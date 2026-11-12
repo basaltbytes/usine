@@ -292,7 +292,7 @@ Off, with the reason:
 
 Rule options:
 
-- `allowedUnstableApis`: the modules the code already depends on, which `effect` 4.0.6 tags `@stability unstable`: `effect/http`, `effect/http-api`, `effect/sql`, `effect/process`, `effect/cli`, `effect/FileSystem`, `effect/Path`, `effect/PlatformError`, `effect/Crypto`, `effect/ByteSize`, `effect/net`, `effect/observability`, `effect/reactivity`, `@effect/platform-node`, `@effect/sql-sqlite-node`, and `@effect/vitest`. Without the list, `unstableApiUsage` reports 3,161 uses of modules the architecture chose on purpose. With it, the rule still fails the first use of any other unstable module.
+- `allowedUnstableApis`: the modules the code already depends on, which `effect` 4.0.6 tags `@stability unstable`: `effect/http`, `effect/http-api`, `effect/sql`, `effect/process`, `effect/cli`, `effect/FileSystem`, `effect/Path`, `effect/PlatformError`, `effect/Crypto`, `effect/ByteSize`, `effect/net`, `effect/observability`, `effect/reactivity`, `@effect/platform-node`, `@effect/sql-sqlite-node`, and `@effect/vitest`. `effect/ai` and `effect/Stdio` joined the list with the MCP tool server ([#879](https://github.com/basaltbytes/usine/issues/879)). Without the list, `unstableApiUsage` reports 3,161 uses of modules the architecture chose on purpose. With it, the rule still fails the first use of any other unstable module.
 - `barrelImportPackages: ["effect"]` for `preferBarrelImport`.
 - `keyPatterns` stays at the default, which derives keys from the file path. `package-identifier` is the alternative if the current `@usine/<package>/<Name>` style should stay.
 

@@ -103,6 +103,7 @@ it.effect("keeps a connected stream idle for 30 seconds without reading projecti
       undoDismissNeed: unused,
       resetCycleBudget: unused,
       resolveFailure: unused,
+      applyCiLabels: unused,
       retry: unused,
       agents: unused(),
       editAndRetry: unused,

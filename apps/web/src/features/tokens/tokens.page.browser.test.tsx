@@ -24,6 +24,7 @@ it("distinguishes tokens with the same name and confirms revocation through the 
     lastUsedAt: 0,
     kind: id === "first" ? "session" : "device",
     scopes: administratorPermissions,
+    expiresAt: null,
   }));
   client.setQueryData(tokensQuery().queryKey, tokens);
   const requests: string[] = [];
@@ -87,5 +88,52 @@ it("distinguishes tokens with the same name and confirms revocation through the 
     client.clear();
     host.remove();
     globalThis.fetch = originalFetch;
+  }
+});
+
+it("shows a device token's operation ceiling and expiry", async () => {
+  const client = new QueryClient({
+    defaultOptions: { queries: { staleTime: Infinity, retry: false } },
+  });
+  const expiresAt = Date.UTC(2027, 0, 2, 3, 4);
+  client.setQueryData(tokensQuery().queryKey, [
+    {
+      id: "agent",
+      name: "Laptop agent",
+      createdAt: 0,
+      lastUsedAt: 0,
+      kind: "device",
+      scopes: administratorPermissions,
+      operations: ["operator.overview", "operator.approve"],
+      expiresAt,
+    },
+  ]);
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  try {
+    flushSync(() =>
+      root.render(
+        <PermissionsContext.Provider value={administratorPermissions}>
+          <QueryClientProvider client={client}>
+            <WithRouter>
+              <PageCommandsProvider>
+                <TokensPage />
+              </PageCommandsProvider>
+            </WithRouter>
+          </QueryClientProvider>
+        </PermissionsContext.Provider>,
+      ),
+    );
+    await expect
+      .element(page.getByText("Operations: operator.overview, operator.approve"))
+      .toBeVisible();
+    await expect
+      .element(page.getByText(`Expires ${new Date(expiresAt).toLocaleString()}`, { exact: false }))
+      .toBeVisible();
+  } finally {
+    flushSync(() => root.unmount());
+    client.clear();
+    host.remove();
   }
 });

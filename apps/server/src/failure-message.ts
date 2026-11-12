@@ -7,6 +7,7 @@ import { LaunchdService } from "./instance/launchd.ts";
 import { type ServiceUnit, serviceOutput, serviceStartCommand } from "./instance/service.ts";
 import type { upDetached } from "./detach.ts";
 import type { exportRun } from "./export-run.ts";
+import type { mcpCommand } from "./mcp/cli.ts";
 import type { instanceEnvironment } from "./instance/environment.ts";
 import type { restart } from "./restart.ts";
 import type { status } from "./status.ts";
@@ -27,7 +28,8 @@ export type CliFailure =
   | Effect.Error<ReturnType<typeof restart>>
   | Effect.Error<ReturnType<typeof upgrade>>
   | Effect.Error<ReturnType<typeof backup>>
-  | Effect.Error<ReturnType<typeof exportRun>>;
+  | Effect.Error<ReturnType<typeof exportRun>>
+  | Effect.Error<ReturnType<typeof mcpCommand>>;
 
 const messageOf = Schema.decodeUnknownOption(Schema.Struct({ message: Schema.NonEmptyString }));
 
@@ -205,11 +207,13 @@ export const failureMessage = (failure: CliFailure): string =>
       `usine up did not start: ${variable} is invalid: ${clause(message)}. Set it to comma-separated key=value pairs with percent-encoded keys and values, or unset it.`,
     WebhookConfigurationError: ({ message }) => message,
     AuthError: ({ message }) => message,
+    McpStartError: ({ message }) => message,
     ConfigCommandError: ({ message }) => message,
     ConfigurationInvalid: ({ problems }) =>
       `Configuration is invalid; no revision was written.\n${problems.map(({ file, stage, message }) => `${file} (${stage}): ${message}`).join("\n")}`,
     ConfigurationStoreError: ({ operation, cause }) =>
       `Configuration store error: could not ${operation}${because(cause)}.`,
+    ValidationTimeoutError: ({ message }) => `${message} No revision was written.`,
     StaleRevision: ({ expected, actual }) =>
       `Configuration changed from revision ${expected} to ${actual}. No revision was written. Export or edit the current configuration and try again.`,
     UnsupportedWorkerError: ({ worker, kind }) =>

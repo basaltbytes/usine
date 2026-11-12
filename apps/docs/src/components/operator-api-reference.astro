@@ -25,6 +25,7 @@ const operations = Object.entries(document.paths).flatMap(([path, methods]) =>
     <section aria-labelledby={operation.operationId}>
       <h2 id={operation.operationId}>{operation.summary}</h2>
       <p><code>{method.toUpperCase()} {path}</code></p>
+      <p>Operation ID <code>{operation.operationId}</code> · Permission <code>{operation["x-usine-permission"]}</code></p>
       <p>{operation.description}</p>
       <p>{operation.security.length === 0 ? "Public endpoint." : "Requires an instance bearer token or browser session."}</p>
       {operation.parameters.length > 0 && (

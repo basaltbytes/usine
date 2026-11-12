@@ -1,9 +1,18 @@
+import { RunNotFoundError } from "@usine/engine/engine";
 import { Effect, Layer, Option } from "effect";
+import { CiMonitor } from "./ci.ts";
 import { PollCycle, PollingTriggers } from "./polling-triggers.ts";
 import { ScheduleCycle, ScheduleTriggers } from "./schedule-triggers.ts";
 
-/** Trigger services that never poll or tick, for an instance that still needs setup. */
+/**
+ * Trigger services that never poll or tick, and a CI monitor without CI waits, for an instance that
+ * still needs setup.
+ */
 export const idleTriggersLayer = Layer.mergeAll(
+  Layer.succeed(CiMonitor)({
+    reconcile: () => Effect.succeed({ outcomes: [], failures: [], nextPollAt: Option.none() }),
+    applyLabelsAfterGreen: (runId) => Effect.fail(RunNotFoundError.make({ runId })),
+  }),
   Layer.succeed(PollingTriggers)({
     lastHint: Effect.succeedNone,
     hint: () => Effect.void,

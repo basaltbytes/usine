@@ -1,5 +1,12 @@
 import { Clock, Effect, Layer, Option } from "effect";
-import { authFailure, type GitHubUserId, InstanceToken, Member, type TokenId } from "./model.ts";
+import {
+  authFailure,
+  type GitHubUserId,
+  InstanceToken,
+  Member,
+  OperationCeilingChange,
+  type TokenId,
+} from "./model.ts";
 import { AuthStore } from "./store.ts";
 
 export const memoryAuthLayer = Layer.sync(AuthStore, () => {
@@ -80,12 +87,21 @@ export const memoryAuthLayer = Layer.sync(AuthStore, () => {
       if (expired > 0) yield* Effect.logInfo("Expired instance tokens deleted", { count: expired });
       return [...tokens.values()].filter((token) => token.memberId === id);
     }),
-    setScopes: Effect.fn("AuthStore.setScopes")(function* (member, id, scopes) {
+    setScopes: Effect.fn("AuthStore.setScopes")(function* (member, id, scopes, change) {
       const token = tokens.get(id);
       if (token === undefined || token.memberId !== member)
         return yield* authFailure("Token not found.", 403);
-      tokens.set(id, InstanceToken.make({ ...token, scopes }));
-      yield* Effect.logInfo("Token scopes changed", { memberId: member, tokenId: id });
+      const operations = OperationCeilingChange.$match(change, {
+        Keep: () => token.operations,
+        Remove: () => Option.none(),
+        Replace: ({ operations }) => Option.some(operations),
+      });
+      tokens.set(id, InstanceToken.make({ ...token, scopes, operations }));
+      yield* Effect.logInfo("Token scopes changed", {
+        memberId: member,
+        tokenId: id,
+        operationCeiling: change._tag,
+      });
     }),
     revoke: Effect.fn("AuthStore.revoke")(function* (member, id) {
       if (tokens.get(id)?.memberId === member) tokens.delete(id);

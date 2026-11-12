@@ -6,13 +6,13 @@ import { BoxdEgressEntry, BoxdSnapshotName, WorkerName } from "@usine/core/worke
 import { ExecShell } from "@usine/agents/child-host";
 import { Redacted, Clock, Config, Effect, Layer, Option, Random, Schedule } from "effect";
 import { FetchHttpClient } from "effect/http";
-import { remoteCommandsFor, sendingShell } from "../../../src/remote/commands.ts";
-import { boxdDriverFor } from "../../../src/ssh/provisioner/boxd.ts";
-import { BoxdApi } from "../../../src/ssh/provisioner/boxd/client.ts";
-import { BOXD_API } from "../../../src/ssh/provisioner/boxd/endpoint.ts";
-import { boxdExecLayer } from "../../../src/ssh/provisioner/boxd/exec.ts";
-import { boxdApiLayer } from "../../../src/ssh/provisioner/boxd/grpc-client.ts";
-import { boxdSettings } from "./support.ts";
+import { remoteCommandsFor, sendingShell } from "../../../../src/remote/commands.ts";
+import { boxdDriverFor } from "../../../../src/ssh/provisioner/boxd.ts";
+import { BoxdApi } from "../../../../src/ssh/provisioner/boxd/client.ts";
+import { BOXD_API } from "../../../../src/ssh/provisioner/boxd/endpoint.ts";
+import { boxdExecLayer } from "../../../../src/ssh/provisioner/boxd/exec.ts";
+import { boxdApiLayer } from "../../../../src/ssh/provisioner/boxd/grpc-client.ts";
+import { boxdSettings } from "../support.ts";
 
 const environment = Effect.runSync(
   Effect.all({

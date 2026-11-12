@@ -4,8 +4,10 @@ import { MemberAccess } from "../../src/auth/access.ts";
 import { securityMiddleware } from "../../src/security.ts";
 import { TestClock } from "effect/testing";
 import { ActingMember, OperatorLogin } from "@usine/core/operator";
-import { Effect, Layer, Option, Redacted, Ref, Schema } from "effect";
-import { HttpRouter, HttpServerResponse } from "effect/http";
+import { Clock, Effect, Layer, Logger, Option, Redacted, Ref, Schema } from "effect";
+import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
+import { IpNetwork } from "effect/net";
+import { administratorPermissions } from "@usine/core/access";
 import { assert, it } from "@effect/vitest";
 import { authenticatedRoutes } from "../../src/auth/http.ts";
 import { seedOperator } from "../../src/auth/authentication.ts";
@@ -35,6 +37,15 @@ const cookie = (response: Response) =>
     .join("; ");
 const linkToken = (url: string) =>
   new URLSearchParams(new URL(url).hash.slice(1)).get("link") ?? "";
+const from = (peer: string, forwardedFor?: string) =>
+  Effect.provideService(
+    HttpServerRequest.HttpServerRequest,
+    HttpServerRequest.fromWeb(
+      new Request("https://usine.example/api/auth/github", {
+        headers: forwardedFor === undefined ? {} : { "x-forwarded-for": forwardedFor },
+      }),
+    ).modify({ remoteAddress: Option.some(peer) }),
+  );
 
 it.live(
   "requires authentication even from loopback, binds cookie writes to CSRF, and revokes sessions",
@@ -215,7 +226,7 @@ it.live("issues a device token once, refuses non-members, and expires one-time l
   }).pipe(Effect.provide(TestClock.layer()), Effect.scoped),
 );
 
-it.live("limits sign-in attempts globally and refuses cross-site link consumption", () =>
+it.live("limits repeated sign-in requests and refuses cross-site link consumption", () =>
   Effect.gen(function* () {
     const services = yield* authFixture();
     const { routes } = authenticatedRoutes(services);
@@ -251,6 +262,164 @@ it.live("limits sign-in attempts globally and refuses cross-site link consumptio
       429,
     );
   }).pipe(Effect.scoped),
+);
+
+it.live("counts sign-in requests per client address so one client can't lock out another", () =>
+  Effect.gen(function* () {
+    const { authentication: auth } = yield* authFixture([alice, bob], bob);
+    for (let count = 0; count < 60; count++) yield* auth.startWeb(false).pipe(from("203.0.113.7"));
+
+    assert.equal((yield* auth.startWeb(false).pipe(from("203.0.113.7"), Effect.flip)).status, 429);
+    const started = yield* auth.startWeb(false).pipe(from("198.51.100.4"));
+    const session = yield* auth
+      .finishWeb(Redacted.value(started.state), "fake")
+      .pipe(from("198.51.100.4"));
+    const signedIn = yield* auth.authenticate(Redacted.value(session.secret));
+    assert.equal(Option.getOrNull(signedIn.member)?.login, bob.login);
+  }).pipe(Effect.scoped),
+);
+
+it.live("stops sign-in requests from new clients at the instance-wide ceiling", () =>
+  Effect.gen(function* () {
+    const { authentication: auth } = yield* authFixture();
+    for (let client = 1; client <= 10; client++)
+      for (let count = 0; count < 60; count++)
+        yield* auth.startWeb(false).pipe(from(`203.0.113.${client}`));
+
+    assert.equal((yield* auth.startWeb(false).pipe(from("198.51.100.4"), Effect.flip)).status, 429);
+  }).pipe(Effect.scoped),
+);
+
+it.live("reads the client address from X-Forwarded-For only behind a trusted proxy", () =>
+  Effect.gen(function* () {
+    const direct = (yield* authFixture()).authentication;
+    for (let count = 0; count < 60; count++)
+      yield* direct.startWeb(false).pipe(from("127.0.0.1", `203.0.113.${count}`));
+
+    assert.equal(
+      (yield* direct.startWeb(false).pipe(from("127.0.0.1", "198.51.100.4"), Effect.flip)).status,
+      429,
+    );
+
+    const proxied = (yield* authFixture([alice], alice, () => administratorPermissions, undefined, [
+      IpNetwork.fromStringUnsafe("127.0.0.0/8"),
+    ])).authentication;
+    for (let count = 0; count < 60; count++)
+      yield* proxied.startWeb(false).pipe(from("192.0.2.1", `203.0.113.${count}`));
+    assert.equal(
+      (yield* proxied.startWeb(false).pipe(from("192.0.2.1", "198.51.100.4"), Effect.flip)).status,
+      429,
+    );
+    for (let count = 0; count < 60; count++)
+      yield* proxied
+        .startWeb(false)
+        .pipe(from("127.0.0.1", `198.51.100.${count}, 203.0.113.7, 127.0.0.2`));
+    yield* proxied.startWeb(false).pipe(from("127.0.0.1", "198.51.100.201, 203.0.113.9"));
+
+    assert.equal(
+      (yield* proxied
+        .startWeb(false)
+        .pipe(from("127.0.0.1", "198.51.100.200, 203.0.113.7"), Effect.flip)).status,
+      429,
+    );
+    yield* proxied.startWeb(false).pipe(from("127.0.0.1", "203.0.113.8"));
+  }).pipe(Effect.scoped),
+);
+
+it.live("doesn't count a client's refused requests toward the instance-wide ceiling", () =>
+  Effect.gen(function* () {
+    const { authentication: auth } = yield* authFixture();
+    for (let count = 0; count < 700; count++)
+      yield* auth.startWeb(false).pipe(from("203.0.113.7"), Effect.ignore);
+
+    assert.equal((yield* auth.startWeb(false).pipe(from("203.0.113.7"), Effect.flip)).status, 429);
+    yield* auth.startWeb(false).pipe(from("198.51.100.4"));
+  }).pipe(Effect.scoped),
+);
+
+it.live("resets the client limit and the instance-wide ceiling after a minute", () =>
+  Effect.gen(function* () {
+    const { authentication: auth } = yield* authFixture();
+    for (let count = 0; count < 60; count++) yield* auth.startWeb(false).pipe(from("203.0.113.7"));
+    assert.equal((yield* auth.startWeb(false).pipe(from("203.0.113.7"), Effect.flip)).status, 429);
+    yield* TestClock.adjust("59 seconds");
+    assert.equal((yield* auth.startWeb(false).pipe(from("203.0.113.7"), Effect.flip)).status, 429);
+    yield* TestClock.adjust("1 second");
+    yield* auth.startWeb(false).pipe(from("203.0.113.7"));
+
+    yield* TestClock.adjust("1 minute");
+    for (let client = 1; client <= 10; client++)
+      for (let count = 0; count < 60; count++)
+        yield* auth.startWeb(false).pipe(from(`192.0.2.${client}`));
+    assert.equal((yield* auth.startWeb(false).pipe(from("198.51.100.4"), Effect.flip)).status, 429);
+    yield* TestClock.adjust("1 minute");
+    yield* auth.startWeb(false).pipe(from("198.51.100.4"));
+  }).pipe(Effect.provide(TestClock.layer()), Effect.scoped),
+);
+
+it.live("reads X-Forwarded-For entries that carry a port", () =>
+  Effect.gen(function* () {
+    const auth = (yield* authFixture([alice], alice, () => administratorPermissions, undefined, [
+      IpNetwork.fromStringUnsafe("127.0.0.0/8"),
+    ])).authentication;
+    for (let count = 0; count < 60; count++)
+      yield* auth.startWeb(false).pipe(from("127.0.0.1", `203.0.113.7:${4000 + count}`));
+    assert.equal(
+      (yield* auth.startWeb(false).pipe(from("127.0.0.1", "203.0.113.7"), Effect.flip)).status,
+      429,
+    );
+    yield* auth.startWeb(false).pipe(from("127.0.0.1", "203.0.113.8:5000"));
+
+    for (let count = 0; count < 60; count++)
+      yield* auth.startWeb(false).pipe(from("127.0.0.1", `[2001:db8::1]:${4000 + count}`));
+    assert.equal(
+      (yield* auth.startWeb(false).pipe(from("127.0.0.1", "2001:db8::1"), Effect.flip)).status,
+      429,
+    );
+    yield* auth.startWeb(false).pipe(from("127.0.0.1", "[2001:db8::2]:443"));
+  }).pipe(Effect.scoped),
+);
+
+it.live(
+  "counts against the trusted proxy and warns when its X-Forwarded-For entry isn't an IP",
+  () =>
+    Effect.gen(function* () {
+      const logs: Array<{
+        readonly level: string;
+        readonly message: unknown;
+        readonly fields: unknown;
+      }> = [];
+      const logger = Logger.make<unknown, void>(({ logLevel, message }) => {
+        const [text, fields] = Array.isArray(message) ? message : [message];
+        logs.push({ level: logLevel, message: text, fields });
+      });
+      const auth = (yield* authFixture([alice], alice, () => administratorPermissions, undefined, [
+        IpNetwork.fromStringUnsafe("127.0.0.0/8"),
+      ])).authentication;
+      for (let count = 0; count < 60; count++)
+        yield* auth.startWeb(false).pipe(from("127.0.0.1", `198.51.100.${count}, unknown`));
+      const refused = yield* auth
+        .startWeb(false)
+        .pipe(from("127.0.0.1", "198.51.100.200, unknown"), Effect.flip, Effect.withLogger(logger));
+      assert.equal(refused.status, 429);
+      yield* auth.startWeb(false).pipe(from("127.0.0.2", "198.51.100.200, unknown"));
+
+      assert.deepInclude(logs, {
+        level: "Warn",
+        message:
+          "A trusted proxy sent an X-Forwarded-For entry that isn't an IP address; counting sign-in requests against the proxy",
+        fields: {
+          endpoint: "web",
+          client: "127.0.0.1",
+          forwardedFor: "198.51.100.200, unknown",
+        },
+      });
+      assert.deepInclude(logs, {
+        level: "Warn",
+        message: "Sign-in rate limit reached for a client",
+        fields: { endpoint: "web", client: "127.0.0.1", source: "unreadable-forwarded-entry" },
+      });
+    }).pipe(Effect.scoped),
 );
 
 it.live(
@@ -430,4 +599,217 @@ it.live("public health reports SQLite degradation and recovery without failing l
       }
     }),
   ),
+);
+
+type TokenBody = {
+  readonly name?: string;
+  readonly scopes: ReadonlyArray<{
+    readonly permission: string;
+    readonly scope: { readonly _tag: string };
+  }>;
+  readonly operations?: ReadonlyArray<string> | null;
+  readonly expiresAt?: number;
+};
+const adminScopes = [{ permission: "admin", scope: { _tag: "Instance" } }];
+const ListedTokens = Schema.Array(
+  Schema.Struct({
+    id: Schema.String,
+    kind: Schema.String,
+    operations: Schema.optionalKey(Schema.Array(Schema.String)),
+    expiresAt: Schema.NullOr(Schema.Finite),
+  }),
+);
+const IssuedSecret = Schema.Struct({ token: Schema.String });
+// Signs alice in with a one-time link and returns her cookie headers and a CSRF-bound JSON writer.
+const signInWithLink = Effect.fn("test.signInWithLink")(function* (
+  services: Effect.Success<ReturnType<typeof authFixture>>,
+  app: { readonly handler: (request: Request) => Promise<Response> },
+) {
+  const currentLink = yield* services.authentication.link;
+  const signedIn = yield* Effect.promise(() =>
+    request(app, "/api/auth/link/consume", "POST", { token: linkToken(currentLink) }),
+  );
+  const headers = { cookie: cookie(signedIn) };
+  const session = yield* Effect.promise(() =>
+    request(app, "/api/auth/session", "GET", undefined, headers).then((response) =>
+      response.json(),
+    ),
+  );
+  const { csrf } = yield* Schema.decodeUnknownEffect(Schema.Struct({ csrf: Schema.String }))(
+    session,
+  );
+  const write = (
+    path: string,
+    method: string,
+    body: TokenBody,
+    credential: Readonly<Record<string, string>> = headers,
+  ) =>
+    Effect.promise(() =>
+      app.handler(
+        new Request(`https://usine.example${path}`, {
+          method,
+          headers: { "content-type": "application/json", "x-usine-csrf": csrf, ...credential },
+          body: jsonKey(body),
+        }),
+      ),
+    );
+  return { headers, write };
+});
+
+it.live("creates, lists, and edits a device token's operation ceiling and expiry", () =>
+  Effect.gen(function* () {
+    const services = yield* authFixture();
+    const { routes } = authenticatedRoutes(services);
+    const app = HttpRouter.toWebHandler(routes, { disableLogger: true });
+    yield* Effect.addFinalizer(() => Effect.promise(() => app.dispose()));
+    const { headers, write } = yield* signInWithLink(services, app);
+    const scopes = adminScopes;
+    const unknown = yield* write("/api/tokens", "POST", {
+      name: "Bad",
+      scopes,
+      operations: ["operator.nothing"],
+    });
+    assert.equal(unknown.status, 400);
+    const expiresAt = (yield* Clock.currentTimeMillis) + 3_600_000;
+    const created = yield* write("/api/tokens", "POST", {
+      name: "Approver",
+      scopes,
+      operations: ["operator.approve"],
+      expiresAt,
+    }).pipe(Effect.flatMap((response) => Effect.promise(() => response.json())));
+    const { token } = yield* Schema.decodeUnknownEffect(IssuedSecret)(created);
+    const bearer = { authorization: `Bearer ${token}` };
+    const deviceSession = yield* Effect.promise(() =>
+      request(app, "/api/auth/session", "GET", undefined, bearer).then((response) =>
+        response.json(),
+      ),
+    );
+    const { operations } = yield* Schema.decodeUnknownEffect(
+      Schema.Struct({ operations: Schema.Array(Schema.String) }),
+    )(deviceSession);
+    assert.deepEqual(operations, ["operator.approve"]);
+    const refused = yield* Effect.promise(() =>
+      request(app, "/api/members", "GET", undefined, bearer),
+    );
+    assert.equal(refused.status, 403);
+    const refusal = yield* Effect.promise(() => refused.json());
+    assert.deepEqual(refusal, {
+      error: "AuthenticationError",
+      message: "This token cannot call authentication.members.",
+    });
+    const listed = yield* Effect.promise(() =>
+      request(app, "/api/tokens", "GET", undefined, headers).then((response) => response.json()),
+    );
+    const tokens = yield* Schema.decodeUnknownEffect(ListedTokens)(listed);
+    const device = tokens.find(({ kind }) => kind === "device");
+    assert.deepEqual(device?.operations, ["operator.approve"]);
+    assert.equal(device?.expiresAt, expiresAt);
+    const id = encodeURIComponent(device?.id ?? "");
+    assert.equal((yield* write(`/api/tokens/${id}/scopes`, "PUT", { scopes })).status, 200);
+    const kept = yield* services.authentication.authenticate(token);
+    assert.deepEqual(Option.getOrNull(kept.operations)?.map(String), ["operator.approve"]);
+    assert.equal(
+      (yield* write(`/api/tokens/${id}/scopes`, "PUT", { scopes, operations: null })).status,
+      200,
+    );
+    const removed = yield* services.authentication.authenticate(token);
+    assert.isTrue(Option.isNone(removed.operations));
+    assert.equal(
+      (yield* Effect.promise(() => request(app, "/api/members", "GET", undefined, bearer))).status,
+      200,
+    );
+  }).pipe(Effect.scoped),
+);
+
+it.live("keeps a ceiling-restricted token from widening any ceiling", () =>
+  Effect.gen(function* () {
+    const services = yield* authFixture();
+    const { routes } = authenticatedRoutes(services);
+    const app = HttpRouter.toWebHandler(routes, { disableLogger: true });
+    yield* Effect.addFinalizer(() => Effect.promise(() => app.dispose()));
+    const { write } = yield* signInWithLink(services, app);
+    const ceiling = [
+      "authentication.setScopes",
+      "authentication.createToken",
+      "authentication.tokens",
+      "operator.overview",
+    ];
+    const created = yield* write("/api/tokens", "POST", {
+      name: "Narrow",
+      scopes: adminScopes,
+      operations: ceiling,
+    }).pipe(Effect.flatMap((response) => Effect.promise(() => response.json())));
+    const { token } = yield* Schema.decodeUnknownEffect(IssuedSecret)(created);
+    const bearer = { authorization: `Bearer ${token}` };
+    const listed = yield* Effect.promise(() =>
+      request(app, "/api/tokens", "GET", undefined, bearer).then((response) => response.json()),
+    );
+    const own = (yield* Schema.decodeUnknownEffect(ListedTokens)(listed)).find(
+      ({ kind }) => kind === "device",
+    );
+    assert.deepEqual(own?.operations, ceiling);
+    assert.isNull(own?.expiresAt);
+    const scopesPath = `/api/tokens/${encodeURIComponent(own?.id ?? "")}/scopes`;
+    const wider = ["operator.overview", "operator.approve"];
+    const statuses = yield* Effect.all({
+      remove: write(scopesPath, "PUT", { scopes: adminScopes, operations: null }, bearer),
+      replace: write(scopesPath, "PUT", { scopes: adminScopes, operations: wider }, bearer),
+      create: write(
+        "/api/tokens",
+        "POST",
+        { name: "Wider", scopes: adminScopes, operations: wider },
+        bearer,
+      ),
+      unknown: write(
+        scopesPath,
+        "PUT",
+        { scopes: adminScopes, operations: ["operator.nothing"] },
+        bearer,
+      ),
+    }).pipe(
+      Effect.map((responses) =>
+        Object.fromEntries(Object.entries(responses).map(([key, value]) => [key, value.status])),
+      ),
+    );
+    assert.deepEqual(statuses, { remove: 403, replace: 403, create: 403, unknown: 400 });
+    const unchanged = yield* services.authentication.authenticate(token);
+    assert.deepEqual(Option.getOrNull(unchanged.operations)?.map(String), ceiling);
+    assert.equal(
+      (yield* write(
+        scopesPath,
+        "PUT",
+        { scopes: adminScopes, operations: ["operator.overview"] },
+        bearer,
+      )).status,
+      200,
+    );
+    const narrowed = yield* services.authentication.authenticate(token);
+    assert.deepEqual(Option.getOrNull(narrowed.operations)?.map(String), ["operator.overview"]);
+  }).pipe(Effect.scoped),
+);
+
+it.live("lets a token with any ceiling sign itself out", () =>
+  Effect.gen(function* () {
+    const services = yield* authFixture();
+    const { routes } = authenticatedRoutes(services);
+    const app = HttpRouter.toWebHandler(routes, { disableLogger: true });
+    yield* Effect.addFinalizer(() => Effect.promise(() => app.dispose()));
+    const { write } = yield* signInWithLink(services, app);
+    const created = yield* write("/api/tokens", "POST", {
+      name: "Approver",
+      scopes: adminScopes,
+      operations: ["operator.approve"],
+    }).pipe(Effect.flatMap((response) => Effect.promise(() => response.json())));
+    const { token } = yield* Schema.decodeUnknownEffect(IssuedSecret)(created);
+    const bearer = { authorization: `Bearer ${token}` };
+    const signedOut = yield* Effect.promise(() =>
+      request(app, "/api/auth/sign-out", "POST", {}, bearer),
+    );
+    assert.equal(signedOut.status, 200);
+    assert.equal(
+      (yield* Effect.promise(() => request(app, "/api/auth/session", "GET", undefined, bearer)))
+        .status,
+      401,
+    );
+  }).pipe(Effect.scoped),
 );

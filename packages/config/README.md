@@ -12,7 +12,7 @@ Each worker accepts `paused` (default `false`), which keeps new attempts off the
 
 `updateYaml` and `updateFrontmatter` change one path in the YAML tree and keep comments, key order, and the Markdown body. Files use snake_case keys (`poll_interval`, `max_concurrent_attempts`); decoded types use camelCase (`pollInterval`, `maxConcurrentAttempts`). The schema does the rename, so edits keep snake_case.
 
-Agent files and agent configuration values validate their harness ID against `@usine/agents/harness`. An unregistered ID fails schema validation before the agent enters the roster. Configuration import and edits also check each coding-agent brain against every configured worker through `admitBrain`. Unsupported placements or credential routes reject the configuration with the agent, worker, role, and adapter reason.
+Agent files and agent configuration values validate their harness ID against `@usine/agents/harness`. An unregistered ID fails schema validation before the agent enters the roster. Configuration import and edits also check each coding-agent brain against every configured worker through `admitBrain`. Unsupported placements or credential routes reject the configuration with the agent, worker, role, and the reason from the role or the harness descriptor.
 
 ## Labels and lanes
 
@@ -133,7 +133,7 @@ The SQLite reopen test uses the shared [SQLite fixture directory helper](../../t
 
 See [Development](../../CONTRIBUTING.md#development) for temporary storage selection and worker concurrency.
 
-The top-level `auth.origins` list configures additional trusted browser origins and defaults to an empty list. `UiOrigin`, exported from `@usine/config/factory`, accepts exact HTTPS origins and HTTP origins on loopback, without credentials, paths, queries, or fragments. The server also allows its canonical `--origin` or `USINE_ORIGIN`. Authentication settings are stored with instance settings; changes require a server restart.
+The top-level `auth.origins` list configures additional trusted browser origins and defaults to an empty list. `UiOrigin`, exported from `@usine/config/factory`, accepts exact HTTPS origins and HTTP origins on loopback, without credentials, paths, queries, or fragments. The server also allows its canonical `--origin` or `USINE_ORIGIN`. The `auth.trusted_proxies` list names the reverse proxy networks, in CIDR notation, whose `X-Forwarded-For` header gives the client address for sign-in rate limits; it defaults to an empty list, and the YAML boundary maps it to `trustedProxies`. Each entry decodes to an `IpNetwork`, and an address with host bits set is refused. Authentication settings are stored with instance settings; changes require a server restart.
 
 SSH provisioners accept optional `reuse: { attempts: 5, max_age: 2h }` for Hetzner and Boat. Both limits are required; omitting `reuse` keeps one machine per attempt. Reuse requires Docker. The YAML boundary maps `max_age` to the domain field `maxAge`.
 

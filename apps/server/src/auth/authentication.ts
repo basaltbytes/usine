@@ -8,6 +8,9 @@ import {
 import { type UiOrigin } from "@usine/config/factory";
 import { OperatorLogin } from "@usine/core/operator";
 import { Clock, Context, Effect, Layer, Option, Redacted, Crypto } from "effect";
+import { HttpServerRequest } from "effect/http";
+import type { IpNetwork } from "effect/net";
+import { type ClientAddress, clientAddress } from "./client.ts";
 import { GitHubSignIn } from "./github.ts";
 import {
   AuthError,
@@ -16,6 +19,9 @@ import {
   type GitHubUserId,
   InstanceToken,
   Member,
+  NO_EXPIRY,
+  OperationCeilingChange,
+  type OperationId,
   TokenId,
   TokenName,
   type TokenHash,
@@ -29,6 +35,22 @@ export interface Access {
   readonly token: Option.Option<InstanceToken>;
   readonly csrf: string;
   readonly permissions: ReadonlyArray<PermissionGrant>;
+  /** The operations a device token may call; `None` when the credential has no operation ceiling. */
+  readonly operations: Option.Option<ReadonlyArray<OperationId>>;
+}
+/** The expiry of a device token that has one; `None` for other credentials. */
+const deviceExpiry = (caller: Access): Option.Option<number> =>
+  Option.filter(
+    caller.token,
+    ({ kind, expiresAt }) => kind === "device" && expiresAt !== NO_EXPIRY,
+  ).pipe(Option.map(({ expiresAt }) => expiresAt));
+/** A device token that a member creates for a client. */
+export interface TokenRequest {
+  readonly name: TokenName;
+  readonly scopes: ReadonlyArray<PermissionGrant>;
+  readonly operations: Option.Option<ReadonlyArray<OperationId>>;
+  /** Epoch milliseconds after which the token stops authenticating. */
+  readonly expiresAt: Option.Option<number>;
 }
 export interface IssuedToken {
   readonly secret: Redacted.Redacted<string>;
@@ -45,7 +67,14 @@ interface DeviceState {
   readonly interval: number;
   readonly name: TokenName;
 }
+interface LimitWindow {
+  readonly until: number;
+  readonly count: number;
+}
 const TEN_MINUTES = 600_000;
+const LIMIT_WINDOW = 60_000;
+const CLIENT_LIMIT = 60;
+const INSTANCE_LIMIT = 600;
 const SESSION_LIFETIME = 30 * 24 * 60 * 60 * 1000;
 
 export class Authentication extends Context.Service<
@@ -53,13 +82,13 @@ export class Authentication extends Context.Service<
   {
     readonly createToken: (
       secret: string,
-      name: TokenName,
-      scopes: ReadonlyArray<PermissionGrant>,
+      request: TokenRequest,
     ) => Effect.Effect<IssuedToken, AuthError>;
     readonly setScopes: (
       secret: string,
       id: TokenId,
       scopes: ReadonlyArray<PermissionGrant>,
+      operations: OperationCeilingChange,
     ) => Effect.Effect<void, AuthError>;
     readonly removeMember: (id: GitHubUserId) => Effect.Effect<void, AuthError>;
     readonly origin: UiOrigin;
@@ -94,6 +123,7 @@ export const authenticationLayer = (options: {
   readonly origin: UiOrigin;
   readonly origins: ReadonlyArray<UiOrigin>;
   readonly localToken: Redacted.Redacted<string>;
+  readonly trustedProxies: ReadonlyArray<IpNetwork.IpNetwork>;
 }) =>
   Layer.effect(
     Authentication,
@@ -109,7 +139,8 @@ export const authenticationLayer = (options: {
       const bootstrapSessions = new Map<TokenHash, number>();
       const states = new Map<TokenHash, WebState>();
       const devices = new Map<TokenHash, DeviceState>();
-      const limits = new Map<string, { readonly until: number; readonly count: number }>();
+      const clientLimits = new Map<string, LimitWindow>();
+      const instanceLimits = new Map<string, LimitWindow>();
       const localHash = secretHash(Redacted.value(options.localToken));
       const csrf = (secret: string) => secretHash(`csrf:${secret}`);
       const callback = `${options.origin}/api/auth/callback`;
@@ -118,6 +149,8 @@ export const authenticationLayer = (options: {
         for (const [key, expires] of bootstrapSessions)
           if (expires <= now) bootstrapSessions.delete(key);
         for (const [key, value] of states) if (value.expires <= now) states.delete(key);
+        for (const windows of [clientLimits, instanceLimits])
+          for (const [key, window] of windows) if (window.until <= now) windows.delete(key);
         for (const [key, value] of devices)
           if (value.expires <= now) {
             Redacted.wipeUnsafe(value.code);
@@ -128,7 +161,7 @@ export const authenticationLayer = (options: {
         member: Member,
         kind: InstanceToken["kind"],
         name: TokenName,
-        requestedScopes: Option.Option<ReadonlyArray<PermissionGrant>> = Option.none(),
+        requested: Option.Option<TokenRequest> = Option.none(),
       ) {
         yield* Effect.annotateCurrentSpan({ memberId: member.id, kind });
         const secret = randomSecret();
@@ -142,20 +175,29 @@ export const authenticationLayer = (options: {
           scopes:
             kind === "session"
               ? []
-              : yield* Option.match(requestedScopes, {
+              : yield* Option.match(requested, {
                   onNone: () => access.permissions(member.id),
-                  onSome: Effect.succeed,
+                  onSome: ({ scopes }) => Effect.succeed(scopes),
                 }),
           kind,
           createdAt: now,
           lastUsedAt: now,
-          expiresAt: kind === "session" ? now + SESSION_LIFETIME : Number.MAX_SAFE_INTEGER,
+          expiresAt:
+            kind === "session"
+              ? now + SESSION_LIFETIME
+              : Option.getOrElse(
+                  Option.flatMap(requested, ({ expiresAt }) => expiresAt),
+                  () => NO_EXPIRY,
+                ),
+          operations: Option.flatMap(requested, ({ operations }) => operations),
         });
         yield* store.issue(token);
         yield* Effect.logInfo("Instance token issued", {
           memberId: member.id,
           tokenId: token.id,
           kind,
+          operationCeiling: Option.isSome(token.operations),
+          expires: token.expiresAt !== NO_EXPIRY,
         });
         return { secret, csrf: csrf(Redacted.value(secret)) };
       });
@@ -197,6 +239,7 @@ export const authenticationLayer = (options: {
             token: Option.none(),
             csrf: csrf(secret),
             permissions: hash === localHash ? administratorPermissions : [],
+            operations: Option.none(),
           };
         }
         const found = yield* store.authenticate(hash, now);
@@ -222,24 +265,82 @@ export const authenticationLayer = (options: {
           token: Option.some(token),
           csrf: csrf(secret),
           permissions,
+          operations: token.kind === "device" ? token.operations : Option.none(),
         };
+      });
+      // A caller with an operation ceiling cannot issue or widen a ceiling beyond its own.
+      const narrowCeiling = Effect.fn("Authentication.narrowCeiling")(function* (
+        caller: Access,
+        requested: Option.Option<ReadonlyArray<OperationId>>,
+      ) {
+        if (Option.isNone(caller.operations)) return requested;
+        const ceiling = caller.operations.value;
+        if (
+          Option.isSome(requested) &&
+          requested.value.every((operation) => ceiling.includes(operation))
+        )
+          return requested;
+        yield* Effect.logWarning("Token operations refused: they exceed the caller's ceiling", {
+          memberId: Option.getOrUndefined(Option.map(caller.member, ({ id }) => id)),
+        });
+        return yield* authFailure("Token operations exceed your token's operations.", 403);
       });
       const limit = Effect.fn("Authentication.limit")(function* (endpoint: string) {
         const now = yield* Clock.currentTimeMillis;
         prune(now);
-        const previous = limits.get(endpoint);
-        const window =
-          previous === undefined || previous.until <= now
-            ? { until: now + 60_000, count: 0 }
-            : previous;
-        if (window.count >= 60) {
-          yield* Effect.logWarning("Sign-in rate limit reached", { endpoint });
+        const request = yield* Effect.serviceOption(HttpServerRequest.HttpServerRequest);
+        const resolved = Option.match(request, {
+          onNone: ():
+            | ClientAddress
+            | { readonly address: string; readonly source: "in-process" } => ({
+            address: "in-process",
+            source: "in-process",
+          }),
+          onSome: (current) => clientAddress(current, options.trustedProxies),
+        });
+        const client = resolved.address;
+        const source = resolved.source === "connection" ? resolved.reason : resolved.source;
+        yield* Effect.annotateCurrentSpan({ endpoint, client, source });
+        if (resolved.source === "connection" && resolved.forwardedFor !== undefined) {
+          const forwardedFor = resolved.forwardedFor.slice(0, 200);
+          if (resolved.reason === "unreadable-forwarded-entry")
+            yield* Effect.logWarning(
+              "A trusted proxy sent an X-Forwarded-For entry that isn't an IP address; counting sign-in requests against the proxy",
+              { endpoint, client, forwardedFor },
+            );
+          else if (resolved.reason === "untrusted-peer")
+            yield* Effect.logInfo(
+              "Ignored X-Forwarded-For from a peer outside auth.trusted_proxies; counting sign-in requests against the peer",
+              { endpoint, client, forwardedFor },
+            );
+        }
+        const clientKey = `${endpoint} ${client}`;
+        const clientWindow = clientLimits.get(clientKey) ?? { until: now + LIMIT_WINDOW, count: 0 };
+        if (clientWindow.count >= CLIENT_LIMIT) {
+          yield* Effect.logWarning("Sign-in rate limit reached for a client", {
+            endpoint,
+            client,
+            source,
+          });
           return yield* authFailure("Too many sign-in requests. Try again in a minute.", 429);
         }
-        limits.set(endpoint, { ...window, count: window.count + 1 });
+        const instanceWindow = instanceLimits.get(endpoint) ?? {
+          until: now + LIMIT_WINDOW,
+          count: 0,
+        };
+        if (instanceWindow.count >= INSTANCE_LIMIT) {
+          yield* Effect.logWarning("Instance-wide sign-in rate limit reached", {
+            endpoint,
+            client,
+            source,
+          });
+          return yield* authFailure("Too many sign-in requests. Try again in a minute.", 429);
+        }
+        clientLimits.set(clientKey, { ...clientWindow, count: clientWindow.count + 1 });
+        instanceLimits.set(endpoint, { ...instanceWindow, count: instanceWindow.count + 1 });
       });
       return Authentication.of({
-        createToken: Effect.fn("Authentication.createToken")(function* (secret, name, scopes) {
+        createToken: Effect.fn("Authentication.createToken")(function* (secret, request) {
           const caller = yield* authenticate(secret);
           if (Option.isNone(caller.member)) {
             yield* Effect.logWarning("Token creation refused for a non-member credential", {
@@ -251,17 +352,43 @@ export const authenticationLayer = (options: {
           if (Option.isSome(caller.token))
             yield* Effect.annotateCurrentSpan({ callerTokenId: caller.token.value.id });
           if (
-            !scopes.every((grant) => permits(caller.permissions, grant.permission, grant.scope))
+            !request.scopes.every((grant) =>
+              permits(caller.permissions, grant.permission, grant.scope),
+            )
           ) {
             yield* Effect.logWarning("Token creation refused: scopes exceed caller permissions", {
               memberId: caller.member.value.id,
-              requestedScopeCount: scopes.length,
+              requestedScopeCount: request.scopes.length,
             });
             return yield* authFailure("Token scopes exceed your permissions.", 403);
           }
-          return yield* issue(caller.member.value, "device", name, Option.some(scopes));
+          const operations = yield* narrowCeiling(caller, request.operations);
+          const now = yield* Clock.currentTimeMillis;
+          if (Option.exists(request.expiresAt, (expiresAt) => expiresAt <= now)) {
+            yield* Effect.logWarning("Token creation refused: expiry is not in the future", {
+              memberId: caller.member.value.id,
+            });
+            return yield* authFailure("Set a token expiry in the future.", 400);
+          }
+          // A device token can't issue a token that outlives it.
+          const callerExpiry = deviceExpiry(caller);
+          if (
+            Option.isSome(callerExpiry) &&
+            !Option.exists(request.expiresAt, (expiresAt) => expiresAt <= callerExpiry.value)
+          ) {
+            yield* Effect.logWarning("Token creation refused: expiry exceeds the caller's", {
+              memberId: caller.member.value.id,
+            });
+            return yield* authFailure("Set a token expiry no later than your token's expiry.", 403);
+          }
+          return yield* issue(
+            caller.member.value,
+            "device",
+            request.name,
+            Option.some({ ...request, operations }),
+          );
         }),
-        setScopes: Effect.fn("Authentication.setScopes")(function* (secret, id, scopes) {
+        setScopes: Effect.fn("Authentication.setScopes")(function* (secret, id, scopes, change) {
           yield* Effect.annotateCurrentSpan({ tokenId: id });
           const caller = yield* authenticate(secret);
           if (Option.isNone(caller.member)) {
@@ -275,7 +402,8 @@ export const authenticationLayer = (options: {
           if (Option.isSome(caller.token))
             yield* Effect.annotateCurrentSpan({ callerTokenId: caller.token.value.id });
           const tokens = yield* store.tokens(caller.member.value.id);
-          if (tokens.some((token) => token.id === id && token.kind === "session")) {
+          const current = tokens.find((token) => token.id === id);
+          if (current?.kind === "session") {
             yield* Effect.logWarning("Scope change refused for a browser session", {
               memberId: caller.member.value.id,
               tokenId: id,
@@ -298,7 +426,30 @@ export const authenticationLayer = (options: {
             );
             return yield* authFailure("Token scopes exceed your permissions.", 403);
           }
-          yield* store.setScopes(caller.member.value.id, id, scopes);
+          // The target's resulting ceiling must fit the caller's, including a ceiling the edit keeps.
+          yield* OperationCeilingChange.$match(change, {
+            Keep: () =>
+              current === undefined ? Effect.void : narrowCeiling(caller, current.operations),
+            Remove: () => narrowCeiling(caller, Option.none()),
+            Replace: ({ operations }) => narrowCeiling(caller, Option.some(operations)),
+          });
+          // A device token can't give its permissions to a token that outlives it.
+          const callerExpiry = deviceExpiry(caller);
+          if (
+            Option.isSome(callerExpiry) &&
+            current !== undefined &&
+            current.expiresAt > callerExpiry.value
+          ) {
+            yield* Effect.logWarning("Token scope change refused: target outlives the caller", {
+              memberId: caller.member.value.id,
+              tokenId: id,
+            });
+            return yield* authFailure(
+              "Change scopes only on tokens that expire no later than your token.",
+              403,
+            );
+          }
+          yield* store.setScopes(caller.member.value.id, id, scopes, change);
         }),
         removeMember: access.remove,
         origin: options.origin,

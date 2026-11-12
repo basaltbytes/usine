@@ -14,7 +14,9 @@ import type { Setup } from "./setup/control.ts";
 import { securityMiddleware } from "./security.ts";
 import { ProjectId } from "@usine/core/project";
 import { LoopName } from "@usine/core/loop";
-import { authenticatedRoutes, type AuthServices } from "./auth/http.ts";
+import { authenticatedRoutes, RequestOperations, type AuthServices } from "./auth/http.ts";
+import { ceilingAdmits } from "./auth/model.ts";
+import { mcpRoutes } from "./mcp/http.ts";
 import { EFFORTS } from "@usine/core/agent/brain";
 import { GitHubApp } from "@usine/github/github-app";
 import { GitHubPolling } from "@usine/github/polling";
@@ -57,6 +59,8 @@ const operatorFailure = (error: BackendError) => {
       case "RunOperationRejectedError":
         if (error.operation === "resolveFailure")
           return "This failure is no longer the current one. Refresh the run, then mark it resolved.";
+        if (error.operation === "applyCiLabels")
+          return "This failure is no longer the current CI failure. Refresh the run before you apply the CI labels.";
         if (error.operation === "runAgain")
           return `Run ${error.runId} is ${error.state.toLowerCase()}. Only a succeeded or canceled run can run again.`;
         return `Cannot ${error.operation} run ${error.runId} while it is ${error.state.toLowerCase()}.`;
@@ -69,6 +73,7 @@ const operatorFailure = (error: BackendError) => {
         if (error.running === 0)
           return `Could not discard the leftovers on worker "${error.worker}": it is in usine.yaml, or an attempt on it is ending.`;
         return `${error.running} ${error.running === 1 ? "attempt is" : "attempts are"} still running on worker "${error.worker}". Discard its leftovers after they end.`;
+      case "CiNotPassedError":
       case "WorkerPreflightRejectedError":
       case "BackendUnavailableError":
       case "RunRetryBlockedError":
@@ -141,6 +146,17 @@ const policy = Layer.succeed(OperatorHttpPolicy)((handler, { endpoint }) =>
           message: "You do not have permission for this operation.",
         });
       }
+    }
+    const operation = `${OperatorApi.groups.operator.identifier}.${endpoint.identifier}`;
+    const ceiling = yield* RequestOperations;
+    if (requirement !== "public" && !ceilingAdmits(ceiling, operation)) {
+      yield* Effect.logWarning("Operator route refused by the token's operation ceiling", {
+        route: endpoint.identifier,
+      });
+      return yield* OperatorHttpError.make({
+        error: "AccessDenied",
+        message: `This token cannot call ${operation}.`,
+      });
     }
     const request = yield* HttpServerRequest.HttpServerRequest;
     const decoded =
@@ -398,6 +414,11 @@ const handlers = HttpApiBuilder.group(
           acknowledge,
         ),
       )
+      .handle("applyCiLabels", ({ params, payload }) =>
+        fromBackend((backend) => backend.applyCiLabels(params.runId, payload.attemptId)).pipe(
+          acknowledge,
+        ),
+      )
       .handle("retry", ({ params }) =>
         fromBackend((backend) => backend.retry(params.runId)).pipe(acknowledge),
       )
@@ -638,6 +659,10 @@ export const serverLayer = (
     setupHttp?.protected.pipe(Layer.provide(authenticated.guard.layer)) ?? Layer.empty,
     setupHttp?.callback ?? Layer.empty,
     apiRoutes.pipe(Layer.provide(authenticated.guard.layer)),
+    mcpRoutes(auth.authentication.origins).pipe(
+      Layer.provide(authenticated.guard.layer),
+      Layer.provide(NodeHttpServer.layerHttpServices),
+    ),
     providerRoutes.pipe(Layer.provide(authenticated.guard.layer)),
     staticRoutes(webRoot),
     authenticated.routes,

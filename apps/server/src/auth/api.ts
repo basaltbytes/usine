@@ -3,7 +3,15 @@ import { PermissionGrant } from "@usine/core/access";
 import { OperatorLogin } from "@usine/core/operator";
 import { Schema, Struct } from "effect";
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema, OpenApi } from "effect/http-api";
-import { AuthError, GitHubUserId, InstanceToken, Member, TokenId, TokenName } from "./model.ts";
+import {
+  AuthError,
+  GitHubUserId,
+  InstanceToken,
+  Member,
+  OperationId,
+  TokenId,
+  TokenName,
+} from "./model.ts";
 
 export const publicAuthPaths = new Set([
   "/api/health",
@@ -33,8 +41,29 @@ const error = AuthError.fields.status.literals.map((status) =>
   }),
 );
 
-export const TokenScopes = Schema.Struct({ scopes: Schema.Array(PermissionGrant) });
-export const CreateToken = Schema.Struct({ name: TokenName, ...TokenScopes.fields });
+const operations = Schema.Array(OperationId).annotate({
+  description:
+    "Operation IDs from this document, such as operator.approve, that the token may call. Requests also need the token's scopes.",
+});
+export const TokenScopes = Schema.Struct({
+  scopes: Schema.Array(PermissionGrant),
+  operations: Schema.optionalKey(
+    Schema.NullOr(operations).annotate({
+      description:
+        "Replaces the operation ceiling. Null removes it; an absent key keeps the current ceiling.",
+    }),
+  ),
+});
+export const CreateToken = Schema.Struct({
+  name: TokenName,
+  scopes: Schema.Array(PermissionGrant),
+  operations: Schema.optionalKey(operations),
+  expiresAt: Schema.optionalKey(
+    Schema.Finite.annotate({
+      description: "Epoch milliseconds after which the token stops authenticating.",
+    }),
+  ),
+});
 
 export const AuthApi = HttpApiGroup.make("authentication")
   .annotate(OpenApi.Title, "Sign-in and members")
@@ -63,6 +92,7 @@ export const AuthApi = HttpApiGroup.make("authentication")
       success: Schema.Struct({
         member: Schema.NullOr(Member),
         permissions: Schema.Array(PermissionGrant),
+        operations: Schema.optionalKey(operations),
         csrf: Schema.String,
       }),
       error,
@@ -70,7 +100,7 @@ export const AuthApi = HttpApiGroup.make("authentication")
       .annotate(OpenApi.Summary, "Read the current session")
       .annotate(
         OpenApi.Description,
-        "Returns the signed-in member and CSRF token. Setup sessions have a null member.",
+        "Returns the signed-in member, effective permissions, the device token's operation ceiling, and the CSRF token. Setup sessions have a null member.",
       ),
     HttpApiEndpoint.post("link", "/api/auth/link", {
       success: Schema.Struct({ url: Schema.String }),
@@ -165,8 +195,8 @@ export const AuthApi = HttpApiGroup.make("authentication")
       ),
     HttpApiEndpoint.get("tokens", "/api/tokens", {
       success: Schema.Array(
-        Schema.Struct(
-          Struct.pick(InstanceToken.fields, [
+        Schema.Struct({
+          ...Struct.pick(InstanceToken.fields, [
             "id",
             "name",
             "createdAt",
@@ -174,7 +204,11 @@ export const AuthApi = HttpApiGroup.make("authentication")
             "kind",
             "scopes",
           ]),
-        ),
+          operations: Schema.optionalKey(operations),
+          expiresAt: Schema.NullOr(Schema.Finite).annotate({
+            description: "Epoch milliseconds of expiry, or null for a device token without one.",
+          }),
+        }),
       ),
       error,
     })
@@ -191,7 +225,7 @@ export const AuthApi = HttpApiGroup.make("authentication")
       .annotate(OpenApi.Summary, "Create a scoped token")
       .annotate(
         OpenApi.Description,
-        "Creates a token whose scopes are a subset of the caller's effective permissions. The secret is returned once.",
+        "Creates a device token whose scopes are a subset of the caller's effective permissions, with an optional operation ceiling and expiry. The secret is returned once.",
       ),
     HttpApiEndpoint.put("setScopes", "/api/tokens/:id/scopes", {
       params: { id: TokenId },
@@ -202,7 +236,7 @@ export const AuthApi = HttpApiGroup.make("authentication")
       .annotate(OpenApi.Summary, "Set token scopes")
       .annotate(
         OpenApi.Description,
-        "Sets the scope ceiling for one of the member's device tokens. Requests also check current role bindings. Browser sessions follow role bindings and reject scope edits.",
+        "Sets the scope ceiling and operation ceiling for one of the member's device tokens. Requests also check current role bindings. Browser sessions follow role bindings and reject scope edits.",
       ),
     HttpApiEndpoint.delete("revokeToken", "/api/tokens/:id", {
       params: { id: TokenId },

@@ -1,10 +1,30 @@
+import { RoleName } from "@usine/core/agent/session";
 import type { ChildHost } from "../child-host/child-host.ts";
 import { AgentResultError, type ChildRequest, RestartState } from "../runtime.ts";
 import { Effect, Option, Struct } from "effect";
-import { admitBrain, AdmissionContext } from "./admission.ts";
+import { admitBrain, AdmissionContext, AdmittedBrain, routePool } from "./admission.ts";
 import { SessionSpec, type Start } from "./contract.ts";
 import type { HarnessCatalog } from "./harness.ts";
 import type { Placement } from "./capability.ts";
+import { RolePlacements, RoleSpec } from "./role.ts";
+
+/**
+ * The coding agent: a child that works in a worker checkout with the harness's own tools, keeps
+ * its conversation, and takes steering, interrupts, and operator messages.
+ */
+export const codingAgent = RoleSpec.make({
+  name: RoleName.make("coding-agent"),
+  placement: RolePlacements.make({
+    placements: ["local", "ssh", "container", "sandbox"],
+    reason: "The coding agent runs on a worker",
+  }),
+  credential: Option.none(),
+  nativeTools: true,
+  hostTools: false,
+  persistence: "saved",
+  interventions: true,
+  output: "text",
+});
 
 export const hostPlacement = (host: ChildHost): Placement =>
   host._tag === "LocalProcess" ? "local" : host.container === undefined ? "ssh" : "container";
@@ -43,13 +63,9 @@ export const admitChild = Effect.fn("HarnessAdmission.child")(function* (
   });
   const context = childAdmissionContext(catalog, request);
   return yield* Effect.fromResult(
-    admitBrain(
-      catalog,
-      "coding-agent",
-      request.session.brain,
-      context,
-      Option.isSome(request.resume) ? ["resume-session"] : [],
-    ),
+    admitBrain(catalog, codingAgent, request.session.brain, context, {
+      reopens: Option.isSome(request.resume),
+    }),
   ).pipe(
     Effect.tap(() =>
       Effect.logInfo("Child credential route admitted", {
@@ -75,9 +91,8 @@ export const admitChild = Effect.fn("HarnessAdmission.child")(function* (
 });
 
 /**
- * Admits the brain of `spec` at its placement and credential route before a session opens. Roles
- * have no requirements of their own yet, so every session is admitted as a coding agent, and a
- * `StartResume` also requires `resume-session`.
+ * Admits the brain of `spec` for its role at its placement and credential route before a session
+ * opens. A `StartResume` also requires `resume-session`.
  */
 export const admitSession = Effect.fn("HarnessAdmission.session")(function* (
   catalog: HarnessCatalog,
@@ -85,26 +100,23 @@ export const admitSession = Effect.fn("HarnessAdmission.session")(function* (
   start: Start,
 ) {
   const resume = start._tag === "StartResume";
+  const { role, context } = spec.admitted;
   yield* Effect.annotateCurrentSpan({
     sessionId: spec.session.id,
+    role: role.name,
     worker: spec.worker,
     harness: spec.session.brain.harness,
   });
   return yield* Effect.fromResult(
-    admitBrain(
-      catalog,
-      "coding-agent",
-      spec.session.brain,
-      spec.route,
-      resume ? ["resume-session"] : [],
-    ),
+    admitBrain(catalog, role, spec.session.brain, context, { reopens: resume }),
   ).pipe(
     Effect.tap(() =>
       Effect.logInfo("Harness session admitted", {
         sessionId: spec.session.id,
+        role: role.name,
         harness: spec.session.brain.harness,
-        credentialRoute: spec.route.credential,
-        placement: spec.route.placement,
+        credentialRoute: context.credential,
+        placement: context.placement,
         resume,
       }),
     ),
@@ -123,11 +135,27 @@ export const admitSession = Effect.fn("HarnessAdmission.session")(function* (
   );
 });
 
-/** Builds the session spec of `request` for the credential route that admission resolved. */
-export const childSpec = (request: ChildRequest, route: AdmissionContext): SessionSpec =>
+/**
+ * The coding-agent route of `request` without checking it, for an operation such as stopping a
+ * retained process that opens no session.
+ */
+export const childRoute = (catalog: HarnessCatalog, request: ChildRequest): AdmittedBrain => {
+  const context = childAdmissionContext(catalog, request);
+  return AdmittedBrain.make({
+    role: codingAgent,
+    brain: request.session.brain,
+    context,
+    pool: Option.flatMap(catalog.get(request.session.brain.harness), (descriptor) =>
+      routePool(descriptor, context.credential),
+    ),
+  });
+};
+
+/** Builds the session spec of `request` for the brain that admission resolved. */
+export const childSpec = (request: ChildRequest, admitted: AdmittedBrain): SessionSpec =>
   SessionSpec.make({
     session: request.session,
-    route,
+    admitted,
     host: request.host,
     worker: request.worker,
     machine: request.machine,

@@ -368,6 +368,16 @@ sent with questions 1 to 12.
     beyond the API port 9443 (TCP), given that only boxd reaches the agent port 57073?
 22. Does an open `Exec` stream count as activity for auto-suspend and auto-hibernate?
 
+Question 35 came after the list in
+[`boxd-attempt-machine-sources.md`](./boxd-attempt-machine-sources.md#questions-for-boxd), which
+ends at 34.
+
+35. When boxd deletes the machine of a running `Exec` stream, the call ends with `UNAVAILABLE` and
+    "lost the connection to the machine during exec: the machine was destroyed". usine tells a
+    deleted machine from a dropped connection by the text "the machine was destroyed". Can boxd
+    end the call with a distinct status, such as `NOT_FOUND`, or an error detail, or keep that text
+    stable?
+
 ## Recommendation
 
 Replace SSH with `Exec` for boxd workers, and keep no SSH fallback for them.

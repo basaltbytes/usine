@@ -171,6 +171,14 @@ export class RunView extends Schema.Class<
    * Whether the latest failed Attempt still requests attention, independent of retry availability.
    */
   canResolveFailure: Schema.Boolean,
+  /**
+   * Whether the latest unresolved failure ended a CI wait whose CI didn't finish, so the operator
+   * can apply its completion labels after CI on its head passes.
+   */
+  canApplyCiLabels: Schema.Boolean.pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed(false)),
+    Schema.withConstructorDefault(Effect.succeed(false)),
+  ),
   /** Whether the run is still open and can be canceled. */
   canCancel: Schema.Boolean,
   /**

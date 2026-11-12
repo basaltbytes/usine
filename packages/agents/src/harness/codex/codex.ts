@@ -31,7 +31,7 @@ import {
   ToolFinished,
   ToolStarted,
 } from "@usine/core/agent/session";
-import { Array as Arr, Deferred, Effect, Layer, Option, Schema, Stream } from "effect";
+import { Array as Arr, DateTime, Deferred, Effect, Layer, Option, Schema, Stream } from "effect";
 import {
   AccountUpdated,
   AgentMessageItem,
@@ -73,6 +73,7 @@ import {
   UserMessageKindItem,
 } from "./codec.ts";
 import {
+  AgentCapacityError,
   type AgentSessionError,
   ChildBackend,
   type InterruptedTool,
@@ -196,11 +197,7 @@ const makeCodexSessions = Effect.gen(function* () {
       let connection = yield* appServer.open(client);
       yield* checkContinuationHome(spec, start, home, defaultHome);
       yield* initializeCodex(connection);
-      let billing = yield* codexChildAccount(
-        connection,
-        spec.session.brain,
-        gatewayCredential(spec.route.credential),
-      );
+      let billing = yield* codexChildAccount(connection, spec.session.brain, spec.admitted.pool);
 
       const models: Array<(typeof ModelListResponse.Type.data)[number]> = [];
       let cursor: string | null = null;
@@ -367,6 +364,8 @@ const makeCodexSessions = Effect.gen(function* () {
       // Provider retries reported for the current turn, and whether the last retry is unresolved.
       let retries = 0;
       let retrying = false;
+      // The account's latest rate-limit snapshot, which dates a usage limit's reset.
+      let rateLimits = Option.none<RateLimitsSnapshot>();
       const startTurn = Effect.fn("CodexRuntime.startTurn")(function* (
         message: string,
         id?: OperatorMessageId,
@@ -533,11 +532,7 @@ const makeCodexSessions = Effect.gen(function* () {
               transport: "replace",
             });
             yield* initializeCodex(connection);
-            billing = yield* codexChildAccount(
-              connection,
-              spec.session.brain,
-              gatewayCredential(spec.route.credential),
-            );
+            billing = yield* codexChildAccount(connection, spec.session.brain, spec.admitted.pool);
             return yield* resumeThread(connection, client, spec, harnessSession);
           }),
         );
@@ -693,7 +688,7 @@ const makeCodexSessions = Effect.gen(function* () {
               return;
             }
             if (method === "account/updated") {
-              if (Option.isSome(gatewayCredential(spec.route.credential)))
+              if (Option.isSome(gatewayCredential(spec.admitted.context.credential)))
                 return yield* Effect.logInfo(
                   "Skipping a Codex account change: the Gateway holds the OpenAI credential",
                   { sessionId: session.id },
@@ -727,21 +722,21 @@ const makeCodexSessions = Effect.gen(function* () {
               );
               if (Option.isNone(notification)) return;
               const snapshot = notification.value.rateLimits;
+              const latest = RateLimitsSnapshot.make({
+                limitId: Option.fromNullishOr(snapshot.limitId),
+                limitName: Option.fromNullishOr(snapshot.limitName),
+                primary: Option.fromNullishOr(snapshot.primary).pipe(Option.map(rateLimitWindow)),
+                secondary: Option.fromNullishOr(snapshot.secondary).pipe(
+                  Option.map(rateLimitWindow),
+                ),
+              });
+              rateLimits = Option.some(latest);
               return yield* channel.emit(
                 PoolRateLimitsUpdated.make({
                   session,
                   pool: billing.pool,
                   login: billing.login,
-                  rateLimits: RateLimitsSnapshot.make({
-                    limitId: Option.fromNullishOr(snapshot.limitId),
-                    limitName: Option.fromNullishOr(snapshot.limitName),
-                    primary: Option.fromNullishOr(snapshot.primary).pipe(
-                      Option.map(rateLimitWindow),
-                    ),
-                    secondary: Option.fromNullishOr(snapshot.secondary).pipe(
-                      Option.map(rateLimitWindow),
-                    ),
-                  }),
+                  rateLimits: latest,
                 }),
               );
             }
@@ -792,7 +787,20 @@ const makeCodexSessions = Effect.gen(function* () {
                 (isTurnStatus(completed.turn.status, "interrupted")
                   ? "Codex child session was interrupted"
                   : "Codex child session failed");
-              return yield* fail(turnFailure(session.id, completed.turn.error, detail));
+              const failure = turnFailure(session.id, completed.turn.error, detail, rateLimits);
+              if (Schema.is(AgentCapacityError)(failure))
+                yield* Effect.logWarning(
+                  "Codex turn ended on a provider capacity refusal or usage limit",
+                  {
+                    sessionId: session.id,
+                    turnId,
+                    codexErrorInfo: completed.turn.error?.codexErrorInfo,
+                    resetsAt: Option.getOrUndefined(
+                      Option.map(failure.resetsAt, DateTime.formatIso),
+                    ),
+                  },
+                );
+              return yield* fail(failure);
             }
             if (DIAGNOSTIC_METHODS.has(method)) {
               return yield* Effect.logWarning("Codex reported a diagnostic", {

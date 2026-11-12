@@ -74,6 +74,7 @@ import {
   OpenApi,
 } from "effect/http-api";
 import { RestartBlock } from "../current-instance/changes.ts";
+import { RevisionStep } from "../current-instance/steps.ts";
 import type { InstanceReloadError } from "../current-instance/current-instance.ts";
 import { BoardLaneId } from "./board.ts";
 import { CycleBudgetResetView } from "./need.ts";
@@ -108,6 +109,7 @@ const errorStatuses = {
   FileChangesNotFoundError: 404,
   PullRequestFilesChangedError: 409,
   RunOperationRejectedError: 409,
+  CiNotPassedError: 409,
   RunRetryBlockedError: 409,
   RunInterventionRejectedError: 409,
   LeftoversDiscardRejectedError: 409,
@@ -256,8 +258,28 @@ export class FactoryConfigRefusal extends Schema.Error<
   { httpApiStatus: 422 },
 ) {}
 
+/** A reload refused because one of its steps, such as the coordinator brain check, ran out of time. */
+export class ValidationTimeoutRefusal extends Schema.Error<
+  ValidationTimeoutRefusal,
+  Brand.Brand<"@usine/orchestrator/operator/http/ValidationTimeoutRefusal">
+>("@usine/orchestrator/ValidationTimeoutRefusal")(
+  {
+    /** The fixed domain error tag that identifies this refusal. */
+    error: Schema.Literal("ValidationTimeoutError"),
+    /** The diagnostic text to show to the operator. */
+    message: Schema.String,
+    /** The step of the save or reload that ran out of time. */
+    step: RevisionStep,
+  },
+  { httpApiStatus: 504 },
+) {}
+
 /** The reason a reload kept the running instance. */
-export type ReloadRefusal = RestartRequiredRefusal | ReloadPreflightRefusal | FactoryConfigRefusal;
+export type ReloadRefusal =
+  | RestartRequiredRefusal
+  | ReloadPreflightRefusal
+  | FactoryConfigRefusal
+  | ValidationTimeoutRefusal;
 
 /** Returns the reload endpoint's refusal for `error`, with `message` for the operator. */
 export const reloadRefusal = (error: InstanceReloadError, message: string): ReloadRefusal =>
@@ -291,6 +313,8 @@ export const reloadRefusal = (error: InstanceReloadError, message: string): Relo
       }),
     FactoryConfigError: ({ _tag, file, stage }) =>
       FactoryConfigRefusal.make({ error: _tag, message, file, stage }),
+    ValidationTimeoutError: ({ _tag, step }) =>
+      ValidationTimeoutRefusal.make({ error: _tag, message, step }),
   });
 
 /** An HTTP 409 response when a configuration write uses an outdated revision. */
@@ -355,6 +379,7 @@ const configurationWriteErrors = [
   RestartRequiredRefusal,
   ReloadPreflightRefusal,
   FactoryConfigRefusal,
+  ValidationTimeoutRefusal,
 ];
 const revisionParams = {
   number: Schema.FiniteFromString.pipe(Schema.decodeTo(ConfigurationRevisionNumber)),
@@ -632,6 +657,16 @@ export const OperatorApi = operatorApi.add(
         .annotate(
           OpenApi.Description,
           "Acknowledges the supplied failed attempt only while it remains the current failure.",
+        ),
+      HttpApiEndpoint.post("applyCiLabels", "/api/runs/:runId/apply-ci-labels", {
+        params: runParams,
+        payload: Schema.Struct({ attemptId: AttemptId }),
+        success: acknowledged,
+      })
+        .annotate(OpenApi.Summary, "Apply CI labels after CI passes")
+        .annotate(
+          OpenApi.Description,
+          "For a run whose CI wait ended because CI on its head didn't finish, checks that CI on the same head has passed with every workflow run concluded, applies the wait's completion labels, and resolves the supplied failed attempt.",
         ),
       HttpApiEndpoint.post("retry", "/api/runs/:runId/retry", {
         params: runParams,
@@ -980,6 +1015,7 @@ export const operatorPermissions = {
   intervene: "operate",
   approve: "operate",
   resolveFailure: "operate",
+  applyCiLabels: "operate",
   retry: "operate",
   cancel: "operate",
   moveProjectItem: "operate",

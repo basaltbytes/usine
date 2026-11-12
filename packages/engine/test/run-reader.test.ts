@@ -24,7 +24,7 @@ import { RunDatabase } from "../src/database/database.ts";
 import { layer } from "../src/database/local-sqlite.ts";
 import { transcriptCodecLayer } from "../src/database/transcript-codec.ts";
 import { RunEngine, Submission } from "../src/engine/engine.ts";
-import { RunReader, WorkerAttempts } from "../src/run-reader/run-reader.ts";
+import { CiFixRun, RunReader, WorkerAttempts } from "../src/run-reader/run-reader.ts";
 import { CompletionCheck } from "../src/completion-check.ts";
 import { StepExecutor } from "../src/step-executor.ts";
 import { savedSettings, TriggerCondition, TriggerRecheck } from "../src/trigger-condition.ts";
@@ -32,6 +32,7 @@ import {
   type AttemptPlan,
   engineLayer,
   executorLayer,
+  stepResult,
   submission as supportSubmission,
   waitFor,
   withInstance,
@@ -277,6 +278,43 @@ describe("Run Events", () => {
   );
 });
 
+/**
+ * Reads `ciFixRuns` for `sources` on a separate connection and returns the links with the number
+ * of parameters bound by each statement.
+ */
+const ciFixRunsParameters = Effect.fn("test.ciFixRunsParameters")(function* (
+  directory: InstanceDirectory,
+  sources: ReadonlyArray<RunId>,
+) {
+  const path = yield* Path.Path;
+  const parameters: Array<number> = [];
+  const logger = Layer.succeed(EffectLogger)({
+    logQuery: (_query, params) => Effect.sync(() => void parameters.push(params.length)),
+  });
+  const database = Layer.effect(
+    RunDatabase,
+    SQLiteDrizzle.make().pipe(
+      Effect.provide(logger.pipe(Layer.provideMerge(SQLiteDrizzle.DefaultServices))),
+    ),
+  ).pipe(
+    Layer.provide(
+      SqliteClient.layer({
+        filename: path.join(directory, ".usine", "runtime.sqlite"),
+        readonly: true,
+        disableWAL: true,
+      }),
+    ),
+  );
+  const reader = RunReader.layer.pipe(
+    Layer.provide(Layer.merge(database, transcriptCodecLayer)),
+    Layer.fresh,
+  );
+  const links = yield* Effect.flatMap(RunReader, (reader) => reader.ciFixRuns(sources)).pipe(
+    Effect.provide(reader),
+  );
+  return { links, parameters };
+});
+
 it.effect("maps a source Run to its newest admitted CI fix across failed heads", () =>
   withInstance((directory) =>
     Effect.gen(function* () {
@@ -301,7 +339,10 @@ it.effect("maps a source Run to its newest admitted CI fix across failed heads",
           Submission.make({ ...fix(1, sourceId, "a"), itemKey: ItemKey.make("first-fix") }),
         );
         assert(first._tag === "Claimed");
-        assert.strictEqual((yield* reader.ciFixRuns([sourceId])).get(sourceId), first.runId);
+        assert.deepStrictEqual(
+          (yield* reader.ciFixRuns([sourceId])).get(sourceId),
+          CiFixRun.make({ runId: first.runId, state: "Waiting" }),
+        );
         yield* TestClock.setTime(2000);
         const second = yield* engine.submit(fix(2, sourceId, "b"));
         assert(second._tag === "Claimed");
@@ -322,8 +363,8 @@ it.effect("maps a source Run to its newest admitted CI fix across failed heads",
         assert.deepStrictEqual(
           links,
           new Map([
-            [sourceId, second.runId],
-            [unrelatedId, unrelated.runId],
+            [sourceId, CiFixRun.make({ runId: second.runId, state: "Waiting" })],
+            [unrelatedId, CiFixRun.make({ runId: unrelated.runId, state: "Waiting" })],
           ]),
         );
         const unknownSources = Array.from({ length: 1100 }, (_, index) =>
@@ -336,8 +377,49 @@ it.effect("maps a source Run to its newest admitted CI fix across failed heads",
           sourceId,
         ]);
         assert.deepStrictEqual(manyLinks, links);
+        const counted = yield* ciFixRunsParameters(directory, [sourceId, ...unknownSources]);
+        assert.deepStrictEqual(counted.links.get(sourceId), links.get(sourceId));
+        assert.isBelow(Math.max(...counted.parameters), 100);
+        assert.strictEqual(counted.parameters.length, Math.ceil(1101 / 48));
         const empty = yield* reader.ciFixRuns([]);
         assert.deepStrictEqual(empty, new Map());
+
+        // Fixes opened at the same time are ordered by Run ID, whichever was inserted first.
+        const tiedAt = DateTime.makeUnsafe("2026-08-24T12:00:30Z");
+        const greatestInsertedFirst: Array<boolean> = [];
+        for (const [index, heads] of [
+          ["d", "e"],
+          ["e", "d"],
+        ].entries()) {
+          const tiedSourceId = RunId.make(`tied-source-${index}`);
+          const tied = yield* Effect.forEach(heads, (head, offset) => {
+            const tiedFix = fix(4 + 2 * index + offset, tiedSourceId, head);
+            return engine.submit(
+              Submission.make({
+                ...tiedFix,
+                event: Event.make({ ...tiedFix.event, receivedAt: tiedAt }),
+                itemKey: ItemKey.make(`tied-fix-${index}-${head}`),
+              }),
+            );
+          });
+          const tiedRunIds = tied.map((result) => {
+            assert(result._tag === "Claimed");
+            return result.runId;
+          });
+          const tiedRuns = yield* Effect.forEach(tiedRunIds, (runId) => engine.inspect(runId));
+          assert.deepStrictEqual(
+            tiedRuns.map(({ run }) => DateTime.formatIso(run.openedAt)),
+            [DateTime.formatIso(tiedAt), DateTime.formatIso(tiedAt)],
+          );
+          const greatest = [...tiedRunIds].sort().at(-1);
+          greatestInsertedFirst.push(tiedRunIds[0] === greatest);
+          assert.strictEqual(
+            (yield* reader.ciFixRuns([tiedSourceId])).get(tiedSourceId)?.runId,
+            greatest,
+          );
+        }
+        // Insertion order alone would link the later row in one of the two pairs.
+        assert.include(greatestInsertedFirst, true);
         yield* engine.drain;
       }).pipe(Effect.provide(engineLayer(directory, executorLayer(plans))));
     }),
@@ -345,7 +427,7 @@ it.effect("maps a source Run to its newest admitted CI fix across failed heads",
 );
 
 it.live.each(["canceled", "revoked"] as const)(
-  "omits a %s CI fix from its source Run's links",
+  "omits a %s CI fix from its source Run's links and links its reopening",
   (state) =>
     withInstance((directory) =>
       Effect.gen(function* () {
@@ -365,7 +447,10 @@ it.live.each(["canceled", "revoked"] as const)(
           const admitted = yield* engine.submit(fix);
           assert(admitted._tag === "Claimed");
           yield* waitFor(engine, admitted.runId, ({ run }) => run.state._tag === "Waiting");
-          assert.strictEqual((yield* reader.ciFixRuns([sourceId])).get(sourceId), admitted.runId);
+          assert.strictEqual(
+            (yield* reader.ciFixRuns([sourceId])).get(sourceId)?.runId,
+            admitted.runId,
+          );
 
           if (state === "canceled") yield* engine.cancel(admitted.runId);
           else yield* engine.revoke(fix.loop, fix.itemKey);
@@ -374,10 +459,58 @@ it.live.each(["canceled", "revoked"] as const)(
           assert.strictEqual(stopped.run.state._tag, "Canceled");
           const links = yield* reader.ciFixRuns([sourceId]);
           assert.deepStrictEqual(links, new Map());
+
+          // The Item leaves and comes back to the fix Event, which opens again under a reopening
+          // key; its Run is linked.
+          if (state === "canceled") yield* engine.revoke(fix.loop, fix.itemKey);
+          const reopened = yield* engine.submit(fix);
+          assert(reopened._tag === "Claimed");
+          assert.notStrictEqual(reopened.runId, admitted.runId);
+          yield* waitFor(engine, reopened.runId, ({ run }) => run.state._tag === "Waiting");
+          assert.deepStrictEqual(
+            (yield* reader.ciFixRuns([sourceId])).get(sourceId),
+            CiFixRun.make({ runId: reopened.runId, state: "Waiting" }),
+          );
           yield* engine.drain;
         }).pipe(Effect.provide(engineLayer(directory, executorLayer(plans))));
       }),
     ),
+);
+
+it.live.each([
+  { state: "Succeeded", plan: Effect.succeed(stepResult("fixed")) },
+  {
+    state: "Failed",
+    plan: BlockedFailure.make({ message: "The fix couldn't make the checks pass." }),
+  },
+] as const)("links a CI fix Run that ended as $state, with that state", ({ state, plan }) =>
+  withInstance((directory) =>
+    Effect.gen(function* () {
+      const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([plan]);
+      yield* Effect.gen(function* () {
+        const engine = yield* RunEngine;
+        const reader = yield* RunReader;
+        const sourceId = RunId.make(`source-with-${state}-fix`);
+        const original = supportSubmission({ number: 1 });
+        const head = CommitSha.make("a".repeat(40));
+        const key = ciFixDedupKey(sourceId, head);
+        const fixed = yield* engine.submit(
+          Submission.make({
+            ...original,
+            event: Event.make({ ...original.event, id: EventId.make(key), dedupKey: key }),
+            ciFailureHead: Option.some(head),
+          }),
+        );
+        assert(fixed._tag === "Claimed");
+        yield* waitFor(engine, fixed.runId, ({ run }) => run.state._tag === state);
+        assert.deepStrictEqual(
+          (yield* reader.ciFixRuns([sourceId])).get(sourceId),
+          CiFixRun.make({ runId: fixed.runId, state }),
+        );
+        yield* engine.drain;
+      }).pipe(Effect.provide(engineLayer(directory, executorLayer(plans))));
+    }),
+  ),
 );
 
 describe("Attempts by Worker", () => {

@@ -24,7 +24,9 @@ export const harnessPresentations = catalog.descriptors.map((descriptor) =>
   HarnessPresentation.make(descriptor),
 );
 
-export { admitBrain, AdmittedBrain, AdmissionContext, BrainRefused, Role } from "./admission.ts";
+export { admitBrain, AdmittedBrain, AdmissionContext, BrainRefused } from "./admission.ts";
+export { codingAgent } from "./launch.ts";
+export { requirements, RoleCredentials, RolePlacements, RoleSpec } from "./role.ts";
 export {
   Capability,
   CapabilityProfile,

@@ -56,8 +56,7 @@ const terminalStates = new Set(["stopped", "failed", "destroyed"]);
 
 /**
  * How long after the create response a restored machine's resumed processes may still reach hosts
- * outside the allowlist of its spec (question 23 of `docs/research/boxd-attempt-machine-sources.md`).
- * The measured window ended about 650 ms after the create response.
+ * outside the allowlist of its spec.
  */
 const EGRESS_IN_FORCE = "1 second";
 

@@ -17,7 +17,7 @@ import { SetupApi } from "../src/setup/api.ts";
 import { setupRoutes } from "../src/setup/http.ts";
 import { securityMiddleware } from "../src/security.ts";
 import { registerSchema, unregisterSchema, validate } from "@hyperjump/json-schema/openapi-3-1";
-import { DocumentationApi, operatorOpenApi } from "../src/openapi.ts";
+import { DocumentationApi, operationPermission, operatorOpenApi } from "../src/openapi.ts";
 import { ConfigurationStoreError } from "@usine/config/configuration";
 import { ProjectId } from "@usine/core/project";
 import { Project } from "@usine/config/project";
@@ -48,7 +48,7 @@ import { AttemptId, AttemptTask } from "@usine/core/attempt";
 import { CycleBudgetAskId } from "@usine/core/cycle-budget";
 import { ItemKey, ItemNumber } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
-import { RepositoryName } from "@usine/core/repository";
+import { CommitSha, RepositoryName } from "@usine/core/repository";
 import { OperatorLogin } from "@usine/core/operator";
 import { EventId } from "@usine/core/event";
 import { RunId } from "@usine/core/run";
@@ -119,6 +119,7 @@ import {
   type StatisticsWindow,
   WorkerConfigurationView,
   CycleBudgetResetView,
+  CiNotPassedError,
 } from "@usine/orchestrator/operator";
 import { OperatorApi, OperatorHttpError } from "@usine/orchestrator/operator/http";
 import { Context, DateTime, Effect, Layer, Option, Redacted, Schema, FileSystem } from "effect";
@@ -553,6 +554,10 @@ it.live(
         Object.entries(methods).map(([method, operation]) => {
           assert.property(operation, "summary", `${method} ${path}`);
           assert.property(operation, "description", `${method} ${path}`);
+          assert.isTrue(
+            "responses" in operation && Option.isSome(operationPermission(operation)),
+            `${method} ${path}`,
+          );
           return `${method.toUpperCase()} ${path}`;
         }),
       );
@@ -564,6 +569,10 @@ it.live(
       assert.deepEqual(generated.paths["/api/version"]?.get?.security, []);
       assert.deepEqual(generated.paths["/api/ready"]?.get?.security, []);
       assert.deepEqual(generated.paths["/api/setup/callback"]?.get?.security, []);
+      const approve = generated.paths["/api/runs/{runId}/approve"]?.post;
+      const createToken = generated.paths["/api/tokens"]?.post;
+      assert.deepEqual(approve && operationPermission(approve), Option.some("operate"));
+      assert.deepEqual(createToken && operationPermission(createToken), Option.some("tokens"));
       assert.deepEqual(generated.paths["/api/overview"]?.get?.security, [
         { bearer: [] },
         { session: [] },
@@ -942,6 +951,7 @@ describe("operator HTTP API", () => {
       const rejecting = Layer.succeed(FactoryBackend)({
         runWorkerPreflight: () => Effect.die("unused"),
         resolveFailure: () => Effect.void,
+        applyCiLabels: () => Effect.void,
         agents: Effect.succeed([]),
         editAndRetry: () => Effect.void,
         runAgain: (id) =>
@@ -1240,6 +1250,17 @@ describe("operator HTTP API", () => {
                     state: "Failed",
                   }),
                 ),
+          applyCiLabels: (id, attemptId) =>
+            attemptId === "attempt/1"
+              ? record(`ci-labels:${id}:${attemptId}`)
+              : Effect.fail(
+                  CiNotPassedError.make({
+                    runId: id,
+                    head: CommitSha.make("a".repeat(40)),
+                    message:
+                      "CI on head aaaa is still pending. usine applied no completion labels.",
+                  }),
+                ),
           agents: Effect.succeed([agentName]),
           editAndRetry: (_id, edit) =>
             Effect.sync(() => {
@@ -1400,6 +1421,21 @@ describe("operator HTTP API", () => {
           );
           assert.instanceOf(staleResolution, OperatorHttpError);
           assert.strictEqual(staleResolution.status, 409);
+          const labelled = yield* client.applyCiLabels({
+            params: { runId },
+            payload: { attemptId: AttemptId.make("attempt/1") },
+          });
+          assert.deepStrictEqual(labelled, { ok: true });
+          const unpassed = yield* Effect.flip(
+            client.applyCiLabels({
+              params: { runId },
+              payload: { attemptId: AttemptId.make("older-attempt") },
+            }),
+          );
+          assert.instanceOf(unpassed, OperatorHttpError);
+          assert.strictEqual(unpassed.status, 409);
+          assert.strictEqual(unpassed.error, "CiNotPassedError");
+          assert.include(unpassed.message, "still pending");
           for (const action of ["approve", "retry", "cancel"] as const) {
             const currentActionResult = yield* client[action]({ params: { runId } });
             assert.deepStrictEqual(currentActionResult, { ok: true });
@@ -1429,6 +1465,7 @@ describe("operator HTTP API", () => {
             "undo:finding:revision",
             "reset:current-ask",
             `resolve:${runId}:attempt/1`,
+            `ci-labels:${runId}:attempt/1`,
             `approve:${runId}`,
             `retry:${runId}`,
             `cancel:${runId}`,

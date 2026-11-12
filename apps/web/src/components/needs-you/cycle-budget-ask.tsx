@@ -14,11 +14,13 @@ import {
 } from "~/components/ui/dialog";
 import { CommandButton } from "~/components/command-palette/button";
 import { api } from "~/lib/api";
+import { toast } from "~/components/ui/toast";
 import {
   cycleBudgetCounts,
   needCopy,
   needDetailsLabel,
   needOpenItemLabel,
+  replayedCiFixes,
 } from "~/lib/needs-you/strings";
 import { overviewQuery } from "~/lib/overview";
 import { NeedItem } from "~/components/needs-you/need-item";
@@ -35,7 +37,12 @@ export const CycleBudgetAsk = ({ need, dismiss }: CycleBudgetAskProps) => {
   const queries = useQueryClient();
   const reset = useMutation({
     mutationFn: () => api((client) => client.resetCycleBudget({ payload: { askId: need.ask.id } })),
-    onSuccess: () => queries.invalidateQueries({ queryKey: overviewQuery().queryKey }),
+    onSuccess: ({ replayedCiFixEventIds }) => {
+      // The ask leaves Needs attention on success, so a toast reports the replayed CI fixes.
+      if (replayedCiFixEventIds.length > 0)
+        toast.add({ type: "success", title: replayedCiFixes(replayedCiFixEventIds.length) });
+      return queries.invalidateQueries({ queryKey: overviewQuery().queryKey });
+    },
   });
   const item = Option.flatMap(taskCard(useOverview(), need.ask.itemKey), ({ items }) =>
     Option.fromNullishOr(items.find(({ itemKey }) => itemKey === need.ask.itemKey)),

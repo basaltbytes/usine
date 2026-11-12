@@ -20,10 +20,12 @@ import {
 import { LoopName } from "@usine/core/loop";
 import { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
+import { CiFixRun } from "@usine/engine/run-reader";
 import {
   RunSummaryView,
   AttemptSummaryView,
   AgentFailureView,
+  InfraFailureView,
   ApprovalNeed,
   RunFailureNeed,
   CycleBudgetNeed,
@@ -58,6 +60,9 @@ declare module "vitest/browser" {
     ) => Promise<void>;
     answerApproval: (status: 200 | 409, body: string) => Promise<void>;
     lateOverviewRequests: () => Promise<number>;
+    ciLabelsResponse: (status: 200 | 409, body: string) => Promise<void>;
+    recordedCiLabels: () => Promise<Array<unknown>>;
+    cycleResetResponse: (body: string) => Promise<void>;
   }
 }
 
@@ -318,14 +323,13 @@ it("shows a silent worker's last answer and opens an affected run", async () => 
 });
 
 it("names the CI fix run that continues a failed run's work and opens it", async () => {
-  const fixRunId = RunId.make("fix-run-1047");
   const need = RunFailureNeed.make({
     id: "run-failure:approval-run:attempt-1",
     repository,
     runId,
     loop,
     failure: AgentFailureView.make({ message: "CI failed. Fix loop fix: CycleBlocked." }),
-    fixRunId,
+    fixRun: CiFixRun.make({ runId: RunId.make("fix-run-1047"), state: "Running" }),
   });
   await commands.approvalResponses(
     overview([need]),
@@ -362,6 +366,60 @@ it("offers no fix run for a failed run without one", async () => {
   await held.getByRole("button", { name: /^Actions for/ }).click();
   await expect
     .element(page.getByRole("menuitem", { name: "Open fix run" }))
+    .not.toBeInTheDocument();
+});
+
+it("applies the CI labels of a stalled CI wait and shows why CI hasn't passed yet", async () => {
+  const need = RunFailureNeed.make({
+    id: "run-failure:approval-run:attempt-1",
+    repository,
+    runId,
+    loop,
+    failure: InfraFailureView.make({
+      message:
+        "CI did not settle within 1800 seconds because GitHub Actions didn't finish these workflow runs.",
+    }),
+    unfinishedCiAttemptId: AttemptId.make("attempt-1"),
+  });
+  await commands.approvalResponses(
+    overview([need]),
+    overview([need]),
+    detail(running),
+    detail(running),
+  );
+  const pending = `CI on head ${"a".repeat(40)} is still pending. usine applied no completion labels.`;
+  await commands.ciLabelsResponse(
+    409,
+    JSON.stringify({ error: "CiNotPassedError", message: pending }),
+  );
+  await queryClient.invalidateQueries({ queryKey: overviewQuery().queryKey });
+  const held = entry("start-dev");
+  await held.getByRole("button", { name: "Apply CI labels" }).click();
+  await expect.element(held.getByRole("alert")).toHaveTextContent(pending);
+  expect(await commands.recordedCiLabels()).toEqual([{ attemptId: "attempt-1" }]);
+  await held.getByRole("button", { name: /^Actions for/ }).click();
+  await expect.element(page.getByRole("menuitem", { name: "Open run" })).toBeVisible();
+});
+
+it("offers no CI labels for a failure that didn't end a stalled CI wait", async () => {
+  const need = RunFailureNeed.make({
+    id: "run-failure:approval-run:attempt-1",
+    repository,
+    runId,
+    loop,
+    failure: AgentFailureView.make({ message: "CI failed. Fix loop fix: CycleBlocked." }),
+  });
+  await commands.approvalResponses(
+    overview([need]),
+    overview([need]),
+    detail(running),
+    detail(running),
+  );
+  await queryClient.invalidateQueries({ queryKey: overviewQuery().queryKey });
+  const held = entry("start-dev");
+  await expect.element(held.getByRole("button", { name: "Details" })).toBeVisible();
+  await expect
+    .element(held.getByRole("button", { name: "Apply CI labels" }))
     .not.toBeInTheDocument();
 });
 
@@ -453,6 +511,42 @@ it.each([1280, 390])(
     }
   },
 );
+
+const replayNeed = CycleBudgetNeed.make({
+  id: "cycle-budget:replayed",
+  itemLabel: "approval/project#367",
+  itemUrl: "https://github.com/approval/project/issues/367",
+  ask: CycleBudgetAsk.make({
+    id: CycleBudgetAskId.make("replayed"),
+    itemKey: waiting.itemKey,
+    repository,
+    loop,
+    limit: CycleLimit.make(3),
+    counts: [
+      LoopCycleCount.make({ loop, admitted: CycleCount.make(3), completed: CycleCount.make(3) }),
+    ],
+  }).recordBlock(loop, EventId.make("blocked-ci-fix")),
+});
+
+it("reports the CI fixes that a cycle budget reset replayed in a toast", async () => {
+  await replaceNeeds([replayNeed]);
+  await commands.cycleResetResponse('{"replayedCiFixEventIds":["blocked-ci-fix"]}');
+  const row = needs.getByRole("listitem").filter({ hasText: replayNeed.itemLabel });
+  await row.getByRole("button", { name: "Reset cycle budget" }).click();
+  await expect.element(page.getByText("Replayed 1 CI fix", { exact: true })).toBeVisible();
+});
+
+it("shows no toast for a cycle budget reset that replays no CI fix", async () => {
+  await replaceNeeds([replayNeed]);
+  await commands.cycleResetResponse('{"replayedCiFixEventIds":[]}');
+  const row = needs.getByRole("listitem").filter({ hasText: replayNeed.itemLabel });
+  await row.getByRole("button", { name: "Reset cycle budget" }).click();
+  // A reset succeeds after its success handler, which adds any toast, has finished.
+  await expect
+    .poll(() => queryClient.getMutationCache().find({ status: "success" }) !== undefined)
+    .toBe(true);
+  expect(document.querySelector('[data-slot="toast"]')).toBeNull();
+});
 
 it.each([
   { width: 1280, running: 0 },

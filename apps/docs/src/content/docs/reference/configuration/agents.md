@@ -92,7 +92,7 @@ Codex disables the checkout's project-local configuration, hooks, and exec polic
 
 ## Preflight
 
-Configuration import and saved edits check every coding-agent brain against each configured worker. A refusal identifies the agent, worker, role, missing capability or placement, and the harness adapter's reason. For example, a Pi agent on an SSH worker lacks the `container` placement because Pi runs its tools in the orchestrator process. Use a local worker for Pi children or select a harness that supports the configured workers.
+Configuration import and saved edits check every coding-agent brain against each configured worker. A refusal identifies the agent, worker, role, missing capability, placement, or credential route, and the reason that the role or the harness gives. For example, a Pi agent on an SSH worker lacks the `container` placement because Pi runs its tools in the orchestrator process. Use a local worker for Pi children or select a harness that supports the configured workers.
 
 Preflight and child launch check the catalog associated with the registered harness runtimes, including custom harness descriptors. Preflight checks the same role requirements before tools and credentials; it does not install harnesses. Startup checks each rostered child brain on every worker. A changed roster is checked before the running configuration accepts it. Each attempt also checks its selected agent. Failures identify the worker, capability, and remediation.
 
