@@ -32,6 +32,7 @@ export interface MemoryDelegation {
   saved: Option.Option<typeof SavedChild.Encoded>;
   output: string;
   idle: Option.Option<string>;
+  idleAnsweredOperator: boolean;
   continuations: Array<number>;
   inFlight: Array<{ readonly callId: string; readonly tool: string }>;
   prompted: boolean;
@@ -51,6 +52,7 @@ const emptyDelegation = (): MemoryDelegation => ({
   saved: Option.none(),
   output: "",
   idle: Option.none(),
+  idleAnsweredOperator: false,
   continuations: [],
   inFlight: [],
   prompted: true,
@@ -74,6 +76,7 @@ export const memoryJournal = (
     output: delegation.output,
     saved: delegation.saved,
     idle: delegation.idle,
+    idleAnsweredOperator: delegation.idleAnsweredOperator,
     continuations: [...delegation.continuations],
     inFlight: [...delegation.inFlight],
     prompted: delegation.prompted,
@@ -144,9 +147,10 @@ export const memoryJournal = (
       Effect.sync(() => {
         delegation.inFlight = delegation.inFlight.filter((call) => call.callId !== callId);
       }),
-    saveIdle: (report) =>
+    saveIdle: (report, answeredOperator) =>
       Effect.sync(() => {
         delegation.idle = report;
+        delegation.idleAnsweredOperator = answeredOperator;
       }),
     saveOutput: (output) =>
       Effect.sync(() => {

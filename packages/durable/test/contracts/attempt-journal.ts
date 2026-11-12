@@ -829,7 +829,7 @@ export const attemptJournalContract = (adapter: JournalAdapter) =>
                   }),
                 )
                 .pipe(dies),
-              yield* store.forgetInput(attemptId, AttemptChannel.Sequence.make(1)).pipe(dies),
+              yield* store.forgetInput(attemptId, AttemptChannel.Sequence.make(1), []).pipe(dies),
               yield* store.recordInbound(attemptId, AttemptChannel.Sequence.make(1)).pipe(dies),
             ];
             return { exits, after: yield* store.load(attemptId) };
@@ -1095,7 +1095,10 @@ export const attemptJournalContract = (adapter: JournalAdapter) =>
                 ToolStarted.make({ callId: "call-2", tool: "read" }),
                 ToolFinished.make({ callId: "call-1" }),
                 ContinuationsSaved.make({ timestamps: [1_000, 2_000] }),
-                IdleSaved.make({ report: Option.some("Waiting for the operator.") }),
+                IdleSaved.make({
+                  report: Option.some("Waiting for the operator."),
+                  answeredOperator: true,
+                }),
                 OutputSaved.make({ output: "Working\n" }),
               ];
               for (const change of changes) yield* store.saveProgress(attemptId, first, change);
@@ -1134,6 +1137,7 @@ export const attemptJournalContract = (adapter: JournalAdapter) =>
               saved: Option.some({ session: "child-1", usage: { totalTokens: 12 } }),
               prompted: false,
               idle: Option.some("Waiting for the operator."),
+              idleAnsweredOperator: true,
               continuations: [1_000, 2_000],
               inFlight: [{ callId: "call-2", tool: "read" }],
               output: "Working\n",
@@ -1187,69 +1191,78 @@ export const attemptJournalContract = (adapter: JournalAdapter) =>
         }).pipe(Effect.scoped),
     );
 
-    it.effect("keeps supervision, queued inputs, and the inbound sequence across a reopen", () =>
-      Effect.gen(function* () {
-        const fixture = yield* adapter.fixture;
-        const request = storedRequest("attempt-supervision");
-        const attemptId = request.spec.attemptId;
-        const first = AgentSessionId.make(`${attemptId}/child/1`);
-        const second = AgentSessionId.make(`${attemptId}/child/2`);
-        const input = (sequence: number, sessionId: AgentSessionId, message: string) =>
-          QueuedInput.make({
-            inputSequence: AttemptChannel.Sequence.make(sequence),
-            sessionId,
-            intervention: EncodedIntervention.make({ action: { _tag: "Steer", message } }),
-          });
-        const forgotten = yield* using(
-          fixture,
-          Effect.gen(function* () {
-            const store = yield* journal;
-            yield* store.open(request);
-            yield* store.supervise(
-              attemptId,
-              Supervision.make({ sessionId: second, held: true, paused: false }),
-            );
-            yield* store.supervise(
-              attemptId,
-              Supervision.make({ sessionId: first, held: true, paused: true }),
-            );
-            // A child neither held nor paused has no stored supervision.
-            yield* store.supervise(
-              attemptId,
-              Supervision.make({ sessionId: second, held: false, paused: false }),
-            );
-            yield* store.queueInput(attemptId, input(3, first, "Run the tests."));
-            yield* store.queueInput(attemptId, input(2, first, "Use pnpm."));
-            yield* store.queueInput(attemptId, input(3, first, "Run the unit tests."));
-            yield* store.queueInput(attemptId, input(4, second, "Check the lockfile."));
-            yield* store.recordInbound(attemptId, AttemptChannel.Sequence.make(4));
-            // An earlier sequence keeps the later next inbound sequence.
-            yield* store.recordInbound(attemptId, AttemptChannel.Sequence.make(2));
-            return [
-              yield* store.forgetInput(attemptId, AttemptChannel.Sequence.make(4)),
-              yield* store.forgetInput(attemptId, AttemptChannel.Sequence.make(4)),
-            ];
-          }),
-        );
-        const reopened = yield* using(
-          fixture,
-          journal.pipe(Effect.flatMap((journal) => journal.load(attemptId))),
-        );
+    it.effect(
+      "keeps supervision, queued inputs, receipts, and the inbound sequence across a reopen",
+      () =>
+        Effect.gen(function* () {
+          const fixture = yield* adapter.fixture;
+          const request = storedRequest("attempt-supervision");
+          const attemptId = request.spec.attemptId;
+          const first = AgentSessionId.make(`${attemptId}/child/1`);
+          const second = AgentSessionId.make(`${attemptId}/child/2`);
+          const input = (sequence: number, sessionId: AgentSessionId, message: string) =>
+            QueuedInput.make({
+              inputSequence: AttemptChannel.Sequence.make(sequence),
+              sessionId,
+              intervention: EncodedIntervention.make({ action: { _tag: "Steer", message } }),
+            });
+          const forgotten = yield* using(
+            fixture,
+            Effect.gen(function* () {
+              const store = yield* journal;
+              yield* store.open(request);
+              yield* store.supervise(
+                attemptId,
+                Supervision.make({ sessionId: second, held: true, paused: false }),
+              );
+              yield* store.supervise(
+                attemptId,
+                Supervision.make({ sessionId: first, held: true, paused: true }),
+              );
+              // A child neither held nor paused has no stored supervision.
+              yield* store.supervise(
+                attemptId,
+                Supervision.make({ sessionId: second, held: false, paused: false }),
+              );
+              yield* store.queueInput(attemptId, input(3, first, "Run the tests."));
+              yield* store.queueInput(attemptId, input(2, first, "Use pnpm."));
+              yield* store.queueInput(attemptId, input(3, first, "Run the unit tests."));
+              yield* store.queueInput(attemptId, input(4, second, "Check the lockfile."));
+              yield* store.recordInbound(attemptId, AttemptChannel.Sequence.make(4));
+              // An earlier sequence keeps the later next inbound sequence.
+              yield* store.recordInbound(attemptId, AttemptChannel.Sequence.make(2));
+              // The input's receipt is reserved in the same write that forgets the input.
+              return [
+                yield* store.forgetInput(attemptId, AttemptChannel.Sequence.make(4), [
+                  envelope(attemptId, 1),
+                ]),
+                yield* store.forgetInput(attemptId, AttemptChannel.Sequence.make(4), []),
+              ];
+            }),
+          );
+          const reopened = yield* using(
+            fixture,
+            journal.pipe(Effect.flatMap((journal) => journal.load(attemptId))),
+          );
 
-        assert.deepStrictEqual(forgotten, [true, false]);
-        assert.deepStrictEqual(
-          Option.map(reopened, ({ supervision, inputs, nextInbound }) => ({
-            supervision,
-            inputs,
-            nextInbound,
-          })),
-          Option.some({
-            supervision: [Supervision.make({ sessionId: first, held: true, paused: true })],
-            inputs: [input(2, first, "Use pnpm."), input(3, first, "Run the unit tests.")],
-            nextInbound: AttemptChannel.Sequence.make(5),
-          }),
-        );
-      }).pipe(Effect.scoped),
+          assert.deepStrictEqual(forgotten, [true, false]);
+          assert.deepStrictEqual(
+            Option.map(reopened, ({ supervision, inputs, nextInbound, outbox, nextOutbound }) => ({
+              supervision,
+              inputs,
+              nextInbound,
+              outbox,
+              nextOutbound,
+            })),
+            Option.some({
+              supervision: [Supervision.make({ sessionId: first, held: true, paused: true })],
+              inputs: [input(2, first, "Use pnpm."), input(3, first, "Run the unit tests.")],
+              nextInbound: AttemptChannel.Sequence.make(5),
+              outbox: [envelope(attemptId, 1)],
+              nextOutbound: AttemptChannel.Sequence.make(2),
+            }),
+          );
+        }).pipe(Effect.scoped),
     );
 
     it.effect("records the result and keeps the longest unsupervised time across a reopen", () =>

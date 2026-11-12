@@ -51,6 +51,8 @@ export interface DelegationProgress {
   readonly saved: Option.Option<unknown>;
   /** The child's report while it waited idle under a Hold. */
   readonly idle: Option.Option<string>;
+  /** Whether `idle` replies to operator input that the child read after its last tool call. */
+  readonly idleAnsweredOperator: boolean;
   /** The times of the continuation turns, in epoch milliseconds. */
   readonly continuations: ReadonlyArray<number>;
   /** The child's tool calls that started and did not finish. */
@@ -133,8 +135,14 @@ export interface DelegationJournal {
   /** Records a started tool call of the child, replacing one with the same `callId`. */
   readonly toolStarted: (callId: string, tool: string) => Effect.Effect<void, JournalError>;
   readonly toolFinished: (callId: string) => Effect.Effect<void, JournalError>;
-  /** Saves the child's report while it waits idle, or `None` when it works or finishes. */
-  readonly saveIdle: (report: Option.Option<string>) => Effect.Effect<void, JournalError>;
+  /**
+   * Saves the child's report while it waits idle, or `None` when it works or finishes, and whether
+   * the report replies to operator input.
+   */
+  readonly saveIdle: (
+    report: Option.Option<string>,
+    answeredOperator: boolean,
+  ) => Effect.Effect<void, JournalError>;
   /** Saves the running output retained so far, which a resumed delegation restores. */
   readonly saveOutput: (output: string) => Effect.Effect<void, JournalError>;
 }

@@ -3,7 +3,7 @@ import { AttemptId } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AttemptFailure } from "@usine/core/attempt/failure";
 import { StepCompletion } from "@usine/core/step/result";
-import { type Brand, Context, type Duration, type Effect, Option, Schema } from "effect";
+import { type Brand, Context, type Duration, Effect, Option, Schema } from "effect";
 
 import { AttemptReport, StoredRequest } from "../attempt-runtime.ts";
 
@@ -63,6 +63,11 @@ export class ChildProgress extends Schema.Class<
   prompted: Schema.Boolean,
   /** The child's report while it waited idle under a Hold. */
   idle: Schema.Option(Schema.String),
+  /** Whether `idle` replies to operator input that the child read after its last tool call. */
+  idleAnsweredOperator: Schema.Boolean.pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed(false)),
+    Schema.withConstructorDefault(Effect.succeed(false)),
+  ),
   /** The times of the continuation turns, in epoch milliseconds. */
   continuations: Schema.Array(Schema.Finite),
   /** The child's tool calls that started and did not finish. */
@@ -146,7 +151,14 @@ export const ToolStarted = Schema.TaggedStruct("ToolStarted", {
 export const ToolFinished = Schema.TaggedStruct("ToolFinished", { callId: Schema.String });
 
 /** The child's report while it waits idle, or `None` when it works or finishes. */
-export const IdleSaved = Schema.TaggedStruct("IdleSaved", { report: Schema.Option(Schema.String) });
+export const IdleSaved = Schema.TaggedStruct("IdleSaved", {
+  report: Schema.Option(Schema.String),
+  /** Whether the report replies to operator input (ADR 0018). */
+  answeredOperator: Schema.Boolean.pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed(false)),
+    Schema.withConstructorDefault(Effect.succeed(false)),
+  ),
+});
 
 export const OutputSaved = Schema.TaggedStruct("OutputSaved", { output: Schema.String });
 
@@ -407,10 +419,15 @@ export class AttemptJournal extends Context.Service<
       attemptId: AttemptId,
       input: QueuedInput,
     ) => Effect.Effect<void, JournalError>;
-    /** Removes queued input `inputSequence`, and returns whether it was stored. */
+    /**
+     * Removes queued input `inputSequence` and appends `receipts` to the outbox in one transaction,
+     * and returns whether the input was stored. The receipts' sequences continue the snapshot's
+     * `nextOutbound`.
+     */
     readonly forgetInput: (
       attemptId: AttemptId,
       inputSequence: AttemptChannel.Sequence,
+      receipts: ReadonlyArray<AttemptChannel.OutboundEnvelope>,
     ) => Effect.Effect<boolean, JournalError>;
     /**
      * Records that the transcript holds operator input `sequence`, so that `nextInbound` follows

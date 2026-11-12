@@ -493,23 +493,34 @@ export const sqliteAttemptJournalLayer = Layer.effect(
           ),
         );
       }),
-      forgetInput: Effect.fn("AttemptJournal.forgetInput")(function* (attemptId, inputSequence) {
-        yield* Effect.annotateCurrentSpan({ attemptId, inputSequence });
-        return yield* Effect.gen(function* () {
-          yield* coordinationExists(attemptId);
-          const [row] =
-            yield* sql`SELECT sequence FROM ${sql(inputs)} WHERE attempt_id = ${attemptId} AND sequence = ${inputSequence}`;
-          if (row === undefined) return false;
-          yield* sql`DELETE FROM ${sql(inputs)} WHERE attempt_id = ${attemptId} AND sequence = ${inputSequence}`;
-          return true;
-        }).pipe(
-          transaction,
-          Effect.catchTag(
-            ["SqlError", "SchemaError"],
-            failure("forget a queued operator input", attemptId),
-          ),
-        );
-      }),
+      forgetInput: Effect.fn("AttemptJournal.forgetInput")(
+        function* (attemptId, inputSequence, receipts) {
+          yield* Effect.annotateCurrentSpan({
+            attemptId,
+            inputSequence,
+            receipts: receipts.length,
+          });
+          return yield* Effect.gen(function* () {
+            if (receipts.length > 0) {
+              const previous = yield* existing(attemptId);
+              const next = yield* reserved(previous, receipts);
+              yield* insertEnvelopes(attemptId, receipts);
+              yield* updateCoordination(next);
+            } else yield* coordinationExists(attemptId);
+            const [row] =
+              yield* sql`SELECT sequence FROM ${sql(inputs)} WHERE attempt_id = ${attemptId} AND sequence = ${inputSequence}`;
+            if (row === undefined) return false;
+            yield* sql`DELETE FROM ${sql(inputs)} WHERE attempt_id = ${attemptId} AND sequence = ${inputSequence}`;
+            return true;
+          }).pipe(
+            transaction,
+            Effect.catchTag(
+              ["SqlError", "SchemaError"],
+              failure("forget a queued operator input", attemptId),
+            ),
+          );
+        },
+      ),
       recordInbound: Effect.fn("AttemptJournal.recordInbound")(function* (attemptId, sequence) {
         yield* Effect.annotateCurrentSpan({ attemptId, inputSequence: sequence });
         yield* Effect.gen(function* () {

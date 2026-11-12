@@ -1,7 +1,7 @@
 import { SqliteClient } from "@effect/sql-sqlite-node";
 import type { AttemptId } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
-import { Context, Effect, Exit, Layer, Schema, Scope } from "effect";
+import { Context, Deferred, Effect, Exit, Layer, Option, Schema, Scope } from "effect";
 import { AttemptRequest } from "../src/attempt-runtime.ts";
 import { AttemptJournal } from "../src/coordinator/journal.ts";
 import { CoordinatorRuntime } from "../src/coordinator/runtime.ts";
@@ -39,6 +39,80 @@ export const interruptingTransition = (tag: string) => (journal: Layer.Layer<Att
       });
     }),
   ).pipe(Layer.provide(journal));
+
+/**
+ * Holds the first `load` that finds the Attempt `Terminal` until `release` completes, after
+ * completing `reached`. The coordinator makes that load after it delivered the terminal envelope
+ * and before its `execute` call detaches.
+ */
+export const holdingTerminalLoad =
+  (reached: Deferred.Deferred<void>, release: Deferred.Deferred<void>) =>
+  (journal: Layer.Layer<AttemptJournal>) =>
+    Layer.effect(
+      AttemptJournal,
+      Effect.gen(function* () {
+        const inner = yield* AttemptJournal;
+        let held = false;
+        return AttemptJournal.of({
+          ...inner,
+          load: (attemptId) =>
+            inner.load(attemptId).pipe(
+              Effect.tap((snapshot) => {
+                if (held || !Option.exists(snapshot, ({ status }) => status._tag === "Terminal"))
+                  return Effect.void;
+                held = true;
+                return Deferred.succeed(reached, undefined).pipe(
+                  Effect.andThen(Deferred.await(release)),
+                );
+              }),
+            ),
+        });
+      }),
+    ).pipe(Layer.provide(journal));
+
+/**
+ * Holds the transition that finishes the Attempt, after completing `reached`, until `release`
+ * completes. The coordinator holds the routing permit while it commits a transition.
+ */
+export const holdingFinish =
+  (reached: Deferred.Deferred<void>, release: Deferred.Deferred<void>) =>
+  (journal: Layer.Layer<AttemptJournal>) =>
+    Layer.effect(
+      AttemptJournal,
+      Effect.gen(function* () {
+        const inner = yield* AttemptJournal;
+        return AttemptJournal.of({
+          ...inner,
+          transition: (attemptId, expected, step) =>
+            (step.intents.some(({ _tag }) => _tag === "Finish")
+              ? Deferred.succeed(reached, undefined).pipe(Effect.andThen(Deferred.await(release)))
+              : Effect.void
+            ).pipe(Effect.andThen(inner.transition(attemptId, expected, step))),
+        });
+      }),
+    ).pipe(Layer.provide(journal));
+
+/**
+ * A `WakeUp` that holds its handler for events tagged `tag`, after completing `reached`, until
+ * `release` completes, and then lets the rules decide.
+ */
+export const holdingWakeUp = (
+  tag: string,
+  reached: Deferred.Deferred<void>,
+  release: Deferred.Deferred<void>,
+) =>
+  Layer.succeed(
+    WakeUp,
+    WakeUp.of({
+      handle: (event) =>
+        event._tag === tag
+          ? Deferred.succeed(reached, undefined).pipe(
+              Effect.andThen(Deferred.await(release)),
+              Effect.as(Option.none()),
+            )
+          : Effect.succeedNone,
+    }),
+  );
 
 /** A coordinator runtime over the journal with stub children, waking `wakeUp`. */
 export const coordinatorWith =

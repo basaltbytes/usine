@@ -159,10 +159,11 @@ const launchStub = Effect.fn("StubChildBackend.launch")(function* (request: Chil
   const interventions: Array<AttemptChannel.OperatorAction> = [];
   let held = request.held;
   let paused = false;
-  let pending = Option.none<string>();
+  // A resumed child restores its idle report and whether it answered the operator.
+  let pending = request.idle;
   const queued: Array<OnDelivery> = [];
   // Like the shared conversation: whether the child read operator input after its last tool call.
-  let answering = false;
+  let answering = Option.isSome(request.idle) && request.idleAnsweredOperator;
 
   const stateNow = (isQueued: boolean) =>
     AttemptChannel.InterventionState.make({ held, paused, queued: isQueued });
@@ -198,7 +199,13 @@ const launchStub = Effect.fn("StubChildBackend.launch")(function* (request: Chil
         Effect.suspend(() => {
           if (!held) return finish(message);
           pending = Option.some(message);
-          return emit(SessionIdle.make({ session }));
+          return emit(
+            SessionIdle.make({
+              session,
+              message: Option.some(message),
+              answeredOperator: answering,
+            }),
+          );
         }),
       ),
     );

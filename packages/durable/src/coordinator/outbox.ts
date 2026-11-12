@@ -54,8 +54,8 @@ export interface Outbox {
   /** Like `emit`, but reports a failure through `failed`, for activity that has no caller to fail. */
   readonly relay: (payloads: ReadonlyArray<AttemptChannel.OutboundPayload>) => Effect.Effect<void>;
   /**
-   * Appends an operator input to the attached sink's transcript, records its sequence in the
-   * journal, and returns the sequence. Fails with `AgentFailure` while detached.
+   * Records the next operator input's sequence in the journal, appends the input to the attached
+   * sink's transcript, and returns the sequence. Fails with `AgentFailure` while detached.
    */
   readonly inbound: (
     intervention: AttemptChannel.Intervention,
@@ -203,9 +203,10 @@ export const outboxFor = Effect.fn("Outbox.open")(function* (
           operator: intervention.operator,
           payload: intervention.action,
         });
-        yield* attachedChannel.io.append("inbound", envelope);
+        // Recorded first, so a stop before the append skips the sequence instead of reusing it.
         yield* journal.recordInbound(attemptId, envelope.sequence);
         attachedChannel.inbound = AttemptChannel.Sequence.make(envelope.sequence + 1);
+        yield* attachedChannel.io.append("inbound", envelope);
         return envelope.sequence;
       }),
     );

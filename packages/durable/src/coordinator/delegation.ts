@@ -68,7 +68,8 @@ export const journalDelegation = (
       ),
     supervision: (sessionId) =>
       supervisor.of(sessionId).pipe(Effect.map(({ held, paused }) => ({ held, paused }))),
-    holdEnded: supervisor.holdEnded,
+    // A held child keeps its result until the operator releases it (`ChildRequest.held`).
+    holdEnded: () => Effect.void,
     releaseSupervision: (sessionId) =>
       supervisor.supervise(Supervision.make({ sessionId, held: false, paused: false })),
     saveSession: (saved, { beforePrompt }) =>
@@ -81,17 +82,21 @@ export const journalDelegation = (
       asJson(usage).pipe(Effect.flatMap((json) => save(UsageSaved.make({ usage: json })))),
     toolStarted: (callId, tool) => save(ToolStarted.make({ callId, tool })),
     toolFinished: (callId) => save(ToolFinished.make({ callId })),
-    saveIdle: (report) => save(IdleSaved.make({ report })),
+    saveIdle: (report, answeredOperator) => save(IdleSaved.make({ report, answeredOperator })),
     saveOutput: (output) => save(OutputSaved.make({ output })),
   };
 };
 
 /**
- * One delegation that the coordinator runs. It keeps the end of the child's output in memory and
- * ends when `aborted` completes. The coordinator turns the delegation's outcome into its next
- * event, so a reserved report or an infrastructure failure needs no record here.
+ * One delegation that the coordinator runs. It keeps the end of the child's output in memory,
+ * runs `published` when the child is live, and ends when `aborted` completes. The coordinator
+ * turns the delegation's outcome into its next event, so a reserved report or an infrastructure
+ * failure needs no record here.
  */
-export const coordinatorCall = (aborted: Effect.Effect<void>): DelegationCall => {
+export const coordinatorCall = (
+  aborted: Effect.Effect<void>,
+  published: Effect.Effect<void>,
+): DelegationCall => {
   let output = "";
   return {
     output: (chunk) =>
@@ -99,8 +104,8 @@ export const coordinatorCall = (aborted: Effect.Effect<void>): DelegationCall =>
         output = `${output}${chunk}`.slice(-RETAINED_OUTPUT_CHARACTERS);
       }),
     retainedOutput: Effect.sync(() => output),
-    // No tool call shows the delegation's details.
-    publish: () => Effect.void,
+    // No tool call shows the delegation's details; a publish means the child is live.
+    publish: () => published,
     aborted,
     infrastructureFailed: () => Effect.void,
     reserved: () => Effect.void,

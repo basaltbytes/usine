@@ -133,12 +133,13 @@ The outbox relay in `src/coordinator/outbox.ts` reserves each envelope in the jo
 
 ### Coordinator operator input
 
-`Interventions` in `src/coordinator/interventions.ts` handles one attempt's operator input. `intervene` appends the input to the transcript through the outbox and applies it under the attempt's routing permit, which transitions also take:
+`Interventions` in `src/coordinator/interventions.ts` handles one attempt's operator input. `intervene` records the input's sequence in the journal, appends the input to the transcript through the outbox, and applies it under the attempt's routing permit, which transitions also take:
 
 - Input for a child goes to that child. Input addressed to the parent goes to the live child, and its receipts set `InterventionState.forwardedTo` to the child, as a forwarded Pi parent steer does. This covers steers, operator messages, interrupts, and releases, and the runaway guard's warning, which is a parent steer.
-- With no live child, or for a child that ended, the receipt is `InterventionRejected`. Input before `Started` or after the terminal envelope fails with `AgentFailure`, because the channel admits no receipt there.
-- The receipt's Hold and pause go to the journal with `supervise`. A child's result waits until its Hold ends, so the attempt's outcome waits for `Release`. A resumed child after a restart gets its stored Hold and pause.
-- A working child queues a message: the journal keeps it with `queueInput` until the child reports it. A read gets a second `InterventionApplied`. An unread input stays stored, so a child resumed after a restart reads it, and is rejected once the child's delegation ends. Every receipt for a child's input precedes the envelopes of the event that its end produces.
+- Input addressed to the parent waits while the open delegation's child starts, as after a reattachment, so the runaway guard's restored warning reaches the resumed child.
+- With no live or starting child, or for a child that ended, the receipt is `InterventionRejected`. Input before `Started` or after the terminal envelope fails with `AgentFailure`, because the channel admits no receipt there.
+- The receipt's Hold and pause go to the journal with `supervise`. A held child keeps its result until `Release`, so the attempt's outcome waits for it. A resumed child after a restart gets its stored Hold and pause, and its idle report with whether that report answered the operator.
+- A working child queues a message: the journal keeps it with `queueInput` until the child reports it. A read gets a second `InterventionApplied`. An unread input stays stored, so a child resumed after a restart reads it, and is rejected once the child's delegation ends. `forgetInput` removes the input and reserves its second receipt in one journal write, so a stop can't repeat the receipt or keep a settled input. Every receipt for a child's input precedes the envelopes of the event that its end produces.
 
 `routerLayer` in `src/coordinator/router.ts` provides `AttemptRuntime` over `PiAttemptRuntime` and `CoordinatorRuntime`. `execute` sends an attempt to the coordinator if the journal has it, to the Pi runtime if pi-durable has it, and otherwise by `RunSpec.parent`, which decodes as `pi` for stored attempts. Every other operation looks the attempt up in the journal and falls back to the Pi runtime, so an attempt stays on the runtime that started it. A Worker notice for an attempt that neither runtime has waits for its `execute` call.
 
@@ -188,7 +189,7 @@ A child's `SessionOperationError` is recorded as an infrastructure failure. This
 - `reserve` and `acknowledge` keep the outbox in sequence order across restarts.
 - `startDelegation` marks a decided delegation started, or returns the progress saved since an earlier run started it. `saveProgress` applies one typed `ProgressChange`, and `settleDelegation` keeps the first event that ended the delegation.
 - `recordResult` stores the harvested result, and `recordUnsupervised` keeps the longest unsupervised time.
-- `supervise` replaces a child's Hold and pause; a child with neither has no stored supervision. `queueInput` and `forgetInput` keep the operator inputs that children queued, and `recordInbound` advances the sequence of the next operator input.
+- `supervise` replaces a child's Hold and pause; a child with neither has no stored supervision. `queueInput` and `forgetInput` keep the operator inputs that children queued, and `forgetInput` reserves the input's receipts in the same transaction. `recordInbound` advances the sequence of the next operator input.
 - `settle` keeps the outcome and the outbox, and advances the revision, so a late transition fails as stale.
 
 The coordinator encodes events, decisions, and state as JSON; the journal stores them without reading them. Breaking a ledger invariant is a defect: an operation on an attempt that was never opened, a transition after `Finish`, a decision other than the recorded one, or an envelope out of sequence.

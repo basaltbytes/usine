@@ -8,7 +8,7 @@ import {
   ToolStarted,
 } from "@usine/core/agent/session";
 import * as AttemptChannel from "@usine/core/attempt/channel";
-import { Context, Deferred, Effect, Fiber, Layer, Option, Result, Schema } from "effect";
+import { Context, Deferred, Effect, Exit, Fiber, Layer, Option, Result, Schema } from "effect";
 import { type AttemptRequest, harvestedResult } from "../src/attempt-runtime.ts";
 import {
   AttemptJournal,
@@ -19,9 +19,18 @@ import {
 import { CoordinatorRuntime } from "../src/coordinator/runtime.ts";
 import { WakeUp } from "../src/coordinator/wake-up.ts";
 import { type StubChild, stubChildBackendLayer, type StubChildren } from "../src/testing.ts";
+import { StoredRequest } from "../src/attempt-runtime.ts";
+import { interventionsFor } from "../src/coordinator/interventions.ts";
+import { memoryAttemptJournalLayer } from "../src/coordinator/memory.ts";
+import { outboxFor, startedWithoutParent } from "../src/coordinator/outbox.ts";
+import { supervisorFor } from "../src/coordinator/supervision.ts";
 import {
   coordinated,
   coordinator,
+  coordinatorWith,
+  holdingFinish,
+  holdingTerminalLoad,
+  holdingWakeUp,
   interruptingTransition,
   orchestrator,
   sqliteJournal,
@@ -89,6 +98,25 @@ const coordinatorOver =
       Layer.provide(Layer.mergeAll(journal, WakeUp.rules)),
       Layer.provideMerge(backend),
     );
+
+/** Holds each child's start, after completing `reached`, until `release` completes. */
+const holdingStart =
+  (reached: Deferred.Deferred<void>, release: Deferred.Deferred<void>) =>
+  (journal: Layer.Layer<AttemptJournal>) =>
+    Layer.effect(
+      AttemptJournal,
+      Effect.gen(function* () {
+        const inner = yield* AttemptJournal;
+        return AttemptJournal.of({
+          ...inner,
+          startDelegation: (id, number) =>
+            Deferred.succeed(reached, undefined).pipe(
+              Effect.andThen(Deferred.await(release)),
+              Effect.andThen(inner.startDelegation(id, number)),
+            ),
+        });
+      }),
+    ).pipe(Layer.provide(journal));
 
 describe("event-driven coordinator operator input", () => {
   it.live("forwards a parent steer to the live child and sends both of its receipts", () =>
@@ -333,62 +361,252 @@ describe("event-driven coordinator operator input", () => {
     }).pipe(Effect.scoped),
   );
 
-  it.live("rejects input without a live child, and refuses it without a live channel", () =>
+  it.live("waits for the starting child, and rejects input while no child is live", () =>
     Effect.gen(function* () {
       const database = yield* temporaryDatabase;
       const request = coordinated("input/rejected");
       const attemptId = request.spec.attemptId;
       const recording = recordingSink();
-      const reached = yield* Deferred.make<void>();
-      const release = yield* Deferred.make<void>();
-      // Holds the child's start after `Started` is reserved, so no child is live yet.
-      const holdingStart = (journal: Layer.Layer<AttemptJournal>) =>
-        Layer.effect(
-          AttemptJournal,
-          Effect.gen(function* () {
-            const inner = yield* AttemptJournal;
-            return AttemptJournal.of({
-              ...inner,
-              startDelegation: (id, number) =>
-                Deferred.succeed(reached, undefined).pipe(
-                  Effect.andThen(Deferred.await(release)),
-                  Effect.andThen(inner.startDelegation(id, number)),
-                ),
-            });
-          }),
-        ).pipe(Layer.provide(journal));
-      const process = yield* orchestrator(sqliteJournal(database).pipe(holdingStart, coordinator));
-      const execution = yield* process.execute(request, recording.sink);
-      yield* Deferred.await(reached);
-      const steer = AttemptChannel.Steer.make({ message: "Keep going." });
-      yield* process.attempts.intervene(attemptId, toParent(steer));
-      yield* Deferred.succeed(release, undefined);
-      const child = yield* process.nextChild;
-      yield* process.attempts.intervene(
-        attemptId,
-        toChild(
-          AgentSessionId.make(`${child.request.session.id}-gone`),
-          AttemptChannel.Release.make(),
+      const starting = yield* Deferred.make<void>();
+      const start = yield* Deferred.make<void>();
+      const deciding = yield* Deferred.make<void>();
+      const decide = yield* Deferred.make<void>();
+      const process = yield* orchestrator(
+        sqliteJournal(database).pipe(
+          holdingStart(starting, start),
+          coordinatorWith(holdingWakeUp("ChildReported", deciding, decide)),
         ),
       );
+      const execution = yield* process.execute(request, recording.sink);
+      yield* Deferred.await(starting);
+      // Input addressed to the parent waits while the delegation's child starts.
+      const steer = AttemptChannel.Steer.make({ message: "Keep going." });
+      const waiting = yield* Effect.forkChild(
+        process.attempts.intervene(attemptId, toParent(steer)),
+      );
+      yield* Effect.sleep("50 millis");
+      const inboundWhileStarting = recording.inbound().length;
+      yield* Deferred.succeed(start, undefined);
+      const child = yield* process.nextChild;
+      const sessionId = child.request.session.id;
+      yield* Fiber.join(waiting);
       yield* child.reply("Done.");
+      // The child ended and the coordinator decides its report, so no child is live.
+      yield* Deferred.await(deciding);
+      yield* process.attempts.intervene(attemptId, toParent(steer));
+      yield* process.attempts.intervene(
+        attemptId,
+        toChild(AgentSessionId.make(`${sessionId}-gone`), AttemptChannel.Release.make()),
+      );
+      yield* Deferred.succeed(decide, undefined);
       yield* Fiber.join(execution);
       const ended = yield* process.attempts.intervene(attemptId, toParent(steer)).pipe(Effect.flip);
       const delivered = yield* child.interventions;
       yield* process.stop;
 
-      assert.deepStrictEqual(delivered, []);
+      assert.strictEqual(inboundWhileStarting, 0);
+      assert.deepStrictEqual(delivered, [steer]);
       assert.deepStrictEqual(receipts(recording.outbound()).map(summary), [
         {
           input: 1,
+          applied: true,
+          held: false,
+          paused: false,
+          queued: true,
+          forwardedTo: sessionId,
+        },
+        {
+          input: 1,
+          applied: true,
+          held: false,
+          paused: false,
+          queued: false,
+          forwardedTo: sessionId,
+        },
+        {
+          input: 2,
           applied: false,
           message: "This attempt has no live child session to receive the input",
         },
-        { input: 2, applied: false, message: "This session is no longer live" },
+        { input: 3, applied: false, message: "This session is no longer live" },
       ]);
       assert.strictEqual(ended._tag, "AgentFailure");
-      assert.lengthOf(recording.inbound(), 2);
+      assert.lengthOf(recording.inbound(), 3);
       assertAdmitted(attemptId, recording.outbound());
+    }).pipe(Effect.scoped),
+  );
+
+  it.live("refuses input before Started, without a transcript entry", () =>
+    Effect.gen(function* () {
+      const request = coordinated("input/before-started");
+      const attemptId = request.spec.attemptId;
+      const recording = recordingSink();
+      const deciding = yield* Deferred.make<void>();
+      const decide = yield* Deferred.make<void>();
+      const database = yield* temporaryDatabase;
+      const process = yield* orchestrator(
+        sqliteJournal(database).pipe(
+          coordinatorWith(holdingWakeUp("AttemptStarted", deciding, decide)),
+        ),
+      );
+      const execution = yield* process.execute(request, recording.sink);
+      // The first event's handler decides, so the transition that reserves `Started` waits.
+      yield* Deferred.await(deciding);
+      const refused = yield* process.attempts
+        .intervene(attemptId, toParent(AttemptChannel.Steer.make({ message: "Early." })))
+        .pipe(Effect.flip);
+      yield* Deferred.succeed(decide, undefined);
+      yield* (yield* process.nextChild).reply("Done.");
+      yield* Fiber.join(execution);
+      yield* process.stop;
+
+      assert.strictEqual(refused._tag, "AgentFailure");
+      assert.deepStrictEqual(recording.inbound(), []);
+      assert.deepStrictEqual(receipts(recording.outbound()), []);
+      assert.strictEqual(trace(recording.outbound())[0], "Started");
+      assertAdmitted(attemptId, recording.outbound());
+    }).pipe(Effect.scoped),
+  );
+
+  it.live("refuses input after the terminal envelope while execute is still attached", () =>
+    Effect.gen(function* () {
+      const request = coordinated("input/after-final");
+      const attemptId = request.spec.attemptId;
+      const recording = recordingSink();
+      const reached = yield* Deferred.make<void>();
+      const release = yield* Deferred.make<void>();
+      const database = yield* temporaryDatabase;
+      const process = yield* orchestrator(
+        sqliteJournal(database).pipe(holdingTerminalLoad(reached, release), coordinator),
+      );
+      const execution = yield* process.execute(request, recording.sink);
+      const child = yield* process.nextChild;
+      yield* child.reply("Done.");
+      yield* Deferred.await(reached);
+      const refused = yield* process.attempts
+        .intervene(
+          attemptId,
+          toChild(child.request.session.id, AttemptChannel.Steer.make({ message: "Late." })),
+        )
+        .pipe(Effect.flip);
+      yield* Deferred.succeed(release, undefined);
+      yield* Fiber.join(execution);
+      yield* process.stop;
+
+      assert.strictEqual(refused._tag, "AgentFailure");
+      assert.deepStrictEqual(recording.inbound(), []);
+      assert.strictEqual(trace(recording.outbound()).at(-1), "Final");
+    }).pipe(Effect.scoped),
+  );
+
+  it.live("applies input after the transition it waited for, so none follows the outcome", () =>
+    Effect.gen(function* () {
+      const request = coordinated("input/during-final");
+      const attemptId = request.spec.attemptId;
+      const recording = recordingSink();
+      const finishing = yield* Deferred.make<void>();
+      const finish = yield* Deferred.make<void>();
+      const reached = yield* Deferred.make<void>();
+      const release = yield* Deferred.make<void>();
+      const database = yield* temporaryDatabase;
+      const process = yield* orchestrator(
+        sqliteJournal(database).pipe(
+          holdingFinish(finishing, finish),
+          holdingTerminalLoad(reached, release),
+          coordinator,
+        ),
+      );
+      const execution = yield* process.execute(request, recording.sink);
+      const child = yield* process.nextChild;
+      yield* child.reply("Done.");
+      // The transition that reserves `Final` holds the routing permit while it commits.
+      yield* Deferred.await(finishing);
+      const late = yield* Effect.forkChild(
+        process.attempts.intervene(
+          attemptId,
+          toChild(child.request.session.id, AttemptChannel.Steer.make({ message: "Late." })),
+        ),
+      );
+      yield* Effect.sleep("50 millis");
+      yield* Deferred.succeed(finish, undefined);
+      yield* Deferred.await(reached);
+      const refused = yield* Fiber.join(late).pipe(Effect.flip);
+      yield* Deferred.succeed(release, undefined);
+      yield* Fiber.join(execution);
+      yield* process.stop;
+
+      assert.strictEqual(refused._tag, "AgentFailure");
+      assert.deepStrictEqual(recording.inbound(), []);
+      assert.strictEqual(trace(recording.outbound()).at(-1), "Final");
+    }).pipe(Effect.scoped),
+  );
+
+  it.live("waits for a read receipt before it rejects the unread inputs of ended children", () =>
+    Effect.gen(function* () {
+      const request = coordinated("input/settle");
+      const attemptId = request.spec.attemptId;
+      const sessionId = AgentSessionId.make(`${attemptId}/child/1`);
+      const recording = recordingSink();
+      const steer = toParent(AttemptChannel.Steer.make({ message: "Run the tests." }));
+      const encoded = yield* Schema.encodeEffect(Schema.toCodecJson(AttemptChannel.Intervention))(
+        steer,
+      );
+      const receipt = yield* Effect.gen(function* () {
+        const journal = yield* AttemptJournal;
+        const snapshot = yield* journal.open(
+          StoredRequest.make({ spec: request.spec, worker: request.worker, cwd: request.cwd }),
+        );
+        const outbox = yield* outboxFor(journal, attemptId);
+        yield* outbox.attach(recording.sink, snapshot);
+        yield* outbox.emit([startedWithoutParent(request.spec)]);
+        const inputSequence = AttemptChannel.Sequence.make(1);
+        yield* journal.queueInput(
+          attemptId,
+          QueuedInput.make({
+            inputSequence,
+            sessionId,
+            intervention: EncodedIntervention.make(encoded),
+          }),
+        );
+        const scope = yield* Effect.scope;
+        const interventions = yield* interventionsFor(
+          journal,
+          {
+            attemptId,
+            outbox,
+            // The child ended after it read the input.
+            children: new Map(),
+            childInputs: new Set([inputSequence]),
+            supervisor: supervisorFor(journal, attemptId),
+          },
+          scope,
+        );
+        // The read's receipt waits for the routing permit.
+        yield* interventions.routing.take(1);
+        yield* interventions.delivery({
+          _tag: "Delivery",
+          inputSequence,
+          intervention: steer,
+          delivered: Option.some(
+            AttemptChannel.InterventionState.make({ held: false, paused: false }),
+          ),
+        });
+        // `settle` gets the permit first, as the coordinator's fiber can after a release.
+        yield* interventions.routing.release(1);
+        yield* interventions.settle;
+        return receipts(recording.outbound()).map(summary);
+      }).pipe(Effect.provide(memoryAttemptJournalLayer));
+
+      assert.deepStrictEqual(receipt, [
+        {
+          input: 1,
+          applied: true,
+          held: false,
+          paused: false,
+          queued: false,
+          forwardedTo: undefined,
+        },
+      ]);
     }).pipe(Effect.scoped),
   );
 });
@@ -561,6 +779,210 @@ describe("event-driven coordinator operator input across restarts", () => {
         Option.some([]),
       );
       assertAdmitted(attemptId, outbound);
+    }).pipe(Effect.scoped),
+  );
+  it.live("keeps an answer to the operator across a restart under a Hold", () =>
+    Effect.gen(function* () {
+      const database = yield* temporaryDatabase;
+      const request = coordinated("input/restart/answered");
+      const attemptId = request.spec.attemptId;
+      const recording = recordingSink();
+      const first = yield* orchestrator(sqliteJournal(database).pipe(coordinator));
+      yield* first.execute(request, recording.sink);
+      const working = yield* first.nextChild;
+      yield* saveSession(working, request);
+      yield* sessionsStarted(recording, 2);
+      yield* first.attempts.intervene(
+        attemptId,
+        toParent(AttemptChannel.OperatorMessage.make({ message: "Why skip the tests?" })),
+      );
+      // The child answers the message and waits under the Hold when the orchestrator stops.
+      yield* working.reply("The tests need a database.");
+      yield* until(() => trace(recording.outbound()).includes("child.SessionIdle"));
+      yield* until(() => receipts(recording.outbound()).length === 2);
+      yield* first.stop;
+
+      const second = yield* orchestrator(sqliteJournal(database).pipe(coordinator));
+      const execution = yield* second.execute(request, recording.sink);
+      const resumed = yield* second.nextChild;
+      yield* second.attempts.intervene(attemptId, toParent(AttemptChannel.Release.make()));
+      const report = yield* Fiber.join(execution);
+      yield* second.stop;
+
+      assert.deepStrictEqual(resumed.request.idle, Option.some("The tests need a database."));
+      assert.isTrue(resumed.request.idleAnsweredOperator);
+      assert.strictEqual(report.message, "The tests need a database.");
+      assert.isTrue(report.answeredOperator);
+      const completion = harvestedResult(report, { facts: [], unverifiedHandoff: Option.none() });
+      assert(Result.isFailure(completion));
+      assert.strictEqual(completion.failure._tag, "AgentFailure");
+      assertAdmitted(attemptId, recording.outbound());
+    }).pipe(Effect.scoped),
+  );
+
+  it.live("forwards the runaway guard's warning to the child resumed after a reattachment", () =>
+    Effect.gen(function* () {
+      const database = yield* temporaryDatabase;
+      const request = coordinated("input/restart/warning");
+      const attemptId = request.spec.attemptId;
+      const recording = recordingSink();
+      const first = yield* orchestrator(sqliteJournal(database).pipe(coordinator));
+      yield* first.execute(request, recording.sink);
+      const working = yield* first.nextChild;
+      const sessionId = working.request.session.id;
+      yield* saveSession(working, request);
+      yield* sessionsStarted(recording, 2);
+      yield* first.stop;
+      const beforeRestart = recording.outbound().length;
+
+      const starting = yield* Deferred.make<void>();
+      const start = yield* Deferred.make<void>();
+      const second = yield* orchestrator(
+        sqliteJournal(database).pipe(holdingStart(starting, start), coordinator),
+      );
+      const execution = yield* second.execute(request, recording.sink);
+      // The guard sends its restored warning once `execute` attaches, before the child resumes.
+      yield* second.attempts.attached(attemptId);
+      yield* Deferred.await(starting);
+      const warning = AttemptChannel.Steer.make({
+        message: "85 of 100 tokens used by this Attempt; commit and push your work now.",
+      });
+      const warned = yield* Effect.forkChild(
+        second.attempts.intervene(
+          attemptId,
+          input(AttemptChannel.ParentTarget.make(), warning, "engine"),
+        ),
+      );
+      yield* Effect.sleep("50 millis");
+      yield* Deferred.succeed(start, undefined);
+      const resumed = yield* second.nextChild;
+      yield* Fiber.join(warned);
+      yield* resumed.reply("Pushed the work.");
+      yield* Fiber.join(execution);
+      const delivered = yield* resumed.interventions;
+      yield* second.stop;
+
+      assert.deepStrictEqual(delivered, [warning]);
+      assert.deepStrictEqual(receipts(recording.outbound().slice(beforeRestart)).map(summary), [
+        {
+          input: 1,
+          applied: true,
+          held: false,
+          paused: false,
+          queued: true,
+          forwardedTo: sessionId,
+        },
+        {
+          input: 1,
+          applied: true,
+          held: false,
+          paused: false,
+          queued: false,
+          forwardedTo: sessionId,
+        },
+      ]);
+      assertAdmitted(attemptId, recording.outbound());
+    }).pipe(Effect.scoped),
+  );
+
+  it.live("sends an unread input's rejection once when a stop interrupts its journal write", () =>
+    Effect.gen(function* () {
+      const database = yield* temporaryDatabase;
+      const request = coordinated("input/restart/receipt");
+      const attemptId = request.spec.attemptId;
+      const recording = recordingSink();
+      // A process stop during the write that forgets the input and reserves its receipt.
+      const interruptingForget = (journal: Layer.Layer<AttemptJournal>) =>
+        Layer.effect(
+          AttemptJournal,
+          Effect.gen(function* () {
+            const inner = yield* AttemptJournal;
+            return AttemptJournal.of({ ...inner, forgetInput: () => Effect.interrupt });
+          }),
+        ).pipe(Layer.provide(journal));
+      const first = yield* orchestrator(
+        sqliteJournal(database).pipe(interruptingForget, coordinator),
+      );
+      const stopped = yield* first.execute(request, recording.sink);
+      const child = yield* first.nextChild;
+      yield* first.attempts.intervene(
+        attemptId,
+        toParent(AttemptChannel.Steer.make({ message: "Also update the docs." })),
+      );
+      yield* child.crash("ssh: closed");
+      yield* Fiber.await(stopped);
+      yield* first.stop;
+
+      const second = yield* orchestrator(sqliteJournal(database).pipe(coordinator));
+      const failure = yield* second.attempts.execute(request, recording.sink).pipe(Effect.flip);
+      const after = yield* stored(database, attemptId);
+      yield* second.stop;
+
+      assert.strictEqual(failure._tag, "InfraFailure");
+      assert.deepStrictEqual(
+        receipts(recording.outbound()).map(({ _tag }) => _tag),
+        ["InterventionApplied", "InterventionRejected"],
+      );
+      assert.deepStrictEqual(trace(recording.outbound()).slice(-2), [
+        "InterventionRejected",
+        "Failed",
+      ]);
+      assert.deepStrictEqual(
+        Option.map(after, ({ inputs }) => inputs),
+        Option.some([]),
+      );
+      assertAdmitted(attemptId, recording.outbound());
+    }).pipe(Effect.scoped),
+  );
+
+  it.live("skips the sequence of an input whose transcript append a stop interrupted", () =>
+    Effect.gen(function* () {
+      const database = yield* temporaryDatabase;
+      const request = coordinated("input/restart/inbound");
+      const attemptId = request.spec.attemptId;
+      const recording = recordingSink();
+      // A process stop during the first input's transcript append.
+      let interrupted = false;
+      const stopping: AttemptChannel.Sink = {
+        ...recording.sink,
+        append: (direction, envelope) =>
+          direction === "inbound" && !interrupted
+            ? Effect.sync(() => {
+                interrupted = true;
+              }).pipe(Effect.andThen(Effect.interrupt))
+            : recording.sink.append(direction, envelope),
+      };
+      const first = yield* orchestrator(sqliteJournal(database).pipe(coordinator));
+      yield* first.execute(request, stopping);
+      const working = yield* first.nextChild;
+      yield* saveSession(working, request);
+      yield* sessionsStarted(recording, 2);
+      const lost = yield* first.attempts
+        .intervene(attemptId, toParent(AttemptChannel.Steer.make({ message: "Lost." })))
+        .pipe(Effect.exit);
+      yield* first.stop;
+
+      const second = yield* orchestrator(sqliteJournal(database).pipe(coordinator));
+      const execution = yield* second.execute(request, recording.sink);
+      const resumed = yield* second.nextChild;
+      yield* second.attempts.intervene(
+        attemptId,
+        toParent(AttemptChannel.Steer.make({ message: "Kept." })),
+      );
+      yield* resumed.reply("Done.");
+      yield* Fiber.join(execution);
+      yield* second.stop;
+
+      assert.isTrue(Exit.hasInterrupts(lost));
+      assert.deepStrictEqual(
+        recording.inbound().map(({ sequence }) => sequence),
+        [2],
+      );
+      assert.deepStrictEqual(
+        receipts(recording.outbound()).map(({ inputSequence }) => Number(inputSequence)),
+        [2, 2],
+      );
+      assertAdmitted(attemptId, recording.outbound());
     }).pipe(Effect.scoped),
   );
 });

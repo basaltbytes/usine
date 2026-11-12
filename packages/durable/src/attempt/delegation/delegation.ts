@@ -338,6 +338,7 @@ export const delegate = Effect.fn("Delegation.delegate")(function* (
     held,
     paused,
     idle,
+    idleAnsweredOperator: Option.isSome(idle) && previous.idleAnsweredOperator,
     prompted: previous.prompted,
     continuations: previous.continuations,
     inFlight: previous.inFlight,
@@ -505,7 +506,9 @@ export const delegate = Effect.fn("Delegation.delegate")(function* (
           event._tag === "SessionFinished"
         )
           yield* checkpoint(
-            journal.saveIdle(event._tag === "SessionIdle" ? event.message : Option.none()),
+            event._tag === "SessionIdle"
+              ? journal.saveIdle(event.message, event.answeredOperator)
+              : journal.saveIdle(Option.none(), false),
           );
         if (
           event._tag === "SessionStarted" &&

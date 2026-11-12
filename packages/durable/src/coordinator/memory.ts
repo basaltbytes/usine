@@ -174,15 +174,22 @@ export const memoryAttemptJournalLayer = Layer.effect(
           yield* save(inputQueued(previous, input));
         }).pipe(serialized);
       }),
-      forgetInput: Effect.fn("AttemptJournal.forgetInput")(function* (attemptId, inputSequence) {
-        yield* Effect.annotateCurrentSpan({ attemptId, inputSequence });
-        return yield* Effect.gen(function* () {
-          const previous = yield* stored(attemptId);
-          const { forgotten, snapshot } = inputForgotten(previous, inputSequence);
-          if (forgotten) yield* save(snapshot);
-          return forgotten;
-        }).pipe(serialized);
-      }),
+      forgetInput: Effect.fn("AttemptJournal.forgetInput")(
+        function* (attemptId, inputSequence, receipts) {
+          yield* Effect.annotateCurrentSpan({
+            attemptId,
+            inputSequence,
+            receipts: receipts.length,
+          });
+          return yield* Effect.gen(function* () {
+            const previous = yield* stored(attemptId);
+            const { forgotten, snapshot } = inputForgotten(previous, inputSequence);
+            const next = yield* reserved(snapshot, receipts);
+            if (next !== previous) yield* save(next);
+            return forgotten;
+          }).pipe(serialized);
+        },
+      ),
       recordInbound: Effect.fn("AttemptJournal.recordInbound")(function* (attemptId, sequence) {
         yield* Effect.annotateCurrentSpan({ attemptId, inputSequence: sequence });
         yield* Effect.gen(function* () {

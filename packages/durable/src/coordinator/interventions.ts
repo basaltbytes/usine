@@ -3,7 +3,17 @@ import type { AgentSessionId } from "@usine/core/agent/session";
 import type { AttemptId } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AgentFailure, type AttemptFailure } from "@usine/core/attempt/failure";
-import { type Brand, Effect, FiberSet, Option, Result, Schema, Scope, Semaphore } from "effect";
+import {
+  type Brand,
+  Deferred,
+  Effect,
+  FiberSet,
+  Option,
+  Result,
+  Schema,
+  Scope,
+  Semaphore,
+} from "effect";
 
 import type { ChildDelivery } from "../attempt/delegation/journal.ts";
 import {
@@ -66,6 +76,11 @@ export interface Interventions {
   /** Receives a child's report that it read a queued input, or stopped before it did. */
   readonly delivery: (delivery: ChildDelivery) => Effect.Effect<void>;
   /**
+   * Signals that a child became live, a delegation ended, or the `execute` call detached, so input
+   * addressed to the parent that waits for the open delegation's child checks again.
+   */
+  readonly childChanged: Effect.Effect<void>;
+  /**
    * Sends the receipts that ended children owe: it waits for the receipts of read inputs, then
    * rejects the stored inputs of children that are no longer live. Run it after a child ends and
    * before the event that its end produces, so every receipt precedes that event's envelopes.
@@ -85,6 +100,13 @@ export const interventionsFor = Effect.fn("Interventions.make")(function* (
   const { attemptId, outbox, children, childInputs, supervisor } = target;
   const routing = yield* Semaphore.make(1);
   const deliveries = yield* FiberSet.make<void, never>().pipe(Scope.provide(scope));
+  // Replaced after each change; a waiter reads it before it checks, so it misses no change.
+  let changed = yield* Deferred.make<void>();
+  const childChanged = Effect.gen(function* () {
+    const previous = changed;
+    changed = yield* Deferred.make<void>();
+    yield* Deferred.succeed(previous, undefined);
+  });
 
   const snapshot = journal.load(attemptId).pipe(
     Effect.flatMap(
@@ -95,14 +117,17 @@ export const interventionsFor = Effect.fn("Interventions.make")(function* (
     ),
   );
 
-  /** Sends the stored input's second receipt and forgets it. The caller holds the permit. */
+  /**
+   * Sends the stored input's second receipt and forgets the input in the same journal write, so a
+   * stop can't send the receipt twice or keep an input it settled. The caller holds the permit.
+   */
   const receipt = (
     inputSequence: AttemptChannel.Sequence,
     intervention: AttemptChannel.Intervention,
     delivered: Option.Option<AttemptChannel.InterventionState>,
   ) =>
-    outbox
-      .emit([
+    outbox.commit(
+      [
         Option.match(delivered, {
           onSome: (state): AttemptChannel.OutboundPayload =>
             AttemptChannel.InterventionApplied.make({ inputSequence, intervention, state }),
@@ -113,8 +138,9 @@ export const interventionsFor = Effect.fn("Interventions.make")(function* (
               message: UNREAD_INPUT,
             }),
         }),
-      ])
-      .pipe(Effect.andThen(journal.forgetInput(attemptId, inputSequence)));
+      ],
+      (outbound) => journal.forgetInput(attemptId, inputSequence, outbound),
+    );
 
   /**
    * Sends the second receipt for an input that a child queued and then read, unless it was already
@@ -129,7 +155,10 @@ export const interventionsFor = Effect.fn("Interventions.make")(function* (
       childInputs.delete(inputSequence);
       const stored = yield* snapshot;
       if (!stored.inputs.some((input) => input.inputSequence === inputSequence))
-        return yield* Effect.logDebug("A child reported an operator input already settled", fields);
+        return yield* Effect.logInfo(
+          "A child reported an operator input already settled; it gets no second receipt",
+          fields,
+        );
       if (!(yield* outbox.attached))
         return yield* Effect.logInfo(
           "No execute call relays the Attempt; the read operator input stays stored for the resumed child",
@@ -180,7 +209,7 @@ export const interventionsFor = Effect.fn("Interventions.make")(function* (
           "Forgot a queued operator input that no longer decodes; it gets no second receipt",
           fields,
         );
-        yield* journal.forgetInput(attemptId, input.inputSequence);
+        yield* journal.forgetInput(attemptId, input.inputSequence, []);
         continue;
       }
       childInputs.delete(input.inputSequence);
@@ -255,6 +284,34 @@ export const interventionsFor = Effect.fn("Interventions.make")(function* (
     return state;
   });
 
+  /**
+   * Waits while the open delegation's child is starting, as after a reattachment, so that input
+   * addressed to the parent reaches the child instead of a rejection. Returns once a child is live,
+   * no delegation is open, or no `execute` call is attached.
+   */
+  const awaitChild = Effect.fn("Interventions.awaitChild")(function* (
+    intervention: AttemptChannel.Intervention,
+  ) {
+    let logged = false;
+    while (true) {
+      const next = changed;
+      if (children.size > 0 || !(yield* outbox.attached)) return;
+      const stored = yield* snapshot;
+      const starting =
+        stored.status._tag === "Open" &&
+        stored.delegations.some(({ outcome }) => Option.isNone(outcome));
+      if (!starting) return;
+      if (!logged) {
+        logged = true;
+        yield* Effect.logInfo("Input addressed to the parent waits for the child to start", {
+          attemptId,
+          action: intervention.action._tag,
+        });
+      }
+      yield* Deferred.await(next);
+    }
+  });
+
   const intervene = Effect.fn("Interventions.intervene")(function* (
     intervention: AttemptChannel.Intervention,
   ) {
@@ -263,6 +320,7 @@ export const interventionsFor = Effect.fn("Interventions.make")(function* (
       target: intervention.target._tag,
       action: intervention.action._tag,
     });
+    if (intervention.target._tag === "Parent") yield* awaitChild(intervention);
     yield* routing.withPermits(1)(
       Effect.gen(function* () {
         const relaying =
@@ -315,6 +373,7 @@ export const interventionsFor = Effect.fn("Interventions.make")(function* (
     routing,
     intervene,
     delivery,
+    childChanged,
     settle: FiberSet.awaitEmpty(deliveries).pipe(
       Effect.andThen(routing.withPermits(1)(rejectUnread())),
     ),

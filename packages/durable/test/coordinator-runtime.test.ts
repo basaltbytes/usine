@@ -44,6 +44,7 @@ import {
   coordinated,
   coordinator,
   coordinatorWith,
+  holdingTerminalLoad,
   interruptingTransition,
   orchestrator,
   sqliteJournal,
@@ -58,36 +59,6 @@ import {
   temporaryDatabase,
   trace,
 } from "./support.ts";
-
-/**
- * Holds the first `load` that finds the Attempt `Terminal` until `release` completes, after
- * completing `reached`. The coordinator makes that load after it delivered the terminal envelope
- * and before its `execute` call detaches.
- */
-const holdingTerminalLoad =
-  (reached: Deferred.Deferred<void>, release: Deferred.Deferred<void>) =>
-  (journal: Layer.Layer<AttemptJournal>) =>
-    Layer.effect(
-      AttemptJournal,
-      Effect.gen(function* () {
-        const inner = yield* AttemptJournal;
-        let held = false;
-        return AttemptJournal.of({
-          ...inner,
-          load: (attemptId) =>
-            inner.load(attemptId).pipe(
-              Effect.tap((snapshot) => {
-                if (held || !Option.exists(snapshot, ({ status }) => status._tag === "Terminal"))
-                  return Effect.void;
-                held = true;
-                return Deferred.succeed(reached, undefined).pipe(
-                  Effect.andThen(Deferred.await(release)),
-                );
-              }),
-            ),
-        });
-      }),
-    ).pipe(Layer.provide(journal));
 
 /**
  * Holds every `startDelegation` after completing `reached`, as a launch that waits through retry
@@ -944,6 +915,43 @@ describe("event-driven coordinator runtime", () => {
       assert.strictEqual(failure._tag, "InfraFailure");
       assert.strictEqual(failure.message, "transcript unavailable");
       assert.deepStrictEqual(unresponsiveReasons(recording.outbound()), []);
+    }).pipe(Effect.scoped),
+  );
+
+  it.live("refuses envelopes after the terminal envelope while an execute call is attached", () =>
+    Effect.gen(function* () {
+      const database = yield* temporaryDatabase;
+      const request = coordinated("coordinator/emit-after-end");
+      const attemptId = request.spec.attemptId;
+      const process = yield* orchestrator(sqliteJournal(database).pipe(coordinator));
+      const execution = yield* process.execute(request, recordingSink().sink);
+      yield* (yield* process.nextChild).reply("Done.");
+      yield* Fiber.join(execution);
+      yield* process.stop;
+
+      // A second `execute` call's outbox, between its attach and its detach.
+      const recording = recordingSink();
+      const { refused, after } = yield* Effect.gen(function* () {
+        const journal = yield* AttemptJournal;
+        const snapshot = yield* journal.load(attemptId);
+        if (Option.isNone(snapshot)) return yield* Effect.die(new Error("no journal"));
+        const outbox = yield* outboxFor(journal, attemptId);
+        const refused = yield* Effect.scoped(
+          Effect.gen(function* () {
+            const attached = yield* outbox.attach(recording.sink, snapshot.value);
+            assert.isTrue(attached);
+            return yield* outbox.emit([unresponsive("after the end")]).pipe(Effect.flip);
+          }),
+        );
+        return { refused, after: yield* journal.load(attemptId) };
+      }).pipe(Effect.provide(sqliteJournal(database)));
+
+      assert.strictEqual(refused._tag, "AgentFailure");
+      assert.deepStrictEqual(recording.outbound(), []);
+      assert.deepStrictEqual(
+        Option.map(after, ({ outbox }) => outbox),
+        Option.some([]),
+      );
     }).pipe(Effect.scoped),
   );
 

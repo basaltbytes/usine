@@ -120,6 +120,14 @@ const restartFields = {
   idle: Schema.OptionFromOptionalKey(Schema.NonEmptyString).pipe(
     Schema.withConstructorDefault(Effect.succeedNone),
   ),
+  /**
+   * Whether the restored idle report replies to an operator message or steer that the session read
+   * after its last tool call (ADR 0018).
+   */
+  idleAnsweredOperator: Schema.Boolean.pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed(false)),
+    Schema.withConstructorDefault(Effect.succeed(false)),
+  ),
 };
 
 /**

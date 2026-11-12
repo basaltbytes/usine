@@ -264,7 +264,10 @@ const changed = (progress: ChildProgress, change: ProgressChange): ChildProgress
       ToolFinished: ({ callId }) => ({
         inFlight: progress.inFlight.filter((call) => call.callId !== callId),
       }),
-      IdleSaved: ({ report }) => ({ idle: report }),
+      IdleSaved: ({ report, answeredOperator }) => ({
+        idle: report,
+        idleAnsweredOperator: Option.isSome(report) && answeredOperator,
+      }),
       OutputSaved: ({ output }) => ({ output }),
     }),
   });

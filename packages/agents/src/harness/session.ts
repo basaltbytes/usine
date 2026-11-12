@@ -50,6 +50,8 @@ export interface SessionChannel {
   readonly emitUnsafe: (event: AgentSessionEvent) => boolean;
   /** The number of tool calls that the session started, counted from the queued events. */
   readonly toolCalls: Effect.Effect<number>;
+  /** Returns `toolCalls` synchronously, for vendor callbacks. */
+  readonly toolCallsUnsafe: () => number;
   readonly fail: (error: AgentSessionError) => Effect.Effect<void>;
   /**
    * Ends the session with `message`, or fails it with the report that `message` marks.
@@ -153,6 +155,7 @@ export const sessionChannel = Effect.fn("SessionChannel.make")(function* (
     emit,
     emitUnsafe,
     toolCalls: Effect.sync(() => toolCalls),
+    toolCallsUnsafe: () => toolCalls,
     fail,
     finish,
   } satisfies SessionChannel;

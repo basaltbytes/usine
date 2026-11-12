@@ -2,7 +2,7 @@
 
 An operator steers, interrupts, messages, or releases a session of a running attempt. The engine sends the input to the live session through `Executor.intervene`, records it and its receipt in the transcript, and flags the attempt as operator-intervened. Operator input never becomes an event; chat turns would fill the ledger of facts that open runs.
 
-Input addressed to the parent goes to the Pi parent when the attempt has one; the parent forwards a steer to its only live child, and takes a separate turn when no child accepts it. An attempt on the event-driven coordinator has no parent session, so parent-addressed input goes to its live child, and is rejected when no child is live. The runaway guard's warning is a parent steer and takes the same route.
+Input addressed to the parent goes to the Pi parent when the attempt has one; the parent forwards a steer to its only live child, and takes a separate turn when no child accepts it. An attempt on the event-driven coordinator has no parent session, so parent-addressed input goes to its live or starting child, and is otherwise rejected. The runaway guard's warning is a parent steer and takes the same route.
 
 An operator message places a hold; a steer doesn't. A held child keeps its result until released, so its parent or coordinator is never cut out. A held parent's next answer doesn't end the attempt, so the exchange can span turns; a release resumes the task. An interrupt pauses the session until new input or a release. Holds, pauses, and queued input survive an orchestrator restart: pi-durable keeps them for the Pi parent, and the attempt journal for the coordinator. The runaway wall clock excludes held time.
 

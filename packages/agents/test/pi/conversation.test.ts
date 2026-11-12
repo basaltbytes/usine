@@ -20,10 +20,12 @@ import {
   AgentQuestionError,
   AgentResultError,
   type OnDelivery,
+  RestartState,
   SessionOperationError,
 } from "../../src/runtime.ts";
 import { sessionChannel } from "../../src/harness/session.ts";
 import { sessionConversation } from "../../src/harness/conversation.ts";
+import type { ContinuationPolicy } from "../../src/harness/continuation.ts";
 
 const parent = ParentSession.make({
   id: AgentSessionId.make("parent"),
@@ -41,16 +43,24 @@ const child = (id: string) =>
     agent: parent.agent,
     brain: parent.brain,
   });
-const conversation = (session: ChildSession) =>
+const conversation = (
+  session: ChildSession,
+  restored: {
+    readonly held?: boolean;
+    readonly idle?: Option.Option<string>;
+    readonly idleAnsweredOperator?: boolean;
+  } = {},
+) =>
   Effect.gen(function* () {
     const channel = yield* sessionChannel({ sessionId: session.id, label: "Conversation test" });
     const turns: Array<{ message: string; activity: "idle" | "running" }> = [];
     const controls = yield* sessionConversation({
       session,
       channel,
-      held: false,
+      held: restored.held ?? false,
       paused: false,
-      idle: Option.none(),
+      idle: restored.idle ?? Option.none(),
+      idleAnsweredOperator: restored.idleAnsweredOperator ?? false,
       // A message to a running turn waits for the harness's next boundary.
       send: (message, activity) =>
         Effect.sync(() => {
@@ -65,10 +75,26 @@ const conversation = (session: ChildSession) =>
     const emitted = Queue.clear(channel.events).pipe(
       Effect.map((events) => events.map((event) => event._tag)),
     );
+    /** Returns the events the session emitted since the last call. */
+    const events = Queue.clear(channel.events);
     /** Emits a started tool call, as the harness does when the session runs a tool. */
     const runTool = (callId: string) =>
       channel.emit(ToolStarted.make({ session, callId, tool: "bash", input: null }));
-    return { ...controls, result, turns, emitted, runTool };
+    /** Queues a started tool call from a vendor callback, as Pi does. */
+    const runToolUnsafe = (callId: string) =>
+      Effect.sync(() =>
+        channel.emitUnsafe(ToolStarted.make({ session, callId, tool: "bash", input: null })),
+      );
+    return {
+      ...controls,
+      result,
+      turns,
+      emitted,
+      events,
+      runTool,
+      runToolUnsafe,
+      toolCalls: channel.toolCalls,
+    };
   });
 
 const noDelivery: OnDelivery = () => Effect.void;
@@ -459,6 +485,87 @@ describe("answers to the operator", () => {
       yield* session.read((yield* session.unread).map(({ id }) => id));
       yield* session.finish("Only the lockfile changed.");
       assert.isTrue((yield* Fiber.join(session.result)).answeredOperator);
+    }),
+  );
+
+  it.effect("doesn't mark an answer when a vendor callback queued a later tool call", () =>
+    Effect.gen(function* () {
+      const session = yield* conversation(child("vendor-tool"));
+      yield* session.intervene(Steer.make({ message: "What changed?" }), noDelivery);
+      yield* session.read((yield* session.unread).map(({ id }) => id));
+      yield* session.runToolUnsafe("call-1");
+      yield* session.finish("Only the lockfile changed.");
+      assert.isFalse((yield* Fiber.join(session.result)).answeredOperator);
+    }),
+  );
+
+  it.effect("counts a read at the tool-call count that the harness captured", () =>
+    Effect.gen(function* () {
+      const session = yield* conversation(child("captured-read"));
+      yield* session.intervene(Steer.make({ message: "What changed?" }), noDelivery);
+      const captured = yield* session.toolCalls;
+      // A tool call that the harness started before the forked read ran.
+      yield* session.runTool("call-1");
+      yield* session.read(
+        (yield* session.unread).map(({ id }) => id),
+        captured,
+      );
+      yield* session.finish("Only the lockfile changed.");
+      assert.isFalse((yield* Fiber.join(session.result)).answeredOperator);
+    }),
+  );
+
+  it.effect("doesn't mark an answer to input that a turn read after a later tool call", () =>
+    Effect.gen(function* () {
+      const session = yield* conversation(child("turn-read"));
+      yield* session.intervene(Steer.make({ message: "Run the tests too." }), noDelivery);
+      yield* session.runTool("call-1");
+      // The turn's result acknowledges the steer; the model may have read it before the tool.
+      yield* session.read(
+        (yield* session.unread).map(({ id }) => id),
+        "turn",
+      );
+      yield* session.finish("The tests pass.");
+      assert.isFalse((yield* Fiber.join(session.result)).answeredOperator);
+    }),
+  );
+
+  it.effect("doesn't mark an answer after the harness's own continuation input", () =>
+    Effect.gen(function* () {
+      const session = yield* conversation(child("continued"));
+      yield* session.intervene(Steer.make({ message: "What changed?" }), noDelivery);
+      yield* session.read((yield* session.unread).map(({ id }) => id));
+      const policy: ContinuationPolicy = {
+        restored: RestartState.make({}),
+        reopen: (native) => native,
+        recover: (_state, _tools, _unread, _emit, send) => send("Continue the task."),
+      };
+      yield* session.recover(policy, [], () => Effect.void);
+      yield* session.finish("Done.");
+      assert.isFalse((yield* Fiber.join(session.result)).answeredOperator);
+    }),
+  );
+
+  it.effect("keeps the answer to the operator of an idle report restored under a Hold", () =>
+    Effect.gen(function* () {
+      const answered = yield* heldAfterWork("idle-answer");
+      yield* answered.intervene(OperatorMessage.make({ message: "Why?" }), noDelivery);
+      yield* answered.events;
+      yield* answered.finish("The tests need a database.");
+      const [idle] = yield* answered.events;
+      assert(idle?._tag === "SessionIdle");
+      assert.isTrue(idle.answeredOperator);
+
+      // A restart restores the stored idle report and whether it answered the operator.
+      const restored = yield* conversation(child("idle-answer-restored"), {
+        held: true,
+        idle: idle.message,
+        idleAnsweredOperator: idle.answeredOperator,
+      });
+      yield* restored.intervene(Release.make(), noDelivery);
+      const result = yield* Fiber.join(restored.result);
+      assert.strictEqual(result.message, "The tests need a database.");
+      assert.isTrue(result.answeredOperator);
     }),
   );
 

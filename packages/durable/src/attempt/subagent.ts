@@ -102,6 +102,7 @@ const toolJournal = (
         output: saved.output,
         saved: Option.map(Option.fromNullOr(saved.saved), (value) => copyJson(value)),
         idle: Option.fromNullishOr(saved.idle),
+        idleAnsweredOperator: saved.idleAnsweredOperator ?? false,
         continuations: [...(saved.continuations ?? [])],
         inFlight: (saved.inFlight ?? []).map(({ callId, tool }) => ({ callId, tool })),
         prompted: saved.prompted ?? true,
@@ -220,10 +221,11 @@ const toolJournal = (
         const record = await delegation(tx);
         record.inFlight = (record.inFlight ?? []).filter((call) => call.callId !== callId);
       }),
-    saveIdle: (report) =>
+    saveIdle: (report, answeredOperator) =>
       commit("save the child's idle report", async (tx) => {
         const record = await delegation(tx);
         record.idle = Option.getOrNull(report);
+        record.idleAnsweredOperator = answeredOperator;
       }),
     saveOutput: (output) =>
       commit("save the child's partial output", async (tx) => {

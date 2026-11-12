@@ -201,7 +201,7 @@ const make = Effect.gen(function* () {
         const outbox = yield* outboxFor(journal, attemptId);
         const children = new Map<AgentSessionId, RunningSession>();
         const childInputs = new Set<number>();
-        const supervisor = yield* supervisorFor(journal, attemptId);
+        const supervisor = supervisorFor(journal, attemptId);
         const created: CoordinatorHub = {
           attemptId,
           outbox,
@@ -264,7 +264,7 @@ const make = Effect.gen(function* () {
       spec: snapshot.request.spec,
       hub: delegationHub(hub),
       journal: journalDelegation(journal, hub.supervisor, attemptId, record.number),
-      call: coordinatorCall(Deferred.await(hub.canceled)),
+      call: coordinatorCall(Deferred.await(hub.canceled), hub.interventions.childChanged),
       assignment: Option.getOrElse(record.assignment, () => FIRST_ASSIGNMENT),
     }).pipe(
       Effect.map((ended) => eventOf(record.number, ended)),
@@ -311,7 +311,8 @@ const make = Effect.gen(function* () {
         new Error(`Attempt ${hub.attemptId} delegates child ${state.child} without its record`),
       );
     return yield* Option.match(record.outcome, {
-      onNone: () => runDelegation(hub, snapshot, record),
+      onNone: () =>
+        runDelegation(hub, snapshot, record).pipe(Effect.ensuring(hub.interventions.childChanged)),
       onSome: (outcome) =>
         Effect.logInfo("Handling the outcome the child recorded before a restart", {
           attemptId: hub.attemptId,
@@ -507,6 +508,7 @@ const make = Effect.gen(function* () {
                 hub.detached = yield* Deferred.make<void>();
                 hub.canceled = yield* Deferred.make<void>();
                 yield* Deferred.succeed(detached, undefined);
+                yield* hub.interventions.childChanged;
               })
             : Effect.void,
         );

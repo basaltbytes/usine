@@ -1029,6 +1029,73 @@ describe("Claude child backend", () => {
     }).pipe(Effect.scoped),
   );
 
+  for (const { name, tool, answered } of [
+    {
+      name: "doesn't count a steer that a typed turn acknowledged after a tool call",
+      tool: true,
+      answered: false,
+    },
+    {
+      name: "counts a steer that a typed turn acknowledged with no tool call",
+      tool: false,
+      answered: true,
+    },
+  ])
+    it.effect(name, () =>
+      Effect.gen(function* () {
+        const inputs = yield* Queue.make<ClaudeUserMessage>();
+        const output = yield* Queue.make<Schema.Json, Cause.Done>();
+        const sdk = Layer.succeed(ClaudeSdk)({
+          open: (input) => {
+            void (async () => {
+              for await (const message of input) {
+                Queue.offerUnsafe(inputs, message);
+                Queue.offerUnsafe(output, rateLimitEvent);
+              }
+            })();
+            return {
+              ...scripted([]),
+              close: () => Queue.endUnsafe(output),
+              [Symbol.asyncIterator]: () =>
+                Stream.toAsyncIterable(Stream.fromQueue(output))[Symbol.asyncIterator](),
+            };
+          },
+        });
+        const result = yield* Effect.gen(function* () {
+          const running = yield* (yield* ChildBackend).launch(request());
+          yield* Queue.take(inputs);
+          const steer = Steer.make({ message: "Check the tests too" });
+          yield* running.intervene(steer, noDelivery);
+          yield* Queue.take(inputs);
+          if (tool) {
+            yield* Queue.offer(output, {
+              type: "assistant",
+              message: {
+                content: [
+                  { type: "tool_use", id: "bash-1", name: "Bash", input: { command: "ls" } },
+                ],
+              },
+            });
+            yield* Queue.offer(output, {
+              type: "user",
+              message: { content: [{ type: "tool_result", tool_use_id: "bash-1", content: "ok" }] },
+            });
+          }
+          // A typed turn names the folded steer only on its result.
+          yield* Queue.offer(output, {
+            type: "result",
+            subtype: "success",
+            result: "Done",
+            queued_turn_count: 0,
+            user_message_uuids: [steer.id],
+          });
+          return yield* running.result;
+        }).pipe(Effect.provide(claudeChild.pipe(Layer.provide(sdk))));
+        assert.strictEqual(result.message, "Done");
+        assert.strictEqual(result.answeredOperator, answered);
+      }).pipe(Effect.scoped),
+    );
+
   it.effect("launches again after Claude loses its login refresh lock and keeps that session", () =>
     Effect.gen(function* () {
       const { launches, sdk } = loginRace(1);

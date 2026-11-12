@@ -537,6 +537,7 @@ const makeClaudeSessions = Effect.gen(function* () {
         held: policy.restored.held,
         paused: policy.restored.paused,
         idle: policy.restored.idle,
+        idleAnsweredOperator: policy.restored.idleAnsweredOperator,
         unread: policy.restored.unread,
         submitted,
         // A message sent during a turn is queued until a tool call returns or the turn ends.
@@ -625,7 +626,8 @@ const makeClaudeSessions = Effect.gen(function* () {
               const id = submitted[index];
               if (id !== undefined && ids.includes(id)) submitted.splice(index, 1);
             }
-            yield* conversation.read(ids);
+            // A result acknowledges input that the turn read at an unknown point.
+            yield* conversation.read(ids, Schema.is(ClaudeResultMessage)(message) ? "turn" : "now");
           }
           const limits = yield* readRateLimits(message);
           if (Option.isSome(limits)) yield* channel.emit(limits.value);
@@ -730,7 +732,7 @@ const makeClaudeSessions = Effect.gen(function* () {
                 read: read.length,
                 queuedTurns: message.queued_turn_count,
               });
-              yield* conversation.read(read);
+              yield* conversation.read(read, "turn");
             }
           }
           if (message.queued_turn_count !== undefined && message.queued_turn_count > 0) {
