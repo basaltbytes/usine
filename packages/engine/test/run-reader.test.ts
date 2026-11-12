@@ -27,7 +27,7 @@ import { RunEngine, Submission } from "../src/engine/engine.ts";
 import { RunReader, WorkerAttempts } from "../src/run-reader/run-reader.ts";
 import { CompletionCheck } from "../src/completion-check.ts";
 import { StepExecutor } from "../src/step-executor.ts";
-import { TriggerCondition, TriggerRecheck } from "../src/trigger-condition.ts";
+import { savedSettings, TriggerCondition, TriggerRecheck } from "../src/trigger-condition.ts";
 import {
   type AttemptPlan,
   engineLayer,
@@ -80,7 +80,8 @@ describe("Run evidence reader", () => {
         Layer.provide(executor),
         Layer.provide(
           Layer.succeed(TriggerCondition)({
-            recheck: (submission) => Effect.succeed(TriggerRecheck.Matches({ submission })),
+            recheck: (submission) =>
+              Effect.succeed(TriggerRecheck.Matches({ settings: savedSettings(submission) })),
           }),
         ),
         Layer.provide(CompletionCheck.unverified),

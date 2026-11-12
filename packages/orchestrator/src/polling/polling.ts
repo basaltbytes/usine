@@ -58,7 +58,11 @@ import { closeAsksOfClosedItems } from "./closed-item-asks.ts";
 import { evaluateChangedItem } from "./item-cycle.ts";
 import { evaluateItem } from "./loop-evaluation.ts";
 import { observeItem, synchronizeLabels } from "./repository-sync.ts";
-import { acknowledgeResets, planResetRefresh } from "./reset-refresh.ts";
+import {
+  acknowledgeResets,
+  acknowledgeUnwatchedResets,
+  planResetRefresh,
+} from "./reset-refresh.ts";
 import { retryUnfetchedItems, UnfetchedItem } from "./unfetched-items.ts";
 import { ItemHints, type ItemHint } from "./hints.ts";
 import { checkOpenIssues, NO_OPEN_ISSUE_CHECK, OPEN_ISSUE_CHECK_INTERVAL } from "./open-issues.ts";
@@ -511,6 +515,9 @@ export class PollingTriggers extends Context.Service<
           );
           const ciCycle = yield* ci.reconcile(instance, Option.none());
           const watched = watchedRepositories(instance, resolved);
+          // After the CI reconcile, which rechecks the CI fixes replayed by the resets pending when
+          // it starts.
+          yield* acknowledgeUnwatchedResets(watched.map(({ repository }) => repository.name));
           return yield* pollAll(
             watched,
             ciCycle,

@@ -26,7 +26,7 @@ import { WorkerName } from "@usine/core/worker";
 import { RunEngine, RetryRequest, Submission } from "@usine/engine/engine";
 import { layer } from "@usine/engine/local-sqlite";
 import { StepExecutor } from "@usine/engine/step-executor";
-import { TriggerCondition, TriggerRecheck } from "@usine/engine/trigger-condition";
+import { savedSettings, TriggerCondition, TriggerRecheck } from "@usine/engine/trigger-condition";
 import { CompletionCheck } from "@usine/engine/completion-check";
 import { DateTime, Effect, FileSystem, Layer, Option, Schema, Stream } from "effect";
 import { TestClock } from "effect/testing";
@@ -195,7 +195,8 @@ it.effect.each(["success", "restart", "cancel", "cap", "ordinary"] as const)(
         }),
       ).pipe(Layer.provide(backend));
       const condition = Layer.succeed(TriggerCondition)({
-        recheck: (submission) => Effect.succeed(TriggerRecheck.Matches({ submission })),
+        recheck: (submission) =>
+          Effect.succeed(TriggerRecheck.Matches({ settings: savedSettings(submission) })),
       });
       const runtime = layer(directory).pipe(
         Layer.provide(executor),

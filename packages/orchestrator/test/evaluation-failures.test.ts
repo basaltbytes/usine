@@ -168,6 +168,7 @@ const claimingRuns = Layer.succeed(RunEngine)({
   discardLeftovers: () => Effect.die("unused"),
   inspect: () => Effect.die("unused"),
   reconcile: Effect.die("unused"),
+  admitCiFixes: Effect.die("unused"),
   drain: Effect.void,
   waitForUpgrade: () => Effect.void,
   cancelUpgrade: Effect.void,
