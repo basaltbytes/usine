@@ -20,6 +20,7 @@ import {
   Context,
   Deferred,
   Effect,
+  Exit,
   Fiber,
   FileSystem,
   Layer,
@@ -27,6 +28,7 @@ import {
   Option,
   Schema,
   Stream,
+  Tracer,
 } from "effect";
 import { TestClock } from "effect/testing";
 import {
@@ -193,6 +195,65 @@ const stepLogger = (steps: Array<StepLog>, messages: Array<unknown> = []) =>
     steps.push(...Option.toArray(Schema.decodeUnknownOption(StepLog)(message[1])));
   });
 
+/** Runs `effect` with a tracer that appends each span it starts to `spans`. */
+const recordingSpans =
+  (spans: Array<Tracer.Span>) =>
+  <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+    Effect.flatMap(Effect.service(Tracer.Tracer), (native) =>
+      effect.pipe(
+        Effect.withTracer(
+          Tracer.make({
+            span: (options) => {
+              const span = native.span(options);
+              spans.push(span);
+              return span;
+            },
+          }),
+        ),
+      ),
+    );
+
+/**
+ * Returns each `CurrentInstance.step` span in `spans` as the step log it should match. A span that
+ * never ended has outcome `open`; a span outside a `CurrentInstance.commit` or
+ * `CurrentInstance.reload` span has outcome `orphaned`.
+ */
+const stepSpans = (spans: ReadonlyArray<Tracer.Span>): Array<StepLog> =>
+  spans
+    .filter(({ name }) => name === "CurrentInstance.step")
+    .map((span) => {
+      const step = String(span.attributes.get("step"));
+      if (span.status._tag !== "Ended") return { step, durationMillis: -1, outcome: "open" };
+      const ancestors: Array<string> = [];
+      for (let parent = span.parent; Option.isSome(parent) && parent.value._tag === "Span";) {
+        ancestors.push(parent.value.name);
+        parent = parent.value.parent;
+      }
+      const { startTime, endTime, exit } = span.status;
+      return {
+        step,
+        durationMillis: Number((endTime - startTime) / 1_000_000n),
+        outcome: !ancestors.some((name) =>
+          ["CurrentInstance.commit", "CurrentInstance.reload"].includes(name),
+        )
+          ? "orphaned"
+          : Exit.isSuccess(exit)
+            ? "passed"
+            : Exit.hasInterrupts(exit)
+              ? "interrupted"
+              : "failed",
+      };
+    });
+
+/** Orders step logs so that lists recorded in a different order compare equal. */
+const unordered = (steps: ReadonlyArray<StepLog>) =>
+  [...steps].sort(
+    (left, right) =>
+      left.step.localeCompare(right.step) ||
+      left.durationMillis - right.durationMillis ||
+      left.outcome.localeCompare(right.outcome),
+  );
+
 const savedSteps = (wait: number, preflight = 0): Array<StepLog> =>
   [
     ["wait", wait],
@@ -301,6 +362,7 @@ it.effect("refuses a save whose coordinator brain check is slow and stores no re
 
 it.effect("logs every step of a save that waits behind a running save", () => {
   const steps: Array<StepLog> = [];
+  const spans: Array<Tracer.Span> = [];
   return Effect.gen(function* () {
     const { store, revision, current, edit, save } = yield* revisionFixture;
     const preflighting = yield* Deferred.make<void>();
@@ -327,11 +389,18 @@ it.effect("logs every step of a save that waits behind a running save", () => {
 
     expect((yield* store.read).number).toBe(revision.number + 2);
     expect(steps).toEqual([...savedSteps(0, 2_000), ...savedSteps(2_000)]);
-  }).pipe(Effect.scoped, Effect.withLogger(stepLogger(steps)), Effect.provide(NodeServices.layer));
+    expect(unordered(stepSpans(spans))).toEqual(unordered(steps));
+  }).pipe(
+    Effect.scoped,
+    Effect.withLogger(stepLogger(steps)),
+    recordingSpans(spans),
+    Effect.provide(NodeServices.layer),
+  );
 });
 
 it.effect("logs the wait of a save whose caller gives up and releases the queue", () => {
   const steps: Array<StepLog> = [];
+  const spans: Array<Tracer.Span> = [];
   return Effect.gen(function* () {
     const { store, revision, current, edit, save } = yield* revisionFixture;
     const preflighting = yield* Deferred.make<void>();
@@ -358,6 +427,34 @@ it.effect("logs the wait of a save whose caller gives up and releases the queue"
     expect((yield* store.read).number).toBe(revision.number);
     stuck = false;
     yield* save(revision.number, edit("Third."));
+    expect((yield* store.read).number).toBe(revision.number + 1);
+    expect(unordered(stepSpans(spans))).toEqual(unordered(steps));
+  }).pipe(
+    Effect.scoped,
+    Effect.withLogger(stepLogger(steps)),
+    recordingSpans(spans),
+    Effect.provide(NodeServices.layer),
+  );
+});
+
+it.effect("logs the brain check of a save whose caller gives up before the time limit", () => {
+  const steps: Array<StepLog> = [];
+  return Effect.gen(function* () {
+    const { store, revision, current, slow, checking, edit, save } = yield* revisionFixture;
+    yield* current.registerWorkers(() => Effect.succeed(Effect.void));
+    slow.value = true;
+    const saving = yield* save(revision.number, edit("Given up.")).pipe(Effect.forkChild);
+    yield* Deferred.await(checking);
+    yield* TestClock.adjust("5 seconds");
+    yield* Fiber.interrupt(saving);
+
+    expect(steps).toEqual([
+      ...savedSteps(0).slice(0, 4),
+      { step: "coordinator-brains", durationMillis: 5_000, outcome: "interrupted" },
+    ]);
+    expect((yield* store.read).number).toBe(revision.number);
+    slow.value = false;
+    yield* save(revision.number, edit("Saved."));
     expect((yield* store.read).number).toBe(revision.number + 1);
   }).pipe(Effect.scoped, Effect.withLogger(stepLogger(steps)), Effect.provide(NodeServices.layer));
 });

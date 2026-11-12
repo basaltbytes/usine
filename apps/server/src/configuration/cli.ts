@@ -42,16 +42,29 @@ import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import { ConfigCommand, ConfigCommandError } from "./command.ts";
 import { configurationLayer, initializeConfiguration } from "./runtime.ts";
 
+/** Loads the models and credentials that the orchestrator gives the coordinator brains of `loaded`. */
+const orchestratorParentModels = (directory: InstanceDirectory) =>
+  Effect.fn("Cli.config.parentModels")(function* (loaded: LoadedInstance) {
+    const uuid = yield* (yield* Crypto.Crypto).randomUUIDv4().pipe(Effect.orDie);
+    const access = yield* parentModels(loaded, InstanceId.make(uuid));
+    return yield* loadParentModels(directory, access);
+  });
+
+/**
+ * Runs `command` on the configuration store. `loadParents` loads the models and credentials that
+ * a revision's coordinator brains are checked against before it is written.
+ */
 export const runConfigCommand = Effect.fn("Cli.config")(
-  function* (directory: InstanceDirectory, command: ConfigCommand) {
+  function* (
+    directory: InstanceDirectory,
+    command: ConfigCommand,
+    loadParents: ReturnType<typeof orchestratorParentModels> = orchestratorParentModels(directory),
+  ) {
     const path = yield* Path.Path;
     const store = yield* ConfigurationStore;
     const folder = yield* ConfigurationFolder;
     const admitParents = Effect.fn("Cli.config.admitParents")(function* (loaded: LoadedInstance) {
-      const uuid = yield* (yield* Crypto.Crypto).randomUUIDv4().pipe(Effect.orDie);
-      const instanceId = InstanceId.make(uuid);
-      const access = yield* parentModels(loaded, instanceId);
-      const parents = yield* loadParentModels(directory, access);
+      const parents = yield* loadParents(loaded);
       return yield* checkCoordinatorBrains(parentAdmissionProblems(loaded, parents));
     }, Effect.scoped);
     if (command._tag === "ConfigImportCommand") {
