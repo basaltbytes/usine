@@ -186,6 +186,26 @@ export class Tape {
     for (const inbox of this.#inboxes.values()) inbox.fail(this.#failure.cause);
   }
 
+  /**
+   * Waits until a replay has consumed and read every transcript entry, so a request that a stopped
+   * session sends late still meets its entry. It stops waiting after 5 seconds without transport progress
+   * or once the replay fails, and leaves the verdict to `assertComplete`.
+   */
+  readonly settled: Effect.Effect<void> = Effect.gen({ self: this }, function* () {
+    if (this.source === "record") return;
+    for (;;) {
+      this.#pump();
+      const consumed =
+        [...this.#groups.values()].every((group) => group.cursor === group.entries.length) &&
+        [...this.#inboxes.values()].every((inbox) => inbox.pending.length === 0);
+      if (consumed || this.#failure !== undefined) return;
+      const progress = yield* Deferred.await(this.#progress).pipe(
+        Effect.timeoutOption("5 seconds"),
+      );
+      if (Option.isNone(progress)) return;
+    }
+  });
+
   assertComplete(): void {
     if (this.#failure !== undefined) throw this.#failure.cause;
     if (this.source !== "record") {

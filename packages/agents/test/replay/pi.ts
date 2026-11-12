@@ -41,11 +41,17 @@ const RecordedEvent = Schema.declare(
  * recording sends each request to the provider with the worker user's Pi credentials and saves its
  * stream; a replay checks each request against the transcript and answers with the saved stream.
  * Pi's tools run for real in both modes, and `agentDir` keeps the user's Pi settings out of both.
+ *
+ * Each session start creates its own model runtime, and its requests are numbered within it, as
+ * `pi:<runtime>.<request>`. A stopped session can still send a request after the next session
+ * opens, so numbering across sessions in arrival order would depend on timing.
  */
 export const piTransport = (tape: Tape, agentDir: string) =>
   piSdkLayer({
     agentDir: () => agentDir,
     modelRuntime: async (signal) => {
+      const session = tape.port("pi");
+      let requests = 0;
       const runtime =
         tape.source === "record"
           ? await ModelRuntime.create({ signal })
@@ -59,7 +65,8 @@ export const piTransport = (tape: Tape, agentDir: string) =>
       if (tape.source !== "record")
         runtime.checkAuth = () => Promise.resolve({ type: "api_key", source: "replay" });
       runtime.streamSimple = (model, context, options) => {
-        const port = tape.port("pi");
+        requests += 1;
+        const port = `${session}.${requests}`;
         tape.outbound(port, {
           method: "stream",
           model: `${model.provider}/${model.id}`,

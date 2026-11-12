@@ -154,6 +154,8 @@ export const openPiFixture = (
       prompt: "Reply with exactly REPLAY_DONE. Do not use tools.",
     });
     const save = Effect.gen(function* () {
+      // A stopped Pi session can still send its aborted request after the scenario ends.
+      yield* tape.settled;
       tape.assertComplete();
       if (mode !== "record") return;
       const transcript = {
