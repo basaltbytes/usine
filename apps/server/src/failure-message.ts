@@ -1,4 +1,5 @@
 import type { configCommand } from "./configuration/cli.ts";
+import { exeDevWorkerRefusal } from "@usine/config/factory";
 import { Duration, type Effect, Match, Option, Schema } from "effect";
 import type { backup } from "./backup.ts";
 import type { CliUsageError, CliVersionError } from "./cli.ts";
@@ -212,7 +213,9 @@ export const failureMessage = (failure: CliFailure): string =>
     StaleRevision: ({ expected, actual }) =>
       `Configuration changed from revision ${expected} to ${actual}. No revision was written. Export or edit the current configuration and try again.`,
     UnsupportedWorkerError: ({ worker, kind }) =>
-      `usine up did not start: worker "${worker}" has kind ${kind}, which differs from the other workers in usine.yaml. usine up runs all workers with one executor. Give every worker under workers the same kind.`,
+      kind === "exe.dev"
+        ? `usine up did not start: ${exeDevWorkerRefusal(worker)} Then run usine up again.`
+        : `usine up did not start: worker "${worker}" has kind ${kind}, which differs from the other workers in usine.yaml. usine up runs all workers with one executor. Give every worker under workers the same kind.`,
     WorkerCapabilityError: ({ worker, capability, message, cause }) =>
       `usine up did not start: worker "${worker}" failed its ${capability} check: ${clause(message)}${because(cause, message)}. Fix the worker or its entry under workers in usine.yaml, then run usine up again.`,
     ExecutorOperationError: ({ operation, message, cause }) =>

@@ -140,6 +140,27 @@ describe("Worker engine selection", () => {
     }),
   );
 
+  it.live("refuses a configuration whose Workers are all exe.dev, naming the Worker", () =>
+    Effect.gen(function* () {
+      const failure = yield* startupFailure([
+        { name: "exe-one", kind: "exe.dev" },
+        { name: "exe-two", kind: "exe.dev" },
+      ]);
+      assert(failure._tag === "UnsupportedWorkerError", failure._tag);
+      assert.strictEqual(failure.worker, "exe-one");
+      assert.strictEqual(failure.kind, "exe.dev");
+    }),
+  );
+
+  it.live("names the exe.dev Worker in a mix with SSH Workers", () =>
+    Effect.gen(function* () {
+      const failure = yield* startupFailure([unreachable, { name: "exe-one", kind: "exe.dev" }]);
+      assert(failure._tag === "UnsupportedWorkerError", failure._tag);
+      assert.strictEqual(failure.worker, "exe-one");
+      assert.strictEqual(failure.kind, "exe.dev");
+    }),
+  );
+
   it.live("refuses a mix of local and SSH Workers at startup", () =>
     Effect.gen(function* () {
       const failure = yield* startupFailure([{ name: "local", kind: "local" }, unreachable]);
