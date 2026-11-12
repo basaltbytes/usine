@@ -15,8 +15,25 @@ import {
 
 const tools = Effect.map(
   Schema.decodeUnknownEffect(PublishedApi)(operatorOpenApi()),
-  operatorTools,
+  (document) => operatorTools(document).tools,
 ).pipe(Effect.orDie);
+
+// Each level references the next twice, so full inlining of `Level0` would build 2^22 objects.
+const LEVELS = 22;
+const fanOutSchemas = Object.fromEntries(
+  Array.from({ length: LEVELS }, (_, level) => [
+    `Level${level}`,
+    level === LEVELS - 1
+      ? { type: "string" }
+      : {
+          type: "object",
+          properties: {
+            left: { $ref: `#/components/schemas/Level${level + 1}` },
+            right: { $ref: `#/components/schemas/Level${level + 1}` },
+          },
+        },
+  ]),
+);
 
 describe("operator MCP tools", () => {
   it.effect("names one tool per operator operation, leaves out streams, and inlines schemas", () =>
@@ -97,22 +114,6 @@ describe("operator MCP tools", () => {
 
   it.effect("bounds the inlined schema of references that fan out", () =>
     Effect.gen(function* () {
-      // Each level references the next twice, so full inlining would build 2^22 objects.
-      const levels = 22;
-      const schemas = Object.fromEntries(
-        Array.from({ length: levels }, (_, level) => [
-          `Level${level}`,
-          level === levels - 1
-            ? { type: "string" }
-            : {
-                type: "object",
-                properties: {
-                  left: { $ref: `#/components/schemas/Level${level + 1}` },
-                  right: { $ref: `#/components/schemas/Level${level + 1}` },
-                },
-              },
-        ]),
-      );
       const document = yield* Schema.decodeEffect(PublishedApi)({
         paths: {
           "/api/fan-out": {
@@ -129,12 +130,59 @@ describe("operator MCP tools", () => {
             },
           },
         },
-        components: { schemas },
+        components: { schemas: fanOutSchemas },
       });
-      const [fanOut] = operatorTools(document);
+      const generated = operatorTools(document);
+      const [fanOut] = generated.tools;
       const size = jsonKey(fanOut?.descriptor.inputSchema ?? {}).length;
       assert.isBelow(size, 2_000_000);
       assert.include(jsonKey(fanOut?.descriptor.inputSchema ?? {}), '"left"');
+      assert.isFalse(generated.complete);
     }),
+  );
+
+  it.effect("shares one inlining budget across every input schema of the document", () =>
+    Effect.gen(function* () {
+      // Every parameter and body references the chain, so a budget for each schema would build
+      // tens of megabytes; the shared budget keeps the whole tool list small.
+      const level0 = { $ref: "#/components/schemas/Level0" };
+      const parameters = Array.from({ length: 30 }, (_, index) => ({
+        name: `p${index}`,
+        in: "query",
+        schema: level0,
+      }));
+      const document = yield* Schema.decodeEffect(PublishedApi)({
+        paths: Object.fromEntries(
+          Array.from({ length: 3 }, (_, index) => [
+            `/api/fan-out-${index}`,
+            {
+              post: {
+                operationId: `operator.fanOut${index}`,
+                parameters,
+                requestBody: { content: { "application/json": { schema: level0 } } },
+                responses: { "200": {} },
+                "x-usine-permission": "operate",
+              },
+            },
+          ]),
+        ),
+        components: { schemas: fanOutSchemas },
+      });
+      const generated = operatorTools(document);
+      assert.lengthOf(generated.tools, 3);
+      assert.isFalse(generated.complete);
+      const size = generated.tools.reduce(
+        (total, { descriptor }) => total + jsonKey(descriptor.inputSchema).length,
+        0,
+      );
+      assert.isBelow(size, 1_000_000);
+    }),
+  );
+
+  it.effect("inlines the real document completely within the budget", () =>
+    Effect.gen(function* () {
+      const document = yield* Schema.decodeUnknownEffect(PublishedApi)(operatorOpenApi());
+      assert.isTrue(operatorTools(document).complete);
+    }).pipe(Effect.orDie),
   );
 });

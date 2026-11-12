@@ -245,6 +245,51 @@ describe("operation ceiling guard", () => {
     }).pipe(Effect.scoped),
   );
 
+  it.live(
+    "keeps a device token with an expiry from editing the scopes of a token that outlives it",
+    () =>
+      Effect.gen(function* () {
+        const { services, device, tokenId, outcomes } = yield* fixture;
+        const now = yield* Clock.currentTimeMillis;
+        const expiresAt = now + 3_600_000;
+        const caller = yield* device(Option.none(), { expiresAt });
+        const bounded = yield* device(
+          Option.some(["authentication.setScopes", "authentication.tokens", "operator.approve"]),
+          { expiresAt },
+        );
+        const lasting = yield* device(Option.none());
+        const reader = [PermissionGrant.make({ permission: "read", scope: InstanceScope.make() })];
+        const open = yield* device(Option.none(), { scopes: reader });
+        const later = yield* device(Option.none(), { scopes: reader, expiresAt: expiresAt + 1 });
+        const same = yield* device(Option.none(), { scopes: reader, expiresAt });
+        const earlier = yield* device(Option.none(), { scopes: reader, expiresAt: now + 60_000 });
+        const approver = yield* device(Option.some(["operator.approve"]), { scopes: reader });
+        const [openId, laterId, sameId, earlierId, approverId] = yield* Effect.forEach(
+          [open, later, same, earlier, approver],
+          tokenId,
+        );
+        const admin = '{"scopes":[{"permission":"admin","scope":{"_tag":"Instance"}}]}';
+        const approve =
+          '{"scopes":[{"permission":"admin","scope":{"_tag":"Instance"}}],"operations":["operator.approve"]}';
+        const results = yield* outcomes([
+          [caller, "PUT", `/api/tokens/${openId}/scopes`, admin],
+          [caller, "PUT", `/api/tokens/${laterId}/scopes`, admin],
+          [bounded, "PUT", `/api/tokens/${approverId}/scopes`, admin],
+          [bounded, "PUT", `/api/tokens/${approverId}/scopes`, approve],
+          [caller, "PUT", `/api/tokens/${sameId}/scopes`, admin],
+          [caller, "PUT", `/api/tokens/${earlierId}/scopes`, admin],
+          [lasting, "PUT", `/api/tokens/${openId}/scopes`, admin],
+        ]);
+        assert.deepEqual(results, [403, 403, 403, 403, 200, 200, 200]);
+        const refused = yield* Effect.forEach([later, approver], (token) =>
+          services.authentication
+            .authenticate(token)
+            .pipe(Effect.map((access) => access.permissions.map(({ permission }) => permission))),
+        );
+        assert.deepEqual(refused, [["read"], ["read"]]);
+      }).pipe(Effect.scoped),
+  );
+
   it.live("serves public operations to a token whose ceiling omits them", () =>
     Effect.gen(function* () {
       const { device, outcomes } = yield* fixture;

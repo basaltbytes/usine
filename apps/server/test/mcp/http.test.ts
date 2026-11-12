@@ -666,6 +666,33 @@ describe("operator MCP endpoint", () => {
     }).pipe(Effect.timeout("10 seconds"), Effect.scoped),
   );
 
+  it.live("stops usine mcp --origin when the instance sends headers and then holds the body", () =>
+    Effect.gen(function* () {
+      const origin = yield* serveOnLoopback(
+        HttpRouter.add(
+          "GET",
+          "/api/openapi.json",
+          HttpServerResponse.stream(
+            Stream.concat(Stream.make("{"), Stream.never).pipe(Stream.encodeText),
+            {
+              contentType: "application/json",
+            },
+          ),
+        ),
+      );
+      const stdio = yield* memoryStdio;
+      const failure = yield* Layer.build(
+        stdioServer(origin, Redacted.make("token"), "500 millis").pipe(
+          Layer.provide(stdio.layer),
+          Layer.provide(FetchHttpClient.layer),
+          Layer.provide(NodeServices.layer),
+        ),
+      ).pipe(Effect.flip);
+      assert.equal(failure._tag, "McpStartError");
+      assert.include(failure.message, `Could not read ${origin}/api/openapi.json`);
+    }).pipe(Effect.timeout("10 seconds"), Effect.scoped),
+  );
+
   it.live(
     "serves a ceiling token's tools from the built usine mcp with only JSON-RPC on stdout",
     () =>

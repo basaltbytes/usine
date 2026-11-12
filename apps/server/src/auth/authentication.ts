@@ -35,6 +35,12 @@ export interface Access {
   /** The operations a device token may call; `None` when the credential has no operation ceiling. */
   readonly operations: Option.Option<ReadonlyArray<OperationId>>;
 }
+/** The expiry of a device token that has one; `None` for other credentials. */
+const deviceExpiry = (caller: Access): Option.Option<number> =>
+  Option.filter(
+    caller.token,
+    ({ kind, expiresAt }) => kind === "device" && expiresAt !== NO_EXPIRY,
+  ).pipe(Option.map(({ expiresAt }) => expiresAt));
 /** A device token that a member creates for a client. */
 export interface TokenRequest {
   readonly name: TokenName;
@@ -311,10 +317,7 @@ export const authenticationLayer = (options: {
             return yield* authFailure("Set a token expiry in the future.", 400);
           }
           // A device token can't issue a token that outlives it.
-          const callerExpiry = Option.filter(
-            caller.token,
-            ({ kind, expiresAt }) => kind === "device" && expiresAt !== NO_EXPIRY,
-          ).pipe(Option.map(({ expiresAt }) => expiresAt));
+          const callerExpiry = deviceExpiry(caller);
           if (
             Option.isSome(callerExpiry) &&
             !Option.exists(request.expiresAt, (expiresAt) => expiresAt <= callerExpiry.value)
@@ -376,6 +379,22 @@ export const authenticationLayer = (options: {
             Remove: () => narrowCeiling(caller, Option.none()),
             Replace: ({ operations }) => narrowCeiling(caller, Option.some(operations)),
           });
+          // A device token can't give its permissions to a token that outlives it.
+          const callerExpiry = deviceExpiry(caller);
+          if (
+            Option.isSome(callerExpiry) &&
+            current !== undefined &&
+            current.expiresAt > callerExpiry.value
+          ) {
+            yield* Effect.logWarning("Token scope change refused: target outlives the caller", {
+              memberId: caller.member.value.id,
+              tokenId: id,
+            });
+            return yield* authFailure(
+              "Change scopes only on tokens that expire no later than your token.",
+              403,
+            );
+          }
           yield* store.setScopes(caller.member.value.id, id, scopes, change);
         }),
         removeMember: access.remove,

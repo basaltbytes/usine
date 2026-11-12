@@ -85,8 +85,14 @@ const componentName = (reference: Schema.Json | undefined) =>
     Option.map((value) => value.slice(COMPONENT_PREFIX.length)),
   );
 
-/** The most objects and arrays that inlining builds for one input schema. */
-const MAX_INLINED_NODES = 10_000;
+/** The most objects and arrays that inlining builds for all the input schemas of a document. */
+export const MAX_INLINED_NODES = 20_000;
+
+/** What inlining may still build for a document, and whether it left a `$ref` unresolved. */
+interface InlineBudget {
+  remaining: number;
+  exhausted: boolean;
+}
 
 /**
  * Returns `schema` with every component `$ref` replaced by its definition. Once `budget` runs out,
@@ -97,7 +103,7 @@ const inline = (
   schema: Schema.Json,
   components: Readonly<Record<string, JsonSchema>>,
   resolving: ReadonlySet<string>,
-  budget: { remaining: number },
+  budget: InlineBudget,
 ): Schema.Json => {
   if (Array.isArray(schema)) {
     budget.remaining -= 1;
@@ -114,7 +120,11 @@ const inline = (
   const name = reference.value;
   const target = components[name];
   // A recursive schema accepts any value at the point where it repeats.
-  if (target === undefined || resolving.has(name) || budget.remaining <= 0) return siblings;
+  if (target === undefined || resolving.has(name)) return siblings;
+  if (budget.remaining <= 0) {
+    budget.exhausted = true;
+    return siblings;
+  }
   const resolved = inline(target, components, new Set([...resolving, name]), budget);
   return isObject(resolved) ? { ...resolved, ...siblings } : siblings;
 };
@@ -122,9 +132,10 @@ const inline = (
 const inlineObject = (
   schema: JsonSchema | undefined,
   components: Readonly<Record<string, JsonSchema>>,
+  budget: InlineBudget,
 ): JsonSchema => {
   if (schema === undefined) return {};
-  const inlined = inline(schema, components, new Set(), { remaining: MAX_INLINED_NODES });
+  const inlined = inline(schema, components, new Set(), budget);
   return isObject(inlined) ? inlined : {};
 };
 
@@ -161,6 +172,7 @@ const tool = (
   method: Method,
   operation: Operation,
   components: Readonly<Record<string, JsonSchema>>,
+  budget: InlineBudget,
 ): OperatorTool => {
   const name = operation.operationId.slice(TOOL_GROUP.length + 1);
   const parameters = operation.parameters ?? [];
@@ -169,7 +181,7 @@ const tool = (
   const body = operation.requestBody?.content["application/json"];
   const properties: Record<string, JsonSchema> = {};
   for (const parameter of [...pathParameters, ...queryParameters]) {
-    const inlined = inlineObject(parameter.schema, components);
+    const inlined = inlineObject(parameter.schema, components, budget);
     properties[parameter.name] =
       parameter.description === undefined
         ? inlined
@@ -177,7 +189,7 @@ const tool = (
   }
   if (body !== undefined)
     properties.body = {
-      ...inlineObject(body.schema, components),
+      ...inlineObject(body.schema, components, budget),
       description: "The JSON request body.",
     };
   const required = [
@@ -216,23 +228,39 @@ const tool = (
   };
 };
 
+/** The tools of a published document. */
+export interface OperatorTools {
+  readonly tools: ReadonlyArray<OperatorTool>;
+  /**
+   * False when the document's references fan out past `MAX_INLINED_NODES`, so some input schemas
+   * keep a `$ref` that accepts any value.
+   */
+  readonly complete: boolean;
+}
+
 /**
  * Returns one tool for each operation of the operator group, named by its endpoint identifier.
- * Event streams are left out: a tool call needs a response that ends.
+ * Event streams are left out: a tool call needs a response that ends. All the input schemas share
+ * one inlining budget, so the work is bounded for the whole document, however many operations and
+ * parameters it has.
  */
-export const operatorTools = (document: PublishedApi): ReadonlyArray<OperatorTool> =>
-  Object.entries(document.paths)
+export const operatorTools = (document: PublishedApi): OperatorTools => {
+  const budget: InlineBudget = { remaining: MAX_INLINED_NODES, exhausted: false };
+  const components = document.components.schemas ?? {};
+  const tools = Object.entries(document.paths)
     .flatMap(([path, item]) =>
       METHODS.flatMap((method) => {
         const operation = item[method];
         return operation !== undefined &&
           operation.operationId.startsWith(`${TOOL_GROUP}.`) &&
           !streams(operation)
-          ? [tool(path, method, operation, document.components.schemas ?? {})]
+          ? [tool(path, method, operation, components, budget)]
           : [];
       }),
     )
     .sort((left, right) => left.name.localeCompare(right.name));
+  return { tools, complete: !budget.exhausted };
+};
 
 /**
  * Returns the tools that the grants and the operation ceiling permit. The server checks every call
