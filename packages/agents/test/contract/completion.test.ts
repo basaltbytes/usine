@@ -176,6 +176,26 @@ const codexLimitReached = rewritePayloads((payload) => {
   };
 });
 
+/** Claude Code's output without any usage, as when the provider refuses the first request. */
+const claudeWithoutUsage = rewritePayloads((payload) => {
+  const { usage: _usage, modelUsage: _models, total_cost_usd: _cost, ...rest } = payload;
+  const message = rest.message;
+  if (payload.type !== "assistant" || message === undefined || !isJsonObject(message)) return rest;
+  const { usage: _messageUsage, ...content } = message;
+  return { ...rest, message: content };
+});
+
+/** Codex's output without token updates, as when the provider refuses the first request. */
+const codexWithoutUsage = (transcript: Transcript): Transcript => ({
+  ...transcript,
+  entries: transcript.entries.filter(
+    (entry) =>
+      entry.type !== "emit_inbound" ||
+      !isJsonObject(entry.payload) ||
+      entry.payload.method !== "thread/tokenUsage/updated",
+  ),
+});
+
 /** When Pi's rewritten final message ended. */
 const PI_FAILED_AT = "2026-11-12T10:00:00.000Z";
 
@@ -190,6 +210,8 @@ interface FailedReplay {
   readonly reason: CompletionFailure["_tag"];
   /** When the capacity refusal resets, as ISO 8601, or `undefined` when it states no reset. */
   readonly resetsAt?: string;
+  /** Whether the harness reported no tokens, so that the failure's usage has 0 tokens. */
+  readonly unmetered?: boolean;
 }
 
 const failedReplays: ReadonlyArray<FailedReplay> = [
@@ -271,6 +293,16 @@ const failedReplays: ReadonlyArray<FailedReplay> = [
   },
   {
     harness: "claude",
+    answer: "a usage limit before any usage",
+    transform: (transcript) =>
+      claudeResult({ is_error: true, api_error_status: 429, result: "You've hit your limit." })(
+        claudeWithoutUsage(transcript),
+      ),
+    reason: "AgentCapacityError",
+    unmetered: true,
+  },
+  {
+    harness: "claude",
     answer: "an API error",
     transform: claudeResult({ is_error: true, result: "API Error: 400 invalid request" }),
     reason: "SessionOperationError",
@@ -304,6 +336,18 @@ const failedReplays: ReadonlyArray<FailedReplay> = [
     reason: "AgentCapacityError",
     // The recorded snapshot's primary window resets then.
     resetsAt: "2026-11-17T12:42:41.000Z",
+  },
+  {
+    harness: "codex",
+    answer: "a usage limit before any token update",
+    transform: (transcript) =>
+      codexFailedTurn({
+        message: "You've hit your usage limit.",
+        codexErrorInfo: "usageLimitExceeded",
+      })(codexLimitReached(codexWithoutUsage(transcript))),
+    reason: "AgentCapacityError",
+    resetsAt: "2026-11-17T12:42:41.000Z",
+    unmetered: true,
   },
   {
     harness: "codex",
@@ -369,12 +413,16 @@ const failedReplays: ReadonlyArray<FailedReplay> = [
   },
 ];
 
-/** Asserts that `failure` failed for `reason` and carries the recorded request's usage. */
+/**
+ * Asserts that `failure` failed for `reason` and carries the recorded request's usage and pool,
+ * with 0 tokens when the replay is `unmetered`.
+ */
 const assertFailedWithUsage = (
   harness: Provider,
   failure: CompletionError,
   reason: CompletionFailure["_tag"],
   resetsAt?: string,
+  unmetered = false,
 ) => {
   assert.strictEqual(failure.reason._tag, reason, failure.message);
   if (failure.reason._tag === "AgentCapacityError")
@@ -384,7 +432,9 @@ const assertFailedWithUsage = (
       "the capacity refusal resets when the harness reported",
     );
   assert(Option.isSome(failure.usage), "the failure carries the completion's usage");
-  assert.isAbove(failure.usage.value.totalTokens, 0, "the failure reports its tokens");
+  if (unmetered)
+    assert.strictEqual(failure.usage.value.totalTokens, 0, "the harness reported no tokens");
+  else assert.isAbove(failure.usage.value.totalTokens, 0, "the failure reports its tokens");
   assert.deepStrictEqual(failure.usage.value.session.pool, Option.some(pools[harness]));
 };
 
@@ -449,7 +499,7 @@ describe("structured completion contract", () => {
     20_000,
   );
 
-  for (const { harness, answer, transform, reason, resetsAt } of failedReplays)
+  for (const { harness, answer, transform, reason, resetsAt, unmetered } of failedReplays)
     it.live(
       `${harness}: structured-result with ${answer} fails with ${reason}`,
       () =>
@@ -460,7 +510,7 @@ describe("structured completion contract", () => {
             });
             const completion = yield* fixture.run;
             assert(Result.isFailure(completion), `${answer} has no value`);
-            assertFailedWithUsage(harness, completion.failure, reason, resetsAt);
+            assertFailedWithUsage(harness, completion.failure, reason, resetsAt, unmetered);
             yield* fixture.save;
           }),
         ),
