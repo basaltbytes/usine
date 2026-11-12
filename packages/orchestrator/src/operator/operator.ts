@@ -533,7 +533,7 @@ const makeOperatorObservation = Effect.gen(function* () {
             runId: run.id,
             loop: run.loop,
             failure: attempt.outcome.failure,
-            fixRunId: fixRuns.get(run.id) ?? null,
+            fixRun: fixRuns.get(run.id) ?? null,
           }),
         );
       }

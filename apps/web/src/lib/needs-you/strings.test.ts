@@ -21,7 +21,8 @@ import {
 import { DateTime, Option, Schema } from "effect";
 import { assert, describe, it } from "vitest";
 import { needsYouByProject } from "~/lib/overview";
-import { needCopy } from "~/lib/needs-you/strings";
+import { CiFixRun } from "@usine/engine/run-reader";
+import { fixRunStatus, needCopy } from "~/lib/needs-you/strings";
 
 describe("operator question copy in Needs attention", () => {
   it("names the asking Loop and shows the Agent's question", () => {
@@ -216,4 +217,13 @@ it("names a paused worker and how to resume it", () => {
     "Running attempts finish. Clear Paused in Configuration > Workers to resume it.",
   );
   assert.strictEqual(copy.repository, null);
+});
+
+it("words a failed run's CI fix link by the fix run's state", () => {
+  const fix = (state: CiFixRun["state"]) =>
+    fixRunStatus(CiFixRun.make({ runId: RunId.make("1a2b3c4d5e6f"), state }));
+  assert.strictEqual(fix("AwaitingCi"), "fix run 1a2b3c4d continues the work");
+  assert.strictEqual(fix("Succeeded"), "fix run 1a2b3c4d finished the work");
+  assert.strictEqual(fix("HandedOff"), "fix run 1a2b3c4d handed the work to another fix run");
+  assert.strictEqual(fix("Failed"), "fix run 1a2b3c4d failed too");
 });

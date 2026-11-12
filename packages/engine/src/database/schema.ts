@@ -64,6 +64,9 @@ export const triggerEvents = snakeCase.table(
     approval: text({ enum: APPROVAL_REQUIREMENTS }).$type<ApprovalRequirement>().notNull(),
     approvalReason: text(),
     ciPolicyJson: text({ mode: "json" }).$type<Schema.Json>(),
+    // The generated CI handoff instructions that end `task`, or null without a CI policy and for
+    // older Events.
+    ciInstructions: text(),
     ciFailureHead: text(),
     ciOnGreenJson: text({ mode: "json" }).$type<Schema.Json>().notNull().default([]),
     outcomeLabelsJson: text({ mode: "json" }).$type<Schema.Json>().notNull().default([]),
