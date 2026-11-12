@@ -24,8 +24,9 @@ export type MessageTaken = "read" | "queued";
 
 /**
  * When the harness read the messages it acknowledges: `now` at the acknowledgment, a tool-call
- * count that the harness captured at the read, or `turn` when the acknowledgment ends a turn and
- * the read happened at an unknown point after the message was queued.
+ * count that the harness captured at the read, or `turn` when the acknowledgment ends a turn that
+ * folded each message in at its first tool result after the message was queued, or at the turn's
+ * end if no tool call finished since.
  */
 export type ReadPoint = "now" | "turn" | number;
 
@@ -39,7 +40,7 @@ interface ConversationOptions {
   readonly submitted?: ReadonlyArray<OperatorMessageId>;
   readonly idle: Option.Option<string>;
   /** Whether the restored idle report replies to operator input (ADR 0018). */
-  readonly idleAnsweredOperator?: boolean;
+  readonly idleAnsweredOperator: boolean;
   /**
    * Queues a message during a turn, or starts another turn in an idle session. If it returns
    * `queued`, the harness reports the read later through `read`.
@@ -60,8 +61,8 @@ interface QueuedMessage {
   readonly id: OperatorMessageId;
   readonly message: string;
   readonly onDelivery: OnDelivery;
-  /** The session's tool-call count when the message was queued. */
-  readonly queuedAt: number;
+  /** The session's count of finished tool calls when the message was queued. */
+  readonly queuedAfter: number;
 }
 
 /**
@@ -87,10 +88,11 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
   let resume = yield* Deferred.make<void>();
   const journal = yield* ChildSessionJournal.current;
   const restoredAt = yield* channel.toolCalls;
+  const restoredAfter = yield* channel.toolResults;
   const queued: Array<QueuedMessage> = (options.unread ?? []).map((message) => ({
     ...message,
     onDelivery: (state) => journal.delivered(message.id, state),
-    queuedAt: restoredAt,
+    queuedAfter: restoredAfter,
   }));
 
   const unsent = new Set(
@@ -111,6 +113,16 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
       );
     });
   const readOperatorInput = Effect.flatMap(channel.toolCalls, readOperatorInputAt);
+  /**
+   * Returns the tool-call count where a turn folded in a message queued after `results` finished
+   * tool calls: the next tool result, or now if none came since.
+   */
+  const foldedAt = (results: number) =>
+    channel
+      .toolCallsAtResult(results)
+      .pipe(
+        Effect.flatMap(Option.match({ onSome: Effect.succeed, onNone: () => channel.toolCalls })),
+      );
 
   /** Reports the identified messages as read at `at`, with the current session state. */
   const deliver = (ids: ReadonlyArray<OperatorMessageId>, at: ReadPoint = "now") =>
@@ -122,14 +134,14 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
       }
       if (read.length === 0) return Effect.void;
       const state = InterventionState.make({ held, paused });
-      // A read at an unknown point of the turn may precede every tool call since the message was
-      // queued, so only those tool calls are known to come before it.
       const readAt =
         at === "now"
           ? readOperatorInput
-          : readOperatorInputAt(
-              at === "turn" ? Math.max(...read.map(({ queuedAt }) => queuedAt)) : at,
-            );
+          : at === "turn"
+            ? Effect.forEach(read, ({ queuedAfter }) => foldedAt(queuedAfter)).pipe(
+                Effect.flatMap((points) => readOperatorInputAt(Math.max(...points))),
+              )
+            : readOperatorInputAt(at);
       return Effect.logInfo("The session read queued operator messages", {
         sessionId: session.id,
         read: read.length,
@@ -240,7 +252,7 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
           id: action.id,
           message: action.message,
           onDelivery,
-          queuedAt: yield* channel.toolCalls,
+          queuedAfter: yield* channel.toolResults,
         });
       if (stopped) yield* channel.emit(SessionResumed.make({ session }));
     }
@@ -254,7 +266,7 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
     return InterventionState.make({ held, paused, queued: taken === "queued" });
   }, mutex.withPermits(1));
 
-  if (Option.isSome(options.idle) && options.idleAnsweredOperator === true) {
+  if (Option.isSome(options.idle) && options.idleAnsweredOperator) {
     operatorInput = Option.some(restoredAt);
     yield* Effect.logInfo("The restored idle report replies to the operator", {
       sessionId: session.id,

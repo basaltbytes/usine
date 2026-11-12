@@ -42,6 +42,7 @@ import {
   type DelegationCall,
   type DelegationHub,
   type DelegationJournal,
+  type QueuedChildInput,
   type ReservedChildReport,
   SavedChild,
 } from "./journal.ts";
@@ -208,15 +209,10 @@ export const delegate = Effect.fn("Delegation.delegate")(function* (
   const restoredInputs = resumed
     ? yield* hub.routing.withPermits(1)(
         Effect.gen(function* () {
-          const queued = yield* journal.queuedInputs(sessionId);
-          const decoded = yield* Effect.forEach(queued, (input) =>
-            Schema.decodeUnknownEffect(AttemptChannel.Intervention)(input.intervention).pipe(
-              Effect.map((intervention) => ({
-                inputSequence: AttemptChannel.Sequence.make(input.inputSequence),
-                intervention,
-              })),
-            ),
-          ).pipe(Effect.result);
+          const decoded = yield* journal.queuedInputs(sessionId).pipe(
+            Effect.map((queued) => Result.succeed<ReadonlyArray<QueuedChildInput>>(queued)),
+            Effect.catchTag("SchemaError", (error) => Effect.succeed(Result.fail(error))),
+          );
           if (Result.isSuccess(decoded))
             for (const input of decoded.success) hub.childInputs.add(input.inputSequence);
           return decoded;

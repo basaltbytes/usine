@@ -114,6 +114,16 @@ export class Supervision extends Schema.Class<
 export const EncodedIntervention = Schema.Json.pipe(Schema.brand("EncodedIntervention"));
 export type EncodedIntervention = typeof EncodedIntervention.Type;
 
+// The one codec of a stored intervention, so what the coordinator stores, a resumed child reads.
+const StoredIntervention = Schema.toCodecJson(AttemptChannel.Intervention);
+
+/** Encodes `intervention` for the journal. */
+export const encodeIntervention = (intervention: AttemptChannel.Intervention) =>
+  Schema.encodeEffect(StoredIntervention)(intervention).pipe(Effect.map(EncodedIntervention.make));
+
+/** Decodes a stored intervention; fails with `SchemaError` when it no longer decodes. */
+export const decodeIntervention = Schema.decodeEffect(StoredIntervention);
+
 /** An operator input that a child queued and hasn't reported read or unread. */
 export class QueuedInput extends Schema.Class<
   QueuedInput,

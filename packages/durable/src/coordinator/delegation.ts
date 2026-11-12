@@ -11,6 +11,7 @@ import type {
 import {
   type AttemptJournal,
   ContinuationsSaved,
+  decodeIntervention,
   Supervision,
   IdleSaved,
   OutputSaved,
@@ -54,16 +55,20 @@ export const journalDelegation = (
     ),
     queuedInputs: (sessionId) =>
       journal.load(attemptId).pipe(
-        Effect.map(
-          Option.match({
-            onNone: () => [],
-            onSome: ({ inputs }) =>
-              inputs.flatMap((input) =>
-                input.sessionId === sessionId
-                  ? [{ inputSequence: input.inputSequence, intervention: input.intervention }]
-                  : [],
+        Effect.flatMap((snapshot) =>
+          Effect.forEach(
+            Option.match(snapshot, {
+              onNone: () => [],
+              onSome: ({ inputs }) => inputs.filter((input) => input.sessionId === sessionId),
+            }),
+            (input) =>
+              decodeIntervention(input.intervention).pipe(
+                Effect.map((intervention) => ({
+                  inputSequence: input.inputSequence,
+                  intervention,
+                })),
               ),
-          }),
+          ),
         ),
       ),
     supervision: (sessionId) =>

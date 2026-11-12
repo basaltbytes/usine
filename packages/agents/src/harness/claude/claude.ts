@@ -626,7 +626,7 @@ const makeClaudeSessions = Effect.gen(function* () {
               const id = submitted[index];
               if (id !== undefined && ids.includes(id)) submitted.splice(index, 1);
             }
-            // A result acknowledges input that the turn read at an unknown point.
+            // A result acknowledges input that the turn folded in between tool rounds.
             yield* conversation.read(ids, Schema.is(ClaudeResultMessage)(message) ? "turn" : "now");
           }
           const limits = yield* readRateLimits(message);

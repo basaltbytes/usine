@@ -1029,71 +1029,156 @@ describe("Claude child backend", () => {
     }).pipe(Effect.scoped),
   );
 
-  for (const { name, tool, answered } of [
+  /** A Claude SDK whose output the test writes, and the user messages that the harness sent. */
+  const typedTurnSdk = Effect.gen(function* () {
+    const inputs = yield* Queue.make<ClaudeUserMessage>();
+    const output = yield* Queue.make<Schema.Json, Cause.Done>();
+    const sdk = Layer.succeed(ClaudeSdk)({
+      open: (input) => {
+        void (async () => {
+          for await (const message of input) {
+            Queue.offerUnsafe(inputs, message);
+            Queue.offerUnsafe(output, rateLimitEvent);
+          }
+        })();
+        return {
+          ...scripted([]),
+          close: () => Queue.endUnsafe(output),
+          [Symbol.asyncIterator]: () =>
+            Stream.toAsyncIterable(Stream.fromQueue(output))[Symbol.asyncIterator](),
+        };
+      },
+    });
+    return { inputs, output, sdk };
+  });
+
+  // Claude folds a message queued during a typed turn in between tool rounds, and names it only on
+  // the turn's result: in `user_message_uuids`, or through `queued_turn_count` on older versions.
+  for (const { name, steps, answered } of [
     {
-      name: "doesn't count a steer that a typed turn acknowledged after a tool call",
-      tool: true,
+      name: "counts a steer sent while the model generates a tool call, with no later tool",
+      steps: ["steer", "use:bash-1", "result:bash-1"],
+      answered: true,
+    },
+    {
+      name: "counts a steer sent while a tool runs, with no later tool",
+      steps: ["use:bash-1", "steer", "result:bash-1"],
+      answered: true,
+    },
+    {
+      name: "counts a steer sent after an earlier tool round, folded in at the next one",
+      steps: ["use:bash-1", "result:bash-1", "steer", "use:bash-2", "result:bash-2"],
+      answered: true,
+    },
+    {
+      name: "doesn't count a steer folded in before a later tool call",
+      steps: ["steer", "use:bash-1", "result:bash-1", "use:bash-2", "result:bash-2"],
       answered: false,
     },
     {
       name: "counts a steer that a typed turn acknowledged with no tool call",
-      tool: false,
+      steps: ["steer"],
       answered: true,
     },
+    {
+      name: "reads several steers of one turn at the latest point that it folded one in",
+      steps: ["steer", "use:bash-1", "result:bash-1", "steer", "use:bash-2", "result:bash-2"],
+      answered: true,
+    },
+    {
+      name: "doesn't count several steers of one turn when a tool call follows the last fold",
+      steps: [
+        "steer",
+        "use:bash-1",
+        "result:bash-1",
+        "steer",
+        "use:bash-2",
+        "result:bash-2",
+        "use:bash-3",
+        "result:bash-3",
+      ],
+      answered: false,
+    },
   ])
-    it.effect(name, () =>
-      Effect.gen(function* () {
-        const inputs = yield* Queue.make<ClaudeUserMessage>();
-        const output = yield* Queue.make<Schema.Json, Cause.Done>();
-        const sdk = Layer.succeed(ClaudeSdk)({
-          open: (input) => {
-            void (async () => {
-              for await (const message of input) {
-                Queue.offerUnsafe(inputs, message);
-                Queue.offerUnsafe(output, rateLimitEvent);
+    for (const acknowledgement of ["user_message_uuids", "queued_turn_count"] as const)
+      it.effect(`${name}, acknowledged by ${acknowledgement}`, () =>
+        Effect.gen(function* () {
+          const { inputs, output, sdk } = yield* typedTurnSdk;
+          const result = yield* Effect.gen(function* () {
+            const running = yield* (yield* ChildBackend).launch(request());
+            const events = yield* Queue.unbounded<string>();
+            yield* Effect.forkScoped(
+              running.events.pipe(Stream.runForEach((event) => Queue.offer(events, event._tag))),
+            );
+            const until = (tag: string): Effect.Effect<void> =>
+              Queue.take(events).pipe(
+                Effect.flatMap((taken) => (taken === tag ? Effect.void : until(tag))),
+              );
+            yield* Queue.take(inputs);
+            const steers: Array<Steer> = [];
+            for (const step of steps) {
+              const [kind, id = ""] = step.split(":");
+              if (kind === "steer") {
+                const steer = Steer.make({ message: `Check step ${steers.length + 1}` });
+                steers.push(steer);
+                yield* running.intervene(steer, noDelivery);
+                yield* Queue.take(inputs);
+              } else if (kind === "use") {
+                yield* Queue.offer(output, {
+                  type: "assistant",
+                  message: {
+                    content: [{ type: "tool_use", id, name: "Bash", input: { command: "ls" } }],
+                  },
+                });
+                yield* until("ToolStarted");
+              } else {
+                yield* Queue.offer(output, {
+                  type: "user",
+                  message: { content: [{ type: "tool_result", tool_use_id: id, content: "ok" }] },
+                });
+                yield* until("ToolFinished");
               }
-            })();
-            return {
-              ...scripted([]),
-              close: () => Queue.endUnsafe(output),
-              [Symbol.asyncIterator]: () =>
-                Stream.toAsyncIterable(Stream.fromQueue(output))[Symbol.asyncIterator](),
+            }
+            const result = {
+              type: "result",
+              subtype: "success",
+              result: "Done",
+              queued_turn_count: 0,
             };
-          },
-        });
-        const result = yield* Effect.gen(function* () {
-          const running = yield* (yield* ChildBackend).launch(request());
-          yield* Queue.take(inputs);
-          const steer = Steer.make({ message: "Check the tests too" });
-          yield* running.intervene(steer, noDelivery);
-          yield* Queue.take(inputs);
-          if (tool) {
-            yield* Queue.offer(output, {
-              type: "assistant",
-              message: {
-                content: [
-                  { type: "tool_use", id: "bash-1", name: "Bash", input: { command: "ls" } },
-                ],
-              },
-            });
-            yield* Queue.offer(output, {
-              type: "user",
-              message: { content: [{ type: "tool_result", tool_use_id: "bash-1", content: "ok" }] },
-            });
-          }
-          // A typed turn names the folded steer only on its result.
-          yield* Queue.offer(output, {
-            type: "result",
-            subtype: "success",
-            result: "Done",
-            queued_turn_count: 0,
-            user_message_uuids: [steer.id],
-          });
-          return yield* running.result;
-        }).pipe(Effect.provide(claudeChild.pipe(Layer.provide(sdk))));
-        assert.strictEqual(result.message, "Done");
-        assert.strictEqual(result.answeredOperator, answered);
-      }).pipe(Effect.scoped),
+            yield* Queue.offer(
+              output,
+              acknowledgement === "user_message_uuids"
+                ? { ...result, user_message_uuids: steers.map(({ id }) => id) }
+                : result,
+            );
+            return yield* running.result;
+          }).pipe(Effect.scoped, Effect.provide(claudeChild.pipe(Layer.provide(sdk))));
+          assert.strictEqual(result.message, "Done");
+          assert.strictEqual(result.answeredOperator, answered);
+        }).pipe(Effect.scoped),
+      );
+
+  for (const answered of [true, false])
+    it.effect(
+      `restores whether a held idle report ${answered ? "answers" : "doesn't answer"} the operator`,
+      () =>
+        Effect.gen(function* () {
+          const { sdk } = yield* typedTurnSdk;
+          const result = yield* Effect.gen(function* () {
+            const running = yield* (yield* ChildBackend).launch(
+              ChildRequest.make({
+                ...request(),
+                held: true,
+                idle: Option.some("The tests need a database."),
+                idleAnsweredOperator: answered,
+              }),
+            );
+            yield* running.intervene(Release.make(), noDelivery);
+            return yield* running.result;
+          }).pipe(Effect.scoped, Effect.provide(claudeChild.pipe(Layer.provide(sdk))));
+          assert.strictEqual(result.message, "The tests need a database.");
+          assert.strictEqual(result.answeredOperator, answered);
+        }).pipe(Effect.scoped),
     );
 
   it.effect("launches again after Claude loses its login refresh lock and keeps that session", () =>

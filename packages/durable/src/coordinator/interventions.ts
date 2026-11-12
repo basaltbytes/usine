@@ -18,7 +18,8 @@ import {
 import type { ChildDelivery } from "../attempt/delegation/journal.ts";
 import {
   type AttemptJournal,
-  EncodedIntervention,
+  decodeIntervention,
+  encodeIntervention,
   type JournalError,
   QueuedInput,
   Supervision,
@@ -39,13 +40,43 @@ class InterventionRefused extends Schema.TaggedError<
 
 const refuse = (message: string) => InterventionRefused.make({ message });
 
+/** Returns the supervision that `action` leaves a child with, from `previous`. */
+const impliedSupervision = (previous: Supervision, action: AttemptChannel.OperatorAction) =>
+  Supervision.make({
+    sessionId: previous.sessionId,
+    held:
+      action._tag === "OperatorMessage" ? true : action._tag === "Release" ? false : previous.held,
+    paused:
+      action._tag === "Interrupt" ? true : action._tag === "Release" ? previous.paused : false,
+  });
+
+const sameSupervision = (left: Supervision, right: Supervision) =>
+  left.held === right.held && left.paused === right.paused;
+
+/**
+ * Runs a journal write that corrects the stored state after the child decided. A failure is
+ * logged and leaves the input's outcome as the child decided it.
+ */
+const correct = <A>(
+  message: string,
+  fields: {
+    readonly attemptId: AttemptId;
+    readonly sessionId: AgentSessionId;
+    readonly inputSequence: AttemptChannel.Sequence;
+    readonly action: AttemptChannel.OperatorAction["_tag"];
+  },
+  write: Effect.Effect<A, JournalError>,
+) =>
+  write.pipe(
+    Effect.asVoid,
+    Effect.catchTag("JournalError", (error) =>
+      Effect.logError(message, { ...fields, message: error.message }),
+    ),
+  );
+
 /** The second receipt's reason when a child stops before it reads a queued operator input. */
 const UNREAD_INPUT =
   "The child stopped before it read this message. Send it again if it still applies.";
-
-const InterventionJson = Schema.toCodecJson(AttemptChannel.Intervention);
-const encodeIntervention = Schema.encodeEffect(InterventionJson);
-const decodeIntervention = Schema.decodeUnknownEffect(InterventionJson);
 
 /** The in-process state of one coordinated Attempt that operator input reads and changes. */
 export interface InterventionTarget {
@@ -221,7 +252,11 @@ export const interventionsFor = Effect.fn("Interventions.make")(function* (
     }
   });
 
-  /** Applies the input to its child and stores the child's supervision and queued input. */
+  /**
+   * Stores the supervision and queued input that the input implies, applies it to its child, and
+   * then corrects the stored state to what the child reports. Storing first keeps an input that
+   * the child applied across a stop before the correction.
+   */
   const route = Effect.fn("Interventions.route")(function* (
     intervention: AttemptChannel.Intervention,
     inputSequence: AttemptChannel.Sequence,
@@ -242,10 +277,36 @@ export const interventionsFor = Effect.fn("Interventions.make")(function* (
             : "This attempt has several live child sessions; address one of them",
       );
     const sessionId = child.value.session.id;
-    yield* Effect.annotateCurrentSpan({ attemptId, sessionId, inputSequence });
+    const fields = { attemptId, sessionId, inputSequence, action: intervention.action._tag };
+    yield* Effect.annotateCurrentSpan(fields);
     const forwardedTo = addressed._tag === "Parent" ? Option.some(sessionId) : Option.none();
-    const state = yield* child.value
-      .intervene(intervention.action, (read) =>
+    const action = intervention.action;
+    const message = action._tag === "Steer" || action._tag === "OperatorMessage";
+    const previous = yield* supervisor.of(sessionId);
+    const implied = impliedSupervision(previous, action);
+    // Restores the stored state when the child doesn't apply the input.
+    const unstage = correct(
+      "Could not restore the stored state of a child that didn't apply operator input",
+      fields,
+      Effect.andThen(
+        sameSupervision(previous, implied) ? Effect.void : supervisor.supervise(previous),
+        message ? journal.forgetInput(attemptId, inputSequence, []) : Effect.void,
+      ),
+    );
+    yield* Effect.gen(function* () {
+      if (!sameSupervision(previous, implied)) yield* supervisor.supervise(implied);
+      if (message)
+        yield* journal.queueInput(
+          attemptId,
+          QueuedInput.make({
+            inputSequence,
+            sessionId,
+            intervention: yield* encodeIntervention(intervention).pipe(Effect.orDie),
+          }),
+        );
+    }).pipe(Effect.onError(() => unstage));
+    const applied = yield* child.value
+      .intervene(action, (read) =>
         delivery({
           _tag: "Delivery",
           inputSequence,
@@ -255,32 +316,37 @@ export const interventionsFor = Effect.fn("Interventions.make")(function* (
           ),
         }),
       )
-      .pipe(
-        Effect.mapBoth({
-          onFailure: (error) => refuse(error.message),
-          onSuccess: (applied) =>
-            AttemptChannel.InterventionState.make({ ...applied, forwardedTo }),
-        }),
+      .pipe(Effect.result);
+    if (Result.isFailure(applied)) {
+      yield* unstage;
+      return yield* refuse(applied.failure.message);
+    }
+    const state = AttemptChannel.InterventionState.make({ ...applied.success, forwardedTo });
+    const actual = Supervision.make({ sessionId, held: state.held, paused: state.paused });
+    if (!sameSupervision(actual, implied)) {
+      yield* Effect.logInfo("The child's supervision differs from what the input implies", {
+        ...fields,
+        held: actual.held,
+        paused: actual.paused,
+      });
+      yield* correct(
+        "Could not store the supervision that the child reported",
+        fields,
+        supervisor.supervise(actual),
       );
-    yield* supervisor.supervise(
-      Supervision.make({ sessionId, held: state.held, paused: state.paused }),
-    );
+    }
     if (state.queued) {
       childInputs.add(inputSequence);
-      const encoded = yield* encodeIntervention(intervention).pipe(Effect.orDie);
-      yield* journal.queueInput(
-        attemptId,
-        QueuedInput.make({
-          inputSequence,
-          sessionId,
-          intervention: EncodedIntervention.make(encoded),
-        }),
+      yield* Effect.logInfo(
+        "The working child reads the operator input at its next boundary",
+        fields,
       );
-      yield* Effect.logInfo("The working child reads the operator input at its next boundary", {
-        sessionId,
-        action: intervention.action._tag,
-      });
-    }
+    } else if (message)
+      yield* correct(
+        "Could not forget an operator input that the child read at once",
+        fields,
+        journal.forgetInput(attemptId, inputSequence, []),
+      );
     return state;
   });
 

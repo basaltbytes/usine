@@ -1,5 +1,10 @@
 import { assert, describe, it } from "@effect/vitest";
-import { ChildBackend, ChildSessionJournal } from "@usine/agents/runtime";
+import {
+  type AgentSessionError,
+  ChildBackend,
+  ChildSessionJournal,
+  SessionOperationError,
+} from "@usine/agents/runtime";
 import {
   AgentSessionId,
   HarnessSession,
@@ -8,11 +13,11 @@ import {
   ToolStarted,
 } from "@usine/core/agent/session";
 import * as AttemptChannel from "@usine/core/attempt/channel";
-import { Context, Deferred, Effect, Exit, Fiber, Layer, Option, Result, Schema } from "effect";
+import { Context, Deferred, Effect, Exit, Fiber, Layer, Option, Result } from "effect";
 import { type AttemptRequest, harvestedResult } from "../src/attempt-runtime.ts";
 import {
   AttemptJournal,
-  EncodedIntervention,
+  encodeIntervention,
   QueuedInput,
   Supervision,
 } from "../src/coordinator/journal.ts";
@@ -122,6 +127,36 @@ const holdingStart =
         });
       }),
     ).pipe(Layer.provide(journal));
+
+/** A stub backend whose children's `intervene` runs `after` once the child applied the input. */
+const afterApplying = (
+  after: (
+    applied: AttemptChannel.InterventionState,
+    session: AgentSessionId,
+  ) => Effect.Effect<AttemptChannel.InterventionState, AgentSessionError>,
+) =>
+  Layer.effectContext(
+    Effect.gen(function* () {
+      const services = yield* Effect.context<ChildBackend | StubChildren>();
+      const backend = Context.get(services, ChildBackend);
+      return Context.add(services, ChildBackend, {
+        ...backend,
+        launch: (child) =>
+          backend.launch(child).pipe(
+            Effect.map((running) => ({
+              ...running,
+              intervene: (
+                action: AttemptChannel.OperatorAction,
+                onDelivery: Parameters<typeof running.intervene>[1],
+              ) =>
+                running
+                  .intervene(action, onDelivery)
+                  .pipe(Effect.flatMap((applied) => after(applied, running.session.id))),
+            })),
+          ),
+      });
+    }),
+  ).pipe(Layer.provide(stubChildBackendLayer));
 
 describe("event-driven coordinator operator input", () => {
   it.live("forwards a parent steer to the live child and sends both of its receipts", () =>
@@ -546,6 +581,78 @@ describe("event-driven coordinator operator input", () => {
     }).pipe(Effect.scoped),
   );
 
+  it.live("fails input addressed to the parent that waits for a child when execute detaches", () =>
+    Effect.gen(function* () {
+      const database = yield* temporaryDatabase;
+      const request = coordinated("input/detached-wait");
+      const attemptId = request.spec.attemptId;
+      const recording = recordingSink();
+      const starting = yield* Deferred.make<void>();
+      const start = yield* Deferred.make<void>();
+      const process = yield* orchestrator(
+        sqliteJournal(database).pipe(holdingStart(starting, start), coordinator),
+      );
+      const execution = yield* process.execute(request, recording.sink);
+      yield* Deferred.await(starting);
+      const waiting = yield* Effect.forkChild(
+        process.attempts.intervene(
+          attemptId,
+          toParent(AttemptChannel.Steer.make({ message: "Keep going." })),
+        ),
+      );
+      yield* Effect.sleep("50 millis");
+      // The execute call detaches, as on a process stop, while the delegation is still open.
+      yield* Fiber.interrupt(execution);
+      const failed = yield* Fiber.join(waiting).pipe(Effect.timeout("5 seconds"), Effect.flip);
+      yield* process.stop;
+
+      assert.strictEqual(failed._tag, "AgentFailure");
+      assert.deepStrictEqual(recording.inbound(), []);
+    }).pipe(Effect.scoped),
+  );
+
+  it.live("gives no second receipt to an input that a child queued and then refused", () =>
+    Effect.gen(function* () {
+      const database = yield* temporaryDatabase;
+      const request = coordinated("input/refused-after-queue");
+      const attemptId = request.spec.attemptId;
+      const recording = recordingSink();
+      // The child queues the input, and then its harness reports a failure.
+      const refusing = afterApplying((_applied, sessionId) =>
+        Effect.fail(
+          SessionOperationError.make({
+            operation: "steer",
+            sessionId: Option.some(sessionId),
+            message: "Can't send a message to the child",
+            cause: new Error("closed pipe"),
+          }),
+        ),
+      );
+      const process = yield* orchestrator(sqliteJournal(database).pipe(coordinatorOver(refusing)));
+      const execution = yield* process.execute(request, recording.sink);
+      const child = yield* process.nextChild;
+      yield* process.attempts.intervene(
+        attemptId,
+        toParent(AttemptChannel.Steer.make({ message: "Run the tests." })),
+      );
+      const refused = yield* stored(database, attemptId);
+      // The child reads the input it queued before it refused it.
+      yield* child.readQueued;
+      yield* child.reply("Done.");
+      yield* Fiber.join(execution);
+      yield* process.stop;
+
+      assert.deepStrictEqual(receipts(recording.outbound()).map(summary), [
+        { input: 1, applied: false, message: "Can't send a message to the child" },
+      ]);
+      assert.deepStrictEqual(
+        Option.map(refused, ({ inputs, supervision }) => ({ inputs, supervision })),
+        Option.some({ inputs: [], supervision: [] }),
+      );
+      assertAdmitted(attemptId, recording.outbound());
+    }).pipe(Effect.scoped),
+  );
+
   it.live("waits for a read receipt before it rejects the unread inputs of ended children", () =>
     Effect.gen(function* () {
       const request = coordinated("input/settle");
@@ -553,9 +660,7 @@ describe("event-driven coordinator operator input", () => {
       const sessionId = AgentSessionId.make(`${attemptId}/child/1`);
       const recording = recordingSink();
       const steer = toParent(AttemptChannel.Steer.make({ message: "Run the tests." }));
-      const encoded = yield* Schema.encodeEffect(Schema.toCodecJson(AttemptChannel.Intervention))(
-        steer,
-      );
+      const encoded = yield* encodeIntervention(steer);
       const receipt = yield* Effect.gen(function* () {
         const journal = yield* AttemptJournal;
         const snapshot = yield* journal.open(
@@ -570,7 +675,7 @@ describe("event-driven coordinator operator input", () => {
           QueuedInput.make({
             inputSequence,
             sessionId,
-            intervention: EncodedIntervention.make(encoded),
+            intervention: encoded,
           }),
         );
         const scope = yield* Effect.scope;
@@ -749,16 +854,14 @@ describe("event-driven coordinator operator input across restarts", () => {
       yield* first.stop;
       // An input queued just before the stop, whose second receipt the stop lost.
       const steer = toParent(AttemptChannel.Steer.make({ message: "Also update the docs." }));
-      const encoded = yield* Schema.encodeEffect(Schema.toCodecJson(AttemptChannel.Intervention))(
-        steer,
-      );
+      const encoded = yield* encodeIntervention(steer);
       yield* Effect.flatMap(Effect.service(AttemptJournal), (journal) =>
         journal.queueInput(
           attemptId,
           QueuedInput.make({
             inputSequence: AttemptChannel.Sequence.make(1),
             sessionId,
-            intervention: EncodedIntervention.make(encoded),
+            intervention: encoded,
           }),
         ),
       ).pipe(Effect.provide(sqliteJournal(database)));
@@ -884,6 +987,142 @@ describe("event-driven coordinator operator input across restarts", () => {
           paused: false,
           queued: false,
           forwardedTo: sessionId,
+        },
+      ]);
+      assertAdmitted(attemptId, recording.outbound());
+    }).pipe(Effect.scoped),
+  );
+
+  for (const action of [
+    AttemptChannel.Interrupt.make(),
+    AttemptChannel.OperatorMessage.make({ message: "Wait for my review." }),
+  ])
+    it.live(`keeps ${action._tag} that the child applied when a stop follows at once`, () =>
+      Effect.gen(function* () {
+        const database = yield* temporaryDatabase;
+        const request = coordinated(`input/restart/applied-${action._tag}`);
+        const attemptId = request.spec.attemptId;
+        const recording = recordingSink();
+        // A process stop right after the child applied the input, before the coordinator goes on.
+        const stopping = afterApplying(() => Effect.interrupt);
+        const first = yield* orchestrator(sqliteJournal(database).pipe(coordinatorOver(stopping)));
+        yield* first.execute(request, recording.sink);
+        const working = yield* first.nextChild;
+        yield* saveSession(working, request);
+        yield* sessionsStarted(recording, 2);
+        const stopped = yield* first.attempts
+          .intervene(attemptId, toParent(action))
+          .pipe(Effect.exit);
+        const applied = yield* working.interventions;
+        yield* first.stop;
+
+        const second = yield* orchestrator(sqliteJournal(database).pipe(coordinator));
+        const execution = yield* second.execute(request, recording.sink);
+        const resumed = yield* second.nextChild;
+        yield* second.attempts.intervene(attemptId, toParent(AttemptChannel.Release.make()));
+        yield* resumed.reply("Reviewed and done.");
+        yield* Fiber.join(execution);
+        yield* second.stop;
+
+        assert.isTrue(Exit.hasInterrupts(stopped));
+        assert.deepStrictEqual(applied, [action]);
+        if (action._tag === "Interrupt") {
+          assert.isTrue(resumed.request.paused);
+          assert.isFalse(resumed.request.held);
+          assert.deepStrictEqual(resumed.request.unread, []);
+        } else {
+          assert.isTrue(resumed.request.held);
+          assert.isFalse(resumed.request.paused);
+          assert.deepStrictEqual(
+            resumed.request.unread.map(({ message }) => message),
+            ["Wait for my review."],
+          );
+        }
+        assertAdmitted(attemptId, recording.outbound());
+      }).pipe(Effect.scoped),
+    );
+
+  it.live("rejects input addressed to a child that a restart replaced", () =>
+    Effect.gen(function* () {
+      const database = yield* temporaryDatabase;
+      const request = coordinated("input/restart/replaced", 2);
+      const attemptId = request.spec.attemptId;
+      const recording = recordingSink();
+      const first = yield* orchestrator(sqliteJournal(database).pipe(coordinator));
+      yield* first.execute(request, recording.sink);
+      const replaced = yield* first.nextChild;
+      yield* sessionsStarted(recording, 1);
+      yield* first.stop;
+
+      const second = yield* orchestrator(sqliteJournal(database).pipe(coordinator));
+      const execution = yield* second.execute(request, recording.sink);
+      const replacement = yield* second.nextChild;
+      yield* second.attempts.intervene(
+        attemptId,
+        toChild(replaced.request.session.id, AttemptChannel.Steer.make({ message: "Late." })),
+      );
+      yield* replacement.reply("Finished from the checkout.");
+      yield* Fiber.join(execution);
+      const delivered = yield* replacement.interventions;
+      yield* second.stop;
+
+      assert.notStrictEqual(replacement.request.session.id, replaced.request.session.id);
+      assert.deepStrictEqual(delivered, []);
+      assert.deepStrictEqual(receipts(recording.outbound()).map(summary), [
+        { input: 1, applied: false, message: "This session is no longer live" },
+      ]);
+      assertAdmitted(attemptId, recording.outbound());
+    }).pipe(Effect.scoped),
+  );
+
+  it.live("rejects waiting input when the resumed delegation ends before its child is live", () =>
+    Effect.gen(function* () {
+      const database = yield* temporaryDatabase;
+      const request = coordinated("input/restart/ended-before-live", 2);
+      const attemptId = request.spec.attemptId;
+      const recording = recordingSink();
+      const first = yield* orchestrator(sqliteJournal(database).pipe(coordinator));
+      yield* first.execute(request, recording.sink);
+      yield* first.nextChild;
+      yield* sessionsStarted(recording, 1);
+      yield* first.stop;
+
+      const starting = yield* Deferred.make<void>();
+      const start = yield* Deferred.make<void>();
+      const deciding = yield* Deferred.make<void>();
+      const decide = yield* Deferred.make<void>();
+      const second = yield* orchestrator(
+        sqliteJournal(database).pipe(
+          holdingStart(starting, start),
+          coordinatorWith(holdingWakeUp("ChildInterrupted", deciding, decide)),
+        ),
+      );
+      const execution = yield* second.execute(request, recording.sink);
+      yield* Deferred.await(starting);
+      const waiting = yield* Effect.forkChild(
+        second.attempts.intervene(
+          attemptId,
+          toParent(AttemptChannel.Steer.make({ message: "Keep going." })),
+        ),
+      );
+      yield* Effect.sleep("50 millis");
+      // The child saved no conversation, so its resumed delegation ends before the child is live.
+      yield* Deferred.succeed(start, undefined);
+      yield* Deferred.await(deciding);
+      yield* Fiber.join(waiting).pipe(Effect.timeout("5 seconds"));
+      yield* Deferred.succeed(decide, undefined);
+      const replacement = yield* second.nextChild;
+      yield* replacement.reply("Finished from the checkout.");
+      yield* Fiber.join(execution);
+      const delivered = yield* replacement.interventions;
+      yield* second.stop;
+
+      assert.deepStrictEqual(delivered, []);
+      assert.deepStrictEqual(receipts(recording.outbound()).map(summary), [
+        {
+          input: 1,
+          applied: false,
+          message: "This attempt has no live child session to receive the input",
         },
       ]);
       assertAdmitted(attemptId, recording.outbound());

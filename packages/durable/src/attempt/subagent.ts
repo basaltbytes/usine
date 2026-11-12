@@ -13,7 +13,8 @@ import {
 import { ChildSessionBudgetExceededError, reportText } from "@usine/agents/runtime";
 import { ChildSessionBudget, ChildSessionCount } from "@usine/core/agent/session";
 import type { AttemptId } from "@usine/core/attempt";
-import { Effect, Match, Option } from "effect";
+import * as AttemptChannel from "@usine/core/attempt/channel";
+import { Effect, Match, Option, Schema } from "effect";
 import { JournalError } from "../coordinator/journal.ts";
 import { durableError } from "../harness.ts";
 import { SubagentDoc } from "./child.ts";
@@ -157,11 +158,19 @@ const toolJournal = (
       run("restore the child's operator inputs", () =>
         api.snapshot(AttemptRecordDoc, attemptId, context),
       ).pipe(
-        Effect.map((record) =>
-          (record?.queuedInputs ?? []).flatMap((input) =>
-            "child" in input && input.child === sessionId
-              ? [{ inputSequence: input.inputSequence, intervention: input.intervention }]
-              : [],
+        // The Pi path stores the intervention's encoded form (`attempt/runtime.ts`).
+        Effect.flatMap((record) =>
+          Effect.forEach(
+            (record?.queuedInputs ?? []).filter(
+              (input) => "child" in input && input.child === sessionId,
+            ),
+            (input) =>
+              Schema.decodeEffect(AttemptChannel.Intervention)(input.intervention).pipe(
+                Effect.map((intervention) => ({
+                  inputSequence: AttemptChannel.Sequence.make(input.inputSequence),
+                  intervention,
+                })),
+              ),
           ),
         ),
       ),

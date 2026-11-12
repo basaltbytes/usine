@@ -5,6 +5,7 @@ import {
   AgentSessionId,
   ChildSession,
   ParentSession,
+  ToolFinished,
   ToolStarted,
 } from "@usine/core/agent/session";
 import {
@@ -80,6 +81,14 @@ const conversation = (
     /** Emits a started tool call, as the harness does when the session runs a tool. */
     const runTool = (callId: string) =>
       channel.emit(ToolStarted.make({ session, callId, tool: "bash", input: null }));
+    /** Emits a tool call's result, as the harness does when the tool returns. */
+    const finishTool = (callId: string) =>
+      channel.emit(
+        ToolFinished.make({ session, callId, tool: "bash", output: "ok", isError: false }),
+      );
+    /** Runs a tool call to its result. */
+    const runToolRound = (callId: string) =>
+      runTool(callId).pipe(Effect.andThen(finishTool(callId)));
     /** Queues a started tool call from a vendor callback, as Pi does. */
     const runToolUnsafe = (callId: string) =>
       Effect.sync(() =>
@@ -92,6 +101,8 @@ const conversation = (
       emitted,
       events,
       runTool,
+      finishTool,
+      runToolRound,
       runToolUnsafe,
       toolCalls: channel.toolCalls,
     };
@@ -515,18 +526,87 @@ describe("answers to the operator", () => {
     }),
   );
 
-  it.effect("doesn't mark an answer to input that a turn read after a later tool call", () =>
+  it.effect("keeps the later of two reads when the harness reports an earlier one last", () =>
     Effect.gen(function* () {
-      const session = yield* conversation(child("turn-read"));
-      yield* session.intervene(Steer.make({ message: "Run the tests too." }), noDelivery);
+      const session = yield* conversation(child("later-read"));
+      yield* session.intervene(Steer.make({ message: "Check the lockfile." }), noDelivery);
+      yield* session.intervene(Steer.make({ message: "Check the tests." }), noDelivery);
+      const [first, second] = yield* session.unread;
+      assert(first !== undefined && second !== undefined);
       yield* session.runTool("call-1");
-      // The turn's result acknowledges the steer; the model may have read it before the tool.
-      yield* session.read(
-        (yield* session.unread).map(({ id }) => id),
-        "turn",
-      );
-      yield* session.finish("The tests pass.");
-      assert.isFalse((yield* Fiber.join(session.result)).answeredOperator);
+      const captured = yield* session.toolCalls;
+      yield* session.runTool("call-2");
+      yield* session.read([first.id]);
+      // A forked read that the harness captured before the second tool call runs last.
+      yield* session.read([second.id], captured);
+      yield* session.finish("Both are fine.");
+      assert.isTrue((yield* Fiber.join(session.result)).answeredOperator);
+    }),
+  );
+
+  // A turn's result acknowledges input that the turn folded in at the first tool result after the
+  // input was queued, or at its end.
+  for (const { name, before, after, answered } of [
+    {
+      name: "marks an answer to a steer that a turn folded in at the next tool result",
+      before: [],
+      after: ["call-1"],
+      answered: true,
+    },
+    {
+      name: "marks an answer to a steer queued after an earlier tool round, folded in at the next",
+      before: ["call-1"],
+      after: ["call-2"],
+      answered: true,
+    },
+    {
+      name: "doesn't mark an answer to a steer that a turn folded in before a later tool call",
+      before: [],
+      after: ["call-1", "call-2"],
+      answered: false,
+    },
+    {
+      name: "marks an answer to a steer that a turn with no later tool round read at its end",
+      before: ["call-1"],
+      after: [],
+      answered: true,
+    },
+  ])
+    it.effect(name, () =>
+      Effect.gen(function* () {
+        const session = yield* conversation(child("turn-read"));
+        for (const callId of before) yield* session.runToolRound(callId);
+        yield* session.intervene(Steer.make({ message: "Run the tests too." }), noDelivery);
+        for (const callId of after) yield* session.runToolRound(callId);
+        yield* session.read(
+          (yield* session.unread).map(({ id }) => id),
+          "turn",
+        );
+        yield* session.finish("The tests pass.");
+        assert.strictEqual((yield* Fiber.join(session.result)).answeredOperator, answered);
+      }),
+    );
+
+  it.effect("reads several messages of one turn at the latest point that it folded one in", () =>
+    Effect.gen(function* () {
+      for (const { later, answered } of [
+        { later: false, answered: true },
+        { later: true, answered: false },
+      ]) {
+        const session = yield* conversation(child(`turn-reads-${String(later)}`));
+        yield* session.intervene(Steer.make({ message: "Check the lockfile." }), noDelivery);
+        // The turn folds in the first steer here, and the second one at the next tool result.
+        yield* session.runToolRound("call-1");
+        yield* session.intervene(Steer.make({ message: "Check the tests." }), noDelivery);
+        yield* session.runToolRound("call-2");
+        if (later) yield* session.runToolRound("call-3");
+        yield* session.read(
+          (yield* session.unread).map(({ id }) => id),
+          "turn",
+        );
+        yield* session.finish("Both are fine.");
+        assert.strictEqual((yield* Fiber.join(session.result)).answeredOperator, answered);
+      }
     }),
   );
 

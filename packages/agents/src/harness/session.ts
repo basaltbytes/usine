@@ -52,6 +52,13 @@ export interface SessionChannel {
   readonly toolCalls: Effect.Effect<number>;
   /** Returns `toolCalls` synchronously, for vendor callbacks. */
   readonly toolCallsUnsafe: () => number;
+  /** The number of tool calls that the session finished, counted from the queued events. */
+  readonly toolResults: Effect.Effect<number>;
+  /**
+   * The `toolCalls` count when tool call number `results + 1` finished, in finish order, or `None`
+   * if no more than `results` tool calls have finished.
+   */
+  readonly toolCallsAtResult: (results: number) => Effect.Effect<Option.Option<number>>;
   readonly fail: (error: AgentSessionError) => Effect.Effect<void>;
   /**
    * Ends the session with `message`, or fails it with the report that `message` marks.
@@ -76,8 +83,11 @@ export const sessionChannel = Effect.fn("SessionChannel.make")(function* (
     for (const cleanup of cleanups.splice(0)) cleanup();
   });
   let toolCalls = 0;
+  // The `toolCalls` count at each finished tool call, in order.
+  const callsAtResults: Array<number> = [];
   const count = (event: AgentSessionEvent) => {
     if (event._tag === "ToolStarted") toolCalls += 1;
+    if (event._tag === "ToolFinished") callsAtResults.push(toolCalls);
   };
 
   const emitUnsafe = (event: AgentSessionEvent) => {
@@ -156,6 +166,9 @@ export const sessionChannel = Effect.fn("SessionChannel.make")(function* (
     emitUnsafe,
     toolCalls: Effect.sync(() => toolCalls),
     toolCallsUnsafe: () => toolCalls,
+    toolResults: Effect.sync(() => callsAtResults.length),
+    toolCallsAtResult: (results) =>
+      Effect.sync(() => Option.fromUndefinedOr(callsAtResults[results])),
     fail,
     finish,
   } satisfies SessionChannel;

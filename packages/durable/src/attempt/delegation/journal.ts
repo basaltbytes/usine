@@ -84,9 +84,8 @@ export type DelegationStart = Admitted | Refused;
 
 /** An operator input queued for a child and not yet reported read. */
 export interface QueuedChildInput {
-  readonly inputSequence: number;
-  /** The encoded intervention as stored, which may no longer decode. */
-  readonly intervention: unknown;
+  readonly inputSequence: AttemptChannel.Sequence;
+  readonly intervention: AttemptChannel.Intervention;
 }
 
 /**
@@ -102,10 +101,13 @@ export interface DelegationJournal {
    * returns the same number with the progress saved since, and changes nothing.
    */
   readonly start: Effect.Effect<DelegationStart, JournalError>;
-  /** Reads the operator inputs queued for the child, oldest first. */
+  /**
+   * Reads the operator inputs queued for the child, oldest first, decoded with the codec that
+   * stored them. Fails with `SchemaError` when one no longer decodes.
+   */
   readonly queuedInputs: (
     sessionId: AgentSessionId,
-  ) => Effect.Effect<ReadonlyArray<QueuedChildInput>, JournalError>;
+  ) => Effect.Effect<ReadonlyArray<QueuedChildInput>, JournalError | Schema.SchemaError>;
   /** Reads whether the operator holds or pauses the child. */
   readonly supervision: (
     sessionId: AgentSessionId,
