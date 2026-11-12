@@ -154,6 +154,35 @@ const holdingSettleOpen =
       }),
     ).pipe(Layer.provide(journal));
 
+/**
+ * Holds the first `settleDelegation` after it commits, completing `ended`, until `release`
+ * completes. The coordinator makes that call after its child ends and before it reloads the journal
+ * for the event's transition.
+ */
+const holdingSettleDelegation =
+  (ended: Deferred.Deferred<void>, release: Deferred.Deferred<void>) =>
+  (journal: Layer.Layer<AttemptJournal>) =>
+    Layer.effect(
+      AttemptJournal,
+      Effect.gen(function* () {
+        const inner = yield* AttemptJournal;
+        let held = false;
+        return AttemptJournal.of({
+          ...inner,
+          settleDelegation: (attemptId, number, outcome) =>
+            inner.settleDelegation(attemptId, number, outcome).pipe(
+              Effect.tap(() => {
+                if (held) return Effect.void;
+                held = true;
+                return Deferred.succeed(ended, undefined).pipe(
+                  Effect.andThen(Deferred.await(release)),
+                );
+              }),
+            ),
+        });
+      }),
+    ).pipe(Layer.provide(journal));
+
 /** Interrupts each `settle` and `settleOpen` once `stopped` holds, as a process stop does. */
 const stoppingSettles = (stopped: () => boolean) => (journal: Layer.Layer<AttemptJournal>) =>
   Layer.effect(
@@ -706,6 +735,67 @@ describe("event-driven coordinator runtime", () => {
         assert.strictEqual(trace(recording.outbound()).at(-1), "Interrupted");
       }).pipe(Effect.scoped),
   );
+
+  for (const signal of ["sent", "held"] as const)
+    it.live(
+      `stops the child's event when a cancel settles the journal as the child ends, with the signal ${signal}`,
+      () =>
+        Effect.gen(function* () {
+          const database = yield* temporaryDatabase;
+          const request = coordinated(`coordinator/cancel-as-child-ends-${signal}`);
+          const attemptId = request.spec.attemptId;
+          const recording = recordingSink();
+          const ended = yield* Deferred.make<void>();
+          const release = yield* Deferred.make<void>();
+          const settled = yield* Deferred.make<void>();
+          const resume = yield* Deferred.make<void>();
+          const logged: Array<string> = [];
+          const logger = Logger.layer([Logger.make(({ message }) => logged.push(String(message)))]);
+          const journal = sqliteJournal(database).pipe(holdingSettleDelegation(ended, release));
+          const process = yield* orchestrator(
+            (signal === "held" ? journal.pipe(holdingSettleOpen(settled, resume)) : journal).pipe(
+              coordinator,
+            ),
+          );
+          const execution = yield* Effect.forkChild(
+            process.attempts.execute(request, recording.sink).pipe(Effect.provide(logger)),
+          );
+          yield* (yield* process.nextChild).reply("Opened #12.");
+          // The delegation recorded the child's report; the event's transition hasn't loaded yet.
+          yield* Deferred.await(ended);
+          const canceling = yield* Effect.forkChild(
+            process.attempts.cancel(attemptId).pipe(Effect.provide(logger)),
+          );
+          if (signal === "held") yield* Deferred.await(settled);
+          else
+            yield* until(() =>
+              logged.some((entry) => entry.includes("Canceling the coordinated Attempt")),
+            );
+          yield* Deferred.succeed(release, undefined);
+          const failure = yield* Fiber.join(execution).pipe(Effect.flip);
+          yield* Deferred.succeed(resume, undefined);
+          yield* Fiber.join(canceling);
+          const live = yield* process.attempts.isLive(attemptId);
+          yield* process.stop;
+          const stopped = yield* stored(database, attemptId);
+
+          assert.strictEqual(failure._tag, "AgentFailure");
+          assert.isFalse(live);
+          assert(Option.isSome(stopped));
+          assert.strictEqual(stopped.value.status._tag, "Settled");
+          assert.isTrue(Option.isNone(stopped.value.pendingDecision));
+          assert.strictEqual(stopped.value.events.length, 1);
+          assert.isTrue(
+            logged.some((entry) =>
+              entry.includes("The journal was settled while the child ended; the event stops"),
+            ),
+          );
+          assert.isFalse(logged.some((entry) => entry.includes("failed while it stopped")));
+          assertAdmitted(attemptId, recording.outbound());
+          assert.isFalse(trace(recording.outbound()).includes("Final"));
+          assert.strictEqual(trace(recording.outbound()).at(-1), "Interrupted");
+        }).pipe(Effect.scoped),
+    );
 
   it.live(
     "leaves a committed outcome live when cancel finds its terminal envelope undelivered",

@@ -406,6 +406,16 @@ const make = Effect.gen(function* () {
       const event = yield* nextEvent(hub, snapshot, state);
       // Reload: the delegation saved progress that the context reads.
       const current = yield* loaded(hub.attemptId);
+      if (current.status._tag !== "Open") {
+        // A cancel settled the journal while the child ended. The top of the loop interrupts on
+        // the cancel's signal, or returns the settled journal if the signal hasn't come yet.
+        yield* Effect.logInfo("The journal was settled while the child ended; the event stops", {
+          attemptId: hub.attemptId,
+          event: event._tag,
+          status: current.status._tag,
+        });
+        continue;
+      }
       yield* handle(hub, current, state, event).pipe(
         Effect.catchTag("StaleRevision", (stale) => staleTransition(hub, stale)),
       );
