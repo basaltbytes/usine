@@ -75,7 +75,9 @@ export const sshMachinePreflightFor = (
         worker,
         "machine",
         `Can't connect to SSH worker "${worker}" at ${host}`,
-        new Error(connected.stderr.trim() || `ssh exited with code ${String(connected.exitCode)}`),
+        new Error(
+          connected.stderr.trim() || `the command exited with code ${String(connected.exitCode)}`,
+        ),
       );
     const rootChecked = yield* commands
       .inspect("preflight", machine.shell, "sh", ["-c", WRITABLE_DIRECTORY_SCRIPT, "sh", root])
