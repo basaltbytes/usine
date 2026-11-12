@@ -79,7 +79,7 @@ After a restart, a resumed child's report clears its own stored infrastructure f
 - Input to a paused or waiting parent, or an idle or paused child, starts its next turn.
 - `Interrupt` aborts the parent's turn and children, withdraws queued input, and holds the parent until a `Steer`, `OperatorMessage`, or `Release` resumes it.
 
-`AttemptReport.answeredOperator` is true if the parent's last turn replied to an operator message or steer, not to the release guidance, without delegating after it. `harvestedResult(report, facts, outputs)` builds a `StepCompletion`, and fails such a report with `AgentFailure` if the checkout has no facts or outputs.
+`AttemptReport.answeredOperator` is true if the parent's last turn replied to an operator message or steer, not to the release guidance, without delegating after it. On the event-driven coordinator, it is the child's `SessionResult.answeredOperator`: the child read an operator message or steer after its last tool call. `harvestedResult(report, facts, outputs)` builds a `StepCompletion`, and fails such a report with `AgentFailure` if the checkout has no facts or outputs.
 
 `cancel(attemptId)` aborts the task bottom-up, waits until it's terminal, and ends `execute` with `Interrupted`. A child whose launch hasn't returned, such as a Claude child waiting to relaunch, starts no process.
 
@@ -129,7 +129,16 @@ The first event starts child 1 with the rendered task, and the transition reserv
 
 The outbox relay in `src/coordinator/outbox.ts` reserves each envelope in the journal before the sink receives it and acknowledges it after, so the next `execute` sends unacknowledged envelopes again. Worker notices before `Started` wait for it, and notices after the terminal envelope are dropped.
 
-`intervene` refuses operator input with `AgentFailure`. `cancel` stops the running child, relays `Interrupted`, and ends `execute` with `AgentFailure`. It settles a journal with no outcome, because the coordinator has no canceled status. A journal with an outcome is left for the caller, so a worker drain leaves an undelivered terminal envelope live, as it does for a Pi parent.
+`intervene` routes operator input to a child, as described in [Coordinator operator input](#coordinator-operator-input). `cancel` stops the running child, relays `Interrupted`, and ends `execute` with `AgentFailure`. It settles a journal with no outcome, because the coordinator has no canceled status. A journal with an outcome is left for the caller, so a worker drain leaves an undelivered terminal envelope live, as it does for a Pi parent.
+
+### Coordinator operator input
+
+`intervene` appends the input to the transcript through the outbox and applies it under the attempt's routing permit, which transitions also take:
+
+- Input for a child goes to that child. Input addressed to the parent goes to the live child, and its receipts set `InterventionState.forwardedTo` to the child, as a forwarded Pi parent steer does. This covers steers, operator messages, interrupts, and releases, and the runaway guard's warning, which is a parent steer.
+- With no live child, or for a child that ended, the receipt is `InterventionRejected`. Input before `Started` or after the terminal envelope fails with `AgentFailure`, because the channel admits no receipt there.
+- The receipt's Hold and pause go to the journal with `supervise`. A child's result waits until its Hold ends, so the attempt's outcome waits for `Release`. A resumed child after a restart gets its stored Hold and pause.
+- A working child queues a message: the journal keeps it with `queueInput` until the child reports it. A read gets a second `InterventionApplied`. An unread input stays stored, so a child resumed after a restart reads it, and is rejected once the child's delegation ends. Every receipt for a child's input precedes the envelopes of the event that its end produces.
 
 `routerLayer` in `src/coordinator/router.ts` provides `AttemptRuntime` over `PiAttemptRuntime` and `CoordinatorRuntime`. `execute` sends an attempt to the coordinator if the journal has it, to the Pi runtime if pi-durable has it, and otherwise by `RunSpec.parent`, which decodes as `pi` for stored attempts. Every other operation looks the attempt up in the journal and falls back to the Pi runtime, so an attempt stays on the runtime that started it. A Worker notice for an attempt that neither runtime has waits for its `execute` call.
 
@@ -147,7 +156,7 @@ const attempts = layer({
 - `layer({ database, parent })` provides `AttemptRuntime`, `DurableHarness`, `ChildBackend`, and `StubChildren` on a SQLite file. To simulate a restart, build a second layer on the file with the remaining answers. Attempts go through the router, with the event-driven coordinator on an in-memory journal; `routedRuntimeLayer` is that router without the harness and children.
 - `parent` lists the parent model's answers, one per request: `delegate(task)` calls `subagent`, `answer(text)` is a final answer, and a function gets the request's context and returns an answer.
 - `PARENT_MODEL`, `faux/faux-1`, is the scripted model. It accepts efforts up to `high`; an empty `RunSpec.parentModel` selects it.
-- `StubChildren.next` waits for the next child. A `StubChild` exposes `request`, `emit(event)`, `reply(message)`, `block(message)`, `crash(message)`, `interrupted`, and its `interventions`. `crash` ends the child without a result, as a Claude child whose output stream fails, so the parent's `subagent` call fails. A held child replies after `Release`.
+- `StubChildren.next` waits for the next child. A `StubChild` exposes `request`, `emit(event)`, `reply(message)`, `readQueued`, `block(message)`, `crash(message)`, `interrupted`, and its `interventions`. `crash` ends the child without a result, as a Claude child whose output stream fails, so the parent's `subagent` call fails. A held child replies after `Release`. A reply answers the operator if the child read an operator message after its last emitted `ToolStarted`.
 - `fauxParent(steps)` and `stubChildBackendLayer` are the two halves, to compose `DurableHarness` with other storage.
 - `stubAttemptRuntime(storage, parent)` is an in-memory `AttemptRuntime` for executor and engine tests without a parent model. `parent` scripts each attempt's final message or `AttemptReport` (`completes`, `worksFor(millis)`, or a `StubParent`). Rebuilding it on the same `StubStorage` simulates a restart. `StubStorage.unsupervised` contains what `recordUnsupervised` stored, and `attached` completes when `execute` starts recording.
 
@@ -171,7 +180,7 @@ A child's `SessionOperationError` is recorded as an infrastructure failure. This
 
 ## Coordinator journal
 
-`AttemptJournal` stores what the event-driven coordinator from [#1150](https://github.com/basaltbytes/usine/issues/1150) needs to resume an attempt: the stored request, an append-only ledger of events with their decisions, the coordinator state, the delegations it decided with what each child saved and the event that ended it, an outbox of channel envelopes that the sink hasn't acknowledged, the harvested result, and the runaway guard's unsupervised time. It doesn't use pi-durable.
+`AttemptJournal` stores what the event-driven coordinator from [#1150](https://github.com/basaltbytes/usine/issues/1150) needs to resume an attempt: the stored request, an append-only ledger of events with their decisions, the coordinator state, the delegations it decided with what each child saved and the event that ended it, an outbox of channel envelopes that the sink hasn't acknowledged, the harvested result, the runaway guard's unsupervised time, and the operator's supervision and queued input for each child. It doesn't use pi-durable.
 
 - `open` creates the journal, or returns the existing one unchanged.
 - `decide` records the first decision for an event and returns it to every later caller, so a restarted coordinator applies the recorded decision instead of deciding again.
@@ -179,6 +188,7 @@ A child's `SessionOperationError` is recorded as an infrastructure failure. This
 - `reserve` and `acknowledge` keep the outbox in sequence order across restarts.
 - `startDelegation` marks a decided delegation started, or returns the progress saved since an earlier run started it. `saveProgress` applies one typed `ProgressChange`, and `settleDelegation` keeps the first event that ended the delegation.
 - `recordResult` stores the harvested result, and `recordUnsupervised` keeps the longest unsupervised time.
+- `supervise` replaces a child's Hold and pause; a child with neither has no stored supervision. `queueInput` and `forgetInput` keep the operator inputs that children queued, and `recordInbound` advances the sequence of the next operator input.
 - `settle` keeps the outcome and the outbox, and advances the revision, so a late transition fails as stale.
 
 The coordinator encodes events, decisions, and state as JSON; the journal stores them without reading them. Breaking a ledger invariant is a defect: an operation on an attempt that was never opened, a transition after `Finish`, a decision other than the recorded one, or an envelope out of sequence.
