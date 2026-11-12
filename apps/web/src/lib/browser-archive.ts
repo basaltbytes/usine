@@ -13,6 +13,8 @@ export type BrowserArchive<Document, Entry> = {
   readonly schema: Schema.Codec<Document, string>;
   readonly entries: (document: Document) => ReadonlyArray<Entry>;
   readonly document: (entries: ReadonlyArray<Entry>) => Document;
+  /** The most entries that are saved. */
+  readonly maximumEntries: number;
   /** The largest serialized archive, in UTF-16 code units, that is read or saved. */
   readonly maximumSize: number;
   /** The span name prefix, such as `LaneFold`. */
@@ -78,7 +80,8 @@ export const browserArchive = <Document, Entry>(
     ): A => run("read", attributes, Effect.map(load, select), fallback),
     /**
      * Saves the entries that `change` returns, newest first. Drops the oldest entries until the
-     * archive fits `maximumSize`, and saves nothing if one entry alone doesn't fit.
+     * archive has at most `maximumEntries` and fits `maximumSize`, and logs how many it dropped.
+     * Saves nothing if one entry alone doesn't fit.
      */
     update: (
       attributes: Readonly<Record<string, string>>,
@@ -89,8 +92,8 @@ export const browserArchive = <Document, Entry>(
         attributes,
         Effect.gen(function* () {
           const saved = yield* load;
-          const entries = [...change(saved)];
-          const total = entries.length;
+          const changed = change(saved);
+          const entries = changed.slice(0, archive.maximumEntries);
           let serialized = encode(archive.document(entries));
           while (serialized.length > archive.maximumSize && entries.length > 1) {
             entries.pop();
@@ -101,9 +104,13 @@ export const browserArchive = <Document, Entry>(
               Effect.annotateLogs({ size: serialized.length, maximumSize: archive.maximumSize }),
             );
           }
-          if (entries.length < total) {
-            yield* Effect.logDebug(`${archive.label} dropped the oldest entries to fit`).pipe(
-              Effect.annotateLogs({ dropped: total - entries.length }),
+          if (entries.length < changed.length) {
+            yield* Effect.logInfo(`${archive.label} dropped the oldest entries to fit`).pipe(
+              Effect.annotateLogs({
+                dropped: changed.length - entries.length,
+                maximumEntries: archive.maximumEntries,
+                maximumSize: archive.maximumSize,
+              }),
             );
           }
           yield* access(() => storage().setItem(archive.key, serialized));

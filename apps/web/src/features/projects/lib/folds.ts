@@ -24,6 +24,7 @@ export const laneFoldMemory = (storage: () => Pick<Storage, "getItem" | "setItem
       schema: LaneFolds,
       entries: ({ lanes }) => lanes,
       document: (lanes) => ({ version: 1, lanes }),
+      maximumEntries: maximumLanes,
       maximumSize: 64_000,
       span: "LaneFold",
       label: "Board lane fold storage",
@@ -40,11 +41,9 @@ export const laneFoldMemory = (storage: () => Pick<Storage, "getItem" | "setItem
         null,
       ),
     write: (project: ProjectId, lane: BoardLaneId, folded: boolean): void =>
-      archive.update({ project, lane }, (lanes) =>
-        [
-          { project, lane, folded },
-          ...lanes.filter((entry) => entry.project !== project || entry.lane !== lane),
-        ].slice(0, maximumLanes),
-      ),
+      archive.update({ project, lane }, (lanes) => [
+        { project, lane, folded },
+        ...lanes.filter((entry) => entry.project !== project || entry.lane !== lane),
+      ]),
   };
 };

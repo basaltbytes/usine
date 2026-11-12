@@ -53,6 +53,7 @@ export const readerMemory = (storage: () => Pick<Storage, "getItem" | "setItem">
       schema: archive,
       entries: ({ runs }) => runs,
       document: (runs) => ({ version: 2, runs }),
+      maximumEntries: maximumRuns,
       maximumSize: 512_000,
       span: "ConversationReader",
       label: "Conversation reader storage",
@@ -75,9 +76,7 @@ export const readerMemory = (storage: () => Pick<Storage, "getItem" | "setItem">
         [
           ...runs.filter((entry) => entry.runId !== runId && fresh(entry.savedAt, now)),
           { runId, savedAt: now, bookmark },
-        ]
-          .sort((a, b) => b.savedAt - a.savedAt)
-          .slice(0, maximumRuns),
+        ].sort((a, b) => b.savedAt - a.savedAt),
       ),
   };
 };

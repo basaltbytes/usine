@@ -154,3 +154,14 @@ it("shows each project's own fold choice when the same column switches project",
   show(unmapped, ProjectId.make("alpha"));
   await expect.element(rail("Unmapped", 1)).toBeVisible();
 });
+
+it("shows each lane's own fold choice when the same column shows another lane", async () => {
+  const done = fixtureLane("Done");
+  laneFoldMemory(() => localStorage).write(ProjectId.make("board-test"), done.id, false);
+  show(fixtureLane("Unmapped"));
+  await foldButton("Unmapped").click();
+  await expect.element(rail("Unmapped", 1)).toBeVisible();
+
+  show(done);
+  await expect.element(foldButton("Done")).toHaveAttribute("aria-expanded", "true");
+});
