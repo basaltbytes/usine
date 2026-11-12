@@ -39,7 +39,7 @@ Effort values are `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max`.
 
 ## Supervisor
 
-The supervisor observes and operates the factory for a member. It runs on the orchestrator with the instance's gateway credential, and each turn reopens the conversation that the previous turn saved. It lists only the operator tools that the member's token allows, the same tools that the [MCP endpoint](/guides/connect-an-mcp-client/) serves, and every call goes through the operator API with that token, so the supervisor can do no more than the member. Members can't open a conversation with the supervisor yet; this setting selects and checks its brain.
+The supervisor observes and operates the factory for a member. It runs on the orchestrator with the instance's gateway credential, and each turn reopens the conversation that the previous turn saved. It lists only the operator tools that the member's token allows, the same tools that the [MCP endpoint](/guides/connect-an-mcp-client/) serves, and every call goes through the operator API with that token, so the supervisor can do no more than the member. The setting selects and checks the supervisor's brain; this release has no interface that opens a conversation with it.
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
