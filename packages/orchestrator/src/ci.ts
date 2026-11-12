@@ -39,10 +39,9 @@ import {
   type FailedCheck,
   GitHubChecks,
   HeadWorkflowRunState,
-  type IncompleteWorkflowRun,
   type PendingCheck,
   type PendingCheckReport,
-  type RunningWorkflowRun,
+  type WorkflowJob,
 } from "@usine/github/checks";
 import { GitHubItemWriter, ItemLabelMutation } from "@usine/github/item-writer";
 import { ItemProjectionWriter } from "@usine/engine/item-projection";
@@ -85,16 +84,74 @@ const pendingCheckDetails = ({ checks, omitted }: PendingCheckReport) =>
           : [`${omitted} more pending ${omitted === 1 ? "check is" : "checks are"} not listed.`]),
       ].join(" ");
 
-const workflowRunDetails = (runs: ReadonlyArray<IncompleteWorkflowRun | RunningWorkflowRun>) =>
+/** The only failed job of a workflow run and the jobs of that run that didn't finish. */
+interface LoneJobFailure {
+  readonly job: WorkflowJob;
+  readonly unfinished: ReadonlyArray<WorkflowJob>;
+}
+
+/**
+ * A workflow run on the head that didn't run or finish in full. `state` is the conclusion of a
+ * run that concluded, or the status of a run still going.
+ */
+interface UnfinishedRun {
+  readonly id: number;
+  readonly workflow: string;
+  readonly url: string;
+  readonly state: string;
+  readonly jobs: ReadonlyArray<WorkflowJob>;
+  readonly loneFailure: Option.Option<LoneJobFailure>;
+}
+
+/**
+ * Returns the only failed job of a run with the jobs that didn't finish, or `None` if no job
+ * failed, several failed, or every other job finished. In a run still going, a job in progress may
+ * still finish, so only queued or waiting jobs count.
+ */
+const loneJobFailure = (
+  jobs: ReadonlyArray<WorkflowJob>,
+  concluded: boolean,
+): Option.Option<LoneJobFailure> => {
+  const failed = jobs.filter(({ failed }) => failed);
+  const [job] = failed;
+  if (failed.length !== 1 || job === undefined) return Option.none();
+  const unfinished = jobs.filter(({ status }) =>
+    concluded ? status !== "completed" : status !== "completed" && status !== "in_progress",
+  );
+  return unfinished.length === 0 ? Option.none() : Option.some({ job, unfinished });
+};
+
+/**
+ * Sorts the workflow runs on the head into runs that concluded without running in full and runs
+ * still going. A run concluded in full when it failed through a job that a fix can address: more
+ * than one failed job, or one failed job with every other job finished.
+ */
+const unfinishedRuns = ({ failed, running }: HeadWorkflowRunState) => ({
+  incomplete: failed.flatMap(({ id, workflow, url, conclusion, jobs }): Array<UnfinishedRun> => {
+    const lone = loneJobFailure(jobs, true);
+    return Option.isNone(lone) && jobs.some(({ failed }) => failed)
+      ? []
+      : [{ id, workflow, url, state: conclusion, jobs, loneFailure: lone }];
+  }),
+  running: running.map(({ id, workflow, url, status, jobs }): UnfinishedRun => ({
+    id,
+    workflow,
+    url,
+    state: status,
+    jobs,
+    loneFailure: loneJobFailure(jobs, false),
+  })),
+});
+
+const workflowRunDetails = (runs: ReadonlyArray<UnfinishedRun>) =>
   runs
     .map((run) => {
-      const state = "conclusion" in run ? run.conclusion : run.status;
       const lone = Option.match(run.loneFailure, {
         onNone: () => "",
         onSome: ({ job, unfinished }) =>
-          `; job ${job} failed while ${unfinished.join(", ")} didn't finish`,
+          `; job ${job.name} failed while ${unfinished.map(({ name }) => name).join(", ")} didn't finish`,
       });
-      return `${run.workflow} (run ${run.id}, ${state}${lone}): ${run.url}`;
+      return `${run.workflow} (run ${run.id}, ${run.state}${lone}): ${run.url}`;
     })
     .join("; ");
 
@@ -103,31 +160,36 @@ const workflowRunDetails = (runs: ReadonlyArray<IncompleteWorkflowRun | RunningW
  * finish in full: it is the run's lone failed job, or a job of an earlier attempt of a run that
  * GitHub Actions reran. Checks without an Actions job never match.
  */
-const unfinishedRunFailure = ({ incomplete, running }: HeadWorkflowRunState) => {
+const unfinishedRunFailure = ({ incomplete, running }: ReturnType<typeof unfinishedRuns>) => {
   const runs = new Map([...incomplete, ...running].map((run) => [run.id, run]));
   return ({ actionsJob }: FailedCheck) =>
     Option.exists(actionsJob, ({ runId, jobId }) => {
       const run = runs.get(runId);
       return (
         run !== undefined &&
-        (!run.jobIds.includes(jobId) ||
-          Option.exists(run.loneFailure, (lone) => lone.jobId === jobId))
+        (!run.jobs.some(({ id }) => id === jobId) ||
+          Option.exists(run.loneFailure, ({ job }) => job.id === jobId))
       );
     });
 };
 
 /**
  * Returns how workflow runs that didn't run or finish in full end a CI wait without another failed
- * job. `Incomplete` is CI that ran only in part, including a lone failed job whose sibling jobs are
- * still queued at the deadline. `Stalled` is a run still going at the deadline, and `Running` one
- * that keeps the wait pending.
+ * job. Before the deadline, a run still going keeps the wait pending (`Running`), and otherwise a
+ * run that concluded without running in full ends it (`Incomplete`). At the deadline, `Incomplete`
+ * names every run that didn't run or finish in full, including a lone failed job whose sibling
+ * jobs are still queued, and `Stalled` names the runs still going when no run ran only in part.
  */
-const unfinishedCi = ({ incomplete, running }: HeadWorkflowRunState, timedOut: boolean) => {
-  const held = running.filter(({ loneFailure }) => Option.isSome(loneFailure));
-  if (incomplete.length > 0 || (timedOut && held.length > 0))
-    return { _tag: "Incomplete", runs: [...incomplete, ...held] } as const;
+const unfinishedCi = (state: HeadWorkflowRunState, timedOut: boolean) => {
+  const { incomplete, running } = unfinishedRuns(state);
+  if (!timedOut && running.length > 0) return { _tag: "Running", runs: running } as const;
+  if (
+    incomplete.length > 0 ||
+    (timedOut && running.some(({ loneFailure }) => Option.isSome(loneFailure)))
+  )
+    return { _tag: "Incomplete", incomplete, running } as const;
   if (running.length === 0) return { _tag: "Concluded" } as const;
-  return { _tag: timedOut ? "Stalled" : "Running", runs: running } as const;
+  return { _tag: "Stalled", runs: running } as const;
 };
 
 const checksUrl = (repository: RepositoryName, pullRequest: number) =>
@@ -153,7 +215,7 @@ export class CiNotPassedError extends Schema.TaggedError<
 const PENDING_DIAGNOSTICS_LIMIT = "10 seconds";
 const PENDING_HISTORY_LIMIT = { seconds: 7 };
 
-const noWorkflowRuns = HeadWorkflowRunState.make({ incomplete: [], running: [] });
+const noWorkflowRuns = HeadWorkflowRunState.make({ failed: [], running: [] });
 
 /** Settles persisted CI waits during polling and webhook hints, without worker reservations. */
 export class CiMonitor extends Context.Service<
@@ -320,7 +382,12 @@ export class CiMonitor extends Context.Service<
           runs: HeadWorkflowRunState,
         ) {
           const unfinished = unfinishedCi(runs, timedOut);
-          const ids = unfinished._tag === "Concluded" ? [] : unfinished.runs.map(({ id }) => id);
+          const ids =
+            unfinished._tag === "Concluded"
+              ? []
+              : unfinished._tag === "Incomplete"
+                ? [...unfinished.incomplete, ...unfinished.running].map(({ id }) => id)
+                : unfinished.runs.map(({ id }) => id);
           const fields = { runId, head, state: observed.state, runs: ids };
           yield* Effect.annotateCurrentSpan({ outcome: unfinished._tag, runs: ids });
           switch (unfinished._tag) {
@@ -332,19 +399,33 @@ export class CiMonitor extends Context.Service<
                 fields,
               );
               return true;
-            case "Incomplete":
+            case "Incomplete": {
+              const { incomplete, running } = unfinished;
+              // At the deadline, the pending jobs tell a stalled run apart from a slow or hung job.
+              const details =
+                running.length > 0 ? yield* pendingDiagnostics : "No workflow run is still going.";
               yield* Effect.logWarning(
                 "CI ran only in part; operator attention is required and no fix starts",
-                fields,
+                { ...fields, details },
               );
-              yield* engine.settleCi(
-                runId,
-                head,
-                CiIncomplete.make({
-                  message: `GitHub Actions didn't run CI on head ${head} in full, so it isn't a failure that a fix can address: ${workflowRunDetails(unfinished.runs)}. usine applied no completion labels and started no fix. Rerun these workflow runs once GitHub allows it, or push a commit to start new ones. ${afterGreen(head)} Check ${checksUrl(wait.repository, pullRequest)}`,
-                }),
-              );
+              const message = [
+                `GitHub Actions didn't run CI on head ${head} in full, so it isn't a failure that a fix can address.`,
+                ...(incomplete.length > 0
+                  ? [
+                      `These workflow runs concluded without running in full: ${workflowRunDetails(incomplete)}.`,
+                    ]
+                  : []),
+                ...(running.length > 0
+                  ? [
+                      `GitHub Actions didn't finish these workflow runs within ${handoff.timeoutSeconds} seconds: ${workflowRunDetails(running)}.`,
+                      details,
+                    ]
+                  : []),
+                `usine applied no completion labels and started no fix. Rerun these workflow runs once GitHub allows it, or push a commit to start new ones. ${afterGreen(head)} Check ${checksUrl(wait.repository, pullRequest)}`,
+              ].join(" ");
+              yield* engine.settleCi(runId, head, CiIncomplete.make({ message }));
               return true;
+            }
             case "Stalled": {
               // The pending jobs tell a stalled run apart from a slow or hung job.
               const details = yield* pendingDiagnostics;
@@ -418,7 +499,7 @@ export class CiMonitor extends Context.Service<
             : Option.none<CheckFailureEvidence>();
         const runs = observed.state === "conflict" ? noWorkflowRuns : yield* readWorkflowRuns;
         // A gate job that failed because the jobs it needs never ran is no failure to fix.
-        const isUnfinishedRunFailure = unfinishedRunFailure(runs);
+        const isUnfinishedRunFailure = unfinishedRunFailure(unfinishedRuns(runs));
         const unfinishedFailures = Option.match(reported, {
           onNone: () => [],
           onSome: ({ checks }) => checks.filter(isUnfinishedRunFailure),
@@ -654,9 +735,10 @@ export class CiMonitor extends Context.Service<
               : `CI on head ${head} is ${observed.state === "pending" ? "still pending" : "red"}.`,
           );
         const runs = yield* checks.workflowRuns(failed.repository, head);
-        if (runs.incomplete.length > 0 || runs.running.length > 0)
+        const { incomplete, running } = unfinishedRuns(runs);
+        if (incomplete.length > 0 || running.length > 0)
           return yield* notPassed(
-            `CI on head ${head} reads green, but these workflow runs on it didn't finish in full: ${workflowRunDetails([...runs.incomplete, ...runs.running])}.`,
+            `CI on head ${head} reads green, but these workflow runs on it didn't finish in full: ${workflowRunDetails([...incomplete, ...running])}.`,
           );
         for (const mutation of handoff.onGreen) {
           yield* writer.updateLabels(
