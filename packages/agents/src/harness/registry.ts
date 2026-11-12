@@ -58,9 +58,9 @@ export class Harnesses extends Context.Service<
       registered.set(runtime.id, {
         id: runtime.id,
         stop: (spec) => runtime.stop(scoped(spec)),
-        open: (spec, start, continuation) =>
-          admitSession(catalog, spec, start).pipe(
-            Effect.andThen(() => runtime.open(scoped(spec), start, continuation)),
+        open: (spec, start, continuation, tools) =>
+          admitSession(catalog, spec, start, tools !== undefined).pipe(
+            Effect.andThen(() => runtime.open(scoped(spec), start, continuation, tools)),
           ),
         preflight: (brain, target) =>
           admitPreflight(catalog, brain, target).pipe(

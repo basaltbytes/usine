@@ -101,6 +101,7 @@
     "@earendil-works/pi-mcp": "1.4.0",
     "@earendil-works/pi-telemetry": "1.4.0",
     "@earendil-works/pi-tui": "1.4.0",
+    "@modelcontextprotocol/sdk": "1.32.1",
     "@usine/core": "workspace:*"
   },
   "devDependencies": {

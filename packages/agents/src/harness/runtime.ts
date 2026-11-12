@@ -16,6 +16,8 @@ import { ChildHost } from "../child-host/child-host.ts";
 import { SessionOperationError } from "../runtime.ts";
 import type { ContinuationPolicy } from "./continuation.ts";
 import type { NativeSession, SessionSpec, Start } from "./contract.ts";
+import { type HostToolServices, type HostToolSet, hostToolSet, noHostTools } from "./tools.ts";
+import type { Tool, Toolkit } from "effect/ai";
 
 /** Where and how to check a brain without starting a prompt. */
 export class ProbeTarget extends Schema.Class<
@@ -41,13 +43,16 @@ export interface HarnessRuntime {
   /**
    * Opens the native session that `spec` describes in the calling scope, starting with a prompt
    * or reopening a saved conversation. `continuation` supplies the restored conversation state and
-   * the recovery decisions after a lost transport.
+   * the recovery decisions after a lost transport. The session can call the tools of `tools`, with
+   * the handlers of the calling context, so the role that opens it scopes what they reach; when
+   * the role closes native tools, they are the only tools that the session lists.
    */
-  readonly open: (
+  readonly open: <Tools extends Record<string, Tool.Any> = Record<never, never>>(
     spec: SessionSpec,
     start: Start,
     continuation: ContinuationPolicy,
-  ) => Effect.Effect<NativeSession, AgentSessionError, Scope.Scope>;
+    tools?: Toolkit.Toolkit<Tools>,
+  ) => Effect.Effect<NativeSession, AgentSessionError, Scope.Scope | HostToolServices<Tools>>;
   /** Stops a retained native process of `spec` without reopening its conversation. */
   readonly stop: (spec: SessionSpec) => Effect.Effect<void, AgentSessionError>;
   readonly preflight: (
@@ -55,6 +60,22 @@ export interface HarnessRuntime {
     target: ProbeTarget,
   ) => Effect.Effect<HarnessReadiness, SessionOperationError>;
 }
+
+/** Opens a native session that serves `tools`, already bound to the opening role's handlers. */
+export type OpenSession = (
+  spec: SessionSpec,
+  start: Start,
+  continuation: ContinuationPolicy,
+  tools: HostToolSet,
+) => Effect.Effect<NativeSession, AgentSessionError, Scope.Scope>;
+
+/** Returns `HarnessRuntime.open` over an adapter's `open`, binding the toolkit to its handlers. */
+export const openWithTools =
+  (open: OpenSession): HarnessRuntime["open"] =>
+  (spec, start, continuation, tools) =>
+    tools === undefined
+      ? open(spec, start, continuation, noHostTools)
+      : Effect.flatMap(hostToolSet(tools), (bound) => open(spec, start, continuation, bound));
 
 export const loginUnavailable = (brain: BrainSpec, message: string) =>
   HarnessUnavailableError.make({ harness: brain.harness, capability: "login", message });
