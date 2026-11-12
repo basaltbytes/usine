@@ -246,7 +246,7 @@ const actionsJobRef = (detailsUrl: string | null) => {
   const ids = detailsUrl?.match(ACTIONS_JOB_URL);
   return ids?.[1] === undefined || ids[2] === undefined
     ? Option.none()
-    : Option.some(ActionsJobRef.make({ runId: Number(ids[1]), jobId: Number(ids[2]) }));
+    : ActionsJobRef.makeOption({ runId: Number(ids[1]), jobId: Number(ids[2]) });
 };
 const jobDuration = (job: CompletedJob) =>
   job.started_at !== null && job.completed_at !== null
@@ -616,9 +616,7 @@ export class GitHubChecks extends Context.Service<
           ].slice(0, PENDING_CHECK_LIMIT);
           const jobRun = (check: PendingCheckRun) =>
             check.status === "in_progress"
-              ? Option.fromNullishOr(
-                  check.details_url?.match(/\/actions\/runs\/(\d+)\/job\/\d+(?:\?|$)/u)?.[1],
-                )
+              ? Option.map(actionsJobRef(check.details_url), ({ runId }) => String(runId))
               : Option.none();
           const historyRuns = [...new Set(shown.flatMap((check) => Option.toArray(jobRun(check))))];
           const histories = new Map<string, ReadonlyArray<CompletedJob>>();
@@ -752,11 +750,11 @@ export class GitHubChecks extends Context.Service<
           const excerpts: Array<string> = [];
           const archives = new Map<string, Uint8Array>();
           for (const check of failed.slice(0, 4)) {
-            const job = check.details_url?.match(/\/actions\/runs\/\d+\/job\/(\d+)(?:\?|$)/u)?.[1];
-            const log =
-              job === undefined
-                ? Effect.succeed(check.output.text ?? check.output.summary ?? "")
-                : jobFailure(prefix, job, archives);
+            const log = Option.match(actionsJobRef(check.details_url), {
+              onNone: (): Effect.Effect<string, GitHubAppError> =>
+                Effect.succeed(check.output.text ?? check.output.summary ?? ""),
+              onSome: ({ jobId }) => jobFailure(prefix, String(jobId), archives),
+            });
             const output = yield* log.pipe(
               Effect.catchIf(
                 (error) => error._tag !== "GitHubRateLimitError",

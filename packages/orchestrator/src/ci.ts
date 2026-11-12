@@ -41,12 +41,13 @@ import {
   HeadWorkflowRunState,
   type PendingCheck,
   type PendingCheckReport,
+  type UnfinishedCheck,
   type WorkflowJob,
 } from "@usine/github/checks";
 import { GitHubItemWriter, ItemLabelMutation } from "@usine/github/item-writer";
 import { ItemProjectionWriter } from "@usine/engine/item-projection";
 import { ChangedPullRequest, GitHubPolling } from "@usine/github/polling";
-import type { GitHubAppError } from "@usine/github/github-app";
+import { type GitHubAppError, isRefusal } from "@usine/github/github-app";
 import { type Brand, Context, DateTime, Effect, Layer, Option, Result, Schema } from "effect";
 import { resolveTriggerLoops, triggerSubmission } from "./trigger-submission.ts";
 import {
@@ -410,12 +411,36 @@ export class CiMonitor extends Context.Service<
               }).pipe(Effect.as("Pending job diagnostics are unavailable.")),
             ),
           );
-        // Settles CI that GitHub Actions didn't run or finish in full, or keeps the wait pending
-        // while a run goes on. Returns `false` once every workflow run concluded in full.
-        const settleUnfinished = Effect.fn("CiMonitor.settleUnfinished")(function* (
-          runs: HeadWorkflowRunState,
+        // Returns the names of the checks on the head that haven't completed, apart from the jobs of
+        // `incomplete`, which can't start. A refused read, such as one without commit-status access,
+        // reports none.
+        const pendingOutside = Effect.fn("CiMonitor.pendingOutside")(function* (
+          incomplete: ReadonlyArray<UnfinishedRun>,
         ) {
-          const unfinished = unfinishedCi(runs, timedOut);
+          const concluded = new Set(incomplete.map(({ id }) => id));
+          const unfinishedChecks = yield* checks
+            .unfinishedChecks(wait.repository, head)
+            .pipe(
+              Effect.catchIf(isRefusal, (error) =>
+                Effect.logWarning(
+                  "Unfinished checks on the head are unreadable; CI decides without them",
+                  { runId, head, ...repositoryFailureLogFields(error) },
+                ).pipe(Effect.as<ReadonlyArray<UnfinishedCheck>>([])),
+              ),
+            );
+          return unfinishedChecks
+            .filter(
+              ({ actionsJob }) => !Option.exists(actionsJob, ({ runId }) => concluded.has(runId)),
+            )
+            .map(({ name }) => name);
+        });
+        // Settles CI that GitHub Actions didn't run or finish in full, or keeps the wait pending
+        // while a run or one of `pendingChecks` goes on. Returns `false` once every workflow run
+        // concluded in full.
+        const settleUnfinished = Effect.fn("CiMonitor.settleUnfinished")(function* (
+          unfinished: ReturnType<typeof unfinishedCi>,
+          pendingChecks: ReadonlyArray<string>,
+        ) {
           const ids =
             unfinished._tag === "Concluded"
               ? []
@@ -435,27 +460,18 @@ export class CiMonitor extends Context.Service<
               return true;
             case "Incomplete": {
               const { incomplete, running } = unfinished;
-              if (!timedOut) {
-                // A check outside the runs that concluded can still fail, and that failure must
-                // reach the fix loop.
-                const concluded = new Set(incomplete.map(({ id }) => id));
-                const pendingChecks = (yield* checks.unfinishedChecks(wait.repository, head))
-                  .filter(
-                    ({ actionsJob }) =>
-                      !Option.exists(actionsJob, ({ runId }) => concluded.has(runId)),
-                  )
-                  .map(({ name }) => name);
-                if (pendingChecks.length > 0) {
-                  yield* Effect.logInfo(
-                    "CI ran only in part, but other checks on the head are still pending; CI is still pending",
-                    { ...fields, pendingChecks },
-                  );
-                  return true;
-                }
+              // A check outside the runs that concluded can still fail, and that failure must reach
+              // the fix loop.
+              if (!timedOut && pendingChecks.length > 0) {
+                yield* Effect.logInfo(
+                  "CI ran only in part, but other checks on the head are still pending; CI is still pending",
+                  { ...fields, pendingChecks },
+                );
+                return true;
               }
-              // At the deadline, the pending jobs tell a stalled run apart from a slow or hung job,
-              // including checks outside a workflow run that is still going.
-              const pending = running.length > 0 || observed.state === "pending";
+              // At the deadline, the pending jobs tell a stalled run apart from a slow or hung job.
+              const pending =
+                running.length > 0 || observed.state === "pending" || pendingChecks.length > 0;
               const details = pending ? yield* pendingDiagnostics : "No check is still pending.";
               yield* Effect.logWarning(
                 "CI ran only in part; operator attention is required and no fix starts",
@@ -511,7 +527,8 @@ export class CiMonitor extends Context.Service<
                   }).pipe(Effect.as(noWorkflowRuns)),
               }),
             );
-            if (yield* settleUnfinished(runs)) return;
+            // The pending rollup already adds the pending job diagnostics.
+            if (yield* settleUnfinished(unfinishedCi(runs, timedOut), [])) return;
             const details = yield* pendingDiagnostics;
             yield* Effect.logWarning("CI wait timed out; operator attention is required", {
               runId,
@@ -540,6 +557,11 @@ export class CiMonitor extends Context.Service<
         // Read the runs before the failed checks: a rerun that concludes between the two reads then
         // delays a fix by one poll, instead of leaving its earlier attempt's failure unexempt.
         const runs = observed.state === "conflict" ? noWorkflowRuns : yield* readWorkflowRuns;
+        const unfinished = unfinishedCi(runs, timedOut);
+        // Read the pending checks before the failed checks too: a check that completes between the
+        // two reads then shows up as failed or keeps the wait pending.
+        const pendingChecks =
+          unfinished._tag === "Incomplete" ? yield* pendingOutside(unfinished.incomplete) : [];
         const reported =
           observed.state === "failure"
             ? yield* checks.failures(wait.repository, head).pipe(Effect.asSome)
@@ -565,13 +587,17 @@ export class CiMonitor extends Context.Service<
         const evidence =
           unfinishedFailures.length > 0 &&
           Option.exists(reported, ({ checks }) => checks.length === unfinishedFailures.length)
-            ? yield* checks
-                .failedStatuses(wait.repository, head)
-                .pipe(
-                  Effect.map((statuses) =>
-                    statuses.checks.length > 0 ? Option.some(statuses) : reported,
-                  ),
-                )
+            ? yield* checks.failedStatuses(wait.repository, head).pipe(
+                Effect.map((statuses) =>
+                  statuses.checks.length > 0 ? Option.some(statuses) : reported,
+                ),
+                Effect.catchIf(isRefusal, (error) =>
+                  Effect.logWarning(
+                    "Commit statuses on the head are unreadable; CI decides from the check runs",
+                    { runId, head, ...repositoryFailureLogFields(error) },
+                  ).pipe(Effect.as(reported)),
+                ),
+              )
             : reported;
         const failedJobs = Option.match(evidence, {
           onNone: () => [],
@@ -585,7 +611,7 @@ export class CiMonitor extends Context.Service<
             jobs: failedJobs,
             unfinishedRunFailures: unfinishedFailures.map(({ name }) => name),
           });
-        else if (yield* settleUnfinished(runs)) return;
+        else if (yield* settleUnfinished(unfinished, pendingChecks)) return;
         if (observed.state === "success") {
           for (const mutation of handoff.onGreen) {
             yield* writer.updateLabels(
