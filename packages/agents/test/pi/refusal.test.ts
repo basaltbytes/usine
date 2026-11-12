@@ -66,6 +66,24 @@ it.each([
     resetsAt: Option.none(),
   },
   {
+    name: "a rate limit next to a number that contains 429",
+    errorMessage: "Rate limit settings are invalid (request 14290)",
+    expected: "AgentResultError",
+    resetsAt: Option.none(),
+  },
+  {
+    name: "a rate limit next to a number that starts with 429",
+    errorMessage: "Rate limit settings are invalid (request 4291)",
+    expected: "AgentResultError",
+    resetsAt: Option.none(),
+  },
+  {
+    name: "a rate limit next to a version that contains 429",
+    errorMessage: "Rate limit settings are invalid in client 1.429.0",
+    expected: "AgentResultError",
+    resetsAt: Option.none(),
+  },
+  {
     name: "a rate limit without HTTP 429",
     errorMessage: "Rate limit settings are invalid",
     expected: "AgentResultError",

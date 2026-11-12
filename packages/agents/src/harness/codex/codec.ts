@@ -170,8 +170,8 @@ const permanentLimit = /^(?:Quota exceeded\b|To use Codex with your ChatGPT plan
 
 /**
  * Classifies the final turn error, preferring Codex's error code to message matching. A usage or
- * rate limit is a capacity refusal that resets when the latest rate-limit snapshot's used-up
- * windows reset, if `rateLimits` has them.
+ * rate limit, including a final HTTP 429 after Codex's own retries, is a capacity refusal that
+ * resets when the latest rate-limit snapshot's used-up windows reset, if `rateLimits` has them.
  */
 export const turnFailure = (
   sessionId: AgentSessionId,
@@ -197,20 +197,33 @@ export const turnFailure = (
           message,
           resetsAt: Option.flatMap(rateLimits, exhaustedUntil),
         });
-  const capacity = Schema.is(Schema.String)(code)
-    ? isCodexErrorCode(code, "serverOverloaded")
-    : Object.values(code).some((detail) =>
-        Option.exists(
-          decodeHttpStatus(detail),
-          ({ httpStatusCode }) =>
-            httpStatusCode === 529 ||
-            (httpStatusCode === 503 &&
-              /\bretry(?:[- ]after)?\b|\btry again\b/iu.test(
-                message + " " + (error?.additionalDetails ?? ""),
-              )),
-        ),
-      );
-  return capacity
+  if (Schema.is(Schema.String)(code))
+    return isCodexErrorCode(code, "serverOverloaded")
+      ? AgentCapacityError.make({ sessionId: Option.some(sessionId), message })
+      : AgentResultError.make({ sessionId: Option.some(sessionId), message });
+  const statuses = Object.values(code).flatMap((detail) =>
+    Option.match(decodeHttpStatus(detail), {
+      onNone: () => [],
+      onSome: ({ httpStatusCode }) => (httpStatusCode === null ? [] : [httpStatusCode]),
+    }),
+  );
+  // Codex reports an exhausted API-key quota as `usageLimitExceeded`, so a final HTTP 429 is a
+  // rate limit.
+  if (statuses.includes(429) && !permanentLimit.test(message))
+    return AgentCapacityError.make({
+      sessionId: Option.some(sessionId),
+      message,
+      resetsAt: Option.flatMap(rateLimits, exhaustedUntil),
+    });
+  const overloaded = statuses.some(
+    (status) =>
+      status === 529 ||
+      (status === 503 &&
+        /\bretry(?:[- ]after)?\b|\btry again\b/iu.test(
+          message + " " + (error?.additionalDetails ?? ""),
+        )),
+  );
+  return overloaded
     ? AgentCapacityError.make({ sessionId: Option.some(sessionId), message })
     : AgentResultError.make({ sessionId: Option.some(sessionId), message });
 };

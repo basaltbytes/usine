@@ -2723,6 +2723,65 @@ it.live(
   30_000,
 );
 
+// pi-durable settles a failed blocking compaction `model_error` without appending a failed
+// assistant entry, so the earlier, retried overload must not date the wait.
+it.live(
+  "dates a Pi parent's stated wait from now when its failed compaction appended no entry",
+  () =>
+    Effect.gen(function* () {
+      const database = yield* temporaryDatabase;
+      const logs = capturedLogs();
+      const limit = "You have hit your ChatGPT usage limit (plus plan). Try again in ~42 min.";
+      const before = yield* DateTime.now;
+      const failure = yield* Effect.gen(function* () {
+        const runtime = yield* AttemptRuntime;
+        const children = yield* StubChildren;
+        const execution = yield* Effect.forkChild(
+          runtime
+            .execute(attemptRequest("capacity/parent/compaction"), recordingSink().sink)
+            .pipe(Effect.flip),
+        );
+        for (const _ of [1, 2]) yield* (yield* children.next).reply("x".repeat(50_000));
+        return yield* Fiber.join(execution);
+      }).pipe(
+        Effect.provide(
+          layer({
+            database,
+            contextWindow: 40_000,
+            parent: [
+              fauxAssistantMessage([], {
+                stopReason: "error",
+                errorMessage: '503 {"error":{"type":"overloaded_error","message":"Overloaded"}}',
+                timestamp: DateTime.toEpochMillis(DateTime.makeUnsafe("2026-11-12T01:00:00Z")),
+              }),
+              delegate("Read the first log"),
+              delegate("Read the second log"),
+              fauxAssistantMessage([], { stopReason: "error", errorMessage: limit }),
+            ],
+          }).pipe(Layer.provideMerge(logs.layer)),
+        ),
+      );
+      const after = yield* DateTime.now;
+      assert(failure._tag === "ProviderCapacityFailure");
+      assert.include(failure.message, limit);
+      assert(Option.isSome(failure.resetsAt));
+      const resetsAt = failure.resetsAt.value;
+      assert.isTrue(
+        DateTime.between(resetsAt, {
+          minimum: DateTime.add(before, { minutes: 43 }),
+          maximum: DateTime.add(after, { minutes: 43 }),
+        }),
+        `resetsAt ${DateTime.formatIso(resetsAt)} counts from now`,
+      );
+      const warnings = logs
+        .matching(/Pi parent turn ended on a provider capacity refusal or usage limit/u)
+        .filter(({ level }) => level === "Warn");
+      assert.strictEqual(warnings.length, 1);
+      assert.include(warnings[0]?.text, DateTime.formatIso(resetsAt));
+    }).pipe(Effect.scoped),
+  30_000,
+);
+
 const planLimitedAt = DateTime.makeUnsafe("2026-11-12T04:17:00Z");
 
 it.live.each([

@@ -47,6 +47,21 @@ it.effect.each([
     expected: "AgentResultError",
   },
   {
+    code: { responseTooManyFailedAttempts: { httpStatusCode: 429 } },
+    message: "exceeded retry limit, last status: 429 Too Many Requests, request id: req_6",
+    expected: "AgentCapacityError",
+  },
+  {
+    code: { responseStreamDisconnected: { httpStatusCode: 429 } },
+    message: "Quota exceeded. Check your plan and billing details.",
+    expected: "AgentResultError",
+  },
+  {
+    code: { responseTooManyFailedAttempts: { httpStatusCode: 500 } },
+    message: "exceeded retry limit, last status: 500 Internal Server Error",
+    expected: "AgentResultError",
+  },
+  {
     code: { activeTurnNotSteerable: { turnKind: "review" } },
     message: "Not steerable",
     expected: "AgentResultError",
@@ -108,6 +123,36 @@ it.each([
 ])("dates a Codex usage limit with $name", ({ limits, expected }) => {
   assert.deepStrictEqual(exhaustedUntil(limits).pipe(Option.map(DateTime.formatIso)), expected);
 });
+
+it.effect("dates a Codex API-key rate limit with the latest snapshot's reset", () =>
+  Effect.gen(function* () {
+    const message = "exceeded retry limit, last status: 429 Too Many Requests, request id: req_6";
+    const { turn } = yield* Schema.decodeEffect(TurnCompleted)({
+      turn: {
+        id: "turn",
+        status: "failed",
+        error: {
+          message,
+          codexErrorInfo: { responseTooManyFailedAttempts: { httpStatusCode: 429 } },
+          additionalDetails: null,
+        },
+      },
+    });
+    const sessionId = AgentSessionId.make("child");
+    const reset = (limits: Option.Option<RateLimitsSnapshot>) => {
+      const failure = turnFailure(sessionId, turn.error, message, limits);
+      assert.isTrue(Schema.is(AgentCapacityError)(failure));
+      return Schema.is(AgentCapacityError)(failure)
+        ? failure.resetsAt.pipe(Option.map(DateTime.formatIso))
+        : Option.none();
+    };
+    assert.deepStrictEqual(
+      reset(Option.some(snapshot(window(100, Option.some("2026-11-12T05:00:00Z"))))),
+      Option.some("2026-11-12T05:00:00.000Z"),
+    );
+    assert.deepStrictEqual(reset(Option.none()), Option.none());
+  }),
+);
 
 it("keeps Claude turn limits terminal after an earlier capacity retry", () => {
   const sessionId = AgentSessionId.make("child");

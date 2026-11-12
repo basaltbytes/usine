@@ -146,7 +146,8 @@ const repliesToOperator = (
 
 /**
  * Classifies the error that ended a parent turn as a child's, and returns it if it is a capacity
- * refusal. A stated wait counts from the failed assistant entry, or from now if there is none.
+ * refusal. A stated wait counts from the newest assistant entry that failed with `errorMessage`,
+ * or from now if none did, as when a blocking compaction fails.
  */
 const parentRefusal = Effect.fn("AttemptTask.parentRefusal")(function* (
   runtime: Runtime,
@@ -156,7 +157,7 @@ const parentRefusal = Effect.fn("AttemptTask.parentRefusal")(function* (
   errorMessage: string,
 ) {
   const view = yield* call("read the parent's transcript", () => runtime.context(parent, context));
-  const timestamp = yield* Option.match(failedAssistantTimestamp(view.entries), {
+  const timestamp = yield* Option.match(failedAssistantTimestamp(view.entries, errorMessage), {
     onSome: Effect.succeed,
     onNone: () => Effect.map(DateTime.now, DateTime.toEpochMillis),
   });
