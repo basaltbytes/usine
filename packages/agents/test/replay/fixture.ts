@@ -21,12 +21,12 @@ import { ownedClaudeReplay } from "./owned-claude.ts";
 import { claudeTransport } from "./claude.ts";
 import { processTransport } from "./process.ts";
 import { piTransport } from "./pi.ts";
-import { type Scenario, Tape, Transcript } from "./transcript.ts";
+import { type Scenario, type SessionScenario, Tape, Transcript } from "./transcript.ts";
 
 export type Provider = "claude" | "codex" | "pi";
 /** The harnesses that run as a process behind a recorded transport. */
 export const providers: ReadonlyArray<Exclude<Provider, "pi">> = ["claude", "codex"];
-export const scenarios: ReadonlyArray<Scenario> = [
+export const scenarios: ReadonlyArray<SessionScenario> = [
   "simple",
   "steer",
   "queued-message",
@@ -39,7 +39,7 @@ export const scenarios: ReadonlyArray<Scenario> = [
  * The scenarios that Pi replays at its provider stream. Pi runs in the orchestrator process, so it
  * has no transport to lose and no process to exit early, and a restart reopens its saved session.
  */
-export const piScenarios: ReadonlyArray<Scenario> = [
+export const piScenarios: ReadonlyArray<SessionScenario> = [
   "simple",
   "steer",
   "queued-message",

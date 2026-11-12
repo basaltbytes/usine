@@ -19,8 +19,12 @@ export const Scenario = Schema.Literals([
   "host-tool",
   "closed-tools",
   "usage-limit",
+  "structured-result",
+  "ephemeral",
 ]);
 export type Scenario = typeof Scenario.Type;
+/** A scenario that runs a session, rather than one structured completion. */
+export type SessionScenario = Exclude<Scenario, "structured-result" | "ephemeral">;
 
 const Outbound = Schema.Struct({
   type: Schema.Literal("expect_outbound"),

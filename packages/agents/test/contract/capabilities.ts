@@ -4,23 +4,17 @@ import type { AgentSessionEvent } from "@usine/core/agent/session";
 import { Option } from "effect";
 import type { Capability } from "../../src/harness/capability.ts";
 import { catalog } from "../../src/harness/catalog.ts";
+import { completionScenarios } from "../replay/completion.ts";
 import { piScenarios, type Provider, scenarios } from "../replay/fixture.ts";
 import type { Scenario } from "../replay/transcript.ts";
 import { toolProviders, toolScenarios } from "./host-tools.ts";
-
-/**
- * A scenario of the contract suite. The recorded ones are `Scenario`s; the rest name the scenarios
- * that the adapter steps for structured completion and ephemeral sessions add, which no adapter
- * passes yet.
- */
-export type ContractScenario = Scenario | "structured-result" | "ephemeral";
 
 /** How the contract suite proves that a harness provides a capability. */
 export type Proof =
   | {
       readonly _tag: "Scenarios";
       /** Every scenario must replay for the harness that declares the capability. */
-      readonly scenarios: readonly [ContractScenario, ...Array<ContractScenario>];
+      readonly scenarios: readonly [Scenario, ...Array<Scenario>];
     }
   | {
       readonly _tag: "Suites";
@@ -33,7 +27,7 @@ export type Proof =
       readonly reason: string;
     };
 
-const proven = (...names: readonly [ContractScenario, ...Array<ContractScenario>]): Proof => ({
+const proven = (...names: readonly [Scenario, ...Array<Scenario>]): Proof => ({
   _tag: "Scenarios",
   scenarios: names,
 });
@@ -68,16 +62,17 @@ export const capabilityProofs = {
 
 /**
  * The scenarios that the replay suites run for `harness`. Claude Code and Codex replay `restart`
- * and `credential-changed` through the durable parent in `@usine/durable`, and the harnesses that
- * serve usine tool sets replay the tool scenarios in `host-tools.test.ts`.
+ * and `credential-changed` through the durable parent in `@usine/durable`, every harness replays
+ * the completion scenarios in `completion.test.ts`, and the harnesses that serve usine tool sets
+ * replay the tool scenarios in `host-tools.test.ts`.
  */
-export const replayedScenarios = (harness: Harness): ReadonlyArray<Scenario> => {
-  const replayed: ReadonlyArray<Scenario> =
-    harness === "pi" ? piScenarios : [...scenarios, "restart", "credential-changed"];
-  return toolProviders.some((provider) => provider === harness)
-    ? [...replayed, ...toolScenarios]
-    : replayed;
-};
+export const replayedScenarios = (harness: Harness): ReadonlyArray<Scenario> => [
+  ...(harness === "pi"
+    ? piScenarios
+    : [...scenarios, "restart" as const, "credential-changed" as const]),
+  ...completionScenarios,
+  ...(toolProviders.some((provider) => provider === harness) ? toolScenarios : []),
+];
 
 /** The capabilities that `harness` declares for any placement and credential route. */
 export const declaredCapabilities = (harness: Harness): ReadonlySet<Capability> =>

@@ -101,6 +101,7 @@ const runPi = <Tools extends Record<string, Tool.Any>, R>(
     },
   };
   const sdk = Layer.succeed(PiSdk)({
+    complete: () => Promise.reject(new Error("The test runs no completion")),
     start: (found) => {
       options = found;
       return Promise.resolve({

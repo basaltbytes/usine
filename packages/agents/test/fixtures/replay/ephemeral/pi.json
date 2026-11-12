@@ -1,0 +1,495 @@
+{
+  "protocol": "pi-provider-stream",
+  "harnessVersion": "1.4.0",
+  "model": "openai/gpt-5.6-luna",
+  "scenario": "ephemeral",
+  "environment": { "HOME": "$HOME", "PATH": "$PATH" },
+  "entries": [
+    {
+      "type": "expect_outbound",
+      "port": "pi:1.1",
+      "payload": {
+        "method": "stream",
+        "model": "openai/gpt-5.6-luna",
+        "reasoning": "low",
+        "systemPrompt": "Answer by calling the structured_output tool exactly once, with the answer as its arguments. Don't reply with text.",
+        "tools": ["structured_output"],
+        "constrainedTools": [
+          {
+            "name": "structured_output",
+            "parameters": {
+              "type": "object",
+              "properties": { "label": { "type": "string", "enum": ["fruit", "vegetable"] } },
+              "required": ["label"],
+              "additionalProperties": false
+            },
+            "constrainedSampling": { "type": "json_schema", "strict": "prefer" }
+          }
+        ],
+        "messages": [
+          { "role": "user", "content": "Classify the word carrot as a fruit or a vegetable." }
+        ]
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1.1/events",
+      "payload": {
+        "type": "start",
+        "partial": {
+          "role": "assistant",
+          "content": [],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794472973507
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1.1/events",
+      "payload": {
+        "type": "text_start",
+        "contentIndex": 0,
+        "partial": {
+          "role": "assistant",
+          "content": [{ "type": "text", "text": "" }],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794472973507,
+          "responseId": "resp_0df97ece8b5ce92d016af57c109fcc87d2b907193681013cac"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1.1/events",
+      "payload": {
+        "type": "text_end",
+        "contentIndex": 0,
+        "content": "",
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "",
+              "textSignature": "{\"v\":1,\"id\":\"msg_0df97ece8b5ce92d016af57c11041087d295da135d2e918198\",\"phase\":\"commentary\"}"
+            },
+            {
+              "type": "toolCall",
+              "id": "call_ceda0c6f28644decb0ddc481a7ad2c6f|fc_0df97ece8b5ce92d016af57c11528c87d2a4583b7fca8a9bca",
+              "name": "structured_output",
+              "arguments": {},
+              "partialJson": ""
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794472973507,
+          "responseId": "resp_0df97ece8b5ce92d016af57c109fcc87d2b907193681013cac"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1.1/events",
+      "payload": {
+        "type": "toolcall_start",
+        "contentIndex": 1,
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "",
+              "textSignature": "{\"v\":1,\"id\":\"msg_0df97ece8b5ce92d016af57c11041087d295da135d2e918198\",\"phase\":\"commentary\"}"
+            },
+            {
+              "type": "toolCall",
+              "id": "call_ceda0c6f28644decb0ddc481a7ad2c6f|fc_0df97ece8b5ce92d016af57c11528c87d2a4583b7fca8a9bca",
+              "name": "structured_output",
+              "arguments": {},
+              "partialJson": ""
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794472973507,
+          "responseId": "resp_0df97ece8b5ce92d016af57c109fcc87d2b907193681013cac"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1.1/events",
+      "payload": {
+        "type": "toolcall_delta",
+        "contentIndex": 1,
+        "delta": "{\"",
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "",
+              "textSignature": "{\"v\":1,\"id\":\"msg_0df97ece8b5ce92d016af57c11041087d295da135d2e918198\",\"phase\":\"commentary\"}"
+            },
+            {
+              "type": "toolCall",
+              "id": "call_ceda0c6f28644decb0ddc481a7ad2c6f|fc_0df97ece8b5ce92d016af57c11528c87d2a4583b7fca8a9bca",
+              "name": "structured_output",
+              "arguments": {},
+              "partialJson": "{\"label"
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794472973507,
+          "responseId": "resp_0df97ece8b5ce92d016af57c109fcc87d2b907193681013cac"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1.1/events",
+      "payload": {
+        "type": "toolcall_delta",
+        "contentIndex": 1,
+        "delta": "label",
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "",
+              "textSignature": "{\"v\":1,\"id\":\"msg_0df97ece8b5ce92d016af57c11041087d295da135d2e918198\",\"phase\":\"commentary\"}"
+            },
+            {
+              "type": "toolCall",
+              "id": "call_ceda0c6f28644decb0ddc481a7ad2c6f|fc_0df97ece8b5ce92d016af57c11528c87d2a4583b7fca8a9bca",
+              "name": "structured_output",
+              "arguments": {},
+              "partialJson": "{\"label"
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794472973507,
+          "responseId": "resp_0df97ece8b5ce92d016af57c109fcc87d2b907193681013cac"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1.1/events",
+      "payload": {
+        "type": "toolcall_delta",
+        "contentIndex": 1,
+        "delta": "\":\"",
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "",
+              "textSignature": "{\"v\":1,\"id\":\"msg_0df97ece8b5ce92d016af57c11041087d295da135d2e918198\",\"phase\":\"commentary\"}"
+            },
+            {
+              "type": "toolCall",
+              "id": "call_ceda0c6f28644decb0ddc481a7ad2c6f|fc_0df97ece8b5ce92d016af57c11528c87d2a4583b7fca8a9bca",
+              "name": "structured_output",
+              "arguments": { "label": "veget" },
+              "partialJson": "{\"label\":\"veget"
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794472973507,
+          "responseId": "resp_0df97ece8b5ce92d016af57c109fcc87d2b907193681013cac"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1.1/events",
+      "payload": {
+        "type": "toolcall_delta",
+        "contentIndex": 1,
+        "delta": "veget",
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "",
+              "textSignature": "{\"v\":1,\"id\":\"msg_0df97ece8b5ce92d016af57c11041087d295da135d2e918198\",\"phase\":\"commentary\"}"
+            },
+            {
+              "type": "toolCall",
+              "id": "call_ceda0c6f28644decb0ddc481a7ad2c6f|fc_0df97ece8b5ce92d016af57c11528c87d2a4583b7fca8a9bca",
+              "name": "structured_output",
+              "arguments": { "label": "vegetable" },
+              "partialJson": "{\"label\":\"vegetable"
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794472973507,
+          "responseId": "resp_0df97ece8b5ce92d016af57c109fcc87d2b907193681013cac"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1.1/events",
+      "payload": {
+        "type": "toolcall_delta",
+        "contentIndex": 1,
+        "delta": "able",
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "",
+              "textSignature": "{\"v\":1,\"id\":\"msg_0df97ece8b5ce92d016af57c11041087d295da135d2e918198\",\"phase\":\"commentary\"}"
+            },
+            {
+              "type": "toolCall",
+              "id": "call_ceda0c6f28644decb0ddc481a7ad2c6f|fc_0df97ece8b5ce92d016af57c11528c87d2a4583b7fca8a9bca",
+              "name": "structured_output",
+              "arguments": { "label": "vegetable" },
+              "partialJson": "{\"label\":\"vegetable\"}"
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794472973507,
+          "responseId": "resp_0df97ece8b5ce92d016af57c109fcc87d2b907193681013cac"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1.1/events",
+      "payload": {
+        "type": "toolcall_delta",
+        "contentIndex": 1,
+        "delta": "\"}",
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "",
+              "textSignature": "{\"v\":1,\"id\":\"msg_0df97ece8b5ce92d016af57c11041087d295da135d2e918198\",\"phase\":\"commentary\"}"
+            },
+            {
+              "type": "toolCall",
+              "id": "call_ceda0c6f28644decb0ddc481a7ad2c6f|fc_0df97ece8b5ce92d016af57c11528c87d2a4583b7fca8a9bca",
+              "name": "structured_output",
+              "arguments": { "label": "vegetable" },
+              "partialJson": "{\"label\":\"vegetable\"}"
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794472973507,
+          "responseId": "resp_0df97ece8b5ce92d016af57c109fcc87d2b907193681013cac"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1.1/events",
+      "payload": {
+        "type": "toolcall_end",
+        "contentIndex": 1,
+        "toolCall": {
+          "type": "toolCall",
+          "id": "call_ceda0c6f28644decb0ddc481a7ad2c6f|fc_0df97ece8b5ce92d016af57c11528c87d2a4583b7fca8a9bca",
+          "name": "structured_output",
+          "arguments": { "label": "vegetable" }
+        },
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "",
+              "textSignature": "{\"v\":1,\"id\":\"msg_0df97ece8b5ce92d016af57c11041087d295da135d2e918198\",\"phase\":\"commentary\"}"
+            },
+            {
+              "type": "toolCall",
+              "id": "call_ceda0c6f28644decb0ddc481a7ad2c6f|fc_0df97ece8b5ce92d016af57c11528c87d2a4583b7fca8a9bca",
+              "name": "structured_output",
+              "arguments": { "label": "vegetable" }
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794472973507,
+          "responseId": "resp_0df97ece8b5ce92d016af57c109fcc87d2b907193681013cac"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1.1/events",
+      "payload": {
+        "type": "done",
+        "reason": "toolUse",
+        "message": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "",
+              "textSignature": "{\"v\":1,\"id\":\"msg_0df97ece8b5ce92d016af57c11041087d295da135d2e918198\",\"phase\":\"commentary\"}"
+            },
+            {
+              "type": "toolCall",
+              "id": "call_ceda0c6f28644decb0ddc481a7ad2c6f|fc_0df97ece8b5ce92d016af57c11528c87d2a4583b7fca8a9bca",
+              "name": "structured_output",
+              "arguments": { "label": "vegetable" }
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 173,
+            "output": 27,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "reasoning": 0,
+            "totalTokens": 200,
+            "cost": {
+              "input": 0.0000346,
+              "output": 0.0000324,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0.000067
+            }
+          },
+          "stopReason": "toolUse",
+          "timestamp": 1794472973507,
+          "responseId": "resp_0df97ece8b5ce92d016af57c109fcc87d2b907193681013cac",
+          "rawStopReason": "completed",
+          "durationMs": 4069
+        }
+      }
+    }
+  ]
+}

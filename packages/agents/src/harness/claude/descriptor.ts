@@ -69,16 +69,10 @@ export const claude = HarnessDescriptor.make({
         "closed-tools",
         "cost-usd",
         "plan-windows",
+        "structured-output",
+        "ephemeral",
       ],
       lacking: [
-        Lacking.make({
-          capability: "structured-output",
-          reason: "The Claude Code adapter returns text, not a schema-checked value",
-        }),
-        Lacking.make({
-          capability: "ephemeral",
-          reason: "The Claude Code adapter saves every conversation",
-        }),
         Lacking.make({
           capability: "durable-coordination",
           reason:
@@ -101,16 +95,10 @@ export const claude = HarnessDescriptor.make({
         "usine-tools",
         "closed-tools",
         "cost-usd",
+        "structured-output",
+        "ephemeral",
       ],
       lacking: [
-        Lacking.make({
-          capability: "structured-output",
-          reason: "The Claude Code adapter returns text, not a schema-checked value",
-        }),
-        Lacking.make({
-          capability: "ephemeral",
-          reason: "The Claude Code adapter saves every conversation",
-        }),
         Lacking.make({
           capability: "durable-coordination",
           reason:

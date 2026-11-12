@@ -418,6 +418,7 @@ const spec = (harness: string, hostTools: boolean) => {
 const reporting = (id: Harness): HarnessRuntime => ({
   id,
   stop: () => Effect.void,
+  complete: () => Effect.die(new Error("The test runs no completion")),
   preflight: checkedPreflight(() => Effect.void),
   open: openWithTools((opened, _start, _policy, served) =>
     Effect.fail(

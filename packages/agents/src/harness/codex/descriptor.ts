@@ -101,6 +101,8 @@ export const codex = HarnessDescriptor.make({
         "token-usage",
         "model-check",
         "plan-windows",
+        "structured-output",
+        "ephemeral",
       ],
       lacking: [
         Lacking.make({
@@ -111,14 +113,6 @@ export const codex = HarnessDescriptor.make({
         Lacking.make({
           capability: "closed-tools",
           reason: "The Codex adapter keeps the harness's own tools on in every session",
-        }),
-        Lacking.make({
-          capability: "structured-output",
-          reason: "The Codex adapter returns text, not a schema-checked value",
-        }),
-        Lacking.make({
-          capability: "ephemeral",
-          reason: "The Codex adapter saves every thread",
         }),
         Lacking.make({
           capability: "durable-coordination",
@@ -134,7 +128,15 @@ export const codex = HarnessDescriptor.make({
     CapabilityProfile.make({
       placements: ["orchestrator", "local", "ssh", "container", "sandbox"],
       credentials: ["gateway", "gateway-api-key", "api-key"],
-      supported: ["resume-session", "steer", "interrupt", "token-usage", "model-check"],
+      supported: [
+        "resume-session",
+        "steer",
+        "interrupt",
+        "token-usage",
+        "model-check",
+        "structured-output",
+        "ephemeral",
+      ],
       lacking: [
         Lacking.make({
           capability: "usine-tools",
@@ -144,14 +146,6 @@ export const codex = HarnessDescriptor.make({
         Lacking.make({
           capability: "closed-tools",
           reason: "The Codex adapter keeps the harness's own tools on in every session",
-        }),
-        Lacking.make({
-          capability: "structured-output",
-          reason: "The Codex adapter returns text, not a schema-checked value",
-        }),
-        Lacking.make({
-          capability: "ephemeral",
-          reason: "The Codex adapter saves every thread",
         }),
         Lacking.make({
           capability: "durable-coordination",

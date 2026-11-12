@@ -17,6 +17,7 @@ import { callHostTool, type HostToolSet, hostToolNames } from "../tools.ts";
 import { type HookCallback } from "@anthropic-ai/claude-agent-sdk";
 import { Harness, ModelId } from "@usine/core/agent/brain";
 import {
+  type BillingPool,
   HarnessSession,
   ProviderRecovered,
   ProviderRetries,
@@ -44,8 +45,6 @@ import {
 } from "effect";
 import { ChildProcessSpawner } from "effect/process";
 import {
-  AgentCapacityError,
-  type AgentResultError,
   HostLoginLock,
   ChildBackend,
   ChildSessionLifecycle,
@@ -61,17 +60,16 @@ import { sdkProcessSpawner } from "../../child-host/sdk.ts";
 import { sessionChannel } from "../session.ts";
 import { sessionConversation } from "../conversation.ts";
 import { claudeSessionMeter, claudeTokenMeter } from "../usage.ts";
-import { claudeRateLimits, isRateLimitEvent, rejectedUntil } from "./rate-limits.ts";
+import { structuredCompletion } from "../completion.ts";
+import { claudeCompletion } from "./completion.ts";
+import { brainOptions } from "./options.ts";
+import { claudeRateLimits } from "./rate-limits.ts";
+import { claudeProviderFailures } from "./provider.ts";
 import {
   apiRetryMessage,
   ClaudeApiRetry,
   ClaudeCompletionHeader,
   ClaudeResultMessage,
-  decodeApiRetry,
-  apiRetryFailure,
-  apiErrorRefusal,
-  assistantFailure,
-  resultFailure,
   decodeMessageAcknowledgement,
   decodeCompletionUpdate,
   isAssistantMessage,
@@ -128,37 +126,21 @@ const toolNameRule = { maxLength: 64 - TOOL_PREFIX.length, reserved: new Set<str
  * native tools gets no built-in tool and no MCP server beyond its usine tools.
  */
 const optionsFor = (spec: SessionSpec, start: Start, sessionId: string): ClaudeQueryOptions => {
-  const effort = spec.session.brain.effort;
-  const base: Omit<ClaudeQueryOptions, "effort" | "thinking"> = {
+  const options: ClaudeQueryOptions = {
+    ...brainOptions(spec),
     allowDangerouslySkipPermissions: true,
-    cwd: spec.cwd,
-    // Replaces the subprocess environment instead of extending this process's.
-    env: { ...spec.environment },
-    model: spec.session.brain.model,
-    // The Worker-provisioned binary that the readiness checks inspect.
-    pathToClaudeCodeExecutable: "claude",
     permissionMode: "bypassPermissions",
     persistSession: true,
     ...Option.match(startReference(start), {
       onNone: () => ({ sessionId }),
       onSome: (saved) => ({ resume: saved.id }),
     }),
-    // The worktree is untrusted, so its project and local settings (hooks, env) are not loaded into
-    // a child that has the App credential; only the Worker user's settings apply.
-    settingSources: ["user"],
     // Flag settings take precedence over the Worker user's settings file.
     settings: { attribution: { commit: "", pr: "" } },
   };
-  const shared = spec.admitted.role.nativeTools
-    ? base
-    : { ...base, tools: [], strictMcpConfig: true };
-  return effort === "off"
-    ? { ...shared, thinking: { type: "disabled" } }
-    : {
-        ...shared,
-        effort: effort === "minimal" ? "low" : effort,
-        thinking: { type: "adaptive" },
-      };
+  return spec.admitted.role.nativeTools
+    ? options
+    : { ...options, tools: [], strictMcpConfig: true };
 };
 
 const modelExists = (models: ReadonlyArray<ClaudeModelInfo>, model: ModelId): boolean =>
@@ -445,6 +427,18 @@ const makeClaudeSessions = Effect.gen(function* () {
     }
   });
 
+  /** A route without a gateway credential kind leaves the pool to Claude Code's own account. */
+  const billingPool = (spec: SessionSpec, query: ClaudeQuery) =>
+    Option.match(spec.admitted.pool, {
+      onSome: (pool) => Effect.succeed(pool),
+      onNone: () =>
+        Effect.tryPromise({
+          try: () => query.usesApiKey(),
+          catch: (cause) =>
+            operationError("launch", spec, "Claude account discovery failed", cause),
+        }).pipe(Effect.map((apiKey): BillingPool => (apiKey ? "apiKeys" : "claudePlan"))),
+    });
+
   /** Serves `tools` to a session as the in-process MCP server `TOOL_SERVER`. */
   const serveTools = Effect.fn("ClaudeRuntime.serveTools")(function* (tools: HostToolSet) {
     const names = yield* hostToolNames(tools, toolNameRule);
@@ -544,16 +538,7 @@ const makeClaudeSessions = Effect.gen(function* () {
       start._tag === "StartResume" ? "resume" : undefined,
     );
 
-    // A route without a gateway credential kind leaves the pool to Claude Code's own account.
-    const pool = Option.isSome(spec.admitted.pool)
-      ? spec.admitted.pool.value
-      : (yield* Effect.tryPromise({
-            try: () => current.query.usesApiKey(),
-            catch: (cause) =>
-              operationError("launch", spec, "Claude account discovery failed", cause),
-          }))
-        ? "apiKeys"
-        : "claudePlan";
+    const pool = yield* billingPool(spec, current.query);
     const session = resolvedSession(spec.session, {
       brain: spec.session.brain,
       pool: Option.some(pool),
@@ -699,24 +684,7 @@ const makeClaudeSessions = Effect.gen(function* () {
       );
     });
 
-    let providerFailure = Option.none<AgentCapacityError | AgentResultError>();
-    // The reset time of the usage limit that the latest rate-limit report rejects requests under.
-    let limitResetsAt = Option.none<DateTime.Utc>();
-
-    /**
-     * Fails the session with `error`. A capacity refusal while the usage limit rejects requests
-     * carries the limit's reset time, so the retry waits for it.
-     */
-    const failTurn = (error: AgentCapacityError | AgentResultError) =>
-      channel.fail(
-        Schema.is(AgentCapacityError)(error) && Option.isSome(limitResetsAt)
-          ? AgentCapacityError.make({
-              sessionId: error.sessionId,
-              message: error.message,
-              resetsAt: limitResetsAt,
-            })
-          : error,
-      );
+    const provider = claudeProviderFailures(session.id);
 
     /** Applies one message from Claude to the session. */
     const handle = (message: Schema.Json) =>
@@ -737,23 +705,14 @@ const makeClaudeSessions = Effect.gen(function* () {
         }
         const limits = yield* readRateLimits(message);
         if (Option.isSome(limits)) yield* channel.emit(limits.value);
-        if (isRateLimitEvent(message)) {
-          limitResetsAt = rejectedUntil(message);
-          if (Option.isSome(limitResetsAt))
-            yield* Effect.logWarning("Claude reports that its usage limit rejects requests", {
-              sessionId: session.id,
-              resetsAt: DateTime.formatIso(limitResetsAt.value),
-            });
-        }
-        const retry = decodeApiRetry(message);
-        if (Option.isSome(retry)) {
-          providerFailure = apiRetryFailure(session.id, retry.value);
-          return yield* reportRetry(retry.value);
-        }
-        if (isAssistantMessage(message)) {
-          betweenTurns = false;
-          providerFailure = assistantFailure(session.id, message, providerFailure);
-        }
+        const reported = provider.read(message);
+        if (Option.isSome(reported.rejectedUntil))
+          yield* Effect.logWarning("Claude reports that its usage limit rejects requests", {
+            sessionId: session.id,
+            resetsAt: DateTime.formatIso(reported.rejectedUntil.value),
+          });
+        if (Option.isSome(reported.retry)) return yield* reportRetry(reported.retry.value);
+        if (isAssistantMessage(message)) betweenTurns = false;
         if (retrying && isAssistantMessage(message)) yield* reportRecovery();
         if (Schema.is(ClaudeCompletionHeader)(message)) {
           const update = yield* decodeCompletionUpdate(message).pipe(
@@ -801,20 +760,22 @@ const makeClaudeSessions = Effect.gen(function* () {
         retries = 0;
         retrying = false;
         if (message.subtype !== "success" || message.result === undefined) {
-          yield* failTurn(resultFailure(session.id, message, providerFailure));
+          yield* channel.fail(provider.failedResult(message));
           return;
         }
-        const refusal = apiErrorRefusal(session.id, message, providerFailure);
+        const refusal = provider.refusal(message);
         if (Option.isSome(refusal)) {
           yield* Effect.logWarning(
             "Claude turn ended on a provider capacity refusal or usage limit",
             {
               sessionId: session.id,
               apiErrorStatus: message.api_error_status,
-              resetsAt: Option.getOrUndefined(Option.map(limitResetsAt, DateTime.formatIso)),
+              resetsAt: Option.getOrUndefined(
+                Option.map(refusal.value.resetsAt, DateTime.formatIso),
+              ),
             },
           );
-          yield* failTurn(refusal.value);
+          yield* channel.fail(refusal.value);
           return;
         }
         if (message.is_error === true)
@@ -822,7 +783,7 @@ const makeClaudeSessions = Effect.gen(function* () {
             "Claude turn ended on an API error that is not a capacity refusal; its text is the session's answer",
             { sessionId: session.id, apiErrorStatus: message.api_error_status },
           );
-        providerFailure = Option.none();
+        provider.clear();
         // Typed-prompt turns stamp only their first assistant frame, even after folding guidance.
         // A result that lists `user_message_uuids` already names every folded message.
         if (message.queued_turn_count !== undefined && Option.isNone(acknowledged)) {
@@ -916,7 +877,7 @@ const makeClaudeSessions = Effect.gen(function* () {
       backgroundTasks = [];
       completedTurn = Option.none();
       reportsSessionState = false;
-      providerFailure = Option.none();
+      provider.clear();
       retries = 0;
       retrying = false;
       const { sessionId: _assignedId, ...resumeOptions } = options;
@@ -1001,7 +962,18 @@ const makeClaudeSessions = Effect.gen(function* () {
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
       );
   });
-  return { open: openWithTools(open), stop } satisfies Pick<HarnessRuntime, "open" | "stop">;
+  return {
+    open: openWithTools(open),
+    stop,
+    // A completion serves no usine tools, so its launch gets no MCP server.
+    complete: structuredCompletion(
+      claudeCompletion(
+        (spec, options, messages, scope) =>
+          launchWithRetries(spec, options, Option.none(), messages, scope),
+        billingPool,
+      ),
+    ),
+  } satisfies Pick<HarnessRuntime, "open" | "stop" | "complete">;
 });
 
 /** Provides `ChildBackend` with Claude Code for every delegated task. */

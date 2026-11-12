@@ -1,6 +1,11 @@
 // SDK hooks, transactions, and async iterators require Promise callbacks.
 // @effect-diagnostics asyncFunction:off
-import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
+import {
+  type Api,
+  type AssistantMessage,
+  getSupportedThinkingLevels,
+  type Model,
+} from "@earendil-works/pi-ai";
 import {
   type BashSpawnHook,
   createAgentSession,
@@ -19,6 +24,7 @@ import {
 import { Effort, ModelId } from "@usine/core/agent/brain";
 import { HarnessSession, HarnessSessionId } from "@usine/core/agent/session";
 import { Context, Effect, Exit, Layer, Option } from "effect";
+import type { CompletionSchema } from "../completion.ts";
 import {
   type PiAuthentication,
   type PiPool,
@@ -122,6 +128,42 @@ export type PiStartResult =
       readonly tools: ReadonlyArray<string>;
     };
 
+/** A Pi startup or completion that its model or credential rules out, before any model request. */
+export type PiRejection = Exclude<PiStartResult, { readonly _tag: "Started" }>;
+
+/** The model, prompt, and value schema of a structured completion. */
+export interface PiCompleteOptions {
+  /** The requested model in `provider/model` form. */
+  readonly model: ModelId;
+  /** The requested reasoning effort, checked against the model's supported levels. */
+  readonly thinkingLevel: Effort;
+  readonly prompt: string;
+  /** The JSON Schema of the value, which the model returns as the output tool's arguments. */
+  readonly schema: CompletionSchema;
+  /** When the prompt was sent, in epoch milliseconds, as Pi stamps every message. */
+  readonly sentAt: number;
+  /** Cancels the credential check and the model request. */
+  readonly signal: AbortSignal;
+}
+
+/** The result of a structured completion: a rejection, or the model's one response. */
+export type PiCompleteResult =
+  | PiRejection
+  | {
+      readonly _tag: "Completed";
+      /** The model in `provider/model` form. */
+      readonly model: ModelId;
+      /** The billing pool resolved from the model's credential. */
+      readonly pool: PiPool;
+      /** The model's response, whose `PI_OUTPUT_TOOL` call carries the value. */
+      readonly message: AssistantMessage;
+    };
+
+/** The tool whose arguments carry a structured completion's value. */
+export const PI_OUTPUT_TOOL = "structured_output";
+
+const completionInstructions = `Answer by calling the ${PI_OUTPUT_TOOL} tool exactly once, with the answer as its arguments. Don't reply with text.`;
+
 /** Returns a bash tool whose commands run with exactly `environment`; Pi's `PI_*` variables are not added. */
 export const environmentBashTool = (
   cwd: string,
@@ -183,6 +225,12 @@ export class PiSdk extends Context.Service<
      * The caller owns disposal of a `Started` session, including if startup finishes after cancellation.
      */
     readonly start: (options: PiStartOptions) => Promise<PiStartResult>;
+    /**
+     * Checks the model and credential of `options`, then sends one model request with no
+     * conversation, no session file, and only the output tool. Returns a rejection variant for an
+     * unsupported configuration; SDK and provider failures reject the promise.
+     */
+    readonly complete: (options: PiCompleteOptions) => Promise<PiCompleteResult>;
   }
 >()("@usine/agents/harness/pi/sdk/PiSdk") {}
 
@@ -195,10 +243,78 @@ export interface PiSdkSources {
 }
 
 /**
+ * Checks that `active` supports `thinkingLevel` and that its credential maps to a billing pool.
+ * Throws for an API key that maps to no pool.
+ */
+const checkModel = async (
+  modelRuntime: ModelRuntime,
+  active: Model<Api>,
+  thinkingLevel: Effort,
+  signal: AbortSignal,
+): Promise<
+  PiRejection | { readonly _tag: "Checked"; readonly model: ModelId; readonly pool: PiPool }
+> => {
+  const model = ModelId.make(`${active.provider}/${active.id}`);
+  const supported = getSupportedThinkingLevels(active);
+  if (!supported.includes(thinkingLevel)) {
+    return { _tag: "UnsupportedEffort", effort: thinkingLevel, model, supported };
+  }
+  const authentication = piAuthentication(
+    await modelRuntime.checkAuth(active.provider, { signal }),
+    modelRuntime.getProvider(active.provider)?.auth.oauth?.isSubscription === true,
+  );
+  const pool = resolvePiPool(active.provider, authentication);
+  if (authentication === undefined) {
+    return { _tag: "AuthenticationUnavailable", model };
+  }
+  if (pool === undefined && authentication._tag === "OAuth") {
+    return { _tag: "UnsupportedAuthentication", authentication, model };
+  }
+  if (pool === undefined) {
+    throw new Error("Pi could not map a configured API key to a billing pool");
+  }
+  return { _tag: "Checked", model, pool };
+};
+
+/**
  * Starts Pi sessions from `sources`. Project extensions, skills, prompt templates, and themes are
  * disabled. Child conversations persist according to their storage policy.
  */
 const piSdk = (sources: PiSdkSources): PiSdk["Service"] => ({
+  complete: async (options) => {
+    const modelRuntime = await sources.modelRuntime(options.signal);
+    const parts = splitPiModel(options.model);
+    if (parts === undefined) return { _tag: "UnknownModel" };
+    const selected = modelRuntime.getModel(parts.provider, parts.modelId);
+    if (selected === undefined) return { _tag: "UnknownModel" };
+    const checked = await checkModel(modelRuntime, selected, options.thinkingLevel, options.signal);
+    if (checked._tag !== "Checked") return checked;
+    // A provider sends the tool in strict mode when its API and the schema allow it.
+    const response = modelRuntime.streamSimple(
+      selected,
+      {
+        systemPrompt: completionInstructions,
+        messages: [{ role: "user", content: options.prompt, timestamp: options.sentAt }],
+        tools: [
+          {
+            name: PI_OUTPUT_TOOL,
+            description: "Returns the answer. Its arguments are the answer.",
+            parameters: options.schema,
+            constrainedSampling: { type: "json_schema", strict: "prefer" },
+          },
+        ],
+      },
+      options.thinkingLevel === "off"
+        ? { signal: options.signal }
+        : { reasoning: options.thinkingLevel, signal: options.signal },
+    );
+    return {
+      _tag: "Completed",
+      model: checked.model,
+      pool: checked.pool,
+      message: await response.result(),
+    };
+  },
   start: async (options) => {
     const modelRuntime = await sources.modelRuntime(options.signal);
     const parts = splitPiModel(options.model);
@@ -253,30 +369,13 @@ const piSdk = (sources: PiSdkSources): PiSdk["Service"] => ({
     try {
       const active = session.model;
       if (active === undefined) throw new Error("Pi started without an active model");
-      const model = ModelId.make(`${active.provider}/${active.id}`);
-      const supported = getSupportedThinkingLevels(active);
-      if (!supported.includes(options.thinkingLevel)) {
-        return { _tag: "UnsupportedEffort", effort: options.thinkingLevel, model, supported };
-      }
-      const authentication = piAuthentication(
-        await modelRuntime.checkAuth(active.provider, { signal: options.signal }),
-        modelRuntime.getProvider(active.provider)?.auth.oauth?.isSubscription === true,
-      );
-      const pool = resolvePiPool(active.provider, authentication);
-      if (authentication === undefined) {
-        return { _tag: "AuthenticationUnavailable", model };
-      }
-      if (pool === undefined && authentication._tag === "OAuth") {
-        return { _tag: "UnsupportedAuthentication", authentication, model };
-      }
-      if (pool === undefined) {
-        throw new Error("Pi could not map a configured API key to a billing pool");
-      }
+      const checked = await checkModel(modelRuntime, active, options.thinkingLevel, options.signal);
+      if (checked._tag !== "Checked") return checked;
       ownershipTransferred = true;
       return {
         _tag: "Started",
-        model,
-        pool,
+        model: checked.model,
+        pool: checked.pool,
         session,
         harnessSession:
           storage._tag === "InMemory"

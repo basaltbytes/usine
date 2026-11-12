@@ -6,6 +6,7 @@ import {
   type AssistantMessageEvent,
   type AssistantMessageEventStream,
   createAssistantMessageEventStream,
+  type Tool,
 } from "@earendil-works/pi-ai";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { Predicate, Schema } from "effect";
@@ -28,6 +29,28 @@ const withoutTimings = (value: Schema.Json): Schema.Json =>
             .map(([key, item]) => [key, withoutTimings(item)]),
         )
       : value;
+
+/**
+ * The parameters and sampling constraint of each tool that constrains the model's arguments, such
+ * as a completion's output tool. Other tools are recorded by name only, so that the session
+ * transcripts don't repeat Pi's tool schemas.
+ */
+const constrainedTools = (tools: ReadonlyArray<Tool>): { constrainedTools?: Schema.Json } => {
+  const constrained = tools.filter(({ constrainedSampling }) => constrainedSampling !== undefined);
+  return constrained.length === 0
+    ? {}
+    : {
+        constrainedTools: json(
+          encode(
+            constrained.map(({ name, parameters, constrainedSampling }) => ({
+              name,
+              parameters,
+              constrainedSampling,
+            })),
+          ),
+        ),
+      };
+};
 
 /** An event that the provider stream emitted when the transcript was recorded. */
 const RecordedEvent = Schema.declare(
@@ -73,6 +96,7 @@ export const piTransport = (tape: Tape, agentDir: string) =>
           reasoning: options?.reasoning ?? null,
           systemPrompt: context.systemPrompt ?? null,
           tools: (context.tools ?? []).map(({ name }) => name),
+          ...constrainedTools(context.tools ?? []),
           messages: withoutTimings(json(encode(context.messages))),
         });
         const output = createAssistantMessageEventStream();

@@ -298,4 +298,54 @@ describe("Claude Code usine tool sets", () => {
       assert.deepStrictEqual(results, [{ isError: false, text: "note greeting" }]);
     }).pipe(Effect.scoped, Effect.provide([lostOnce, handlers, loginLock, NodeServices.layer]));
   });
+
+  it.effect("launch a structured completion without the usine tool server", () => {
+    const opened: Array<{ options: ClaudeQueryOptions; server: Option.Option<ClaudeToolServer> }> =
+      [];
+    const completer = RoleSpec.make({
+      ...role,
+      hostTools: false,
+      persistence: "ephemeral",
+      output: "structured",
+    });
+    const completion = SessionSpec.make({
+      ...spec,
+      admitted: AdmittedBrain.make({ ...spec.admitted, role: completer }),
+    });
+    const answering = Layer.succeed(ClaudeSdk)({
+      open: (_input, options, server) => {
+        opened.push({ options, server });
+        return {
+          close: () => undefined,
+          interrupt: () => Promise.resolve(),
+          usesApiKey: () => Promise.resolve(false),
+          supportedModels: () =>
+            Promise.resolve([{ value: "sonnet", resolvedModel: "claude-sonnet-4-6" }]),
+          async *[Symbol.asyncIterator]() {
+            yield { type: "system", subtype: "init", session_id: "claude-tools-3" };
+            yield {
+              type: "result",
+              subtype: "success",
+              result: "",
+              structured_output: { approved: true },
+            };
+          },
+        };
+      },
+    });
+    return Effect.gen(function* () {
+      const runtime = yield* claudeRuntime;
+      const answer = yield* runtime.complete(
+        completion,
+        "Approve the change",
+        Schema.Struct({ approved: Schema.Boolean }),
+      );
+      assert.deepStrictEqual(answer.value, { approved: true });
+      assert.lengthOf(opened, 1);
+      const [launch] = opened;
+      assert(launch !== undefined);
+      assert(Option.isNone(launch.server), "a completion serves no usine tools");
+      assert.deepStrictEqual(launch.options.tools, []);
+    }).pipe(Effect.scoped, Effect.provide([answering, loginLock, NodeServices.layer]));
+  });
 });

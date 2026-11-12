@@ -1,7 +1,7 @@
 import { assert, describe, it } from "@effect/vitest";
 import { BrainSpec, Harness, ModelId } from "@usine/core/agent/brain";
 import { RoleName } from "@usine/core/agent/session";
-import { Array as Arr, Option, Result } from "effect";
+import { Option, Result } from "effect";
 import {
   admitBrain,
   AdmissionContext,
@@ -255,32 +255,20 @@ describe("brain admission", () => {
       "token-usage",
     ]);
     const container = AdmissionContext.make({ placement: "container", credential: "api-key" });
-    for (const id of ["claude", "codex"]) {
-      const refused = admitBrain(catalog, reviewer, brain(id), container);
-      assert(Result.isFailure(refused));
-      assert.strictEqual(refused.failure.role, "reviewer");
-      assert.deepStrictEqual(
-        refused.failure.missing.map(({ capability }) => capability),
-        id === "claude"
-          ? ["structured-output", "ephemeral"]
-          : ["closed-tools", "structured-output", "ephemeral"],
-      );
-    }
+    // Claude Code closes its own tools; Codex can't yet.
+    assert(Result.isSuccess(admitBrain(catalog, reviewer, brain("claude"), container)));
+    const refused = admitBrain(catalog, reviewer, brain("codex"), container);
+    assert(Result.isFailure(refused));
+    assert.strictEqual(refused.failure.role, "reviewer");
+    assert.deepStrictEqual(
+      refused.failure.missing.map(({ capability }) => capability),
+      ["closed-tools"],
+    );
     const claude = catalog.get(Harness.make("claude"));
     assert(Option.isSome(claude));
     const capable = HarnessDescriptor.make({
       ...claude.value,
       id: Harness.make("capable"),
-      capabilities: Arr.map(claude.value.capabilities, (profile) =>
-        CapabilityProfile.make({
-          ...profile,
-          supported: [...profile.supported, "structured-output", "ephemeral"],
-          lacking: profile.lacking.filter(
-            ({ capability }) =>
-              !["closed-tools", "structured-output", "ephemeral"].includes(capability),
-          ),
-        }),
-      ),
     });
     const extended = HarnessCatalog.make({ descriptors: [...catalog.descriptors, capable] });
     const admitted = admitBrain(

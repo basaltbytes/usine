@@ -52,6 +52,10 @@ export const ClaudeResultMessage = Schema.Struct({
   is_error: Schema.optionalKey(Schema.Boolean),
   /** The HTTP status of the API error that ended the turn, or `null` without a response. */
   api_error_status: Schema.optionalKey(Schema.NullOr(Schema.Finite)),
+  /** Why the model stopped, such as `refusal`, or `null` when Claude Code didn't report it. */
+  stop_reason: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  /** The value of a turn with an output format, as its `StructuredOutput` tool received it. */
+  structured_output: Schema.optionalKey(Schema.Json),
 });
 const ClaudeBackgroundTasks = Schema.Struct({
   type: Schema.Literal("system"),

@@ -216,6 +216,10 @@ _Avoid_: agent type, mode, persona
 The tools that usine gives a session through the harness contract, defined once as a toolkit. The role that opens the session supplies their handlers, so it decides what each call can reach.
 _Avoid_: MCP tools, custom tools, plugin
 
+**Completion**:
+One schema-checked value that a harness returns for one prompt, with no saved conversation.
+_Avoid_: structured call, one-shot
+
 **Pool**:
 The billing source for an attempt's usage: API keys, the Claude plan, or the ChatGPT plan.
 _Avoid_: budget, account, quota

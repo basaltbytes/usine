@@ -291,12 +291,12 @@ The route resolution is `childAdmissionContext` (`launch.ts:12-32`) generalized 
 | Placement | The worker's | Follows the attempt agent: same placement and route | Follows the attempt agent, or orchestrator for an instance-level brain | `orchestrator` |
 | Credential | Any route the descriptor offers | The attempt agent's route | The attempt agent's route, or the instance brain's route | `gateway-*` (owner decision 10 of 2026-11-04) |
 | Brain | Agent `harness`, `model`, `effort` | Agent `harness`, `decision.model` and `decision.effort` | Same as (b), or an instance brain | Instance `orchestrator` brain |
-| Primitive | `open` with continuation | `open`, read the first decision tool call, `interrupt` | `complete` | `open` with continuation |
-| Pi | Local only until step 21 | In process, `customTools`, `tools: []` | `pi-ai` `complete` (`pi-ai/dist/compat.d.ts:64`); schema enforcement method **unverified** | In process on the orchestrator with a gateway route (`pi/descriptor.ts:16-18`) |
+| Primitive | `open` with continuation | `open`, read the first decision tool call, `interrupt`. Blocked until `open` can run a session without saving its conversation: every adapter's `open` saves one, so admission refuses an `ephemeral` role, and `complete` refuses a text role | `complete` | `open` with continuation |
+| Pi | Local only until step 21 | In process, `customTools`, `tools: []` | One `streamSimple` request through Pi's model runtime with an output tool; see [step 20](#20-structured-completion) | In process on the orchestrator with a gateway route (`pi/descriptor.ts:16-18`) |
 | Claude Code | Built | SDK `query()` with `tools: []`, an SDK MCP server, `permissionMode: "dontAsk"`, `persistSession: false` (PR #1153 section 4) | SDK `query()` with `tools: []` and `outputFormat` (PR #1153 section 4) | SDK with an SDK MCP server |
 | Codex | Built | Client-served dynamic tools or MCP configuration (section 6); turning off shell and edit **unverified** | `thread/start` `ephemeral` and `turn/start` `outputSchema` (both in `packages/agents/src/protocol/codex/upstream-schema.json`, `definitions/v2/ThreadStartParams` and `TurnStartParams`) | Same as decision session, with `saved` |
 
-The coordinator never names a harness: the #1164 handler builds a decision `SessionSpec` from the attempt's admitted child brain, calls `Harnesses.runtime(brain.harness).open`, and reads the first decision tool call. Placement and route follow the child, so the decision session needs no extra credential, as #1164 requires.
+The coordinator never names a harness: the #1164 handler builds a decision `SessionSpec` from the attempt's admitted child brain, calls `Harnesses.runtime(brain.harness).open`, and reads the first decision tool call. Placement and route follow the child, so the decision session needs no extra credential, as #1164 requires. Before it can run, `open` must run a session without saving its conversation: every adapter's `open` saves one today (`persistSession: true` for Claude Code, `ephemeral: false` for Codex, Pi's `Create` storage), so `admitSession` refuses an `ephemeral` role, and `complete` admits only a structured one.
 
 ## 6. Tool delivery
 
@@ -344,6 +344,13 @@ Spike the experimental dynamic tools against Codex 0.164.0 and turning off shell
 ### 20. Structured completion
 
 Add `complete` to the three runtimes: Pi through `pi-ai` with its routes, including OpenAI-compatible endpoints; Claude Code through `query()` with `outputFormat`; Codex through an ephemeral thread with `outputSchema`. Add the `structured-result` and `ephemeral` fixtures. #1165 then becomes a handler that calls `complete` (owner decision 1).
+
+How each harness enforces the schema, checked on 2026-11-12 for #1208. usine sends the output's JSON Schema with closed objects and decodes every returned value with the Effect schema, so the decoder is the final check on all three.
+
+- **Claude Code 2.1.311**: with `outputFormat` and `tools: []`, the `init` message lists only a `StructuredOutput` tool, and the model returns the value as that tool's input (recorded in `structured-result/claude.json`). Claude Code checks the input against the schema and asks the model again on a mismatch; past its retries the result has the subtype `error_max_structured_output_retries` (`sdk.d.ts`, `SDKResultError`). The value arrives in the result's `structured_output`. With `persistSession: false`, no transcript appears under `~/.claude/projects`.
+- **Codex 0.164.0**: `turn/start` `outputSchema` constrains the final assistant message (`upstream-schema.json`, `TurnStartParams`). The 0.164.0 binary names the schema `codex_output_schema`, the Responses `text.format` name; that the format is strict is **inferred** from upstream source, not seen in traffic. Codex doesn't check the message itself, so usine parses it as JSON. An `ephemeral` thread writes no rollout under `CODEX_HOME/sessions`. Codex keeps its own tools, so the completion thread is read-only.
+- **Pi 1.4.0**: `pi-ai` has no structured-output option, and `toolChoice` is only `auto` or `none` (`pi-ai/dist/types.d.ts`). The adapter sends one tool whose parameters are the schema, with `constrainedSampling: { type: "json_schema", strict: "prefer" }`, and instructs the model to call it. Each provider API sends the tool in strict mode when it supports strict tools and the schema converts, and otherwise without (`resolveJsonSchemaStrictSampling` in `pi-ai/dist/api/constrained-sampling.js`, called from the Anthropic, OpenAI Responses and Completions, Google, Mistral, and Bedrock APIs). The OpenAI Responses path is recorded in `structured-result/pi.json`. No session manager is created, so nothing is written under the session directory.
+- **Refusals**: a declined answer reaches usine as Claude Code's result `stop_reason: "refusal"` and as Pi's `rawStopReason: "refusal"` on an error stop (`mapStopReason` in `pi-ai/dist/api/anthropic-messages.js`). The Codex app server has no refusal field, and pi-ai's OpenAI Responses path appends refusal text to the answer text (`openai-responses-shared.js`), so those refusals fail as invalid values.
 
 ### 21. Pi sessions on workers
 
@@ -401,8 +408,9 @@ The owner answered on 2026-11-11:
 ## Not verified
 
 - Codex 0.164.0: how dynamic tools are registered on a thread under `experimentalApi`, whether a thread can turn off shell and edit tools, and whether a `config` override can add an MCP server.
-- Pi: how `pi-ai` `complete` enforces an output schema per provider, and which flags `pi --mode rpc` takes for extensions and tools.
+- Pi: which flags `pi --mode rpc` takes for extensions and tools.
+- Codex: whether `outputSchema` reaches the Responses API in strict mode.
 - Whether `pi-ai` providers expose label probabilities, which owner decision 1 affects.
 - Whether usine's Claude adapter reads the usage-credit status, and whether its usage sums helper models as `pi-claude-cli` does.
 - Line numbers in PR #1197 are hunk positions and may move before merge.
-- No build or test ran; every claim about behavior comes from reading code and pinned type declarations.
+- Apart from the step 20 findings, which recorded fixtures back, no build or test ran; every claim about behavior comes from reading code and pinned type declarations.

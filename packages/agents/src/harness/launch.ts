@@ -92,7 +92,10 @@ export const admitChild = Effect.fn("HarnessAdmission.child")(function* (
 
 /**
  * Admits the brain of `spec` for its role at its placement and credential route before a session
- * opens. A `StartResume` also requires `resume-session`. `hostTools` states whether the session
+ * opens. A `StartResume` also requires `resume-session`. An opened session always saves its
+ * conversation and returns text, so a role that keeps no conversation or returns a structured value
+ * is refused. Only a role that does both runs as a completion; any other such role has no primitive
+ * until a session can run without saving its conversation. `hostTools` states whether the session
  * opens with a usine tool set, which it must exactly when its role runs one.
  */
 export const admitSession = Effect.fn("HarnessAdmission.session")(function* (
@@ -109,18 +112,27 @@ export const admitSession = Effect.fn("HarnessAdmission.session")(function* (
     worker: spec.worker,
     harness: spec.session.brain.harness,
   });
-  if (role.hostTools !== hostTools) {
-    const message = role.hostTools
-      ? `The ${role.name} role runs a usine tool set, but its session opened without one`
-      : `The ${role.name} role runs no usine tool set, but its session opened with one`;
-    yield* Effect.logWarning("Harness session refused", {
+  const refuse = (message: string) =>
+    Effect.logWarning("Harness session refused", {
       sessionId: spec.session.id,
       role: role.name,
       harness: spec.session.brain.harness,
       message,
-    });
-    return yield* AgentResultError.make({ sessionId: Option.some(spec.session.id), message });
-  }
+    }).pipe(
+      Effect.andThen(
+        Effect.fail(AgentResultError.make({ sessionId: Option.some(spec.session.id), message })),
+      ),
+    );
+  if (role.persistence === "ephemeral" || role.output === "structured")
+    return yield* refuse(
+      `${role.name} keeps no conversation or returns a structured value, but a session always saves its conversation and returns text; only a role that returns a structured value and keeps no conversation runs as a completion`,
+    );
+  if (role.hostTools !== hostTools)
+    return yield* refuse(
+      role.hostTools
+        ? `The ${role.name} role runs a usine tool set, but its session opened without one`
+        : `The ${role.name} role runs no usine tool set, but its session opened with one`,
+    );
   return yield* Effect.fromResult(
     admitBrain(catalog, role, spec.session.brain, context, { reopens: resume }),
   ).pipe(
