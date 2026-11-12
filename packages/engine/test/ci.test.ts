@@ -220,6 +220,12 @@ it.live.each([
             pullRequest: 815,
             head,
           });
+          assert(waiting.run.state._tag === "AwaitingCi");
+          assert(settled.run.state._tag === "Failed");
+          assert.deepStrictEqual(
+            settled.run.state.unfinishedCi,
+            Option.some(waiting.run.state.handoff),
+          );
         }
         if (resolution._tag === "CiFailed") {
           yield* engine.retry(accepted.runId);
@@ -444,6 +450,8 @@ it.live.each([1, 2])(
           } else {
             assert.strictEqual(settled.run.state._tag, "Failed");
             assert.strictEqual(RunState.operatorActions(settled.run.state).canResolveFailure, true);
+            // Red CI isn't unfinished CI, so no completion labels wait for a later green run.
+            assert.strictEqual(RunState.operatorActions(settled.run.state).canApplyCiLabels, false);
             assert.strictEqual((yield* (yield* CycleBudgets).asks).length, 1);
           }
         }).pipe(Effect.provide(engineLayer(directory, worker.executor)));

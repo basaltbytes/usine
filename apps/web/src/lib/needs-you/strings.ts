@@ -185,6 +185,9 @@ export const needDetailsLabel = "Details";
 export const needOpenItemLabel = "Open item";
 export const needOpenRunLabel = "Open run";
 export const needOpenFixRunLabel = "Open fix run";
+/** Explains the action that applies the completion labels of a CI wait that didn't finish. */
+export const applyCiLabelsDescription =
+  "After CI on the same head passes, apply the labels that the CI wait records and mark the failure resolved";
 /** Names the CI fix run that took over a failed run's work, for example `fix run 1a2b3c4d continues the work`. */
 export const fixRunContinues = (fixRunId: RunId) =>
   `fix run ${fixRunId.slice(0, 8)} continues the work`;

@@ -1,3 +1,4 @@
+import { idleCiMonitor } from "./support/ci.ts";
 import { jsonKey } from "@usine/core/json-key";
 import { EnginePersistenceError } from "@usine/engine/engine";
 import { boardHistory } from "./support/run-reader.ts";
@@ -752,6 +753,7 @@ const testLayer = (
     MarcbachmannCelLayer,
     workerStatus,
     Layer.succeed(UnconfirmedStops)({ list: unconfirmedStops }),
+    idleCiMonitor,
   );
   return Operator.layer.pipe(Layer.provide(configurationLayer), Layer.provide(dependencies));
 };

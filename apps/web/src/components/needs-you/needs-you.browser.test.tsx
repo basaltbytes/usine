@@ -24,6 +24,7 @@ import {
   RunSummaryView,
   AttemptSummaryView,
   AgentFailureView,
+  InfraFailureView,
   ApprovalNeed,
   RunFailureNeed,
   CycleBudgetNeed,
@@ -58,6 +59,8 @@ declare module "vitest/browser" {
     ) => Promise<void>;
     answerApproval: (status: 200 | 409, body: string) => Promise<void>;
     lateOverviewRequests: () => Promise<number>;
+    ciLabelsResponse: (status: 200 | 409, body: string) => Promise<void>;
+    recordedCiLabels: () => Promise<Array<unknown>>;
   }
 }
 
@@ -362,6 +365,60 @@ it("offers no fix run for a failed run without one", async () => {
   await held.getByRole("button", { name: /^Actions for/ }).click();
   await expect
     .element(page.getByRole("menuitem", { name: "Open fix run" }))
+    .not.toBeInTheDocument();
+});
+
+it("applies the CI labels of a stalled CI wait and shows why CI hasn't passed yet", async () => {
+  const need = RunFailureNeed.make({
+    id: "run-failure:approval-run:attempt-1",
+    repository,
+    runId,
+    loop,
+    failure: InfraFailureView.make({
+      message:
+        "CI did not settle within 1800 seconds because GitHub Actions didn't finish these workflow runs.",
+    }),
+    unfinishedCiAttemptId: AttemptId.make("attempt-1"),
+  });
+  await commands.approvalResponses(
+    overview([need]),
+    overview([need]),
+    detail(running),
+    detail(running),
+  );
+  const pending = `CI on head ${"a".repeat(40)} is still pending. usine applied no completion labels.`;
+  await commands.ciLabelsResponse(
+    409,
+    JSON.stringify({ error: "CiNotPassedError", message: pending }),
+  );
+  await queryClient.invalidateQueries({ queryKey: overviewQuery().queryKey });
+  const held = entry("start-dev");
+  await held.getByRole("button", { name: "Apply CI labels" }).click();
+  await expect.element(held.getByRole("alert")).toHaveTextContent(pending);
+  expect(await commands.recordedCiLabels()).toEqual([{ attemptId: "attempt-1" }]);
+  await held.getByRole("button", { name: /^Actions for/ }).click();
+  await expect.element(page.getByRole("menuitem", { name: "Open run" })).toBeVisible();
+});
+
+it("offers no CI labels for a failure that didn't end a stalled CI wait", async () => {
+  const need = RunFailureNeed.make({
+    id: "run-failure:approval-run:attempt-1",
+    repository,
+    runId,
+    loop,
+    failure: AgentFailureView.make({ message: "CI failed. Fix loop fix: CycleBlocked." }),
+  });
+  await commands.approvalResponses(
+    overview([need]),
+    overview([need]),
+    detail(running),
+    detail(running),
+  );
+  await queryClient.invalidateQueries({ queryKey: overviewQuery().queryKey });
+  const held = entry("start-dev");
+  await expect.element(held.getByRole("button", { name: "Details" })).toBeVisible();
+  await expect
+    .element(held.getByRole("button", { name: "Apply CI labels" }))
     .not.toBeInTheDocument();
 });
 

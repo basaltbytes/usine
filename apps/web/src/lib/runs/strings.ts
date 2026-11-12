@@ -30,6 +30,7 @@ export const runActionLabel = {
   retry: "Retry",
   runAgain: "Run again",
   cancel: "Cancel run",
+  applyCiLabels: "Apply CI labels",
   confirmCancel: "Confirm cancel",
   keepRunning: "Keep running",
 } as const;
@@ -142,6 +143,7 @@ export const runActionProgress = {
   retry: "Retrying…",
   cancel: "Canceling…",
   resolveFailure: "Marking resolved…",
+  applyCiLabels: "Applying CI labels…",
 } as const satisfies Record<RunActionRequest["action"], string>;
 
 export const failureMessage = (failure: FailureView): string =>

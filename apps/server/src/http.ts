@@ -57,6 +57,8 @@ const operatorFailure = (error: BackendError) => {
       case "RunOperationRejectedError":
         if (error.operation === "resolveFailure")
           return "This failure is no longer the current one. Refresh the run, then mark it resolved.";
+        if (error.operation === "applyCiLabels")
+          return "This failure is no longer the current CI failure. Refresh the run before you apply the CI labels.";
         if (error.operation === "runAgain")
           return `Run ${error.runId} is ${error.state.toLowerCase()}. Only a succeeded or canceled run can run again.`;
         return `Cannot ${error.operation} run ${error.runId} while it is ${error.state.toLowerCase()}.`;
@@ -69,6 +71,7 @@ const operatorFailure = (error: BackendError) => {
         if (error.running === 0)
           return `Could not discard the leftovers on worker "${error.worker}": it is in usine.yaml, or an attempt on it is ending.`;
         return `${error.running} ${error.running === 1 ? "attempt is" : "attempts are"} still running on worker "${error.worker}". Discard its leftovers after they end.`;
+      case "CiNotPassedError":
       case "WorkerPreflightRejectedError":
       case "BackendUnavailableError":
       case "RunRetryBlockedError":
@@ -395,6 +398,11 @@ const handlers = HttpApiBuilder.group(
       )
       .handle("resolveFailure", ({ params, payload }) =>
         fromBackend((backend) => backend.resolveFailure(params.runId, payload.attemptId)).pipe(
+          acknowledge,
+        ),
+      )
+      .handle("applyCiLabels", ({ params, payload }) =>
+        fromBackend((backend) => backend.applyCiLabels(params.runId, payload.attemptId)).pipe(
           acknowledge,
         ),
       )

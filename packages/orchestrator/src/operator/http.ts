@@ -108,6 +108,7 @@ const errorStatuses = {
   FileChangesNotFoundError: 404,
   PullRequestFilesChangedError: 409,
   RunOperationRejectedError: 409,
+  CiNotPassedError: 409,
   RunRetryBlockedError: 409,
   RunInterventionRejectedError: 409,
   LeftoversDiscardRejectedError: 409,
@@ -633,6 +634,16 @@ export const OperatorApi = operatorApi.add(
           OpenApi.Description,
           "Acknowledges the supplied failed attempt only while it remains the current failure.",
         ),
+      HttpApiEndpoint.post("applyCiLabels", "/api/runs/:runId/apply-ci-labels", {
+        params: runParams,
+        payload: Schema.Struct({ attemptId: AttemptId }),
+        success: acknowledged,
+      })
+        .annotate(OpenApi.Summary, "Apply CI labels after CI passes")
+        .annotate(
+          OpenApi.Description,
+          "For a run whose CI wait ended because CI on its head didn't finish, checks that CI on the same head has passed with every workflow run concluded, applies the wait's completion labels, and resolves the supplied failed attempt.",
+        ),
       HttpApiEndpoint.post("retry", "/api/runs/:runId/retry", {
         params: runParams,
         success: acknowledged,
@@ -980,6 +991,7 @@ export const operatorPermissions = {
   intervene: "operate",
   approve: "operate",
   resolveFailure: "operate",
+  applyCiLabels: "operate",
   retry: "operate",
   cancel: "operate",
   moveProjectItem: "operate",

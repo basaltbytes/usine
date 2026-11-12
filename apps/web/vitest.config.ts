@@ -41,6 +41,8 @@ interface ApprovalExchange {
   lateOverviews: number;
 }
 const approvals = new WeakMap<Page, ApprovalExchange>();
+/** The bodies of the apply CI labels requests on Run `approval-run`, in arrival order. */
+const ciLabelRequests = new WeakMap<Page, Array<unknown>>();
 /** The `window` of each task and run statistics request, in arrival order. */
 interface StatisticsRequests {
   readonly tasks: Array<string | null>;
@@ -387,6 +389,16 @@ export default mergeConfig(
                   await route.fulfill({ status, contentType: "application/json", body });
                 },
                 lateOverviewRequests: async ({ page }) => approvals.get(page)?.lateOverviews ?? 0,
+                // Answers apply CI labels requests on Run `approval-run` with `status` and `body`.
+                ciLabelsResponse: async ({ page }, status: 200 | 409, body: string) => {
+                  ciLabelRequests.set(page, []);
+                  await page.unroute("**/api/runs/approval-run/apply-ci-labels");
+                  await page.route("**/api/runs/approval-run/apply-ci-labels", (route) => {
+                    ciLabelRequests.get(page)?.push(route.request().postDataJSON());
+                    return route.fulfill({ status, contentType: "application/json", body });
+                  });
+                },
+                recordedCiLabels: async ({ page }) => ciLabelRequests.get(page) ?? [],
                 githubChangesResponse: async ({ page }, body: string) => {
                   await page.unroute("**/api/runs/*/github-changes");
                   await page.route("**/api/runs/*/github-changes", (route) =>
