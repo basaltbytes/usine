@@ -412,8 +412,8 @@ export class CiMonitor extends Context.Service<
             ),
           );
         // Returns the names of the checks on the head that haven't completed, apart from the jobs of
-        // `incomplete`, which can't start. A refused read, such as one without commit-status access,
-        // reports none.
+        // `incomplete`, which can't start. A refused check-run read reports none; the adapter keeps
+        // the check runs when only the commit-status read is refused.
         const pendingOutside = Effect.fn("CiMonitor.pendingOutside")(function* (
           incomplete: ReadonlyArray<UnfinishedRun>,
         ) {

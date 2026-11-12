@@ -14,7 +14,7 @@ import {
 } from "effect";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
 import { GitHubApp } from "./github-app.ts";
-import type { GitHubAppError } from "./error.ts";
+import { type GitHubAppError, isRefusal } from "./error.ts";
 import { queryGraphql } from "./graphql.ts";
 import { retryTransientRequest } from "./retry.ts";
 import { API_ROOT, authorized, invalidResponse, statusError, transportError } from "./http.ts";
@@ -318,7 +318,8 @@ export class GitHubChecks extends Context.Service<
     ) => Effect.Effect<PendingCheckReport, GitHubAppError>;
     /**
      * Reads every check run on `head` that hasn't completed and every pending commit status on
-     * it, without duration history.
+     * it, without duration history. When GitHub refuses the commit-status read, for example
+     * without the `statuses` permission, it reports the check runs alone.
      */
     readonly unfinishedChecks: (
       repository: RepositoryName,
@@ -588,7 +589,14 @@ export class GitHubChecks extends Context.Service<
           const { owner, name } = splitRepositoryName(repository);
           const prefix = `repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`;
           const runs = yield* unfinishedCheckRuns(prefix, head);
-          const statuses = yield* pendingStatuses(prefix, head);
+          const statuses = yield* pendingStatuses(prefix, head).pipe(
+            Effect.catchIf(isRefusal, (error) =>
+              Effect.logWarning(
+                "Commit statuses on the head are unreadable; the unfinished checks are the check runs alone",
+                { repository, head, errorTag: error._tag, message: error.message },
+              ).pipe(Effect.as<ReadonlyArray<PendingCheckRun>>([])),
+            ),
+          );
           yield* Effect.logInfo("Read unfinished CI checks", {
             repository,
             head,

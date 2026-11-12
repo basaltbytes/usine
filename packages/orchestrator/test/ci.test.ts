@@ -234,15 +234,20 @@ const scenario = Effect.fn("test.ciScenario")(function* (
   // Runs just after `failures` or `failedStatuses` returns, such as a check that fails then.
   const afterFailures = yield* Ref.make<Effect.Effect<void>>(Effect.void);
   const afterFailedStatuses = yield* Ref.make<Effect.Effect<void>>(Effect.void);
-  // Fails every commit-status read, as GitHub does without the `statuses` permission.
-  const statusReadFailure = yield* Ref.make(Option.none<GitHubApiError>());
-  const readStatuses = <A>(read: Effect.Effect<A>) =>
-    Ref.get(statusReadFailure).pipe(
+  // Fails the `failedStatuses` read. GitHub refuses it without the `statuses` permission; the
+  // adapter's `unfinishedChecks` then reports the check runs alone, so it reads `unfinishedChecks`.
+  const statusReadFailure = yield* Ref.make(Option.none<GitHubApiError | GitHubRateLimitError>());
+  // Fails the whole `unfinishedChecks` read.
+  const unfinishedReadFailure = yield* Ref.make(
+    Option.none<GitHubApiError | GitHubRateLimitError>(),
+  );
+  const readOr = <A, E>(failure: Ref.Ref<Option.Option<E>>, read: Effect.Effect<A>) =>
+    Ref.get(failure).pipe(
       Effect.flatMap(Option.match({ onNone: () => read, onSome: Effect.fail })),
     );
   const checks = Layer.succeed(GitHubChecks)({
     workflowRuns: () => Effect.flatten(Ref.get(workflowRuns)),
-    unfinishedChecks: () => readStatuses(Ref.get(unfinishedChecks)),
+    unfinishedChecks: () => readOr(unfinishedReadFailure, Ref.get(unfinishedChecks)),
     pendingDetails: (_repository, _head, historyDeadline) =>
       Effect.gen(function* () {
         yield* Ref.set(pendingHistoryDeadline, Option.some(historyDeadline));
@@ -301,7 +306,7 @@ const scenario = Effect.fn("test.ciScenario")(function* (
         Effect.tap(() => Effect.flatten(Ref.get(afterFailures))),
       ),
     failedStatuses: () =>
-      readStatuses(Ref.get(failedStatuses)).pipe(
+      readOr(statusReadFailure, Ref.get(failedStatuses)).pipe(
         Effect.map((contexts) =>
           CheckFailureEvidence.make({
             checks: contexts.map((context) => failedCheck(context)),
@@ -415,6 +420,7 @@ const scenario = Effect.fn("test.ciScenario")(function* (
     afterFailures,
     afterFailedStatuses,
     statusReadFailure,
+    unfinishedReadFailure,
     mergeable,
     tasks,
     verifiedSubmissions,
@@ -1619,6 +1625,170 @@ it.live("a refused commit-status read leaves CI that ran only in part to the che
       }).pipe(Effect.provide(setup.runtime));
     }),
   ).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.live(
+  "a refused unfinished-check read leaves CI that ran only in part to the failed checks",
+  () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixtureInstance = yield* instance;
+        const setup = yield* scenario(3600);
+        yield* Effect.gen(function* () {
+          const engine = yield* RunEngine;
+          const runId = yield* openWait(setup.timeoutSeconds);
+          yield* Ref.set(
+            setup.observed,
+            CheckSnapshot.make({ pullRequestState: "open", head, state: "failure" }),
+          );
+          yield* Ref.set(setup.workflowRuns, Effect.succeed(gateRun("concluded")));
+          yield* Ref.set(setup.unfinishedChecks, [
+            UnfinishedCheck.make({ name: "deploy-preview" }),
+          ]);
+          yield* Ref.set(
+            setup.unfinishedReadFailure,
+            Option.some(
+              GitHubApiError.make({
+                operation: "read-ci-checks",
+                status: Option.some(403),
+                message: "Resource not accessible by integration",
+              }),
+            ),
+          );
+
+          const { failures } = yield* (yield* CiMonitor).reconcile(fixtureInstance, Option.none());
+
+          assert.deepStrictEqual(failures, []);
+          const incomplete = yield* engine.inspect(runId);
+          assert(incomplete.run.state._tag === "Failed");
+          const { failure } = failedAttempt(incomplete);
+          assert.include(failure.message, `GitHub Actions didn't run CI on head ${head} in full`);
+          assert.strictEqual((yield* Ref.get(setup.tasks)).length, 1);
+        }).pipe(Effect.provide(setup.runtime));
+      }),
+    ).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.live(
+  "a pending check run beside a refused commit-status read keeps CI that ran only in part waiting",
+  () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixtureInstance = yield* instance;
+        const setup = yield* scenario(3600);
+        yield* Effect.gen(function* () {
+          const engine = yield* RunEngine;
+          const monitor = yield* CiMonitor;
+          const runId = yield* openWait(setup.timeoutSeconds);
+          yield* Ref.set(
+            setup.observed,
+            CheckSnapshot.make({ pullRequestState: "open", head, state: "failure" }),
+          );
+          yield* Ref.set(setup.workflowRuns, Effect.succeed(gateRun("concluded")));
+          yield* Ref.set(
+            setup.statusReadFailure,
+            Option.some(
+              GitHubApiError.make({
+                operation: "read-ci-checks",
+                status: Option.some(403),
+                message: "Resource not accessible by integration",
+              }),
+            ),
+          );
+          // Another app's check run, which the adapter still reports without the status read.
+          yield* Ref.set(setup.unfinishedChecks, [
+            UnfinishedCheck.make({ name: "deploy-preview" }),
+          ]);
+
+          const { failures } = yield* monitor.reconcile(fixtureInstance, Option.none());
+
+          assert.deepStrictEqual(failures, []);
+          assert.strictEqual((yield* engine.inspect(runId)).run.state._tag, "AwaitingCi");
+          assert.strictEqual((yield* Ref.get(setup.tasks)).length, 1);
+
+          yield* Ref.set(setup.unfinishedChecks, []);
+          yield* Ref.set(setup.failedChecks, [
+            failedCheck("ci", gateJob),
+            failedCheck("deploy-preview"),
+          ]);
+          yield* monitor.reconcile(fixtureInstance, Option.none());
+
+          const source = yield* engine.inspect(runId);
+          assert(source.run.state._tag === "HandedOff");
+          assert.include(source.run.state.reason, "CI failed: ci, deploy-preview.");
+          assert.strictEqual((yield* Ref.get(setup.tasks)).length, 2);
+        }).pipe(Effect.provide(setup.runtime));
+      }),
+    ).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.live.each([
+  { read: "unfinished-check", errorTag: "GitHubApiError" },
+  { read: "failed commit-status", errorTag: "GitHubRateLimitError" },
+] as const)(
+  "a transient $read read failure defers CI that ran only in part, and a failed status then reaches the fix loop",
+  ({ read, errorTag }) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixtureInstance = yield* instance;
+        const setup = yield* scenario(3600);
+        yield* Effect.gen(function* () {
+          const engine = yield* RunEngine;
+          const monitor = yield* CiMonitor;
+          const runId = yield* openWait(setup.timeoutSeconds);
+          yield* Ref.set(
+            setup.observed,
+            CheckSnapshot.make({ pullRequestState: "open", head, state: "failure" }),
+          );
+          yield* Ref.set(setup.workflowRuns, Effect.succeed(gateRun("concluded")));
+          if (read === "unfinished-check") {
+            yield* Ref.set(setup.unfinishedChecks, [UnfinishedCheck.make({ name: "external-ci" })]);
+            yield* Ref.set(
+              setup.unfinishedReadFailure,
+              Option.some(
+                GitHubApiError.make({
+                  operation: "read-ci-checks",
+                  status: Option.some(502),
+                  message: "Bad gateway",
+                }),
+              ),
+            );
+          } else {
+            yield* Ref.set(setup.failedStatuses, ["external-ci"]);
+            yield* Ref.set(
+              setup.statusReadFailure,
+              Option.some(
+                GitHubRateLimitError.make({
+                  operation: "read-ci-checks",
+                  message: "secondary rate limit",
+                  retryAt: yield* DateTime.now,
+                }),
+              ),
+            );
+          }
+
+          const first = yield* monitor.reconcile(fixtureInstance, Option.none());
+
+          assert.deepStrictEqual(
+            first.failures.map((failure) => failure.errorTag),
+            [errorTag],
+          );
+          assert.strictEqual((yield* engine.inspect(runId)).run.state._tag, "AwaitingCi");
+          assert.strictEqual((yield* Ref.get(setup.tasks)).length, 1);
+
+          yield* Ref.set(setup.unfinishedReadFailure, Option.none());
+          yield* Ref.set(setup.statusReadFailure, Option.none());
+          yield* Ref.set(setup.unfinishedChecks, []);
+          yield* Ref.set(setup.failedStatuses, ["external-ci"]);
+          yield* monitor.reconcile(fixtureInstance, Option.none());
+
+          const source = yield* engine.inspect(runId);
+          assert(source.run.state._tag === "HandedOff");
+          assert.include(source.run.state.reason, "CI failed: external-ci.");
+          assert.strictEqual((yield* Ref.get(setup.tasks)).length, 2);
+        }).pipe(Effect.provide(setup.runtime));
+      }),
+    ).pipe(Effect.provide(NodeServices.layer)),
 );
 
 it.live("a run that ran only in part under a green rollup waits for another workflow run", () =>

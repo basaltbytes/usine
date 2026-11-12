@@ -1,5 +1,5 @@
 import { assert, it } from "@effect/vitest";
-import { DateTime, Deferred, Effect, Fiber, Layer, Option, Schema } from "effect";
+import { DateTime, Deferred, Effect, Fiber, Layer, Option, Result, Schema } from "effect";
 import { HttpClient, HttpClientResponse } from "effect/http";
 import { TestClock } from "effect/testing";
 import { GitHubChecks, PendingCheck, PendingCheckReport } from "../../src/checks.ts";
@@ -270,6 +270,47 @@ it.effect("reads unfinished check runs and pending commit statuses with their Ac
                 { context: "docs", state: "success", description: null },
               ],
             }),
+      ),
+    ),
+  ),
+);
+
+it.effect.each([
+  { status: 403, outcome: "reports the check runs alone" },
+  { status: 500, outcome: "fails" },
+] as const)("an unfinished-check read whose status read gets $status $outcome", ({ status }) =>
+  Effect.gen(function* () {
+    const read = yield* (yield* GitHubChecks)
+      .unfinishedChecks(repository, head)
+      .pipe(Effect.result);
+    if (status === 403) {
+      assert(Result.isSuccess(read));
+      assert.deepStrictEqual(
+        read.success.map(({ name }) => name),
+        ["deploy-preview"],
+      );
+      return;
+    }
+    assert(Result.isFailure(read));
+    assert(read.failure._tag === "GitHubApiError");
+    assert.deepStrictEqual(read.failure.status, Option.some(500));
+  }).pipe(
+    Effect.provide(
+      withClient((url) =>
+        url.includes("check-runs")
+          ? pendingRuns([
+              // Another app's check run, with no Actions details URL.
+              {
+                name: "deploy-preview",
+                status: "in_progress",
+                started_at: null,
+                details_url: null,
+              },
+            ])
+          : new Response(
+              status === 403 ? "Resource not accessible by integration" : "server error",
+              { status },
+            ),
       ),
     ),
   ),
