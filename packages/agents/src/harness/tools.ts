@@ -9,7 +9,7 @@ import {
   Schema,
   Stream,
 } from "effect";
-import { type AiError, Tool, type Toolkit } from "effect/ai";
+import { AiError, Tool, type Toolkit } from "effect/ai";
 
 /** The services that serving `Tools` to a session needs: each tool's handler and its services. */
 export type HostToolServices<Tools extends Record<string, Tool.Any>> =
@@ -50,11 +50,11 @@ export const noHostTools: HostToolSet = { tools: [] };
 
 const encodeJson = Schema.encodeUnknownEffect(Schema.fromJsonString(Schema.Unknown));
 
-/** Returns an encoded value as the model reads it: a string as is, anything else as JSON. */
-const resultText = (encoded: Schema.Json | undefined) =>
-  Predicate.isString(encoded)
-    ? Effect.succeed(encoded)
-    : encodeJson(encoded ?? null).pipe(Effect.orElseSucceed(() => String(encoded)));
+/** Returns a JSON value as the model reads it: a string as is, anything else as JSON. */
+const jsonText = (json: Schema.Json | undefined) =>
+  Predicate.isString(json)
+    ? Effect.succeed(json)
+    : encodeJson(json ?? null).pipe(Effect.orElseSucceed(() => String(json)));
 
 /**
  * A typed failure of a tool call: an `AiError` for invalid parameters or results, or a value of
@@ -62,17 +62,11 @@ const resultText = (encoded: Schema.Json | undefined) =>
  */
 type ToolFailure = AiError.AiError | Error | Schema.Json;
 
-/** The text of a typed failure: an error's own message, else its encoded value. */
-const failureText = (
-  encode: (failure: ToolFailure) => Effect.Effect<Schema.Json, Schema.SchemaError>,
-  failure: ToolFailure,
-) =>
-  Predicate.isError(failure) && failure.message !== ""
-    ? Effect.succeed(failure.message)
-    : encode(failure).pipe(
-        Effect.flatMap(resultText),
-        Effect.orElseSucceed(() => String(failure)),
-      );
+/** What a handler returns, or a typed failure of the call. */
+type ToolOutcome = Tool.HandlerResult<Tool.Any>["result"] | ToolFailure;
+
+/** Encodes a value of one of a tool's schemas as JSON. */
+type JsonEncoder = (value: ToolOutcome) => Effect.Effect<Schema.Json, Schema.SchemaError>;
 
 /**
  * Binds every tool of `toolkit` to the handlers and services of the calling context, so the role
@@ -84,17 +78,50 @@ export const hostToolSet = <Tools extends Record<string, Tool.Any>>(
   Effect.gen(function* () {
     const built = yield* toolkit;
     const context = yield* Effect.context<Tool.HandlerServices<Tools[keyof Tools]>>();
-    // SAFETY: `handle` decodes the encoded parameters itself, so any JSON input is checked.
+    // SAFETY: `handle` decodes the parameters itself, and `call` passes it the encoded form of
+    // parameters that the tool's JSON codec decoded.
     const handle = built.handle as (
       name: string,
-      params: Schema.Json,
+      params: Tool.Parameters<Tool.Any>,
       toolCallId?: string,
     ) => Effect.Effect<Stream.Stream<Tool.HandlerResult<Tool.Any>, ToolFailure>, AiError.AiError>;
     const bind = (tool: Tool.Any): HostTool => {
-      // SAFETY: the failure schema's encoding services are handler services, which `context` provides.
-      const encodeFailure = Schema.encodeUnknownEffect(Schema.toCodecJson(tool.failureSchema)) as (
-        failure: ToolFailure,
-      ) => Effect.Effect<Schema.Json, Schema.SchemaError>;
+      // The model reads and writes JSON, while `handle` decodes the parameters and encodes the
+      // result with the tool's own schemas, whose encoded side may not be JSON. Each call
+      // crosses between the two through the schemas' JSON codecs.
+      // SAFETY: the schemas' encoding and decoding services are handler services, which
+      // `context` provides.
+      const decodeParameters = Schema.decodeUnknownEffect(
+        Schema.toCodecJson(tool.parametersSchema),
+      ) as (input: Schema.Json) => Effect.Effect<Tool.Parameters<Tool.Any>, Schema.SchemaError>;
+      // SAFETY: as above.
+      const encodeParameters = Schema.encodeUnknownEffect(tool.parametersSchema) as (
+        params: Tool.Parameters<Tool.Any>,
+      ) => Effect.Effect<Tool.Parameters<Tool.Any>, Schema.SchemaError>;
+      // SAFETY: as above.
+      const encodeSuccess = Schema.encodeUnknownEffect(
+        Schema.toCodecJson(tool.successSchema),
+      ) as JsonEncoder;
+      // SAFETY: as above.
+      const encodeFailure = Schema.encodeUnknownEffect(
+        Schema.toCodecJson(Tool.failureResultSchema(tool)),
+      ) as JsonEncoder;
+      /**
+       * The text of a failure. A tool that returns its failures returns their encoded value; any
+       * other tool returns an error's own message, else its encoded value.
+       */
+      const failureText = (failure: ToolOutcome) =>
+        tool.failureMode === "error" && Predicate.isError(failure) && failure.message !== ""
+          ? Effect.succeed(failure.message)
+          : encodeFailure(failure).pipe(
+              Effect.flatMap(jsonText),
+              Effect.orElseSucceed(() => String(failure)),
+            );
+      const failed = Effect.fnUntraced(function* (failure: ToolOutcome) {
+        const text = yield* failureText(failure);
+        yield* Effect.logInfo("Usine tool call failed", { tool: tool.name, message: text });
+        return { isError: true, text } satisfies HostToolResult;
+      });
       return {
         name: tool.name,
         description: Tool.getDescription(tool) ?? tool.name,
@@ -105,25 +132,43 @@ export const hostToolSet = <Tools extends Record<string, Tool.Any>>(
               tool: tool.name,
               ...Option.match(callId, { onNone: () => ({}), onSome: (id) => ({ callId: id }) }),
             });
-            const last = yield* handle(tool.name, input, Option.getOrUndefined(callId)).pipe(
-              Stream.unwrap,
-              Stream.runLast,
+            const params = yield* decodeParameters(input).pipe(
+              Effect.flatMap(encodeParameters),
               Effect.result,
             );
-            if (Result.isSuccess(last) && Option.isSome(last.success)) {
-              const outcome = last.success.value;
-              const text = yield* resultText(
-                Schema.is(Schema.Json)(outcome.encodedResult) ? outcome.encodedResult : undefined,
+            if (Result.isFailure(params))
+              return yield* failed(
+                AiError.make({
+                  module: "Toolkit",
+                  method: `${tool.name}.handle`,
+                  reason: AiError.ToolParameterValidationError.make({
+                    toolName: tool.name,
+                    description: params.failure.message,
+                  }),
+                }),
               );
-              if (outcome.isFailure)
-                yield* Effect.logInfo("Usine tool returned a failure", { tool: tool.name });
-              return { isError: outcome.isFailure, text };
+            const last = yield* handle(
+              tool.name,
+              params.success,
+              Option.getOrUndefined(callId),
+            ).pipe(Stream.unwrap, Stream.runLast, Effect.result);
+            if (Result.isFailure(last)) return yield* failed(last.failure);
+            if (Option.isNone(last.success))
+              return yield* failed(new Error(`The ${tool.name} tool returned no result`));
+            const outcome = last.success.value;
+            if (outcome.isFailure) return yield* failed(outcome.result);
+            const encoded = yield* Effect.result(encodeSuccess(outcome.result));
+            if (Result.isFailure(encoded)) {
+              yield* Effect.logError("Usine tool returned a result that is not JSON", {
+                tool: tool.name,
+                message: encoded.failure.message,
+              });
+              return {
+                isError: true,
+                text: `The ${tool.name} tool returned a result that is not JSON`,
+              };
             }
-            const text = Result.isFailure(last)
-              ? yield* failureText(encodeFailure, last.failure)
-              : `The ${tool.name} tool returned no result`;
-            yield* Effect.logInfo("Usine tool call failed", { tool: tool.name, message: text });
-            return { isError: true, text };
+            return { isError: false, text: yield* jsonText(encoded.success) };
           },
           (effect) =>
             effect.pipe(

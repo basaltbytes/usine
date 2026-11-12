@@ -3,7 +3,7 @@ import { AgentName } from "@usine/core/agent";
 import { BrainSpec, Harness, ModelId } from "@usine/core/agent/brain";
 import { AgentSessionId, RoleName, RoleSession } from "@usine/core/agent/session";
 import { WorkerName } from "@usine/core/worker";
-import { type Brand, Context, Effect, Exit, Layer, Option, Schema } from "effect";
+import { type Brand, Context, DateTime, Effect, Exit, Layer, Option, Schema } from "effect";
 import { Tool, Toolkit } from "effect/ai";
 import { LocalProcess } from "../src/child-host/child-host.ts";
 import { AdmissionContext, AdmittedBrain } from "../src/harness/admission.ts";
@@ -118,6 +118,84 @@ describe("usine tool sets", () => {
       const invalid = yield* lookup.call({ name: "known" }, Option.none());
       assert.isTrue(invalid.isError);
       assert.include(invalid.text, '"_tag":"AiError"');
+    }),
+  );
+
+  it.effect("take parameters and return results in the JSON form of the tool's schemas", () =>
+    Effect.gen(function* () {
+      const Window = Schema.Struct({ at: Schema.DateTimeUtc, limit: Schema.Option(Schema.Finite) });
+      const Since = Tool.make("since", {
+        description: "Lists notes since a time.",
+        parameters: Window,
+        success: Schema.Struct({ window: Window, at: Schema.DateTimeUtc }),
+        failure: Schema.Struct({ before: Schema.DateTimeUtc }),
+        failureMode: "return",
+      });
+      const Opaque = Tool.make("opaque", {
+        description: "Returns a function.",
+        success: Schema.Unknown,
+      });
+      const kit = Toolkit.make(Since, Opaque);
+      const bound = yield* hostToolSet(kit).pipe(
+        Effect.provide(
+          kit.toLayer({
+            since: (window) =>
+              DateTime.isLessThan(window.at, DateTime.makeUnsafe(0))
+                ? Effect.fail({ before: DateTime.makeUnsafe(0) })
+                : Effect.succeed({ window, at: DateTime.add(window.at, { days: 1 }) }),
+            opaque: () => Effect.succeed(() => "not JSON"),
+          }),
+        ),
+      );
+      const [since, opaque] = bound.tools;
+      assert(since !== undefined && opaque !== undefined);
+      const listed = yield* Schema.decodeUnknownEffect(
+        Schema.Struct({
+          properties: Schema.Struct({ at: Schema.Struct({ type: Schema.String }) }),
+        }),
+      )(since.parameters);
+      assert.strictEqual(listed.properties.at.type, "string", "the listed schema is the JSON form");
+      const encodeWindow = Schema.encodeEffect(Schema.toCodecJson(Window));
+      const window = {
+        at: DateTime.makeUnsafe("2026-11-12T00:00:00.000Z"),
+        limit: Option.some(3),
+      };
+      const input = yield* encodeWindow(window);
+      const found = yield* since.call(input, Option.none());
+      assert.isFalse(found.isError, found.text);
+      const result = yield* Schema.decodeEffect(
+        Schema.fromJsonString(Schema.toCodecJson(Since.successSchema)),
+      )(found.text);
+      assert.deepStrictEqual(result, {
+        window,
+        at: DateTime.makeUnsafe("2026-11-13T00:00:00.000Z"),
+      });
+      const before = yield* encodeWindow({ at: DateTime.makeUnsafe(-1), limit: Option.none() });
+      const early = yield* since.call(before, Option.none());
+      assert.deepStrictEqual(early, {
+        isError: true,
+        text: '{"before":"1970-01-01T00:00:00.000Z"}',
+      });
+      const invalid = yield* since.call({ at: "yesterday" }, Option.none());
+      assert.isTrue(invalid.isError);
+      // A tool that returns its failures returns invalid parameters as the encoded `AiError`.
+      assert.include(invalid.text, '"_tag":"ToolParameterValidationError"');
+      assert.include(invalid.text, "Expected a valid UTC DateTime string");
+      const { records, layer } = collectLogs(["Error"]);
+      const notJson = yield* opaque.call({}, Option.none()).pipe(Effect.provide(layer));
+      assert.deepStrictEqual(notJson, {
+        isError: true,
+        text: "The opaque tool returned a result that is not JSON",
+      });
+      assert.deepStrictEqual(
+        records.map(({ message }) => message),
+        [
+          [
+            "Usine tool returned a result that is not JSON",
+            { tool: "opaque", message: "Expected JSON value" },
+          ],
+        ],
+      );
     }),
   );
 
