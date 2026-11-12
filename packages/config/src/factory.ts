@@ -335,9 +335,6 @@ export class BoatProvisioner extends Schema.Class<
   reuse: ProvisionerReuseFromYaml,
 }) {}
 
-/** @deprecated Use ProvisionerTailnet. */
-export { ProvisionerTailnet as BoatTailnet };
-
 /**
  * Restores each boxd machine from a snapshot, which fixes the machine's size. Each attempt gets a
  * new machine, so a boxd worker ignores `reuse`.

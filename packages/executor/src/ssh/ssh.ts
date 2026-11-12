@@ -381,7 +381,6 @@ export type {
   BoatProvisioner,
   BoxdProvisioner,
   ProvisionerTailnet,
-  BoatTailnet,
   HetznerProvisioner,
   ProviderApiKeys,
   SshExecutorOptions,
