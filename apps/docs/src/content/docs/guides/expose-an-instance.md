@@ -22,7 +22,7 @@ A running instance, completed first-member enrollment, instance admin access, a 
 
    For Cloudflare Tunnel, route the hostname to `http://127.0.0.1:7331` and enable HTTPS redirection. For tailnet access, run `tailscale serve --bg http://127.0.0.1:7331` and use its printed HTTPS origin.
 
-3. Forward `Host`, `Origin`, `Authorization`, `Cookie`, `Content-Type`, `X-Usine-CSRF`, and CORS preflight headers unchanged. Permit `OPTIONS`; preserve `Set-Cookie`, `Vary`, `Cache-Control`, CORS, and security response headers. Disable API and sign-in redirect caching and script injection.
+3. Forward `Host`, `Origin`, `Authorization`, `Cookie`, `Content-Type`, `X-Usine-CSRF`, and CORS preflight headers unchanged. Permit `OPTIONS`; preserve `Set-Cookie`, `Vary`, `Cache-Control`, CORS, and security response headers. Disable API and sign-in redirect caching and script injection. Pass error responses from usine through unchanged: the UI reads the JSON body of a refusal, such as the HTTP 503 that a configuration save returns when its checks run out of time. Caddy, Cloudflare Tunnel, and `tailscale serve` pass that response through by default.
 4. Let usine trust the proxy's `X-Forwarded-For` header, so that sign-in rate limits count each client address separately. Run `usine config edit settings instance`, add the proxy's loopback addresses, and restart:
 
    ```yaml

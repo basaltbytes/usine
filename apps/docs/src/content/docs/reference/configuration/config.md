@@ -99,7 +99,7 @@ These settings require a restart:
 
 For example, after changing browser origins with the CLI, run `usine restart` when no attempt is running.
 
-Before storing a revision, CLI commands and the operator API check the coordinator brain of each agent: the parent model, effort, and credential. Agents that share a parent model and effort share one check. If the check doesn't finish within 10 seconds, the write is refused with `ValidationTimeoutError` (HTTP 504 from the operator API), and no revision is stored. The orchestrator repeats the check, with the same limit, before it applies a reload or a revision stored by the CLI; a check that runs out of time keeps the running configuration.
+Before storing a revision, CLI commands and the operator API check the coordinator brain of each agent: the parent model, effort, and credential. Agents that share a parent model and effort share one check. If the check doesn't finish within 10 seconds, the write is refused with `ValidationTimeoutError` (HTTP 503 from the operator API), and no revision is stored. The orchestrator repeats the check, with the same limit, before it applies a reload or a revision stored by the CLI; a check that runs out of time keeps the running configuration.
 
 When the orchestrator saves a revision through the operator API or reloads the store, each step logs `Configuration step finished` with its `step`, `durationMillis`, and `outcome` (`passed`, `failed`, or `interrupted`). A refused coordinator brain logs `coordinator-brains` as `failed`. A reload skips `parse` and `store`:
 

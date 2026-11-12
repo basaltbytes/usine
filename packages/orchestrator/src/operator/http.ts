@@ -258,7 +258,10 @@ export class FactoryConfigRefusal extends Schema.Error<
   { httpApiStatus: 422 },
 ) {}
 
-/** A reload refused because one of its steps, such as the coordinator brain check, ran out of time. */
+/**
+ * A configuration write or reload refused because one of its steps, such as the coordinator brain
+ * check, ran out of time.
+ */
 export class ValidationTimeoutRefusal extends Schema.Error<
   ValidationTimeoutRefusal,
   Brand.Brand<"@usine/orchestrator/operator/http/ValidationTimeoutRefusal">
@@ -271,7 +274,7 @@ export class ValidationTimeoutRefusal extends Schema.Error<
     /** The step of the save or reload that ran out of time. */
     step: RevisionStep,
   },
-  { httpApiStatus: 504 },
+  { httpApiStatus: 503 },
 ) {}
 
 /** The reason a reload kept the running instance. */
