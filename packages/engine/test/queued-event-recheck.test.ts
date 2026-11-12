@@ -787,63 +787,78 @@ describe("queued Event trigger re-check", () => {
     ),
   );
 
-  it.live("logs an idle reconcile summary at Debug while a paused Loop holds a CI fix", () =>
-    withInstance((directory) =>
-      Effect.gen(function* () {
-        const gate = yield* Deferred.make<void>();
-        const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([
-          Deferred.await(gate).pipe(Effect.as(stepResult("first"))),
-        ]);
-        const rechecks = yield* Ref.make<ReadonlyArray<EventId>>([]);
-        const runtime = engineLayer(
-          directory,
-          executorLayer(plans),
-          conditionLayer((candidate) =>
-            Ref.update(rechecks, (all) => [...all, candidate.event.id]).pipe(
-              Effect.andThen(stillMatches(candidate)),
-            ),
-          ),
-        );
-        const summaries: Array<readonly [string, string]> = [];
-        const logger = Logger.make<unknown, void>(({ logLevel, message }) => {
-          const [text] = Array.isArray(message) ? message : [message];
-          if (
-            text === "Every Run to drive already has its fiber" ||
-            text === "Runs recovered from the run tables"
-          )
-            summaries.push([logLevel, text]);
-        });
-        yield* Effect.gen(function* () {
-          const engine = yield* RunEngine;
-          const controls = yield* LoopControl;
-          const fix = Submission.make({
-            ...submission({ number: 11 }),
-            ciFailureHead: Option.some(CommitSha.make("e".repeat(40))),
-          });
-          const first = yield* engine.submit(submission({ number: 10 }));
-          assert(first._tag === "Claimed");
-          yield* waitFor(engine, first.runId, ({ run }) => run.state._tag === "Running");
-          assert.strictEqual((yield* engine.submit(fix))._tag, "Queued");
-          yield* controls.pause(fix.loop);
-          yield* Deferred.succeed(gate, undefined);
-          yield* waitFor(engine, first.runId, ({ run }) => run.state._tag === "Succeeded");
-
-          yield* engine.reconcile.pipe(
-            Effect.provide(Logger.layer([logger])),
-            Effect.provideService(References.MinimumLogLevel, "Debug"),
-          );
-
-          assert.deepStrictEqual(summaries, [
-            ["Debug", "Every Run to drive already has its fiber"],
+  it.live(
+    "logs an idle reconcile summary at Debug while a paused Loop holds a CI fix, and at Info once it opens",
+    () =>
+      withInstance((directory) =>
+        Effect.gen(function* () {
+          const gate = yield* Deferred.make<void>();
+          const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([
+            Deferred.await(gate).pipe(Effect.as(stepResult("first"))),
+            Effect.succeed(stepResult("fix")),
           ]);
-          const checked = yield* Ref.get(rechecks);
-          assert.deepStrictEqual(checked, []);
-          const fixRunId = yield* runIdFor(fix);
-          const unopened = yield* Effect.flip(engine.inspect(fixRunId));
-          assert.strictEqual(unopened._tag, "RunNotFoundError");
-        }).pipe(Effect.provide(runtime));
-      }),
-    ),
+          const rechecks = yield* Ref.make<ReadonlyArray<EventId>>([]);
+          const runtime = engineLayer(
+            directory,
+            executorLayer(plans),
+            conditionLayer((candidate) =>
+              Ref.update(rechecks, (all) => [...all, candidate.event.id]).pipe(
+                Effect.andThen(stillMatches(candidate)),
+              ),
+            ),
+          );
+          const summaries: Array<readonly [string, string]> = [];
+          const logger = Logger.make<unknown, void>(({ logLevel, message }) => {
+            const [text] = Array.isArray(message) ? message : [message];
+            if (
+              text === "Every Run to drive already has its fiber" ||
+              text === "Runs recovered from the run tables"
+            )
+              summaries.push([logLevel, text]);
+          });
+          yield* Effect.gen(function* () {
+            const engine = yield* RunEngine;
+            const controls = yield* LoopControl;
+            const fix = Submission.make({
+              ...submission({ number: 11 }),
+              ciFailureHead: Option.some(CommitSha.make("e".repeat(40))),
+            });
+            const first = yield* engine.submit(submission({ number: 10 }));
+            assert(first._tag === "Claimed");
+            yield* waitFor(engine, first.runId, ({ run }) => run.state._tag === "Running");
+            assert.strictEqual((yield* engine.submit(fix))._tag, "Queued");
+            yield* controls.pause(fix.loop);
+            yield* Deferred.succeed(gate, undefined);
+            yield* waitFor(engine, first.runId, ({ run }) => run.state._tag === "Succeeded");
+
+            yield* engine.reconcile.pipe(
+              Effect.provide(Logger.layer([logger])),
+              Effect.provideService(References.MinimumLogLevel, "Debug"),
+            );
+
+            assert.deepStrictEqual(summaries, [
+              ["Debug", "Every Run to drive already has its fiber"],
+            ]);
+            const checked = yield* Ref.get(rechecks);
+            assert.deepStrictEqual(checked, []);
+            const fixRunId = yield* runIdFor(fix);
+            const unopened = yield* Effect.flip(engine.inspect(fixRunId));
+            assert.strictEqual(unopened._tag, "RunNotFoundError");
+
+            summaries.length = 0;
+            yield* controls.unpause(fix.loop);
+            yield* engine.reconcile.pipe(
+              Effect.provide(Logger.layer([logger])),
+              Effect.provideService(References.MinimumLogLevel, "Debug"),
+            );
+
+            assert.deepStrictEqual(summaries, [["Info", "Runs recovered from the run tables"]]);
+            const rechecked = yield* Ref.get(rechecks);
+            assert.deepStrictEqual(rechecked, [fix.event.id]);
+            yield* waitFor(engine, fixRunId, ({ run }) => run.state._tag === "Succeeded");
+          }).pipe(Effect.provide(runtime));
+        }),
+      ),
   );
 
   it.live("rechecks no Event of an Item suppressed while the Event ahead was rechecked", () =>
