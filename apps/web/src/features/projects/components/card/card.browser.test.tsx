@@ -163,7 +163,7 @@ const laneNames = () =>
     section.getAttribute("aria-label"),
   );
 
-it("puts the lanes that accept moves first, Done and Unmapped last, and folds them into rails", async () => {
+it("puts the lanes that accept moves first, Done and Unmapped last, and folds Done into a rail", async () => {
   expect(laneNames()).toEqual([
     "Backlog lane",
     "Ready lane",

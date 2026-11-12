@@ -38,6 +38,8 @@ The **No project access** page checks permissions every minute. When an admin gr
 
 Open run drawers and run pages refresh during machine preparation and quota backoff, including for members with project access only. They also refresh after configuration changes. If an agent definition changes, failed runs show the warning that **Edit and retry** uses the current definition.
 
+Every board lane stays in one row. **Unmapped** holds tasks that match no lane and starts open while it holds an open issue or pull request. Lanes that hold only closed items, such as **Done**, and **Unmapped** with no open item start folded to a rail with their count. Select a rail to open its lane, and select the fold button in the lane header to fold it again. Your browser remembers each choice for that lane of the project.
+
 Board moves appear immediately. A failed label write restores the card's previous lane and displays the error. An accepted move remains visible until GitHub synchronization confirms the lane. Open **Done** and scroll to load all its cards; loaded cards support **Move to** and dragging to a writable lane. Long lanes and run histories load more rows as you scroll.
 
 **Runs without a card** includes only runs whose items have no board card. Runs on cards in **Done** stay out of this section, including before you load the lane.

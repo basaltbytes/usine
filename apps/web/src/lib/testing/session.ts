@@ -7,4 +7,8 @@ declare module "vitest/browser" {
   }
 }
 
-beforeEach(() => commands.sessionPermissions());
+beforeEach(() => {
+  // Browser memory, such as board lane folds, would otherwise carry from one test to the next.
+  localStorage.clear();
+  return commands.sessionPermissions();
+});
