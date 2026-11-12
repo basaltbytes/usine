@@ -25,6 +25,7 @@ import {
   Array as EffectArray,
   Context,
   DateTime,
+  Duration,
   Effect,
   Layer,
   Match,
@@ -46,6 +47,7 @@ import {
   type RestartChange,
   restartChanges,
 } from "./changes.ts";
+import { afterRunning, RevisionStep, timedStep } from "./steps.ts";
 
 /** A reload changed `usine.yaml` in a way that needs a restart, so the running instance is kept. */
 export class RestartRequiredError extends Schema.TaggedError<
@@ -132,8 +134,54 @@ export const reloadPreflightFailed = (
   });
 };
 
+/** The longest wait for the coordinator brain check before a save or reload is refused. */
+export const coordinatorBrainTimeout = Duration.seconds(10);
+
+/** A step of a save or reload didn't finish in time, so nothing was stored or applied. */
+export class ValidationTimeoutError extends Schema.TaggedError<
+  ValidationTimeoutError,
+  Brand.Brand<"@usine/orchestrator/current-instance/current-instance/ValidationTimeoutError">
+>("@usine/orchestrator/ValidationTimeoutError")("ValidationTimeoutError", {
+  /** The step that ran out of time. */
+  step: RevisionStep,
+  /** An operator summary of the timeout, stating that the running configuration is kept. */
+  message: Schema.NonEmptyString,
+}) {}
+
+/**
+ * Runs `check` as the `coordinator-brains` step. Fails with `ValidationTimeoutError` when it runs
+ * longer than `coordinatorBrainTimeout`, and with `refuse(problems)` when it refuses a brain, so
+ * a refused brain logs the step as `failed`.
+ */
+export const checkCoordinatorBrains = <E, R, F>(
+  check: Effect.Effect<ReadonlyArray<ConfigFileError>, E, R>,
+  refuse: (problems: EffectArray.NonEmptyReadonlyArray<ConfigFileError>) => F,
+): Effect.Effect<void, E | F | ValidationTimeoutError, R> =>
+  timedStep(
+    "coordinator-brains",
+    check.pipe(
+      Effect.timeoutOrElse({
+        duration: coordinatorBrainTimeout,
+        orElse: () =>
+          Effect.fail(
+            ValidationTimeoutError.make({
+              step: "coordinator-brains",
+              message: `The coordinator brain check didn't finish within ${Duration.toSeconds(coordinatorBrainTimeout)} seconds. The running configuration is unchanged. Check that the model provider responds, then try again.`,
+            }),
+          ),
+      }),
+      Effect.flatMap((problems) =>
+        EffectArray.isReadonlyArrayNonEmpty(problems) ? Effect.fail(refuse(problems)) : Effect.void,
+      ),
+    ),
+  );
+
 /** The reason a reload kept the running instance. */
-export type InstanceReloadError = FactoryConfigError | RestartRequiredError | ReloadPreflightError;
+export type InstanceReloadError =
+  | FactoryConfigError
+  | RestartRequiredError
+  | ReloadPreflightError
+  | ValidationTimeoutError;
 
 /**
  * Prepares a reload from `running` to `loaded` and returns the effect that applies its workers.
@@ -165,6 +213,7 @@ const rejectionLogFields = (error: InstanceReloadError) =>
       causeTag: cause._tag,
       message,
     }),
+    ValidationTimeoutError: ({ _tag, step, message }) => ({ errorTag: _tag, step, message }),
   });
 
 /**
@@ -256,22 +305,32 @@ export class CurrentInstance extends Context.Service<
               const loaded = snapshot.instance.value;
               yield* Effect.annotateCurrentSpan({ revision: snapshot.number });
               const workers = yield* Ref.get(registered);
-              const restart = restartChanges(running, loaded, Option.isSome(workers));
-              if (EffectArray.isReadonlyArrayNonEmpty(restart)) {
-                return yield* restartRequired(restart);
-              }
-              const problems = yield* restore((yield* Ref.get(parentAdmission))(loaded));
-              const problem = problems[0];
-              if (problem !== undefined)
-                return yield* FactoryConfigError.make({
-                  file: problem.file,
-                  stage: problem.stage,
-                  message: `${problem.message}. The running configuration is unchanged.`,
-                });
-              const applyWorkers = yield* restore(
-                Option.isSome(workers)
-                  ? workers.value(running, loaded)
-                  : beforeWorkersStart(running, loaded),
+              yield* timedStep(
+                "restart",
+                Effect.suspend(() => {
+                  const restart = restartChanges(running, loaded, Option.isSome(workers));
+                  return EffectArray.isReadonlyArrayNonEmpty(restart)
+                    ? Effect.fail(restartRequired(restart))
+                    : Effect.void;
+                }),
+              );
+              const admit = yield* Ref.get(parentAdmission);
+              yield* restore(
+                checkCoordinatorBrains(admit(loaded), ([problem]) =>
+                  FactoryConfigError.make({
+                    file: problem.file,
+                    stage: problem.stage,
+                    message: `${problem.message}. The running configuration is unchanged.`,
+                  }),
+                ),
+              );
+              const applyWorkers = yield* timedStep(
+                "worker-preflight",
+                restore(
+                  Option.isSome(workers)
+                    ? workers.value(running, loaded)
+                    : beforeWorkersStart(running, loaded),
+                ),
               );
               const changes = instanceReload(running, loaded);
               // The caller applies this prepared reload after validation.
@@ -331,7 +390,7 @@ export class CurrentInstance extends Context.Service<
             Effect.gen(function* () {
               yield* Ref.set(observed, snapshot);
               const apply = yield* restore(prepare(snapshot));
-              return yield* apply;
+              return yield* timedStep("apply", apply);
             }),
           ).pipe(Effect.scoped);
 
@@ -340,25 +399,22 @@ export class CurrentInstance extends Context.Service<
             Effect.uninterruptibleMask((restore) =>
               Effect.gen(function* () {
                 yield* Effect.annotateCurrentSpan({ expectedRevision: request.expected });
-                const snapshot = yield* store.read;
-
-                const candidate = yield* commit(
-                  parser,
-                  snapshot,
-                  request.expected,
-                  request.changes,
-                  {
+                const snapshot = yield* timedStep("read", store.read);
+                const time = yield* DateTime.now;
+                const candidate = yield* timedStep(
+                  "parse",
+                  commit(parser, snapshot, request.expected, request.changes, {
                     actor: request.actor,
                     message: request.message,
-                    time: yield* DateTime.now,
-                  },
+                    time,
+                  }),
                 );
                 const apply = yield* restore(prepare(candidate.configuration));
-                const revision = yield* store.commit(request);
-                yield* apply;
+                const revision = yield* timedStep("store", store.commit(request));
+                yield* timedStep("apply", apply);
                 return revision;
               }),
-            ).pipe(Effect.scoped, reloading.withPermits(1)),
+            ).pipe(Effect.scoped, afterRunning(reloading)),
           Effect.tapError((error) =>
             Effect.logWarning("Configuration write refused", {
               errorTag: error._tag,
@@ -380,8 +436,9 @@ export class CurrentInstance extends Context.Service<
               message: "Could not read the configuration store",
             }),
           ),
+          (read) => timedStep("read", read),
           Effect.flatMap(install),
-          reloading.withPermits(1),
+          afterRunning(reloading),
           Effect.withSpan("CurrentInstance.reload", { attributes: { directory } }),
         );
 
@@ -403,6 +460,7 @@ export class CurrentInstance extends Context.Service<
                   FactoryConfigError: () => Effect.void,
                   RestartRequiredError: () => Effect.void,
                   ReloadPreflightError: () => Effect.void,
+                  ValidationTimeoutError: () => Effect.void,
                 }),
               );
             }).pipe(reloading.withPermits(1)),

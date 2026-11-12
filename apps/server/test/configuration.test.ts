@@ -1,7 +1,8 @@
 import { jsonKey } from "@usine/core/json-key";
 import { HttpClient, FetchHttpClient } from "effect/http";
 
-import { Fiber, Effect, Layer, Option, Schema, Deferred, FileSystem } from "effect";
+import { Context, Fiber, Effect, Layer, Option, Schema, Deferred, FileSystem } from "effect";
+import { TestClock } from "effect/testing";
 import { webRequest } from "../../../tooling/test/http.mts";
 import { sqliteTempDirectory } from "../../../tooling/test/sqlite.mts";
 import { NodeServices, NodeFileSystem } from "@effect/platform-node";
@@ -14,6 +15,12 @@ import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { createServer } from "node:net";
 import { ConfigurationEntityView, UpgradeView } from "@usine/orchestrator/operator/http";
 import { UsineConfig } from "@usine/config/factory";
+import { fauxParent } from "@usine/durable/testing";
+import { coordinatorBrainTimeout } from "@usine/orchestrator/current-instance";
+import { runConfigCommand } from "../src/configuration/cli.ts";
+import { parseConfigCommand } from "../src/configuration/command.ts";
+import { configurationLayer } from "../src/configuration/runtime.ts";
+import { failureMessage } from "../src/failure-message.ts";
 import {
   ConfigurationStore,
   configurationDiff,
@@ -217,6 +224,38 @@ writeFileSync(file, readFileSync(file, "utf8").replace("effort: high", "effort: 
       expect(storedConfiguration(directory)).toEqual(before);
     }).pipe(Effect.provide(NodeFileSystem.layer)),
   { timeout: 60_000 },
+);
+
+it.effect("refuses an import whose coordinator brain check doesn't finish in time", () =>
+  Effect.gen(function* () {
+    const folder = yield* directoryFixture;
+    const directory = InstanceDirectory.make(folder);
+    const context = yield* Layer.build(
+      configurationLayer.pipe(Layer.provide(localSqliteLayer(directory))),
+    );
+    const checking = yield* Deferred.make<void>();
+    const parents = {
+      ...fauxParent([]),
+      credentials: {
+        route: "gateway",
+        authentication: () =>
+          Deferred.succeed(checking, undefined).pipe(Effect.andThen(Effect.never)),
+      },
+    } as const;
+    const command = yield* parseConfigCommand(["import", directory]);
+    const importing = yield* runConfigCommand(directory, command, () =>
+      Effect.succeed(parents),
+    ).pipe(Effect.provideContext(context), Effect.flip, Effect.forkChild);
+    yield* Deferred.await(checking);
+    yield* TestClock.adjust(coordinatorBrainTimeout);
+    const failure = yield* Fiber.join(importing);
+
+    expect(failure._tag).toBe("ValidationTimeoutError");
+    expect(failureMessage(failure)).toBe(
+      "The coordinator brain check didn't finish within 10 seconds. The running configuration is unchanged. Check that the model provider responds, then try again. No revision was written.",
+    );
+    expect((yield* Context.get(context, ConfigurationStore).read).number).toBe(0);
+  }).pipe(Effect.provide(NodeServices.layer)),
 );
 
 it.live(

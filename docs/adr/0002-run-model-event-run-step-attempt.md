@@ -4,7 +4,7 @@ usine adapts Inngest's run model. An event's dedup key comes from the watched st
 
 A loop has at most one open run per item. A newer event supersedes it only before an attempt starts; otherwise the event waits until the run ends. An approval is an event. The operator can retry a failed run, and run a succeeded or canceled run again, since a run can succeed with its item unresolved and a quick label round trip looks unchanged to polling. Run again records a new event for the same state, so polling still acts once.
 
-Automatic retry covers only failures outside the agent: infrastructure failures and provider capacity refusals, up to three attempts. A capacity retry waits a few minutes, or until the reset of a usage limit that the harness reports as a capacity refusal, and continues from the salvaged work. Every other failure waits for the operator, including a defect that escapes the executor, so a bug doesn't repeat agent work.
+Automatic retry covers only failures outside the agent: infrastructure failures and provider capacity refusals, up to three attempts. A capacity retry waits a few minutes, or until the reset that any harness reports for a subscription or API-key usage limit, and continues from the salvaged work. Every other failure waits for the operator, including a defect that escapes the executor, so a bug doesn't repeat agent work.
 
 Each open run is one engine fiber over usine's own run tables. The fiber reserves a worker, opens or reattaches an attempt, and records its outcome until the run closes. A run waiting for approval or for CI ([ADR 0033](./0033-durable-ci-waits.md)) has no fiber.
 
