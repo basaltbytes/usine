@@ -1609,4 +1609,51 @@ describe("SSH Worker with Docker", () => {
       );
     });
   });
+
+  it.effect.each([{ order: ["claude", "codex"] }, { order: ["codex", "claude"] }] as const)(
+    "mounts each harness's login files by its own route ($order)",
+    ({ order }) => {
+      const [claude, codex] = LOGINS;
+      const machine = dockerMachine();
+      for (const login of LOGINS) machine.state.homeFiles.add(login.mounted).add(login.seeded);
+      const gateway = fakeGateway(machine, BOTH_PROVIDERS);
+      const logs = capturedLogs();
+      const mountsFor = ({ mounted, seeded }: (typeof LOGINS)[number]) => [
+        `type=bind,"source=/home/usine/${mounted}","destination=/home/usine/${mounted}"`,
+        `type=bind,"source=/home/usine/${seeded}","destination=/usr/local/share/usine/seed/${seeded}",readonly`,
+      ];
+      const ready = () => (spec: BrainSpec) =>
+        Effect.succeed(HarnessReady.make({ harness: spec.harness }));
+      return Effect.gen(function* () {
+        const executor = yield* Executor;
+        const brains = order.map((id) => (id === "claude" ? claude : codex).brain);
+        yield* executor.preflight(WORKER, brains, 1);
+        const mounts = mountsOf(preflightRunOf(machine));
+        for (const mount of mountsFor(claude)) assert.notInclude(mounts, mount);
+        assert.includeMembers(mounts, mountsFor(codex));
+        for (const [harness, route, mounted] of [
+          ["claude", "gateway", ""],
+          ["codex", "host-login", codex.mounted],
+        ] as const) {
+          const line = logs.infos.find(
+            (line) =>
+              line.includes("Chose the login files that the Worker's containers mount") &&
+              line.includes(`"harness":"${harness}"`),
+          );
+          assert(line !== undefined, `preflight logs ${harness}`);
+          const fields = (yield* Schema.decodeEffect(CapturedLog)(line).pipe(Effect.orDie))[1];
+          assert.strictEqual(fields.credentialRoute, route);
+          assert.strictEqual(fields.mounted, mounted);
+        }
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(
+          gatewayRuntime(machine, mintingProvider(), gateway, {
+            address: gatewayAddress({ llmProviders: ["anthropic-messages"] }),
+            probes: { harnessReadiness: ready },
+          }).pipe(Layer.provideMerge(logs.layer)),
+        ),
+      );
+    },
+  );
 });
