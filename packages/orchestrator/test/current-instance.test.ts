@@ -497,6 +497,42 @@ describe("CurrentInstance", () => {
     ),
   );
 
+  it.live("accepts an unchanged auth.trusted_proxies list and rejects a changed one", () =>
+    withFolder(
+      (root) =>
+        Effect.gen(function* () {
+          const instances = yield* CurrentInstance;
+          yield* startWorkers([]);
+          yield* writeInstanceFiles(root, [
+            [
+              "usine.yaml",
+              `${usineYaml()}webhooks:\n  mode: deliveries\nauth:\n  trusted_proxies: ["127.0.0.1/32", "::1/128"]\n`,
+            ],
+          ]);
+          yield* instances.reload;
+          const running = yield* instances.get;
+          assert.strictEqual(running.config.webhooks.mode, "deliveries");
+
+          yield* writeInstanceFiles(root, [
+            [
+              "usine.yaml",
+              `${usineYaml()}webhooks:\n  mode: deliveries\nauth:\n  trusted_proxies: [127.0.0.1/32]\n`,
+            ],
+          ]);
+          const failure = yield* Effect.flip(instances.reload);
+          assert(failure._tag === "RestartRequiredError", failure._tag);
+          assert.deepStrictEqual(failure.fields, ["auth"]);
+          const unchanged = yield* instances.get;
+          assert.strictEqual(unchanged, running);
+        }).pipe(Effect.scoped),
+      [
+        ["usine.yaml", `${usineYaml()}auth:\n  trusted_proxies: [127.0.0.1/32, ::1/128]\n`],
+        ["agents/developer.md", agentFile("gpt-5.6-sol")],
+        ["loops/start-dev.md", loopFile("developer")],
+      ],
+    ),
+  );
+
   it.live("preflights on every Worker only the brains a reload adds", () =>
     withFolder((root) =>
       Effect.gen(function* () {

@@ -10,7 +10,7 @@ import { OperatorLogin } from "@usine/core/operator";
 import { Clock, Context, Effect, Layer, Option, Redacted, Crypto } from "effect";
 import { HttpServerRequest } from "effect/http";
 import type { IpNetwork } from "effect/net";
-import { clientAddress } from "./client.ts";
+import { type ClientAddress, clientAddress } from "./client.ts";
 import { GitHubSignIn } from "./github.ts";
 import {
   AuthError,
@@ -242,15 +242,39 @@ export const authenticationLayer = (options: {
         const now = yield* Clock.currentTimeMillis;
         prune(now);
         const request = yield* Effect.serviceOption(HttpServerRequest.HttpServerRequest);
-        const client = Option.match(request, {
-          onNone: () => "in-process",
+        const resolved = Option.match(request, {
+          onNone: ():
+            | ClientAddress
+            | { readonly address: string; readonly source: "in-process" } => ({
+            address: "in-process",
+            source: "in-process",
+          }),
           onSome: (current) => clientAddress(current, options.trustedProxies),
         });
-        yield* Effect.annotateCurrentSpan({ endpoint, client });
+        const client = resolved.address;
+        const source = resolved.source === "connection" ? resolved.reason : resolved.source;
+        yield* Effect.annotateCurrentSpan({ endpoint, client, source });
+        if (resolved.source === "connection" && resolved.forwardedFor !== undefined) {
+          const forwardedFor = resolved.forwardedFor.slice(0, 200);
+          if (resolved.reason === "unreadable-forwarded-entry")
+            yield* Effect.logWarning(
+              "A trusted proxy sent an X-Forwarded-For entry that isn't an IP address; counting sign-in requests against the proxy",
+              { endpoint, client, forwardedFor },
+            );
+          else if (resolved.reason === "untrusted-peer")
+            yield* Effect.logInfo(
+              "Ignored X-Forwarded-For from a peer outside auth.trusted_proxies; counting sign-in requests against the peer",
+              { endpoint, client, forwardedFor },
+            );
+        }
         const clientKey = `${endpoint} ${client}`;
         const clientWindow = clientLimits.get(clientKey) ?? { until: now + LIMIT_WINDOW, count: 0 };
         if (clientWindow.count >= CLIENT_LIMIT) {
-          yield* Effect.logWarning("Sign-in rate limit reached for a client", { endpoint, client });
+          yield* Effect.logWarning("Sign-in rate limit reached for a client", {
+            endpoint,
+            client,
+            source,
+          });
           return yield* authFailure("Too many sign-in requests. Try again in a minute.", 429);
         }
         const instanceWindow = instanceLimits.get(endpoint) ?? {
@@ -261,6 +285,7 @@ export const authenticationLayer = (options: {
           yield* Effect.logWarning("Instance-wide sign-in rate limit reached", {
             endpoint,
             client,
+            source,
           });
           return yield* authFailure("Too many sign-in requests. Try again in a minute.", 429);
         }

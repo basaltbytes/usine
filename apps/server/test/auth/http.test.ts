@@ -4,7 +4,7 @@ import { MemberAccess } from "../../src/auth/access.ts";
 import { securityMiddleware } from "../../src/security.ts";
 import { TestClock } from "effect/testing";
 import { ActingMember, OperatorLogin } from "@usine/core/operator";
-import { Effect, Layer, Option, Redacted, Ref, Schema } from "effect";
+import { Effect, Layer, Logger, Option, Redacted, Ref, Schema } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
 import { IpNetwork } from "effect/net";
 import { administratorPermissions } from "@usine/core/access";
@@ -323,6 +323,102 @@ it.live("reads the client address from X-Forwarded-For only behind a trusted pro
     );
     yield* proxied.startWeb(false).pipe(from("127.0.0.1", "203.0.113.8"));
   }).pipe(Effect.scoped),
+);
+
+it.live("doesn't count a client's refused requests toward the instance-wide ceiling", () =>
+  Effect.gen(function* () {
+    const { authentication: auth } = yield* authFixture();
+    for (let count = 0; count < 700; count++)
+      yield* auth.startWeb(false).pipe(from("203.0.113.7"), Effect.ignore);
+
+    assert.equal((yield* auth.startWeb(false).pipe(from("203.0.113.7"), Effect.flip)).status, 429);
+    yield* auth.startWeb(false).pipe(from("198.51.100.4"));
+  }).pipe(Effect.scoped),
+);
+
+it.live("resets the client limit and the instance-wide ceiling after a minute", () =>
+  Effect.gen(function* () {
+    const { authentication: auth } = yield* authFixture();
+    for (let count = 0; count < 60; count++) yield* auth.startWeb(false).pipe(from("203.0.113.7"));
+    assert.equal((yield* auth.startWeb(false).pipe(from("203.0.113.7"), Effect.flip)).status, 429);
+    yield* TestClock.adjust("59 seconds");
+    assert.equal((yield* auth.startWeb(false).pipe(from("203.0.113.7"), Effect.flip)).status, 429);
+    yield* TestClock.adjust("1 second");
+    yield* auth.startWeb(false).pipe(from("203.0.113.7"));
+
+    yield* TestClock.adjust("1 minute");
+    for (let client = 1; client <= 10; client++)
+      for (let count = 0; count < 60; count++)
+        yield* auth.startWeb(false).pipe(from(`192.0.2.${client}`));
+    assert.equal((yield* auth.startWeb(false).pipe(from("198.51.100.4"), Effect.flip)).status, 429);
+    yield* TestClock.adjust("1 minute");
+    yield* auth.startWeb(false).pipe(from("198.51.100.4"));
+  }).pipe(Effect.provide(TestClock.layer()), Effect.scoped),
+);
+
+it.live("reads X-Forwarded-For entries that carry a port", () =>
+  Effect.gen(function* () {
+    const auth = (yield* authFixture([alice], alice, () => administratorPermissions, [
+      IpNetwork.fromStringUnsafe("127.0.0.0/8"),
+    ])).authentication;
+    for (let count = 0; count < 60; count++)
+      yield* auth.startWeb(false).pipe(from("127.0.0.1", `203.0.113.7:${4000 + count}`));
+    assert.equal(
+      (yield* auth.startWeb(false).pipe(from("127.0.0.1", "203.0.113.7"), Effect.flip)).status,
+      429,
+    );
+    yield* auth.startWeb(false).pipe(from("127.0.0.1", "203.0.113.8:5000"));
+
+    for (let count = 0; count < 60; count++)
+      yield* auth.startWeb(false).pipe(from("127.0.0.1", `[2001:db8::1]:${4000 + count}`));
+    assert.equal(
+      (yield* auth.startWeb(false).pipe(from("127.0.0.1", "2001:db8::1"), Effect.flip)).status,
+      429,
+    );
+    yield* auth.startWeb(false).pipe(from("127.0.0.1", "[2001:db8::2]:443"));
+  }).pipe(Effect.scoped),
+);
+
+it.live(
+  "counts against the trusted proxy and warns when its X-Forwarded-For entry isn't an IP",
+  () =>
+    Effect.gen(function* () {
+      const logs: Array<{
+        readonly level: string;
+        readonly message: unknown;
+        readonly fields: unknown;
+      }> = [];
+      const logger = Logger.make<unknown, void>(({ logLevel, message }) => {
+        const [text, fields] = Array.isArray(message) ? message : [message];
+        logs.push({ level: logLevel, message: text, fields });
+      });
+      const auth = (yield* authFixture([alice], alice, () => administratorPermissions, [
+        IpNetwork.fromStringUnsafe("127.0.0.0/8"),
+      ])).authentication;
+      for (let count = 0; count < 60; count++)
+        yield* auth.startWeb(false).pipe(from("127.0.0.1", `198.51.100.${count}, unknown`));
+      const refused = yield* auth
+        .startWeb(false)
+        .pipe(from("127.0.0.1", "198.51.100.200, unknown"), Effect.flip, Effect.withLogger(logger));
+      assert.equal(refused.status, 429);
+      yield* auth.startWeb(false).pipe(from("127.0.0.2", "198.51.100.200, unknown"));
+
+      assert.deepInclude(logs, {
+        level: "Warn",
+        message:
+          "A trusted proxy sent an X-Forwarded-For entry that isn't an IP address; counting sign-in requests against the proxy",
+        fields: {
+          endpoint: "web",
+          client: "127.0.0.1",
+          forwardedFor: "198.51.100.200, unknown",
+        },
+      });
+      assert.deepInclude(logs, {
+        level: "Warn",
+        message: "Sign-in rate limit reached for a client",
+        fields: { endpoint: "web", client: "127.0.0.1", source: "unreadable-forwarded-entry" },
+      });
+    }).pipe(Effect.scoped),
 );
 
 it.live(
