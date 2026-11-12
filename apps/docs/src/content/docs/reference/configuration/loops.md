@@ -50,7 +50,7 @@ Run the repository checks and push before finishing. Do not merge.
 
 For example, a weekly schedule uses cron `0 6 * * 1`, time zone `Europe/Paris`, and condition `true`. After downtime, only the latest missed tick fires, once per selected repository.
 
-Polling evaluates changed issues and pull requests, and refreshes open pull requests for mergeability changes. A matching item state opens one run; timestamps alone do not create another state. A changed state can supersede a run before its first attempt. A false condition revokes runs with no started attempt; running attempts continue. A queued event is rechecked before opening its run; a recheck error or timeout permits the run and logs a warning.
+Polling evaluates changed issues and pull requests, and refreshes open pull requests for mergeability changes. A matching item state opens one run; timestamps alone do not create another state. A changed state can supersede a run before its first attempt. A false condition revokes runs with no started attempt; running attempts continue. A queued event is rechecked before its run opens. If the recheck fails or times out, usine logs a warning: a trigger match opens with its saved settings, and a CI fix stays queued until a later reconciliation can read its pull request.
 
 Issue and schedule attempts start detached at the latest default-branch commit. Pull request attempts start detached at the recorded head commit. A task that pushes to a pull request must tell the agent to check out its source branch first.
 

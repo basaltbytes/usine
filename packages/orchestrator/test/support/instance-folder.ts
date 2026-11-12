@@ -1,6 +1,7 @@
 import { NodeServices } from "@effect/platform-node";
 import {
   Configuration,
+  type ConfigurationRevision,
   ConfigurationRevisionNumber,
   ConfigurationStore,
   ConfigurationStoreError,
@@ -31,8 +32,14 @@ export const writeInstanceFiles = Effect.fn("test.writeInstanceFiles")(function*
   }
 });
 
-/** The reloadable current instance over the folder at `root`, loaded as `usine up` loads it. */
-export const reloadableInstanceLayer = (root: InstanceDirectory) =>
+/**
+ * The reloadable current instance over the folder at `root`, loaded as `usine up` loads it. The
+ * store's `changes` stream yields `revisions`, then never ends.
+ */
+export const reloadableInstanceLayer = (
+  root: InstanceDirectory,
+  revisions: ReadonlyArray<ConfigurationRevision> = [],
+) =>
   Layer.unwrap(
     Effect.gen(function* () {
       const folder = yield* InstanceFolder;
@@ -53,7 +60,7 @@ export const reloadableInstanceLayer = (root: InstanceDirectory) =>
             list: unused,
             revision: unused,
             commit: unused,
-            changes: () => Stream.never,
+            changes: () => Stream.concat(Stream.fromIterable(revisions), Stream.never),
           }),
         ),
       );

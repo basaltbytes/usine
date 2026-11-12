@@ -8,7 +8,7 @@ The default adapter stores the event ledger and run records in `<instance>/.usin
 
 ## Stores and readers
 
-Operations without arguments are Effect values: `yield* reader.revision`, `yield* engine.reconcile`, and `yield* budgets.asks`. This also applies to `awaitingCi`, `drain`, `recoverWorkspaces`, `latestPoolRateLimits`, `pendingResets`, and attention acknowledgement `list`. Each execution reads current state.
+Operations without arguments are Effect values: `yield* reader.revision`, `yield* engine.reconcile`, and `yield* budgets.asks`. This also applies to `admitCiFixes`, `awaitingCi`, `drain`, `recoverWorkspaces`, `latestPoolRateLimits`, `pendingResets`, and attention acknowledgement `list`. Each execution reads current state.
 
 - `CursorStore` stores typed keys with JSON values, for efficiency-only trigger cursors such as GitHub watermarks and ETags. Deleting one safely replays events; the ledger deduplicates.
 - `LoopControl` stores loop pause state; pausing never edits the loop file.
@@ -65,7 +65,7 @@ An attempt ending with `QuestionFailure` or `BlockedFailure` starts a suppressio
 
 ### Run fibers and restarts
 
-Each open run has one fiber, and the run tables are the only durable state. At startup and every `ReconcileInterval` (three minutes by default), the engine starts a fiber for each open run without one, except runs waiting for approval, and opens the newest queued event of each loop item without an open run, if the item has a closed run or that event is a CI fix. CI fixes and trigger matches follow the same rule: events are rechecked from newest to oldest. A CI fix that does not match is revoked on its own before the next candidate is rechecked. A trigger mismatch revokes the queued trigger matches together and preserves CI fixes for their own rechecks. The first matching event opens the next run and supersedes older queued events. A missing item revokes the whole queued group. Reconcile skips items with an open run, so their queued CI fixes wait for that run's continuation without a trigger recheck. A failed store operation is retried four times with exponential backoff. If the engine fails while driving a run (a defect, or a write that still fails), the fiber logs the cause and stops until the next reconcile or restart.
+Each open run has one fiber, and the run tables are the only durable state. At startup and every `ReconcileInterval` (three minutes by default), the engine starts a fiber for each open run without one, except runs waiting for approval, and admits the queued events of each loop item without an open run, open budget ask, or suppression. It reads that set once per reconcile. `RunEngine.admitCiFixes` admits only the queues whose newest event is a CI fix; after that fix mismatches, the next event it rechecks can be a trigger match. CI fixes and trigger matches follow the same rule: events are rechecked from newest to oldest. A CI fix that does not match is revoked on its own before the next candidate is rechecked. A trigger mismatch revokes the queued trigger matches together and preserves CI fixes for their own rechecks. The first matching event opens the next run and supersedes older queued events. A missing item revokes the whole queued group. Reconcile skips items with an open run, so their queued CI fixes wait for that run's continuation without a trigger recheck. After a mismatch, the next candidate is read only while the item has no open run or suppression. A recheck returns the settings the run opens with as `Matches({ settings })`; the engine keeps only the setting keys from it, so the event, item, revision, and CI evidence stay as recorded. A recheck that can't read the item returns `Undetermined`: a trigger match opens with its saved settings, and a CI fix stays queued for the next reconcile. A failed store operation is retried four times with exponential backoff. If the engine fails while driving a run (a defect, or a write that still fails), the fiber logs the cause and stops until the next reconcile or restart.
 
 After a stop during an attempt, the engine asks `StepExecutor.isLive` whether its parent task survived:
 
@@ -143,7 +143,7 @@ import { WorkerName } from "@usine/core/worker"
 import { InstanceDirectory } from "@usine/core/instance"
 import { StepCompletion, StepResult } from "@usine/core/step/result"
 import { StepExecutor } from "@usine/engine/step-executor"
-import { TriggerCondition, TriggerRecheck } from "@usine/engine/trigger-condition"
+import { savedSettings, TriggerCondition, TriggerRecheck } from "@usine/engine/trigger-condition"
 import { CompletionCheck } from "@usine/engine/completion-check"
 import { layer } from "@usine/engine/local-sqlite"
 import { RunEngine } from "@usine/engine/engine"
@@ -166,9 +166,11 @@ const StepExecutorLive = Layer.succeed(StepExecutor)({
   interrupt: () => Effect.void,
 })
 
-// Re-checks a queued Event's trigger before its Run opens; this one always matches.
+// Re-checks a queued Event's trigger before its Run opens; this one always matches with the
+// saved settings.
 const TriggerConditionLive = Layer.succeed(TriggerCondition)({
-  recheck: (submission) => Effect.succeed(TriggerRecheck.Matches({ submission })),
+  recheck: (submission) =>
+    Effect.succeed(TriggerRecheck.Matches({ settings: savedSettings(submission) })),
 })
 
 const EngineLive = layer(InstanceDirectory.make("/path/to/instance")).pipe(

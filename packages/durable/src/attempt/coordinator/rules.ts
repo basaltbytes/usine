@@ -349,10 +349,12 @@ export const ruleFor = (event: CoordinatorEvent, context: AttemptContext): Decis
     BudgetExceeded: ({ attempted }): Decision => OverBudget.make({ attempted }),
   });
 
-/** Whether a model may answer `event`; every other event takes its rule, so typed facts win. */
+/**
+ * Whether a model may answer `event`: only a report without a reserved marker. Every other event
+ * takes its rule, so typed facts win, and an interrupted child that left no report can't complete.
+ */
 const modelEligible = (event: ChildEvent): boolean =>
-  event._tag === "ChildInterrupted" ||
-  (event._tag === "ChildReported" && Option.isNone(event.reserved));
+  event._tag === "ChildReported" && Option.isNone(event.reserved);
 
 const reportText = (event: ChildReported): string =>
   event.report.trim() === "" ? BLANK_REPORT_MESSAGE : event.report;

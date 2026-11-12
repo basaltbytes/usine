@@ -78,7 +78,7 @@ export {
   ConfigurationStoreError,
   StaleRevision,
 } from "./model.ts";
-export { commit, validateConfiguration } from "./commit.ts";
+export { commit, replay, validateConfiguration } from "./commit.ts";
 export {
   configurationDiff,
   configurationEntities,
