@@ -170,6 +170,7 @@ describe("shared continuation policy", () => {
                 held: policy.restored.held,
                 paused: policy.restored.paused,
                 idle: policy.restored.idle,
+                idleAnsweredOperator: policy.restored.idleAnsweredOperator,
                 unread: policy.restored.unread,
                 send: (message, _activity, id) =>
                   steer(message, id).pipe(Effect.as("queued" as const)),

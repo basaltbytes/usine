@@ -1,9 +1,9 @@
-import { ChildSessionCount } from "@usine/core/agent/session";
+import { AgentSessionId, ChildSessionCount } from "@usine/core/agent/session";
 import { AttemptId } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AttemptFailure } from "@usine/core/attempt/failure";
 import { StepCompletion } from "@usine/core/step/result";
-import { type Brand, Context, type Duration, type Effect, Option, Schema } from "effect";
+import { type Brand, Context, type Duration, Effect, Option, Schema } from "effect";
 
 import { AttemptReport, StoredRequest } from "../attempt-runtime.ts";
 
@@ -63,6 +63,11 @@ export class ChildProgress extends Schema.Class<
   prompted: Schema.Boolean,
   /** The child's report while it waited idle under a Hold. */
   idle: Schema.Option(Schema.String),
+  /** Whether `idle` replies to operator input that the child read after its last tool call. */
+  idleAnsweredOperator: Schema.Boolean.pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed(false)),
+    Schema.withConstructorDefault(Effect.succeed(false)),
+  ),
   /** The times of the continuation turns, in epoch milliseconds. */
   continuations: Schema.Array(Schema.Finite),
   /** The child's tool calls that started and did not finish. */
@@ -93,6 +98,44 @@ export class DelegationRecord extends Schema.Class<
   outcome: Schema.Option(EncodedEvent),
 }) {}
 
+/** Whether the operator holds or pauses one child session (ADR 0018). */
+export class Supervision extends Schema.Class<
+  Supervision,
+  Brand.Brand<"@usine/durable/coordinator/journal/Supervision">
+>("@usine/durable/Supervision")({
+  sessionId: AgentSessionId,
+  /** Whether the child keeps its result until the operator releases it. */
+  held: Schema.Boolean,
+  /** Whether the child's turn is interrupted until new input or a release. */
+  paused: Schema.Boolean,
+}) {}
+
+/** An operator intervention, encoded by the coordinator; the journal stores it unread. */
+export const EncodedIntervention = Schema.Json.pipe(Schema.brand("EncodedIntervention"));
+export type EncodedIntervention = typeof EncodedIntervention.Type;
+
+// The one codec of a stored intervention, so what the coordinator stores, a resumed child reads.
+const StoredIntervention = Schema.toCodecJson(AttemptChannel.Intervention);
+
+/** Encodes `intervention` for the journal. */
+export const encodeIntervention = (intervention: AttemptChannel.Intervention) =>
+  Schema.encodeEffect(StoredIntervention)(intervention).pipe(Effect.map(EncodedIntervention.make));
+
+/** Decodes a stored intervention; fails with `SchemaError` when it no longer decodes. */
+export const decodeIntervention = Schema.decodeEffect(StoredIntervention);
+
+/** An operator input that a child queued and hasn't reported read or unread. */
+export class QueuedInput extends Schema.Class<
+  QueuedInput,
+  Brand.Brand<"@usine/durable/coordinator/journal/QueuedInput">
+>("@usine/durable/QueuedInput")({
+  /** The inbound sequence of the input, which its receipts repeat. */
+  inputSequence: AttemptChannel.Sequence,
+  /** The child that queued the input. */
+  sessionId: AgentSessionId,
+  intervention: EncodedIntervention,
+}) {}
+
 /** The child saved its conversation. Before its prompt, the first save marks it unprompted. */
 export const SessionSaved = Schema.TaggedStruct("SessionSaved", {
   saved: Schema.Json,
@@ -118,7 +161,14 @@ export const ToolStarted = Schema.TaggedStruct("ToolStarted", {
 export const ToolFinished = Schema.TaggedStruct("ToolFinished", { callId: Schema.String });
 
 /** The child's report while it waits idle, or `None` when it works or finishes. */
-export const IdleSaved = Schema.TaggedStruct("IdleSaved", { report: Schema.Option(Schema.String) });
+export const IdleSaved = Schema.TaggedStruct("IdleSaved", {
+  report: Schema.Option(Schema.String),
+  /** Whether the report replies to operator input (ADR 0018). */
+  answeredOperator: Schema.Boolean.pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed(false)),
+    Schema.withConstructorDefault(Effect.succeed(false)),
+  ),
+});
 
 export const OutputSaved = Schema.TaggedStruct("OutputSaved", { output: Schema.String });
 
@@ -248,6 +298,12 @@ export class CoordinatorSnapshot extends Schema.Class<
   result: Schema.Option(StepCompletion),
   /** The runaway guard's longest recorded unsupervised time. */
   unsupervised: Schema.Option(Schema.Duration),
+  /** The children that the operator holds or pauses, in session ID order. */
+  supervision: Schema.Array(Supervision),
+  /** Operator inputs that children queued and haven't reported, in sequence order. */
+  inputs: Schema.Array(QueuedInput),
+  /** The sequence of the next operator input in the transcript. */
+  nextInbound: AttemptChannel.Sequence,
 }) {
   get attemptId(): AttemptId {
     return this.request.spec.attemptId;
@@ -288,7 +344,8 @@ export class StaleRevision extends Schema.TaggedError<
 /**
  * The event-driven coordinator's durable record of each Attempt: its stored request, an
  * append-only ledger of events with their decisions, the coordinator state, the delegations it
- * decided, and an outbox of channel envelopes awaiting the sink.
+ * decided, an outbox of channel envelopes awaiting the sink, and the operator's supervision and
+ * queued input for its children.
  *
  * Calling an operation other than `open`, `load`, or `settle` for an Attempt that was never opened
  * is a defect, as is a transition that breaks the ledger's invariants or a progress change to a
@@ -358,6 +415,37 @@ export class AttemptJournal extends Context.Service<
     readonly recordUnsupervised: (
       attemptId: AttemptId,
       unsupervised: Duration.Duration,
+    ) => Effect.Effect<void, JournalError>;
+    /**
+     * Replaces the operator's supervision of `supervision.sessionId`. A session that is neither
+     * held nor paused has no stored supervision.
+     */
+    readonly supervise: (
+      attemptId: AttemptId,
+      supervision: Supervision,
+    ) => Effect.Effect<void, JournalError>;
+    /** Stores a queued operator input, replacing one with the same input sequence. */
+    readonly queueInput: (
+      attemptId: AttemptId,
+      input: QueuedInput,
+    ) => Effect.Effect<void, JournalError>;
+    /**
+     * Removes queued input `inputSequence` and appends `receipts` to the outbox in one transaction,
+     * and returns whether the input was stored. The receipts' sequences continue the snapshot's
+     * `nextOutbound`.
+     */
+    readonly forgetInput: (
+      attemptId: AttemptId,
+      inputSequence: AttemptChannel.Sequence,
+      receipts: ReadonlyArray<AttemptChannel.OutboundEnvelope>,
+    ) => Effect.Effect<boolean, JournalError>;
+    /**
+     * Records that the transcript holds operator input `sequence`, so that `nextInbound` follows
+     * it. Keeps a later stored `nextInbound`.
+     */
+    readonly recordInbound: (
+      attemptId: AttemptId,
+      sequence: AttemptChannel.Sequence,
     ) => Effect.Effect<void, JournalError>;
     /** Removes reserved envelopes up to and including `through`. Idempotent. */
     readonly acknowledge: (

@@ -18,7 +18,6 @@ import {
 import { StepCompletion, StepResult } from "@usine/core/step/result";
 import { WorkerName } from "@usine/core/worker";
 import {
-  Context,
   DateTime,
   Deferred,
   Effect,
@@ -29,7 +28,6 @@ import {
   Option,
   Ref,
   Schema,
-  Scope,
 } from "effect";
 import { TestClock } from "effect/testing";
 import { AttemptRequest, ParentReported, ResultRecorded } from "../src/attempt-runtime.ts";
@@ -42,12 +40,19 @@ import {
 } from "../src/attempt/coordinator/rules.ts";
 import { AttemptJournal, EventSequence, Settled } from "../src/coordinator/journal.ts";
 import { outboxFor } from "../src/coordinator/outbox.ts";
-import { CoordinatorRuntime } from "../src/coordinator/runtime.ts";
 import { RecordedDecision, WakeUp } from "../src/coordinator/wake-up.ts";
-import { stubChildBackendLayer, StubChildren } from "../src/testing.ts";
+import {
+  coordinated,
+  coordinator,
+  coordinatorWith,
+  holdingTerminalLoad,
+  interruptingTransition,
+  orchestrator,
+  stored,
+  until,
+} from "./coordinator-support.ts";
 import {
   assertAdmitted,
-  attemptRequest,
   handlerSession,
   recordingSink,
   slowToInterrupt,
@@ -55,60 +60,6 @@ import {
   temporaryDatabase,
   trace,
 } from "./support.ts";
-
-/** A request whose Attempt runs without a parent session. */
-const coordinated = (attemptId: string, maxChildren = 3) => {
-  const request = attemptRequest(attemptId, maxChildren);
-  return AttemptRequest.make({
-    ...request,
-    spec: AttemptChannel.RunSpec.make({ ...request.spec, parent: "none" }),
-  });
-};
-
-/** Interrupts, as a process stop does, each transition whose event has tag `tag`. */
-const interruptingTransition = (tag: string) => (journal: Layer.Layer<AttemptJournal>) =>
-  Layer.effect(
-    AttemptJournal,
-    Effect.gen(function* () {
-      const inner = yield* AttemptJournal;
-      const isTagged = Schema.is(Schema.Struct({ _tag: Schema.Literal(tag) }));
-      return AttemptJournal.of({
-        ...inner,
-        transition: (attemptId, expected, step) =>
-          isTagged(step.event) ? Effect.interrupt : inner.transition(attemptId, expected, step),
-      });
-    }),
-  ).pipe(Layer.provide(journal));
-
-/**
- * Holds the first `load` that finds the Attempt `Terminal` until `release` completes, after
- * completing `reached`. The coordinator makes that load after it delivered the terminal envelope
- * and before its `execute` call detaches.
- */
-const holdingTerminalLoad =
-  (reached: Deferred.Deferred<void>, release: Deferred.Deferred<void>) =>
-  (journal: Layer.Layer<AttemptJournal>) =>
-    Layer.effect(
-      AttemptJournal,
-      Effect.gen(function* () {
-        const inner = yield* AttemptJournal;
-        let held = false;
-        return AttemptJournal.of({
-          ...inner,
-          load: (attemptId) =>
-            inner.load(attemptId).pipe(
-              Effect.tap((snapshot) => {
-                if (held || !Option.exists(snapshot, ({ status }) => status._tag === "Terminal"))
-                  return Effect.void;
-                held = true;
-                return Deferred.succeed(reached, undefined).pipe(
-                  Effect.andThen(Deferred.await(release)),
-                );
-              }),
-            ),
-        });
-      }),
-    ).pipe(Layer.provide(journal));
 
 /**
  * Holds every `startDelegation` after completing `reached`, as a launch that waits through retry
@@ -237,46 +188,6 @@ const unresponsive = (reason: string) =>
 const unresponsiveReasons = (envelopes: ReadonlyArray<AttemptChannel.OutboundEnvelope>) =>
   envelopes.flatMap(({ payload }) =>
     payload._tag === "WorkerUnresponsive" ? [payload.reason] : [],
-  );
-
-/** A coordinator runtime over the journal with stub children, waking `wakeUp`. */
-const coordinatorWith = (wakeUp: Layer.Layer<WakeUp>) => (journal: Layer.Layer<AttemptJournal>) =>
-  CoordinatorRuntime.layer.pipe(
-    Layer.provide(Layer.mergeAll(journal, wakeUp)),
-    Layer.provideMerge(stubChildBackendLayer),
-  );
-
-const coordinator = coordinatorWith(WakeUp.rules);
-
-/**
- * Starts a runtime in its own scope, as one orchestrator process. `stop` closes the scope, which
- * interrupts its `execute` calls and children as a process stop does.
- */
-const orchestrator = (layer: Layer.Layer<CoordinatorRuntime | StubChildren>) =>
-  Effect.gen(function* () {
-    const scope = yield* Scope.make();
-    const context = yield* Layer.buildWithScope(layer, scope);
-    const attempts = Context.get(context, CoordinatorRuntime);
-    return {
-      attempts,
-      nextChild: Context.get(context, StubChildren).next,
-      /** Forks `execute` in the process's scope. */
-      execute: (request: AttemptRequest, io: AttemptChannel.Sink) =>
-        Effect.forkIn(attempts.execute(request, io), scope),
-      stop: Scope.close(scope, Exit.void),
-    };
-  });
-
-/** Waits until `check` holds. */
-const until = (check: () => boolean): Effect.Effect<void> =>
-  Effect.suspend(() =>
-    check() ? Effect.void : Effect.sleep("10 millis").pipe(Effect.andThen(until(check))),
-  );
-
-/** Reads the Attempt's journal through a separate connection. */
-const stored = (database: string, attemptId: AttemptId) =>
-  Effect.flatMap(Effect.service(AttemptJournal), (journal) => journal.load(attemptId)).pipe(
-    Effect.provide(sqliteJournal(database)),
   );
 
 /** A model handler's decision to complete the Attempt with `message`. */
@@ -477,7 +388,7 @@ describe("event-driven coordinator runtime", () => {
       }).pipe(Effect.scoped),
   );
 
-  it.live("refuses operator input and relays Worker notices from Started until the outcome", () =>
+  it.live("relays Worker notices from Started until the outcome", () =>
     Effect.gen(function* () {
       const database = yield* temporaryDatabase;
       const request = coordinated("coordinator/notices");
@@ -488,27 +399,15 @@ describe("event-driven coordinator runtime", () => {
       const execution = yield* process.execute(request, recording.sink);
       const child = yield* process.nextChild;
       yield* process.attempts.notify(attemptId, unresponsive("while working"));
-      const refused = yield* process.attempts
-        .intervene(
-          attemptId,
-          AttemptChannel.Intervention.make({
-            operator: "octocat",
-            target: AttemptChannel.ParentTarget.make(),
-            action: AttemptChannel.Steer.make({ message: "Keep going." }),
-          }),
-        )
-        .pipe(Effect.flip);
       yield* child.reply("Done.");
       yield* Fiber.join(execution);
       yield* process.attempts.notify(attemptId, unresponsive("after the end"));
       yield* process.stop;
 
-      assert.strictEqual(refused._tag, "AgentFailure");
       const outbound = recording.outbound();
       assertAdmitted(attemptId, outbound);
       assert.deepStrictEqual(unresponsiveReasons(outbound), ["before start", "while working"]);
       assert.deepStrictEqual(trace(outbound).slice(0, 2), ["Started", "WorkerUnresponsive"]);
-      assert.deepStrictEqual(recording.inbound(), []);
     }).pipe(Effect.scoped),
   );
 
@@ -1056,6 +955,43 @@ describe("event-driven coordinator runtime", () => {
         assert.strictEqual(failure.message, "transcript unavailable");
         assert.deepStrictEqual(unresponsiveReasons(recording.outbound()), []);
       }).pipe(Effect.scoped),
+  );
+
+  it.live("refuses envelopes after the terminal envelope while an execute call is attached", () =>
+    Effect.gen(function* () {
+      const database = yield* temporaryDatabase;
+      const request = coordinated("coordinator/emit-after-end");
+      const attemptId = request.spec.attemptId;
+      const process = yield* orchestrator(sqliteJournal(database).pipe(coordinator));
+      const execution = yield* process.execute(request, recordingSink().sink);
+      yield* (yield* process.nextChild).reply("Done.");
+      yield* Fiber.join(execution);
+      yield* process.stop;
+
+      // A second `execute` call's outbox, between its attach and its detach.
+      const recording = recordingSink();
+      const { refused, after } = yield* Effect.gen(function* () {
+        const journal = yield* AttemptJournal;
+        const snapshot = yield* journal.load(attemptId);
+        if (Option.isNone(snapshot)) return yield* Effect.die(new Error("no journal"));
+        const outbox = yield* outboxFor(journal, attemptId);
+        const refused = yield* Effect.scoped(
+          Effect.gen(function* () {
+            const attached = yield* outbox.attach(recording.sink, snapshot.value);
+            assert.isTrue(attached);
+            return yield* outbox.emit([unresponsive("after the end")]).pipe(Effect.flip);
+          }),
+        );
+        return { refused, after: yield* journal.load(attemptId) };
+      }).pipe(Effect.provide(sqliteJournal(database)));
+
+      assert.strictEqual(refused._tag, "AgentFailure");
+      assert.deepStrictEqual(recording.outbound(), []);
+      assert.deepStrictEqual(
+        Option.map(after, ({ outbox }) => outbox),
+        Option.some([]),
+      );
+    }).pipe(Effect.scoped),
   );
 
   it.live("drops a Worker notice while an execute call is attached to an ended Attempt", () =>

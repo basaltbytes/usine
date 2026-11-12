@@ -22,10 +22,13 @@ import { deskQuery } from "~/lib/desk/queries";
 import { runDetailKey } from "~/lib/runs/queries";
 import { api } from "~/lib/api";
 
-/** An operator action on one Run; resolving a failure includes the failed Attempt. */
+/**
+ * An operator action on one Run; resolving a failure and applying the CI labels of a CI wait that
+ * didn't finish include the failed Attempt.
+ */
 export type RunActionRequest =
   | { readonly action: "approve" | "retry" | "cancel" }
-  | { readonly action: "resolveFailure"; readonly attemptId: AttemptId };
+  | { readonly action: "resolveFailure" | "applyCiLabels"; readonly attemptId: AttemptId };
 
 interface RunActionVariables {
   readonly runId: RunId;
@@ -75,8 +78,8 @@ export const useRunAction = () => {
     mutationKey: runActionKey,
     mutationFn: ({ runId, request }: RunActionVariables) =>
       api((client) =>
-        request.action === "resolveFailure"
-          ? client.resolveFailure({ params: { runId }, payload: { attemptId: request.attemptId } })
+        request.action === "resolveFailure" || request.action === "applyCiLabels"
+          ? client[request.action]({ params: { runId }, payload: { attemptId: request.attemptId } })
           : client[request.action]({ params: { runId } }),
       ),
     onSuccess: (_, { runId }) => {

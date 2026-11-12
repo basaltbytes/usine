@@ -222,6 +222,14 @@ export class SessionIdle extends Schema.TaggedClass<
   message: Schema.OptionFromOptionalKey(Schema.NonEmptyString).pipe(
     Schema.withConstructorDefault(Effect.succeedNone),
   ),
+  /**
+   * Whether `message` replies to an operator message or steer that the session read after its last
+   * tool call (ADR 0018).
+   */
+  answeredOperator: Schema.Boolean.pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed(false)),
+    Schema.withConstructorDefault(Effect.succeed(false)),
+  ),
 }) {}
 
 /** A live session that started another user turn in the same conversation. */

@@ -9,4 +9,5 @@ export const idleCiMonitor = Layer.succeed(CiMonitor)({
       failures: [],
       nextPollAt: Option.none(),
     }),
+  applyLabelsAfterGreen: () => Effect.die("unused CI labels"),
 });

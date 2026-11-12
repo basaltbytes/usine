@@ -229,6 +229,10 @@ export const runSummaryView = (
   upgrade: UpgradeDrain | null = null,
 ): RunSummaryView => {
   const actions = RunState.operatorActions(snapshot.run.state);
+  const unresolved = !Option.contains(
+    snapshot.resolvedFailureAttemptId,
+    snapshot.attempts.at(-1)?.id,
+  );
   return RunSummaryView.make({
     id: snapshot.run.id,
     itemKey: snapshot.itemKey,
@@ -261,9 +265,8 @@ export const runSummaryView = (
     runAgain: Option.getOrNull(snapshot.runAgain),
     pullRequestUrl: snapshot.pullRequestUrl,
     ...actions,
-    canResolveFailure:
-      actions.canResolveFailure &&
-      !Option.contains(snapshot.resolvedFailureAttemptId, snapshot.attempts.at(-1)?.id),
+    canResolveFailure: actions.canResolveFailure && unresolved,
+    canApplyCiLabels: actions.canApplyCiLabels && unresolved,
   });
 };
 

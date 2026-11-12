@@ -51,6 +51,8 @@ export interface DelegationProgress {
   readonly saved: Option.Option<unknown>;
   /** The child's report while it waited idle under a Hold. */
   readonly idle: Option.Option<string>;
+  /** Whether `idle` replies to operator input that the child read after its last tool call. */
+  readonly idleAnsweredOperator: boolean;
   /** The times of the continuation turns, in epoch milliseconds. */
   readonly continuations: ReadonlyArray<number>;
   /** The child's tool calls that started and did not finish. */
@@ -82,8 +84,8 @@ export type DelegationStart = Admitted | Refused;
 
 /** An operator input queued for a child and not yet reported read. */
 export interface QueuedChildInput {
-  readonly inputSequence: number;
-  readonly intervention: typeof AttemptChannel.Intervention.Encoded;
+  readonly inputSequence: AttemptChannel.Sequence;
+  readonly intervention: AttemptChannel.Intervention;
 }
 
 /**
@@ -99,10 +101,13 @@ export interface DelegationJournal {
    * returns the same number with the progress saved since, and changes nothing.
    */
   readonly start: Effect.Effect<DelegationStart, JournalError>;
-  /** Reads the operator inputs queued for the child, oldest first. */
+  /**
+   * Reads the operator inputs queued for the child, oldest first, decoded with the codec that
+   * stored them. Fails with `SchemaError` when one no longer decodes.
+   */
   readonly queuedInputs: (
     sessionId: AgentSessionId,
-  ) => Effect.Effect<ReadonlyArray<QueuedChildInput>, JournalError>;
+  ) => Effect.Effect<ReadonlyArray<QueuedChildInput>, JournalError | Schema.SchemaError>;
   /** Reads whether the operator holds or pauses the child. */
   readonly supervision: (
     sessionId: AgentSessionId,
@@ -132,8 +137,14 @@ export interface DelegationJournal {
   /** Records a started tool call of the child, replacing one with the same `callId`. */
   readonly toolStarted: (callId: string, tool: string) => Effect.Effect<void, JournalError>;
   readonly toolFinished: (callId: string) => Effect.Effect<void, JournalError>;
-  /** Saves the child's report while it waits idle, or `None` when it works or finishes. */
-  readonly saveIdle: (report: Option.Option<string>) => Effect.Effect<void, JournalError>;
+  /**
+   * Saves the child's report while it waits idle, or `None` when it works or finishes, and whether
+   * the report replies to operator input.
+   */
+  readonly saveIdle: (
+    report: Option.Option<string>,
+    answeredOperator: boolean,
+  ) => Effect.Effect<void, JournalError>;
   /** Saves the running output retained so far, which a resumed delegation restores. */
   readonly saveOutput: (output: string) => Effect.Effect<void, JournalError>;
 }

@@ -136,7 +136,8 @@
           "role": "user",
           "content": "Call the read_note tool with the name \"missing\". That call fails. Then call read_note with the name \"greeting\" and reply with exactly the note that it returns. Call no other tools."
         },
-        "parent_tool_use_id": null
+        "parent_tool_use_id": null,
+        "uuid": "$OPERATOR_1"
       }
     },
     {

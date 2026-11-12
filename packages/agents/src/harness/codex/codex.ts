@@ -490,6 +490,7 @@ const makeCodexSessions = Effect.gen(function* () {
         held: policy.restored.held,
         paused: policy.restored.paused,
         idle: policy.restored.idle,
+        idleAnsweredOperator: policy.restored.idleAnsweredOperator,
         unread: policy.restored.unread,
         submitted: submitted.flatMap(({ id }) => (id === undefined ? [] : [id])),
         send: (message, _activity, id) => steer(message, id),

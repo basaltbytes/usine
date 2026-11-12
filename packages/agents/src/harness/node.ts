@@ -1,3 +1,4 @@
+import { NodeCrypto } from "@effect/platform-node";
 import { Effect, Layer } from "effect";
 import type { HarnessCatalog } from "./harness.ts";
 import type { HarnessRuntime } from "./runtime.ts";
@@ -23,7 +24,7 @@ const harnessesFor = (
     Effect.map(Effect.all([claudeRuntime, codexRuntime, piRuntime]), (runtimes) =>
       Harnesses.layerFrom(source, configure(runtimes)),
     ),
-  );
+  ).pipe(Layer.provide(NodeCrypto.layer));
 
 const sdkLive = Layer.mergeAll(claudeSdkLive, codexAppServerLive, piSdkLive);
 
