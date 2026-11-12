@@ -12,7 +12,7 @@ The Pi child backend uses the Pi packages pinned together at 1.4.0, matching the
 
 A role is a `RoleSpec` value in the module that owns it: its name, the placements and credential routes it accepts with the reason it refuses the rest, whether it keeps the harness's own tools, whether it runs a usine tool set, whether its conversation is saved, journaled, or ephemeral, whether it takes interventions, and whether it returns text or a structured value. `requirements(role)` derives the harness capabilities from those fields: a usine tool set needs `usine-tools`, closed native tools need `closed-tools`, structured output needs `structured-output`, an ephemeral session needs `ephemeral`, a journaled one needs `durable-coordination`, interventions need `steer` and `interrupt`, and every session needs `token-usage`. A journaled session takes its tools from the journal, so it needs no `usine-tools` or `closed-tools`. `codingAgent` runs on workers with any credential route; the coordinator is declared with the parent in `@usine/durable`.
 
-`admitBrain(catalog, role, brain, context, { reopens })` checks a role at a placement and credential route without IO. `reopens` adds `resume-session` for a session that reopens a saved conversation. A refusal lists each missing capability, placement, or credential route with the reason that the role or the descriptor gives. `AdmittedBrain` carries the role, brain, route, and the billing pool that the route determines: `gateway-api-key` sets `apiKeys`, `gateway-subscription` sets the plan of the provider that the descriptor's worker credential names, and every other route, or a subscription on a descriptor that names no provider such as Pi, leaves the pool to the harness at launch. Each descriptor declares supported capabilities and reasons for absent capabilities per route, including `plan-windows` for Claude Code and Codex subscription routes. A descriptor declares only the capabilities whose contract scenarios its adapter passes, so no harness declares `usine-tools`, `closed-tools`, `structured-output`, or `ephemeral`.
+`admitBrain(catalog, role, brain, context, { reopens })` checks a role at a placement and credential route without IO. `reopens` adds `resume-session` for a session that reopens a saved conversation. A refusal lists each missing capability, placement, or credential route with the reason that the role or the descriptor gives. `AdmittedBrain` carries the role, brain, route, and the billing pool that the route determines: `gateway-api-key` sets `apiKeys`, `gateway-subscription` sets the plan of the provider that the descriptor's worker credential names, and every other route, or a subscription on a descriptor that names no provider such as Pi, leaves the pool to the harness at launch. Each descriptor declares supported capabilities and reasons for absent capabilities per route, including `plan-windows` for Claude Code and Codex subscription routes. A descriptor declares only the capabilities whose contract scenarios its adapter passes. Claude Code and Pi declare `usine-tools` and `closed-tools`; Codex lacks both until step 19 of the harness adapter plan, and no harness declares `structured-output` or `ephemeral`.
 
 `workerImageInputs(catalog)` returns the worker npm packages and image tag from each descriptor's `worker.install`, in catalog order. Harnesses bundled in the orchestrator have no worker packages and don't contribute to the tag. Run `pnpm worker-image:generate` from the repository root after changing installation requirements. It builds the catalog and updates both Dockerfiles, Hetzner cloud-init, and `infra/worker-image/tag.txt`, with pnpm at the root `packageManager` version. `pnpm check` rejects stale generated inputs. Claude Code preflight accepts any installed version; the image install version doesn't restrict worker readiness.
 
@@ -28,7 +28,7 @@ import { harnessesLive } from "@usine/agents/harness/node";
 const childBackendLayer = childDispatcherLayer.pipe(Layer.provide(harnessesLive));
 ```
 
-`harnessesLayer` uses supplied SDK services; `harnessesLive` supplies the production SDKs. Both layers retain `HarnessRegistrationError` in their error channel. Custom compositions use `Harnesses.layerFrom(catalog, runtimes)`. Registered runtimes open and stop sessions with only their own harness's host variables. They admit each opened session's brain for the role in its spec at its placement and credential route, adding `resume-session` for a `StartResume`, and admit preflight brains as coding agents with that catalog. A `HarnessRuntime` has an ID, `preflight(brain, target)`, `open(spec, start, continuation)`, and `stop(spec)`; it names no role.
+`harnessesLayer` uses supplied SDK services; `harnessesLive` supplies the production SDKs. Both layers retain `HarnessRegistrationError` in their error channel. Custom compositions use `Harnesses.layerFrom(catalog, runtimes)`. Registered runtimes open and stop sessions with only their own harness's host variables. They admit each opened session's brain for the role in its spec at its placement and credential route, adding `resume-session` for a `StartResume`, and admit preflight brains as coding agents with that catalog. A `HarnessRuntime` has an ID, `preflight(brain, target)`, `open(spec, start, continuation, tools?)`, and `stop(spec)`; it names no role. The registry refuses a session that opens with a toolkit when its role runs no usine tool set, or without one when its role runs one.
 
 `/harness/contract` exports the role-neutral session input. A `SessionSpec` holds the session identity (`ParentSession`, `ChildSession`, or `RoleSession`), the placement and credential route, the host, worker, provisioned machine, checkout, and environment. `StartPrompt` starts a conversation with its first message; `StartResume` reopens a saved `HarnessSession` without sending one. `open` returns a `NativeSession`: the running session, whether a reopened process was already in a turn, and the recovery of interrupted tool calls. Adapters read only the spec, the start, and the continuation policy, so a role other than the child opens a session the same way. Open it through `Harnesses`, which admits the spec before the adapter starts:
 
@@ -46,6 +46,34 @@ const openSession = (spec: SessionSpec, prompt: string) =>
     return yield* runtime.open(spec, StartPrompt.make({ text: prompt }), policy);
   });
 ```
+
+### Usine tool sets
+
+A role that runs a usine tool set passes an `effect/ai` `Toolkit` as the last argument of `open`. The handlers come from the calling context, so the role decides what each call reaches, such as the member token that an operator tool acts with:
+
+```ts
+import { Effect, Schema } from "effect";
+import { Tool, Toolkit } from "effect/ai";
+
+const ReadNote = Tool.make("read_note", {
+  description: "Reads a note.",
+  parameters: Schema.Struct({ name: Schema.String }),
+  success: Schema.String,
+});
+const notes = Toolkit.make(ReadNote);
+const noteHandlers = notes.toLayer({ read_note: ({ name }) => Effect.succeed(`Note ${name}`) });
+
+const openWithNotes = (spec: SessionSpec, prompt: string) =>
+  Effect.gen(function* () {
+    const runtime = yield* (yield* Harnesses).runtime(spec.session.brain.harness);
+    const policy = yield* continuationPolicy(spec, prompt, RestartState.make({}));
+    return yield* runtime.open(spec, StartPrompt.make({ text: prompt }), policy, notes);
+  }).pipe(Effect.provide(noteHandlers));
+```
+
+Claude Code serves the toolkit as the in-process MCP server `usine`, whose calls travel over the CLI's own stdio, so they work on every worker kind. Its tools load in the first prompt instead of behind Claude Code's tool search. Pi serves the toolkit as custom tools. When the role sets `nativeTools: false`, the session lists only the toolkit's tools: Claude Code starts with no built-in tool and ignores every other MCP configuration, and Pi activates no tool of its own.
+
+`ToolStarted` and `ToolFinished` carry the toolkit's names, without the `mcp__usine__` prefix. A name that a harness can't carry, because it is longer than the model API accepts, has other characters than letters, digits, `_`, and `-`, or takes the name of one of Pi's own tools, gets a stable alias that maps back. A handler failure, invalid parameters, or a handler defect returns an error result to the model, and the session continues; a defect is also logged with its cause.
 
 `childContinuation(catalog, runtime)` (`/continuation`) is the child role over a runtime. Each `launch`, `resume`, or `stop` builds a `SessionSpec` from the `ChildRequest`. `launch` and `resume` first admit the child with the catalog, including the credential-provider lookup, and also build a `RestartState`. The continuation policy carries the restart state, so adapters read operator holds, pauses, unread messages, and committed usage from it. `ProbeTarget` names the host, environment, placement, worker, optional provisioned machine, and credential route. The placement and route use the admission vocabulary (`Placement` and `CredentialRoute`), so a sandbox probe is the `api-key` route at the `sandbox` placement. Preflight reports capability gaps as `HarnessUnavailableError` values; transport failures and timeouts fail with `SessionOperationError`.
 
@@ -180,7 +208,9 @@ It accepts Codex CLI **0.164.0 (or 0.159.0 through 0.159.3)** (`supportedCodexVe
 
 ## Transport replay tests
 
-`pnpm --filter @usine/agents test` replays recorded Claude SDK messages, Codex app-server JSON-RPC traffic, and Pi provider streams through the real adapters, conversation controls, and session channels. CI runs this suite on every pull request. The fixtures cover simple turns, steering, messages queued during a tool call, interrupt and guidance, holds and release, transport loss and recovery, and a process that exits before its first message. Pi runs in process, so it records at the model runtime's stream, runs its tools for real in both modes, and has no transport-loss or early-exit fixture; its restart fixture stops the session during a command and reopens the saved conversation.
+`pnpm --filter @usine/agents test` replays recorded Claude SDK messages, Codex app-server JSON-RPC traffic, and Pi provider streams through the real adapters, conversation controls, and session channels. CI runs this suite on every pull request. The fixtures cover simple turns, steering, messages queued during a tool call, interrupt and guidance, holds and release, transport loss and recovery, a process that exits before its first message, and, for Claude Code and Pi, usine tool sets. Pi runs in process, so it records at the model runtime's stream, runs its tools for real in both modes, and has no transport-loss or early-exit fixture; its restart fixture stops the session during a command and reopens the saved conversation.
+
+`test/contract/host-tools.ts` defines the one toolkit that the `host-tool` and `closed-tools` scenarios serve on every harness that declares `usine-tools`, through the registry, so admission checks the descriptor. In `host-tool`, the first call fails in its handler, the model reads the error and calls again, and events carry the toolkit's name. In `closed-tools`, the role closes native tools, and the recorded tool list, Claude Code's `init` message or Pi's provider request, holds only the toolkit's tool. A Claude replay sends each recorded call to the session's tool server and checks the result; Pi runs the handler for real in both modes. A Claude recording keeps only the SDK's traffic: the replay answers at the SDK boundary, so it never starts the Claude Code process beneath it.
 
 `test/contract/capabilities.ts` maps each capability to the scenarios that prove it, or, for a capability that no session scenario shows, such as `model-check`, to the suites that check it for each harness. The contract suite fails when a descriptor declares a capability whose scenarios have no replayed fixture for that harness, or that no suite checks for that harness. It also checks that admission refuses every lacking capability with the descriptor's reason. Simple replays also check reported tokens and, where declared, USD.
 
@@ -197,7 +227,7 @@ USINE_CLAUDE_INTEGRATION_MODEL=claude-sonnet-5-5 USINE_CODEX_INTEGRATION_MODEL=g
 USINE_PI_INTEGRATION_MODEL=openai/gpt-5.6-luna pnpm --filter @usine/agents test:integration:pi
 ```
 
-The Pi recorder uses the worker user's Pi credentials and model configuration, and keeps the user's Pi settings out of the session.
+The Pi recorder uses the worker user's Pi credentials and model configuration, and keeps the user's Pi settings out of the session. Set `PI_CODING_AGENT_DIR` to record with a `models.json` and `auth.json` other than the user's, such as one that points a provider at a gateway.
 
 The interrupt-and-guidance fixture waits at the tool boundary before sending guidance. Claude records and replays the SDK tool hooks and checks that the post-tool hook stays blocked until guidance arrives. Codex interrupts the first turn, waits for the interrupted completion and idle event, and starts a new turn with the guidance. Both check the guided reply and include a separate command interrupted through the harness cancellation API. Restart fixtures retain the harness home and assert that the child resumes with the same saved home. Credential-change fixtures require `USINE_GATEWAY_TOKEN` and add the API-key auth variable on resume. They simulate a change in the gateway credential kind and check the billing pool on resumed usage events and Codex rate-limit events. The recorded vendor session uses subscription authentication.
 
