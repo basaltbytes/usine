@@ -1,123 +1,117 @@
-// The Pi SDK starts sessions with native Promises.
-// @effect-diagnostics newPromise:off
-import { assert } from "@effect/vitest";
-import { fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai/providers/faux";
+// Pi's model runtime streams through native Promise callbacks and async iterators.
+// @effect-diagnostics asyncFunction:off
+// Recorded provider events are decoded synchronously at the stream boundary.
+// @effect-diagnostics schemaSync:off
 import {
-  createAgentSession,
-  ModelRuntime,
-  SessionManager,
-  SettingsManager,
-  VERSION,
-} from "@earendil-works/pi-coding-agent";
-import { AgentName } from "@usine/core/agent";
-import { BrainSpec, Harness, ModelId } from "@usine/core/agent/brain";
-import { AgentSessionId, ChildSession } from "@usine/core/agent/session";
-import { WorkerName } from "@usine/core/worker";
-import { Effect, FileSystem, Layer, Option, Path, Schema } from "effect";
-import { fileURLToPath } from "node:url";
-import { LocalProcess } from "../../src/child-host/child-host.ts";
-import { piChildLayer } from "../../src/harness/pi/pi.ts";
-import { PiSdk } from "../../src/harness/pi/sdk.ts";
-import { ChildRequest, WorkingDirectory } from "../../src/runtime.ts";
-import type { FixtureOptions } from "./fixture.ts";
-import { type Scenario, Transcript } from "./transcript.ts";
+  type AssistantMessageEvent,
+  type AssistantMessageEventStream,
+  createAssistantMessageEventStream,
+} from "@earendil-works/pi-ai";
+import { ModelRuntime } from "@earendil-works/pi-coding-agent";
+import { Predicate, Schema } from "effect";
+import { piSdkLayer } from "../../src/harness/pi/sdk.ts";
+import { isJsonObject, Tape } from "./transcript.ts";
 
-/** The port whose inbound entries are the provider's assistant messages, in order. */
-const PROVIDER_PORT = "pi:1/provider";
+const json = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json));
+const encode = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
-/** An assistant message that a Pi provider returned for a failed request. */
-const ProviderError = Schema.Struct({
-  role: Schema.Literal("assistant"),
-  stopReason: Schema.Literal("error"),
-  errorMessage: Schema.String,
-  timestamp: Schema.Int,
-});
+const timings = new Set(["timestamp", "durationMs"]);
+
+/** Drops the wall-clock times and durations of every message, which differ between runs. */
+const withoutTimings = (value: Schema.Json): Schema.Json =>
+  Array.isArray(value)
+    ? value.map(withoutTimings)
+    : isJsonObject(value)
+      ? Object.fromEntries(
+          Object.entries(value)
+            .filter(([key]) => !timings.has(key))
+            .map(([key, item]) => [key, withoutTimings(item)]),
+        )
+      : value;
+
+/** An event that the provider stream emitted when the transcript was recorded. */
+const RecordedEvent = Schema.declare(
+  (value): value is AssistantMessageEvent =>
+    Predicate.hasProperty(value, "type") && Predicate.isString(value.type),
+  { expected: "a recorded provider stream event" },
+);
 
 /**
- * Opens a recorded Pi session. A faux provider returns the recorded provider messages to a real Pi
- * SDK session, which the Pi harness runs; `save` checks that Pi requested each one.
+ * Pi sessions whose model requests go through `tape`, the Pi transport's provider stream. A
+ * recording sends each request to the provider with the worker user's Pi credentials and saves its
+ * stream; a replay checks each request against the transcript and answers with the saved stream.
+ * Pi's tools run for real in both modes, and `agentDir` keeps the user's Pi settings out of both.
+ *
+ * Each session start creates its own model runtime, and its requests are numbered within it, as
+ * `pi:<runtime>.<request>`. A stopped session can still send a request after the next session
+ * opens, so numbering across sessions in arrival order would depend on timing.
  */
-export const openPiFixture = (scenario: Scenario, options: FixtureOptions = {}) =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
-    const file = fileURLToPath(new URL(`../fixtures/replay/${scenario}/pi.json`, import.meta.url));
-    const source = yield* fs.readFileString(file).pipe(
-      Effect.flatMap(
-        Schema.decodeUnknownEffect(Schema.fromJsonString(Transcript), {
-          onExcessProperty: "error",
-        }),
-      ),
-    );
-    const transcript = options.transform?.(source) ?? source;
-    assert.strictEqual(transcript.protocol, "pi-sdk");
-    assert.strictEqual(transcript.scenario, scenario);
-    assert.strictEqual(transcript.harnessVersion, VERSION);
-    const responses = yield* Effect.forEach(
-      transcript.entries.flatMap((entry) =>
-        entry.type === "emit_inbound" && entry.port === PROVIDER_PORT ? [entry.payload] : [],
-      ),
-      (payload) => Schema.decodeUnknownEffect(ProviderError)(payload),
-    );
-    const directory = yield* fs.makeTempDirectoryScoped({ prefix: "usine-replay-pi-" });
-    const faux = fauxProvider();
-    faux.setResponses(
-      responses.map(({ errorMessage, timestamp }) =>
-        fauxAssistantMessage([], { stopReason: "error", errorMessage, timestamp }),
-      ),
-    );
-    const modelRuntime = yield* Effect.promise(() =>
-      ModelRuntime.create({
-        authPath: path.join(directory, "auth.json"),
-        modelsPath: null,
-        refreshOnCreate: false,
-      }),
-    );
-    modelRuntime.registerNativeProvider(faux.provider);
-    const { session } = yield* Effect.acquireRelease(
-      Effect.promise(() =>
-        createAgentSession({
-          agentDir: directory,
-          cwd: directory,
-          model: faux.getModel(),
-          modelRuntime,
-          tools: [],
-          sessionManager: SessionManager.inMemory(directory),
-          settingsManager: SettingsManager.inMemory(),
-        }),
-      ),
-      ({ session }) => Effect.sync(() => session.dispose()),
-    );
-    const model = ModelId.make(`${faux.provider.id}/${faux.getModel().id}`);
-    const sdk = Layer.succeed(PiSdk)({
-      start: () =>
-        Promise.resolve({
-          _tag: "Started",
-          harnessSession: Option.none(),
-          model,
-          pool: "chatgptPlan",
-          session,
-          tools: [],
-        }),
-    });
-    return {
-      backend: piChildLayer.pipe(Layer.provideMerge(sdk)),
-      request: ChildRequest.make({
-        worker: WorkerName.make("replay-worker"),
-        machine: Option.none(),
-        host: LocalProcess.make(),
-        environment: transcript.environment,
-        cwd: WorkingDirectory.make(directory),
-        session: ChildSession.make({
-          id: AgentSessionId.make("replay-parent:child:1"),
-          parentId: AgentSessionId.make("replay-parent"),
-          agent: AgentName.make("replay"),
-          brain: BrainSpec.make({ harness: Harness.make("pi"), model, effort: "low" }),
-        }),
-        prompt: "Reply with exactly REPLAY_DONE. Do not use tools.",
-      }),
-      save: Effect.sync(() =>
-        assert.strictEqual(faux.state.callCount, responses.length, "Pi requests each response"),
-      ),
-    };
+export const piTransport = (tape: Tape, agentDir: string) =>
+  piSdkLayer({
+    agentDir: () => agentDir,
+    modelRuntime: async (signal) => {
+      const session = tape.port("pi");
+      let requests = 0;
+      const runtime =
+        tape.source === "record"
+          ? await ModelRuntime.create({ signal })
+          : await ModelRuntime.create({
+              signal,
+              authPath: `${agentDir}/auth.json`,
+              modelsPath: null,
+              refreshOnCreate: false,
+            });
+      const live = runtime.streamSimple.bind(runtime);
+      if (tape.source !== "record")
+        runtime.checkAuth = () => Promise.resolve({ type: "api_key", source: "replay" });
+      runtime.streamSimple = (model, context, options) => {
+        requests += 1;
+        const port = `${session}.${requests}`;
+        tape.outbound(port, {
+          method: "stream",
+          model: `${model.provider}/${model.id}`,
+          reasoning: options?.reasoning ?? null,
+          systemPrompt: context.systemPrompt ?? null,
+          tools: (context.tools ?? []).map(({ name }) => name),
+          messages: withoutTimings(json(encode(context.messages))),
+        });
+        const output = createAssistantMessageEventStream();
+        if (tape.source === "record") {
+          void forward(live(model, context, options), output, (event) =>
+            tape.inbound(`${port}/events`, json(encode(event))),
+          );
+        } else {
+          // The provider passes its payload to Pi's request hooks, such as the pause gate,
+          // before it sends the request.
+          void Promise.resolve(options?.onPayload?.({}, model)).then(() =>
+            replay(tape, `${port}/events`, output),
+          );
+        }
+        return output;
+      };
+      return runtime;
+    },
   });
+
+const forward = async (
+  upstream: AssistantMessageEventStream,
+  output: AssistantMessageEventStream,
+  record: (event: AssistantMessageEvent) => void,
+) => {
+  for await (const event of upstream) {
+    record(event);
+    output.push(event);
+  }
+  output.end();
+};
+
+const replay = async (tape: Tape, port: string, output: AssistantMessageEventStream) => {
+  for (;;) {
+    const entry = await tape.read(port);
+    if (entry.type === "runtime_exit") break;
+    const event = Schema.decodeUnknownSync(RecordedEvent)(entry.payload);
+    output.push(event);
+    if (event.type === "done" || event.type === "error") break;
+  }
+  output.end();
+};

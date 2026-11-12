@@ -5,7 +5,7 @@ import {
   Release,
   type InterventionState,
 } from "@usine/core/attempt/channel";
-import type { AgentSessionEvent } from "@usine/core/agent/session";
+import type { AgentSessionEvent, HarnessSession } from "@usine/core/agent/session";
 import { Effect, Fiber, FileSystem, Option, Queue, Result, Schema, Stream } from "effect";
 import {
   AgentCapacityError,
@@ -26,6 +26,53 @@ export const waitingPrompt =
   "Run exactly `node wait.cjs` with your command tool and wait for it to finish. " +
   "Then reply with exactly REPLAY_DONE. The test controls the command. Do not use any other tools.";
 const guidance = "Change the final reply to exactly REPLAY_GUIDED. Do not use any more tools.";
+
+/**
+ * Starts the waiting task, stops the session while its command runs, as an orchestrator restart
+ * does, and reopens the saved conversation, which continues to the final reply.
+ */
+const restart = (base: ChildRequest) =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const backend = yield* ChildBackend;
+    yield* fs.writeFileString(`${base.cwd}/wait.cjs`, waitScript);
+    const request = ChildRequest.make({ ...base, prompt: waitingPrompt });
+    const reference = yield* Effect.scoped(
+      Effect.gen(function* () {
+        const running = yield* backend.launch(request);
+        const events = yield* Queue.unbounded<AgentSessionEvent>();
+        yield* running.events.pipe(
+          Stream.runForEach((event) => Queue.offer(events, event)),
+          Effect.forkScoped,
+        );
+        let saved = Option.none<HarnessSession>();
+        for (;;) {
+          const event = yield* Queue.take(events);
+          if (event._tag === "SessionStarted") saved = event.harnessSession;
+          if (event._tag === "ToolStarted") break;
+        }
+        assert(Option.isSome(saved), "the session saves its conversation before the first turn");
+        return saved.value;
+      }),
+    ).pipe(Effect.timeout("90 seconds"));
+    yield* fs.writeFileString(`${base.cwd}/release`, "ready");
+    const resumed = yield* backend.launch(
+      ChildRequest.make({ ...request, resume: Option.some(reference) }),
+    );
+    const collected = yield* Effect.forkScoped(Stream.runCollect(resumed.events));
+    const result = yield* resumed.result.pipe(Effect.timeout("90 seconds"));
+    const events = yield* Fiber.join(collected);
+    assert.include(result.message, "REPLAY_DONE");
+    const started = events[0];
+    assert(started?._tag === "SessionStarted");
+    assert.deepStrictEqual(
+      Option.map(started.harnessSession, ({ id }) => id),
+      Option.some(reference.id),
+      "the session reopens the saved conversation",
+    );
+    assert.strictEqual(events.at(-1)?._tag, "SessionFinished");
+    return [...events];
+  });
 
 export const runScenario = (
   scenario: Scenario,
@@ -50,6 +97,7 @@ export const runScenario = (
         releaseCommand: fs.writeFileString(`${base.cwd}/release`, "ready").pipe(Effect.orDie),
         sessionReleased: Effect.void,
       };
+      if (scenario === "restart") return yield* restart(base);
       if (scenario !== "simple") yield* fs.writeFileString(`${base.cwd}/wait.cjs`, waitScript);
       const request =
         scenario === "simple" ? base : ChildRequest.make({ ...base, prompt: waitingPrompt });
@@ -101,7 +149,7 @@ export const runScenario = (
         }
         assert(!events.some((event) => event._tag === "SessionFinished"));
         if (scenario === "hold-release") {
-          yield* running.intervene(
+          const second = yield* running.intervene(
             OperatorMessage.make({
               message: "Reply with exactly REPLAY_SECOND. Do not use tools.",
             }),
@@ -109,10 +157,16 @@ export const runScenario = (
           );
           yield* until("SessionResumed");
           yield* until("SessionIdle");
-          const delivered = yield* Queue.take(delivery);
-          assert(Option.isSome(delivered));
-          assert(delivered.value.held);
-          assert(!delivered.value.queued);
+          // A harness that starts the turn with the message reads it at once, with no later receipt.
+          if (second.queued) {
+            const delivered = yield* Queue.take(delivery);
+            assert(Option.isSome(delivered));
+            assert(delivered.value.held);
+            assert(!delivered.value.queued);
+          } else {
+            const receipts = yield* Queue.clear(delivery);
+            assert.deepStrictEqual(receipts, []);
+          }
         }
         yield* running.intervene(Release.make(), () => Effect.void);
         yield* control.sessionReleased;
@@ -120,11 +174,21 @@ export const runScenario = (
         yield* control.toolReady;
         yield* running.intervene(Interrupt.make(), () => Effect.void);
         yield* releaseCommand;
-        if (base.session.brain.harness === "claude") yield* control.boundary;
+        const harness = base.session.brain.harness;
+        // Claude Code and Pi hold the turn at their next tool or model boundary; Codex ends it.
+        if (harness === "claude") yield* control.boundary;
+        else if (harness === "pi") yield* until("ToolFinished");
         else yield* until("SessionIdle");
         yield* running.intervene(OperatorMessage.make({ message: guidance }), () => Effect.void);
         yield* until("SessionResumed");
         yield* until("SessionIdle");
+        if (harness === "pi") {
+          // Pi's pause gate holds the model request after the interrupted tool, so no text
+          // arrives until the guidance resumes the session.
+          const resumed = events.findIndex((event) => event._tag === "SessionResumed");
+          const text = events.findIndex((event) => event._tag === "TextOutput");
+          assert.isAbove(text, resumed, "Pi writes no text before the guidance resumes it");
+        }
         yield* running.intervene(Release.make(), () => Effect.void);
         yield* control.sessionReleased;
       } else if (scenario !== "simple") {

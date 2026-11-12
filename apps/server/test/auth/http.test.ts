@@ -4,7 +4,7 @@ import { MemberAccess } from "../../src/auth/access.ts";
 import { securityMiddleware } from "../../src/security.ts";
 import { TestClock } from "effect/testing";
 import { ActingMember, OperatorLogin } from "@usine/core/operator";
-import { Effect, Layer, Option, Redacted, Ref, Schema } from "effect";
+import { Clock, Effect, Layer, Option, Redacted, Ref, Schema } from "effect";
 import { HttpRouter, HttpServerResponse } from "effect/http";
 import { assert, it } from "@effect/vitest";
 import { authenticatedRoutes } from "../../src/auth/http.ts";
@@ -430,4 +430,217 @@ it.live("public health reports SQLite degradation and recovery without failing l
       }
     }),
   ),
+);
+
+type TokenBody = {
+  readonly name?: string;
+  readonly scopes: ReadonlyArray<{
+    readonly permission: string;
+    readonly scope: { readonly _tag: string };
+  }>;
+  readonly operations?: ReadonlyArray<string> | null;
+  readonly expiresAt?: number;
+};
+const adminScopes = [{ permission: "admin", scope: { _tag: "Instance" } }];
+const ListedTokens = Schema.Array(
+  Schema.Struct({
+    id: Schema.String,
+    kind: Schema.String,
+    operations: Schema.optionalKey(Schema.Array(Schema.String)),
+    expiresAt: Schema.NullOr(Schema.Finite),
+  }),
+);
+const IssuedSecret = Schema.Struct({ token: Schema.String });
+// Signs alice in with a one-time link and returns her cookie headers and a CSRF-bound JSON writer.
+const signInWithLink = Effect.fn("test.signInWithLink")(function* (
+  services: Effect.Success<ReturnType<typeof authFixture>>,
+  app: { readonly handler: (request: Request) => Promise<Response> },
+) {
+  const currentLink = yield* services.authentication.link;
+  const signedIn = yield* Effect.promise(() =>
+    request(app, "/api/auth/link/consume", "POST", { token: linkToken(currentLink) }),
+  );
+  const headers = { cookie: cookie(signedIn) };
+  const session = yield* Effect.promise(() =>
+    request(app, "/api/auth/session", "GET", undefined, headers).then((response) =>
+      response.json(),
+    ),
+  );
+  const { csrf } = yield* Schema.decodeUnknownEffect(Schema.Struct({ csrf: Schema.String }))(
+    session,
+  );
+  const write = (
+    path: string,
+    method: string,
+    body: TokenBody,
+    credential: Readonly<Record<string, string>> = headers,
+  ) =>
+    Effect.promise(() =>
+      app.handler(
+        new Request(`https://usine.example${path}`, {
+          method,
+          headers: { "content-type": "application/json", "x-usine-csrf": csrf, ...credential },
+          body: jsonKey(body),
+        }),
+      ),
+    );
+  return { headers, write };
+});
+
+it.live("creates, lists, and edits a device token's operation ceiling and expiry", () =>
+  Effect.gen(function* () {
+    const services = yield* authFixture();
+    const { routes } = authenticatedRoutes(services);
+    const app = HttpRouter.toWebHandler(routes, { disableLogger: true });
+    yield* Effect.addFinalizer(() => Effect.promise(() => app.dispose()));
+    const { headers, write } = yield* signInWithLink(services, app);
+    const scopes = adminScopes;
+    const unknown = yield* write("/api/tokens", "POST", {
+      name: "Bad",
+      scopes,
+      operations: ["operator.nothing"],
+    });
+    assert.equal(unknown.status, 400);
+    const expiresAt = (yield* Clock.currentTimeMillis) + 3_600_000;
+    const created = yield* write("/api/tokens", "POST", {
+      name: "Approver",
+      scopes,
+      operations: ["operator.approve"],
+      expiresAt,
+    }).pipe(Effect.flatMap((response) => Effect.promise(() => response.json())));
+    const { token } = yield* Schema.decodeUnknownEffect(IssuedSecret)(created);
+    const bearer = { authorization: `Bearer ${token}` };
+    const deviceSession = yield* Effect.promise(() =>
+      request(app, "/api/auth/session", "GET", undefined, bearer).then((response) =>
+        response.json(),
+      ),
+    );
+    const { operations } = yield* Schema.decodeUnknownEffect(
+      Schema.Struct({ operations: Schema.Array(Schema.String) }),
+    )(deviceSession);
+    assert.deepEqual(operations, ["operator.approve"]);
+    const refused = yield* Effect.promise(() =>
+      request(app, "/api/members", "GET", undefined, bearer),
+    );
+    assert.equal(refused.status, 403);
+    const refusal = yield* Effect.promise(() => refused.json());
+    assert.deepEqual(refusal, {
+      error: "AuthenticationError",
+      message: "This token cannot call authentication.members.",
+    });
+    const listed = yield* Effect.promise(() =>
+      request(app, "/api/tokens", "GET", undefined, headers).then((response) => response.json()),
+    );
+    const tokens = yield* Schema.decodeUnknownEffect(ListedTokens)(listed);
+    const device = tokens.find(({ kind }) => kind === "device");
+    assert.deepEqual(device?.operations, ["operator.approve"]);
+    assert.equal(device?.expiresAt, expiresAt);
+    const id = encodeURIComponent(device?.id ?? "");
+    assert.equal((yield* write(`/api/tokens/${id}/scopes`, "PUT", { scopes })).status, 200);
+    const kept = yield* services.authentication.authenticate(token);
+    assert.deepEqual(Option.getOrNull(kept.operations)?.map(String), ["operator.approve"]);
+    assert.equal(
+      (yield* write(`/api/tokens/${id}/scopes`, "PUT", { scopes, operations: null })).status,
+      200,
+    );
+    const removed = yield* services.authentication.authenticate(token);
+    assert.isTrue(Option.isNone(removed.operations));
+    assert.equal(
+      (yield* Effect.promise(() => request(app, "/api/members", "GET", undefined, bearer))).status,
+      200,
+    );
+  }).pipe(Effect.scoped),
+);
+
+it.live("keeps a ceiling-restricted token from widening any ceiling", () =>
+  Effect.gen(function* () {
+    const services = yield* authFixture();
+    const { routes } = authenticatedRoutes(services);
+    const app = HttpRouter.toWebHandler(routes, { disableLogger: true });
+    yield* Effect.addFinalizer(() => Effect.promise(() => app.dispose()));
+    const { write } = yield* signInWithLink(services, app);
+    const ceiling = [
+      "authentication.setScopes",
+      "authentication.createToken",
+      "authentication.tokens",
+      "operator.overview",
+    ];
+    const created = yield* write("/api/tokens", "POST", {
+      name: "Narrow",
+      scopes: adminScopes,
+      operations: ceiling,
+    }).pipe(Effect.flatMap((response) => Effect.promise(() => response.json())));
+    const { token } = yield* Schema.decodeUnknownEffect(IssuedSecret)(created);
+    const bearer = { authorization: `Bearer ${token}` };
+    const listed = yield* Effect.promise(() =>
+      request(app, "/api/tokens", "GET", undefined, bearer).then((response) => response.json()),
+    );
+    const own = (yield* Schema.decodeUnknownEffect(ListedTokens)(listed)).find(
+      ({ kind }) => kind === "device",
+    );
+    assert.deepEqual(own?.operations, ceiling);
+    assert.isNull(own?.expiresAt);
+    const scopesPath = `/api/tokens/${encodeURIComponent(own?.id ?? "")}/scopes`;
+    const wider = ["operator.overview", "operator.approve"];
+    const statuses = yield* Effect.all({
+      remove: write(scopesPath, "PUT", { scopes: adminScopes, operations: null }, bearer),
+      replace: write(scopesPath, "PUT", { scopes: adminScopes, operations: wider }, bearer),
+      create: write(
+        "/api/tokens",
+        "POST",
+        { name: "Wider", scopes: adminScopes, operations: wider },
+        bearer,
+      ),
+      unknown: write(
+        scopesPath,
+        "PUT",
+        { scopes: adminScopes, operations: ["operator.nothing"] },
+        bearer,
+      ),
+    }).pipe(
+      Effect.map((responses) =>
+        Object.fromEntries(Object.entries(responses).map(([key, value]) => [key, value.status])),
+      ),
+    );
+    assert.deepEqual(statuses, { remove: 403, replace: 403, create: 403, unknown: 400 });
+    const unchanged = yield* services.authentication.authenticate(token);
+    assert.deepEqual(Option.getOrNull(unchanged.operations)?.map(String), ceiling);
+    assert.equal(
+      (yield* write(
+        scopesPath,
+        "PUT",
+        { scopes: adminScopes, operations: ["operator.overview"] },
+        bearer,
+      )).status,
+      200,
+    );
+    const narrowed = yield* services.authentication.authenticate(token);
+    assert.deepEqual(Option.getOrNull(narrowed.operations)?.map(String), ["operator.overview"]);
+  }).pipe(Effect.scoped),
+);
+
+it.live("lets a token with any ceiling sign itself out", () =>
+  Effect.gen(function* () {
+    const services = yield* authFixture();
+    const { routes } = authenticatedRoutes(services);
+    const app = HttpRouter.toWebHandler(routes, { disableLogger: true });
+    yield* Effect.addFinalizer(() => Effect.promise(() => app.dispose()));
+    const { write } = yield* signInWithLink(services, app);
+    const created = yield* write("/api/tokens", "POST", {
+      name: "Approver",
+      scopes: adminScopes,
+      operations: ["operator.approve"],
+    }).pipe(Effect.flatMap((response) => Effect.promise(() => response.json())));
+    const { token } = yield* Schema.decodeUnknownEffect(IssuedSecret)(created);
+    const bearer = { authorization: `Bearer ${token}` };
+    const signedOut = yield* Effect.promise(() =>
+      request(app, "/api/auth/sign-out", "POST", {}, bearer),
+    );
+    assert.equal(signedOut.status, 200);
+    assert.equal(
+      (yield* Effect.promise(() => request(app, "/api/auth/session", "GET", undefined, bearer)))
+        .status,
+      401,
+    );
+  }).pipe(Effect.scoped),
 );

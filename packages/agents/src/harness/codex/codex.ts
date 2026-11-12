@@ -197,11 +197,7 @@ const makeCodexSessions = Effect.gen(function* () {
       let connection = yield* appServer.open(client);
       yield* checkContinuationHome(spec, start, home, defaultHome);
       yield* initializeCodex(connection);
-      let billing = yield* codexChildAccount(
-        connection,
-        spec.session.brain,
-        gatewayCredential(spec.route.credential),
-      );
+      let billing = yield* codexChildAccount(connection, spec.session.brain, spec.admitted.pool);
 
       const models: Array<(typeof ModelListResponse.Type.data)[number]> = [];
       let cursor: string | null = null;
@@ -535,11 +531,7 @@ const makeCodexSessions = Effect.gen(function* () {
               transport: "replace",
             });
             yield* initializeCodex(connection);
-            billing = yield* codexChildAccount(
-              connection,
-              spec.session.brain,
-              gatewayCredential(spec.route.credential),
-            );
+            billing = yield* codexChildAccount(connection, spec.session.brain, spec.admitted.pool);
             return yield* resumeThread(connection, client, spec, harnessSession);
           }),
         );
@@ -695,7 +687,7 @@ const makeCodexSessions = Effect.gen(function* () {
               return;
             }
             if (method === "account/updated") {
-              if (Option.isSome(gatewayCredential(spec.route.credential)))
+              if (Option.isSome(gatewayCredential(spec.admitted.context.credential)))
                 return yield* Effect.logInfo(
                   "Skipping a Codex account change: the Gateway holds the OpenAI credential",
                   { sessionId: session.id },

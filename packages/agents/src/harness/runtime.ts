@@ -9,6 +9,7 @@ import type { AgentSessionError } from "../runtime.ts";
 import { MachineId, WorkerName } from "@usine/core/worker";
 import { type Brand, Effect, Option, Schema } from "effect";
 import { admitBrain, AdmissionContext } from "./admission.ts";
+import { codingAgent } from "./launch.ts";
 import type { HarnessCatalog } from "./harness.ts";
 import { CredentialRoute, Placement } from "./capability.ts";
 import { ChildHost } from "../child-host/child-host.ts";
@@ -58,7 +59,7 @@ export interface HarnessRuntime {
 export const loginUnavailable = (brain: BrainSpec, message: string) =>
   HarnessUnavailableError.make({ harness: brain.harness, capability: "login", message });
 
-/** Checks preflight requirements against the dispatched runtime's catalog. */
+/** Checks a worker's coding-agent brain against the dispatched runtime's catalog. */
 export const admitPreflight = Effect.fn("HarnessAdmission.preflight")(function* (
   catalog: HarnessCatalog,
   brain: BrainSpec,
@@ -72,7 +73,7 @@ export const admitPreflight = Effect.fn("HarnessAdmission.preflight")(function* 
   return yield* Effect.fromResult(
     admitBrain(
       catalog,
-      "coding-agent",
+      codingAgent,
       brain,
       AdmissionContext.make({ placement: target.placement, credential: target.credential }),
     ),

@@ -1,3 +1,4 @@
+import { recordContracts } from "../replay/record.ts";
 import { NodeServices } from "@effect/platform-node";
 import { describe, it } from "@effect/vitest";
 import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
@@ -50,3 +51,5 @@ describe("Pi child live contract", () => {
     150_000,
   );
 });
+
+recordContracts("pi");

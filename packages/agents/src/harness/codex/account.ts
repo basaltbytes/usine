@@ -1,6 +1,5 @@
 import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { type BillingPool, PoolLogin } from "@usine/core/agent/session";
-import type { GatewayCredentialKind } from "@usine/core/worker";
 import { Effect, Option, Schema } from "effect";
 import { PoolUnavailableError } from "../../runtime.ts";
 import {
@@ -83,19 +82,19 @@ export const verifyCodexAccount = Effect.fn("Codex.verifyAccount")(function* (
 });
 
 /**
- * Returns a Codex child's billing pool and login. With a gateway credential, Codex has no login
- * of its own, so the pool follows the credential kind (ADR 0027).
+ * Returns a Codex child's billing pool and login. `routePool` is the pool that the credential route
+ * determined at admission: a gateway credential, with which Codex has no login of its own
+ * (ADR 0027). Without it, Codex reports the pool of its login.
  */
 export const codexChildAccount = Effect.fn("Codex.childAccount")(function* (
   connection: CodexConnection,
   brain: BrainSpec,
-  gatewayCredential: Option.Option<GatewayCredentialKind>,
+  routePool: Option.Option<BillingPool>,
 ) {
-  if (Option.isNone(gatewayCredential)) return yield* verifyCodexAccount(connection, brain.model);
-  const pool: BillingPool = gatewayCredential.value === "api-key" ? "apiKeys" : "chatgptPlan";
+  if (Option.isNone(routePool)) return yield* verifyCodexAccount(connection, brain.model);
+  const pool = routePool.value;
   yield* Effect.logInfo("Codex uses the Gateway's OpenAI credential; skipped the login check", {
     model: brain.model,
-    credential: gatewayCredential.value,
     pool,
   });
   return { pool, login: Option.none<PoolLogin>() };

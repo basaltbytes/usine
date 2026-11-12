@@ -6,6 +6,9 @@ export const confirmRevoke = "Confirm revocation";
 export const keepToken = "Keep token";
 export const lastUsed = "Last used";
 export const created = "Created";
+export const expires = "Expires";
+export const operationsLabel = "Operations";
+export const noOperations = "No operations";
 
 export const scopeCopy = {
   title: "Scopes",
@@ -21,4 +24,8 @@ export const scopeCopy = {
   read: "Read",
   operate: "Operate",
   maintain: "Maintain",
+  operations: "Operations",
+  operationsHint:
+    "Operation IDs from the API reference, separated by commas. Leave empty to allow every operation the scopes permit.",
+  expires: "Expires",
 };

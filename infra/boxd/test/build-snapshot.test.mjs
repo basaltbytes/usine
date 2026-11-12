@@ -214,6 +214,12 @@ test("passes each size to the spec, including one that only a self-hosted cluste
   }
 });
 
+test("builds without isolation with --no-isolated", async () => {
+  const boxd = fakeBoxd();
+  await run(boxd, parseOptions(["--no-isolated", "usine-attempt"], env)).result;
+  assert.equal(boxd.events[0][1].spec.resolve().isolated, undefined);
+});
+
 test("waits for the version that the save captures", async () => {
   const boxd = fakeBoxd({ previous: 3 });
   await run(boxd, parseOptions(["usine-attempt"], env)).result;

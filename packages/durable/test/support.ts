@@ -6,6 +6,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 // @effect-diagnostics-next-line nodeBuiltinImport:off
 import { join } from "node:path";
 import { assert } from "@effect/vitest";
+import { SqliteClient } from "@effect/sql-sqlite-node";
 import { type ChildHost, LocalProcess } from "@usine/agents/child-host";
 import { Agent, AgentName, AgentPersona } from "@usine/core/agent";
 import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
@@ -14,8 +15,9 @@ import { AttemptId, AttemptTask } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { CommitSha, RepositoryName, RepositoryRevision } from "@usine/core/repository";
 import { BotLogin, WorkerName } from "@usine/core/worker";
-import { DateTime, Effect, Option, Result } from "effect";
+import { DateTime, Effect, Layer, Option, Result } from "effect";
 import { AttemptRequest } from "../src/attempt-runtime.ts";
+import { sqliteAttemptJournalLayer } from "../src/coordinator/sqlite/store.ts";
 import { HandlerSession, HandlerUsage } from "../src/coordinator/wake-up.ts";
 import { PARENT_MODEL } from "../src/testing.ts";
 
@@ -68,6 +70,13 @@ export const temporaryDatabase = Effect.acquireRelease(
   Effect.sync(() => mkdtempSync(join(sqliteTempDirectory(), "usine-durable-"))),
   (directory) => Effect.sync(() => rmSync(directory, { force: true, recursive: true })),
 ).pipe(Effect.map((directory) => join(directory, "durable.sqlite")));
+
+/** The attempt journal on the SQLite file `database`. To simulate a restart, build it again. */
+export const sqliteJournal = (database: string) =>
+  sqliteAttemptJournalLayer.pipe(
+    Layer.provide(SqliteClient.layer({ filename: database })),
+    Layer.orDie,
+  );
 
 /**
  * Returns a sink that records envelopes like the transcript store, one row per direction and

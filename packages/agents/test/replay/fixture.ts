@@ -13,15 +13,19 @@ import { claudeChildLayer } from "../../src/harness/claude/claude.ts";
 import { catalog } from "../../src/harness/catalog.ts";
 import { ClaudeSdk, claudeSdkLive } from "../../src/harness/claude/sdk.ts";
 import { codexChildLayer } from "../../src/harness/codex/codex.ts";
+import { piChildLayer } from "../../src/harness/pi/pi.ts";
+import { getPackageDir, VERSION as PI_VERSION } from "@earendil-works/pi-coding-agent";
 import { CodexAppServer, codexAppServerLive } from "../../src/harness/codex/app-server.ts";
 import { ChildBackend, ChildRequest, HostLoginLock, WorkingDirectory } from "../../src/runtime.ts";
 import { ownedClaudeReplay } from "./owned-claude.ts";
 import { claudeTransport } from "./claude.ts";
 import { processTransport } from "./process.ts";
+import { piTransport } from "./pi.ts";
 import { type Scenario, Tape, Transcript } from "./transcript.ts";
 
-export type Provider = "claude" | "codex";
-export const providers: ReadonlyArray<Provider> = ["claude", "codex"];
+export type Provider = "claude" | "codex" | "pi";
+/** The harnesses that run as a process behind a recorded transport. */
+export const providers: ReadonlyArray<Exclude<Provider, "pi">> = ["claude", "codex"];
 export const scenarios: ReadonlyArray<Scenario> = [
   "simple",
   "steer",
@@ -30,6 +34,18 @@ export const scenarios: ReadonlyArray<Scenario> = [
   "hold-release",
   "transport-loss",
   "early-exit",
+];
+/**
+ * The scenarios that Pi replays at its provider stream. Pi runs in the orchestrator process, so it
+ * has no transport to lose and no process to exit early, and a restart reopens its saved session.
+ */
+export const piScenarios: ReadonlyArray<Scenario> = [
+  "simple",
+  "steer",
+  "queued-message",
+  "interrupt-guidance",
+  "hold-release",
+  "restart",
 ];
 export const recordingModel = (provider: Provider): string | undefined =>
   env[`USINE_${provider.toUpperCase()}_INTEGRATION_MODEL`];
@@ -40,7 +56,7 @@ export const recordingPid = (savedPid: string): number => {
   return pid;
 };
 
-const fixtureFile = (provider: Provider, scenario: Scenario) =>
+export const fixtureFile = (provider: Provider, scenario: Scenario) =>
   fileURLToPath(new URL(`../fixtures/replay/${scenario}/${provider}.json`, import.meta.url));
 const environmentKeys = [
   "HOME",
@@ -59,8 +75,127 @@ export interface FixtureOptions {
   readonly transform?: (transcript: Transcript) => Transcript;
 }
 
+const decodeTranscript = (file: string, options: FixtureOptions) =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const transcript = yield* fs.readFileString(file).pipe(
+      Effect.flatMap(
+        Schema.decodeUnknownEffect(Schema.fromJsonString(Transcript), {
+          onExcessProperty: "error",
+        }),
+      ),
+    );
+    return options.transform?.(transcript) ?? transcript;
+  });
+
+/**
+ * Opens a Pi fixture: an in-process Pi child whose provider stream is recorded or replayed. The
+ * child's tools run for real in both modes.
+ */
+export const openPiFixture = (
+  scenario: Scenario,
+  mode: "record" | "replay",
+  options: FixtureOptions = {},
+) =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const cwd = yield* fs.makeTempDirectoryScoped({ prefix: "usine-replay-" });
+    const agentDir = yield* fs.makeTempDirectoryScoped({ prefix: "usine-replay-pi-" });
+    const file = fixtureFile("pi", scenario);
+    const source = mode === "record" ? "record" : yield* decodeTranscript(file, options);
+    const tape = new Tape(source);
+    tape.bind(cwd, "$WORKTREE");
+    // Pi's system prompt names its installed documentation.
+    tape.bind(getPackageDir(), "$PI_PACKAGE");
+    // Pi reads its provider credential from this process; none of it may reach the transcript.
+    for (const key of ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"] as const) {
+      const value = env[key];
+      if (source === "record" && value !== undefined) tape.bind(value, `$${key}`);
+    }
+    const environment =
+      source === "record"
+        ? Object.fromEntries(
+            (["HOME", "PATH"] as const).flatMap((key) => {
+              const value = env[key];
+              if (value === undefined) return [];
+              tape.bind(value, `$${key}`);
+              return [[key, value]];
+            }),
+          )
+        : { ...source.environment };
+    if (source !== "record" && env.PATH !== undefined && environment.PATH !== undefined) {
+      tape.bind(env.PATH, "$PATH");
+      environment.PATH = env.PATH;
+    }
+    const model = source === "record" ? recordingModel("pi") : source.model;
+    assert(model !== undefined, "set the integration model to record traffic");
+    if (source !== "record") {
+      assert.strictEqual(source.scenario, scenario);
+      assert.strictEqual(source.protocol, "pi-provider-stream");
+      assert.strictEqual(source.harnessVersion, PI_VERSION);
+    }
+    const request = ChildRequest.make({
+      worker: WorkerName.make("replay-worker"),
+      machine: Option.none(),
+      host: LocalProcess.make(),
+      environment,
+      cwd: WorkingDirectory.make(cwd),
+      session: ChildSession.make({
+        id: AgentSessionId.make("replay-parent:child:1"),
+        parentId: AgentSessionId.make("replay-parent"),
+        agent: AgentName.make("replay"),
+        brain: BrainSpec.make({
+          harness: Harness.make("pi"),
+          model: ModelId.make(model),
+          effort: "low",
+        }),
+      }),
+      prompt: "Reply with exactly REPLAY_DONE. Do not use tools.",
+    });
+    const save = Effect.gen(function* () {
+      // A stopped Pi session can still send its aborted request after the scenario ends.
+      yield* tape.settled;
+      tape.assertComplete();
+      if (mode !== "record") return;
+      const transcript = {
+        protocol: "pi-provider-stream",
+        harnessVersion: PI_VERSION,
+        model,
+        scenario,
+        environment: tape.normalize(environment),
+        entries: tape.entries,
+      };
+      const decoded = yield* Schema.decodeUnknownEffect(Transcript)(transcript);
+      const encoded = yield* Schema.encodeEffect(Schema.fromJsonString(Transcript))(decoded);
+      yield* fs.makeDirectory(path.dirname(file), { recursive: true });
+      yield* fs.writeFileString(file, encoded + "\n");
+    });
+    return {
+      tape,
+      cwd,
+      request,
+      backend: piChildLayer.pipe(
+        Layer.provide(piTransport(tape, agentDir)),
+        Layer.provideMerge(NodeServices.layer),
+      ),
+      controls: {
+        nativeReceipts: true,
+        drop: Effect.void,
+        boundary: Effect.void,
+        sessionReleased: Effect.void,
+        releaseCommand: fs.writeFileString(`${cwd}/release`, "ready").pipe(Effect.orDie),
+        // Pi runs the command in this process, so its marker file shows that the tool started.
+        toolReady: Effect.gen(function* () {
+          while (!(yield* fs.exists(`${cwd}/started`))) yield* Effect.sleep("10 millis");
+        }).pipe(Effect.timeout("30 seconds"), Effect.orDie),
+      },
+      save,
+    };
+  });
+
 export const openFixture = (
-  provider: Provider,
+  provider: Exclude<Provider, "pi">,
   scenario: Scenario,
   mode: "record" | "replay",
   options: FixtureOptions = {},
@@ -70,17 +205,7 @@ export const openFixture = (
     const path = yield* Path.Path;
     const cwd = yield* fs.makeTempDirectoryScoped({ prefix: "usine-replay-" });
     const file = fixtureFile(provider, scenario);
-    const source =
-      mode === "record"
-        ? "record"
-        : yield* fs.readFileString(file).pipe(
-            Effect.flatMap(
-              Schema.decodeUnknownEffect(Schema.fromJsonString(Transcript), {
-                onExcessProperty: "error",
-              }),
-            ),
-            Effect.map((transcript) => options.transform?.(transcript) ?? transcript),
-          );
+    const source = mode === "record" ? "record" : yield* decodeTranscript(file, options);
     const tape = new Tape(source);
     tape.bind(cwd, "$WORKTREE");
     const environment =

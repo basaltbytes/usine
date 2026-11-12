@@ -33,7 +33,7 @@ import {
   Executor,
   WorkerMachines,
 } from "../../../src/executor.ts";
-import type { BoatTailnet, SshWorkerAddress } from "../../../src/ssh/model.ts";
+import type { ProvisionerTailnet, SshWorkerAddress } from "../../../src/ssh/model.ts";
 import { tailscaleClientFor } from "../../../src/ssh/provisioner/tailnet/client.ts";
 import { boxdDriverFor } from "../../../src/ssh/provisioner/boxd.ts";
 import { boatDriverFor } from "../../../src/ssh/provisioner/boat.ts";
@@ -53,7 +53,7 @@ import {
 import { BOAT_TEST_API, fakeProviders } from "./fake-providers.ts";
 import { boatSettings, boxdSettings } from "./support.ts";
 
-const tailnet: BoatTailnet = {
+const tailnet: ProvisionerTailnet = {
   gatewayAddress: TailnetAddress.make("100.64.0.2"),
   clientId: Redacted.make("test-client"),
   clientSecret: Redacted.make("test-client-secret"),

@@ -43,11 +43,11 @@ Roles on a project accumulate across bindings. Lists omit projects without read 
 | Credential | Type | Default lifetime | Description |
 | --- | --- | --- | --- |
 | Browser session | HttpOnly cookie | 30 days | Follows current member bindings on every request and requires a CSRF header for writes. |
-| Device token | bearer token | until revoked | Intersects its permission ceiling with current member bindings on every request. |
+| Device token | bearer token | until revoked, or until its expiry | Intersects its permission ceiling with current member bindings on every request. An operation ceiling limits it to the listed operations. |
 | One-time sign-in link | private URL | 10 minutes | Opens a member browser session once and permits first-member enrollment through local access. |
 | Local admin token | private file | one process start | Gives the built-in local actor instance admin access without a member identity. |
 
-`usine sign-in <origin>` issues a device token after GitHub authorization. **Tokens** lists browsers and devices with creation and last-use times. Secrets appear once; the instance stores hashes. Revoking an entry ends its access. Device scopes cannot exceed the caller’s effective permissions. Read, operate, and maintain scopes are independent, so include read for clients that fetch data before acting. Browser sessions have no editable ceiling.
+`usine sign-in <origin>` issues a device token after GitHub authorization. **Tokens** lists browsers and devices with creation and last-use times. Secrets appear once; the instance stores hashes. Revoking an entry ends its access. Device scopes cannot exceed the caller’s effective permissions. Read, operate, and maintain scopes are independent, so include read for clients that fetch data before acting. Browser sessions have no editable ceiling. A device token can also have an operation ceiling, the operation IDs that it may call, such as `operator.approve`; reading its session and signing out stay allowed. An expiry, set at creation, ends a device token's access at that time.
 
 The local admin token is `.usine/admin-token`, a regular file owned by the service user with mode `0600`. Startup replaces it. Local lifecycle commands reject unsafe files before sending signals. Local writes and configuration CLI revisions record **local admin**. If binding edits remove admin access, use the configuration CLI on the instance machine to restore it.
 

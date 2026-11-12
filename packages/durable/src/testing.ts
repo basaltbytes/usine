@@ -19,6 +19,7 @@ import {
   type AgentSessionError,
   ChildBackend,
   type ChildRequest,
+  ChildSessionLifecycle,
   type OnDelivery,
   reportText,
   type RunningSession,
@@ -143,6 +144,13 @@ export interface StubChild {
   readonly crash: (message: string) => Effect.Effect<void>;
   /** Completes when the parent's tool call interrupts the child (abort, cancel, or shutdown). */
   readonly interrupted: Effect.Effect<void>;
+  /** Makes later turn interrupts never return, as a harness that doesn't answer them. */
+  readonly stall: Effect.Effect<void>;
+  /**
+   * Completes when the child's session closes, with whether its lifecycle reported stopping then.
+   * A host keeps a stopping child for a resume and stops any other child.
+   */
+  readonly closed: Effect.Effect<boolean>;
   readonly interventions: Effect.Effect<ReadonlyArray<AttemptChannel.OperatorAction>>;
 }
 
@@ -161,6 +169,12 @@ const launchStub = Effect.fn("StubChildBackend.launch")(function* (request: Chil
   const events = yield* Queue.make<AgentSessionEvent, AgentSessionError | Cause.Done>();
   const result = yield* Deferred.make<SessionResult, AgentSessionError>();
   const interrupted = yield* Deferred.make<void>();
+  const closed = yield* Deferred.make<boolean>();
+  const lifecycle = yield* ChildSessionLifecycle.current;
+  yield* Effect.addFinalizer(() =>
+    lifecycle.isStopping.pipe(Effect.flatMap((stopping) => Deferred.succeed(closed, stopping))),
+  );
+  let stalled = false;
   const interventions: Array<AttemptChannel.OperatorAction> = [];
   let held = request.held;
   let paused = false;
@@ -261,7 +275,7 @@ const launchStub = Effect.fn("StubChildBackend.launch")(function* (request: Chil
     result: Deferred.await(result),
     steer: () => Effect.void,
     interrupt: Deferred.succeed(interrupted, undefined).pipe(
-      Effect.andThen(Queue.end(events)),
+      Effect.andThen(Effect.suspend(() => (stalled ? Effect.never : Queue.end(events)))),
       Effect.asVoid,
     ),
     intervene,
@@ -277,6 +291,10 @@ const launchStub = Effect.fn("StubChildBackend.launch")(function* (request: Chil
     limit,
     crash,
     interrupted: Deferred.await(interrupted),
+    stall: Effect.sync(() => {
+      stalled = true;
+    }),
+    closed: Deferred.await(closed),
     interventions: Effect.sync(() => [...interventions]),
   };
   return { running, child };

@@ -5,9 +5,8 @@ import { AttemptFailed } from "@usine/core/attempt/outcome";
 import { Running } from "@usine/core/run/state";
 import { DateTime, Effect, Option, Schema } from "effect";
 import { type AgentCapacityError, toAttemptFailure } from "../../src/runtime.ts";
-import { type FixtureOptions, openFixture } from "./fixture.ts";
+import { type FixtureOptions, openFixture, openPiFixture } from "./fixture.ts";
 import { collectLogs } from "../logs.ts";
-import { openPiFixture } from "./pi.ts";
 import { runUsageLimit } from "./scenarios.ts";
 import { isJsonObject, type Transcript } from "./transcript.ts";
 
@@ -55,13 +54,10 @@ const harnessNames = { claude: "Claude", codex: "Codex", pi: "Pi" } as const;
 const usageLimit = (harness: "claude" | "codex" | "pi", options: FixtureOptions) =>
   Effect.scoped(
     Effect.gen(function* () {
-      if (harness === "pi") {
-        const fixture = yield* openPiFixture("usage-limit", options);
-        const failure = yield* runUsageLimit(fixture.request).pipe(Effect.provide(fixture.backend));
-        yield* fixture.save;
-        return failure;
-      }
-      const fixture = yield* openFixture(harness, "usage-limit", "replay", options);
+      const fixture =
+        harness === "pi"
+          ? yield* openPiFixture("usage-limit", "replay", options)
+          : yield* openFixture(harness, "usage-limit", "replay", options);
       const failure = yield* runUsageLimit(fixture.request).pipe(
         Effect.provide(fixture.backend),
         fixture.tape.guard,
