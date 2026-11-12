@@ -127,6 +127,13 @@ export class ExeDevWorker extends Schema.Class<
   paused: WorkerPaused,
 }) {}
 
+/**
+ * Returns the refusal for exe.dev worker `worker`. The configuration store and `usine up` refuse
+ * exe.dev workers, which this version of usine doesn't run.
+ */
+export const exeDevWorkerRefusal = (worker: WorkerName): string =>
+  `Worker "${worker}" has kind exe.dev, which this version of usine doesn't run. Remove the worker or give it another kind.`;
+
 const EnvironmentVariableName = Schema.String.check(
   Schema.isPattern(/^[A-Za-z_][A-Za-z0-9_]*$/u, {
     message: "Expected an environment variable name",
