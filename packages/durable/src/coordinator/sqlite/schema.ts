@@ -8,6 +8,8 @@ export const coordinationTable = sqliteTable("usine_attempt_coordination", {
   state: text("state"),
   status: text("status").notNull(),
   nextOutbound: integer("next_outbound").notNull(),
+  result: text("result"),
+  unsupervisedMillis: integer("unsupervised_millis"),
 });
 
 /** The ledger. A row without an event holds a decision whose transition hasn't committed. */
@@ -32,6 +34,9 @@ export const delegationsTable = sqliteTable(
       .references(() => coordinationTable.attemptId),
     number: integer("number").notNull(),
     delegation: text("delegation").notNull(),
+    /** Null until a run of the delegation starts its child. */
+    progress: text("progress"),
+    outcome: text("outcome"),
   },
   (table) => [primaryKey({ columns: [table.attemptId, table.number] })],
 );

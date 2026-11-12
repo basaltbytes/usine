@@ -20,6 +20,7 @@ import { sqliteAuthLayer } from "./auth/sqlite.ts";
 import { writeAdminToken } from "./auth/local.ts";
 import type { AuthServices } from "./auth/http.ts";
 import { FetchHttpClient, HttpServer, type HttpRouter } from "effect/http";
+import type { SqlClient } from "effect/sql";
 import { ItemProjectionReader } from "@usine/engine/item-projection";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { GitHubPolling } from "@usine/github/polling";
@@ -179,7 +180,10 @@ const start = Effect.fnUntraced(function* (
   instances: CurrentInstance["Service"],
   port: Port,
   record: InstanceRecord,
-  database: Layer.Layer<RunDatabase | StepOutputStore | TranscriptCodec, EnginePersistenceError>,
+  database: Layer.Layer<
+    RunDatabase | StepOutputStore | TranscriptCodec | SqlClient.SqlClient,
+    EnginePersistenceError
+  >,
   configurationEditor: ConfigurationEditor["Service"],
   auth: AuthServices,
 ) {

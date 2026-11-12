@@ -3,8 +3,8 @@ import { OperatorActor } from "@usine/core/operator";
 import { type Brand, Option, Schema } from "effect";
 
 /**
- * An operator retry of a failed Run. `requestedBy` is `None` if `usine.yaml` sets no operator
- * login, and `amendment` is the edit-and-retry task and Agent (ADR 0018).
+ * An operator retry of a failed Run. `requestedBy` is `None` if neither a signed-in member nor
+ * the instance settings supply an operator login, and `amendment` is the edit-and-retry task and Agent (ADR 0018).
  */
 export class RetryRequest extends Schema.Class<
   RetryRequest,

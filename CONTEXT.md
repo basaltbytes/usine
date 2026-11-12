@@ -117,15 +117,15 @@ The time from an attempt's start to its recorded outcome. The run reader uses it
 _Avoid_: session, lease
 
 **Reattach**:
-To resume an open attempt after an orchestrator restart, if its Pi parent's durable task is still live.
+To resume an open attempt after an orchestrator restart, if its coordinator is still live: the Pi parent's durable task, or the event-driven coordinator's attempt journal.
 _Avoid_: retry, takeover
 
 **Approval**:
-An event that lets a run of a gated loop leave the `waiting` state. It records the operator login and the channel (web UI or 👍 on the ask).
+An event that lets a run of a gated loop leave the `waiting` state. It records the approving member's login; the web UI is the only approval channel.
 _Avoid_: confirmation, sign-off
 
 **Ask**:
-A request for an operator answer on a blocked run: either yes/no, answered with a reaction, or a question, answered with a reply.
+A request for an operator decision, such as an agent's question or blocker or an exhausted cycle budget. The operator answers it in Needs attention.
 _Avoid_: notification, prompt, request, question
 
 **Takeover**:
@@ -220,8 +220,12 @@ _Avoid_: budget, timeout, kill switch
 The branch `usine/salvage/<run>/<attempt>` that the executor pushes with the work of an attempt that didn't succeed. The run's next attempt starts from it.
 _Avoid_: backup, checkpoint, recovery branch
 
+**Coordinator**:
+What starts an attempt's children and turns their reports into the attempt's outcome: a Pi parent session, or the event-driven coordinator, which handles each attempt lifecycle event with a rule and has no parent session.
+_Avoid_: orchestrator, supervisor
+
 **Child-session budget**:
-The maximum number of child sessions that a parent can start in one attempt.
+The maximum number of child sessions that an attempt's coordinator can start in one attempt.
 _Avoid_: child concurrency, concurrent-children cap
 
 **Cycle budget**:

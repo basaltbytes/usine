@@ -61,8 +61,12 @@ import {
   ResultRecorded,
   StoredRequest,
 } from "./attempt-runtime.ts";
-import { keepNotice } from "./attempt/hubs.ts";
+import { keepNotice } from "./attempt/notices.ts";
 import { layer as attemptRuntimeLayer } from "./attempt/runtime.ts";
+import { memoryAttemptJournalLayer } from "./coordinator/memory.ts";
+import { routerLayer } from "./coordinator/router.ts";
+import { CoordinatorRuntime } from "./coordinator/runtime.ts";
+import { WakeUp } from "./coordinator/wake-up.ts";
 import { SUBAGENT_TOOL } from "./attempt/subagent.ts";
 import { durableError, layer as durableHarnessLayer } from "./harness.ts";
 
@@ -303,9 +307,22 @@ export interface DurableTestingOptions {
   readonly parent: ReadonlyArray<ParentStep>;
 }
 
-/** Returns a durable Attempt runtime with a scripted parent model and stub children. */
+/**
+ * Provides `AttemptRuntime` as production routes it: the Pi parent's runtime on the durable
+ * harness, and the event-driven coordinator on an in-memory attempt journal.
+ */
+export const routedRuntimeLayer = routerLayer.pipe(
+  Layer.provide(Layer.mergeAll(attemptRuntimeLayer, CoordinatorRuntime.layer)),
+  Layer.provide(WakeUp.rules),
+  Layer.provide(memoryAttemptJournalLayer),
+);
+
+/**
+ * Returns the routed Attempt runtime with stub children: a scripted Pi parent model on durable
+ * storage, and the event-driven coordinator on an in-memory attempt journal.
+ */
 export const layer = (options: DurableTestingOptions) =>
-  attemptRuntimeLayer.pipe(
+  routedRuntimeLayer.pipe(
     Layer.provideMerge(
       Layer.unwrap(
         Effect.sync(() =>

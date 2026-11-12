@@ -9,4 +9,13 @@ export const migrations = [
       "CREATE TABLE `usine_attempt_outbox` (\n\t`attempt_id` text NOT NULL,\n\t`sequence` integer NOT NULL,\n\t`envelope` text NOT NULL,\n\tCONSTRAINT `usine_attempt_outbox_pk` PRIMARY KEY(`attempt_id`, `sequence`),\n\tCONSTRAINT `fk_usine_attempt_outbox_attempt_id_usine_attempt_coordination_attempt_id_fk` FOREIGN KEY (`attempt_id`) REFERENCES `usine_attempt_coordination`(`attempt_id`)\n);",
     ],
   ],
+  [
+    "2_20261111153209_coordinator_delegation_progress",
+    [
+      "ALTER TABLE `usine_attempt_coordination` ADD `result` text;",
+      "ALTER TABLE `usine_attempt_coordination` ADD `unsupervised_millis` integer;",
+      "ALTER TABLE `usine_attempt_delegations` ADD `progress` text;",
+      "ALTER TABLE `usine_attempt_delegations` ADD `outcome` text;",
+    ],
+  ],
 ] as const;

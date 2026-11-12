@@ -17,6 +17,7 @@ import { InstanceDirectory } from "@usine/core/instance";
 import { layer as durableAttemptRuntimeLayer } from "@usine/durable/live";
 import { GitHubIntegration, IntegrationName } from "@usine/executor/exe-dev";
 import { RunEngine, Submission } from "@usine/engine/engine";
+import { localSqliteLayer } from "@usine/engine/local-sqlite";
 import { TranscriptAllQuery } from "@usine/engine/transcript";
 import { Config, DateTime, Effect, FileSystem, Layer, Option, Schema, Crypto } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
@@ -101,18 +102,25 @@ describe("live exe.dev Worker", () => {
         prefix: "usine-exe-dev-integration-",
       });
       const instanceDirectory = InstanceDirectory.make(directory);
-      const runtime = exeDevLayer(instanceDirectory, config, [agent.brain], {
-        githubIntegrations: [
-          GitHubIntegration.make({
-            repository,
-            name: IntegrationName.make(settings.integration),
-          }),
-        ],
-      }).pipe(
+      const database = localSqliteLayer(instanceDirectory);
+      const runtime = exeDevLayer(
+        instanceDirectory,
+        config,
+        [agent.brain],
+        {
+          githubIntegrations: [
+            GitHubIntegration.make({
+              repository,
+              name: IntegrationName.make(settings.integration),
+            }),
+          ],
+        },
+        database,
+      ).pipe(
         Layer.provide(MarcbachmannCelLayer),
         Layer.provide(alwaysHoldsLayer),
         Layer.provide(CompletionCheck.unverified),
-        Layer.provide(durableAttemptRuntimeLayer(instanceDirectory)),
+        Layer.provide(durableAttemptRuntimeLayer(instanceDirectory).pipe(Layer.provide(database))),
         Layer.provide(harnessesLive),
         Layer.provide(hostLoginLockLayer),
         Layer.provide(fixedConfigLayer(config)),

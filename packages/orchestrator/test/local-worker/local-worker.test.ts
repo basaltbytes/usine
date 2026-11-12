@@ -13,6 +13,7 @@ import * as AttemptChannel from "@usine/core/attempt/channel";
 import { InfraFailure } from "@usine/core/attempt/failure";
 import { SalvageRef } from "@usine/core/attempt/salvage";
 import { Event } from "@usine/core/event";
+import { GitHubLabelName } from "@usine/core/label";
 import { LoopName } from "@usine/core/loop";
 import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
 import * as RunState from "@usine/core/run/state";
@@ -1004,7 +1005,7 @@ describe("local worker", () => {
   );
 
   it.effect(
-    "commits as the App's bot on every Worker kind, passes the Run's CI requirement, fails an Attempt whose bot can't be read before preparation, and acquires no checkout when preparation fails",
+    "commits as the App's bot on every Worker kind, passes the Run's CI requirement and outcome labels, fails an Attempt whose bot can't be read before preparation, and acquires no checkout when preparation fails",
     () =>
       Effect.gen(function* () {
         const missing = InstallationDiscoveryError.make({
@@ -1098,6 +1099,7 @@ describe("local worker", () => {
                   permissions: selected.permissions,
                   resume: Option.none(),
                   requiresCi: true,
+                  outcomeLabels: [GitHubLabelName.make("ready-to-merge")],
                 }),
                 {
                   append: () => Effect.void,
@@ -1130,6 +1132,10 @@ describe("local worker", () => {
           );
           assert.deepStrictEqual(writers, expected);
           assert.isTrue(requested.every(({ requiresCi }) => requiresCi));
+          assert.deepStrictEqual(
+            requested.map(({ outcomeLabels }) => outcomeLabels),
+            requested.map(() => [GitHubLabelName.make("ready-to-merge")]),
+          );
           assert.strictEqual(failed._tag, failure);
           // The engine reconciles a checkout kept for a reattachment until preparation acquires it
           // (#180).

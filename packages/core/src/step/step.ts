@@ -2,7 +2,7 @@ import { type Brand, Schema } from "effect";
 import { RunId } from "../run/run.ts";
 import { StepResult } from "./result.ts";
 
-/** The step name from the loop file. After a rename, stored results stay under the old name (ADR 0002). */
+/** The step name from the loop definition. After a rename, stored results stay under the old name (ADR 0002). */
 export const StepName = Schema.NonEmptyString.pipe(Schema.brand("StepName"));
 
 export type StepName = typeof StepName.Type;

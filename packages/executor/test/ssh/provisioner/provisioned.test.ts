@@ -252,6 +252,58 @@ describe("Provisioned SSH Worker behind a Gateway", () => {
   );
 
   it.live(
+    "runs Codex on the Gateway's credential, without the provisioner's OpenAI API key, when the Gateway holds the provider",
+    () => {
+      const machine = fakeMachine();
+      const providers = fakeProviders();
+      const gateway = fakeGateway(machine, SUBSCRIPTION_PROVIDERS);
+      let given: AttemptRequest | undefined;
+      const parent: StubParent = (context) => {
+        given = context.request;
+        return completes(context);
+      };
+      return Effect.gen(function* () {
+        const executor = yield* Executor;
+        const machines = yield* WorkerMachines;
+        yield* executor.preflight(WORKER, [codexAgent.brain], 1);
+        const grant = yield* machines.create(WORKER, MACHINE_RUN, request.attemptId, [
+          codexAgent.brain,
+        ]);
+
+        yield* (yield* executor.prepare(codexRequest)).launch(sink);
+        assert(given !== undefined && Schema.is(RemoteShell)(given.host));
+        assert.notProperty(given.host.stdinEnvironment, "OPENAI_API_KEY");
+        assert.notProperty(given.host.sshEnvironment, "OPENAI_API_KEY");
+        assert.notProperty(given.environment, "OPENAI_API_KEY");
+        assert.isFalse(
+          machine.state.calls.some(({ line }) => line.includes(OPENAI_KEY)),
+          "the provisioner's key is in no command",
+        );
+        assert.include(
+          machine.state.files.get(`${CODEX_HOME}/config.toml`) ?? "",
+          'base_url = "http://llm.gw.test/openai-responses/v1"',
+        );
+        const currentGatewayCredential = yield* given.gatewayCredential;
+        assert.deepStrictEqual(currentGatewayCredential, Option.some("subscription"));
+        yield* machines.release(grant.hold);
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(
+          gatewayRuntimeOf(
+            machine,
+            providers,
+            gateway,
+            gatewayHetznerAddress(["anthropic-messages", "openai-responses"], {
+              openai: OPENAI_KEY,
+            }),
+            parent,
+          ),
+        ),
+      );
+    },
+  );
+
+  it.live(
     "refuses Codex behind a Gateway without openai and without an OpenAI API key, and checks the API host for one with a key",
     () => {
       const machine = fakeMachine();

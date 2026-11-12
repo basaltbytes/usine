@@ -1347,6 +1347,51 @@ describe("Worker scheduler on reload", () => {
     ),
   );
 
+  it.live(
+    "refuses a reload that adds a Worker of another kind, and adds one of the same kind",
+    () =>
+      withWorkers(localWorkers([["local", 1]]), (root) =>
+        Effect.gen(function* () {
+          const instances = yield* CurrentInstance;
+          const running = yield* instances.get;
+          const scheduler = yield* startScheduler([]);
+
+          yield* writeInstanceFiles(root, [
+            ["usine.yaml", usineYaml(`${localWorkers([["local", 1]])}${sshWorker("remote", 1)}`)],
+          ]);
+          const unserved = yield* Effect.flip(instances.reload);
+          assert(unserved._tag === "RestartRequiredError", unserved._tag);
+          assert.deepStrictEqual(unserved.fields, ["workers.remote.kind"]);
+          assert.include(
+            unserved.message,
+            'worker "remote" has kind ssh, and the running workers have kind local',
+          );
+          const unchanged = yield* instances.get;
+          assert.strictEqual(unchanged, running);
+          const unchangedWorkers = yield* scheduler.workers;
+          assert.deepStrictEqual(unchangedWorkers, [WorkerName.make("local")]);
+
+          yield* writeInstanceFiles(root, [
+            [
+              "usine.yaml",
+              usineYaml(
+                localWorkers([
+                  ["local", 1],
+                  ["third", 1],
+                ]),
+              ),
+            ],
+          ]);
+          yield* instances.reload;
+          const addedWorkers = yield* scheduler.workers;
+          assert.deepStrictEqual(addedWorkers, [
+            WorkerName.make("local"),
+            WorkerName.make("third"),
+          ]);
+        }).pipe(Effect.scoped),
+      ),
+  );
+
   it.live("preflights an SSH Worker with a changed connection and resizes it on reload", () =>
     withWorkers(sshWorker("build-1", 1), (root) =>
       Effect.gen(function* () {
