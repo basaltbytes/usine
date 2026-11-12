@@ -26,7 +26,9 @@ import { collectLogs } from "./logs.ts";
 class NoteMissing extends Schema.TaggedError<
   NoteMissing,
   Brand.Brand<"@usine/agents/test/tools/NoteMissing">
->("@usine/agents/test/tools/NoteMissing")("NoteMissing", { note: Schema.String }) {}
+>("@usine/agents/test/tools/NoteMissing")("NoteMissing", {
+  note: Schema.String,
+}) {}
 
 /** The member whose token a role's tools act with. */
 class Member extends Context.Service<Member, { readonly login: string }>()(
@@ -114,7 +116,10 @@ describe("usine tool sets", () => {
       const found = yield* lookup.call({ key: "known" }, Option.none());
       assert.deepStrictEqual(found, { isError: false, text: "found" });
       const missing = yield* lookup.call({ key: "other" }, Option.none());
-      assert.deepStrictEqual(missing, { isError: true, text: '{"reason":"nope"}' });
+      assert.deepStrictEqual(missing, {
+        isError: true,
+        text: '{"reason":"nope"}',
+      });
       const invalid = yield* lookup.call({ name: "known" }, Option.none());
       assert.isTrue(invalid.isError);
       assert.include(invalid.text, '"_tag":"AiError"');
@@ -123,12 +128,22 @@ describe("usine tool sets", () => {
 
   it.effect("take parameters and return results in the JSON form of the tool's schemas", () =>
     Effect.gen(function* () {
-      const Window = Schema.Struct({ at: Schema.DateTimeUtc, limit: Schema.Option(Schema.Finite) });
+      // `from` and `page` have an encoded side that differs from their type, so `handle` only
+      // accepts them in the type-side encoded form; `budget` has a type-side form that isn't JSON.
+      const Window = Schema.Struct({
+        at: Schema.DateTimeUtc,
+        limit: Schema.Option(Schema.Finite),
+        from: Schema.DateTimeUtcFromString,
+        page: Schema.OptionFromNullOr(Schema.Finite),
+      });
       const Since = Tool.make("since", {
         description: "Lists notes since a time.",
         parameters: Window,
         success: Schema.Struct({ window: Window, at: Schema.DateTimeUtc }),
-        failure: Schema.Struct({ before: Schema.DateTimeUtc }),
+        failure: Schema.Struct({
+          before: Schema.DateTimeUtc,
+          budget: Schema.BigInt,
+        }),
         failureMode: "return",
       });
       const Opaque = Tool.make("opaque", {
@@ -141,8 +156,11 @@ describe("usine tool sets", () => {
           kit.toLayer({
             since: (window) =>
               DateTime.isLessThan(window.at, DateTime.makeUnsafe(0))
-                ? Effect.fail({ before: DateTime.makeUnsafe(0) })
-                : Effect.succeed({ window, at: DateTime.add(window.at, { days: 1 }) }),
+                ? Effect.fail({ before: DateTime.makeUnsafe(0), budget: 5n })
+                : Effect.succeed({
+                    window,
+                    at: DateTime.add(window.at, { days: 1 }),
+                  }),
             opaque: () => Effect.succeed(() => "not JSON"),
           }),
         ),
@@ -151,30 +169,35 @@ describe("usine tool sets", () => {
       assert(since !== undefined && opaque !== undefined);
       const listed = yield* Schema.decodeUnknownEffect(
         Schema.Struct({
-          properties: Schema.Struct({ at: Schema.Struct({ type: Schema.String }) }),
+          properties: Schema.Struct({
+            at: Schema.Struct({ type: Schema.String }),
+          }),
         }),
       )(since.parameters);
       assert.strictEqual(listed.properties.at.type, "string", "the listed schema is the JSON form");
-      const encodeWindow = Schema.encodeEffect(Schema.toCodecJson(Window));
-      const window = {
-        at: DateTime.makeUnsafe("2026-11-12T00:00:00.000Z"),
-        limit: Option.some(3),
+      const input = {
+        at: "2026-11-12T00:00:00.000Z",
+        limit: { _tag: "Some", value: 3 },
+        from: "2026-11-01T00:00:00.000Z",
+        page: 2,
       };
-      const input = yield* encodeWindow(window);
       const found = yield* since.call(input, Option.none());
-      assert.isFalse(found.isError, found.text);
-      const result = yield* Schema.decodeEffect(
-        Schema.fromJsonString(Schema.toCodecJson(Since.successSchema)),
-      )(found.text);
-      assert.deepStrictEqual(result, {
-        window,
-        at: DateTime.makeUnsafe("2026-11-13T00:00:00.000Z"),
+      assert.deepStrictEqual(found, {
+        isError: false,
+        text:
+          '{"window":{"at":"2026-11-12T00:00:00.000Z","limit":{"_tag":"Some","value":3},' +
+          '"from":"2026-11-01T00:00:00.000Z","page":2},"at":"2026-11-13T00:00:00.000Z"}',
       });
-      const before = yield* encodeWindow({ at: DateTime.makeUnsafe(-1), limit: Option.none() });
+      const before = {
+        at: "1969-12-31T23:59:59.999Z",
+        limit: { _tag: "None" },
+        from: input.from,
+        page: null,
+      };
       const early = yield* since.call(before, Option.none());
       assert.deepStrictEqual(early, {
         isError: true,
-        text: '{"before":"1970-01-01T00:00:00.000Z"}',
+        text: '{"before":"1970-01-01T00:00:00.000Z","budget":"5"}',
       });
       const invalid = yield* since.call({ at: "yesterday" }, Option.none());
       assert.isTrue(invalid.isError);
@@ -258,7 +281,10 @@ describe("usine tool sets", () => {
       const outOfRange = yield* call("read_note", decodeHostToolInput(parsed), Option.none()).pipe(
         Effect.provide(layer),
       );
-      assert.deepStrictEqual(outOfRange, { isError: true, text: "The tool input is not JSON" });
+      assert.deepStrictEqual(outOfRange, {
+        isError: true,
+        text: "The tool input is not JSON",
+      });
       assert.deepStrictEqual(
         records.map(({ level, message }) => ({ level, message })),
         [
@@ -310,7 +336,10 @@ const spec = (harness: string, hostTools: boolean) => {
     admitted: AdmittedBrain.make({
       role: role(hostTools),
       brain,
-      context: AdmissionContext.make({ placement: "orchestrator", credential: "gateway" }),
+      context: AdmissionContext.make({
+        placement: "orchestrator",
+        credential: "gateway",
+      }),
       pool: Option.none(),
     }),
     host: LocalProcess.make(),
