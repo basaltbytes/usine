@@ -9,6 +9,8 @@ import {
 import { WorkerName } from "@usine/core/worker";
 import { Effect, Fiber, Logger, Option, Schema, Stream } from "effect";
 import { LocalProcess } from "../../src/child-host/child-host.ts";
+import { catalog } from "../../src/harness/catalog.ts";
+import { childContinuation } from "../../src/harness/continuation.ts";
 import { piRuntime, piSdkLive } from "../../src/harness/pi/pi.ts";
 import { ChildRequest, WorkingDirectory, SessionOperationError } from "../../src/runtime.ts";
 
@@ -36,7 +38,7 @@ const request = ChildRequest.make({
 await Effect.runPromise(
   Effect.scoped(
     Effect.gen(function* () {
-      const runtime = yield* piRuntime;
+      const runtime = childContinuation(catalog, yield* piRuntime);
       const running = yield* id === undefined
         ? runtime.launch(request)
         : mode === "request"

@@ -1,7 +1,8 @@
 import type { ChildHost } from "../child-host/child-host.ts";
-import { AgentResultError, type ChildRequest } from "../runtime.ts";
-import { Effect, Option } from "effect";
+import { AgentResultError, type ChildRequest, RestartState } from "../runtime.ts";
+import { Effect, Option, Struct } from "effect";
 import { admitBrain, AdmissionContext } from "./admission.ts";
+import { SessionSpec, type Start } from "./contract.ts";
 import type { HarnessCatalog } from "./harness.ts";
 import type { Placement } from "./capability.ts";
 
@@ -72,3 +73,79 @@ export const admitChild = Effect.fn("HarnessAdmission.child")(function* (
     ),
   );
 });
+
+/**
+ * Admits the brain of `spec` at its placement and credential route before a session opens. Roles
+ * have no requirements of their own yet, so every session is admitted as a coding agent, and a
+ * `StartResume` also requires `resume-session`.
+ */
+export const admitSession = Effect.fn("HarnessAdmission.session")(function* (
+  catalog: HarnessCatalog,
+  spec: SessionSpec,
+  start: Start,
+) {
+  const resume = start._tag === "StartResume";
+  yield* Effect.annotateCurrentSpan({
+    sessionId: spec.session.id,
+    worker: spec.worker,
+    harness: spec.session.brain.harness,
+  });
+  return yield* Effect.fromResult(
+    admitBrain(
+      catalog,
+      "coding-agent",
+      spec.session.brain,
+      spec.route,
+      resume ? ["resume-session"] : [],
+    ),
+  ).pipe(
+    Effect.tap(() =>
+      Effect.logInfo("Harness session admitted", {
+        sessionId: spec.session.id,
+        harness: spec.session.brain.harness,
+        credentialRoute: spec.route.credential,
+        placement: spec.route.placement,
+        resume,
+      }),
+    ),
+    Effect.tapError((error) =>
+      Effect.logWarning("Harness session refused", {
+        sessionId: spec.session.id,
+        role: error.role,
+        harness: error.harness,
+        missing: error.missing,
+        worker: spec.worker,
+      }),
+    ),
+    Effect.mapError((error) =>
+      AgentResultError.make({ sessionId: Option.some(spec.session.id), message: error.message }),
+    ),
+  );
+});
+
+/** Builds the session spec of `request` for the credential route that admission resolved. */
+export const childSpec = (request: ChildRequest, route: AdmissionContext): SessionSpec =>
+  SessionSpec.make({
+    session: request.session,
+    route,
+    host: request.host,
+    worker: request.worker,
+    machine: request.machine,
+    cwd: request.cwd,
+    environment: request.environment,
+  });
+
+/** The conversation state that `request` restores. */
+export const childRestart = (request: ChildRequest): RestartState =>
+  RestartState.make(
+    Struct.pick(request, [
+      "prompted",
+      "continuations",
+      "inFlight",
+      "unread",
+      "usage",
+      "held",
+      "paused",
+      "idle",
+    ]),
+  );

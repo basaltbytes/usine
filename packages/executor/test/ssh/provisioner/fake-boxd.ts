@@ -172,14 +172,6 @@ export const fakeBoxd = () => {
           );
         }),
       ),
-    updateLabels: (id, set) =>
-      call("updateLabels", () =>
-        Effect.gen(function* () {
-          const machine = machines.get(id);
-          if (machine === undefined) return yield* failure("updateLabels", "NOT_FOUND");
-          machines.set(id, { ...machine, labels: { ...machine.labels, ...set } });
-        }),
-      ),
     destroy: (id) =>
       call("destroy", () => {
         names.delete(id);

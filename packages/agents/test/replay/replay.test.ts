@@ -655,11 +655,21 @@ for (const checkpointState of ["caught-up", "pending-hook"] as const)
               assert(increased._tag === "SessionTokensUpdated");
               assert.strictEqual(increased.totalTokens, committed.totalTokens + 5);
               if (checkpointState === "pending-hook") {
+                yield* fs.writeFileString(`${fixture.cwd}/usage-after-hook`, "ready");
                 yield* resumed.intervene(
                   Steer.make({ message: "Continue after the pending hook replay" }),
                   () => Effect.void,
                 );
                 yield* fileWithLines(`${fixture.cwd}/hook-responses`, 1);
+                // Claude writes z first after the hook response, ahead of the queued steer turn.
+                const afterHook = yield* until("SessionTokensUpdated");
+                assert(afterHook._tag === "SessionTokensUpdated");
+                assert(Option.isSome(afterHook.processUsage));
+                assert.strictEqual(afterHook.processUsage.value.messages?.z, 1010);
+                assert.isUndefined(
+                  afterHook.processUsage.value.messages?.["old-x"],
+                  "the acknowledged hook response lets the checkpoint discard superseded IDs",
+                );
               }
               yield* fixture.controls.releaseCommand;
               yield* resumed.intervene(Release.make(), () => Effect.void);

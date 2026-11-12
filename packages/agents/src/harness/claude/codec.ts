@@ -2,7 +2,7 @@ import { OperatorMessageId } from "@usine/core/attempt/channel";
 import {
   type AgentSessionEvent,
   AgentSessionId,
-  type ChildSession,
+  type AgentSession,
   TextOutput,
   ToolFinished,
   ToolStarted,
@@ -148,7 +148,7 @@ export const loginCheck = (message: Schema.Json, spentTokens: boolean): LoginChe
 /** Returns the transcript events in `message`; `tools` names the open tool calls by ID. */
 export const sessionEventsFrom = (
   message: Schema.Json,
-  session: ChildSession,
+  session: AgentSession,
   tools: Map<string, string>,
 ): ReadonlyArray<AgentSessionEvent> => {
   if (!Schema.is(ClaudeContentMessage)(message)) return [];

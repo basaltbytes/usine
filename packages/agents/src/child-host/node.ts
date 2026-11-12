@@ -12,6 +12,7 @@ import { SessionOperationError } from "../runtime.ts";
 import {
   ChildProcessLost,
   type ProcessCommand,
+  type ProcessOptions,
   type ProcessTarget,
   processError,
   remoteProcess,
@@ -62,9 +63,7 @@ export const startChildProcess = Effect.fn("ChildHost.startChildProcess")(functi
   target: ProcessTarget,
   command: ProcessCommand,
   input: Stream.Stream<Uint8Array>,
-  transport?: "replace" | "resume",
-  acknowledgement: "received" | "handled" = "received",
-  onInputAcknowledged?: (bytes: Uint8Array) => Effect.Effect<number>,
+  options: ProcessOptions = {},
 ) {
   yield* Effect.annotateCurrentSpan({ sessionId: Option.getOrUndefined(target.sessionId) });
   if (isRemoteHost(target.host) && Option.isSome(target.sessionId))
@@ -72,15 +71,14 @@ export const startChildProcess = Effect.fn("ChildHost.startChildProcess")(functi
       { ...target, sessionId: target.sessionId },
       command,
       input,
-      transport,
-      acknowledgement,
-      onInputAcknowledged,
+      options,
     );
-  const { invocation, options } = childInvocation(target, command, {
+  const { onInputAcknowledged } = options;
+  const { invocation, options: spawnOptions } = childInvocation(target, command, {
     stream: input.pipe(Stream.tap((data) => onInputAcknowledged?.(data) ?? Effect.void)),
     endOnDone: true,
   });
-  const handle = yield* hostSpawn(target.host, invocation, options).pipe(
+  const handle = yield* hostSpawn(target.host, invocation, spawnOptions).pipe(
     Effect.mapError((cause) => processError(target, "Child process failed to start", cause)),
   );
   const stderr = yield* Ref.make("");

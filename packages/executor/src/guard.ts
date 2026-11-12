@@ -86,7 +86,7 @@ const recordTokens = (
   return true;
 };
 
-/** Returns the Hold key: `"parent"` for the parent session, or the session ID for a child. */
+/** Returns the Hold key: `"parent"` for the parent session, or the session ID for any other session. */
 const holdKey = (session: AttemptChannel.SessionTarget | AgentSession): string => {
   switch (session._tag) {
     case "Parent":
@@ -95,6 +95,7 @@ const holdKey = (session: AttemptChannel.SessionTarget | AgentSession): string =
     case "Child":
       return session.sessionId;
     case "ChildSession":
+    case "RoleSession":
       return session.id;
   }
 };

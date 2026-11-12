@@ -7,7 +7,11 @@ import {
   type ShellContainer,
 } from "@usine/agents/child-host";
 import type { Harness } from "@usine/core/agent/brain";
-import { type AttemptId, ContainerOutOfMemoryKills } from "@usine/core/attempt";
+import {
+  type AttemptId,
+  ContainerOutOfMemoryKills,
+  MAX_KILLED_PROCESSES,
+} from "@usine/core/attempt";
 import type { Sink } from "@usine/core/attempt/channel";
 import type { InstanceId } from "@usine/core/instance";
 import { safeSegment } from "@usine/core/repository";
@@ -561,8 +565,9 @@ export const containersFor = (commands: RemoteCommands) => {
 
   /**
    * Starts the container of `spec` again if it stopped, such as after an out-of-memory kill or a
-   * signal to its init, and returns whether the kernel killed its init for memory. The scope that
-   * started it still removes it. Fails if it doesn't exist.
+   * signal to its init. Returns `running` if it still ran, else `started`, or `startedAfterOomKill`
+   * if the kernel killed its init for memory. The scope that started it still removes it. Fails if
+   * it doesn't exist.
    */
   const ensureRunning = Effect.fn("RemoteExecutor.ensureContainerRunning")(function* (
     operation: ExecutorOperation,
@@ -581,7 +586,7 @@ export const containersFor = (commands: RemoteCommands) => {
       .split(" ");
     if (status === "running") {
       yield* Effect.logDebug("The container still runs", fields);
-      return false;
+      return "running" as const;
     }
     yield* Effect.logWarning("The container stopped; starting it again", {
       ...fields,
@@ -590,7 +595,7 @@ export const containersFor = (commands: RemoteCommands) => {
       oomKilled,
     });
     yield* commands.run(operation, shell, spec.settings.runtime, ["start", spec.name]);
-    return oomKilled === "true";
+    return oomKilled === "true" ? ("startedAfterOomKill" as const) : ("started" as const);
   });
 
   /**
@@ -653,7 +658,9 @@ export const containersFor = (commands: RemoteCommands) => {
     const fields = containerFields(shell, spec);
     yield* Effect.annotateCurrentSpan(fields);
     const recorder = yield* Ref.make(Option.none<Sink["outOfMemory"]>());
-    // A start gives the container a new cgroup, whose count doesn't include the killed init.
+    // A start gives the container a new cgroup whose count restarts at 0, so the kernel logs
+    // keep the only trace of the processes killed before it, a killed init included.
+    const starts = yield* Ref.make(0);
     const killedInits = yield* Ref.make(0);
     const recordKills = Effect.fn("RemoteExecutor.recordContainerOutOfMemoryKills")(
       function* () {
@@ -666,14 +673,17 @@ export const containersFor = (commands: RemoteCommands) => {
           );
         const { container, kills: counted } = yield* outOfMemoryKills("cleanup", shell, spec);
         const kills = counted + (yield* Ref.get(killedInits));
-        if (kills === 0) return;
-        const processes = yield* readKilledProcesses(
+        const started = yield* Ref.get(starts);
+        if (kills === 0 && started === 0)
+          return yield* Effect.logDebug("The kernel killed no process in the container", fields);
+        const read = yield* readKilledProcesses(
           commands,
           shell,
           spec.settings.runtime,
           spec.name,
           container,
         );
+        const processes = Option.getOrElse(read, () => []);
         if (processes.length < kills)
           yield* Effect.logWarning("Kernel OOM details are incomplete", {
             ...fields,
@@ -681,12 +691,26 @@ export const containersFor = (commands: RemoteCommands) => {
             kills,
             identified: processes.length,
           });
+        const recorded = Math.max(kills, processes.length);
+        if (recorded === 0)
+          return yield* Effect.logInfo(
+            Option.isNone(read)
+              ? "The kernel logs are unreadable, so no process killed in the container before its starts is recorded"
+              : "The kernel logs name no process killed in the container before its starts",
+            { ...fields, container, starts: started },
+          );
+        if (processes.length > MAX_KILLED_PROCESSES)
+          yield* Effect.logWarning("Recording only the first killed processes", {
+            ...fields,
+            container,
+            identified: processes.length,
+            kept: MAX_KILLED_PROCESSES,
+          });
         yield* record.value(
           ContainerOutOfMemoryKills.make({
             container,
-            // Restarts reset cgroup counters; host diagnostics retain earlier victims.
-            kills: Math.max(kills, processes.length),
-            processes,
+            kills: recorded,
+            processes: processes.slice(0, MAX_KILLED_PROCESSES),
             memoryMib: spec.settings.limits.memoryMib,
           }),
         );
@@ -703,8 +727,15 @@ export const containersFor = (commands: RemoteCommands) => {
       recordKills,
       recordTo: (record: Sink["outOfMemory"]) => Ref.set(recorder, Option.some(record)),
       ensureRunning: ensureRunning("cleanup", shell, spec).pipe(
-        Effect.tap((oomKilled) =>
-          oomKilled ? Ref.update(killedInits, (n) => n + 1) : Effect.void,
+        Effect.tap((state) =>
+          state === "running"
+            ? Effect.void
+            : Effect.andThen(
+                Ref.update(starts, (n) => n + 1),
+                state === "startedAfterOomKill"
+                  ? Ref.update(killedInits, (n) => n + 1)
+                  : Effect.void,
+              ),
         ),
       ),
     };

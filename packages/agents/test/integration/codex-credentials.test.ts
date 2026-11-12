@@ -68,6 +68,7 @@ it.live(
             ProbeTarget.make({
               host: LocalProcess.make(),
               environment: { HOME: home, CODEX_HOME: codexHome, PATH: path },
+              placement: "local",
               credential: "host-login",
               worker: WorkerName.make("test-worker"),
               machine: Option.none(),
@@ -90,6 +91,7 @@ it.live(
             ProbeTarget.make({
               host: LocalProcess.make(),
               environment: { HOME: home, CODEX_HOME: codexHome, PATH: path },
+              placement: "local",
               credential: "host-login",
               worker: WorkerName.make("test-worker"),
               machine: Option.none(),

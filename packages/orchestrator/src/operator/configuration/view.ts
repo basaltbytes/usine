@@ -352,6 +352,11 @@ export class WorkerConfigurationView extends Schema.Class<
   preflightRunning: Schema.Boolean.pipe(Schema.withConstructorDefault(Effect.succeed(false))),
   /** In harness name order; empty before any harness check. */
   harnesses: Schema.Array(HarnessPreflightView),
+  /**
+   * What the last passed preflight of the Worker's machine found missing that Attempts run
+   * without, such as a kernel log that the SSH user can't read; empty before one.
+   */
+  findings: Schema.Array(Schema.String).pipe(Schema.withConstructorDefault(Effect.succeed([]))),
 }) {}
 
 /** A Worker removed by a reload that still runs Attempts. It's removed when the last one ends. */
@@ -731,6 +736,7 @@ const makeOperatorConfiguration = Effect.gen(function* () {
         ),
         containerLimits:
           preflight === undefined ? null : Option.getOrNull(preflight.containerLimits),
+        findings: preflight?.findings ?? [],
         machines: inFlight.filter((machine) => machine.worker === worker.name).map(machineView),
         provisioning: Option.getOrNull(
           Option.map(

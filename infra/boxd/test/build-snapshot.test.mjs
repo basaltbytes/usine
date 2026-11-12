@@ -206,8 +206,8 @@ test("builds on an isolated, shared machine from a spec with the allowlist, over
   assert.match(logged.at(-1), /^Deleted temporary machine usine-snapshot-/u);
 });
 
-test("passes each size to the spec", async () => {
-  for (const size of ["1x4", "8x32"]) {
+test("passes each size to the spec, including one that only a self-hosted cluster lists", async () => {
+  for (const size of ["1x4", "8x32", "1x32"]) {
     const boxd = fakeBoxd();
     await run(boxd, parseOptions(["--size", size, "usine-attempt"], env)).result;
     assert.equal(boxd.events[0][1].spec.resolve().size, size);
@@ -380,7 +380,20 @@ test("calls the hosted endpoint, or the region and endpoint that the options nam
 test("refuses invalid options and a missing API key", () => {
   for (const [argv, environment] of [
     [[], env],
-    [["--size", "2x16", "usine-attempt"], env],
+    [["--size", "small", "usine-attempt"], env],
+    [["--size", "0x4", "usine-attempt"], env],
+    [["--size", "2x0", "usine-attempt"], env],
+    [["--size", "02x8", "usine-attempt"], env],
+    [["--size", "2x08", "usine-attempt"], env],
+    [["--size", "2X8", "usine-attempt"], env],
+    [["--size", "2x8.5", "usine-attempt"], env],
+    [["--size", "2x8x1", "usine-attempt"], env],
+    [["--size", "x8", "usine-attempt"], env],
+    [["--size", "2x", "usine-attempt"], env],
+    [["--size", "28", "usine-attempt"], env],
+    [["--size", "12345x8", "usine-attempt"], env],
+    [["--size", "2x1234567", "usine-attempt"], env],
+    [["--size", "2x8\n1x4", "usine-attempt"], env],
     [["--region", "NYC", "usine-attempt"], env],
     [["--endpoint", "", "usine-attempt"], env],
     [["--vcpu", "2", "usine-attempt"], env],

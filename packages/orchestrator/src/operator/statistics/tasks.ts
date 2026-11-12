@@ -1,4 +1,3 @@
-import type { OutOfMemoryKills } from "@usine/core/attempt";
 import { jsonKey } from "@usine/core/json-key";
 import { TokenCount, UsdAmount } from "@usine/core/agent/session";
 import type { ItemNumber } from "@usine/core/item";
@@ -83,7 +82,8 @@ interface TaskTokens extends TaskUsage {
 interface MeasuredTask extends OutcomeTask {
   readonly view: TaskDoneView;
   readonly start: number;
-  readonly outOfMemory: ReadonlyArray<OutOfMemoryKills>;
+  /** The out-of-memory kills of each of the task's Attempts that had any. */
+  readonly memoryKills: ReadonlyArray<number>;
   readonly operatorActions: number;
   readonly timing: TaskTiming;
   readonly tokens: Option.Option<TaskTokens>;
@@ -259,8 +259,10 @@ const measure = (
     mergedAt,
     runs,
     rounds: rounds(runs),
-    outOfMemory: runs.flatMap(({ attempts }) =>
-      attempts.flatMap(({ outOfMemory }) => Option.toArray(outOfMemory)),
+    memoryKills: runs.flatMap(({ attempts }) =>
+      attempts.flatMap(({ outOfMemory }) =>
+        Option.toArray(Option.map(outOfMemory, ({ kills }) => kills)),
+      ),
     ),
     operatorActions: runActions(runs) + task.budgetResets,
     timing: taskTiming(runs, start, end, now),
@@ -383,7 +385,7 @@ export const taskStatisticsView = ({
     Option.getOrNull(
       Option.map(median(members.map(({ view }) => view.durationMillis)), Math.round),
     );
-  const memory = tasks.flatMap(({ outOfMemory }) => outOfMemory);
+  const memoryKills = tasks.flatMap((task) => task.memoryKills);
   return StatisticsView.make({
     window,
     from: DateTime.formatIso(DateTime.makeUnsafe(from)),
@@ -403,9 +405,9 @@ export const taskStatisticsView = ({
       });
     }),
     firstTimeRight: tasks.filter(firstTimeRight).length,
-    memoryKills: sum(memory.map(({ kills }) => kills)),
-    memoryKillAttempts: memory.length,
-    repeatedMemoryKillAttempts: memory.filter(({ kills }) => kills > 1).length,
+    memoryKills: sum(memoryKills),
+    memoryKillAttempts: memoryKills.length,
+    repeatedMemoryKillAttempts: memoryKills.filter((kills) => kills > 1).length,
     operatorActions: sum(tasks.map(({ operatorActions }) => operatorActions)),
     time: timeView(times, order),
     tokens: tokensView(metered, order),

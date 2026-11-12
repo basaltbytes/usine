@@ -194,6 +194,41 @@ describe("configuration domain without layers", () => {
     }),
   );
 
+  it.effect("loads a stored boxd worker that still sets reuse", () =>
+    Effect.gen(function* () {
+      // A worker entity as releases before boxd's single-use machines stored it.
+      const stored = {
+        name: "boxd-pool",
+        kind: "ssh",
+        root: "/home/boxd/.usine",
+        provisioner: {
+          provider: "boxd",
+          token_env: "BOXD_API_KEY",
+          snapshot: "usine-attempt",
+          reuse: { attempts: 5, max_age: "2h" },
+        },
+      };
+      const instance = yield* fixture;
+      const entities = configurationEntities(instance).map((entity) =>
+        entity.key.kind === "worker" && entity.key.identifier === "fallback"
+          ? ConfigurationEntity.make({
+              ...entity,
+              key: ConfigurationEntityKey.make({
+                kind: "worker",
+                identifier: ConfigurationEntityId.make("boxd-pool"),
+              }),
+              value: stored,
+            })
+          : entity,
+      );
+      const loaded = yield* validateConfiguration(parser, entities);
+      const worker = loaded.config.workers.find(({ name }) => name === "boxd-pool");
+      assert(worker?.kind === "ssh" && Option.isSome(worker.provisioner));
+      assert(worker.provisioner.value.provider === "boxd");
+      expect(Option.isSome(worker.provisioner.value.reuse)).toBe(true);
+    }),
+  );
+
   it.effect("omits unchanged entities when adding or removing an entity before them", () =>
     Effect.gen(function* () {
       const fixtureInstance = yield* fixture;

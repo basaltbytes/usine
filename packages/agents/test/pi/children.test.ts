@@ -1,5 +1,9 @@
 import { HarnessCatalog, HarnessDescriptor } from "../../src/harness/harness.ts";
 import { claude } from "../../src/harness/claude/descriptor.ts";
+import { pi } from "../../src/harness/pi/descriptor.ts";
+import { AdmissionContext } from "../../src/harness/admission.ts";
+import { continuationPolicy } from "../../src/harness/continuation.ts";
+import { SessionSpec, StartPrompt, StartResume } from "../../src/harness/contract.ts";
 import { Harnesses, type HarnessRuntime, ProbeTarget } from "../../src/harness/node.ts";
 import { checkedPreflight } from "../../src/harness/runtime.ts";
 import { CapabilityProfile, Lacking } from "../../src/harness/capability.ts";
@@ -12,6 +16,8 @@ import {
   ChildSession,
   HarnessSession,
   HarnessSessionId,
+  RoleName,
+  RoleSession,
 } from "@usine/core/agent/session";
 import { AgentName } from "@usine/core/agent";
 import * as AttemptChannel from "@usine/core/attempt/channel";
@@ -20,9 +26,9 @@ import { WorkerName } from "@usine/core/worker";
 import { Array as Arr, Effect, Layer, Option, Stream } from "effect";
 import { LocalProcess } from "../../src/child-host/child-host.ts";
 import {
-  type ChildBackendService,
   ChildRequest,
   ChildBackend,
+  RestartState,
   SessionResult,
   WorkingDirectory,
 } from "../../src/runtime.ts";
@@ -48,18 +54,21 @@ const request = (harness: Harness) =>
     prompt: "Implement the focused task.",
   });
 
-const backend = (selected: Harness): ChildBackendService & Pick<HarnessRuntime, "resume"> => ({
-  resume: () => Effect.succeedNone,
+const backend = (selected: Harness): Pick<HarnessRuntime, "open" | "stop"> => ({
   stop: () => Effect.void,
-  launch: (found) =>
+  open: (spec) =>
     Effect.succeed({
-      session: found.session,
-      events: Stream.empty,
-      result: Effect.succeed(SessionResult.make({ message: selected })),
-      steer: () => Effect.void,
-      interrupt: Effect.void,
-      intervene: () =>
-        Effect.succeed(AttemptChannel.InterventionState.make({ held: false, paused: false })),
+      running: {
+        session: spec.session,
+        events: Stream.empty,
+        result: Effect.succeed(SessionResult.make({ message: selected })),
+        steer: () => Effect.void,
+        interrupt: Effect.void,
+        intervene: () =>
+          Effect.succeed(AttemptChannel.InterventionState.make({ held: false, paused: false })),
+      },
+      active: false,
+      recover: () => Effect.void,
     }),
 });
 
@@ -77,35 +86,47 @@ const runtimes = extended.ids.map((id): HarnessRuntime => ({
 }));
 
 describe("harness runtime registration", () => {
-  it.effect("removes other harnesses' host configuration before launch", () => {
+  it.effect("removes other harnesses' host configuration before launch and stop", () => {
     const original = request(claude.id);
+    const seen: Array<{
+      readonly operation: "open" | "stop";
+      readonly environment: Readonly<Record<string, string | undefined>>;
+    }> = [];
     const runtime: HarnessRuntime = {
       id: claude.id,
-      stop: () => Effect.void,
-      resume: () => Effect.succeedNone,
+      stop: (spec) =>
+        Effect.sync(() => {
+          seen.push({ operation: "stop", environment: spec.environment });
+        }),
       preflight: checkedPreflight(() => Effect.void),
-      launch: (found) => {
-        assert.deepStrictEqual(found.environment, {
-          HOME: "/home/worker",
-          PATH: "/usr/bin:/bin",
-          CLAUDE_CONFIG_DIR: "/worker/claude",
-        });
-        return backend(claude.id).launch(found);
+      open: (spec, start, continuation) => {
+        seen.push({ operation: "open", environment: spec.environment });
+        return backend(claude.id).open(spec, start, continuation);
       },
+    };
+    const child = ChildRequest.make({
+      ...original,
+      environment: {
+        ...original.environment,
+        CLAUDE_CONFIG_DIR: "/worker/claude",
+        CODEX_HOME: "/worker/codex",
+        USINE_GATEWAY_TOKEN: "other-harness-token",
+      },
+    });
+    const scopedEnvironment = {
+      HOME: "/home/worker",
+      PATH: "/usr/bin:/bin",
+      CLAUDE_CONFIG_DIR: "/worker/claude",
     };
     return Effect.scoped(
       Effect.gen(function* () {
-        yield* (yield* ChildBackend).launch(
-          ChildRequest.make({
-            ...original,
-            environment: {
-              ...original.environment,
-              CLAUDE_CONFIG_DIR: "/worker/claude",
-              CODEX_HOME: "/worker/codex",
-              USINE_GATEWAY_TOKEN: "other-harness-token",
-            },
-          }),
-        );
+        const dispatcher = yield* ChildBackend;
+        yield* dispatcher.launch(child);
+        yield* dispatcher.stop(child);
+        assert.deepStrictEqual(seen, [
+          { operation: "open", environment: scopedEnvironment },
+          { operation: "stop", environment: scopedEnvironment },
+        ]);
       }),
     ).pipe(
       Effect.provide(
@@ -122,6 +143,103 @@ describe("harness runtime registration", () => {
                 })),
             ]),
           ),
+        ),
+      ),
+    );
+  });
+
+  it.effect("admits a role session before a registered runtime opens it", () => {
+    const opened: Array<string> = [];
+    const recording = (id: Harness): HarnessRuntime => ({
+      id,
+      stop: () => Effect.void,
+      preflight: checkedPreflight(() => Effect.void),
+      open: (spec, start, continuation) => {
+        opened.push(`${id}:${spec.route.placement}:${start._tag}`);
+        return backend(id).open(spec, start, continuation);
+      },
+    });
+    const withoutResume = HarnessDescriptor.make({
+      ...claude,
+      capabilities: Arr.map(claude.capabilities, (profile) =>
+        CapabilityProfile.make({
+          ...profile,
+          supported: profile.supported.filter((capability) => capability !== "resume-session"),
+          lacking: [
+            ...profile.lacking,
+            Lacking.make({ capability: "resume-session", reason: "No saved-session recovery" }),
+          ],
+        }),
+      ),
+    });
+    const spec = (harness: Harness, route: AdmissionContext) =>
+      SessionSpec.make({
+        session: RoleSession.make({
+          id: AgentSessionId.make(`role-${harness}`),
+          role: RoleName.make("contract-probe"),
+          agent: AgentName.make("developer"),
+          brain: BrainSpec.make({
+            harness,
+            model: ModelId.make(`${harness}-model`),
+            effort: "high",
+          }),
+        }),
+        route,
+        host: LocalProcess.make(),
+        worker: WorkerName.make("worker-1"),
+        machine: Option.none(),
+        cwd: WorkingDirectory.make("/remote/checkout"),
+        environment: { HOME: "/home/worker", PATH: "/usr/bin:/bin" },
+      });
+    const prompt = "Probe the contract.";
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const harnesses = yield* Harnesses;
+        const open = Effect.fn(function* (selected: SessionSpec, resume: boolean) {
+          const runtime = yield* harnesses.runtime(selected.session.brain.harness);
+          const policy = yield* continuationPolicy(selected, prompt, RestartState.make({}));
+          return yield* runtime.open(
+            selected,
+            resume
+              ? StartResume.make({
+                  reference: HarnessSession.make({
+                    id: HarnessSessionId.make("saved"),
+                    cwd: selected.cwd,
+                  }),
+                })
+              : StartPrompt.make({ text: prompt }),
+            policy,
+          );
+        });
+        const remote = yield* open(
+          spec(pi.id, AdmissionContext.make({ placement: "ssh", credential: "api-key" })),
+          false,
+        ).pipe(Effect.flip);
+        assert.strictEqual(remote._tag, "AgentResultError");
+        assert.include(remote.message, "pi cannot run as coding-agent at ssh: lacks ssh");
+        const resumed = yield* open(
+          spec(claude.id, AdmissionContext.make({ placement: "local", credential: "host-login" })),
+          true,
+        ).pipe(Effect.flip);
+        assert.strictEqual(resumed._tag, "AgentResultError");
+        assert.include(resumed.message, "resume-session");
+        assert.deepStrictEqual(opened, []);
+        const local = yield* open(
+          spec(pi.id, AdmissionContext.make({ placement: "local", credential: "host-login" })),
+          false,
+        );
+        assert.strictEqual((yield* local.running.result).message, pi.id);
+        assert.deepStrictEqual(opened, [`${pi.id}:local:StartPrompt`]);
+      }),
+    ).pipe(
+      Effect.provide(
+        Harnesses.layerFrom(
+          HarnessCatalog.make({
+            descriptors: catalog.descriptors.map((descriptor) =>
+              descriptor.id === claude.id ? withoutResume : descriptor,
+            ),
+          }),
+          catalog.ids.map(recording),
         ),
       ),
     );
@@ -194,6 +312,7 @@ describe("harness runtime registration", () => {
                 environment: child.environment,
                 worker: child.worker,
                 machine: child.machine,
+                placement: "local",
                 credential: "host-login",
               }),
             );
@@ -246,6 +365,7 @@ describe("harness runtime registration", () => {
               environment: child.environment,
               worker: child.worker,
               machine: child.machine,
+              placement: "local",
               credential,
             }),
           );

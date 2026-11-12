@@ -686,6 +686,33 @@ describe("cloudflare Worker", () => {
     }).pipe(Effect.scoped),
   );
 
+  it.live("reports a harness that fails in the sandbox as a sandbox image gap", () =>
+    Effect.gen(function* () {
+      const worker = yield* fakeWorker;
+      const codex = CheckoutRequest.make({ ...request, agent: brain(Harness.make("codex")) });
+      worker.state.respond = (_sandbox, words) =>
+        words[0] === "codex" ? Option.some({ stdout: "", exitCode: 127 }) : Option.none();
+      const [preflight, prepare] = yield* Effect.gen(function* () {
+        const cloudflare = yield* Executor;
+        return [
+          yield* cloudflare.preflight(WORKER, [codex.agent.brain], 1).pipe(Effect.flip),
+          yield* cloudflare.prepare(codex).pipe(Effect.flip),
+        ] as const;
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(executor(worker, mintingProvider(), completes, new StubStorage(), [OPENAI])),
+      );
+
+      for (const refused of [preflight, prepare]) {
+        const isCapabilityGap = Schema.is(WorkerCapabilityError)(refused);
+        assert(isCapabilityGap);
+        assert.strictEqual(refused.capability, "toolchain");
+        assert.include(refused.message, "in the sandbox image");
+        assert.notInclude(refused.message, "on the worker");
+      }
+    }).pipe(Effect.scoped),
+  );
+
   it.live("reports a refused Access token and a missing image as capability gaps", () =>
     Effect.gen(function* () {
       const worker = yield* fakeWorker;

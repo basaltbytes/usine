@@ -1,5 +1,5 @@
 import {
-  type ChildSession,
+  type AgentSession,
   PoolRateLimitsUpdated,
   RateLimitsSnapshot,
   RateLimitWindow,
@@ -37,7 +37,7 @@ const decodeRateLimit = Schema.decodeUnknownEffect(ClaudeRateLimit);
 const decodeRateLimitOption = Schema.decodeUnknownOption(ClaudeRateLimit);
 
 /** Emits only the allowance window included in the provider report. */
-export const claudeRateLimits = (session: ChildSession) => {
+export const claudeRateLimits = (session: AgentSession) => {
   const pool = sessionPool(session);
 
   return Effect.fn("ClaudeRateLimits.read")(

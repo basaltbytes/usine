@@ -111,8 +111,11 @@ export interface MachineDriver {
     name: string,
     tags: MachineTags,
   ) => Effect.Effect<CreatedMachine, MachineUnavailableError | WorkerCapabilityError>;
-  /** Updates the attempt identity before a reused machine starts work. */
-  readonly assign: (id: MachineId, tags: MachineTags) => Effect.Effect<void, ProviderApiError>;
+  /**
+   * Updates the attempt identity before a reused machine starts work. Absent for a provider whose
+   * machines are single-use, whose idle machines are discarded.
+   */
+  readonly assign?: (id: MachineId, tags: MachineTags) => Effect.Effect<void, ProviderApiError>;
   /** Waits until the machine runs and can be reached. Polls every `interval`. */
   readonly endpoint: (
     id: MachineId,

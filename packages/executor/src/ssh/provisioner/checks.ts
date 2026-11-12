@@ -16,7 +16,7 @@ import {
   type PreflightReport,
 } from "../../executor.ts";
 import { gatewayHolds, provisionedApiKey } from "../api-keys.ts";
-import type { SshMachine, SshWorkerAddress } from "../model.ts";
+import { machineReuseOf, type SshMachine, type SshWorkerAddress } from "../model.ts";
 import type { SshWorkerEntry } from "../workers.ts";
 
 /**
@@ -108,13 +108,14 @@ export const machineChecksFor = (
     if (provisioner._tag !== "Provisioned")
       return yield* Effect.die(new Error("expected a provisioned machine"));
     if (
-      Option.isNone(provisioner.provisioner.reuse) &&
+      Option.isNone(machineReuseOf(provisioner.provisioner)) &&
       last !== undefined &&
       now - last < provisioner.provisioner.timings.machineCheckInterval * 1000
     ) {
-      yield* Effect.logDebug("Machine check interval has not elapsed", {
+      yield* Effect.logInfo("Skipping the machine check: its interval has not elapsed", {
         worker,
         lastCheckedAt: last,
+        machineCheckInterval: provisioner.provisioner.timings.machineCheckInterval,
       });
       return Option.none<MachineCheck>();
     }
@@ -156,7 +157,7 @@ export const machineChecksFor = (
           ),
       }),
     );
-    if (Option.isSome(provisioner.provisioner.reuse) && Option.isSome(report.degraded))
+    if (Option.isSome(machineReuseOf(provisioner.provisioner)) && Option.isSome(report.degraded))
       return yield* WorkerCapabilityError.make({
         worker,
         capability: "container",
@@ -166,7 +167,13 @@ export const machineChecksFor = (
     const checkFinishedAt = yield* DateTime.now;
     const checkedAt = DateTime.toEpochMillis(checkFinishedAt);
     checkedOn.set(machine.address, checkedAt);
-    return Option.some(MachineCheck.make({ brains, containerLimits: report.containerLimits }));
+    return Option.some(
+      MachineCheck.make({
+        brains,
+        containerLimits: report.containerLimits,
+        findings: report.findings,
+      }),
+    );
   });
 
   return { check: checkMachine };

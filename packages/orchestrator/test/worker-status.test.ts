@@ -107,8 +107,51 @@ describe("Worker preflight record", () => {
     assert.deepStrictEqual(reloaded.containerLimits, Option.some(limits));
   });
 
+  it("keeps the findings of the last machine check through a preflight without a machine or a failed one", () => {
+    const finding = "The SSH user can't read the kernel journal";
+    const checked = recordPreflight(
+      unchecked(worker),
+      [codex],
+      at(8),
+      Result.succeed({ ...fullPreflight, findings: [finding] }),
+    );
+    assert.deepStrictEqual(checked.findings, [finding]);
+    const deferred = recordPreflight(
+      checked,
+      [codex],
+      at(9),
+      Result.succeed({
+        ...fullPreflight,
+        deferred: Option.some("Checked on the worker's first machine each day."),
+      }),
+    );
+    assert.deepStrictEqual(deferred.findings, [finding]);
+    const failed = recordPreflight(
+      deferred,
+      [codex],
+      at(10),
+      Result.fail(
+        WorkerCapabilityError.make({
+          worker,
+          capability: "machine",
+          message: "Can't connect",
+          cause: new Error("refused"),
+        }),
+      ),
+    );
+    assert.deepStrictEqual(failed.findings, [finding]);
+    const fixed = recordPreflight(failed, [codex], at(11), Result.succeed(fullPreflight));
+    assert.deepStrictEqual(fixed.findings, []);
+  });
+
   it("fails an unavailable harness, passes the ones checked before it, and keeps the rest", () => {
-    const started = recordPreflight(unchecked(worker), [pi], at(8), Result.succeed(fullPreflight));
+    const finding = "The SSH user can't read the kernel journal";
+    const started = recordPreflight(
+      unchecked(worker),
+      [pi],
+      at(8),
+      Result.succeed({ ...fullPreflight, findings: [finding] }),
+    );
     const record = recordPreflight(
       started,
       [codex, claude, pi],
@@ -127,6 +170,7 @@ describe("Worker preflight record", () => {
     assert(failed?._tag === "Failed", "claude failed");
     assert.deepStrictEqual(failed.capability, Option.some("harness-login"));
     assert.strictEqual(failed.message, "claude is not logged in");
+    assert.deepStrictEqual(record.findings, [finding]);
   });
 
   it("fails the Worker's prerequisites on any other failure and leaves its harnesses", () => {

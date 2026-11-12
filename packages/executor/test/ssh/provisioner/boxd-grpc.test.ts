@@ -80,7 +80,7 @@ it.effect("decodes real gRPC responses, exchanges a refused key once, and saniti
               return { regions: [{ id: region, apiEndpoint: "" }], thisRegion: region };
             },
             createVmFromSnapshot: (request) => {
-              assert.strictEqual(request.config?.network?.ssh, true);
+              assert.strictEqual(request.config?.network?.ssh, false);
               assert.strictEqual(request.spec?.version, 1);
               assert.strictEqual(request.spec?.isolated, true);
               assert.deepStrictEqual(request.spec?.labels, { "usine.worker": "worker" });
@@ -92,10 +92,6 @@ it.effect("decodes real gRPC responses, exchanges a refused key once, and saniti
             listVms: (request) => {
               selectors.push(request.labelSelector);
               return { vms: [machine] };
-            },
-            updateVmLabels: () => {
-              calls.push("labels");
-              return {};
             },
             destroyVm: () => {
               calls.push("destroy");
@@ -187,7 +183,6 @@ it.effect("decodes real gRPC responses, exchanges a refused key once, and saniti
       const vm = yield* api.vm(created.id);
       assert.strictEqual(vm.createdAt, 1_700_000_000);
       yield* api.listVms(["usine.worker=worker"]);
-      yield* api.updateLabels(created.id, { "usine.attempts": "2" });
       assert.deepStrictEqual(vm.egressAllow, ["*.tailscale.com"]);
       const inEffect = yield* api.setEgressAllow(created.id, [
         "*.tailscale.com",
@@ -214,7 +209,6 @@ it.effect("decodes real gRPC responses, exchanges a refused key once, and saniti
     assert.strictEqual(exchanges, 2);
     assert.deepStrictEqual(selectors[0], ["usine.worker=worker"]);
     assert.deepStrictEqual(calls, [
-      "labels",
       "egress vm-1 *.tailscale.com,registry.npmjs.org",
       "hibernate",
       "suspend",

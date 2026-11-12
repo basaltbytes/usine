@@ -2,9 +2,9 @@
 import { EventEmitter } from "node:events";
 // @effect-diagnostics-next-line nodeBuiltinImport:off
 import { PassThrough } from "node:stream";
-import { type Cause, Effect, Option, Queue, Ref, Scope, Stream } from "effect";
+import { type Cause, Deferred, Effect, Option, Queue, Ref, Scope, Stream } from "effect";
 import { ChildProcessSpawner } from "effect/process";
-import { type ProcessTarget, processError } from "./process.ts";
+import { type ProcessOptions, type ProcessTarget, processError } from "./process.ts";
 import { startChildProcess } from "./node.ts";
 import { ChildSessionLifecycle, SessionOperationError } from "../runtime.ts";
 
@@ -33,21 +33,29 @@ class SdkProcess extends EventEmitter {
   }
 }
 
-/** Adapts SDK stream handles to the scoped process owner; `readOutput` returns checkpointed bytes. */
+/** How the SDK's child process starts and checkpoints its output. */
+export interface SdkProcessOptions extends Pick<
+  ProcessOptions,
+  "transport" | "onInputAcknowledged"
+> {
+  /** Reads a chunk of the child's output; returns the bytes that became checkpointed. */
+  readonly readOutput?: (bytes: Uint8Array) => Effect.Effect<number>;
+}
+
+/** Adapts SDK stream handles to the scoped process owner, which checkpoints handled output. */
 export const sdkProcessSpawner = Effect.fn("ChildHost.sdkProcessSpawner")(function* (
   target: ProcessTarget,
-  transport?: "replace" | "resume",
-  readOutput: (bytes: Uint8Array) => Effect.Effect<number, SessionOperationError> = () =>
-    Effect.succeed(0),
-  onInputAcknowledged?: (bytes: Uint8Array) => Effect.Effect<number>,
+  { readOutput = () => Effect.succeed(0), ...processOptions }: SdkProcessOptions = {},
 ) {
   const context = yield* Effect.context<ChildProcessSpawner.ChildProcessSpawner>();
   const lifecycle = yield* ChildSessionLifecycle.current;
   const scope = yield* Effect.scope;
   const failure = yield* Ref.make(Option.none<SessionOperationError>());
   const retained = yield* Ref.make(false);
+  // The started process's output acknowledgement, or `None` when it failed to start.
+  const acknowledgeOutput =
+    yield* Deferred.make<Option.Option<(bytes: number) => Effect.Effect<void>>>();
   const run = Effect.runForkWith(context);
-  let acknowledgeOutput = (_bytes: number): Effect.Effect<void> => Effect.void;
   const spawn = (options: SpawnOptions) => {
     const process = new SdkProcess(() => {
       run(stop);
@@ -68,11 +76,9 @@ export const sdkProcessSpawner = Effect.fn("ChildHost.sdkProcessSpawner")(functi
         },
         { command: options.command, args: options.args, cwd: options.cwd ?? target.cwd },
         Stream.fromQueue(input),
-        transport,
-        "handled",
-        onInputAcknowledged,
+        { ...processOptions, acknowledgement: "handled" },
       );
-      acknowledgeOutput = handle.acknowledgeOutput;
+      yield* Deferred.succeed(acknowledgeOutput, Option.some(handle.acknowledgeOutput));
       const generation = yield* handle.generation;
       yield* Ref.set(retained, Option.isSome(generation));
       stop = Effect.gen(function* () {
@@ -93,7 +99,7 @@ export const sdkProcessSpawner = Effect.fn("ChildHost.sdkProcessSpawner")(functi
           handle.stdout.pipe(
             Stream.runForEach((data) =>
               readOutput(data).pipe(
-                Effect.flatMap(acknowledgeOutput),
+                Effect.flatMap(handle.acknowledgeOutput),
                 Effect.andThen(
                   Effect.sync(() => {
                     process.stdout.write(data);
@@ -111,6 +117,7 @@ export const sdkProcessSpawner = Effect.fn("ChildHost.sdkProcessSpawner")(functi
       process.stdout.end();
       process.emit("exit", event.exitCode, null);
     }).pipe(
+      Effect.ensuring(Deferred.succeed(acknowledgeOutput, Option.none())),
       Scope.provide(scope),
       Effect.catch((error) =>
         Effect.gen(function* () {
@@ -132,7 +139,21 @@ export const sdkProcessSpawner = Effect.fn("ChildHost.sdkProcessSpawner")(functi
   return {
     spawn,
     retained: Ref.get(retained),
-    acknowledge: (bytes: number) => Effect.suspend(() => acknowledgeOutput(bytes)),
+    /**
+     * Checkpoints `bytes` of handled output. Output exists only once the process started, so a
+     * positive count waits for its start; the count is ignored if the process failed to start.
+     */
+    acknowledge: (bytes: number) =>
+      bytes === 0
+        ? Effect.void
+        : Deferred.await(acknowledgeOutput).pipe(
+            Effect.flatMap(
+              Option.match({
+                onNone: () => Effect.void,
+                onSome: (acknowledge) => acknowledge(bytes),
+              }),
+            ),
+          ),
     diagnose: (error: SessionOperationError) =>
       Ref.get(failure).pipe(Effect.map(Option.getOrElse(() => error))),
   };

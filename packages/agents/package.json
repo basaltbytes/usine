@@ -67,6 +67,10 @@
       "types": "./dist/harness/catalog.d.ts",
       "default": "./dist/harness/catalog.js"
     },
+    "./harness/contract": {
+      "types": "./dist/harness/contract.d.ts",
+      "default": "./dist/harness/contract.js"
+    },
     "./harness/node": {
       "types": "./dist/harness/node.d.ts",
       "default": "./dist/harness/node.js"

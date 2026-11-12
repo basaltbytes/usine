@@ -3,17 +3,34 @@ import { ContainerId } from "@usine/core/worker";
 import { NodeServices } from "@effect/platform-node";
 import { Effect, FileSystem, Path } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
-import { KERNEL_MEMORY_SCRIPT, killedProcessesFromKernel } from "../../src/remote/memory.ts";
+import {
+  KERNEL_LOG_READABLE_SCRIPT,
+  KERNEL_MEMORY_SCRIPT,
+  killedProcessesFromKernel,
+} from "../../src/remote/memory.ts";
 
 const container = ContainerId.make("a".repeat(64));
 const other = "b".repeat(64);
 const diagnostic = (cgroup: string, command: string, pid: number) =>
   `oom-kill:constraint=CONSTRAINT_MEMCG,nodemask=(null),cpuset=libpod-${container}.scope,mems_allowed=0,oom_memcg=/user.slice/libpod-${container}.scope,task_memcg=${cgroup},task=${command},pid=${pid},uid=1000`;
 
+/** Kernel lines that the collection must drop: an unrelated one, and an OOM line that isn't the kill. */
+const kernelNoise = [
+  "docker0: port 1(veth1) entered blocking state",
+  "node invoked oom-killer: gfp_mask=0xcc0",
+];
+/** A shell command that prints each line. */
+const printLines = (lines: ReadonlyArray<string>) =>
+  `printf '%s\\n' ${lines.map((line) => `'${line}'`).join(" ")}`;
+
 describe("kernel OOM process attribution", () => {
-  it.live.each([true, false])(
-    "reads the kernel through journalctl, falling back to dmesg: journal available %s",
-    (journalAvailable) =>
+  it.live.each(
+    (["match", "no match", "no match, failing", "unreadable"] as const).flatMap((journal) =>
+      (["match", "no match", "failing"] as const).map((dmesg) => ({ journal, dmesg })),
+    ),
+  )(
+    "reads the kernel through journalctl, falling back to dmesg filtered on the worker: journal $journal, dmesg $dmesg",
+    ({ journal, dmesg }) =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
@@ -33,33 +50,137 @@ printf '"%s"\\n' '${created}'
         yield* fs.writeFileString(
           path.join(directory, "journalctl"),
           `#!/bin/sh
-[ "$1" = -k ] && [ "$2" = --since ] && [ "$3" = '${created}' ] || exit 2
-${journalAvailable ? "echo journal-diagnostic" : "exit 1"}
+[ "$1" = -k ] || exit 2
+${
+  journal === "unreadable"
+    ? // Like journalctl 257 for a user outside systemd-journal: exits 0 with no entries, prints a
+      // placeholder unless quiet, and exits 1 for --grep.
+      `for arg in "$@"; do
+  [ "$arg" = -q ] && quiet=1
+  [ "$arg" = --grep ] && exit 1
+done
+[ -n "\${quiet:-}" ] || echo '-- No entries --'
+exit 0`
+    : ""
+}
+# The readability check reads the latest entry of the boot.
+[ "$2" = -b ] && echo 'Linux version 6.18.0' && exit 0
+[ "$2" = --since ] && [ "$3" = '${created}' ] || exit 2
+# The journal holds kernel lines besides the OOM kill, and prints the ones that --grep keeps.
+pattern=
+previous=
+for arg in "$@"; do
+  [ "$previous" = --grep ] && pattern=$arg
+  [ "$arg" = -q ] && quiet=1
+  previous=$arg
+done
+entries=$(${printLines(journal === "match" ? [...kernelNoise, "oom-kill:journal-diagnostic"] : kernelNoise)} | grep -E -- "\${pattern:-.}" || true)
+[ -n "$entries" ] && printf '%s\\n' "$entries" && exit 0
+${
+  {
+    match: "",
+    // Like journalctl, prints a placeholder when nothing matches, unless quiet.
+    "no match": `[ -n "\${quiet:-}" ] && exit 0
+echo '-- No entries --'`,
+    // journalctl 257 exits 1 when --grep matches nothing.
+    "no match, failing": "exit 1",
+    unreadable: "",
+  }[journal]
+}
 `,
           { mode: 0o755 },
         );
         yield* fs.writeFileString(
           path.join(directory, "dmesg"),
-          "#!/bin/sh\necho ring-buffer-diagnostic\n",
+          {
+            match: `#!/bin/sh\n${printLines([...kernelNoise, "oom-kill:ring-buffer-diagnostic"])}\n`,
+            "no match": `#!/bin/sh\n${printLines(kernelNoise)}\n`,
+            failing:
+              "#!/bin/sh\necho 'dmesg: read kernel buffer failed: Operation not permitted' >&2\nexit 1\n",
+          }[dmesg],
           {
             mode: 0o755,
           },
         );
-        const output = yield* spawner.string(
-          ChildProcess.make("/bin/sh", ["-c", KERNEL_MEMORY_SCRIPT, "sh", "runtime", "attempt"], {
+        const command = ChildProcess.make(
+          "/bin/sh",
+          ["-c", KERNEL_MEMORY_SCRIPT, "sh", "runtime", "attempt"],
+          {
             env: { PATH: `${directory}:/usr/bin:/bin` },
             extendEnv: false,
-          }),
+          },
         );
-        expect(output).toBe(journalAvailable ? "journal-diagnostic\n" : "ring-buffer-diagnostic\n");
+        const exitCode = yield* spawner.exitCode(command);
+        if (journal === "unreadable" && dmesg === "failing") {
+          expect(exitCode).toBe(1);
+          return;
+        }
+        expect(exitCode).toBe(0);
+        const output = yield* spawner.string(command);
+        expect(output).toBe(
+          journal === "match"
+            ? "source journal\noom-kill:journal-diagnostic\n"
+            : {
+                match: "source dmesg\noom-kill:ring-buffer-diagnostic\n",
+                // The ring buffer is readable and names no kill, so the record keeps the count alone.
+                "no match": "source dmesg\n",
+                // The journal is readable and names no kill, so the record keeps the count alone.
+                failing: "source journal\n",
+              }[dmesg],
+        );
       }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
-  it("uses the victim cgroup for Docker and rootless Podman, including nested cgroups", () => {
+  it.live.each([
+    { journal: "entry", dmesg: true, readable: true },
+    { journal: "entry", dmesg: false, readable: true },
+    { journal: "empty", dmesg: true, readable: true },
+    { journal: "empty", dmesg: false, readable: false },
+    { journal: "absent", dmesg: true, readable: true },
+    { journal: "absent", dmesg: false, readable: false },
+  ] as const)(
+    "checks that the kernel journal or ring buffer is readable: journal $journal, dmesg $dmesg",
+    ({ journal, dmesg, readable }) =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+        const directory = yield* fs.makeTempDirectoryScoped({ prefix: "usine-kernel-log-" });
+        if (journal !== "absent")
+          yield* fs.writeFileString(
+            path.join(directory, "journalctl"),
+            `#!/bin/sh
+[ "$1" = -k ] && [ "$2" = -b ] || exit 2
+for arg in "$@"; do [ "$arg" = -q ] && quiet=1; done
+${journal === "entry" ? "echo 'Linux version 6.18.0'" : '[ -n "${quiet:-}" ] || echo "-- No entries --"'}
+`,
+            { mode: 0o755 },
+          );
+        yield* fs.writeFileString(
+          path.join(directory, "dmesg"),
+          dmesg
+            ? "#!/bin/sh\necho 'Linux version 6.18.0'\n"
+            : "#!/bin/sh\necho 'dmesg: read kernel buffer failed: Operation not permitted' >&2\nexit 1\n",
+          { mode: 0o755 },
+        );
+        // Only the fakes are on the PATH, so a host journalctl can't stand in for an absent one.
+        const exitCode = yield* spawner.exitCode(
+          ChildProcess.make("/bin/sh", ["-c", KERNEL_LOG_READABLE_SCRIPT], {
+            env: { PATH: directory },
+            extendEnv: false,
+          }),
+        );
+        expect(exitCode === 0).toBe(readable);
+      }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it("uses the victim cgroup for Docker and Podman, including nested cgroups", () => {
     const logs = [
       diagnostic(`/docker/${container}`, "node (vitest 1)", 123),
       diagnostic(`/user.slice/libpod-${container}.scope/build`, "esbuild", 456),
       diagnostic(`/system.slice/docker-${container}.scope`, "codex", 789),
+      // Podman with the cgroupfs manager names the cgroup without `.scope`.
+      diagnostic(`/libpod_parent/libpod-${container}`, "pnpm", 321),
       // The cpuset and OOM ancestor alone do not identify the victim's container.
       diagnostic(`/docker/${other}`, "sibling", 999),
       diagnostic(`/docker/${container}ff`, "prefix collision", 1000),
@@ -70,6 +191,7 @@ ${journalAvailable ? "echo journal-diagnostic" : "exit 1"}
       { command: "node (vitest 1)", pid: 123 },
       { command: "esbuild", pid: 456 },
       { command: "codex", pid: 789 },
+      { command: "pnpm", pid: 321 },
     ]);
   });
 
