@@ -1402,11 +1402,11 @@ describe("engine restart", () => {
           assert.deepStrictEqual(summaries, [
             jsonKey([
               "Startup checkout reconciliation finished on a Worker",
-              { worker: "local", visited: 3, kept: 2, discarded: 1 },
+              { worker: "local", visited: 3, kept: 0, failed: 1, empty: 1, discarded: 1 },
             ]),
             jsonKey([
               "Startup checkout reconciliation finished on a Worker",
-              { worker: "spare", visited: 0, kept: 0, discarded: 0 },
+              { worker: "spare", visited: 0, kept: 0, failed: 0, empty: 0, discarded: 0 },
             ]),
           ]);
           const reader = Context.get(context, RunReader);
@@ -1427,6 +1427,57 @@ describe("engine restart", () => {
           const revisitedState = yield* Ref.get(revisited);
           assert.sameMembers([...revisitedState], [...failing, ...open]);
           yield* Scope.close(secondScope, Exit.void);
+        }),
+      ),
+  );
+
+  it.live(
+    "settles ended Attempts with nothing left on their Worker at the first start, so a second start visits only kept checkouts",
+    () =>
+      withInstance((directory) =>
+        Effect.gen(function* () {
+          const ended = [
+            ...(yield* deliverOneAttempt(directory, 45)).attempts,
+            ...(yield* deliverOneAttempt(directory, 46)).attempts,
+          ].map(({ id }) => id);
+          const kept = (yield* deliverOneAttempt(directory, 47)).attempts.map(({ id }) => id);
+          const summaries: Array<string> = [];
+          const logger = Logger.make<unknown, void>(({ logLevel, message }) => {
+            const line = jsonKey(message);
+            if (logLevel === "Info" && line.includes("finished on a Worker")) summaries.push(line);
+          });
+          const start = Effect.fn("start")(function* () {
+            const recovered = yield* Ref.make<ReadonlyArray<AttemptId>>([]);
+            const scope = yield* Scope.make();
+            yield* Scope.provide(
+              Layer.build(
+                engineLayer(
+                  directory,
+                  recordingExecutor(["local"], recovered, undefined, ({ attemptId }) =>
+                    Effect.succeed(kept.includes(attemptId) ? "found" : "gone"),
+                  ),
+                ),
+              ),
+              scope,
+            ).pipe(Effect.provide(Logger.layer([logger])));
+            yield* Scope.close(scope, Exit.void);
+            return yield* Ref.get(recovered);
+          });
+
+          const first = yield* start();
+          const second = yield* start();
+          assert.sameMembers([...first], [...ended, ...kept]);
+          assert.deepStrictEqual(second, kept);
+          assert.deepStrictEqual(summaries, [
+            jsonKey([
+              "Startup checkout reconciliation finished on a Worker",
+              { worker: "local", visited: 3, kept: 1, failed: 0, empty: 0, discarded: 2 },
+            ]),
+            jsonKey([
+              "Startup checkout reconciliation finished on a Worker",
+              { worker: "local", visited: 1, kept: 1, failed: 0, empty: 0, discarded: 0 },
+            ]),
+          ]);
         }),
       ),
   );
