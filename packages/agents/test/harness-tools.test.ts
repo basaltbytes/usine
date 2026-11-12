@@ -85,11 +85,20 @@ describe("usine tool sets", () => {
       const invalid = yield* read.call({ title: "greeting" }, Option.none());
       assert.isTrue(invalid.isError);
       assert.include(invalid.text, "Invalid parameters for tool 'read_note'");
-      const exploded = yield* explode.call({}, Option.none());
+      const logs = collectLogs(["Info", "Error"]);
+      const exploded = yield* explode.call({}, Option.none()).pipe(Effect.provide(logs.layer));
       assert.deepStrictEqual(exploded, {
         isError: true,
         text: "The explode tool failed internally",
       });
+      // A defect is logged as an error only: the call wasn't cancelled.
+      assert.deepStrictEqual(
+        logs.records.map(({ level, message }) => [
+          level,
+          Array.isArray(message) ? message[0] : message,
+        ]),
+        [["Error", "Usine tool handler died"]],
+      );
     }),
   );
 
