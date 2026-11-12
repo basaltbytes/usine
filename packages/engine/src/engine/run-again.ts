@@ -11,7 +11,8 @@ import { Claimed, CycleBlocked, Submission } from "./submission.ts";
 
 /**
  * An operator request to run a succeeded or canceled Run again with the Loop's current settings
- * (#152). `requestedBy` is `None` if `usine.yaml` sets no operator login.
+ * (#152). `requestedBy` is `None` if neither a signed-in member nor the
+ * instance settings supply an operator login.
  */
 export class RunAgainRequest extends Schema.Class<
   RunAgainRequest,

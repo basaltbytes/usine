@@ -10,7 +10,7 @@ import { SqliteClient } from "@effect/sql-sqlite-node";
 import { type ChildHost, LocalProcess } from "@usine/agents/child-host";
 import { Agent, AgentName, AgentPersona } from "@usine/core/agent";
 import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
-import { type AgentSessionEvent, ChildSessionBudget } from "@usine/core/agent/session";
+import { type AgentSessionEvent, ChildSessionBudget, TokenCount } from "@usine/core/agent/session";
 import { AttemptId, AttemptTask } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { CommitSha, RepositoryName, RepositoryRevision } from "@usine/core/repository";
@@ -18,6 +18,7 @@ import { BotLogin, WorkerName } from "@usine/core/worker";
 import { DateTime, Effect, Layer, Option, Result } from "effect";
 import { AttemptRequest } from "../src/attempt-runtime.ts";
 import { sqliteAttemptJournalLayer } from "../src/coordinator/sqlite/store.ts";
+import { HandlerSession, HandlerUsage } from "../src/coordinator/wake-up.ts";
 import { PARENT_MODEL } from "../src/testing.ts";
 
 const agent = Agent.make({
@@ -160,3 +161,15 @@ export const trace = (envelopes: ReadonlyArray<AttemptChannel.OutboundEnvelope>)
       event._tag === "ToolStarted" || event._tag === "ToolFinished" ? `:${event.tool}` : "";
     return [`${role}.${event._tag}${tool}`];
   });
+
+/** The model call of a decision that a `session` or `completion` handler made in a test. */
+export const handlerSession = HandlerSession.make({
+  brain: BrainSpec.make({
+    harness: Harness.make("claude"),
+    model: ModelId.make("claude-haiku-4-5"),
+    effort: "low",
+  }),
+  route: "host-login",
+  pool: "claudePlan",
+  usage: HandlerUsage.make({ totalTokens: TokenCount.make(1_200), costUsd: Option.none() }),
+});

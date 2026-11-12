@@ -35,8 +35,10 @@ import {
   ConfigurationEntity,
   ConfigurationEntityId,
   ConfigurationEntityKey,
+  ConfigurationRevision,
   ConfigurationRevisionNumber,
   ConfigurationStore,
+  revertConfiguration,
   validateConfiguration,
 } from "../src/configuration/store.ts";
 import {
@@ -45,6 +47,7 @@ import {
   formatRevisionEntity,
   parseConfigurationEntity,
 } from "../src/configuration/folder.ts";
+import { replay } from "../src/configuration/commit.ts";
 import { LoopJson } from "../src/configuration/entities.ts";
 import { memoryConfigurationLayer } from "../src/configuration/memory.ts";
 import { sqliteConfigurationLayer } from "../src/configuration/sqlite/store.ts";
@@ -164,6 +167,25 @@ describe("configuration domain without layers", () => {
           }
         }
       }
+    }),
+  );
+
+  it.effect("replays a stored revision that adds an exe.dev worker", () =>
+    Effect.gen(function* () {
+      const changes = (yield* initialChanges).map((change) =>
+        change.key.kind === "worker"
+          ? ConfigurationChange.make({
+              ...change,
+              after: Option.some({ name: change.key.identifier, kind: "exe.dev" }),
+            })
+          : change,
+      );
+      const replayed = yield* replay(parser, Configuration.empty, zero, changes, metadata);
+      expect(
+        Option.map(replayed.configuration.instance, ({ config }) =>
+          config.workers.map(({ kind }) => kind),
+        ),
+      ).toEqual(Option.some(["exe.dev", "exe.dev"]));
     }),
   );
 
@@ -604,6 +626,40 @@ for (const [name, layer] of adapters)
       }).pipe(Effect.provide(layer)),
     );
 
+    it.effect("refuses all-exe.dev and mixed workers without writing a revision", () =>
+      Effect.gen(function* () {
+        const fixtureInstance = yield* fixture;
+        const store = yield* ConfigurationStore;
+        yield* initialize;
+        const current = yield* store.read;
+
+        const workers = configurationEntities(fixtureInstance).filter(
+          ({ key }) => key.kind === "worker",
+        );
+        const toExeDev = workers.map(({ key, value }) =>
+          ConfigurationChange.make({
+            key,
+            before: Option.some(value),
+            after: Option.some({ name: key.identifier, kind: "exe.dev" }),
+          }),
+        );
+        for (const changes of [toExeDev, toExeDev.slice(1)]) {
+          const failure = yield* store
+            .commit({ expected: current.number, changes, ...metadata })
+            .pipe(Effect.flip);
+          assert(failure._tag === "ConfigurationInvalid", failure._tag);
+          expect(failure.problems.map(({ file, message }) => ({ file, message }))).toEqual(
+            changes.map(({ key }) => ({
+              file: `worker:${key.identifier}`,
+              message: `Worker "${key.identifier}" has kind exe.dev, which this version of usine doesn't run. Remove the worker or give it another kind.`,
+            })),
+          );
+          const stored = yield* store.read;
+          expect(stored).toEqual(current);
+        }
+      }).pipe(Effect.provide(layer)),
+    );
+
     it.effect(
       "commits atomically, records before and after, filters history, and replays revisions",
       () =>
@@ -929,3 +985,156 @@ it.live("keeps stored outcome labels when the upgraded configuration is still in
     Effect.withLogger(logger),
   );
 });
+
+const extraLabel = ConfigurationChange.make({
+  key: ConfigurationEntityKey.make({
+    kind: "label",
+    identifier: ConfigurationEntityId.make("extra"),
+  }),
+  before: Option.none(),
+  after: Option.some({ name: "extra" }),
+});
+/**
+ * Changes worker `fallback` in `configuration` from its stored value to kind `kind`, or removes it
+ * when `kind` is none.
+ */
+const fallbackChange = (configuration: Configuration, kind: Option.Option<string>) =>
+  Effect.gen(function* () {
+    assert(Option.isSome(configuration.instance));
+    const stored = configurationEntities(configuration.instance.value).find(
+      ({ key }) => key.key === "worker:fallback",
+    );
+    if (stored === undefined) return yield* Effect.die("missing worker:fallback");
+    return ConfigurationChange.make({
+      key: stored.key,
+      before: Option.some(stored.value),
+      after: Option.map(kind, (value) => ({ name: "fallback", kind: value })),
+    });
+  });
+const exeDevRefusal = {
+  file: "worker:fallback",
+  message: `Worker "fallback" has kind exe.dev, which this version of usine doesn't run. Remove the worker or give it another kind.`,
+};
+
+/**
+ * Opens a SQLite store in a scoped temporary directory and commits the fixture. It then writes
+ * revision 2, which sets worker `fallback` to kind exe.dev, as releases before the store refused
+ * exe.dev workers saved it.
+ */
+const exeDevWorkerStore = Effect.gen(function* () {
+  const fs = yield* FileSystem.FileSystem;
+  const directory = yield* fs.makeTempDirectoryScoped({ directory: sqliteTempDirectory() });
+  const sqlite = SqliteClient.layer({ filename: `${directory}/configuration.sqlite` });
+  const services = yield* Layer.build(
+    sqliteConfigurationLayer.pipe(Layer.provide(parserLayer), Layer.provideMerge(sqlite)),
+  );
+  const store = Context.get(services, ConfigurationStore);
+  const sql = Context.get(services, SqlClient.SqlClient);
+  yield* store.commit({ expected: zero, changes: yield* initialChanges, ...metadata });
+  const current = yield* store.read;
+  const toExeDev = yield* fallbackChange(current, Option.some("exe.dev"));
+  const { configuration, revision } = yield* replay(
+    parser,
+    current,
+    current.number,
+    [toExeDev],
+    metadata,
+  );
+  assert(Option.isSome(configuration.instance));
+  const exeDev = configurationEntities(configuration.instance.value).find(
+    ({ key }) => key.key === "worker:fallback",
+  );
+  if (exeDev === undefined) return yield* Effect.die("missing worker:fallback");
+  const value = yield* Schema.encodeEffect(
+    Schema.fromJsonString(Schema.toCodecJson(ConfigurationRevision)),
+  )(revision);
+  yield* sql`INSERT INTO usine_configuration_revisions (number, value) VALUES (${revision.number}, ${value})`;
+  const entity = yield* Schema.encodeEffect(
+    Schema.fromJsonString(Schema.toCodecJson(ConfigurationEntity)),
+  )(exeDev);
+  yield* sql`UPDATE usine_configuration_entities SET value = ${entity} WHERE key = 'worker:fallback'`;
+  const revisions = Effect.map(
+    sql<{
+      readonly number: number;
+    }>`SELECT number FROM usine_configuration_revisions ORDER BY number`,
+    (rows) => rows.map(({ number }) => number),
+  );
+  return { store, revisions };
+});
+
+it.live("reads a stored exe.dev worker and refuses other saves until it is removed", () =>
+  Effect.gen(function* () {
+    const { store, revisions } = yield* exeDevWorkerStore;
+    const stored = yield* store.read;
+    expect(stored.number).toBe(2);
+    assert(Option.isSome(stored.instance));
+    expect(stored.instance.value.config.workers.map(({ name, kind }) => `${name}:${kind}`)).toEqual(
+      ["local:local", "fallback:exe.dev"],
+    );
+
+    const refused = yield* store
+      .commit({ expected: stored.number, changes: [extraLabel], ...metadata })
+      .pipe(Effect.flip);
+    assert(refused._tag === "ConfigurationInvalid", refused._tag);
+    expect(refused.problems.map(({ file, message }) => ({ file, message }))).toEqual([
+      exeDevRefusal,
+    ]);
+    const kept = yield* revisions;
+    expect(kept).toEqual([1, 2]);
+
+    for (const kind of [Option.none(), Option.some("local")]) {
+      const fresh = yield* exeDevWorkerStore;
+      const change = yield* fallbackChange(stored, kind);
+      const committed = yield* fresh.store.commit({
+        expected: stored.number,
+        changes: [change],
+        ...metadata,
+      });
+      expect(committed.number).toBe(3);
+      const saved = yield* fresh.store.read;
+      assert(Option.isSome(saved.instance));
+      expect(
+        saved.instance.value.config.workers.map(({ name, kind }) => `${name}:${kind}`),
+      ).toEqual(Option.isSome(kind) ? ["local:local", "fallback:local"] : ["local:local"]);
+    }
+  }).pipe(Effect.scoped, Effect.timeout("10 seconds"), Effect.provide(NodeServices.layer)),
+);
+
+it.live("reverts a revision over a history that holds an exe.dev worker", () =>
+  Effect.gen(function* () {
+    const { store, revisions } = yield* exeDevWorkerStore;
+    const revertOf = (number: number) =>
+      Effect.gen(function* () {
+        const current = yield* store.read;
+        const target = yield* store.revision(ConfigurationRevisionNumber.make(number));
+        assert(Option.isSome(target));
+        const history = yield* store.list(Option.none());
+        const changes = yield* revertConfiguration(parser, target.value, history, current);
+        return yield* store.commit({ expected: current.number, changes, ...metadata });
+      });
+    const seeded = yield* store.read;
+    const toLocal = yield* fallbackChange(seeded, Option.some("local"));
+    yield* store.commit({ expected: seeded.number, changes: [toLocal], ...metadata });
+    yield* store.commit({
+      expected: ConfigurationRevisionNumber.make(3),
+      changes: [extraLabel],
+      ...metadata,
+    });
+
+    // Reverting revision 4 replays revision 2, which holds the exe.dev worker.
+    const reverted = yield* revertOf(4);
+    expect(reverted.number).toBe(5);
+    const current = yield* store.read;
+    assert(Option.isSome(current.instance));
+    expect(current.instance.value.config.labels.map(({ name }) => name)).not.toContain("extra");
+
+    // Reverting revision 3 would bring the exe.dev worker back.
+    const refused = yield* revertOf(3).pipe(Effect.flip);
+    assert(refused._tag === "ConfigurationInvalid", refused._tag);
+    expect(refused.problems.map(({ file, message }) => ({ file, message }))).toEqual([
+      exeDevRefusal,
+    ]);
+    const written = yield* revisions;
+    expect(written).toEqual([1, 2, 3, 4, 5]);
+  }).pipe(Effect.scoped, Effect.timeout("10 seconds"), Effect.provide(NodeServices.layer)),
+);

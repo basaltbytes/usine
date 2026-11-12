@@ -8,6 +8,7 @@ import { DurableHarnessError } from "@usine/durable/harness";
 import { EnginePersistenceError } from "@usine/engine/engine";
 import { ExecutorOperationError, WorkerCapabilityError } from "@usine/executor";
 import { assert, describe, it } from "vitest";
+import { UnsupportedWorkerError } from "@usine/orchestrator/scheduler";
 import { failureMessage } from "../src/failure-message.ts";
 
 describe("CLI failure messages", () => {
@@ -57,6 +58,24 @@ describe("CLI failure messages", () => {
     );
     assert.include(message, "loops (read): ENOENT: no such file or directory");
     assert.include(message, "no revision was written");
+  });
+
+  it("refuses an exe.dev Worker because this version doesn't run the kind", () => {
+    assert.strictEqual(
+      failureMessage(
+        UnsupportedWorkerError.make({ worker: WorkerName.make("exe-one"), kind: "exe.dev" }),
+      ),
+      'usine up did not start: Worker "exe-one" has kind exe.dev, which this version of usine doesn\'t run. Remove the worker or give it another kind. Then run usine up again.',
+    );
+  });
+
+  it("names the Worker whose kind differs from the executor's", () => {
+    assert.strictEqual(
+      failureMessage(
+        UnsupportedWorkerError.make({ worker: WorkerName.make("eu-one"), kind: "ssh" }),
+      ),
+      'usine up did not start: worker "eu-one" has kind ssh, which differs from the other workers in usine.yaml. usine up runs all workers with one executor. Give every worker under workers the same kind.',
+    );
   });
 
   it("names the Worker, the failed check, and the cause of a preflight refusal", () => {

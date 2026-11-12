@@ -13,11 +13,16 @@ import { LoopName } from "@usine/core/loop";
 import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
 import { StepName } from "@usine/core/step";
 import { Submission } from "@usine/engine/engine";
-import { TriggerCondition } from "@usine/engine/trigger-condition";
+import { savedSettings, TriggerCondition } from "@usine/engine/trigger-condition";
 import { Source } from "@usine/expression/expression-engine";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { GitHubApiError } from "@usine/github/github-app";
-import { GitHubItemNotFoundError, GitHubPolling } from "@usine/github/polling";
+import {
+  ContentHash,
+  GitHubItemNotFoundError,
+  GitHubPolling,
+  IssueSnapshot,
+} from "@usine/github/polling";
 import { DateTime, Deferred, Effect, Fiber, Layer, Option, Schema, SubscriptionRef } from "effect";
 import { TestClock } from "effect/testing";
 import { CurrentInstance } from "../src/current-instance/current-instance.ts";
@@ -126,13 +131,13 @@ const failingGitHub: GitHubPolling["Service"] = {
 };
 
 describe("TriggerCondition", () => {
-  it.effect("keeps the queued Event's turn when the fresh snapshot cannot be fetched", () =>
+  it.effect("reports the recheck undetermined when the fresh snapshot cannot be fetched", () =>
     Effect.gen(function* () {
       const condition = yield* TriggerCondition;
       const recheck = yield* condition.recheck(
         submissionFor(issueLoop.name, '["github","basaltbytes/usine",28]'),
       );
-      assert.strictEqual(recheck._tag, "Matches");
+      assert.strictEqual(recheck._tag, "Undetermined");
     }).pipe(Effect.provide(layerWith(failingGitHub))),
   );
 
@@ -160,34 +165,36 @@ describe("TriggerCondition", () => {
     ),
   );
 
-  it.effect("interrupts a hung snapshot and keeps the queued Event's turn after five seconds", () =>
-    Effect.gen(function* () {
-      const started = yield* Deferred.make<void>();
-      const interrupted = yield* Deferred.make<void>();
-      const github: GitHubPolling["Service"] = {
-        ...failingGitHub,
-        snapshot: () =>
-          Deferred.succeed(started, undefined).pipe(
-            Effect.andThen(Effect.never),
-            Effect.onInterrupt(() => Deferred.succeed(interrupted, undefined)),
-          ),
-      };
-      const fiber = yield* Effect.gen(function* () {
-        const condition = yield* TriggerCondition;
-        return yield* condition.recheck(
-          submissionFor(issueLoop.name, '["github","basaltbytes/usine",28]'),
-        );
-      }).pipe(Effect.provide(layerWith(github)), Effect.forkChild);
+  it.effect(
+    "interrupts a hung snapshot and reports the recheck undetermined after five seconds",
+    () =>
+      Effect.gen(function* () {
+        const started = yield* Deferred.make<void>();
+        const interrupted = yield* Deferred.make<void>();
+        const github: GitHubPolling["Service"] = {
+          ...failingGitHub,
+          snapshot: () =>
+            Deferred.succeed(started, undefined).pipe(
+              Effect.andThen(Effect.never),
+              Effect.onInterrupt(() => Deferred.succeed(interrupted, undefined)),
+            ),
+        };
+        const fiber = yield* Effect.gen(function* () {
+          const condition = yield* TriggerCondition;
+          return yield* condition.recheck(
+            submissionFor(issueLoop.name, '["github","basaltbytes/usine",28]'),
+          );
+        }).pipe(Effect.provide(layerWith(github)), Effect.forkChild);
 
-      yield* Deferred.await(started);
-      yield* TestClock.adjust("4 seconds");
-      assert.isUndefined(fiber.pollUnsafe());
-      yield* TestClock.adjust("1 second");
-      const fiberResult = yield* Fiber.join(fiber);
-      assert.strictEqual(fiberResult._tag, "Matches");
-      const interruptedDone = yield* Deferred.isDone(interrupted);
-      assert.isTrue(interruptedDone);
-    }),
+        yield* Deferred.await(started);
+        yield* TestClock.adjust("4 seconds");
+        assert.isUndefined(fiber.pollUnsafe());
+        yield* TestClock.adjust("1 second");
+        const fiberResult = yield* Fiber.join(fiber);
+        assert.strictEqual(fiberResult._tag, "Undetermined");
+        const interruptedDone = yield* Deferred.isDone(interrupted);
+        assert.isTrue(interruptedDone);
+      }),
   );
 
   it.effect("never re-fetches for a schedule Tick, which has no standing condition", () =>
@@ -243,5 +250,49 @@ describe("TriggerCondition", () => {
       );
       assert.strictEqual(recheck._tag, "NoLongerMatches");
     }).pipe(Effect.provide(layerWith(failingGitHub))),
+  );
+
+  it.effect("opens a queued trigger match with its saved settings after the Loop changes", () =>
+    Effect.gen(function* () {
+      const fixtureInstance = yield* instance;
+      const edited = LoadedInstance.make({
+        ...fixtureInstance,
+        loops: [LoopFile.make({ ...issueLoop, approval: "required", permissions: "read" })],
+      });
+      const github: GitHubPolling["Service"] = {
+        ...failingGitHub,
+        snapshot: () =>
+          Effect.succeed(
+            IssueSnapshot.make({
+              payload: {
+                number: 28,
+                title: "Issue 28",
+                body: "",
+                url: "https://github.com/basaltbytes/usine/issues/28",
+                state: "OPEN",
+                stateReason: null,
+                createdAt: "2026-09-18T04:00:00Z",
+                updatedAt: "2026-09-18T04:08:10Z",
+                closedAt: null,
+                author: null,
+                issueType: null,
+                milestone: null,
+                labelEvents: {},
+                labels: { totalCount: 0, nodes: [] },
+                assignees: { totalCount: 0, nodes: [] },
+                comments: { totalCount: 0, nodes: [] },
+                closedByPullRequestsReferences: { totalCount: 0, nodes: [] },
+              },
+              contentHash: ContentHash.make("c".repeat(64)),
+            }),
+          ),
+      };
+      const queued = submissionFor(issueLoop.name, '["github","basaltbytes/usine",28]');
+      const recheck = yield* Effect.gen(function* () {
+        return yield* (yield* TriggerCondition).recheck(queued);
+      }).pipe(Effect.provide(layerWith(github, fixedInstanceLayer(edited))));
+      assert(recheck._tag === "Matches");
+      assert.deepStrictEqual(recheck.settings, savedSettings(queued));
+    }),
   );
 });
