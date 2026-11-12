@@ -121,7 +121,7 @@ A model may answer only a report without a marker. For every other event, `clamp
 `CoordinatorRuntime` in `src/coordinator/runtime.ts` implements `AttemptRuntime` for an attempt without a parent session. It needs `AttemptJournal`, `ChildBackend`, and `WakeUp`, and no model credential. It handles each lifecycle event in four steps:
 
 1. `buildAttemptContext` reads the journal: the event, the first 4,000 characters of the rendered task, the outcome labels and CI policy, each delegation with the latest two reports up to 4,000 characters and earlier ones as one line, and the last 2,000 characters of the latest child's output. It shortens the task, output, and reports so the encoded context stays within 16,000 characters, and keeps the event whole.
-2. `WakeUp.handle(event, context)` returns a `RecordedDecision`, or `None` to apply the event's rule. `WakeUp.rules` sends every event to its rule.
+2. `WakeUp.handle(event, context, attempt)` returns a `RecordedDecision`, or `None` to apply the event's rule. `attempt` carries the attempt ID, the event's journal sequence, the stored `RunSpec` with the agent's brain, and an effect that returns the attached `AttemptRequest`, so a model handler can open a session on the attempt's worker. A `RecordedDecision` names its handler, `rule`, `completion`, or `session`, and a model's decision also records its `HandlerSession`: the brain, credential route, billing pool, and usage of the model call. `WakeUp.rules` sends every event to its rule.
 3. `AttemptJournal.decide` records the decision; the first one recorded for the event wins.
 4. `clamp` and `apply` from the rules check it and return the next state and intents, which one `transition` commits with the event and the envelopes they reserve.
 
@@ -129,7 +129,7 @@ The first event starts child 1 with the rendered task, and the transition reserv
 
 The outbox relay in `src/coordinator/outbox.ts` reserves each envelope in the journal before the sink receives it and acknowledges it after, so the next `execute` sends unacknowledged envelopes again. Worker notices before `Started` wait for it, and notices after the terminal envelope are dropped.
 
-`intervene` refuses operator input with `AgentFailure`. `cancel` stops the running child, relays `Interrupted`, and ends `execute` with `AgentFailure`. It settles a journal with no outcome, because the coordinator has no canceled status. A journal with an outcome is left for the caller, so a worker drain leaves an undelivered terminal envelope live, as it does for a Pi parent.
+`intervene` refuses operator input with `AgentFailure`. `cancel` stops the running child or interrupts the running handler, relays `Interrupted`, and ends `execute` with `AgentFailure`. It settles a journal with no outcome, because the coordinator has no canceled status. A journal with an outcome is left for the caller, so a worker drain leaves an undelivered terminal envelope live, as it does for a Pi parent.
 
 `routerLayer` in `src/coordinator/router.ts` provides `AttemptRuntime` over `PiAttemptRuntime` and `CoordinatorRuntime`. `execute` sends an attempt to the coordinator if the journal has it, to the Pi runtime if pi-durable has it, and otherwise by `RunSpec.parent`, which decodes as `pi` for stored attempts. Every other operation looks the attempt up in the journal and falls back to the Pi runtime, so an attempt stays on the runtime that started it. A Worker notice for an attempt that neither runtime has waits for its `execute` call.
 
