@@ -7,23 +7,23 @@ import { HttpClient, HttpClientResponse } from "effect/http";
 import { createServer } from "node:http2";
 import { createServer as createTcpServer } from "node:net";
 import { TestClock } from "effect/testing";
-import { machineDriversFor } from "../../../src/ssh/provisioner/drivers.ts";
-import { fakeMachine, WORKER } from "../support.ts";
-import { boxdAddress, hetznerAddress } from "./fixtures.ts";
-import { fakeBoxd } from "./fake-boxd.ts";
-import { boxdSettings, UNUSED_CLUSTER, UNUSED_EXCHANGE } from "./support.ts";
+import { machineDriversFor } from "../../../../src/ssh/provisioner/drivers.ts";
+import { fakeMachine, WORKER } from "../../support.ts";
+import { boxdAddress, hetznerAddress } from "../fixtures.ts";
+import { fakeBoxd } from "./fake.ts";
+import { boxdSettings, UNUSED_CLUSTER, UNUSED_EXCHANGE } from "../support.ts";
 import { jsonKey } from "@usine/core/json-key";
-import { BoxdApi as BoxdService } from "../../../src/ssh/provisioner/boxd/api-pb.ts";
+import { BoxdApi as BoxdService } from "../../../../src/ssh/provisioner/boxd/api-pb.ts";
 import {
   BoxdApi,
   type BoxdApiLayer,
   BoxdCallError,
   type BoxdCreate,
-} from "../../../src/ssh/provisioner/boxd/client.ts";
-import { boxdDriverFor } from "../../../src/ssh/provisioner/boxd.ts";
-import { BOXD_API } from "../../../src/ssh/provisioner/boxd/endpoint.ts";
-import { boxdApiLayer } from "../../../src/ssh/provisioner/boxd/grpc-client.ts";
-import { failureCode } from "../../../src/ssh/provisioner/boxd/status.ts";
+} from "../../../../src/ssh/provisioner/boxd/client.ts";
+import { boxdDriverFor } from "../../../../src/ssh/provisioner/boxd.ts";
+import { BOXD_API } from "../../../../src/ssh/provisioner/boxd/endpoint.ts";
+import { boxdApiLayer } from "../../../../src/ssh/provisioner/boxd/grpc-client.ts";
+import { failureCode } from "../../../../src/ssh/provisioner/boxd/status.ts";
 
 it.effect("decodes real gRPC responses, exchanges a refused key once, and sanitizes refusals", () =>
   Effect.gen(function* () {

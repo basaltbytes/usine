@@ -1,5 +1,6 @@
 import { Code, ConnectError } from "@connectrpc/connect";
 import { assert, describe, it } from "@effect/vitest";
+import { vi } from "vitest";
 import { HostUnreachable } from "@usine/agents/child-host";
 import { MachineId } from "@usine/core/worker";
 import {
@@ -20,17 +21,15 @@ import { connect, createServer, type Socket } from "node:net";
 import {
   BoxdExec,
   boxdExecLayer,
-  BoxdMachineGone,
   boxdTransport,
   STDIN_CHUNK_BYTES,
-} from "../../../src/ssh/provisioner/boxd/exec.ts";
-import { BoxdCallError } from "../../../src/ssh/provisioner/boxd/client.ts";
-import { type ExecHandler, fakeBoxdExec, runLocally } from "./fake-boxd-exec.ts";
+} from "../../../../src/ssh/provisioner/boxd/exec.ts";
+import { BoxdCallError } from "../../../../src/ssh/provisioner/boxd/client.ts";
+import { type ExecHandler, fakeBoxdExec, runLocally } from "./fake-exec.ts";
 
 const KEY = "bxd_exec_test_key";
 /** Returns the `Exec` credential that always answers `credential`. */
 const bearer = (credential: string) => Effect.succeed(Redacted.make(credential));
-const isGone = Schema.is(BoxdMachineGone);
 const MACHINE = MachineId.make("vm-exec-1");
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -132,74 +131,79 @@ describe("BoxdExec", () => {
     }).pipe(Effect.scoped),
   );
 
-  it.live("raises the HTTP/2 connection and stream windows to 8 MiB before it sends stdin", () =>
-    Effect.gen(function* () {
-      const connections: Array<number> = [];
-      const streams: Array<number> = [];
-      const server = yield* fakeBoxdExec({
-        credential: KEY,
-        machines: new Set([MACHINE]),
-        handler: () =>
-          Stream.sync(() => {
-            for (const session of server.sessions) {
-              connections.push(session.state.remoteWindowSize ?? 0);
-              // The window that the client grants each new stream.
-              streams.push(session.remoteSettings.initialWindowSize ?? 0);
-            }
-            return { exitCode: 0 };
-          }),
-      });
-      yield* run(server.url, "true");
+  it.live(
+    "raises the HTTP/2 connection and stream windows to 8 MiB by the time the command starts",
+    () =>
+      Effect.gen(function* () {
+        const connections: Array<number> = [];
+        const streams: Array<number> = [];
+        const server = yield* fakeBoxdExec({
+          credential: KEY,
+          machines: new Set([MACHINE]),
+          handler: () =>
+            Stream.sync(() => {
+              for (const session of server.sessions) {
+                connections.push(session.state.remoteWindowSize ?? 0);
+                // The window that the client grants each new stream.
+                streams.push(session.remoteSettings.initialWindowSize ?? 0);
+              }
+              return { exitCode: 0 };
+            }),
+        });
+        yield* run(server.url, "true");
 
-      assert.isAtLeast(Math.max(...connections), 8 * 1024 * 1024 - 1024);
-      assert.isAtLeast(Math.max(...streams), 8 * 1024 * 1024);
-    }).pipe(Effect.scoped),
+        assert.isAtLeast(Math.max(...connections), 8 * 1024 * 1024 - 1024);
+        assert.isAtLeast(Math.max(...streams), 8 * 1024 * 1024);
+      }).pipe(Effect.scoped),
   );
 
   it.live("maps each gRPC status to a typed error without the credential", () =>
     Effect.gen(function* () {
       const cases = [
-        {
-          error: new ConnectError("VM not found (region fra)", Code.NotFound),
-          expected: "BoxdMachineGone",
-        },
+        { error: new ConnectError("VM not found (region fra)", Code.NotFound), code: "NOT_FOUND" },
         {
           error: new ConnectError(
             "lost the connection to the machine during exec: the machine was destroyed",
             Code.Unavailable,
           ),
-          expected: "BoxdMachineGone",
+          code: "UNAVAILABLE",
         },
-        {
-          error: new ConnectError("read ETIMEDOUT", Code.Unavailable),
-          expected: "UNAVAILABLE",
-        },
+        { error: new ConnectError("read ETIMEDOUT", Code.Unavailable), code: "UNAVAILABLE" },
         {
           error: new ConnectError(`bad key ${KEY}`, Code.PermissionDenied),
-          expected: "PERMISSION_DENIED",
+          code: "PERMISSION_DENIED",
         },
       ];
-      for (const { error, expected } of cases) {
+      for (const { error, code } of cases) {
         const server = yield* fake(failing(error));
         const failure = yield* run(server.url, "true").pipe(Effect.flip);
-        if (expected === "BoxdMachineGone") {
-          assert.isTrue(isGone(failure), error.rawMessage);
-        } else {
-          assert(failure._tag === "BoxdCallError");
-          assert.strictEqual(failure.code, expected);
-          assert.notInclude(failure.message, KEY);
-        }
+        assert.strictEqual(failure.code, code, error.rawMessage);
+        assert.strictEqual(failure.message, error.rawMessage.replaceAll(KEY, "[redacted]"));
       }
       const server = yield* fake();
       const refused = yield* run(server.url, "true", Stream.empty, { credential: "other" }).pipe(
         Effect.flip,
       );
-      assert(refused._tag === "BoxdCallError");
       assert.strictEqual(refused.code, "UNAUTHENTICATED");
       const unknown = yield* run(server.url, "true", Stream.empty, {
         machine: MachineId.make("vm-unknown"),
       }).pipe(Effect.flip);
-      assert.isTrue(isGone(unknown));
+      assert.strictEqual(unknown.code, "NOT_FOUND");
+    }).pipe(Effect.scoped),
+  );
+
+  it.live("keeps the error message intact when the credential is empty", () =>
+    Effect.gen(function* () {
+      const server = yield* fake();
+      const refused = yield* run(server.url, "true", Stream.empty, { credential: "" }).pipe(
+        Effect.flip,
+      );
+
+      assert.strictEqual(refused.code, "UNAUTHENTICATED");
+      assert.strictEqual(
+        refused.message,
+        "API key not recognized: it was deleted, or it is not a key of this cluster",
+      );
     }).pipe(Effect.scoped),
   );
 
@@ -243,12 +247,20 @@ describe("BoxdExec", () => {
           failing(new ConnectError("read ETIMEDOUT", Code.Unavailable)),
         );
         const server = yield* fake();
-        const closed = yield* fake();
+        const destroyed = yield* fake(
+          failing(
+            new ConnectError(
+              "lost the connection to the machine during exec: the machine was destroyed",
+              Code.Unavailable,
+            ),
+          ),
+        );
         const cases = [
           { url: server.url, credential: "other", machine: MACHINE, says: "UNAUTHENTICATED" },
           { url: unavailable.url, credential: KEY, machine: MACHINE, says: "UNAVAILABLE" },
           { url: "http://127.0.0.1:1", credential: KEY, machine: MACHINE, says: "UNAVAILABLE" },
-          { url: closed.url, credential: KEY, machine: MachineId.make("vm-gone"), says: "is gone" },
+          { url: server.url, credential: KEY, machine: MachineId.make("vm-gone"), says: "is gone" },
+          { url: destroyed.url, credential: KEY, machine: MACHINE, says: "is gone" },
         ];
         for (const { url, credential, machine, says } of cases) {
           const failure = yield* Effect.gen(function* () {
@@ -265,6 +277,7 @@ describe("BoxdExec", () => {
           assert(Schema.is(HostUnreachable)(failure), says);
           assert.strictEqual(failure.destination, machine);
           assert.include(failure.message, says);
+          if (says !== "is gone") assert.notInclude(failure.message, "is gone");
           assert.notInclude(failure.message, KEY);
         }
       }).pipe(Effect.scoped),
@@ -275,8 +288,21 @@ describe("BoxdExec", () => {
       const server = yield* fake(replies({ data: "partial" }));
       const failure = yield* run(server.url, "true").pipe(Effect.flip);
 
-      assert(failure._tag === "BoxdCallError");
       assert.strictEqual(failure.code, "UNAVAILABLE");
+      assert.strictEqual(failure.message, "boxd ended the exec stream without an exit code");
+    }).pipe(Effect.scoped),
+  );
+
+  it.live("takes the exit code from the last response only", () =>
+    Effect.gen(function* () {
+      const early = yield* fake(replies({ data: "a" }, { exitCode: 0 }, { data: "b" }));
+      const failure = yield* run(early.url, "true").pipe(Effect.flip);
+      assert.strictEqual(failure.message, "boxd ended the exec stream without an exit code");
+
+      const combined = yield* fake(replies({ data: "a" }, { data: "b", exitCode: 3 }));
+      const result = yield* run(combined.url, "true");
+      assert.strictEqual(decoder.decode(result.stdout), "ab");
+      assert.strictEqual(result.exitCode, 3);
     }).pipe(Effect.scoped),
   );
 
@@ -318,7 +344,7 @@ describe("BoxdExec", () => {
     }).pipe(Effect.scoped),
   );
 
-  it.live("cancels the call when its scope closes", () =>
+  it.live("cancels the call through its abort signal when its scope closes", () =>
     Effect.gen(function* () {
       const started = yield* Deferred.make<AbortSignal>();
       const server = yield* fake((call) =>
@@ -403,6 +429,47 @@ describe("BoxdExec", () => {
       yield* Stream.runDrain(Stream.merge(execution.stdout, execution.stderr)).pipe(
         Effect.timeout("2 seconds"),
       );
+    }).pipe(Effect.scoped),
+  );
+
+  it.live("fails a silent command within a minute by default when the connection dies", () =>
+    Effect.gen(function* () {
+      const started = yield* Deferred.make<void>();
+      const server = yield* fake(() =>
+        Stream.fromEffect(Deferred.succeed(started, undefined)).pipe(
+          Stream.flatMap(() => Stream.never),
+        ),
+      );
+      const proxy = yield* blackHoleProxy(new URL(server.url).port);
+      // The connection's PING timers run on the fake clock. Node's sockets and the fibers keep
+      // their real timers.
+      yield* Effect.acquireRelease(
+        Effect.sync(() => vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })),
+        () => Effect.sync(() => vi.useRealTimers()),
+      );
+      const fiber = yield* Effect.gen(function* () {
+        const exec = yield* BoxdExec;
+        const execution = yield* exec.exec(MACHINE, "sleep 2400", Stream.never);
+        return yield* execution.exitCode;
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(boxdExecLayer(proxy.url, bearer(KEY))),
+        Effect.flip,
+        Effect.forkChild,
+      );
+      yield* Deferred.await(started);
+      proxy.drop();
+      for (let second = 0; second < 60 && fiber.pollUnsafe() === undefined; second++) {
+        vi.advanceTimersByTime(1_000);
+        yield* Effect.callback<void>((resume) => {
+          setImmediate(() => resume(Effect.void));
+        }).pipe(Effect.repeat({ times: 20 }));
+      }
+      const exit = fiber.pollUnsafe();
+
+      assert(exit !== undefined && Exit.isSuccess(exit), "the call outlived a minute");
+      assert.strictEqual(exit.value._tag, "BoxdCallError");
+      assert.strictEqual(exit.value.code, "UNAVAILABLE");
     }).pipe(Effect.scoped),
   );
 
