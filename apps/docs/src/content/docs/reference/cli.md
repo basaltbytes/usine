@@ -241,7 +241,7 @@ Keep `.env` private, set mode `0600`, and exclude it from git. Changes take effe
 
 ### Reload
 
-`SIGUSR1` requests a reread of stored configuration. It does not import files or reread `.env`. Most revisions apply automatically. See [revision application](/reference/configuration/config/#revision-application).
+`SIGHUP` sent to the orchestrator process requests a reread of stored configuration. It does not import files or reread `.env`. Most revisions apply automatically. See [revision application](/reference/configuration/config/#revision-application).
 
 ## Exit status
 

@@ -13,6 +13,7 @@ import { RepositoryName } from "@usine/core/repository";
 import { GitHubPolling, RepositoryLabelCatalog } from "@usine/github/polling";
 import { expect, it } from "vitest";
 import {
+  ConfigurationEntityId,
   ConfigurationStoreError,
   ConfigurationRevisionNumber,
   configurationDiff,
@@ -24,7 +25,10 @@ import { WorkerName } from "@usine/core/worker";
 
 import { GitHubApp, InvalidGitHubResponseError } from "@usine/github/github-app";
 
+import { OperatorApi, ValidationTimeoutRefusal } from "@usine/orchestrator/operator/http";
 import { Clock, Effect, Layer, Option, Ref, Schema } from "effect";
+import { FetchHttpClient } from "effect/http";
+import { HttpApiClient } from "effect/http-api";
 
 import { harness, agentText, loopText, unused } from "./support.ts";
 it("attributes binding creation, edits, and deletion to the authenticated member", () =>
@@ -247,7 +251,7 @@ it("refuses stale, invalid and incompatible writes without storing a revision", 
     }).pipe(Effect.scoped),
   ));
 
-it("refuses a write whose coordinator brain check runs out of time with HTTP 504", () =>
+it("refuses a write whose coordinator brain check runs out of time with HTTP 503", () =>
   Effect.runPromise(
     Effect.gen(function* () {
       const live = yield* Clock.Clock;
@@ -261,7 +265,7 @@ it("refuses a write whose coordinator brain check runs out of time with HTTP 504
         monotonicTimeNanos: live.monotonicTimeNanos,
         sleep: () => Effect.void,
       });
-      const { request, store, current } = yield* harness(instant);
+      const { request, handler, store, current } = yield* harness(instant);
       let slow = false;
       yield* current.registerParentAdmission(() => (slow ? Effect.never : Effect.succeed([])));
       slow = true;
@@ -270,10 +274,27 @@ it("refuses a write whose coordinator brain check runs out of time with HTTP 504
         value: { name: "ready" },
       });
       expect(response).toMatchObject({
-        status: 504,
+        status: 503,
         body: { error: "ValidationTimeoutError", step: "coordinator-brains" },
       });
       expect(jsonKey(response)).toContain("didn't finish within 10 seconds");
+
+      // The UI's generated client decodes the refusal, though other operator errors share 503.
+      const refusal = yield* HttpApiClient.make(OperatorApi, { baseUrl: "http://localhost" }).pipe(
+        Effect.flatMap(({ operator }) =>
+          operator.replaceConfigurationEntity({
+            params: { kind: "label", identifier: ConfigurationEntityId.make("ready") },
+            payload: { expected: ConfigurationRevisionNumber.make(1), value: { name: "ready" } },
+          }),
+        ),
+        Effect.flip,
+        Effect.provide(FetchHttpClient.layer),
+        Effect.provideService(FetchHttpClient.Fetch, (input, init) =>
+          handler(new Request(input, init)),
+        ),
+      );
+      expect(refusal).toBeInstanceOf(ValidationTimeoutRefusal);
+      expect(refusal).toMatchObject({ step: "coordinator-brains" });
       expect((yield* store.read).number).toBe(1);
     }).pipe(Effect.scoped),
   ));
