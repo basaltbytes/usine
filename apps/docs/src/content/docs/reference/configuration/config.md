@@ -114,11 +114,11 @@ When the orchestrator saves a revision through the operator API or reloads the s
 | `store` | step | none | Stores the revision. |
 | `apply` | step | none | Applies the revision to new work. |
 
-The UI refuses a revision that requires a restart, fails preflight, or runs out of time. CLI commands can save it while the process keeps the accepted configuration. A successful CLI exit confirms storage. Check logs for `Stored configuration applied; new runs use the new configuration` or `Configuration revision could not be applied; the running configuration is unchanged`. Correct rejected settings or restart to apply them. `SIGUSR1` requests an explicit store reread.
+The UI refuses a revision that requires a restart, fails preflight, or runs out of time. CLI commands can save it while the process keeps the accepted configuration. A successful CLI exit confirms storage. Check logs for `Stored configuration applied; new runs use the new configuration` or `Configuration revision could not be applied; the running configuration is unchanged`. Correct rejected settings or restart to apply them. Send `SIGHUP` to the orchestrator process to request an explicit store reread.
 
 ## Exit status
 
 | Status | Type | Default | Description |
 | --- | --- | --- | --- |
 | `0` | exit code | success | Command completed, including unchanged content, empty history, or help. |
-| `1` | exit code | failure | Invalid usage, editor failure, invalid configuration, stale revision, or storage failure, with a diagnostic on standard error. |
+| `1` | exit code | failure | Invalid usage, editor failure, invalid configuration, stale revision, coordinator brain check timeout (`ValidationTimeoutError`), or storage failure, with a diagnostic on standard error. |
