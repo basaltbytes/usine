@@ -210,6 +210,7 @@ export const failureMessage = (failure: CliFailure): string =>
       `Configuration is invalid; no revision was written.\n${problems.map(({ file, stage, message }) => `${file} (${stage}): ${message}`).join("\n")}`,
     ConfigurationStoreError: ({ operation, cause }) =>
       `Configuration store error: could not ${operation}${because(cause)}.`,
+    ValidationTimeoutError: ({ message }) => `${message} No revision was written.`,
     StaleRevision: ({ expected, actual }) =>
       `Configuration changed from revision ${expected} to ${actual}. No revision was written. Export or edit the current configuration and try again.`,
     UnsupportedWorkerError: ({ worker, kind }) =>

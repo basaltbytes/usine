@@ -23,7 +23,6 @@ import { ExecutorError } from "@usine/executor";
 import {
   type Brand,
   Array as EffectArray,
-  Clock,
   Context,
   DateTime,
   Duration,
@@ -48,7 +47,7 @@ import {
   type RestartChange,
   restartChanges,
 } from "./changes.ts";
-import { logStep, RevisionStep, timedStep } from "./steps.ts";
+import { afterRunning, RevisionStep, timedStep } from "./steps.ts";
 
 /** A reload changed `usine.yaml` in a way that needs a restart, so the running instance is kept. */
 export class RestartRequiredError extends Schema.TaggedError<
@@ -149,6 +148,27 @@ export class ValidationTimeoutError extends Schema.TaggedError<
   message: Schema.NonEmptyString,
 }) {}
 
+/**
+ * Runs `check` as the `coordinator-brains` step. Fails with `ValidationTimeoutError` when it runs
+ * longer than `coordinatorBrainTimeout`.
+ */
+export const checkCoordinatorBrains = <A, E, R>(check: Effect.Effect<A, E, R>) =>
+  timedStep(
+    "coordinator-brains",
+    check.pipe(
+      Effect.timeoutOrElse({
+        duration: coordinatorBrainTimeout,
+        orElse: () =>
+          Effect.fail(
+            ValidationTimeoutError.make({
+              step: "coordinator-brains",
+              message: `The coordinator brain check didn't finish within ${Duration.toSeconds(coordinatorBrainTimeout)} seconds. The running configuration is unchanged. Check that the model provider responds, then try again.`,
+            }),
+          ),
+      }),
+    ),
+  );
+
 /** The reason a reload kept the running instance. */
 export type InstanceReloadError =
   | FactoryConfigError
@@ -247,13 +267,6 @@ export class CurrentInstance extends Context.Service<
           (loaded: LoadedInstance) => Effect.Effect<ReadonlyArray<ConfigFileError>>
         >(() => Effect.succeed([]));
         const reloading = yield* Semaphore.make(1);
-        /** Runs `effect` after the running save or reload, and logs how long it waited. */
-        const afterRunning = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-          Effect.flatMap(Clock.currentTimeMillis, (queued) =>
-            reloading.withPermits(1)(
-              logStep("wait", queued, "passed").pipe(Effect.andThen(effect)),
-            ),
-          );
         yield* logConfigWarnings(initial.warnings);
 
         const beforeWorkersStart = Effect.fn("CurrentInstance.beforeWorkersStart")(function* (
@@ -295,23 +308,7 @@ export class CurrentInstance extends Context.Service<
                 }),
               );
               const admit = yield* Ref.get(parentAdmission);
-              const problems = yield* timedStep(
-                "coordinator-brains",
-                restore(
-                  admit(loaded).pipe(
-                    Effect.timeoutOrElse({
-                      duration: coordinatorBrainTimeout,
-                      orElse: () =>
-                        Effect.fail(
-                          ValidationTimeoutError.make({
-                            step: "coordinator-brains",
-                            message: `The coordinator brain check didn't finish within ${Duration.toSeconds(coordinatorBrainTimeout)} seconds. The running configuration is unchanged. Check that the model provider responds, then try again.`,
-                          }),
-                        ),
-                    }),
-                  ),
-                ),
-              );
+              const problems = yield* restore(checkCoordinatorBrains(admit(loaded)));
               const problem = problems[0];
               if (problem !== undefined)
                 return yield* FactoryConfigError.make({
@@ -385,7 +382,7 @@ export class CurrentInstance extends Context.Service<
             Effect.gen(function* () {
               yield* Ref.set(observed, snapshot);
               const apply = yield* restore(prepare(snapshot));
-              return yield* apply;
+              return yield* timedStep("apply", apply);
             }),
           ).pipe(Effect.scoped);
 
@@ -409,7 +406,7 @@ export class CurrentInstance extends Context.Service<
                 yield* timedStep("apply", apply);
                 return revision;
               }),
-            ).pipe(Effect.scoped, afterRunning),
+            ).pipe(Effect.scoped, afterRunning(reloading)),
           Effect.tapError((error) =>
             Effect.logWarning("Configuration write refused", {
               errorTag: error._tag,
@@ -433,7 +430,7 @@ export class CurrentInstance extends Context.Service<
           ),
           (read) => timedStep("read", read),
           Effect.flatMap(install),
-          afterRunning,
+          afterRunning(reloading),
           Effect.withSpan("CurrentInstance.reload", { attributes: { directory } }),
         );
 

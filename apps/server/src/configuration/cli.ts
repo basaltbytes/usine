@@ -2,6 +2,7 @@ import { loadParentModels } from "@usine/durable/live";
 import { parentModels } from "@usine/orchestrator/parent-models";
 import type { LoadedInstance } from "@usine/config/instance";
 import { parentAdmissionProblems } from "@usine/orchestrator/parent-admission";
+import { checkCoordinatorBrains } from "@usine/orchestrator/current-instance";
 import { localActor } from "@usine/core/operator";
 import {
   Configuration,
@@ -51,7 +52,7 @@ export const runConfigCommand = Effect.fn("Cli.config")(
       const instanceId = InstanceId.make(uuid);
       const access = yield* parentModels(loaded, instanceId);
       const parents = yield* loadParentModels(directory, access);
-      return yield* parentAdmissionProblems(loaded, parents);
+      return yield* checkCoordinatorBrains(parentAdmissionProblems(loaded, parents));
     }, Effect.scoped);
     if (command._tag === "ConfigImportCommand") {
       const current = yield* store.read;
