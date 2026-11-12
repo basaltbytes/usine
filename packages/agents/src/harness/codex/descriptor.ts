@@ -96,7 +96,6 @@ export const codex = HarnessDescriptor.make({
       credentials: ["host-login", "gateway-subscription"],
       supported: [
         "resume-session",
-        "usine-tools",
         "steer",
         "interrupt",
         "token-usage",
@@ -104,6 +103,10 @@ export const codex = HarnessDescriptor.make({
         "plan-windows",
       ],
       lacking: [
+        Lacking.make({
+          capability: "usine-tools",
+          reason: "The Codex adapter passes no usine tool set to a session",
+        }),
         Lacking.make({
           capability: "closed-tools",
           reason: "The Codex adapter keeps the harness's own tools on in every session",
@@ -130,15 +133,12 @@ export const codex = HarnessDescriptor.make({
     CapabilityProfile.make({
       placements: ["orchestrator", "local", "ssh", "container", "sandbox"],
       credentials: ["gateway", "gateway-api-key", "api-key"],
-      supported: [
-        "resume-session",
-        "usine-tools",
-        "steer",
-        "interrupt",
-        "token-usage",
-        "model-check",
-      ],
+      supported: ["resume-session", "steer", "interrupt", "token-usage", "model-check"],
       lacking: [
+        Lacking.make({
+          capability: "usine-tools",
+          reason: "The Codex adapter passes no usine tool set to a session",
+        }),
         Lacking.make({
           capability: "closed-tools",
           reason: "The Codex adapter keeps the harness's own tools on in every session",

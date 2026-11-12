@@ -1,5 +1,6 @@
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
+import { Harness } from "@usine/core/agent/brain";
 import type { AgentSessionEvent, HarnessSession } from "@usine/core/agent/session";
 import { SessionTokensUpdated } from "@usine/core/agent/session";
 import { Interrupt, OperatorMessageId, Release, Steer } from "@usine/core/attempt/channel";
@@ -42,6 +43,7 @@ import { decodeWire, encodeWire } from "./process.ts";
 import { Base64 } from "effect/encoding";
 import { TestClock } from "effect/testing";
 import { runScenario } from "./scenarios.ts";
+import { assertProvenCapabilities } from "../contract/capabilities.ts";
 
 const fileWithLines = (file: string, count: number) =>
   Effect.gen(function* () {
@@ -128,6 +130,7 @@ describe("recorded harness transports", () => {
                     return yield* Fiber.join(fiber);
                   })
                 : replay;
+              assertProvenCapabilities(Harness.make(provider), scenario, events);
               if (provider === "codex" && scenario === "simple") {
                 const limits = events.filter((event) => event._tag === "PoolRateLimitsUpdated");
                 assert.lengthOf(limits, 1);
@@ -181,10 +184,11 @@ describe("recorded Pi provider streams", () => {
         Effect.scoped(
           Effect.gen(function* () {
             const fixture = yield* openPiFixture(scenario, "replay");
-            yield* runScenario(scenario, fixture.request, fixture.controls).pipe(
+            const events = yield* runScenario(scenario, fixture.request, fixture.controls).pipe(
               Effect.provide(fixture.backend),
               fixture.tape.guard,
             );
+            assertProvenCapabilities(Harness.make("pi"), scenario, events);
             yield* fixture.save;
           }),
         ).pipe(Effect.provide(NodeServices.layer), Effect.timeout("15 seconds")),

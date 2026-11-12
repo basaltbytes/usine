@@ -95,45 +95,76 @@ describe("brain admission", () => {
   });
 
   it("admits supervisors only on the orchestrator through gateway credentials", () => {
-    for (const id of ["claude", "codex"]) {
-      for (const credential of ["gateway", "gateway-subscription", "gateway-api-key"] as const) {
-        assert(
-          Result.isSuccess(
-            admitBrain(
-              catalog,
-              supervisor,
-              brain(id),
-              AdmissionContext.make({ placement: "orchestrator", credential }),
-            ),
-          ),
+    const gateways = ["gateway", "gateway-subscription", "gateway-api-key"] as const;
+    // No adapter passes a usine tool set to a session yet, so every harness refuses the supervisor.
+    for (const id of catalog.ids)
+      for (const credential of gateways) {
+        const refused = admitBrain(
+          catalog,
+          supervisor,
+          brain(id),
+          AdmissionContext.make({ placement: "orchestrator", credential }),
         );
+        assert(Result.isFailure(refused));
+        assert.deepStrictEqual(
+          refused.failure.missing.map(({ capability }) => capability),
+          ["usine-tools"],
+        );
+        assert.include(refused.failure.message, "passes no usine tool set to a session");
       }
-      assert(Result.isFailure(admitBrain(catalog, supervisor, brain(id), orchestrator)));
+    const claude = catalog.get(Harness.make("claude"));
+    assert(Option.isSome(claude));
+    const toolful = HarnessDescriptor.make({
+      ...claude.value,
+      id: Harness.make("toolful"),
+      capabilities: Arr.map(claude.value.capabilities, (profile) =>
+        CapabilityProfile.make({
+          ...profile,
+          supported: [...profile.supported, "usine-tools"],
+          lacking: profile.lacking.filter(({ capability }) => capability !== "usine-tools"),
+        }),
+      ),
+    });
+    const extended = HarnessCatalog.make({ descriptors: [...catalog.descriptors, toolful] });
+    for (const credential of gateways)
       assert(
-        Result.isFailure(
+        Result.isSuccess(
           admitBrain(
-            catalog,
+            extended,
             supervisor,
-            brain(id),
-            AdmissionContext.make({ placement: "ssh", credential: "gateway" }),
+            brain("toolful"),
+            AdmissionContext.make({ placement: "orchestrator", credential }),
           ),
         ),
       );
-    }
-    for (const credential of ["gateway", "gateway-subscription", "gateway-api-key"] as const) {
-      for (const role of [coordinator, supervisor]) {
-        assert(
-          Result.isSuccess(
-            admitBrain(
-              catalog,
-              role,
-              brain("pi"),
-              AdmissionContext.make({ placement: "orchestrator", credential }),
-            ),
+    const login = admitBrain(extended, supervisor, brain("toolful"), orchestrator);
+    assert(Result.isFailure(login));
+    assert.deepStrictEqual(login.failure.missing, [
+      Lacking.make({
+        capability: "credential-route",
+        reason:
+          "The supervisor uses a gateway credential so subscription credentials stay on the gateway",
+      }),
+    ]);
+    const worker = admitBrain(
+      extended,
+      supervisor,
+      brain("toolful"),
+      AdmissionContext.make({ placement: "ssh", credential: "gateway" }),
+    );
+    assert(Result.isFailure(worker));
+    assert.strictEqual(worker.failure.missing[0].capability, "orchestrator");
+    for (const credential of gateways)
+      assert(
+        Result.isSuccess(
+          admitBrain(
+            catalog,
+            coordinator,
+            brain("pi"),
+            AdmissionContext.make({ placement: "orchestrator", credential }),
           ),
-        );
-      }
-    }
+        ),
+      );
   });
 
   it("refuses unregistered harnesses and unsupported credentials", () => {

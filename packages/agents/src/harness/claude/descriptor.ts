@@ -62,7 +62,6 @@ export const claude = HarnessDescriptor.make({
       credentials: ["host-login", "gateway-subscription"],
       supported: [
         "resume-session",
-        "usine-tools",
         "steer",
         "interrupt",
         "token-usage",
@@ -70,6 +69,10 @@ export const claude = HarnessDescriptor.make({
         "plan-windows",
       ],
       lacking: [
+        Lacking.make({
+          capability: "usine-tools",
+          reason: "The Claude Code adapter passes no usine tool set to a session",
+        }),
         Lacking.make({
           capability: "closed-tools",
           reason: "The Claude Code adapter keeps the harness's own tools on in every session",
@@ -96,8 +99,12 @@ export const claude = HarnessDescriptor.make({
     CapabilityProfile.make({
       placements: ["orchestrator", "local", "ssh", "container", "sandbox"],
       credentials: ["gateway", "gateway-api-key", "api-key"],
-      supported: ["resume-session", "usine-tools", "steer", "interrupt", "token-usage", "cost-usd"],
+      supported: ["resume-session", "steer", "interrupt", "token-usage", "cost-usd"],
       lacking: [
+        Lacking.make({
+          capability: "usine-tools",
+          reason: "The Claude Code adapter passes no usine tool set to a session",
+        }),
         Lacking.make({
           capability: "closed-tools",
           reason: "The Claude Code adapter keeps the harness's own tools on in every session",
