@@ -263,6 +263,105 @@ describe("operator MCP tools", () => {
     }),
   );
 
+  it.effect("replaces arrays and objects nested deeper than the nesting limit", () =>
+    Effect.gen(function* () {
+      const decode = (
+        schema: Schema.JsonObject,
+        schemas: Readonly<Record<string, Schema.JsonObject>> = {},
+      ) =>
+        Schema.decodeEffect(PublishedApi)({
+          paths: {
+            "/api/nested": {
+              get: {
+                operationId: "operator.nested",
+                parameters: [{ name: "value", in: "query", schema }],
+                responses: { "200": {} },
+                "x-usine-permission": "read",
+              },
+            },
+          },
+          components: { schemas },
+        }).pipe(Effect.map(operatorTools));
+      const valueSchema = ({ tools }: ReturnType<typeof operatorTools>) =>
+        tools[0]?.descriptor.inputSchema.properties?.["value"];
+      // `levels` objects inside one another around `inner`, with no `$ref`.
+      const nested = (levels: number, inner: Schema.JsonObject): Schema.JsonObject =>
+        Array.from({ length: levels }).reduce<Schema.JsonObject>((items) => ({ items }), inner);
+      const fits = yield* decode(nested(63, { type: "string" }));
+      assert.isTrue(fits.complete);
+      assert.deepStrictEqual(valueSchema(fits), nested(63, { type: "string" }));
+      const cut = yield* decode(nested(64, { type: "string" }));
+      assert.isFalse(cut.complete);
+      assert.deepStrictEqual(valueSchema(cut), nested(64, {}));
+      // Without the limit, 5,000 levels overflow the stack.
+      const deep = yield* decode(nested(5_000, { type: "string" }));
+      assert.isFalse(deep.complete);
+      assert.lengthOf(deep.tools, 1);
+      // 32 chained components, each 100 levels deep: the reference depth alone allows them all.
+      const chained = yield* decode(
+        { $ref: "#/components/schemas/Level0" },
+        Object.fromEntries(
+          Array.from({ length: 32 }, (_, index) => [
+            `Level${index}`,
+            nested(100, index === 31 ? {} : { $ref: `#/components/schemas/Level${index + 1}` }),
+          ]),
+        ),
+      );
+      assert.isFalse(chained.complete);
+      assert.lengthOf(chained.tools, 1);
+    }).pipe(Effect.orDie),
+  );
+
+  it.effect("accepts any value where a recursive component repeats", () =>
+    Effect.gen(function* () {
+      const document = yield* Schema.decodeEffect(PublishedApi)({
+        paths: {
+          "/api/recursive": {
+            get: {
+              operationId: "operator.recursive",
+              parameters: ["Node", "Tree", "A"].map((name) => ({
+                name,
+                in: "query",
+                schema: { $ref: `#/components/schemas/${name}` },
+              })),
+              responses: { "200": {} },
+              "x-usine-permission": "read",
+            },
+          },
+        },
+        components: {
+          schemas: {
+            Node: { type: "object", properties: { next: { $ref: "#/components/schemas/Node" } } },
+            Tree: {
+              type: "object",
+              properties: {
+                left: { $ref: "#/components/schemas/Tree" },
+                right: { $ref: "#/components/schemas/Tree" },
+              },
+            },
+            A: { type: "object", properties: { b: { $ref: "#/components/schemas/B" } } },
+            B: { type: "object", properties: { a: { $ref: "#/components/schemas/A" } } },
+          },
+        },
+      });
+      const generated = operatorTools(document);
+      assert.isTrue(generated.complete);
+      const properties = generated.tools[0]?.descriptor.inputSchema.properties;
+      assert.deepStrictEqual(properties?.["Node"], {
+        type: "object",
+        properties: { next: {} },
+      });
+      assert.deepStrictEqual(properties?.["Tree"], {
+        type: "object",
+        properties: { left: {}, right: {} },
+      });
+      assert.deepStrictEqual(properties?.["A"], {
+        type: "object",
+        properties: { b: { type: "object", properties: { a: {} } } },
+      });
+    }).pipe(Effect.orDie),
+  );
+
   it.effect("inlines the real document completely within the budget", () =>
     Effect.gen(function* () {
       const document = yield* Schema.decodeUnknownEffect(PublishedApi)(operatorOpenApi());

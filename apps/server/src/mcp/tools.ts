@@ -1,5 +1,5 @@
 import { InstanceScope, type PermissionGrant, permits } from "@usine/core/access";
-import { Effect, Option, Result, Schema } from "effect";
+import { Effect, Option, Predicate, Result, Schema } from "effect";
 import { McpSchema } from "effect/ai";
 import { ceilingAdmits, type OperationId } from "../auth/model.ts";
 import { OperationPermission, PERMISSION_EXTENSION } from "../openapi.ts";
@@ -77,9 +77,9 @@ export interface OperatorTool {
 
 const COMPONENT_PREFIX = "#/components/schemas/";
 
-const isJsonObject = Schema.is(JsonSchema);
 const isString = Schema.is(Schema.String);
-const isObject = (value: Schema.Json): value is JsonSchema => isJsonObject(value);
+/** Shallow: the document is already decoded as JSON, so the values inside need no check. */
+const isObject = (value: Schema.Json): value is JsonSchema => Predicate.isObject(value);
 const componentName = (reference: Schema.Json | undefined) =>
   Schema.decodeUnknownOption(Schema.String)(reference).pipe(
     Option.filter((value) => value.startsWith(COMPONENT_PREFIX)),
@@ -99,6 +99,12 @@ const MAX_INLINED_LENGTH = 500_000;
  */
 const MAX_REFERENCE_DEPTH = 32;
 
+/**
+ * The most levels of arrays and objects that inlining builds inside one input schema, counting the
+ * levels that resolved references add. The real document nests at most 10.
+ */
+const MAX_NESTING_DEPTH = 64;
+
 /** What inlining may still build for a document, and whether it left a `$ref` unresolved. */
 interface InlineBudget {
   remaining: number;
@@ -115,22 +121,30 @@ const scalarLength = (value: Schema.Json) =>
  * its JSON text. Once `budget` runs out, a `$ref` is left unresolved and accepts any value, so a
  * document whose references fan out or repeat a large component can't make the expansion grow
  * without bound. A `$ref` nested deeper than `MAX_REFERENCE_DEPTH` resolutions is left unresolved
- * the same way, so a long chain of references can't make the recursion deep. `resolving` holds the
- * components being resolved, outermost first.
+ * the same way, and an array or object deeper than `MAX_NESTING_DEPTH` levels is replaced by `{}`.
+ * Each recursive call either nests one level deeper or resolves one more reference, so together
+ * the two limits bound the depth of the recursion. `resolving` holds the components being
+ * resolved, outermost first, and `depth` is the nesting level of `schema`.
  */
 const inline = (
   schema: Schema.Json,
   components: Readonly<Record<string, JsonSchema>>,
   resolving: Set<string>,
   budget: InlineBudget,
+  depth: number,
 ): Schema.Json => {
-  if (Array.isArray(schema)) {
-    budget.remaining -= 2 + schema.length;
-    return schema.map((entry) => inline(entry, components, resolving, budget));
-  }
-  if (!isObject(schema)) {
+  if (!isObject(schema) && !Array.isArray(schema)) {
     budget.remaining -= scalarLength(schema);
     return schema;
+  }
+  if (depth >= MAX_NESTING_DEPTH) {
+    budget.exhausted = true;
+    budget.remaining -= 2;
+    return {};
+  }
+  if (Array.isArray(schema)) {
+    budget.remaining -= 2 + schema.length;
+    return schema.map((entry) => inline(entry, components, resolving, budget, depth + 1));
   }
   budget.remaining -= 2;
   const { $ref, ...rest } = schema;
@@ -138,7 +152,7 @@ const inline = (
     Object.entries(rest).map(([key, value]) => {
       // The quotes, the colon, and the comma.
       budget.remaining -= key.length + 4;
-      return [key, inline(value, components, resolving, budget)];
+      return [key, inline(value, components, resolving, budget, depth + 1)];
     }),
   );
   const reference = componentName($ref);
@@ -153,7 +167,8 @@ const inline = (
   }
   resolving.add(name);
   try {
-    const resolved = inline(target, components, resolving, budget);
+    // The definition takes the place of the `$ref`, at the same level.
+    const resolved = inline(target, components, resolving, budget, depth);
     return isObject(resolved) ? { ...resolved, ...siblings } : siblings;
   } finally {
     resolving.delete(name);
@@ -166,7 +181,7 @@ const inlineObject = (
   budget: InlineBudget,
 ): JsonSchema => {
   if (schema === undefined) return {};
-  const inlined = inline(schema, components, new Set(), budget);
+  const inlined = inline(schema, components, new Set(), budget, 0);
   return isObject(inlined) ? inlined : {};
 };
 
@@ -263,9 +278,10 @@ const tool = (
 export interface OperatorTools {
   readonly tools: ReadonlyArray<OperatorTool>;
   /**
-   * False when inlining the document's references would build more than the inlining budget, or
-   * nest more than `MAX_REFERENCE_DEPTH` of them, so some input schemas keep a `$ref` that accepts
-   * any value.
+   * False when inlining the document's references would build more than the inlining budget, nest
+   * more than `MAX_REFERENCE_DEPTH` of them, or nest arrays and objects more than
+   * `MAX_NESTING_DEPTH` levels deep, so some input schemas keep a `$ref` or a `{}` that accepts any
+   * value.
    */
   readonly complete: boolean;
 }
@@ -273,9 +289,10 @@ export interface OperatorTools {
 /**
  * Returns one tool for each operation of the operator group, named by its endpoint identifier.
  * Event streams are left out: a tool call needs a response that ends. All the input schemas share
- * one inlining budget, charged by the length of the JSON text that inlining builds, and nested
- * references stop at `MAX_REFERENCE_DEPTH`. The size of the tool list is therefore bounded for the
- * whole document, apart from the document's own size, and so is the work of each resolution.
+ * one inlining budget, charged by the length of the JSON text that inlining builds. Nested
+ * references stop at `MAX_REFERENCE_DEPTH`, and nested arrays and objects at `MAX_NESTING_DEPTH`.
+ * The size of the tool list is therefore bounded for the whole document, apart from the
+ * document's own size, and so is the depth of the recursion.
  */
 export const operatorTools = (document: PublishedApi): OperatorTools => {
   const budget: InlineBudget = { remaining: MAX_INLINED_LENGTH, exhausted: false };
@@ -296,9 +313,9 @@ export const operatorTools = (document: PublishedApi): OperatorTools => {
 };
 
 /**
- * Returns the tools of `document`, and logs a warning when the inlining budget or the reference
- * depth runs out. `source`
- * names the instance that served the document, such as `{ origin }`.
+ * Returns the tools of `document`, and logs a warning when the inlining budget, the reference
+ * depth, or the nesting depth runs out. `source` names the instance that served the document,
+ * such as `{ origin }`.
  */
 export const loadOperatorTools = Effect.fn("Mcp.loadOperatorTools")(function* (
   document: PublishedApi,
@@ -307,8 +324,13 @@ export const loadOperatorTools = Effect.fn("Mcp.loadOperatorTools")(function* (
   const generated = operatorTools(document);
   if (!generated.complete)
     yield* Effect.logWarning(
-      "MCP tool schemas left references unresolved: the inlining budget or depth ran out",
-      { ...source, limit: MAX_INLINED_LENGTH, depth: MAX_REFERENCE_DEPTH },
+      "MCP tool schemas accept any value in places: the inlining budget or depth ran out",
+      {
+        ...source,
+        limit: MAX_INLINED_LENGTH,
+        depth: MAX_REFERENCE_DEPTH,
+        nesting: MAX_NESTING_DEPTH,
+      },
     );
   return generated.tools;
 });
