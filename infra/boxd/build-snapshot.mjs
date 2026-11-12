@@ -9,7 +9,7 @@ import { Boxd, Machine } from "@boxd-sh/sdk";
 import { boxdEgress } from "./egress.mjs";
 
 const USAGE =
-  "Usage: build-snapshot.mjs [--size <vcpu>x<GiB>] [--region <id>] [--endpoint <url>] <snapshot-name>";
+  "Usage: build-snapshot.mjs [--size <vcpu>x<GiB>] [--region <id>] [--endpoint <url>] [--no-isolated] <snapshot-name>";
 /** The pattern of `BoxdSize` in `@usine/core/worker`, so `provisioner.size` can name the size. */
 const SIZE = /^[1-9][0-9]{0,3}x[1-9][0-9]{0,5}$/u;
 const NAME = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/u;
@@ -77,6 +77,7 @@ export const parseOptions = (argv, env) => {
         size: { type: "string", default: "2x8" },
         region: { type: "string" },
         endpoint: { type: "string" },
+        "no-isolated": { type: "boolean", default: false },
       },
     });
   } catch (error) {
@@ -109,6 +110,7 @@ export const parseOptions = (argv, env) => {
     size: values.size,
     region: values.region,
     endpoint: values.endpoint,
+    isolated: !values["no-isolated"],
     apiKey,
     runtime,
     image,
@@ -208,13 +210,14 @@ const saveSnapshot = async (boxd, machine, name, { signal, pollMs, timeoutMs }) 
 
 /**
  * Builds snapshot `options.snapshot` on a temporary machine and returns its name. The machine is
- * shared with the API key's org, isolated, at `options.size`, with the egress allowlist of
- * `egress.mjs` in its spec, which the snapshot keeps. The setup runs with egress unrestricted,
- * because it downloads from hosts outside the allowlist. The machine is deleted when the build
- * ends, fails, or `signal` aborts; `log` names it if its deletion fails. `pollMs` sets how often
- * the script reads the machine and the snapshot. `egressTimeoutMs` and `snapshotTimeoutMs` set how
- * long it waits for an egress edit and the snapshot, and `egressInForceMs` how long it waits after
- * boxd reports an egress edit before it relies on the edit.
+ * shared with the API key's org, isolated unless `options.isolated` is false, at `options.size`,
+ * with the egress allowlist of `egress.mjs` in its spec, which the snapshot keeps. The setup runs
+ * with egress unrestricted, because it downloads from hosts outside the allowlist. The machine is
+ * deleted when the build ends, fails, or `signal` aborts; `log` names it if its deletion fails.
+ * `pollMs` sets how often the script reads the machine and the snapshot. `egressTimeoutMs` and
+ * `snapshotTimeoutMs` set how long it waits for an egress edit and the snapshot, and
+ * `egressInForceMs` how long it waits after boxd reports an egress edit before it relies on the
+ * edit.
  */
 export const build = async (
   boxd,
@@ -232,10 +235,8 @@ export const build = async (
   const egress = boxdEgress();
   const stamp = new Date().toISOString().replace(/[-:T]/gu, "").slice(0, 14);
   const name = `usine-snapshot-${stamp}-${process.pid}`;
-  const spec = Machine.spec()
-    .size(options.size)
-    .isolated()
-    .egress(...egress);
+  const sized = Machine.spec().size(options.size);
+  const spec = (options.isolated ? sized.isolated() : sized).egress(...egress);
   const machine = await boxd.machines.create({ name, shared: true, spec });
   log(`Created temporary machine ${name}`);
   let removal;
