@@ -51,15 +51,20 @@ import { Schema } from "effect";
 import { renderToStaticMarkup } from "react-dom/server";
 import { assert, describe, it } from "vitest";
 import { ProjectBoard } from "~/features/projects/board.page";
-import { laneUnder, orderLanes, runsWithoutCard } from "~/features/projects/lib/board";
+import {
+  foldableLane,
+  foldsByDefault,
+  laneUnder,
+  orderLanes,
+  runsWithoutCard,
+} from "~/features/projects/lib/board";
 import { cardLabels, currentRun, itemFailure, runLineSince } from "~/lib/projects/card";
-import { foldsByDefault } from "~/features/projects/components/column";
 import { laneFlows } from "~/features/projects/components/flow";
 import { elapsedLabel, timestampLabel } from "~/lib/strings";
 import { needCopy } from "~/lib/needs-you/strings";
 import { failureMessage } from "~/lib/runs/strings";
 import { WithRouter } from "~/lib/testing/memory-router";
-import { taskUsageOf } from "~/lib/projects/fixture";
+import { boardOverview, taskUsageOf } from "~/lib/projects/fixture";
 
 const brain = BrainSpec.make({
   harness: Harness.make("codex"),
@@ -333,12 +338,38 @@ describe("Board lane order", () => {
     );
   });
 
-  it("folds the fallback lane and lanes of closed Items until the operator opens them", () => {
-    assert.isTrue(foldsByDefault(readOnly("unmapped", "fallback")));
+  it("folds lanes of closed Items, and the fallback lane only while it holds no open Item", () => {
+    const lanes = boardOverview().projects.flatMap(({ board }) => board.lanes);
+    const itemsOf = (name: string) => lanes.find((lane) => lane.name === name)?.items ?? [];
+    const unmapped = (items: ReadonlyArray<BoardTaskView>) =>
+      ReadOnlyBoardLaneView.make({ ...readOnly("unmapped", "fallback"), items });
+    assert.isFalse(foldsByDefault(unmapped(itemsOf("Unmapped"))));
+    assert.isFalse(foldsByDefault(unmapped([...itemsOf("Done"), ...itemsOf("Pull requests")])));
+    assert.isTrue(foldsByDefault(unmapped(itemsOf("Done"))));
+    assert.isTrue(foldsByDefault(unmapped([])));
+    // An open issue whose linked pull request merged without closing it: the merged pull request
+    // is the current Item, and the open issue keeps the lane open.
+    const merged = itemsOf("Done").map((task) =>
+      BoardTaskView.make({
+        ...task,
+        items: task.items.map((item) =>
+          item.kind === "issue" ? BoardItemLink.make({ ...item, state: "issue-open" }) : item,
+        ),
+      }),
+    );
+    assert.strictEqual(merged[0]?.state, "pr-merged");
+    assert.isFalse(foldsByDefault(unmapped(merged)));
     assert.isTrue(foldsByDefault(readOnly("done", "authored", ["issue-closed", "pr-merged"])));
     assert.isFalse(foldsByDefault(readOnly("pull-requests", "authored", ["pr-open", "pr-merged"])));
     assert.isFalse(foldsByDefault(readOnly("backlog", "authored")));
     assert.isFalse(foldsByDefault(writable("ready")));
+  });
+
+  it("lets the operator fold only the fallback lane and lanes of closed Items", () => {
+    assert.isTrue(foldableLane(readOnly("unmapped", "fallback")));
+    assert.isTrue(foldableLane(readOnly("done", "authored", ["issue-closed", "pr-merged"])));
+    assert.isFalse(foldableLane(readOnly("pull-requests", "authored", ["pr-open", "pr-merged"])));
+    assert.isFalse(foldableLane(writable("ready")));
   });
 });
 
