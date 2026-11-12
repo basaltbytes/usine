@@ -20,8 +20,10 @@ import {
   Clock,
   Context,
   DateTime,
+  Deferred,
   Duration,
   Effect,
+  Exit,
   Fiber,
   FileSystem,
   Layer,
@@ -31,6 +33,7 @@ import {
   Redacted,
   Result,
   Schema,
+  Scope,
   Sink,
   Stdio,
   Stream,
@@ -38,6 +41,7 @@ import {
 import { FetchHttpClient, HttpRouter, HttpServer, HttpServerResponse } from "effect/http";
 import { authenticatedRoutes } from "../../src/auth/http.ts";
 import { OperationCeilingChange, OperationId, TokenName } from "../../src/auth/model.ts";
+import type { AuthStore } from "../../src/auth/store.ts";
 import { FactoryBackend } from "../../src/backend.ts";
 import { Port } from "../../src/cli.ts";
 import { apiRoutes, MAX_REQUEST_BODY_BYTES, serverLayer } from "../../src/http.ts";
@@ -107,8 +111,31 @@ interface LogLine {
   readonly fields: unknown;
 }
 
+type Authenticate = ReturnType<AuthStore["Service"]["authenticate"]>;
+
+/** How many sessions the server ended for going unused. */
+const idleEnds = (logs: ReadonlyArray<LogLine>) =>
+  logs.filter(
+    ({ message, fields }) =>
+      message === "MCP session ended" && jsonKey(fields ?? null) === jsonKey({ reason: "idle" }),
+  ).length;
+
 const makeFixture = () =>
   Effect.gen(function* () {
+    // Replaces one call of the auth store's `authenticate`, after `skip` calls pass through.
+    let interception:
+      | { skip: number; readonly replace: (original: Authenticate) => Authenticate }
+      | undefined;
+    const wrapStore = (store: AuthStore["Service"]): AuthStore["Service"] => ({
+      ...store,
+      authenticate: (hash, now) =>
+        Effect.suspend(() => {
+          const current = interception;
+          if (current === undefined || current.skip-- > 0) return store.authenticate(hash, now);
+          interception = undefined;
+          return current.replace(store.authenticate(hash, now));
+        }),
+    });
     // The server's clock runs ahead of real time by `skew` milliseconds.
     let skew = 0;
     const skewed = (real: Clock.Clock): Clock.Clock => ({
@@ -127,7 +154,7 @@ const makeFixture = () =>
       logs.push({ message: text, fields });
     });
     const approvals: Array<{ readonly runId: RunId; readonly actor: Option.Option<string> }> = [];
-    const services = yield* authFixture();
+    const services = yield* authFixture(undefined, undefined, undefined, wrapStore);
     const auth = services.authentication;
     const currentLink = yield* auth.link;
     const link = new URL(currentLink);
@@ -207,6 +234,11 @@ const makeFixture = () =>
       advance: (duration: Duration.Input) =>
         Effect.sync(() => {
           skew += Duration.toMillis(Duration.fromInputUnsafe(duration));
+        }),
+      /** Replaces the auth store's `authenticate` result for one call, after `skip` calls. */
+      intercept: (skip: number, replace: (original: Authenticate) => Authenticate) =>
+        Effect.sync(() => {
+          interception = { skip, replace };
         }),
     };
   });
@@ -551,6 +583,70 @@ describe("operator MCP endpoint", () => {
       );
       const owned = yield* client.status("tools/list");
       assert.equal(owned, 404);
+    }).pipe(Effect.scoped),
+  );
+
+  it.live("hands the sessions of an aborted sweep to the next sweep", () =>
+    Effect.gen(function* () {
+      const { app, device, browser, logs, advance, intercept } = yield* fixture;
+      const token = yield* device([grant("read")]);
+      const owner = mcpClient(inProcess(app), token);
+      yield* owner.initialize;
+      for (const _ of [1, 2]) yield* mcpClient(inProcess(app), token).initialize;
+      yield* advance(MCP_SESSION_IDLE);
+      // The browser's GET authenticates once; the sweep's first DELETE then waits in the store.
+      const held = yield* Deferred.make<void>();
+      const release = yield* Deferred.make<void>();
+      yield* intercept(1, (original) =>
+        Deferred.succeed(held, undefined).pipe(
+          Effect.andThen(Deferred.await(release)),
+          Effect.andThen(original),
+        ),
+      );
+      // Closing `connection` aborts the request, as a client that goes away does.
+      const connection = yield* Scope.make();
+      const signal = yield* Effect.abortSignal.pipe(Scope.provide(connection));
+      const aborted = app.handler(
+        new Request(`https://usine.example${MCP_PATH}`, {
+          headers: { cookie: `usine_session=${browser.session}` },
+          signal,
+        }),
+      );
+      yield* Deferred.await(held);
+      yield* Scope.close(connection, Exit.void);
+      yield* Effect.promise(() => aborted);
+      yield* Deferred.succeed(release, undefined);
+      assert.equal(idleEnds(logs), 0);
+      const owned = yield* owner.status("tools/list");
+      assert.equal(owned, 404);
+      assert.equal(idleEnds(logs), 3);
+    }).pipe(Effect.scoped),
+  );
+
+  it.live("retries a session whose tool server refused the sweep's DELETE", () =>
+    Effect.gen(function* () {
+      const { app, device, browser, logs, advance, intercept } = yield* fixture;
+      const token = yield* device([grant("read")]);
+      const owner = mcpClient(inProcess(app), token);
+      yield* owner.initialize;
+      yield* advance(MCP_SESSION_IDLE);
+      // The browser's GET authenticates once; the sweep's DELETE then finds no credential.
+      yield* intercept(1, () => Effect.succeedNone);
+      yield* Effect.promise(() =>
+        app.handler(
+          new Request(`https://usine.example${MCP_PATH}`, {
+            headers: { cookie: `usine_session=${browser.session}` },
+          }),
+        ),
+      );
+      assert.deepInclude(logs, {
+        message: "MCP tool server did not end the session; the next sweep retries",
+        fields: { reason: "idle", status: 401 },
+      });
+      assert.equal(idleEnds(logs), 0);
+      const owned = yield* owner.status("tools/list");
+      assert.equal(owned, 404);
+      assert.equal(idleEnds(logs), 1);
     }).pipe(Effect.scoped),
   );
 

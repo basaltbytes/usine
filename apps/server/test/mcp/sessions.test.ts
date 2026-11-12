@@ -28,4 +28,38 @@ describe("MCP session table", () => {
     for (const ending of sessions.takeStale(1_000)) sessions.retry(ending);
     assert.equal(sessions.admit("s1", owner, "detail", 1_000)._tag, "Unknown");
   });
+
+  it("settles a session that its tool server ended or no longer has", () => {
+    const sessions = sessionTable(1_000);
+    sessions.open("s1", { credential: owner, tools: "detail", lastUsedAt: 0 });
+    sessions.open("s2", { credential: owner, tools: "detail", lastUsedAt: 0 });
+    const [first, second] = sessions.takeStale(1_000);
+    assert.isDefined(first);
+    assert.isDefined(second);
+    assert.equal(sessions.settle(first, 204)._tag, "Ended");
+    assert.equal(sessions.settle(second, 404)._tag, "Gone");
+    assert.deepEqual(sessions.takeStale(2_000), []);
+  });
+
+  it("keeps a session that its tool server refused for the next sweep", () => {
+    const sessions = sessionTable(1_000);
+    sessions.open("s1", { credential: owner, tools: "detail", lastUsedAt: 0 });
+    for (const ending of sessions.takeStale(1_000))
+      assert.equal(sessions.settle(ending, 403)._tag, "Refused");
+    assert.deepEqual(
+      sessions.takeStale(2_000).map(({ id, reason }) => [id, reason]),
+      [["s1", "idle"]],
+    );
+  });
+
+  it("ends a session whose tool list changed at the next sweep", () => {
+    const sessions = sessionTable(1_000);
+    sessions.open("s1", { credential: owner, tools: "detail", lastUsedAt: 0 });
+    assert.equal(sessions.admit("s1", owner, "detail,approve", 10)._tag, "ToolsChanged");
+    assert.equal(sessions.admit("s1", owner, "detail,approve", 20)._tag, "Unknown");
+    assert.deepEqual(
+      sessions.takeStale(30).map(({ id, reason }) => [id, reason]),
+      [["s1", "tools-changed"]],
+    );
+  });
 });

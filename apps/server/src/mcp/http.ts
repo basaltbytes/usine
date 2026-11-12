@@ -1,5 +1,5 @@
 import { RequestPermissions } from "@usine/core/access";
-import { Clock, Deferred, Duration, Effect, Layer, Option, RcMap, Schema } from "effect";
+import { Cause, Clock, Deferred, Duration, Effect, Layer, Option, RcMap, Schema } from "effect";
 import { McpServer } from "effect/ai";
 import {
   HttpEffect,
@@ -17,7 +17,7 @@ import {
   OperatorUnavailableError,
   registerOperatorTools,
 } from "./server.ts";
-import { type EndingSession, SessionAdmission, sessionTable } from "./sessions.ts";
+import { type EndingSession, SessionAdmission, SessionEnd, sessionTable } from "./sessions.ts";
 import { loadOperatorTools, type OperatorTool, PublishedApi, visibleTools } from "./tools.ts";
 
 /** The path of the Streamable HTTP MCP endpoint. */
@@ -36,6 +36,7 @@ const credentialHeaders = (request: HttpServerRequest.HttpServerRequest) => {
 const SESSION_HEADER = "mcp-session-id";
 /** How long an MCP session can go unused before the server ends it. */
 export const MCP_SESSION_IDLE = Duration.hours(1);
+const SESSION_RETRY = "MCP tool server did not end the session; the next sweep retries";
 
 /**
  * Serves the operator tools at `POST /api/mcp`. Each tool call goes through the same router as an
@@ -131,8 +132,7 @@ export const mcpRoutes = (allowedOrigins: ReadonlyArray<string>) =>
       const sessions = sessionTable(Duration.toMillis(MCP_SESSION_IDLE));
       // Ends the session on its tool server, which keeps it until a DELETE. The auth guard also
       // covers the tool server's routes, so the DELETE carries the credential of `caller`, with
-      // the CSRF token that a cookie `GET` doesn't send. A session that the tool server doesn't
-      // end goes back to the table, so the next sweep retries it.
+      // the CSRF token that a cookie `GET` doesn't send.
       const endSession = Effect.fn("Mcp.endSession")(function* (
         caller: HttpServerRequest.HttpServerRequest,
         csrf: Option.Option<string>,
@@ -156,20 +156,46 @@ export const mcpRoutes = (allowedOrigins: ReadonlyArray<string>) =>
             ),
           ),
         );
-        if (ended.status === 204) yield* Effect.logInfo("MCP session ended", { reason });
-        else if (ended.status === 404)
-          yield* Effect.logInfo("MCP session already ended on its tool server", { reason });
-        else {
-          sessions.retry(ending);
-          yield* Effect.logWarning(
-            "MCP tool server did not end the session; the next sweep retries",
-            {
-              reason,
-              status: ended.status,
-            },
-          );
-        }
+        yield* SessionEnd.$match(sessions.settle(ending, ended.status), {
+          Ended: () => Effect.logInfo("MCP session ended", { reason }),
+          Gone: () => Effect.logInfo("MCP session already ended on its tool server", { reason }),
+          Refused: () => Effect.logWarning(SESSION_RETRY, { reason, status: ended.status }),
+        });
       }, Effect.scoped);
+      // Ends the sessions that `takeStale` returns. A session whose end fails, or that the request
+      // didn't reach because its client went away, goes back to the table for the next sweep.
+      const sweep = Effect.fn("Mcp.sweep")(function* (
+        caller: HttpServerRequest.HttpServerRequest,
+        csrf: Option.Option<string>,
+        now: number,
+      ) {
+        const unsettled = new Set<EndingSession>();
+        yield* Effect.suspend(() => {
+          const endings = sessions.takeStale(now);
+          for (const ending of endings) unsettled.add(ending);
+          return Effect.forEach(
+            endings,
+            (ending) =>
+              endSession(caller, csrf, ending).pipe(
+                Effect.matchCauseEffect({
+                  onSuccess: () => Effect.sync(() => unsettled.delete(ending)),
+                  onFailure: (cause) =>
+                    Effect.logWarning(SESSION_RETRY, {
+                      reason: ending.reason,
+                      cause: Cause.pretty(cause),
+                    }),
+                }),
+              ),
+            { discard: true },
+          );
+        }).pipe(
+          Effect.onExit(() =>
+            Effect.sync(() => {
+              for (const ending of unsettled) sessions.retry(ending);
+            }),
+          ),
+        );
+      });
       const notFound = HttpServerResponse.empty({ status: 404 });
       const handler = Effect.gen(function* () {
         const request = yield* HttpServerRequest.HttpServerRequest;
@@ -178,7 +204,7 @@ export const mcpRoutes = (allowedOrigins: ReadonlyArray<string>) =>
           return yield* Effect.die("The MCP route runs without the auth guard.");
         const csrf = yield* RequestCsrf;
         const now = yield* Clock.currentTimeMillis;
-        for (const ending of sessions.takeStale(now)) yield* endSession(request, csrf, ending);
+        yield* sweep(request, csrf, now);
         const grants = yield* RequestPermissions;
         const ceiling = yield* RequestOperations;
         const visible: ReadonlyArray<OperatorTool> = visibleTools(tools, grants, ceiling);
@@ -197,10 +223,7 @@ export const mcpRoutes = (allowedOrigins: ReadonlyArray<string>) =>
                 Effect.logWarning(
                   "MCP request refused: the session belongs to another credential",
                 ).pipe(Effect.as(Option.some(notFound))),
-              ToolsChanged: ({ session }) =>
-                endSession(request, csrf, { id, session, reason: "tools-changed" }).pipe(
-                  Effect.as(Option.some(notFound)),
-                ),
+              ToolsChanged: () => sweep(request, csrf, now).pipe(Effect.as(Option.some(notFound))),
             },
           );
           if (Option.isSome(refusal)) return refusal.value;
