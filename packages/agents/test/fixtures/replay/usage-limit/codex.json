@@ -921,6 +921,28 @@
             "limitId": "codex",
             "limitName": null,
             "normalModelSlug": null,
+            "primary": { "usedPercent": 66, "windowDurationMins": 10080, "resetsAt": 1794314556 },
+            "secondary": null,
+            "credits": { "hasCredits": true, "unlimited": false, "balance": "62717.5395687500" },
+            "individualLimit": null,
+            "spendControlReached": null,
+            "planType": null,
+            "rateLimitReachedType": null
+          }
+        },
+        "emittedAtMs": 1793904068315
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "method": "account/rateLimits/updated",
+        "params": {
+          "rateLimits": {
+            "limitId": "codex",
+            "limitName": null,
+            "normalModelSlug": null,
             "primary": { "usedPercent": 100, "windowDurationMins": 300, "resetsAt": 1794459600 },
             "secondary": { "usedPercent": 71, "windowDurationMins": 10080, "resetsAt": 1794718800 },
             "credits": { "hasCredits": true, "unlimited": false, "balance": "62717.5395687500" },

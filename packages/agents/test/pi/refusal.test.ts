@@ -46,6 +46,26 @@ it.each([
     resetsAt: Option.none(),
   },
   {
+    name: "billing exhaustion with rate-limit text",
+    errorMessage:
+      "429 Rate limit reached for requests. insufficient_quota: check your billing details",
+    expected: "AgentResultError",
+    resetsAt: Option.none(),
+  },
+  {
+    name: "an exhausted Gemini quota",
+    errorMessage:
+      '429 {"error":{"code":429,"message":"Resource has been exhausted: Quota exceeded for metric generate_content_requests","status":"RESOURCE_EXHAUSTED"}}',
+    expected: "AgentResultError",
+    resetsAt: Option.none(),
+  },
+  {
+    name: "HTTP 429 without rate-limit text",
+    errorMessage: "Error: model returned 429 items",
+    expected: "AgentResultError",
+    resetsAt: Option.none(),
+  },
+  {
     name: "a rate limit without HTTP 429",
     errorMessage: "Rate limit settings are invalid",
     expected: "AgentResultError",

@@ -20,12 +20,8 @@ import {
   UserEntry,
 } from "@earendil-works/pi-durable";
 import { assemblePrompt } from "@usine/agents/prompt";
-import {
-  AgentCapacityError,
-  harnessFailure,
-  reportedOutcome,
-  toAttemptFailure,
-} from "@usine/agents/runtime";
+import { piFailure } from "@usine/agents/pi/refusal";
+import { AgentCapacityError, reportedOutcome, toAttemptFailure } from "@usine/agents/runtime";
 import { ModelId } from "@usine/core/agent/brain";
 import type { AttemptId } from "@usine/core/attempt";
 import type { RunSpec } from "@usine/core/attempt/channel";
@@ -54,7 +50,7 @@ import {
   HoldDoc,
   RELEASE_GUIDANCE,
 } from "./documents.ts";
-import { assistantText } from "./events.ts";
+import { assistantText, failedAssistantTimestamp } from "./events.ts";
 import { completedOutcome, failedOutcome } from "./outcome.ts";
 import { parentSession, resolveParent } from "./parent.ts";
 import { parentSessionId } from "./sessions.ts";
@@ -147,6 +143,31 @@ const repliesToOperator = (
   }
   return false;
 };
+
+/**
+ * Classifies the error that ended a parent turn as a child's, and returns it if it is a capacity
+ * refusal. A stated wait counts from the failed assistant entry, or from now if there is none.
+ */
+const parentRefusal = Effect.fn("AttemptTask.parentRefusal")(function* (
+  runtime: Runtime,
+  context: ChordContext,
+  parent: ConversationId,
+  attemptId: AttemptId,
+  errorMessage: string,
+) {
+  const view = yield* call("read the parent's transcript", () => runtime.context(parent, context));
+  const timestamp = yield* Option.match(failedAssistantTimestamp(view.entries), {
+    onSome: Effect.succeed,
+    onNone: () => Effect.map(DateTime.now, DateTime.toEpochMillis),
+  });
+  const failure = piFailure(parentSessionId(attemptId), { errorMessage, timestamp });
+  if (!Schema.is(AgentCapacityError)(failure)) return Option.none<AgentCapacityError>();
+  yield* Effect.logWarning("Pi parent turn ended on a provider capacity refusal or usage limit", {
+    attemptId,
+    resetsAt: Option.getOrUndefined(Option.map(failure.resetsAt, DateTime.formatIso)),
+  });
+  return Option.some(failure);
+});
 
 /** Whether the parent is paused, has pending guidance, or is under a Hold. */
 const supervised = (hold: Readonly<Hold>, attemptId: AttemptId): boolean =>
@@ -489,9 +510,7 @@ export const attemptTask = (
       settled.status === "unanswered" &&
       settled.reason === "model_error" &&
       Schema.is(Schema.String)(settled.detail)
-        ? Option.some(harnessFailure(Option.none(), settled.detail)).pipe(
-            Option.filter((error) => Schema.is(AgentCapacityError)(error)),
-          )
+        ? yield* parentRefusal(runtime, context, parent, spec.attemptId, settled.detail)
         : Option.none<AgentCapacityError>();
     const outcome = failedOutcome(
       Option.match(refusal, {

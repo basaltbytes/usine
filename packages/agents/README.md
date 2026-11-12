@@ -72,6 +72,8 @@ Logs record the verified authentication method and pool. On completion or interr
 
 `/pi/authentication` exports the parent's rules for other runtimes: `splitPiModel` (parses `provider/model`), `piAuthentication` (a provider's credential check), `requiredPiPool` (a provider's pool), and `resolvePiPool` (its credential's pool).
 
+`/pi/refusal` exports `piFailure`, which classifies the error that ended a Pi turn, so that the parent's failed turn reports a usage limit as a child's does.
+
 `/openai-prices` exports `openAiPrice`, which prices the token breakdown of a Codex session's `SessionTokensUpdated` at OpenAI's API rates. It returns `None` for a model that the bundled table lacks. The table covers the listed models of each supported Codex CLI version.
 
 ## Child hosts
@@ -226,7 +228,7 @@ Provider capacity refusals use `AgentCapacityError`, which maps to `ProviderCapa
 
 - Claude's `rate_limit` code and HTTP 429 mark a usage limit. Its `resetsAt` is the reset time from Claude's last `rejected` rate-limit report.
 - Codex's `usageLimitExceeded` and `rateLimitExceeded` codes mark a usage limit, except a billing quota (“Quota exceeded”) or a plan without Codex, which don't reset. Its `resetsAt` is the latest reset time among the used-up windows of the last `account/rateLimits/updated` snapshot.
-- Pi's ChatGPT plan limit (“You have hit your ChatGPT usage limit” over HTTP, “The usage limit has been reached” over WebSocket), a shared subscription limit (`subscription_sharing_usage_limit_exceeded`), and HTTP 429 with rate-limit text mark a usage limit; HTTP 429 for billing exhaustion doesn't. A plan limit that states its wait (“Try again in ~N min”) resets one minute after that wait from the turn's start, since Pi rounds the wait to the nearest minute.
+- Pi's ChatGPT plan limit (“You have hit your ChatGPT usage limit” over HTTP, “The usage limit has been reached” over WebSocket), a shared subscription limit (`subscription_sharing_usage_limit_exceeded`), and HTTP 429 with rate-limit text mark a usage limit; HTTP 429 for billing exhaustion doesn't. A plan limit that states its wait (“Try again in ~N min”) resets one minute after that wait, counted from the timestamp of the failed assistant message, which is when the failed model request started. The extra minute covers Pi rounding the wait to the nearest minute. The Pi parent and Pi children classify a failed turn the same way.
 
 Claude Code ends a turn on an API error with a `success` result that has `is_error`: that result fails the session after a capacity refusal or usage limit, or when it has HTTP 429 or 529 or capacity error text that `harnessFailure` recognizes; after any other API error, its text stays the session's answer. When a harness exposes only text, `harnessFailure` recognizes “Selected model is at capacity”, `overloaded_error`, HTTP 529, and 503 with a retry hint. Other task failures remain `AgentResultError`.
 

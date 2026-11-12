@@ -2722,3 +2722,58 @@ it.live(
     }).pipe(Effect.scoped),
   30_000,
 );
+
+const planLimitedAt = DateTime.makeUnsafe("2026-11-12T04:17:00Z");
+
+it.live.each([
+  {
+    name: "a ChatGPT plan limit with its wait",
+    message: "You have hit your ChatGPT usage limit (plus plan). Try again in ~42 min.",
+    resetsAt: Option.some("2026-11-12T05:00:00.000Z"),
+  },
+  {
+    name: "a ChatGPT plan limit without a reset time",
+    message: "You have hit your ChatGPT usage limit (plus plan).",
+    resetsAt: Option.none(),
+  },
+  {
+    name: "a ChatGPT plan limit relayed over WebSocket",
+    message: "Codex error: The usage limit has been reached",
+    resetsAt: Option.none(),
+  },
+  {
+    name: "an API-key rate limit",
+    message:
+      '429 {"type":"error","error":{"type":"rate_limit_error","message":"This request would exceed your rate limit."}}',
+    resetsAt: Option.none(),
+  },
+])(
+  "fails a Pi parent's turn on $name as a capacity failure with its reset",
+  ({ message, resetsAt }) =>
+    Effect.gen(function* () {
+      const database = yield* temporaryDatabase;
+      const failure = yield* Effect.gen(function* () {
+        const runtime = yield* AttemptRuntime;
+        return yield* runtime
+          .execute(attemptRequest("capacity/parent/usage-limit"), recordingSink().sink)
+          .pipe(Effect.flip);
+      }).pipe(
+        Effect.provide(
+          layer({
+            database,
+            parent: Array.from({ length: 4 }, () =>
+              fauxAssistantMessage([], {
+                stopReason: "error",
+                errorMessage: message,
+                timestamp: DateTime.toEpochMillis(planLimitedAt),
+              }),
+            ),
+          }),
+        ),
+      );
+      assert(failure._tag === "ProviderCapacityFailure");
+      assert.strictEqual(failure.message, message);
+      assert.deepStrictEqual(failure.resetsAt.pipe(Option.map(DateTime.formatIso)), resetsAt);
+    }).pipe(Effect.scoped),
+  30_000,
+);

@@ -1,11 +1,12 @@
 import { NodeServices } from "@effect/platform-node";
-import { assert, describe, it } from "@effect/vitest";
+import { assert, describe, expect, it } from "@effect/vitest";
 import { AttemptNumber, pendingProviderRetry } from "@usine/core/attempt";
 import { AttemptFailed } from "@usine/core/attempt/outcome";
 import { Running } from "@usine/core/run/state";
 import { DateTime, Effect, Option, Schema } from "effect";
 import { type AgentCapacityError, toAttemptFailure } from "../../src/runtime.ts";
 import { type FixtureOptions, openFixture } from "./fixture.ts";
+import { collectLogs } from "../logs.ts";
 import { openPiFixture } from "./pi.ts";
 import { runUsageLimit } from "./scenarios.ts";
 import { isJsonObject, type Transcript } from "./transcript.ts";
@@ -49,6 +50,8 @@ const withoutReset = (transcript: Transcript): Transcript => ({
   ),
 });
 
+const harnessNames = { claude: "Claude", codex: "Codex", pi: "Pi" } as const;
+
 const usageLimit = (harness: "claude" | "codex" | "pi", options: FixtureOptions) =>
   Effect.scoped(
     Effect.gen(function* () {
@@ -68,6 +71,28 @@ const usageLimit = (harness: "claude" | "codex" | "pi", options: FixtureOptions)
     }),
   ).pipe(Effect.provide(NodeServices.layer), Effect.timeout("15 seconds"));
 
+/** Runs `usageLimit` and asserts that the harness logged its refusal and reset at Warning. */
+const loggedUsageLimit = (
+  harness: "claude" | "codex" | "pi",
+  options: FixtureOptions,
+  resetsAt: string | undefined,
+) =>
+  Effect.gen(function* () {
+    const { records, layer } = collectLogs(["Warn"]);
+    const failure = yield* usageLimit(harness, options).pipe(Effect.provide(layer));
+    const refusal = `${harnessNames[harness]} turn ended on a provider capacity refusal or usage limit`;
+    expect(
+      records.filter(({ message }) => Array.isArray(message) && message[0] === refusal),
+    ).toEqual([
+      {
+        level: "Warn",
+        message: [refusal, expect.objectContaining({ resetsAt })],
+        annotations: expect.anything(),
+      },
+    ]);
+    return failure;
+  });
+
 /** Returns when the run starts its next attempt after `failure` ends attempt 1 at `ENDED_AT`. */
 const retryAt = (failure: AgentCapacityError) =>
   pendingProviderRetry(Running.make(), [
@@ -82,7 +107,7 @@ describe("recorded usage limits", () => {
   for (const harness of ["claude", "codex", "pi"] as const) {
     it.live(`${harness}: retries after the reported reset`, () =>
       Effect.gen(function* () {
-        const failure = yield* usageLimit(harness, {});
+        const failure = yield* loggedUsageLimit(harness, {}, RESETS_AT);
         assert.deepStrictEqual(
           failure.resetsAt.pipe(Option.map(DateTime.formatIso)),
           Option.some(RESETS_AT),
@@ -93,7 +118,7 @@ describe("recorded usage limits", () => {
 
     it.live(`${harness}: waits the default capacity delay without a reset time`, () =>
       Effect.gen(function* () {
-        const failure = yield* usageLimit(harness, { transform: withoutReset });
+        const failure = yield* loggedUsageLimit(harness, { transform: withoutReset }, undefined);
         assert.deepStrictEqual(failure.resetsAt, Option.none());
         assert.deepStrictEqual(retryAt(failure), Option.some("2026-11-12T03:02:00.000Z"));
       }),

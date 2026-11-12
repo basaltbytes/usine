@@ -34,7 +34,13 @@ const ToolResultMessage = Schema.Struct({
   details: Schema.optionalKey(Schema.Json),
   isError: Schema.Boolean,
 });
+const FailedAssistantMessage = Schema.Struct({
+  role: Schema.Literal("assistant"),
+  stopReason: Schema.Literal("error"),
+  timestamp: Schema.Finite,
+});
 const decodeAssistant = Schema.decodeUnknownOption(AssistantMessage);
+const decodeFailedAssistant = Schema.decodeUnknownOption(FailedAssistantMessage);
 const decodeToolResult = Schema.decodeUnknownOption(ToolResultMessage);
 const isTextBlock = Schema.is(TextBlock);
 const isToolCallBlock = Schema.is(ToolCallBlock);
@@ -49,6 +55,21 @@ export const assistantText = (entry: EntryRecord): Option.Option<string> =>
       .trim();
     return text.length > 0 ? Option.some(text) : Option.none();
   });
+
+/**
+ * Returns the timestamp, in epoch milliseconds, of the newest assistant entry that ended on a
+ * model error, or `None` if no entry did.
+ */
+export const failedAssistantTimestamp = (
+  entries: ReadonlyArray<EntryRecord>,
+): Option.Option<number> => {
+  for (const entry of [...entries].reverse()) {
+    if (entry.kind !== AssistantEntry.kind) continue;
+    const failed = decodeFailedAssistant(entry.model?.[0]);
+    if (Option.isSome(failed)) return Option.some(failed.value.timestamp);
+  }
+  return Option.none();
+};
 
 /**
  * Returns the session events for one committed parent entry, in Pi SDK emission order. User input,
