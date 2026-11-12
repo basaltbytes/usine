@@ -29,6 +29,7 @@ export const authFixture = (
   initial: ReadonlyArray<Member> = [alice],
   identity = alice,
   permissions: () => ReadonlyArray<PermissionGrant> = () => administratorPermissions,
+  wrapStore: (store: AuthStore["Service"]) => AuthStore["Service"] = (store) => store,
   trustedProxies: ReadonlyArray<IpNetwork.IpNetwork> = [],
 ) =>
   Effect.gen(function* () {
@@ -74,7 +75,7 @@ export const authFixture = (
         trustedProxies,
       }).pipe(
         Layer.provide(NodeCrypto.layer),
-        Layer.provide(Layer.succeed(AuthStore, store)),
+        Layer.provide(Layer.succeed(AuthStore, wrapStore(store))),
         Layer.provide(
           Layer.succeed(MemberAccess, {
             permissions: () => Effect.sync(permissions),

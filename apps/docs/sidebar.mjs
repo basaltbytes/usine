@@ -77,6 +77,7 @@ export const guideGroups = [
       { slug: "guides/sign-in" },
       { slug: "guides/manage-members" },
       { slug: "guides/create-a-device-token" },
+      { slug: "guides/connect-an-mcp-client" },
     ],
   },
 ];

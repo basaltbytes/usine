@@ -18,6 +18,9 @@ import {
   keepToken,
   lastUsed,
   created,
+  expires,
+  operationsLabel,
+  noOperations,
 } from "./strings";
 
 export const TokensPage = () => {
@@ -65,9 +68,21 @@ export const TokensPage = () => {
                       ? token.scopes.map(scopeLabel).join(", ")
                       : scopeCopy.none}
                 </p>
+                {token.operations !== undefined && (
+                  <p className="text-sm">
+                    {operationsLabel}:{" "}
+                    {token.operations.length > 0 ? token.operations.join(", ") : noOperations}
+                  </p>
+                )}
                 <p className="text-xs text-muted-foreground">
                   {created} {new Date(token.createdAt).toLocaleDateString()} · {lastUsed}{" "}
                   {new Date(token.lastUsedAt).toLocaleString()}
+                  {token.kind === "device" && token.expiresAt !== null && (
+                    <>
+                      {" "}
+                      · {expires} {new Date(token.expiresAt).toLocaleString()}
+                    </>
+                  )}
                 </p>
               </div>
               {editing === token.id && (
