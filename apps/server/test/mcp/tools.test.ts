@@ -179,6 +179,47 @@ describe("operator MCP tools", () => {
     }),
   );
 
+  it.effect("charges the budget for the array entries and strings that inlining copies", () =>
+    Effect.gen(function* () {
+      // Each component is small, but 1,000 references copy it 1,000 times: about 4 MB of `enum`
+      // entries or 2 MB of description if the budget counted only objects.
+      const repeated = (component: string) =>
+        Schema.decodeEffect(PublishedApi)({
+          paths: {
+            "/api/large": {
+              get: {
+                operationId: "operator.large",
+                parameters: Array.from({ length: 1_000 }, (_, index) => ({
+                  name: `p${index}`,
+                  in: "query",
+                  schema: { $ref: `#/components/schemas/${component}` },
+                })),
+                responses: { "200": {} },
+                "x-usine-permission": "read",
+              },
+            },
+          },
+          components: {
+            schemas: {
+              Enum: { type: "integer", enum: Array.from({ length: 2_000 }, () => 0) },
+              Text: { type: "string", description: "x".repeat(2_000) },
+            },
+          },
+        });
+      for (const [component, copied] of [
+        ["Enum", '"enum"'],
+        ["Text", "x".repeat(2_000)],
+      ] as const) {
+        const document = yield* repeated(component);
+        const generated = operatorTools(document);
+        const schema = jsonKey(generated.tools[0]?.descriptor.inputSchema ?? {});
+        assert.isFalse(generated.complete, component);
+        assert.include(schema, copied, component);
+        assert.isBelow(schema.length, 1_000_000, component);
+      }
+    }),
+  );
+
   it.effect("inlines the real document completely within the budget", () =>
     Effect.gen(function* () {
       const document = yield* Schema.decodeUnknownEffect(PublishedApi)(operatorOpenApi());

@@ -10,7 +10,7 @@ import {
   OperatorUnavailableError,
   registerOperatorTools,
 } from "./server.ts";
-import { MAX_INLINED_NODES, operatorTools, PublishedApi, visibleTools } from "./tools.ts";
+import { loadOperatorTools, PublishedApi, visibleTools } from "./tools.ts";
 
 const REQUEST_TIMEOUT = Duration.seconds(30);
 /** The largest response, in bytes, that `usine mcp` reads from the instance at start. */
@@ -109,14 +109,9 @@ export const stdioServer = (
         );
       const document = yield* decode("/api/openapi.json", PublishedApi);
       const session = yield* decode("/api/auth/session", Session);
-      const generated = operatorTools(document);
-      if (!generated.complete)
-        yield* Effect.logWarning(
-          "MCP tool schemas left references unresolved: the inlining budget ran out",
-          { origin, limit: MAX_INLINED_NODES },
-        );
+      const generated = yield* loadOperatorTools(document, { origin });
       const tools = visibleTools(
-        generated.tools,
+        generated,
         session.permissions,
         Option.fromUndefinedOr(session.operations),
       );

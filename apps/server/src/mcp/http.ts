@@ -17,13 +17,7 @@ import {
   OperatorUnavailableError,
   registerOperatorTools,
 } from "./server.ts";
-import {
-  MAX_INLINED_NODES,
-  type OperatorTool,
-  operatorTools,
-  PublishedApi,
-  visibleTools,
-} from "./tools.ts";
+import { loadOperatorTools, type OperatorTool, PublishedApi, visibleTools } from "./tools.ts";
 
 /** The path of the Streamable HTTP MCP endpoint. */
 export const MCP_PATH = "/api/mcp";
@@ -49,13 +43,7 @@ export const mcpRoutes = (allowedOrigins: ReadonlyArray<string>) =>
       const document = yield* Schema.decodeUnknownEffect(PublishedApi)(operatorOpenApi()).pipe(
         Effect.orDie,
       );
-      const generated = operatorTools(document);
-      if (!generated.complete)
-        yield* Effect.logWarning(
-          "MCP tool schemas left references unresolved: the inlining budget ran out",
-          { limit: MAX_INLINED_NODES },
-        );
-      const tools = generated.tools;
+      const tools = yield* loadOperatorTools(document);
       const byName = new Map(tools.map((tool) => [tool.name, tool]));
       const call: OperatorCall = Effect.fn("Mcp.operatorRequest")(function* (request) {
         yield* Effect.annotateCurrentSpan({ method: request.method, url: request.url });

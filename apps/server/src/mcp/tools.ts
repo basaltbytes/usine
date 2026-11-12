@@ -1,5 +1,5 @@
 import { InstanceScope, type PermissionGrant, permits } from "@usine/core/access";
-import { Option, Result, Schema } from "effect";
+import { Effect, Option, Result, Schema } from "effect";
 import { McpSchema } from "effect/ai";
 import { ceilingAdmits, type OperationId } from "../auth/model.ts";
 import { OperationPermission, PERMISSION_EXTENSION } from "../openapi.ts";
@@ -78,6 +78,7 @@ export interface OperatorTool {
 const COMPONENT_PREFIX = "#/components/schemas/";
 
 const isJsonObject = Schema.is(JsonSchema);
+const isString = Schema.is(Schema.String);
 const isObject = (value: Schema.Json): value is JsonSchema => isJsonObject(value);
 const componentName = (reference: Schema.Json | undefined) =>
   Schema.decodeUnknownOption(Schema.String)(reference).pipe(
@@ -85,8 +86,11 @@ const componentName = (reference: Schema.Json | undefined) =>
     Option.map((value) => value.slice(COMPONENT_PREFIX.length)),
   );
 
-/** The most objects and arrays that inlining builds for all the input schemas of a document. */
-export const MAX_INLINED_NODES = 20_000;
+/**
+ * The most JSON text, in characters, that inlining builds for all the input schemas of a document.
+ * The real document builds about 14,000.
+ */
+const MAX_INLINED_LENGTH = 500_000;
 
 /** What inlining may still build for a document, and whether it left a `$ref` unresolved. */
 interface InlineBudget {
@@ -94,10 +98,16 @@ interface InlineBudget {
   exhausted: boolean;
 }
 
+/** The length of the JSON text of a string, number, boolean, or null, ignoring escapes. */
+const scalarLength = (value: Schema.Json) =>
+  isString(value) ? value.length + 2 : String(value).length;
+
 /**
- * Returns `schema` with every component `$ref` replaced by its definition. Once `budget` runs out,
- * a `$ref` is left unresolved and accepts any value, so a document whose references fan out can't
- * make the expansion grow without bound.
+ * Returns `schema` with every component `$ref` replaced by its definition. Every value that
+ * inlining builds, including array entries and strings, is charged to `budget` by the length of
+ * its JSON text. Once `budget` runs out, a `$ref` is left unresolved and accepts any value, so a
+ * document whose references fan out or repeat a large component can't make the expansion grow
+ * without bound.
  */
 const inline = (
   schema: Schema.Json,
@@ -106,14 +116,21 @@ const inline = (
   budget: InlineBudget,
 ): Schema.Json => {
   if (Array.isArray(schema)) {
-    budget.remaining -= 1;
+    budget.remaining -= 2 + schema.length;
     return schema.map((entry) => inline(entry, components, resolving, budget));
   }
-  if (!isObject(schema)) return schema;
-  budget.remaining -= 1;
+  if (!isObject(schema)) {
+    budget.remaining -= scalarLength(schema);
+    return schema;
+  }
+  budget.remaining -= 2;
   const { $ref, ...rest } = schema;
   const siblings = Object.fromEntries(
-    Object.entries(rest).map(([key, value]) => [key, inline(value, components, resolving, budget)]),
+    Object.entries(rest).map(([key, value]) => {
+      // The quotes, the colon, and the comma.
+      budget.remaining -= key.length + 4;
+      return [key, inline(value, components, resolving, budget)];
+    }),
   );
   const reference = componentName($ref);
   if (Option.isNone(reference)) return siblings;
@@ -232,8 +249,8 @@ const tool = (
 export interface OperatorTools {
   readonly tools: ReadonlyArray<OperatorTool>;
   /**
-   * False when the document's references fan out past `MAX_INLINED_NODES`, so some input schemas
-   * keep a `$ref` that accepts any value.
+   * False when inlining the document's references would build more than the inlining budget, so
+   * some input schemas keep a `$ref` that accepts any value.
    */
   readonly complete: boolean;
 }
@@ -241,11 +258,11 @@ export interface OperatorTools {
 /**
  * Returns one tool for each operation of the operator group, named by its endpoint identifier.
  * Event streams are left out: a tool call needs a response that ends. All the input schemas share
- * one inlining budget, so the work is bounded for the whole document, however many operations and
- * parameters it has.
+ * one inlining budget, charged by the length of the JSON text that inlining builds, so the work and
+ * the size of the tool list are bounded for the whole document, apart from the document's own size.
  */
 export const operatorTools = (document: PublishedApi): OperatorTools => {
-  const budget: InlineBudget = { remaining: MAX_INLINED_NODES, exhausted: false };
+  const budget: InlineBudget = { remaining: MAX_INLINED_LENGTH, exhausted: false };
   const components = document.components.schemas ?? {};
   const tools = Object.entries(document.paths)
     .flatMap(([path, item]) =>
@@ -261,6 +278,23 @@ export const operatorTools = (document: PublishedApi): OperatorTools => {
     .sort((left, right) => left.name.localeCompare(right.name));
   return { tools, complete: !budget.exhausted };
 };
+
+/**
+ * Returns the tools of `document`, and logs a warning when the inlining budget runs out. `source`
+ * names the instance that served the document, such as `{ origin }`.
+ */
+export const loadOperatorTools = Effect.fn("Mcp.loadOperatorTools")(function* (
+  document: PublishedApi,
+  source: { readonly origin?: string } = {},
+) {
+  const generated = operatorTools(document);
+  if (!generated.complete)
+    yield* Effect.logWarning(
+      "MCP tool schemas left references unresolved: the inlining budget ran out",
+      { ...source, limit: MAX_INLINED_LENGTH },
+    );
+  return generated.tools;
+});
 
 /**
  * Returns the tools that the grants and the operation ceiling permit. The server checks every call

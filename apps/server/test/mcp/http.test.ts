@@ -23,6 +23,7 @@ import {
   Fiber,
   FileSystem,
   Layer,
+  Logger,
   Option,
   Queue,
   Redacted,
@@ -618,6 +619,61 @@ describe("operator MCP endpoint", () => {
         `Refused to send the token to ${other}`,
       );
       assert.deepEqual(elsewhere, []);
+    }).pipe(Effect.timeout("10 seconds"), Effect.scoped),
+  );
+
+  it.live("warns when usine mcp --origin runs out of inlining budget", () =>
+    Effect.gen(function* () {
+      // 1,000 references to a 2,000-entry `enum` would copy about 4 MB.
+      const document = {
+        paths: {
+          "/api/large": {
+            get: {
+              operationId: "operator.large",
+              parameters: Array.from({ length: 1_000 }, (_, index) => ({
+                name: `p${index}`,
+                in: "query",
+                schema: { $ref: "#/components/schemas/Enum" },
+              })),
+              responses: { "200": {} },
+              "x-usine-permission": "read",
+            },
+          },
+        },
+        components: {
+          schemas: { Enum: { type: "integer", enum: Array.from({ length: 2_000 }, () => 0) } },
+        },
+      };
+      const origin = yield* serveOnLoopback(
+        Layer.mergeAll(
+          HttpRouter.add("GET", "/api/openapi.json", HttpServerResponse.jsonUnsafe(document)),
+          HttpRouter.add(
+            "GET",
+            "/api/auth/session",
+            HttpServerResponse.jsonUnsafe({
+              permissions: [{ permission: "admin", scope: { _tag: "Instance" } }],
+            }),
+          ),
+        ),
+      );
+      const warnings: Array<string> = [];
+      const logger = Logger.make<unknown, void>(({ logLevel, message }) => {
+        if (logLevel === "Warn") warnings.push(jsonKey(message));
+      });
+      const stdio = yield* memoryStdio;
+      yield* Layer.build(
+        stdioServer(origin, Redacted.make("token"), "2 seconds").pipe(
+          Layer.provide(stdio.layer),
+          Layer.provide(FetchHttpClient.layer),
+          Layer.provide(NodeServices.layer),
+        ),
+      ).pipe(Effect.provide(Logger.layer([logger])));
+      assert.lengthOf(warnings, 1);
+      assert.include(
+        warnings[0],
+        "MCP tool schemas left references unresolved: the inlining budget ran out",
+      );
+      assert.include(warnings[0], origin);
     }).pipe(Effect.timeout("10 seconds"), Effect.scoped),
   );
 
