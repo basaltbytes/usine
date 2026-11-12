@@ -121,11 +121,11 @@ To resume an open attempt after an orchestrator restart, if its Pi parent's dura
 _Avoid_: retry, takeover
 
 **Approval**:
-An event that lets a run of a gated loop leave the `waiting` state. It records the operator login and the channel (web UI or 👍 on the ask).
+An event that lets a run of a gated loop leave the `waiting` state. It records the approving member's login; the web UI is the only approval channel.
 _Avoid_: confirmation, sign-off
 
 **Ask**:
-A request for an operator answer on a blocked run: either yes/no, answered with a reaction, or a question, answered with a reply.
+A request for an operator decision, such as an agent's question or blocker or an exhausted cycle budget. The operator answers it in Needs attention.
 _Avoid_: notification, prompt, request, question
 
 **Takeover**:

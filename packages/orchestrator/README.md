@@ -58,7 +58,7 @@ A card also has `pullRequest` (the open PR, else the newest merged one) and `usa
 
 A malformed item projection is quarantined and reported on the board and the needs-attention strip; valid items stay visible. A failed declared-label creation is a repo preflight finding and doesn't block triggers.
 
-`Operator.moveBoardItem(instance, move)` accepts authored label-backed lanes, adds the target lane's labels, and removes only labels the authored map owns, even with a stale snapshot or truncated label connection. Proposed lanes are read-only (`BoardLaneReadOnlyError`); define [`repos[].lanes`](https://docs.usine.dev/reference/configuration/usine-yaml/) and reload to enable moves. Every attempted label write, including an uncertain or partial failure, queues an item hint: the poller fetches the snapshot, places it, and evaluates its loops at once unless GitHub requested backoff.
+`Operator.moveBoardItem(instance, move)` accepts authored label-backed lanes, adds the target lane's labels, and removes only labels the authored map owns, even with a stale snapshot or truncated label connection. Proposed lanes are read-only (`BoardLaneReadOnlyError`); define the project's [`lanes`](https://docs.usine.dev/reference/configuration/projects/#lane) to enable moves; the revision applies live. Every attempted label write, including an uncertain or partial failure, queues an item hint: the poller fetches the snapshot, places it, and evaluates its loops at once unless GitHub requested backoff.
 
 Board move rejection errors derive diagnostic messages from their repository, item, or lane fields. The server uses these messages in both rejection logs and HTTP responses.
 
