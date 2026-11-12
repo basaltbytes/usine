@@ -1,14 +1,12 @@
-import { SqliteClient } from "@effect/sql-sqlite-node";
 import type { AttemptId } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { Context, Deferred, Effect, Exit, Layer, Option, Schema, Scope } from "effect";
 import { AttemptRequest } from "../src/attempt-runtime.ts";
 import { AttemptJournal } from "../src/coordinator/journal.ts";
 import { CoordinatorRuntime } from "../src/coordinator/runtime.ts";
-import { sqliteAttemptJournalLayer } from "../src/coordinator/sqlite/store.ts";
 import { WakeUp } from "../src/coordinator/wake-up.ts";
 import { stubChildBackendLayer, StubChildren } from "../src/testing.ts";
-import { attemptRequest } from "./support.ts";
+import { attemptRequest, sqliteJournal } from "./support.ts";
 
 /** A request whose Attempt runs without a parent session. */
 export const coordinated = (attemptId: string, maxChildren = 3) => {
@@ -18,12 +16,6 @@ export const coordinated = (attemptId: string, maxChildren = 3) => {
     spec: AttemptChannel.RunSpec.make({ ...request.spec, parent: "none" }),
   });
 };
-
-export const sqliteJournal = (database: string) =>
-  sqliteAttemptJournalLayer.pipe(
-    Layer.provide(SqliteClient.layer({ filename: database })),
-    Layer.orDie,
-  );
 
 /** Interrupts, as a process stop does, each transition whose event has tag `tag`. */
 export const interruptingTransition = (tag: string) => (journal: Layer.Layer<AttemptJournal>) =>

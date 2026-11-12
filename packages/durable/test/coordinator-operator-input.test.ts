@@ -33,11 +33,16 @@ import {
   holdingWakeUp,
   interruptingTransition,
   orchestrator,
-  sqliteJournal,
   stored,
   until,
 } from "./coordinator-support.ts";
-import { assertAdmitted, recordingSink, temporaryDatabase, trace } from "./support.ts";
+import {
+  assertAdmitted,
+  recordingSink,
+  sqliteJournal,
+  temporaryDatabase,
+  trace,
+} from "./support.ts";
 
 const input = (
   target: AttemptChannel.SessionTarget,
