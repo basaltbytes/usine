@@ -615,7 +615,13 @@ describe("operator MCP endpoint", () => {
       const token = yield* device([grant("read")]);
       const owner = mcpClient(inProcess(app), token);
       yield* owner.initialize;
-      for (const _ of [1, 2]) yield* mcpClient(inProcess(app), token).initialize;
+      const second = mcpClient(inProcess(app), token);
+      yield* second.initialize;
+      yield* mcpClient(inProcess(app), token).initialize;
+      // The same grants share one tool server, which still knows a session the sweep is ending.
+      const otherToken = yield* device([grant("read")]);
+      const other = mcpClient(inProcess(app), otherToken);
+      other.useSession(second.session());
       yield* advance(MCP_SESSION_IDLE);
       // The browser's GET authenticates once; the sweep's first DELETE then waits in the store.
       const held = yield* Deferred.make<void>();
@@ -636,6 +642,12 @@ describe("operator MCP endpoint", () => {
         }),
       );
       yield* Deferred.await(held);
+      // The sweep has taken the second session from the table, and its tool server hasn't ended
+      // it yet. The route refuses it for its owner and for another credential, rather than
+      // forwarding the request to the tool server.
+      const ownerWhileEnding = yield* second.status("tools/list");
+      const otherWhileEnding = yield* other.status("tools/list");
+      assert.deepEqual([ownerWhileEnding, otherWhileEnding], [404, 404]);
       yield* Scope.close(connection, Exit.void);
       yield* Effect.promise(() => aborted);
       yield* Deferred.succeed(release, undefined);
