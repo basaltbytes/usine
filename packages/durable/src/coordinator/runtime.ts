@@ -481,9 +481,8 @@ const make = Effect.gen(function* () {
     });
     const intents: Array<Intent> = [];
     const payloads: Array<AttemptChannel.OutboundPayload> = [];
-    if (event._tag === "AttemptStarted") {
-      payloads.push(startedWithoutParent(snapshot.request.spec), ...(yield* hub.outbox.takeKept));
-    }
+    // The outbox relays the kept Worker notices after `Started`, once the transition commits.
+    if (event._tag === "AttemptStarted") payloads.push(startedWithoutParent(snapshot.request.spec));
     for (const effect of effects) {
       if (effect._tag === "Ignored")
         // The coordinator handles only events about its latest child, so a rule that ignores one

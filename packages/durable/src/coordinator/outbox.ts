@@ -63,7 +63,8 @@ export interface Outbox {
   ) => Effect.Effect<AttemptChannel.Sequence, AttemptFailure | JournalError>;
   /**
    * Builds envelopes for `payloads`, commits them with `write`, which must reserve exactly those
-   * envelopes, then delivers them. With `terminal`, the last payload ends the channel.
+   * envelopes, then delivers them. A terminal payload ends the channel. A `Started` payload takes
+   * the kept Worker notices right after it, and the outbox forgets them once `write` succeeds.
    */
   readonly commit: <A, E>(
     payloads: ReadonlyArray<AttemptChannel.OutboundPayload>,
@@ -155,11 +156,25 @@ export const outboxFor = Effect.fn("Outbox.open")(function* (
       // The channel admits no envelope after its terminal envelope.
       if (Option.isNone(channel) || ended) return yield* unavailable();
       const attachedChannel = channel.value;
-      const outbound = yield* envelopes(attachedChannel, payloads);
+      const starting = payloads.findIndex(({ _tag }) => _tag === "Started");
+      const relayedKept = starting < 0 ? [] : kept;
+      const sent =
+        starting < 0
+          ? payloads
+          : [...payloads.slice(0, starting + 1), ...kept, ...payloads.slice(starting + 1)];
+      const outbound = yield* envelopes(attachedChannel, sent);
       const written = yield* write(outbound);
       attachedChannel.next = AttemptChannel.Sequence.make(attachedChannel.next + outbound.length);
       attachedChannel.pending.push(...outbound);
-      if (payloads.some(({ _tag }) => _tag === "Started")) started = true;
+      if (starting >= 0) {
+        started = true;
+        kept = [];
+        if (relayedKept.length > 0)
+          yield* Effect.logInfo("Relayed the kept Worker notices after Started", {
+            attemptId,
+            notices: relayedKept.map(({ _tag }) => _tag),
+          });
+      }
       if (payloads.some(isTerminal)) ended = true;
       yield* deliver(attachedChannel);
       return written;

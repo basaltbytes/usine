@@ -45,7 +45,12 @@ import {
   FIRST_ASSIGNMENT,
   REPLACEMENT_ASSIGNMENT,
 } from "../src/attempt/coordinator/rules.ts";
-import { AttemptJournal, EventSequence, Settled } from "../src/coordinator/journal.ts";
+import {
+  AttemptJournal,
+  EventSequence,
+  JournalError,
+  Settled,
+} from "../src/coordinator/journal.ts";
 import { outboxFor } from "../src/coordinator/outbox.ts";
 import { RecordedDecision, WakeUp } from "../src/coordinator/wake-up.ts";
 import {
@@ -104,6 +109,31 @@ const hangingLaunches = (reached: Deferred.Deferred<void>) =>
       ).pipe(Context.add(StubChildren, children));
     }),
   ).pipe(Layer.provide(stubChildBackendLayer));
+
+/** Fails the first transition whose event has tag `tag` with `JournalError`. */
+const failingTransitionOnce = (tag: string) => (journal: Layer.Layer<AttemptJournal>) =>
+  Layer.effect(
+    AttemptJournal,
+    Effect.gen(function* () {
+      const inner = yield* AttemptJournal;
+      const isTagged = Schema.is(Schema.Struct({ _tag: Schema.Literal(tag) }));
+      let failed = false;
+      return AttemptJournal.of({
+        ...inner,
+        transition: (attemptId, expected, step) => {
+          if (failed || !isTagged(step.event)) return inner.transition(attemptId, expected, step);
+          failed = true;
+          return Effect.fail(
+            JournalError.make({
+              operation: "commit an attempt journal transition",
+              attemptId,
+              cause: new Error("disk I/O error"),
+            }),
+          );
+        },
+      });
+    }),
+  ).pipe(Layer.provide(journal));
 
 /** Holds the `decide` call for event `sequence` after completing `reached`, until `release` completes. */
 const holdingDecide =
@@ -479,6 +509,33 @@ describe("event-driven coordinator runtime", () => {
       assertAdmitted(attemptId, outbound);
       assert.deepStrictEqual(trace(outbound).slice(0, 2), ["Started", "WorkerUnresponsive"]);
       assert.deepStrictEqual(unresponsiveReasons(outbound), ["while deciding"]);
+    }).pipe(Effect.scoped),
+  );
+
+  it.live("keeps the Worker notices for the next execute call after Started fails to commit", () =>
+    Effect.gen(function* () {
+      const database = yield* temporaryDatabase;
+      const request = coordinated("coordinator/notice-after-failed-start");
+      const attemptId = request.spec.attemptId;
+      const process = yield* orchestrator(
+        sqliteJournal(database).pipe(failingTransitionOnce("AttemptStarted"), coordinator),
+      );
+      yield* process.attempts.notify(attemptId, unresponsive("before start"));
+      const failure = yield* process.attempts
+        .execute(request, recordingSink().sink)
+        .pipe(Effect.flip);
+      const recording = recordingSink();
+      const execution = yield* process.execute(request, recording.sink);
+      yield* (yield* process.nextChild).reply("Done.");
+      yield* Fiber.join(execution);
+      yield* process.stop;
+
+      const outbound = recording.outbound();
+      assert.strictEqual(failure._tag, "InfraFailure");
+      assert.include(failure.message, "disk I/O error");
+      assertAdmitted(attemptId, outbound);
+      assert.deepStrictEqual(trace(outbound).slice(0, 2), ["Started", "WorkerUnresponsive"]);
+      assert.deepStrictEqual(unresponsiveReasons(outbound), ["before start"]);
     }).pipe(Effect.scoped),
   );
 
