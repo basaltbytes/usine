@@ -4,7 +4,6 @@ import { RunId } from "@usine/core/run";
 import { type Brand, Effect, Redacted, Schema } from "effect";
 import { HttpClient, HttpClientResponse } from "effect/http";
 import { type Port, SERVER_HOST } from "../cli.ts";
-import { StartingResponse } from "../listener.ts";
 
 const OPERATOR_API_TIMEOUT = "5 seconds";
 
@@ -86,25 +85,13 @@ export const gatewayTokenVariables = Effect.fn("Instance.gatewayTokenVariables")
   return [...new Set(configuration.workers.flatMap(({ gateway }) => gateway?.adminTokenEnv ?? []))];
 });
 
-const startingResponse = Schema.fromJsonString(StartingResponse);
-
 /**
- * Returns whether an HTTP server answers on `port` with a response other than a `usine up`
- * startup response. Returns `false` while the listener holds the port but startup recovery hasn't
- * installed the setup or runtime routes.
+ * Returns whether the `usine up` on `port` has started: `GET /api/version` returns HTTP 200. Until
+ * then, its listener answers every request with HTTP 503.
  */
-export const servesRoutes = (port: Port) =>
-  Effect.flatMap(HttpClient.HttpClient, (client) => client.get(apiUrl(port, "/api/overview"))).pipe(
-    Effect.flatMap((response) =>
-      Effect.flatMap(response.text, (body) =>
-        response.status === 503
-          ? Schema.decodeEffect(startingResponse)(body).pipe(
-              Effect.as(false),
-              Effect.orElseSucceed(() => true),
-            )
-          : Effect.succeed(true),
-      ),
-    ),
+export const hasStarted = (port: Port) =>
+  Effect.flatMap(HttpClient.HttpClient, (client) => client.get(apiUrl(port, "/api/version"))).pipe(
+    Effect.flatMap((response) => Effect.as(response.text, response.status === 200)),
     Effect.timeout("2 seconds"),
     Effect.orElseSucceed(() => false),
   );

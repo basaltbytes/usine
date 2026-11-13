@@ -134,9 +134,14 @@ it.live(
         Layer.provide(CompletionCheck.unverified),
       );
       const listener = yield* startupListener("0.5.1-next.341");
+      const client = yield* HttpClient.HttpClient;
+      const beforeStart = yield* client.get("/api/version");
+      assert.strictEqual(beforeStart.status, 503);
+      assert.strictEqual(beforeStart.headers["retry-after"], "1");
+      assert.strictEqual(beforeStart.headers["connection"], "close");
+      yield* listener.started;
       const starting = yield* Layer.build(runtime).pipe(Effect.forkChild);
       yield* Deferred.await(recovering);
-      const client = yield* HttpClient.HttpClient;
       const version = yield* client.get("/api/version");
       assert.strictEqual(version.status, 200);
       const currentJson = yield* version.json;
@@ -196,12 +201,17 @@ it.live("restores the startup responses when the installed routes close", () =>
       serverLayer(Layer.mock(FactoryBackend)({}), "", listener, auth, Layer.empty, Layer.empty),
       routes,
     );
+    const unstarted = yield* client.get("/api/overview");
+    assert.strictEqual(unstarted.status, 503, "routes wait until startup has finished");
+    yield* listener.started;
     const installed = yield* client.get("/api/overview");
     assert.strictEqual(installed.status, 401);
     yield* Scope.close(routes, Exit.void);
     const restored = yield* client.get("/api/overview");
     assert.strictEqual(restored.status, 503);
     assert.strictEqual(restored.headers["retry-after"], "1");
+    const version = yield* client.get("/api/version");
+    assert.strictEqual(version.status, 200);
   }).pipe(
     Effect.scoped,
     Effect.provide(NodeHttpServer.layerTest.pipe(Layer.provideMerge(NodeServices.layer))),

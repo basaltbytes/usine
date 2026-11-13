@@ -22,7 +22,7 @@ usine up --detach --origin https://usine.example.com
 
 Startup takes the instance lock, opens the listener, applies runtime database migrations, loads stored configuration, reads App and worker credentials, checks workers, and recovers attempts. Recovery visits every attempt that still has tracked leftovers on a configured worker and logs one summary per worker with the attempts visited, kept, and discarded. A finished attempt whose machine and checkout are both gone is discarded, so later starts skip it. Open attempts and attempts whose recovery failed stay tracked. On SSH workers, the first preparation after a start logs one warning with the number of unrecognized paths under `attempts/`, excluding the checkouts of attempts being reattached; the paths are logged at debug level. Empty configuration tables accept a bootstrap import or initialize empty setup configuration. [Import and export format](/reference/configuration/import-export/) describes bootstrap input. Later starts read the database.
 
-The listener answers from the moment it accepts connections, in setup mode too. Until startup finishes, `GET /api/version` returns the running release and every other request returns HTTP 503 with `Retry-After: 1`. When setup completes, the listener keeps the port and returns the same startup responses until the runtime routes are installed.
+The listener answers from the moment it accepts connections, in setup mode too. Until the instance has started, every request returns HTTP 503 with `Retry-After: 1`. The instance has started when migrations are applied, configuration is loaded, the admin token is written, and either setup mode serves its routes and has logged the sign-in line, or runtime startup begins its worker checks and attempt recovery. From then on, `GET /api/version` returns the running release. In runtime mode, every other request returns HTTP 503 with `Retry-After: 1` until recovery finishes and the runtime routes are installed; `GET /api/ready` then returns HTTP 200. Startup responses close the connection. When setup completes, the listener keeps the port and returns the same responses until the runtime routes are installed.
 
 Missing or invalid App credentials start setup mode. Polling and schedules stay idle until setup completes. Worker preflight failure stops runtime startup. The App secrets file, `.usine/github-app.json`, must be a regular file with mode `0600`; environment values override corresponding file fields.
 
@@ -32,7 +32,7 @@ Session usage and pool rate-limit projection updates, including pool reset sched
 
 ### Background start
 
-A detached start retains the selected Node binary, options, entry point, and launch flags. It waits for the process to answer after startup recovery. If the process exits, the command prints its exit and the log tail. After 120 seconds without an answer or new log line, the command reports a timeout while the process can still be starting. Logs have owner-only permissions and require operator-managed rotation.
+A detached start retains the selected Node binary, options, entry point, and launch flags. It returns when the new process holds the instance lock and `GET /api/version` returns HTTP 200, so the instance has started as described above: the admin token exists, and setup mode answers requests. It doesn't wait for attempt recovery; poll `GET /api/ready` for that. If the process exits first, the command fails and prints its exit and the log tail. After 120 seconds without a start or a new log line, the command reports a timeout while the process can still be starting. Logs have owner-only permissions and require operator-managed rotation.
 
 ### Instance record
 
@@ -118,7 +118,7 @@ Ctrl+C or SIGTERM starts a drain. Its deadline uses `settings.max_attempt_minute
 usine restart
 ```
 
-Restart requires a running instance and retains its launch flags. It refuses active attempts unless forced and verifies required gateway credential variables before stopping. A detached restart appends to `.usine/usine.log`; systemd and launchd instances restart through their service manager. The new process reads the instance environment again.
+Restart requires a running instance and retains its launch flags. It refuses active attempts unless forced and verifies required gateway credential variables before stopping. A detached restart appends to `.usine/usine.log`; systemd and launchd instances restart through their service manager. The new process reads the instance environment again. Restart returns when the new process has started, by the same rule as a [background start](#background-start), and fails if the new process exits or its service stops first.
 
 ## usine upgrade
 

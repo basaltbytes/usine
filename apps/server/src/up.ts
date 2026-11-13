@@ -118,23 +118,27 @@ const serve = Effect.fnUntraced(function* (options: {
       ? `usine is running in setup mode at ${options.url}`
       : `usine is running at ${options.url}`,
   );
-  if (process.stdout.isTTY) {
-    const signInLink = yield* options.auth.authentication.link;
-    yield* Console.log(`Sign in: ${signInLink}`);
-    if (options.openSetupPage) {
-      yield* openBrowser(signInLink).pipe(
-        Effect.tapError((error) =>
-          Effect.logWarning("The setup page could not be opened automatically", {
-            command: error.command,
-            cause: error.cause,
-            url: options.url,
-          }),
-        ),
-        Effect.ignore,
-      );
-    }
-  } else {
-    yield* Console.log("Run usine sign-in-link in the instance folder to sign in.");
+  const signInLink = yield* process.stdout.isTTY
+    ? Effect.asSome(options.auth.authentication.link)
+    : Effect.succeedNone;
+  yield* Console.log(
+    Option.match(signInLink, {
+      onNone: () => "Run usine sign-in-link in the instance folder to sign in.",
+      onSome: (link) => `Sign in: ${link}`,
+    }),
+  );
+  yield* options.listener.started;
+  if (Option.isSome(signInLink) && options.openSetupPage) {
+    yield* openBrowser(signInLink.value).pipe(
+      Effect.tapError((error) =>
+        Effect.logWarning("The setup page could not be opened automatically", {
+          command: error.command,
+          cause: error.cause,
+          url: options.url,
+        }),
+      ),
+      Effect.ignore,
+    );
   }
   return yield* Effect.never;
 });
@@ -253,6 +257,7 @@ const start = Effect.fnUntraced(function* (
       Layer.provide(Layer.succeed(GitHubCredentials, credentials.success)),
       Layer.provide(Layer.succeed(CurrentInstance, instances)),
     );
+    yield* listener.started;
     const context = yield* Layer.build(runtime).pipe(
       Effect.provideService(RunEngineShutdown, shutdown),
     );
