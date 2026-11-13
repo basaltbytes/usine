@@ -15,31 +15,65 @@ const testLayer = ConfigurationFolder.layer.pipe(
   Layer.provideMerge(NodeServices.layer),
 );
 
+const withId = <A extends { readonly id: string }>(model: A | undefined, id: string) =>
+  model === undefined ? undefined : { ...model, id };
+
 const agentFile = (effort: string, frontmatter = "") =>
   `---\nharness: codex\nmodel: gpt-6.1-sol\neffort: ${effort}\n${frontmatter}---\nReview the pull request.\n`;
 
-it.effect("checks each distinct coordinator brain once", () =>
+it.effect("asks the credential's login once per provider across models and efforts", () =>
   Effect.gen(function* () {
     const directory = yield* (yield* FileSystem.FileSystem).makeTempDirectoryScoped();
     const root = InstanceDirectory.make(directory);
     yield* writeInstanceFiles(root, [
       ["usine.yaml", "version: 2\noperator: operator\nrepos: [{ name: acme/project }]\n"],
       ["agents/first.md", agentFile("high")],
-      ["agents/second.md", agentFile("high")],
-      ["agents/third.md", agentFile("medium")],
+      ["agents/second.md", agentFile("high", "parent_effort: medium\n")],
+      ["agents/third.md", agentFile("high", "parent_model: faux/faux-2\nparent_effort: low\n")],
     ]);
     const loaded = yield* (yield* ConfigurationFolder).load(root);
     const parents = fauxParent([]);
-    const lookups = vi.spyOn(parents.models, "getModel");
+    const served = parents.models.getModel.bind(parents.models);
+    const lookups = vi
+      .spyOn(parents.models, "getModel")
+      .mockImplementation((provider, id) =>
+        id === "faux-2" ? withId(served(provider, "faux-1"), id) : served(provider, id),
+      );
+    const logins = vi.spyOn(parents.models, "checkAuth");
 
     const problems = yield* parentAdmissionProblems(loaded, parents);
 
     expect(problems).toEqual([]);
-    expect(lookups).toHaveBeenCalledTimes(2);
+    expect(lookups).toHaveBeenCalledTimes(3);
+    expect(logins).toHaveBeenCalledTimes(1);
   }).pipe(Effect.scoped, Effect.provide(testLayer)),
 );
 
-it.effect("keys the shared check on the instance default parent effort", () =>
+it.effect("names each agent that a refused login affects", () =>
+  Effect.gen(function* () {
+    const directory = yield* (yield* FileSystem.FileSystem).makeTempDirectoryScoped();
+    const root = InstanceDirectory.make(directory);
+    yield* writeInstanceFiles(root, [
+      ["usine.yaml", "version: 2\noperator: operator\nrepos: [{ name: acme/project }]\n"],
+      ["agents/alpha.md", agentFile("high")],
+      ["agents/beta.md", agentFile("high", "parent_effort: low\n")],
+    ]);
+    const loaded = yield* (yield* ConfigurationFolder).load(root);
+    const parents = fauxParent([]);
+    const logins = vi.spyOn(parents.models, "checkAuth").mockResolvedValue(undefined);
+
+    const problems = yield* parentAdmissionProblems(loaded, parents);
+
+    expect(problems.map(({ file }) => file)).toEqual(["agents/alpha.md", "agents/beta.md"]);
+    expect(problems.map(({ message }) => message)).toEqual([
+      expect.stringMatching(/^Agent "alpha" cannot run as coordinator: .*requires a credential/u),
+      expect.stringMatching(/^Agent "beta" cannot run as coordinator: .*requires a credential/u),
+    ]);
+    expect(logins).toHaveBeenCalledTimes(1);
+  }).pipe(Effect.scoped, Effect.provide(testLayer)),
+);
+
+it.effect("resolves each agent's parent effort against the instance default", () =>
   Effect.gen(function* () {
     const directory = yield* (yield* FileSystem.FileSystem).makeTempDirectoryScoped();
     const root = InstanceDirectory.make(directory);

@@ -1,1 +1,6 @@
-export { resolveParent, type ParentBrainOptions } from "./attempt/parent.ts";
+export {
+  resolveParent,
+  sharedParentLogin,
+  type ParentBrainOptions,
+  type ParentLogin,
+} from "./attempt/parent.ts";
