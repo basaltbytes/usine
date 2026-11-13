@@ -4,7 +4,7 @@ import {
   MemoryKilledProcess,
   OutOfMemoryKills,
 } from "@usine/core/attempt";
-import { AgentFailure } from "@usine/core/attempt/failure";
+import { AgentFailure, InfraFailure } from "@usine/core/attempt/failure";
 import {
   SalvagePartlyPushed,
   SalvagePushed,
@@ -36,7 +36,12 @@ export const attemptRecordsContract = (adapter: PersistenceAdapter) => {
             const store = yield* RunStore;
             const runId = RunId.make("salvaged");
             yield* store.recordAndClaim(lifecycleSubmission, runId);
-            const first = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
+            const first = yield* store.beginAttempt(
+              runId,
+              WorkerName.make("local"),
+              "local",
+              Option.none(),
+            );
             assert(first._tag === "AttemptStarted");
             assert(Option.isNone(first.execution.resume));
             // Cancellation closes the Attempt before the executor finishes salvaging.
@@ -81,6 +86,7 @@ export const attemptRecordsContract = (adapter: PersistenceAdapter) => {
             const started = yield* store.beginAttempt(
               retriedRun,
               WorkerName.make("local"),
+              "local",
               Option.none(),
             );
             assert(started._tag === "AttemptStarted");
@@ -93,6 +99,7 @@ export const attemptRecordsContract = (adapter: PersistenceAdapter) => {
             const resumed = yield* store.beginAttempt(
               retriedRun,
               WorkerName.make("local"),
+              "local",
               Option.none(),
             );
             assert(resumed._tag === "AttemptStarted");
@@ -117,6 +124,7 @@ export const attemptRecordsContract = (adapter: PersistenceAdapter) => {
             const fresh = yield* store.beginAttempt(
               retriedRun,
               WorkerName.make("local"),
+              "local",
               Option.none(),
             );
             assert(fresh._tag === "AttemptStarted");
@@ -147,6 +155,7 @@ export const attemptRecordsContract = (adapter: PersistenceAdapter) => {
             const afterPartial = yield* store.beginAttempt(
               retriedRun,
               WorkerName.make("local"),
+              "local",
               Option.none(),
             );
             assert(afterPartial._tag === "AttemptStarted");
@@ -205,7 +214,12 @@ export const attemptRecordsContract = (adapter: PersistenceAdapter) => {
           const store = yield* RunStore;
           const runId = RunId.make("commented");
           yield* store.recordAndClaim(lifecycleSubmission, runId);
-          const started = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
+          const started = yield* store.beginAttempt(
+            runId,
+            WorkerName.make("local"),
+            "local",
+            Option.none(),
+          );
           assert(started._tag === "AttemptStarted");
           const review = Comment.make({
             url: new URL("https://github.com/basaltbytes/usine/pull/71#pullrequestreview-9"),
@@ -218,7 +232,12 @@ export const attemptRecordsContract = (adapter: PersistenceAdapter) => {
             Result.fail(AgentFailure.make({ message: "Checks failed" })),
           );
           yield* store.retry(runId);
-          const retried = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
+          const retried = yield* store.beginAttempt(
+            runId,
+            WorkerName.make("local"),
+            "local",
+            Option.none(),
+          );
           assert(retried._tag === "AttemptStarted");
 
           const attempts = (yield* store.snapshot(runId)).attempts;
@@ -241,6 +260,7 @@ export const attemptRecordsContract = (adapter: PersistenceAdapter) => {
             const started = yield* store.beginAttempt(
               runId,
               WorkerName.make("local"),
+              "local",
               Option.none(),
             );
             assert(started._tag === "AttemptStarted");
@@ -262,6 +282,7 @@ export const attemptRecordsContract = (adapter: PersistenceAdapter) => {
             const reattached = yield* store.beginAttempt(
               runId,
               WorkerName.make("local"),
+              "local",
               Option.some(attemptId),
             );
             assert(reattached._tag === "AttemptStarted");
@@ -276,6 +297,7 @@ export const attemptRecordsContract = (adapter: PersistenceAdapter) => {
             const retried = yield* store.beginAttempt(
               runId,
               WorkerName.make("local"),
+              "local",
               Option.none(),
             );
             assert(retried._tag === "AttemptStarted");
@@ -297,6 +319,40 @@ export const attemptRecordsContract = (adapter: PersistenceAdapter) => {
             assert.deepStrictEqual(attempts[1]?.outOfMemory, Option.none());
           }),
         ),
+    );
+
+    it.live("records the kind of the Worker each Attempt started on", () =>
+      withPersistence(
+        adapter,
+        Effect.gen(function* () {
+          const store = yield* RunStore;
+          const runId = RunId.make("worker-kinds");
+          const worker = WorkerName.make("remote");
+          yield* store.recordAndClaim(lifecycleSubmission, runId);
+          const first = yield* store.beginAttempt(runId, worker, "exe.dev", Option.none());
+          assert(first._tag === "AttemptStarted");
+          // A reattach keeps the kind recorded when the Attempt started.
+          const reattached = yield* store.beginAttempt(
+            runId,
+            worker,
+            "ssh",
+            Option.some(first.execution.attempt.id),
+          );
+          assert(reattached._tag === "AttemptStarted");
+          assert.deepStrictEqual(reattached.execution.attempt.workerKind, Option.some("exe.dev"));
+          yield* store.finishAttempt(
+            first.execution.attempt,
+            Result.fail(InfraFailure.make({ message: "worker lost", cause: "test" })),
+          );
+          const second = yield* store.beginAttempt(runId, worker, "ssh", Option.none());
+          assert(second._tag === "AttemptStarted");
+
+          assert.deepStrictEqual(
+            (yield* store.snapshot(runId)).attempts.map(({ workerKind }) => workerKind),
+            [Option.some("exe.dev"), Option.some("ssh")],
+          );
+        }),
+      ),
     );
   });
 };

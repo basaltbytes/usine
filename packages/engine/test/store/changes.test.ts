@@ -109,7 +109,7 @@ it.effect(
         yield* expectWrite(store.recordAndClaim(start, run), [{ kind: "run", id: run }]);
         yield* expectUnchanged(store.recordAndClaim(start, run));
         const started = yield* expectWrite(
-          store.beginAttempt(run, WorkerName.make("local"), Option.none()),
+          store.beginAttempt(run, WorkerName.make("local"), "local", Option.none()),
           [{ kind: "run", id: run }],
         );
         assert(started._tag === "AttemptStarted");
@@ -197,7 +197,9 @@ it.effect(
             { kind: "run", id: run },
           ],
         );
-        yield* expectUnchanged(store.beginAttempt(run, WorkerName.make("local"), Option.none()));
+        yield* expectUnchanged(
+          store.beginAttempt(run, WorkerName.make("local"), "local", Option.none()),
+        );
         const next = Submission.make({
           ...start,
           event: Event.make({
@@ -319,7 +321,12 @@ it.effect("restores only the latest future pool reset deadlines after a store re
         const store = yield* RunStore;
         const run = RunId.make("restart-pool-run");
         yield* store.recordAndClaim(lifecycleSubmission, run);
-        const started = yield* store.beginAttempt(run, WorkerName.make("local"), Option.none());
+        const started = yield* store.beginAttempt(
+          run,
+          WorkerName.make("local"),
+          "local",
+          Option.none(),
+        );
         assert(started._tag === "AttemptStarted");
         const attempt = started.execution.attempt;
         for (const [index, pool, primaryMinutes, secondaryMinutes] of [

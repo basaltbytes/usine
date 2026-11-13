@@ -160,7 +160,8 @@ const failRunningAttempt = (
  * Returns the changes for the executor result of `attemptId`. Infrastructure and capacity failures
  * allow up to 3 Attempts in total; a late or repeated result returns `Unchanged`. A success that
  * CI must wait on, without a verified pull request at its head, fails with the failure for the
- * result's `unverifiedHandoff`.
+ * result's `unverifiedHandoff`. A report that the completion check rejected fails with the
+ * check's failure, before the CI checks, which read the handoff from that report.
  */
 export const finishAttempt = (
   current: RunProgress,

@@ -157,6 +157,7 @@ const StepExecutorLive = Layer.succeed(StepExecutor)({
   intervene: () => Effect.void,
   reserve: () => Effect.succeed({
     worker: WorkerName.make("local"),
+    kind: "local",
     release: Effect.void,
   }),
   execute: ({ event }) => Effect.succeed(StepCompletion.fromResult(new StepResult({
@@ -271,7 +272,7 @@ Run `pnpm --filter @usine/engine check` after building dependencies to check Typ
 
 The local database composition provides `StepOutputStore` alongside `RunDatabase`. `layerWithDatabase` requires both ports. The engine writes documents before `finishAttempt`; replay preserves one row per output. Run reads and exports include only `StepResult.outputs` refs.
 
-`Submission.outcomeLabels` saves a loop's required verdict labels with its event. Before the engine records a successful completion, including a stored completion recovered after a restart, it calls `CompletionCheck.verify` (`/completion-check`) once, outside the retried store write. The check receives the run's attempt history so retries can reuse a verdict from the same run, including when a retry uses a different Worker's GitHub account. It skips the call when the run wouldn't record the success: the run stopped running, another attempt replaced this one, or the attempt's push failed. A rejected verdict fails the attempt and the run with `AgentFailure` and starts no other attempt; the attempt keeps the report's message and facts as its result. Already failed attempts retain their original failure. `CompletionCheck` is a required service: a host that doesn't verify labels provides `CompletionCheck.unverified`. Retry retains the saved requirement, while Run again uses the loop's current requirement.
+`Submission.outcomeLabels` saves a loop's required verdict labels with its event. Before the engine records a successful completion, including a stored completion recovered after a restart, it calls `CompletionCheck.verify` (`/completion-check`) once, outside the retried store write. The check receives the run's attempt history so retries can reuse a verdict from the same run, including when a retry uses a different Worker's GitHub account. Each attempt records the kind of its Worker in `Attempt.workerKind`, from the `kind` of the `WorkerLease` it started on; a reattach keeps the recorded kind, and older attempts have none. A report the check rejects fails the attempt before the CI checks, which read the handoff from that report. It skips the call when the run wouldn't record the success: the run stopped running, another attempt replaced this one, or the attempt's push failed. A rejected verdict fails the attempt and the run with `AgentFailure` and starts no other attempt; the attempt keeps the report's message and facts as its result. Already failed attempts retain their original failure. `CompletionCheck` is a required service: a host that doesn't verify labels provides `CompletionCheck.unverified`. Retry retains the saved requirement, while Run again uses the loop's current requirement.
 
 ## Memory-kill records
 

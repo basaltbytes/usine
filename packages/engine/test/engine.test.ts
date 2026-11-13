@@ -1,4 +1,10 @@
 import { StepCompletion } from "@usine/core/step/result";
+import {
+  StepOutput,
+  StepOutputName,
+  StepOutputSha256,
+  StepOutputType,
+} from "@usine/core/step/output";
 import { jsonKey } from "@usine/core/json-key";
 import { GitHubLabelName } from "@usine/core/label";
 import { EnginePersistenceError } from "../src/engine/error.ts";
@@ -54,6 +60,7 @@ import { LoopControl } from "../src/loop-control/loop-control.ts";
 import { RunReader } from "../src/run-reader/run-reader.ts";
 import { CompletionCheck } from "../src/completion-check.ts";
 import { StepExecutor } from "../src/step-executor.ts";
+import { StepOutputStore } from "../src/step-outputs/store.ts";
 import { TriggerRecheck } from "../src/trigger-condition.ts";
 import { runIdFor, Submission } from "../src/engine/submission.ts";
 import {
@@ -104,11 +111,15 @@ describe("durable run engine", () => {
             recover: () => Effect.succeed("found" as const),
             intervene: () => Effect.void,
             interrupt: () => Effect.void,
-            occupy: (worker) => Effect.succeed({ worker, release: Effect.void }),
+            occupy: (worker) => Effect.succeed({ worker, kind: "local", release: Effect.void }),
             sweep: Effect.void,
             discard: () => Effect.void,
             reserve: () =>
-              Effect.succeed({ worker: WorkerName.make("local"), release: Effect.void }),
+              Effect.succeed({
+                worker: WorkerName.make("local"),
+                kind: "local",
+                release: Effect.void,
+              }),
             execute: (execution) =>
               Effect.gen(function* () {
                 executed.push({
@@ -191,10 +202,15 @@ describe("durable run engine", () => {
           isLive: () => Effect.succeed(false),
           outcome: () => Effect.succeedNone,
           recover: () => Effect.succeed("found" as const),
-          occupy: (worker) => Effect.succeed({ worker, release: Effect.void }),
+          occupy: (worker) => Effect.succeed({ worker, kind: "local", release: Effect.void }),
           sweep: Effect.void,
           discard: () => Effect.void,
-          reserve: () => Effect.succeed({ worker: WorkerName.make("local"), release: Effect.void }),
+          reserve: () =>
+            Effect.succeed({
+              worker: WorkerName.make("local"),
+              kind: "local",
+              release: Effect.void,
+            }),
           execute: () => Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never)),
           interrupt: () => Effect.void,
           intervene: (id) =>
@@ -265,6 +281,30 @@ describe("durable run engine", () => {
               attempt.outcome.value._tag === "Succeeded",
           );
         }).pipe(Effect.provide(runtime));
+      }),
+    ),
+  );
+
+  it.live("records the kind of the leased Worker on the Attempt it starts", () =>
+    withInstance((directory) =>
+      Effect.gen(function* () {
+        const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([
+          Effect.succeed(stepResult("finished")),
+        ]);
+        yield* Effect.gen(function* () {
+          const engine = yield* RunEngine;
+          const accepted = yield* engine.submit(submission({ number: 1 }));
+          assert(accepted._tag === "Claimed");
+          const snapshot = yield* waitFor(
+            engine,
+            accepted.runId,
+            ({ run }) => run.state._tag === "Succeeded",
+          );
+          assert.deepStrictEqual(
+            snapshot.attempts.map(({ workerKind }) => workerKind),
+            [Option.some("exe.dev")],
+          );
+        }).pipe(Effect.provide(engineLayer(directory, executorLayer(plans, "exe.dev"))));
       }),
     ),
   );
@@ -935,7 +975,11 @@ describe("durable run engine", () => {
                   yield* TxRef.update(leased, (count) => count + 1);
                 }),
               ).pipe(
-                Effect.as({ worker: local, release: TxRef.update(leased, (count) => count - 1) }),
+                Effect.as({
+                  worker: local,
+                  kind: "local",
+                  release: TxRef.update(leased, (count) => count - 1),
+                }),
               ),
             execute: (execution, io) =>
               Effect.gen(function* () {
@@ -1237,7 +1281,7 @@ describe("durable run engine", () => {
           recover: () => Effect.succeed("found" as const),
           intervene: () => Effect.void,
           interrupt: () => Effect.void,
-          occupy: (worker) => Effect.succeed({ worker, release: Effect.void }),
+          occupy: (worker) => Effect.succeed({ worker, kind: "local", release: Effect.void }),
           sweep: Effect.void,
           discard: () => Effect.void,
           reserve: () =>
@@ -1327,32 +1371,54 @@ interface Failures {
   left: number;
 }
 
-/** Returns the instance's database, with transactions that fail while `failures.left` is positive. */
+/** Returns `effect`, or a lock failure of `operation` while `failures.left` is positive. */
+const failingWhile = <A, E, R>(
+  failures: Failures,
+  operation: string,
+  effect: Effect.Effect<A, E, R>,
+): Effect.Effect<A, E | EnginePersistenceError, R> =>
+  Effect.suspend((): Effect.Effect<A, E | EnginePersistenceError, R> => {
+    if (failures.left <= 0) return effect;
+    failures.left -= 1;
+    return Effect.fail(
+      EnginePersistenceError.make({ operation, cause: new Error("database is locked") }),
+    );
+  });
+
+/**
+ * Returns the instance's database, with transactions and step output writes that fail while
+ * `failures.left` is positive.
+ */
 const flakyDatabase = (directory: InstanceDirectory, failures: Failures) =>
-  Layer.effect(
-    RunDatabase,
-    Effect.gen(function* () {
-      const database = yield* RunDatabase;
-      const transaction = <A, E, R>(work: (tx: RunDatabaseClient) => Effect.Effect<A, E, R>) =>
-        Effect.suspend((): Effect.Effect<A, E | SqlError.SqlError | EnginePersistenceError, R> => {
-          if (failures.left <= 0) return database.transaction(work);
-          failures.left -= 1;
-          return Effect.fail(
-            EnginePersistenceError.make({
-              operation: "transaction",
-              cause: new Error("database is locked"),
-            }),
-          );
+  Layer.mergeAll(
+    Layer.effect(
+      RunDatabase,
+      Effect.gen(function* () {
+        const database = yield* RunDatabase;
+        const transaction = <A, E, R>(
+          work: (tx: RunDatabaseClient) => Effect.Effect<A, E, R>,
+        ): Effect.Effect<A, E | SqlError.SqlError | EnginePersistenceError, R> =>
+          failingWhile(failures, "transaction", database.transaction(work));
+        return new Proxy(database, {
+          get: (target, property) => {
+            if (property === "transaction") return transaction;
+            // SAFETY: the proxy only forwards members of the database client.
+            const member = target[property as keyof RunDatabaseClient];
+            return member instanceof Function ? member.bind(target) : member;
+          },
         });
-      return new Proxy(database, {
-        get: (target, property) => {
-          if (property === "transaction") return transaction;
-          // SAFETY: the proxy only forwards members of the database client.
-          const member = target[property as keyof RunDatabaseClient];
-          return member instanceof Function ? member.bind(target) : member;
-        },
-      });
-    }),
+      }),
+    ),
+    Layer.effect(
+      StepOutputStore,
+      Effect.map(StepOutputStore, (outputs) =>
+        StepOutputStore.of({
+          ...outputs,
+          write: (context, written) =>
+            failingWhile(failures, "write step outputs", outputs.write(context, written)),
+        }),
+      ),
+    ),
   ).pipe(Layer.provideMerge(localSqliteLayer(directory)));
 
 /** Returns the engine on `flakyDatabase` with `executor`; every queued Event's trigger still matches. */
@@ -1425,6 +1491,101 @@ describe("store failures in a Run's fiber", () => {
           assert.strictEqual(failures.left, 0);
           assert.strictEqual(checks, 1);
         }).pipe(Effect.provide(flakyEngineLayer(directory, failures, executorLayer(plans), check)));
+      }),
+    ),
+  );
+
+  it.live("reads the Run once more when the read before verifying outcome labels fails", () =>
+    withInstance((directory) =>
+      Effect.gen(function* () {
+        const failures: Failures = { left: 0 };
+        const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([
+          // The next transaction, which reads the Run before the outcome label check, fails once.
+          Effect.sync(() => {
+            failures.left = 1;
+          }).pipe(Effect.as(stepResult("verified after the read is retried"))),
+        ]);
+        let checks = 0;
+        const check = Layer.succeed(CompletionCheck)({
+          verify: () =>
+            Effect.sync(() => {
+              assert.strictEqual(failures.left, 0);
+              checks += 1;
+            }),
+        });
+        yield* Effect.gen(function* () {
+          const engine = yield* RunEngine;
+          const accepted = yield* engine.submit(
+            Submission.make({
+              ...submission({ number: 1, item: "read-before-check" }),
+              outcomeLabels: [GitHubLabelName.make("passed")],
+            }),
+          );
+          assert(accepted._tag === "Claimed");
+          const finished = yield* waitFor(
+            engine,
+            accepted.runId,
+            ({ run }) => run.state._tag === "Succeeded",
+          );
+          assert.strictEqual(finished.attempts.length, 1);
+          assert.strictEqual(failures.left, 0);
+          assert.strictEqual(checks, 1);
+        }).pipe(Effect.provide(flakyEngineLayer(directory, failures, executorLayer(plans), check)));
+      }),
+    ),
+  );
+
+  it.live("writes an Attempt's step outputs once more when the write fails", () =>
+    withInstance((directory) =>
+      Effect.gen(function* () {
+        const failures: Failures = { left: 0 };
+        const document = StepOutput.make({
+          name: StepOutputName.make("walkthrough"),
+          type: StepOutputType.make("balade.walkthrough"),
+          commit: Option.none(),
+          content: { title: "Written on the second try" },
+          size: 37,
+          sha256: StepOutputSha256.make("a".repeat(64)),
+        });
+        const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([
+          Effect.succeed(stepResult("finished with an output")),
+        ]);
+        // The Attempt's first store write after it ends, its step outputs, fails once.
+        const executor = Layer.effect(
+          StepExecutor,
+          Effect.map(StepExecutor, (scripted) =>
+            StepExecutor.of({
+              ...scripted,
+              execute: (execution, io) =>
+                scripted.execute(execution, io).pipe(
+                  Effect.map(({ result }) => StepCompletion.fromResult(result, [document])),
+                  Effect.tap(() =>
+                    Effect.sync(() => {
+                      failures.left = 1;
+                    }),
+                  ),
+                ),
+            }),
+          ),
+        ).pipe(Layer.provide(executorLayer(plans)));
+        yield* Effect.gen(function* () {
+          const engine = yield* RunEngine;
+          const accepted = yield* engine.submit(submission({ number: 1, item: "outputs" }));
+          assert(accepted._tag === "Claimed");
+          const finished = yield* waitFor(
+            engine,
+            accepted.runId,
+            ({ run }) => run.state._tag === "Succeeded",
+          );
+          const [attempt] = finished.attempts;
+          assert(attempt !== undefined && finished.attempts.length === 1);
+          assert.strictEqual(failures.left, 0);
+          const stored = yield* (yield* StepOutputStore).read(attempt.id, document.name);
+          assert.deepStrictEqual(
+            Option.map(stored, ({ content }) => content),
+            Option.some(document.content),
+          );
+        }).pipe(Effect.provide(flakyEngineLayer(directory, failures, executor)));
       }),
     ),
   );

@@ -101,7 +101,12 @@ const finalEnd = (run: RunDetailView["run"]): Option.Option<AttemptEnd> => {
     return Option.some({ _tag: "Succeeded", message: Option.fromNullishOr(run.resultMessage) });
   if (run.state === "Canceled") return Option.some({ _tag: "Canceled", salvage });
   if (run.state === "Failed" && attempt?.outcome?._tag === "Failed")
-    return Option.some({ _tag: "Failed", failure: attempt.outcome.failure, salvage });
+    return Option.some({
+      _tag: "Failed",
+      failure: attempt.outcome.failure,
+      report: Option.fromNullishOr(attempt.outcome.report),
+      salvage,
+    });
   return Option.none();
 };
 

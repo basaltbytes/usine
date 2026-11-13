@@ -114,6 +114,8 @@ export type AttemptEnd =
   | {
       readonly _tag: "Failed";
       readonly failure: FailureView;
+      /** The final report that the Attempt kept: a rejected report or a failed CI handoff. */
+      readonly report: Option.Option<string>;
       readonly salvage: AttemptSalvage | null;
     }
   | { readonly _tag: "Canceled"; readonly salvage: AttemptSalvage | null };
@@ -246,16 +248,21 @@ const isTerminal = (notice: TranscriptNotice) =>
     notice.origin.payload._tag === "Failed" ||
     notice.origin.payload._tag === "Interrupted");
 
-/** Returns the Agent text that a terminal outcome repeats: the result, failure report, blocker, or question. */
+/**
+ * Returns the Agent text that a terminal outcome repeats: the result, the kept final report,
+ * the failure report, the blocker, or the question.
+ */
 export const terminalText = (end: AttemptEnd): string | null =>
   Match.valueTags(end, {
     Succeeded: ({ message }) => Option.getOrNull(message),
-    Failed: ({ failure }) =>
-      failure._tag === "AgentFailure" ||
-      failure._tag === "BlockedFailure" ||
-      failure._tag === "QuestionFailure"
-        ? failureMessage(failure)
-        : null,
+    Failed: ({ failure, report }) =>
+      Option.getOrElse(report, () =>
+        failure._tag === "AgentFailure" ||
+        failure._tag === "BlockedFailure" ||
+        failure._tag === "QuestionFailure"
+          ? failureMessage(failure)
+          : null,
+      ),
     Canceled: () => null,
   });
 
@@ -274,13 +281,19 @@ const envelopeEnd = (
       AwaitingCi: () => null,
       HandedOff: () => null,
       Succeeded: (): AttemptEnd => ({ _tag: "Succeeded", message }),
-      Failed: ({ failure }): AttemptEnd => ({ _tag: "Failed", failure, salvage }),
+      Failed: ({ failure, report }): AttemptEnd => ({
+        _tag: "Failed",
+        failure,
+        report: Option.fromNullishOr(report),
+        salvage,
+      }),
       Canceled: (): AttemptEnd => ({ _tag: "Canceled", salvage }),
     });
   if (envelope?.origin._tag !== "Envelope") return null;
   const payload = envelope.origin.payload;
   if (payload._tag === "Final") return { _tag: "Succeeded", message };
-  if (payload._tag === "Failed") return { _tag: "Failed", failure: payload.failure, salvage };
+  if (payload._tag === "Failed")
+    return { _tag: "Failed", failure: payload.failure, report: Option.none(), salvage };
   if (payload._tag === "Interrupted") return { _tag: "Canceled", salvage };
   return null;
 };

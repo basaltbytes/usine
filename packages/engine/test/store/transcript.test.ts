@@ -55,7 +55,12 @@ describe("Attempt transcripts", () => {
           });
           const runId = RunId.make(`usage-run-${index}`);
           yield* store.recordAndClaim(submission, runId);
-          const started = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
+          const started = yield* store.beginAttempt(
+            runId,
+            WorkerName.make("local"),
+            "local",
+            Option.none(),
+          );
           assert(started._tag === "AttemptStarted");
           const attemptId = started.execution.attempt.id;
           const parent = ParentSession.make({
@@ -234,7 +239,12 @@ describe("Attempt transcripts", () => {
         const database = yield* RunDatabase;
         const store = yield* RunStore;
         yield* store.recordAndClaim(submission, runId);
-        const started = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
+        const started = yield* store.beginAttempt(
+          runId,
+          WorkerName.make("local"),
+          "local",
+          Option.none(),
+        );
         assert.strictEqual(started._tag, "AttemptStarted");
         if (started._tag !== "AttemptStarted") return;
         const attemptId = started.execution.attempt.id;
@@ -294,7 +304,12 @@ describe("Attempt transcripts", () => {
         const database = yield* RunDatabase;
         const store = yield* RunStore;
         yield* store.recordAndClaim(submission, runId);
-        const started = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
+        const started = yield* store.beginAttempt(
+          runId,
+          WorkerName.make("local"),
+          "local",
+          Option.none(),
+        );
         assert.strictEqual(started._tag, "AttemptStarted");
         if (started._tag !== "AttemptStarted") return;
         const attemptId = started.execution.attempt.id;

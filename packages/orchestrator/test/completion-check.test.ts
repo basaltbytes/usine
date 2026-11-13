@@ -4,9 +4,11 @@ import { UsineConfig } from "@usine/config/factory";
 import { AgentName } from "@usine/core/agent";
 import { BrainSpec, Harness, ModelId } from "@usine/core/agent/brain";
 import { Attempt, AttemptId, AttemptNumber, AttemptTask } from "@usine/core/attempt";
+import { InfraFailure } from "@usine/core/attempt/failure";
+import { AttemptFailed } from "@usine/core/attempt/outcome";
 import { Event } from "@usine/core/event";
 import { InstanceDirectory } from "@usine/core/instance";
-import { ItemKey } from "@usine/core/item";
+import { ItemKey, ItemNumber } from "@usine/core/item";
 import { GitHubLabelName } from "@usine/core/label";
 import { jsonKey } from "@usine/core/json-key";
 import { RepositoryName } from "@usine/core/repository";
@@ -17,11 +19,18 @@ import { type BotAccount, BotLogin, WorkerName } from "@usine/core/worker";
 import { CompletionCheck } from "@usine/engine/completion-check";
 import { RunEngine, Submission } from "@usine/engine/engine";
 import { layer as engineLayer } from "@usine/engine/local-sqlite";
+import { summarizeRun } from "@usine/engine/run-reader";
 import { StepExecutor } from "@usine/engine/step-executor";
-import { GitHubApiError, GitHubApp, type GitHubAppError } from "@usine/github/github-app";
+import {
+  GitHubApiError,
+  GitHubApp,
+  type GitHubAppError,
+  InvalidGitHubResponseError,
+} from "@usine/github/github-app";
 import {
   GitHubItemHistory,
   GitHubItemNotFoundError,
+  GitHubTimelineTooLongError,
   type ItemChange,
   LabelAdded,
   LabelRemoved,
@@ -45,6 +54,7 @@ import {
 } from "effect";
 import { TestClock } from "effect/testing";
 import { completionCheckLayer } from "../src/completion-check.ts";
+import { runSummaryView, runView } from "../src/operator/projection.ts";
 import { gitHubItemKey } from "../src/polling/repository-sync.ts";
 import { engineItemChecksLayer } from "../src/runtime.ts";
 import { sqliteTempDirectory } from "../../../tooling/test/sqlite.mts";
@@ -92,6 +102,25 @@ const attemptOn = (worker: string) =>
     salvage: Option.none(),
   });
 
+/** The first Attempt on `worker`, failed at `endedAt`. */
+const failedOn = (worker: string, endedAt: DateTime.Utc) =>
+  Attempt.make({
+    ...attemptOn(worker),
+    outcome: Option.some(
+      AttemptFailed.make({ failure: InfraFailure.make({ message: "worker lost", cause: "test" }) }),
+    ),
+    endedAt: Option.some(endedAt),
+  });
+
+/** The second Attempt on `worker`, started at 16:00. */
+const retryOn = (worker: string) =>
+  Attempt.make({
+    ...attemptOn(worker),
+    id: AttemptId.make("run-1/review/2"),
+    number: AttemptNumber.make(2),
+    startedAt: at("2026-11-08T16:00:00Z"),
+  });
+
 const review = (itemKey: ItemKey = gitHubItemKey(repository, 1)) =>
   Submission.make({
     ...submission(1),
@@ -127,7 +156,10 @@ const removed = (
 
 type TimelineRead = (
   since: DateTime.Utc,
-) => Effect.Effect<ReadonlyArray<TimelineEntry>, GitHubAppError | GitHubItemNotFoundError>;
+) => Effect.Effect<
+  ReadonlyArray<TimelineEntry>,
+  GitHubAppError | GitHubItemNotFoundError | GitHubTimelineTooLongError
+>;
 
 /**
  * Returns GitHub fakes that record each read. The timeline fake returns every entry of the
@@ -213,10 +245,10 @@ const reviewingExecutor = (executions: { count: number }) => {
     recover: () => Effect.succeed("found" as const),
     intervene: () => Effect.void,
     interrupt: () => Effect.void,
-    occupy: () => Effect.succeed({ worker, release: Effect.void }),
+    occupy: () => Effect.succeed({ worker, kind: "local", release: Effect.void }),
     sweep: Effect.void,
     discard: () => Effect.void,
-    reserve: () => Effect.succeed({ worker, release: Effect.void }),
+    reserve: () => Effect.succeed({ worker, kind: "local", release: Effect.void }),
     execute: () =>
       Effect.sync(() => {
         executions.count += 1;
@@ -306,13 +338,9 @@ describe("label events", () => {
           Effect.succeed([added(appActor, "ready-to-merge", at("2026-11-08T15:55:00Z"))]),
         labels: Effect.succeed(["ready-to-merge"]),
       });
-      const retry = Attempt.make({
-        ...attemptOn("local"),
-        id: AttemptId.make("run-1/review/2"),
-        number: AttemptNumber.make(2),
-        startedAt: at("2026-11-08T16:00:00Z"),
-      });
-      const result = yield* verify(retry, review(), [attemptOn("local"), retry]).pipe(
+      const retry = retryOn("local");
+      const first = failedOn("local", at("2026-11-08T15:58:00Z"));
+      const result = yield* verify(retry, review(), [first, retry]).pipe(
         Effect.provide(fake.check),
       );
       assert.strictEqual(result._tag, "Success");
@@ -320,6 +348,48 @@ describe("label events", () => {
         { actor: appActor, since: "2026-11-08T15:50:10.000Z", item: 1 },
       ]);
       assert.strictEqual(fake.reads.labels, 0);
+    }),
+  );
+
+  it.effect.each([
+    ["between the Attempts", at("2026-11-08T15:59:00Z"), "Failure"],
+    ["at the end of the earlier Attempt", at("2026-11-08T15:58:00Z"), "Success"],
+    ["during the retry", at("2026-11-08T16:00:00Z"), "Success"],
+  ] as const)("counts a label the shared writer added %s accordingly", ([, time, expected]) =>
+    Effect.gen(function* () {
+      // Another Run's `on_green` writes as the same App bot as the Attempts.
+      const fake = fakeGitHub({
+        timeline: () => Effect.succeed([added(appActor, "ready-to-merge", time)]),
+        labels: Effect.succeed(["ready-to-merge"]),
+      });
+      const retry = retryOn("local");
+      const result = yield* verify(retry, review(), [
+        failedOn("local", at("2026-11-08T15:58:00.500Z")),
+        retry,
+      ]).pipe(Effect.provide(fake.check));
+      assert.strictEqual(result._tag, expected);
+      if (result._tag === "Failure")
+        assert.include(result.failure.message, "added no outcome label");
+      assert.strictEqual(fake.reads.labels, 0);
+    }),
+  );
+
+  it.effect("doesn't count the labels of an earlier Attempt without a recorded end", () =>
+    Effect.gen(function* () {
+      const fake = fakeGitHub({
+        timeline: () =>
+          Effect.succeed([added(appActor, "ready-to-merge", at("2026-11-08T15:55:00Z"))]),
+      });
+      const retry = retryOn("local");
+      const first = Attempt.make({ ...failedOn("local", startedAt), endedAt: Option.none() });
+      const result = yield* verify(retry, review(), [first, retry]).pipe(
+        Effect.provide(fake.check),
+      );
+      assert(result._tag === "Failure");
+      assert.include(result.failure.message, "added no outcome label");
+      assert.deepStrictEqual(fake.reads.timeline, [
+        { actor: appActor, since: "2026-11-08T16:00:00.000Z", item: 1 },
+      ]);
     }),
   );
 
@@ -338,13 +408,9 @@ describe("label events", () => {
             ]),
           labels: Effect.succeed([]),
         });
-        const retry = Attempt.make({
-          ...attemptOn(retryWorker),
-          id: AttemptId.make("run-1/review/2"),
-          number: AttemptNumber.make(2),
-          startedAt: at("2026-11-08T16:00:00Z"),
-        });
-        const result = yield* verify(retry, review(), [attemptOn(firstWorker), retry]).pipe(
+        const retry = retryOn(retryWorker);
+        const first = failedOn(firstWorker, at("2026-11-08T15:58:00Z"));
+        const result = yield* verify(retry, review(), [first, retry]).pipe(
           Effect.provide(fake.check),
         );
         assert.strictEqual(result._tag, "Success");
@@ -394,6 +460,52 @@ describe("label events", () => {
       assert.deepStrictEqual(
         fake.reads.timeline.map(({ actor }) => actor),
         [exeActor],
+      );
+    }),
+  );
+
+  it.effect.each([
+    ["exe.dev", exeActor],
+    ["local", appActor],
+  ] as const)(
+    "reads the writer of the recorded %s kind, whatever the Worker's kind is now",
+    ([kind, actor]) =>
+      Effect.gen(function* () {
+        const fake = fakeGitHub({
+          timeline: () =>
+            Effect.succeed([added(actor, "ready-to-merge", at("2026-11-08T15:55:00Z"))]),
+        });
+        // The configuration gives `exe-one` the exe.dev kind and `local` the local kind.
+        const worker = kind === "exe.dev" ? "local" : "exe-one";
+        const recorded = Attempt.make({ ...attemptOn(worker), workerKind: Option.some(kind) });
+        const result = yield* verify(recorded, review()).pipe(Effect.provide(fake.check));
+        assert.strictEqual(result._tag, "Success");
+        assert.deepStrictEqual(
+          fake.reads.timeline.map((read) => read.actor),
+          [actor],
+        );
+      }),
+  );
+
+  it.effect("reads an earlier Attempt's writer from its recorded kind on a removed Worker", () =>
+    Effect.gen(function* () {
+      const fake = fakeGitHub({
+        timeline: () =>
+          Effect.succeed([added(exeActor, "ready-to-merge", at("2026-11-08T15:55:00Z"))]),
+      });
+      const first = Attempt.make({
+        ...failedOn("removed-worker", at("2026-11-08T15:58:00Z")),
+        workerKind: Option.some("exe.dev"),
+      });
+      const retry = retryOn("local");
+      const result = yield* verify(retry, review(), [first, retry]).pipe(
+        Effect.provide(fake.check),
+      );
+      assert.strictEqual(result._tag, "Success");
+      // Each writer's read starts at its own earliest Attempt.
+      assert.deepStrictEqual(
+        Object.fromEntries(fake.reads.timeline.map(({ actor, since }) => [actor, since])),
+        { [appActor]: "2026-11-08T16:00:00.000Z", [exeActor]: "2026-11-08T15:50:10.000Z" },
       );
     }),
   );
@@ -496,6 +608,108 @@ describe("current label fallback", () => {
         assert.include(result.failure.message, "ended without an outcome label");
       assert.strictEqual(fake.reads.timeline.length, 0);
       assert.strictEqual(fake.reads.labels, 1);
+    }),
+  );
+
+  it.effect("reads a timeline longer than ten pages once before checking current labels", () =>
+    Effect.gen(function* () {
+      const started = yield* Deferred.make<void>();
+      const fake = fakeGitHub({
+        timeline: () =>
+          Deferred.succeed(started, undefined).pipe(
+            Effect.andThen(
+              GitHubTimelineTooLongError.make({
+                repository,
+                item: ItemNumber.make(1),
+                since: "2026-11-08T15:50:10.000Z",
+                pages: 10,
+                message:
+                  "The timeline of acme/demo#1 since 2026-11-08T15:50:10.000Z has more than 10 pages",
+              }),
+            ),
+          ),
+        labels: Effect.succeed(["ready-to-merge"]),
+      });
+      const fiber = yield* verify(attemptOn("local"), review()).pipe(
+        Effect.provide(fake.check),
+        Effect.forkChild,
+      );
+      yield* Deferred.await(started);
+      yield* TestClock.adjust("3 seconds");
+      assert.strictEqual((yield* Fiber.join(fiber))._tag, "Success");
+      assert.strictEqual(fake.reads.timeline.length, 1);
+      assert.strictEqual(fake.reads.labels, 1);
+    }),
+  );
+
+  const bodyFailure = (operation: "fetch-item-timeline" | "fetch-item-labels") =>
+    InvalidGitHubResponseError.make({
+      operation,
+      message: "GitHub returned a response in an unexpected format",
+      detail: "Decode error (200 GET https://api.github.com/graphql)",
+    });
+
+  it.effect("reads label events again after a response body fails partway through", () =>
+    Effect.gen(function* () {
+      const started = yield* Deferred.make<void>();
+      let reads = 0;
+      const fake = fakeGitHub({
+        timeline: () =>
+          Effect.suspend(() => {
+            reads += 1;
+            return reads === 1
+              ? Deferred.succeed(started, undefined).pipe(
+                  Effect.andThen(bodyFailure("fetch-item-timeline")),
+                )
+              : Effect.succeed([
+                  added(appActor, "agent-review-findings", at("2026-11-08T15:55:00Z")),
+                ]);
+          }),
+      });
+      const fiber = yield* verify(attemptOn("local"), review()).pipe(
+        Effect.provide(fake.check),
+        Effect.forkChild,
+      );
+      yield* Deferred.await(started);
+      yield* TestClock.adjust("1 second");
+      assert.strictEqual((yield* Fiber.join(fiber))._tag, "Success");
+      assert.strictEqual(fake.reads.timeline.length, 2);
+      assert.strictEqual(fake.reads.labels, 0);
+    }),
+  );
+
+  it.effect("reads current labels again after a response body fails partway through", () =>
+    Effect.gen(function* () {
+      const timelineStarted = yield* Deferred.make<void>();
+      const started = yield* Deferred.make<void>();
+      let labelReads = 0;
+      const fake = fakeGitHub({
+        timeline: () =>
+          Deferred.succeed(timelineStarted, undefined).pipe(
+            Effect.andThen(bodyFailure("fetch-item-timeline")),
+          ),
+        labels: Effect.suspend(() => {
+          labelReads += 1;
+          return labelReads === 1
+            ? Deferred.succeed(started, undefined).pipe(
+                Effect.andThen(bodyFailure("fetch-item-labels")),
+              )
+            : Effect.succeed(["ready-to-merge"]);
+        }),
+      });
+      const fiber = yield* verify(attemptOn("local"), review()).pipe(
+        Effect.provide(fake.check),
+        Effect.forkChild,
+      );
+      yield* Deferred.await(timelineStarted);
+      yield* TestClock.adjust("1 second");
+      yield* TestClock.adjust("2 seconds");
+      yield* Deferred.await(started);
+      assert.strictEqual(fake.reads.labels, 1);
+      yield* TestClock.adjust("1 second");
+      assert.strictEqual((yield* Fiber.join(fiber))._tag, "Success");
+      assert.strictEqual(fake.reads.timeline.length, 3);
+      assert.strictEqual(fake.reads.labels, 2);
     }),
   );
 
@@ -787,6 +1001,20 @@ it.live("fails without re-running the agent when the attempt added no outcome la
       const outcome = finished.attempts[0]?.outcome;
       assert(outcome !== undefined && Option.isSome(outcome) && outcome.value._tag === "Failed");
       assert.strictEqual(outcome.value.failure._tag, "AgentFailure");
+      // The run detail shows the rejected report next to the failure; Run lists omit it.
+      const view = runView(finished, new Set(), new Map());
+      assert.deepStrictEqual(
+        view.attempts.map(({ outcome }) =>
+          outcome?._tag === "Failed" ? [outcome.failure._tag, outcome.report] : null,
+        ),
+        [["AgentFailure", "Review published."]],
+      );
+      assert.deepStrictEqual(
+        runSummaryView(summarizeRun(finished), new Set(), new Map()).attempts.map(({ outcome }) =>
+          outcome?._tag === "Failed" ? outcome.report : undefined,
+        ),
+        [null],
+      );
     }),
   );
 });

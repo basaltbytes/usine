@@ -220,8 +220,9 @@ export const checkReads = ({
       recover: () => Effect.succeed("found" as const),
       intervene: () => Effect.void,
       interrupt: () => Effect.void,
-      reserve: () => Effect.succeed({ worker: WorkerName.make("worker"), release: Effect.void }),
-      occupy: (worker) => Effect.succeed({ worker, release: Effect.void }),
+      reserve: () =>
+        Effect.succeed({ worker: WorkerName.make("worker"), kind: "local", release: Effect.void }),
+      occupy: (worker) => Effect.succeed({ worker, kind: "local", release: Effect.void }),
       sweep: Effect.void,
       discard: () => Effect.void,
       execute: () => Deferred.succeed(preparing, undefined).pipe(Effect.andThen(Effect.never)),
