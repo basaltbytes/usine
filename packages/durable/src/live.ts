@@ -92,17 +92,23 @@ export const harnessLayer = (instanceDirectory: InstanceDirectory, access?: Pare
 export const childBackendLayer: Layer.Layer<ChildBackend, never, Harnesses> = childDispatcherLayer;
 
 /**
+ * Provides the event-driven coordinator and its attempt journal, which migrates and uses the
+ * runtime database's `SqlClient`. The coordinator decides a report without a reserved marker with
+ * a structured completion when the agent has a `decision` brain.
+ */
+export const coordinatorLayer = CoordinatorRuntime.layer.pipe(
+  Layer.provide(completionWakeUp),
+  Layer.provideMerge(sqliteAttemptJournalLayer),
+);
+
+/**
  * Provides the Node `AttemptRuntime` with the real child backends: the Pi parent's runtime on
- * `.usine/durable.sqlite`, and the event-driven coordinator, whose attempt journal migrates and
- * uses the runtime database's `SqlClient`. The coordinator decides a report without a reserved
- * marker with a structured completion when the agent has a `decision` brain. Building it resumes
- * every unfinished Pi Attempt.
+ * `.usine/durable.sqlite`, and the event-driven coordinator of `coordinatorLayer`. Building it
+ * resumes every unfinished Pi Attempt.
  */
 export const layer = (instanceDirectory: InstanceDirectory, access?: ParentModelAccess) =>
   routerLayer.pipe(
-    Layer.provide(Layer.mergeAll(attemptRuntimeLayer, CoordinatorRuntime.layer)),
-    Layer.provide(completionWakeUp),
-    Layer.provide(sqliteAttemptJournalLayer),
+    Layer.provide(Layer.mergeAll(attemptRuntimeLayer, coordinatorLayer)),
     Layer.provideMerge(harnessLayer(instanceDirectory, access)),
     Layer.provide(childBackendLayer),
   );

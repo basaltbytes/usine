@@ -14,7 +14,7 @@ import {
   sessionPool,
   type SessionTokensUpdated,
 } from "@usine/core/agent/session";
-import { Effect, Layer, Match, Option, Schema } from "effect";
+import { Effect, Layer, Match, Option, Result, Schema } from "effect";
 
 import {
   AtCapacity,
@@ -59,23 +59,26 @@ const decisionCompletion = RoleSpec.make({
   output: "structured",
 });
 
-/** Text that the decision may leave to the event, as `null`, because strict modes require every key. */
-const defaulted = Schema.NullOr(Schema.NonEmptyString);
+/**
+ * Text that the decision may leave to the event, as `null`, because strict modes require every key.
+ * The wire schema carries no `minLength`, which strict modes may not accept, so `""` means `null`.
+ */
+const defaulted = Schema.NullOr(Schema.String);
 
 /**
  * The completion's value: a `ModelDecision` whose optional fields are `null` when absent, and why
- * the model chose it.
+ * the model chose it. Its strings carry no length keyword; `decisionOf` checks the required ones.
  */
 export const CompletionAnswer = Schema.Struct({
   decision: Schema.Union([
     Schema.TaggedStruct("Complete", { message: defaulted }),
     Schema.TaggedStruct("RetryChild", { assignment: defaulted }),
     Schema.TaggedStruct("Blocked", { message: defaulted }),
-    Schema.TaggedStruct("Question", { question: Schema.NonEmptyString }),
-    Schema.TaggedStruct("Failed", { message: Schema.NonEmptyString }),
-    Schema.TaggedStruct("InfraFailed", { message: Schema.NonEmptyString }),
+    Schema.TaggedStruct("Question", { question: Schema.String }),
+    Schema.TaggedStruct("Failed", { message: Schema.String }),
+    Schema.TaggedStruct("InfraFailed", { message: Schema.String }),
     Schema.TaggedStruct("AtCapacity", {
-      message: Schema.NonEmptyString,
+      message: Schema.String,
       resetsAt: Schema.NullOr(Schema.DateTimeUtcFromString),
     }),
   ]),
@@ -83,18 +86,41 @@ export const CompletionAnswer = Schema.Struct({
 });
 type CompletionAnswer = typeof CompletionAnswer.Type;
 
-/** Returns the `ModelDecision` that `answer` states, without the keys it left `null`. */
-const decisionOf = (answer: CompletionAnswer["decision"]): ModelDecision =>
+/** Whether the answer gave `text`, rather than leaving it `null` or empty. */
+const given = (text: string | null): text is string => text !== null && text !== "";
+
+/** `text` as a required field of `tag`, or why the answer can't state it. */
+const required = (tag: string, field: string, text: string): Result.Result<string, string> =>
+  text === "" ? Result.fail(`The answer's ${tag} has an empty ${field}`) : Result.succeed(text);
+
+/**
+ * Returns the `ModelDecision` that `answer` states, without the keys it left `null` or empty, or
+ * why it states none: a required text is empty.
+ */
+const decisionOf = (answer: CompletionAnswer["decision"]): Result.Result<ModelDecision, string> =>
   Match.valueTags(answer, {
-    Complete: ({ message }): ModelDecision => Complete.make(message === null ? {} : { message }),
-    RetryChild: ({ assignment }): ModelDecision =>
-      RetryChild.make(assignment === null ? {} : { assignment }),
-    Blocked: ({ message }): ModelDecision => Blocked.make(message === null ? {} : { message }),
-    Question: ({ question }): ModelDecision => Question.make({ question }),
-    Failed: ({ message }): ModelDecision => Failed.make({ message }),
-    InfraFailed: ({ message }): ModelDecision => InfraFailed.make({ message }),
-    AtCapacity: ({ message, resetsAt }): ModelDecision =>
-      AtCapacity.make(resetsAt === null ? { message } : { message, resetsAt }),
+    Complete: ({ message }) =>
+      Result.succeed<ModelDecision>(Complete.make(given(message) ? { message } : {})),
+    RetryChild: ({ assignment }) =>
+      Result.succeed<ModelDecision>(RetryChild.make(given(assignment) ? { assignment } : {})),
+    Blocked: ({ message }) =>
+      Result.succeed<ModelDecision>(Blocked.make(given(message) ? { message } : {})),
+    Question: ({ question }) =>
+      Result.map(required("Question", "question", question), (question): ModelDecision =>
+        Question.make({ question }),
+      ),
+    Failed: ({ message }) =>
+      Result.map(required("Failed", "message", message), (message): ModelDecision =>
+        Failed.make({ message }),
+      ),
+    InfraFailed: ({ message }) =>
+      Result.map(required("InfraFailed", "message", message), (message): ModelDecision =>
+        InfraFailed.make({ message }),
+      ),
+    AtCapacity: ({ message, resetsAt }) =>
+      Result.map(required("AtCapacity", "message", message), (message): ModelDecision =>
+        AtCapacity.make(resetsAt === null ? { message } : { message, resetsAt }),
+      ),
   });
 
 const INSTRUCTIONS = `You decide what an Attempt does next. usine ran a child session of a coding agent on a task, and the child finished with the final report in \`event.report\`. The JSON below is the Attempt: the event, the start of the task, the outcome labels and CI policy that the engine checks after a success, the earlier delegations, the end of the child's output, and the child-session budget in \`maxChildren\`.
@@ -207,7 +233,9 @@ const make = Effect.gen(function* () {
     }
     const { value, usage } = completion.success;
     yield* attempt.recordUsage(usage);
-    const decision = decisionOf(value.decision);
+    const stated = decisionOf(value.decision);
+    if (stated._tag === "Failure") return yield* ruleDecides(attempt, event, stated.failure);
+    const decision = stated.success;
     const rejection = clampRejection(decision, context);
     if (Option.isSome(rejection))
       return yield* ruleDecides(

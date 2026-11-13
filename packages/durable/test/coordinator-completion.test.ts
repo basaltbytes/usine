@@ -1,4 +1,6 @@
 import { assert, describe, it } from "@effect/vitest";
+import { SqliteClient } from "@effect/sql-sqlite-node";
+import { type ChildHost, RemoteShell } from "@usine/agents/child-host";
 import {
   CapabilityProfile,
   catalog,
@@ -59,6 +61,7 @@ import {
   InfraFailed,
   type ModelDecision,
   Question,
+  DelegationSummary,
   ReservedReport,
   RetryChild,
 } from "../src/attempt/coordinator/rules.ts";
@@ -71,33 +74,38 @@ import {
   RecordedDecision,
   WakeUp,
 } from "../src/coordinator/wake-up.ts";
-import { coordinated, coordinatorWith, orchestrator, stored } from "./coordinator-support.ts";
-import { recordingSink, temporaryDatabase, sqliteJournal } from "./support.ts";
+import { coordinatorLayer } from "../src/live.ts";
+import { stubChildBackendLayer } from "../src/testing.ts";
+import { coordinated, orchestrator, stored } from "./coordinator-support.ts";
+import { recordingSink, temporaryDatabase } from "./support.ts";
 
 const DECISION_MODEL = ModelId.make("claude-haiku-4-5");
 
-/** The worker's credential for a request: the gateway's kind and the harness environment. */
-interface WorkerCredential {
+/**
+ * Where a request's child runs: the agent's harness, the host, the gateway's credential kind, and
+ * the harness environment. Without them, the agent runs on `claude` on a local host with its login.
+ */
+interface Worker {
+  readonly harness?: Harness;
+  readonly host?: ChildHost;
   readonly gateway?: GatewayCredentialKind;
   readonly environment?: Readonly<Record<string, string>>;
 }
 
 /** A request whose agent decides with `DECISION_MODEL`, or without a decision brain. */
-const requestFor = (
-  attemptId: string,
-  decision = true,
-  maxChildren = 3,
-  credential: WorkerCredential = {},
-) => {
+const requestFor = (attemptId: string, decision = true, maxChildren = 3, worker: Worker = {}) => {
   const request = coordinated(attemptId, maxChildren);
+  const agent = request.spec.agent;
   return AttemptRequest.make({
     ...request,
-    environment: { ...request.environment, ...credential.environment },
-    gatewayCredential: Effect.succeed(Option.fromNullishOr(credential.gateway)),
+    host: worker.host ?? request.host,
+    environment: { ...request.environment, ...worker.environment },
+    gatewayCredential: Effect.succeed(Option.fromNullishOr(worker.gateway)),
     spec: AttemptChannel.RunSpec.make({
       ...request.spec,
       agent: Agent.make({
-        ...request.spec.agent,
+        ...agent,
+        brain: BrainSpec.make({ ...agent.brain, harness: worker.harness ?? agent.brain.harness }),
         decision: decision
           ? Option.some(DecisionBrain.make({ model: DECISION_MODEL, effort: "low" }))
           : Option.none(),
@@ -114,7 +122,13 @@ const reported = (report: string, reserved = Option.none<ReservedReport>()) =>
     reserved,
   });
 
-const contextFor = (request: AttemptRequest, event: CoordinatorEvent) =>
+/** What the handler knows besides the request: the earlier delegations and the child's output. */
+interface History {
+  readonly delegations?: ReadonlyArray<DelegationSummary>;
+  readonly output?: string;
+}
+
+const contextFor = (request: AttemptRequest, event: CoordinatorEvent, history: History = {}) =>
   AttemptContext.make({
     event,
     maxChildren: request.spec.maxChildren,
@@ -123,8 +137,8 @@ const contextFor = (request: AttemptRequest, event: CoordinatorEvent) =>
     task: request.spec.task,
     outcomeLabels: request.spec.outcomeLabels,
     requiresCi: request.spec.requiresCi,
-    delegations: [],
-    output: "",
+    delegations: history.delegations ?? [],
+    output: history.output ?? "",
   });
 
 /** The usage that a scripted completion reports for `spec`, with the pool that admission set. */
@@ -183,12 +197,8 @@ const harnessesWith = (script: Script, harnesses: HarnessCatalog = catalog) => {
         Effect.map((value) => ({ value, usage: usageOf(spec) })),
       ),
   }));
-  return {
-    calls,
-    layer: completionWakeUp.pipe(
-      Layer.provide(Harnesses.layerFrom(harnesses, runtimes).pipe(Layer.orDie)),
-    ),
-  };
+  const registry = Harnesses.layerFrom(harnesses, runtimes).pipe(Layer.orDie);
+  return { calls, registry, layer: completionWakeUp.pipe(Layer.provide(registry)) };
 };
 
 /**
@@ -200,6 +210,7 @@ const wake = (
   request: AttemptRequest,
   event: CoordinatorEvent,
   harnessCatalog: HarnessCatalog = catalog,
+  history: History = {},
 ) =>
   Effect.gen(function* () {
     const harnesses = harnessesWith(script, harnessCatalog);
@@ -211,7 +222,7 @@ const wake = (
       ),
     ]);
     const decision = yield* Effect.flatMap(Effect.service(WakeUp), (wakeUp) =>
-      wakeUp.handle(event, contextFor(request, event), {
+      wakeUp.handle(event, contextFor(request, event, history), {
         attemptId: request.spec.attemptId,
         sequence: EventSequence.make(2),
         spec: request.spec,
@@ -378,7 +389,7 @@ describe("structured completion wake-up", () => {
     );
   }
 
-  const routes: ReadonlyArray<readonly [WorkerCredential, string, Option.Option<BillingPool>]> = [
+  const routes: ReadonlyArray<readonly [Worker, string, Option.Option<BillingPool>]> = [
     [{ gateway: "api-key" }, "gateway-api-key", Option.some("apiKeys")],
     [{ gateway: "subscription" }, "gateway-subscription", Option.some("claudePlan")],
     [{ environment: { ANTHROPIC_API_KEY: "sk-test" } }, "api-key", Option.none()],
@@ -418,6 +429,149 @@ describe("structured completion wake-up", () => {
       }),
     );
   }
+
+  const ssh = RemoteShell.make({
+    ssh: { command: "ssh", args: ["-o", "BatchMode=yes"] },
+    sshEnvironment: {},
+    destination: "worker.exe.xyz",
+  });
+  const contained = RemoteShell.make({ ...ssh, container: { runtime: "docker", name: "usine-1" } });
+  const placements: ReadonlyArray<readonly [string, Worker, string, string]> = [
+    // Codex can't turn its own tools off, so the role must accept native tools.
+    ["codex on a local host", { harness: Harness.make("codex") }, "local", "host-login"],
+    [
+      "codex on an ssh worker with a gateway",
+      { harness: Harness.make("codex"), host: ssh, gateway: "api-key" },
+      "ssh",
+      "gateway-api-key",
+    ],
+    ["claude on an ssh worker", { host: ssh }, "ssh", "host-login"],
+    [
+      "claude in a container with a gateway",
+      { host: contained, gateway: "subscription" },
+      "container",
+      "gateway-subscription",
+    ],
+  ];
+
+  for (const [name, worker, placement, route] of placements) {
+    it.effect(`asks ${name} at the child's placement`, () =>
+      Effect.gen(function* () {
+        const request = requestFor(`completion/placement-${placement}-${route}`, true, 3, worker);
+        const { decision, calls, fellBack } = yield* wake(
+          answering(retry),
+          request,
+          reported("Committed the fix, but the push failed."),
+        );
+
+        assert.isFalse(fellBack(""), "The rule decided instead of the completion");
+        const [call] = calls;
+        if (call === undefined) return assert.fail("The handler called no completion");
+        assert.deepStrictEqual(
+          {
+            harness: call.spec.session.brain.harness,
+            host: call.spec.host,
+            placement: call.spec.admitted.context.placement,
+            credential: call.spec.admitted.context.credential,
+            decision: Option.map(decision, ({ handler }) => handler),
+          },
+          {
+            harness: request.spec.agent.brain.harness,
+            host: request.host,
+            placement,
+            credential: route,
+            decision: Option.some("completion"),
+          },
+        );
+      }),
+    );
+  }
+
+  it.effect("asks with the instructions, the report, the delegations, and the output", () =>
+    Effect.gen(function* () {
+      const { calls } = yield* wake(
+        answering(retry),
+        requestFor("completion/prompt"),
+        reported("Committed the fix, but the push failed."),
+        catalog,
+        {
+          delegations: [
+            DelegationSummary.make({
+              child: ChildSessionCount.make(1),
+              status: "ended",
+              end: Option.some("interrupted"),
+              report: Option.some("The worker restarted during the tests."),
+            }),
+          ],
+          output: "remote: Permission to basaltbytes/usine.git denied.",
+        },
+      );
+
+      const [call] = calls;
+      if (call === undefined) return assert.fail("The handler called no completion");
+      for (const part of [
+        "You decide what an Attempt does next.",
+        "`RetryChild`: the work isn't done",
+        "Committed the fix, but the push failed.",
+        "The worker restarted during the tests.",
+        "remote: Permission to basaltbytes/usine.git denied.",
+        "Fix the flaky durable test.",
+      ])
+        assert.include(call.prompt, part);
+    }),
+  );
+
+  it.effect("reads an empty optional text as null", () =>
+    Effect.gen(function* () {
+      const { decision } = yield* wake(
+        answering({ decision: { _tag: "Blocked", message: "" }, reason: "No access." }),
+        requestFor("completion/empty-optional"),
+        reported("No access to the repository."),
+      );
+
+      assert.deepStrictEqual(
+        Option.map(decision, ({ decision }) => decision),
+        Option.some(Blocked.make({})),
+      );
+    }),
+  );
+
+  const empty: ReadonlyArray<readonly [Schema.Json, string]> = [
+    [{ _tag: "Question", question: "" }, "The answer's Question has an empty question"],
+    [{ _tag: "Failed", message: "" }, "The answer's Failed has an empty message"],
+    [{ _tag: "InfraFailed", message: "" }, "The answer's InfraFailed has an empty message"],
+    [
+      { _tag: "AtCapacity", message: "", resetsAt: null },
+      "The answer's AtCapacity has an empty message",
+    ],
+  ];
+
+  for (const [answer, reason] of empty) {
+    it.effect(`falls back to the rule on an empty required text: ${reason}`, () =>
+      Effect.gen(function* () {
+        const { decision, recorded, fellBack } = yield* wake(
+          answering({ decision: answer, reason: "The report says so." }),
+          requestFor("completion/empty-required"),
+          reported("Stopped before the push."),
+        );
+
+        assert.isTrue(Option.isNone(decision));
+        assert.isTrue(fellBack(reason));
+        assert.strictEqual(recorded.length, 1);
+      }),
+    );
+  }
+
+  it.effect("keeps string length keywords out of the answer's JSON Schema", () =>
+    Effect.gen(function* () {
+      const document = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
+        Schema.toJsonSchemaDocument(CompletionAnswer),
+      );
+
+      assert.include(document, '"type"');
+      for (const keyword of ["minLength", "maxLength"]) assert.notInclude(document, `"${keyword}"`);
+    }),
+  );
 
   it.effect("leaves every event other than a report to the rule without a model call", () =>
     Effect.gen(function* () {
@@ -641,45 +795,61 @@ describe("structured completion wake-up", () => {
 });
 
 describe("coordinator with the structured completion", () => {
-  it.live("completes with the completion's decision and relays its usage", () =>
-    Effect.gen(function* () {
-      const database = yield* temporaryDatabase;
-      const request = requestFor("completion/coordinator");
-      const harnesses = harnessesWith(
-        answering({
-          decision: { _tag: "Complete", message: "Opened #12, which closes the issue." },
-          reason: "The pull request is open.",
-        }),
-      );
-      const recording = recordingSink();
-      const process = yield* orchestrator(
-        sqliteJournal(database).pipe(coordinatorWith(harnesses.layer)),
-      );
-      const execution = yield* process.execute(request, recording.sink);
-      yield* (yield* process.nextChild).reply("Opened #12.");
-      const report = yield* Fiber.join(execution);
-      yield* process.stop;
-      const snapshot = yield* stored(database, request.spec.attemptId);
-      const decisions = yield* Effect.forEach(
-        Option.match(snapshot, { onNone: () => [], onSome: ({ events }) => events }),
-        ({ decision }) => Schema.decodeEffect(Schema.toCodecJson(RecordedDecision))(decision),
-      );
-      const usage = recording
-        .outbound()
-        .flatMap(({ payload }) =>
-          payload._tag === "SessionEvent" && payload.event._tag === "SessionTokensUpdated"
-            ? [[payload.event.session.id, payload.event.totalTokens] as const]
-            : [],
+  it.live(
+    "completes the live coordinator with the completion's decision and relays its usage",
+    () =>
+      Effect.gen(function* () {
+        const database = yield* temporaryDatabase;
+        const request = requestFor("completion/coordinator");
+        const harnesses = harnessesWith(
+          answering({
+            decision: { _tag: "Complete", message: "Opened #12, which closes the issue." },
+            reason: "The pull request is open.",
+          }),
         );
+        const recording = recordingSink();
+        // The live composition, with scripted harness runtimes and stub children.
+        const process = yield* orchestrator(
+          coordinatorLayer.pipe(
+            Layer.provide(harnesses.registry),
+            Layer.provide(SqliteClient.layer({ filename: database })),
+            Layer.orDie,
+            Layer.provideMerge(stubChildBackendLayer),
+          ),
+        );
+        const execution = yield* process.execute(request, recording.sink);
+        yield* (yield* process.nextChild).reply("Opened #12.");
+        const report = yield* Fiber.join(execution);
+        yield* process.stop;
+        const snapshot = yield* stored(database, request.spec.attemptId);
+        const decisions = yield* Effect.forEach(
+          Option.match(snapshot, { onNone: () => [], onSome: ({ events }) => events }),
+          ({ decision }) => Schema.decodeEffect(Schema.toCodecJson(RecordedDecision))(decision),
+        );
+        const usage = recording
+          .outbound()
+          .flatMap(({ payload }) =>
+            payload._tag === "SessionEvent" && payload.event._tag === "SessionTokensUpdated"
+              ? [[payload.event.session.id, payload.event.totalTokens] as const]
+              : [],
+          );
 
-      assert.strictEqual(report.message, "Opened #12, which closes the issue.");
-      assert.deepStrictEqual(
-        decisions.map(({ handler }) => handler),
-        ["rule", "completion"],
-      );
-      assert.deepStrictEqual(usage, [
-        [AgentSessionId.make("parent:completion/coordinator:decision:2"), TokenCount.make(800)],
-      ]);
-    }).pipe(Effect.scoped),
+        assert.strictEqual(report.message, "Opened #12, which closes the issue.");
+        assert.deepStrictEqual(
+          decisions.map(({ handler }) => handler),
+          ["rule", "completion"],
+        );
+        assert.deepStrictEqual(usage, [
+          [AgentSessionId.make("parent:completion/coordinator:decision:2"), TokenCount.make(800)],
+        ]);
+        const [call] = harnesses.calls;
+        if (call === undefined) return assert.fail("The coordinator called no completion");
+        for (const part of [
+          "You decide what an Attempt does next.",
+          "Opened #12.",
+          "Fix the flaky durable test.",
+        ])
+          assert.include(call.prompt, part);
+      }).pipe(Effect.scoped),
   );
 });
