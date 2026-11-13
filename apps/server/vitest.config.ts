@@ -1,6 +1,9 @@
 import { configDefaults, defineConfig } from "vitest/config";
 
-const latencyTest = "test/operator-reads/latency.test.ts";
+const latencyTests = [
+  "test/operator-reads/latency.test.ts",
+  "test/coordinator/journal-latency.test.ts",
+];
 
 export default defineConfig({
   test: {
@@ -8,14 +11,14 @@ export default defineConfig({
       {
         test: {
           name: "server",
-          exclude: [...configDefaults.exclude, latencyTest],
+          exclude: [...configDefaults.exclude, ...latencyTests],
         },
       },
       {
         test: {
           name: "latency",
-          include: [latencyTest],
-          // Measure read latency after other server tests release the CPU.
+          include: latencyTests,
+          // Measure latency after other server tests release the CPU.
           sequence: { groupOrder: 1 },
           fileParallelism: false,
         },

@@ -31,7 +31,7 @@ import {
   keptDelegationOutcome,
   opened,
   progressed,
-  reserved,
+  reservation,
   settled,
   settledDelegation,
   startedDelegation,
@@ -88,6 +88,7 @@ const recordOf = ({ delegation, progress, outcome }: typeof DelegationRow.Type) 
     outcome: Option.fromNullOr(outcome),
   });
 const EnvelopeRow = Schema.Struct({ envelope: EnvelopeJson });
+const OutboxPositionRow = Schema.Struct({ nextOutbound: AttemptChannel.Sequence });
 /** SQLite stores a boolean as 0 or 1. */
 const StoredBoolean = Schema.Literals([0, 1]);
 const SupervisionRow = Schema.Struct({
@@ -218,6 +219,21 @@ export const sqliteAttemptJournalLayer = Layer.effect(
           }),
         { discard: true },
       );
+    /** Appends `envelopes` to the outbox without loading the snapshot. */
+    const reserveEnvelopes = (
+      attemptId: AttemptId,
+      envelopes: ReadonlyArray<AttemptChannel.OutboundEnvelope>,
+    ) =>
+      Effect.gen(function* () {
+        const [row] =
+          yield* sql`SELECT next_outbound AS "nextOutbound" FROM ${sql(coordination)} WHERE attempt_id = ${attemptId}`;
+        if (row === undefined)
+          return yield* Effect.die(new Error(`Attempt ${attemptId} has no journal`));
+        const { nextOutbound } = yield* Schema.decodeUnknownEffect(OutboxPositionRow)(row);
+        const next = yield* reservation(attemptId, nextOutbound, envelopes);
+        yield* insertEnvelopes(attemptId, envelopes);
+        yield* sql`UPDATE ${sql(coordination)} SET next_outbound = ${next} WHERE attempt_id = ${attemptId}`;
+      });
     const delegationRow = (attemptId: AttemptId, number: ChildSessionCount) =>
       Effect.gen(function* () {
         const [row] =
@@ -363,12 +379,7 @@ export const sqliteAttemptJournalLayer = Layer.effect(
       }),
       reserve: Effect.fn("AttemptJournal.reserve")(function* (attemptId, envelopes) {
         yield* Effect.annotateCurrentSpan({ attemptId, envelopes: envelopes.length });
-        yield* Effect.gen(function* () {
-          const previous = yield* existing(attemptId);
-          const next = yield* reserved(previous, envelopes);
-          yield* insertEnvelopes(attemptId, envelopes);
-          yield* updateCoordination(next);
-        }).pipe(
+        yield* reserveEnvelopes(attemptId, envelopes).pipe(
           transaction,
           Effect.catchTag(
             ["SqlError", "SchemaError"],
@@ -391,6 +402,12 @@ export const sqliteAttemptJournalLayer = Layer.effect(
       saveProgress: Effect.fn("AttemptJournal.saveProgress")(function* (attemptId, number, change) {
         yield* Effect.annotateCurrentSpan({ attemptId, delegation: number, change: change._tag });
         yield* Effect.gen(function* () {
+          if (change._tag === "OutputSaved") {
+            // The most frequent change replaces one field in place, without decoding the progress.
+            const updated =
+              yield* sql`UPDATE ${sql(delegations)} SET progress = json_set(progress, '$.output', ${change.output}) WHERE attempt_id = ${attemptId} AND number = ${number} AND progress IS NOT NULL RETURNING number`;
+            if (updated.length > 0) return;
+          }
           const record = yield* delegationRow(attemptId, number).pipe(
             Effect.flatMap((current) => progressed(current, change)),
           );
@@ -501,12 +518,8 @@ export const sqliteAttemptJournalLayer = Layer.effect(
             receipts: receipts.length,
           });
           return yield* Effect.gen(function* () {
-            if (receipts.length > 0) {
-              const previous = yield* existing(attemptId);
-              const next = yield* reserved(previous, receipts);
-              yield* insertEnvelopes(attemptId, receipts);
-              yield* updateCoordination(next);
-            } else yield* coordinationExists(attemptId);
+            if (receipts.length > 0) yield* reserveEnvelopes(attemptId, receipts);
+            else yield* coordinationExists(attemptId);
             const [row] =
               yield* sql`SELECT sequence FROM ${sql(inputs)} WHERE attempt_id = ${attemptId} AND sequence = ${inputSequence}`;
             if (row === undefined) return false;
@@ -537,7 +550,7 @@ export const sqliteAttemptJournalLayer = Layer.effect(
       acknowledge: Effect.fn("AttemptJournal.acknowledge")(function* (attemptId, through) {
         yield* Effect.annotateCurrentSpan({ attemptId, through });
         yield* Effect.gen(function* () {
-          yield* existing(attemptId);
+          yield* coordinationExists(attemptId);
           yield* sql`DELETE FROM ${sql(outbox)} WHERE attempt_id = ${attemptId} AND sequence <= ${through}`;
         }).pipe(
           transaction,

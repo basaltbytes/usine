@@ -1184,13 +1184,23 @@ export const attemptJournalContract = (adapter: JournalAdapter) =>
                   .saveProgress(attemptId, ChildSessionCount.make(1), Prompted.make({}))
                   .pipe(dies),
                 yield* store
+                  .saveProgress(
+                    attemptId,
+                    ChildSessionCount.make(1),
+                    OutputSaved.make({ output: "Working\n" }),
+                  )
+                  .pipe(dies),
+                yield* store
+                  .saveProgress(attemptId, second, OutputSaved.make({ output: "Working\n" }))
+                  .pipe(dies),
+                yield* store
                   .settleDelegation(attemptId, second, EncodedEvent.make({ _tag: "ChildReported" }))
                   .pipe(dies),
               ];
             }),
           );
 
-          assert.deepStrictEqual(exits, [true, true, true]);
+          assert.deepStrictEqual(exits, [true, true, true, true, true]);
         }).pipe(Effect.scoped),
     );
 
