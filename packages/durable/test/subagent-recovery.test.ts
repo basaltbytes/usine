@@ -562,11 +562,13 @@ for (const [recovery, blocker, harness] of recoveries.flatMap(([recovery, blocke
   );
 }
 
-for (const acknowledged of [false, true])
-  it.live(`restores whether the saved child acknowledged its prompt (${acknowledged})`, () =>
+// An older version saved the conversation only after the prompt, without a receipt.
+for (const receipt of ["unacknowledged", "acknowledged", "absent"] as const)
+  it.live(`restores whether the saved child acknowledged its prompt (${receipt})`, () =>
     Effect.gen(function* () {
+      const acknowledged = receipt !== "unacknowledged";
       const database = yield* temporaryDatabase;
-      const request = attemptRequest(`recovery/prompted-${acknowledged}`);
+      const request = attemptRequest(`recovery/prompted-${receipt}`);
       const restored: Array<boolean> = [];
       const backend = Layer.effectContext(
         Effect.gen(function* () {
@@ -611,6 +613,19 @@ for (const acknowledged of [false, true])
             Context.get(services, AttemptRuntime).execute(request, recordingSink().sink),
           );
           yield* Context.get(services, StubChildren).next;
+          if (receipt === "absent")
+            yield* Context.get(services, DurableHarness).use(
+              "drop the saved prompt receipt",
+              (harness, context) =>
+                harness.commit(async (tx) => {
+                  const tasks = await tx.scanTasks({ kind: "pi.tool" }, 100);
+                  const task = tasks.items[0];
+                  assert(task !== undefined);
+                  const record = await tx.doc(SubagentDoc, task.id);
+                  assert.isTrue(record.prompted);
+                  delete record.prompted;
+                }, context),
+            );
           yield* Fiber.interrupt(execution);
         }),
       );

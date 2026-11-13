@@ -19,7 +19,7 @@ import {
 import { DEFAULT_LIFECYCLE_TIMEOUT_SECONDS, Port, SERVER_HOST, type UpCommand } from "./cli.ts";
 import { InstanceInUseError } from "./instance/lock.ts";
 import { type InstanceLaunch, ProcessId, currentLaunch, instanceFiles } from "./instance/record.ts";
-import { answers } from "./instance/operator-api.ts";
+import { hasStarted } from "./instance/operator-api.ts";
 import { probeInstance } from "./instance/state.ts";
 import { configuredLaunchdService } from "./instance/launchd.ts";
 import {
@@ -38,16 +38,16 @@ const LOG_TAIL_LINES = 20;
 const LOG_TAIL_BYTES = 64 * 1024;
 
 /**
- * A `usine up` started in the background exited before it listened, or stopped writing to its log
- * without listening.
+ * A `usine up` started in the background exited before it started, or stopped writing to its log
+ * without starting.
  */
 export class DetachedStartError extends Schema.TaggedError<
   DetachedStartError,
   Brand.Brand<"@usine/server/detach/DetachedStartError">
 >("@usine/server/DetachedStartError")("DetachedStartError", {
   /**
-   * `exited` if the process ended. `silent` if it still runs, but neither listened nor wrote to
-   * its log for `timeout`.
+   * `exited` if the process ended. `silent` if it still runs, but neither started nor wrote to its
+   * log for `timeout`.
    */
   outcome: Schema.Literals(["exited", "silent"]),
   pid: Schema.Option(ProcessId),
@@ -117,7 +117,7 @@ const logTail = (log: string, offset: number) =>
     Effect.orElseSucceed(() => ""),
   );
 
-/** A `usine up` that `startDetached` started and that answers on its port. */
+/** A `usine up` that `startDetached` or `startUnit` started. */
 export class StartedInstance extends Schema.Class<
   StartedInstance,
   Brand.Brand<"@usine/server/detach/StartedInstance">
@@ -137,10 +137,13 @@ type StartOutcome =
 
 /**
  * Starts `usine up` in the background with `launch`, in its own session and with its output
- * appended to `.usine/usine.log`. Waits until the new process holds the instance and answers HTTP
- * requests. A usine version that writes only `.usine/instance.pid` also counts. Fails with
- * `DetachedStartError` if the process exits first, or if it neither answers nor writes to the log
- * for `timeout`.
+ * appended to `.usine/usine.log`. Waits until the new process holds the instance and has started:
+ * `GET /api/version` returns HTTP 200. `usine up` answers it once it has applied migrations, loaded
+ * configuration, and written the admin token, and then either serves setup mode and has logged the
+ * sign-in line, or begins worker checks and attempt recovery. Other routes can return HTTP 503
+ * until recovery ends. A usine version that writes only `.usine/instance.pid` also counts. Fails
+ * with `DetachedStartError` if the process exits first, or if it neither starts nor writes to the
+ * log for `timeout`.
  */
 export const startDetached = Effect.fn("Cli.startDetached")(function* (
   directory: InstanceDirectory,
@@ -195,11 +198,11 @@ export const startDetached = Effect.fn("Cli.startDetached")(function* (
     port: launch.port,
   });
 
-  // Polls HTTP first: the lock probe takes a read lock, and by the time the server answers, the new
-  // process has held the instance lock for a while.
+  // Polls HTTP first: the lock probe takes a read lock, and by the time the server has started, the
+  // new process has held the instance lock for a while.
   const listening = Effect.gen(function* () {
     while (true) {
-      if (yield* answers(launch.port)) {
+      if (yield* hasStarted(launch.port)) {
         const state = yield* probeInstance(directory);
         const holder =
           state._tag === "Running"
@@ -241,7 +244,7 @@ export const startDetached = Effect.fn("Cli.startDetached")(function* (
       size === offset
         ? Effect.void
         : Effect.logInfo(
-            "The background usine up isn't listening yet; waiting while it writes to its log",
+            "The background usine up hasn't started yet; waiting while it writes to its log",
             {
               pid: Option.getOrUndefined(pid),
               port: launch.port,
@@ -256,7 +259,7 @@ export const startDetached = Effect.fn("Cli.startDetached")(function* (
   // `raceAll` would hide that failure until the log fell silent.
   const outcome = yield* Effect.raceAllFirst([listening, exited, silence(offset), stillStarting]);
   if (outcome._tag === "Listening") {
-    yield* Effect.logInfo("The background usine up is listening", {
+    yield* Effect.logInfo("The background usine up has started", {
       pid: outcome.started.pid,
       port: launch.port,
     });
@@ -272,7 +275,7 @@ export const startDetached = Effect.fn("Cli.startDetached")(function* (
     log: files.log,
     tail,
   });
-  yield* Effect.logWarning("The background usine up did not start listening", {
+  yield* Effect.logWarning("The background usine up did not start", {
     outcome: error.outcome,
     pid: Option.getOrUndefined(pid),
     exit: Option.getOrUndefined(error.exit),
@@ -290,21 +293,21 @@ export const startedMessage = ({ pid, port, unit }: StartedInstance): string =>
   });
 
 /**
- * A supervised start failed before `usine up` answered, or did not answer within the timeout.
+ * A supervised start failed before `usine up` started, or did not start within the timeout.
  */
 export class ServiceStartError extends Schema.TaggedError<
   ServiceStartError,
   Brand.Brand<"@usine/server/detach/ServiceStartError">
 >("@usine/server/ServiceStartError")("ServiceStartError", {
   unit: ServiceUnit,
-  /** `failed` if the service stopped or waits to restart, `silent` if it runs but didn't answer. */
+  /** `failed` if the service stopped or waits to restart, `silent` if it runs but didn't start. */
   outcome: Schema.Literals(["failed", "silent"]),
   /** The manager's active state and detail, such as `activating (auto-restart)`. */
   state: Schema.String,
   timeout: Schema.Duration,
 }) {}
 
-/** The service states that end a start before `usine up` answers. */
+/** The service states that end a start before `usine up` has started. */
 const ENDED_STATES: ReadonlySet<string> = new Set(["failed", "inactive", "deactivating"]);
 
 /**
@@ -345,8 +348,9 @@ const cancelPendingRestart = Effect.fn("Cli.cancelPendingRestart")(
 );
 
 /**
- * Starts a supervised instance and waits for a different process to own its lock and answer.
- * Cancels pending supervisor retries when startup fails. A timeout leaves a running service up.
+ * Starts a supervised instance and waits for a different process to own its lock and start, as
+ * `startDetached` does. Cancels pending supervisor retries when startup fails. A timeout leaves a
+ * running service up.
  */
 export const startUnit = Effect.fn("Cli.startUnit")(function* (
   directory: InstanceDirectory,
@@ -364,7 +368,7 @@ export const startUnit = Effect.fn("Cli.startUnit")(function* (
       if (
         state._tag === "Running" &&
         state.record.pid !== previous &&
-        (yield* answers(state.record.launch.port))
+        (yield* hasStarted(state.record.launch.port))
       ) {
         return StartedInstance.make({
           pid: state.record.pid,
@@ -375,7 +379,7 @@ export const startUnit = Effect.fn("Cli.startUnit")(function* (
       const { active, sub } = yield* serviceState(unit);
       last = `${active} (${sub})`;
       if (ENDED_STATES.has(active) || sub === "auto-restart") {
-        yield* Effect.logWarning("The instance's service ended before usine up answered", {
+        yield* Effect.logWarning("The instance's service ended before usine up started", {
           unit,
           state: last,
         });
@@ -388,14 +392,14 @@ export const startUnit = Effect.fn("Cli.startUnit")(function* (
   });
   const started = yield* Effect.timeoutOption(listening, timeout);
   if (Option.isSome(started)) {
-    yield* Effect.logInfo("The instance's service is listening", {
+    yield* Effect.logInfo("The instance's service has started", {
       unit,
       pid: started.value.pid,
       port: started.value.port,
     });
     return started.value;
   }
-  yield* Effect.logWarning("The instance's service didn't answer before the timeout", {
+  yield* Effect.logWarning("The instance's service didn't start before the timeout", {
     unit,
     state: last,
     timeoutSeconds: Duration.toSeconds(timeout),

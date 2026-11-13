@@ -31,7 +31,7 @@ import { NodeServices } from "@effect/platform-node";
 import { InstanceDirectory } from "@usine/core/instance";
 import { RunId } from "@usine/core/run";
 
-import { FetchHttpClient, type HttpClient } from "effect/http";
+import { FetchHttpClient, HttpClient } from "effect/http";
 import { afterEach, assert, describe, it } from "@effect/vitest";
 import { UiOrigin } from "@usine/config/factory";
 import { LifecycleOptions, Port, SERVER_HOST, type UpLogLevel } from "../src/cli.ts";
@@ -661,6 +661,38 @@ describe("instance lifecycle", { timeout: SCENARIO_TIMEOUT_MS }, () => {
       assert.include(error.tail, "cannot start");
     }),
   );
+
+  it.live("reports a background start that fails after its port answered", () =>
+    Effect.gen(function* () {
+      const directory = instanceFolder();
+      writeFileSync(join(directory, "fixture-startup"), "fail");
+      const launch = yield* fixtureLaunch();
+      const error = yield* startDetached(directory, launch, Duration.seconds(20)).pipe(
+        Effect.flip,
+        Effect.provide(services),
+      );
+      assert(error._tag === "DetachedStartError", error._tag);
+      assert.strictEqual(error.outcome, "exited");
+      assert.deepStrictEqual(error.exit, Option.some("status 1"));
+      assert.include(error.tail, "fixture migration failed");
+    }),
+  );
+
+  it.live("reports a restart whose new process fails after its port answered", () =>
+    Effect.gen(function* () {
+      const directory = instanceFolder();
+      const first = yield* startFixture(directory);
+      writeFileSync(join(directory, "fixture-startup"), "fail");
+      const error = yield* restart(directory, options(20), recordedOnly).pipe(
+        Effect.flip,
+        Effect.provide(services),
+      );
+      assert(error._tag === "DetachedStartError", error._tag);
+      assert.strictEqual(error.outcome, "exited");
+      assert.include(error.tail, "fixture migration failed");
+      assert.isFalse(alive(first.pid));
+    }),
+  );
   it.live(
     "stops, restarts, and reports an instance that a systemd service runs with systemctl",
     () =>
@@ -898,6 +930,73 @@ describe("instance lifecycle", { timeout: SCENARIO_TIMEOUT_MS }, () => {
       );
       assert.include(failed, "activating (auto-restart)");
       assert.isTrue(existsSync(join(directory, "launchctl-unloaded")));
+    }),
+  );
+});
+
+/** Returns the status of `GET /api/setup` on `port` with the instance's admin token. */
+const setupStatus = (directory: InstanceDirectory, port: Port) =>
+  Effect.flatMap(HttpClient.HttpClient, (client) =>
+    client.get(`http://${SERVER_HOST}:${port}/api/setup`, {
+      headers: {
+        authorization: `Bearer ${readFileSync(join(directory, ".usine/admin-token"), "utf8").trim()}`,
+      },
+    }),
+  ).pipe(Effect.map(({ status }) => status));
+
+describe("usine up --detach and usine restart", { timeout: SCENARIO_TIMEOUT_MS }, () => {
+  it.live(
+    "return after a setup-mode start has written the admin token, logged the sign-in line, and installed its routes",
+    () =>
+      Effect.gen(function* () {
+        const directory = instanceFolder();
+        const files = instanceFiles(directory);
+        const port = yield* freePort();
+        yield* runCli(directory, [
+          "up",
+          "--detach",
+          "--port",
+          String(port),
+          "--allow-volatile-instance",
+        ]);
+        const first = yield* probeInstance(directory).pipe(Effect.provide(services));
+        assert(first._tag === "Running");
+        pids.add(first.record.pid);
+        const status = yield* run(setupStatus(directory, port));
+        assert.strictEqual(status, 200);
+        const log = readFileSync(files.log, "utf8");
+        assert.strictEqual(log.match(/running in setup mode/gu)?.length, 1, log);
+        assert.include(log, "Run usine sign-in-link in the instance folder to sign in.");
+
+        yield* runCli(directory, ["restart"]);
+        const second = yield* probeInstance(directory).pipe(Effect.provide(services));
+        assert(second._tag === "Running");
+        pids.add(second.record.pid);
+        assert.notStrictEqual(second.record.pid, first.record.pid);
+        const restartedStatus = yield* run(setupStatus(directory, port));
+        assert.strictEqual(restartedStatus, 200);
+        const restarted = readFileSync(files.log, "utf8");
+        assert.strictEqual(restarted.match(/running in setup mode/gu)?.length, 2, restarted);
+        yield* runCli(directory, ["stop"]);
+      }),
+  );
+
+  it.live("fail when usine up exits after its port opened, as with an unreadable store", () =>
+    Effect.gen(function* () {
+      const directory = instanceFolder();
+      mkdirSync(join(directory, ".usine"));
+      writeFileSync(join(directory, ".usine/runtime.sqlite"), "not a database");
+      const port = yield* freePort();
+      const failed = yield* runCli(directory, [
+        "up",
+        "--detach",
+        "--port",
+        String(port),
+        "--allow-volatile-instance",
+      ]).pipe(Effect.flip);
+      assert.include(failed.message, `before it finished starting on port ${port}`);
+      const state = yield* probeInstance(directory).pipe(Effect.provide(services));
+      assert(state._tag === "Stopped");
     }),
   );
 });
