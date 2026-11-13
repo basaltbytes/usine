@@ -45,7 +45,13 @@ export const relayModelRequest = Effect.fn("SupervisorModelRelay.request")(
     const request = yield* HttpServerRequest.HttpServerRequest;
     const path = new URL(request.url, "http://model-relay").pathname;
     const protocol = request.method === "POST" ? relayedPaths.get(path) : undefined;
-    if (protocol === undefined) return refusal(404, "The model relay serves model requests only");
+    if (protocol === undefined) {
+      yield* Effect.logWarning("The supervisor model relay refused a path", {
+        method: request.method,
+        path,
+      });
+      return refusal(404, "The model relay serves model requests only");
+    }
     let bytes = 0;
     const chunks: Array<Uint8Array> = [];
     yield* request.stream.pipe(
@@ -57,14 +63,22 @@ export const relayModelRequest = Effect.fn("SupervisorModelRelay.request")(
       }),
     );
     if (bytes > MAX_RELAY_BODY_BYTES) {
-      yield* Effect.logWarning("The supervisor model relay refused an oversized body");
+      yield* Effect.logWarning("The supervisor model relay refused an oversized body", { bytes });
       return refusal(413, "The model request exceeds 2 MiB");
     }
     const body = Buffer.concat(chunks).toString("utf8");
     const parsed = decodeModel(body);
-    if (Result.isFailure(parsed)) return refusal(400, "Expected a JSON model request");
+    if (Result.isFailure(parsed)) {
+      yield* Effect.logWarning("The supervisor model relay refused an invalid JSON model request", {
+        bytes,
+      });
+      return refusal(400, "Expected a JSON model request");
+    }
     if (parsed.success.model !== model) {
-      yield* Effect.logWarning("The supervisor model relay refused another model");
+      yield* Effect.logWarning("The supervisor model relay refused another model", {
+        requestedModel: parsed.success.model,
+        model,
+      });
       return refusal(403, "The model relay serves the configured supervisor model only");
     }
     const headers = Object.fromEntries(
@@ -87,7 +101,9 @@ export const relayModelRequest = Effect.fn("SupervisorModelRelay.request")(
             message: error.message,
           }).pipe(Effect.as(refusal(502, "The model route is unavailable"))),
         HttpServerError: () =>
-          Effect.succeed(refusal(400, "The model relay could not read the request body")),
+          Effect.logWarning("The supervisor model relay could not read the request body").pipe(
+            Effect.as(refusal(400, "The model relay could not read the request body")),
+          ),
       }),
     ),
 );

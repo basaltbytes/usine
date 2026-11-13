@@ -1,4 +1,4 @@
-import { bindMount } from "../bind-mount.ts";
+import { bindMount, mountField } from "../bind-mount.ts";
 import { catalog } from "@usine/agents/harness";
 import {
   CHILD_KILL_SCRIPT,
@@ -455,9 +455,7 @@ export const containersFor = (commands: RemoteCommands) => {
       ...Option.match(spec.checkout, {
         onNone: () => [],
         onSome: ({ path, parent }) => [
-          ["type=tmpfs", `"destination=${parent.replaceAll('"', '""')}"`, "tmpfs-mode=1777"].join(
-            ",",
-          ),
+          ["type=tmpfs", mountField("destination", parent), "tmpfs-mode=1777"].join(","),
           bindMount(path, path, "writable"),
         ],
       }),

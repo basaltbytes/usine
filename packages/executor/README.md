@@ -16,7 +16,7 @@ Worker preflight checks each coding-agent brain with the shared `admitBrain` pol
 
 ## Supervisor sandbox
 
-`@usine/executor/supervisor` provides one container per supervisor turn on the orchestrator host. `containerSandboxLayer({ root, image, runtime, route, limits })` finds Podman, then Docker, unless `runtime` names one. Startup pulls `image` before admitting turns. The container has no network, a read-only root filesystem, no capabilities and no new privileges, and runs as the orchestrator's user. An `ExecShell` seat enters it with `<runtime> exec`.
+`@usine/executor/supervisor` provides one container per supervisor turn on the orchestrator host. `containerSandboxLayer({ root, image, runtime, route, limits })` finds Podman, then Docker, unless `runtime` names one. Startup prepares `image` in the background, using a cached image when available and retrying failed preparation every minute. A turn waits up to 30 seconds for the image before refusing with a retry message. The container has no network, a read-only root filesystem, no capabilities and no new privileges, and runs as the orchestrator's user. An `ExecShell` seat enters it with `<runtime> exec`.
 
 `limits` defaults to `SupervisorLimits`: 1 CPU, 1024 MiB memory without swap, 256 processes/threads, 64 MiB `/tmp` and 512 MiB per conversation. Shared memory is capped at 16 MiB and container logs are disabled. Opening verifies the runtime's cgroup v2 limits and refuses a seat if they are not enforced. Runtime commands, including startup, have a 30-second timeout; image preparation has a five-minute timeout.
 

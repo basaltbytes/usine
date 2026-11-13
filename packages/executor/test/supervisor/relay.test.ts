@@ -5,7 +5,7 @@ import { connect } from "node:net";
 import { NodeHttpClient, NodeHttpServer, NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import { ModelId } from "@usine/core/agent/brain";
-import { Effect, Result, Schema } from "effect";
+import { Effect, Logger, Result, Schema } from "effect";
 import { HttpClient, HttpClientRequest, HttpServerRequest, HttpServerResponse } from "effect/http";
 import { GatewayModelError, type GatewayModelRoute } from "../../src/ssh/gateway/model-route.ts";
 import {
@@ -26,6 +26,52 @@ const request = (body: string) =>
   );
 
 describe("supervisor relay limits", () => {
+  it.effect("logs refused paths, invalid and unreadable bodies, models and body sizes", () => {
+    const logs: Array<unknown> = [];
+    const logger = Logger.layer([
+      Logger.make<unknown, void>(({ logLevel, message }) => {
+        if (logLevel === "Warn") logs.push(message);
+      }),
+    ]);
+    return Effect.gen(function* () {
+      const broken = {
+        method: "POST",
+        duplex: "half",
+        body: new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.error(new Error("broken stream"));
+          },
+        }),
+      };
+      const requests = [
+        HttpServerRequest.fromWeb(new Request("http://relay/unknown")),
+        request("invalid"),
+        HttpServerRequest.fromWeb(
+          new Request("http://relay/openai-responses/v1/responses", broken),
+        ),
+        request('{"model":"other"}'),
+        request("x".repeat(MAX_RELAY_BODY_BYTES + 1)),
+      ];
+      const statuses = yield* Effect.forEach(requests, (request) =>
+        relayModelRequest(unused, model).pipe(
+          Effect.provideService(HttpServerRequest.HttpServerRequest, request),
+          Effect.map((response) => response.status),
+        ),
+      );
+      assert.deepStrictEqual(statuses, [404, 400, 400, 403, 413]);
+      assert.deepStrictEqual(logs, [
+        ["The supervisor model relay refused a path", { method: "GET", path: "/unknown" }],
+        ["The supervisor model relay refused an invalid JSON model request", { bytes: 7 }],
+        ["The supervisor model relay could not read the request body"],
+        ["The supervisor model relay refused another model", { requestedModel: "other", model }],
+        [
+          "The supervisor model relay refused an oversized body",
+          { bytes: MAX_RELAY_BODY_BYTES + 1 },
+        ],
+      ]);
+    }).pipe(Effect.provide(logger));
+  });
+
   it.effect("refuses another model and hides the gateway destination in a 502", () =>
     Effect.gen(function* () {
       const denied = yield* relayModelRequest(unused, model).pipe(

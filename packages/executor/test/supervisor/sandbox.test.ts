@@ -1,4 +1,4 @@
-import { spawning, podman, type Answer } from "./runtime-fixture.ts";
+import { spawning, podman, type Answer, type RuntimeState } from "./runtime-fixture.ts";
 import { directoryName } from "../../src/supervisor/names.ts";
 import { bindMount } from "../../src/bind-mount.ts";
 import { NodeFileSystem, NodeServices } from "@effect/platform-node";
@@ -10,6 +10,8 @@ import { CommitSha, RepositoryName } from "@usine/core/repository";
 import { ContainerImage, type GatewayLlmProtocol } from "@usine/core/worker";
 import {
   Clock,
+  Context,
+  Layer,
   Duration,
   Effect,
   Exit,
@@ -184,6 +186,11 @@ describe("the supervisor sandbox's container runtime", () => {
     const pairs = args.slice(0, -1).map((arg, index) => `${arg} ${args[index + 1]}`);
     for (const pair of [
       "--network none",
+      "--pull never",
+      "--log-driver none",
+      "--shm-size 16m",
+      "--memory 1024m",
+      "--memory-swap 1024m",
       "--cap-drop ALL",
       "--security-opt no-new-privileges",
       "--label usine.supervisor.root=/instance/.usine/supervisor",
@@ -220,15 +227,14 @@ describe("a supervisor sandbox on a container runtime", () => {
   };
 
   const sandboxAt = (root: string) =>
-    SupervisorSandbox.pipe(
-      Effect.provide(
-        containerSandboxLayer({
-          root,
-          image: ContainerImage.make("docker.io/library/node:22-slim"),
-          runtime: Option.none(),
-          route: Option.some(Effect.succeed(route)),
-        }),
-      ),
+    containerSandboxLayer({
+      root,
+      image: ContainerImage.make("docker.io/library/node:22-slim"),
+      runtime: Option.none(),
+      route: Option.some(Effect.succeed(route)),
+    }).pipe(
+      Layer.build,
+      Effect.map((context) => Context.get(context, SupervisorSandbox)),
     );
 
   const codexTurn = (conversation: string) =>
@@ -238,6 +244,100 @@ describe("a supervisor sandbox on a container runtime", () => {
       harness: Harness.make("codex"),
       sources: [],
     });
+
+  it.live("refuses startup while labeled containers cannot be removed", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const root = yield* fs.makeTempDirectoryScoped();
+      const sandbox = yield* sandboxAt(root);
+      assert(Option.isSome(sandbox.unavailable));
+      const error = yield* sandbox.open(codexTurn("blocked")).pipe(Effect.flip);
+      assert.include(error.message, "earlier process remain");
+    }).pipe(
+      Effect.scoped,
+      Effect.provide([NodeFileSystem.layer, podman([], ["leftover"], { starts: true }, false)]),
+    ),
+  );
+
+  it.live("removes labeled containers again when the sandbox shuts down", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const root = yield* fs.makeTempDirectoryScoped();
+      const calls: Array<ReadonlyArray<string>> = [];
+      const scope = yield* Scope.make();
+      const sandbox = yield* sandboxAt(root).pipe(
+        Scope.provide(scope),
+        Effect.provide(podman(calls)),
+      );
+      const turnScope = yield* Scope.make();
+      yield* sandbox.open(codexTurn("active-at-shutdown")).pipe(Scope.provide(turnScope));
+      const started = calls.find(([, command]) => command === "run");
+      assert(started !== undefined);
+      const name = started[started.indexOf("--name") + 1];
+      assert(name !== undefined);
+      const before = calls.length;
+      yield* Scope.close(scope, Exit.void);
+      assert.deepStrictEqual(
+        calls.slice(before).filter(([, command]) => command === "rm"),
+        [["podman", "rm", "--force", name]],
+      );
+      yield* Scope.close(turnScope, Exit.void);
+    }).pipe(Effect.scoped, Effect.provide(NodeFileSystem.layer)),
+  );
+
+  it.live("opens with a cached image during a registry outage without pulling", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const root = yield* fs.makeTempDirectoryScoped();
+      const calls: Array<ReadonlyArray<string>> = [];
+      yield* Effect.gen(function* () {
+        const sandbox = yield* sandboxAt(root);
+        yield* sandbox.open(codexTurn("cached")).pipe(Effect.scoped);
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(
+          podman(calls, [], {
+            starts: true,
+            image: { stdout: "cached", exitCode: 0 },
+            pull: { stdout: "", stderr: "registry unavailable", exitCode: 1 },
+          }),
+        ),
+      );
+      assert.isFalse(calls.some(([, command]) => command === "pull"));
+    }).pipe(Effect.scoped, Effect.provide(NodeFileSystem.layer)),
+  );
+
+  it.effect("starts during a stalled pull and recovers after a timed-out preparation", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const root = yield* fs.makeTempDirectoryScoped();
+      const calls: Array<ReadonlyArray<string>> = [];
+      const runtime: RuntimeState = { starts: true, pull: "hang" };
+      yield* Effect.gen(function* () {
+        const sandbox = yield* sandboxAt(root);
+        assert(Option.isNone(sandbox.unavailable));
+        yield* TestClock.withLive(
+          Effect.sleep("10 millis").pipe(
+            Effect.repeat({ until: () => calls.some(([, command]) => command === "pull") }),
+          ),
+        );
+        const waiting = yield* sandbox
+          .open(codexTurn("waiting"))
+          .pipe(Effect.scoped, Effect.flip, Effect.forkChild);
+        yield* TestClock.adjust("30 seconds");
+        const refused = yield* Fiber.join(waiting);
+        assert.include(refused.message, "still being prepared");
+        yield* TestClock.adjust("270 seconds");
+        runtime.pull = { stdout: "", exitCode: 0 };
+        yield* TestClock.adjust("1 minute");
+        yield* sandbox.open(codexTurn("recovered")).pipe(Effect.scoped);
+        assert.lengthOf(
+          calls.filter(([, command]) => command === "pull"),
+          2,
+        );
+      }).pipe(Effect.scoped, Effect.provide(podman(calls, [], runtime)));
+    }).pipe(Effect.scoped, Effect.provide(NodeFileSystem.layer)),
+  );
 
   it.live("writes the harness's settings without following a link that a turn left", () =>
     Effect.gen(function* () {

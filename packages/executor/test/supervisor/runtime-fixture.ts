@@ -52,6 +52,14 @@ export const spawning = (
     ),
   );
 
+export interface RuntimeState {
+  starts: boolean;
+  hangStart?: boolean;
+  rejectLimits?: boolean;
+  image?: Answer;
+  pull?: Answer;
+}
+
 /**
  * A Podman that runs every command, and lists `left` as the containers that it still runs. As
  * Podman does, `run` refuses a `--mount` whose host path doesn't exist. `relay.starts` says
@@ -60,7 +68,7 @@ export const spawning = (
 export const podman = (
   calls: Array<ReadonlyArray<string>>,
   left: ReadonlyArray<string> = [],
-  relay: { starts: boolean; hangStart?: boolean; rejectLimits?: boolean } = { starts: true },
+  relay: RuntimeState = { starts: true },
   removes = true,
 ) => {
   const containers = new Map(left.map((name) => [name, ""]));
@@ -85,6 +93,8 @@ export const podman = (
     }
     if (command === "mkfs.ext4" || command === "e2fsck") return { stdout: "", exitCode: 0 };
     if (command !== "podman") return undefined;
+    if (args[0] === "image") return relay.image ?? { stdout: "", exitCode: 1 };
+    if (args[0] === "pull") return relay.pull ?? { stdout: "", exitCode: 0 };
     if (args[0] === "info") return { stdout: "true", exitCode: 0 };
     if (args[0] === "ps") {
       const filter = args.find((arg) => arg.startsWith("label=usine.supervisor.conversation="));

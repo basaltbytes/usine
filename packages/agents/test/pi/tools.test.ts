@@ -351,10 +351,12 @@ describe("Pi usine tool sets", () => {
             "require('node:fs').writeFileSync('large', Buffer.alloc(3 * 1024 ** 2))",
           ]);
           await rejects(() => run("read", { path: "large" }), /at most 2 MiB/);
-          await rejects(
-            () => host("node", ["-e", "process.stdout.write(Buffer.alloc(5 * 1024 ** 2))"]),
-            /exceeds 4 MiB/,
-          );
+          for (const script of [
+            "process.stdout.write(Buffer.alloc(5 * 1024 ** 2))",
+            "process.stderr.write(Buffer.alloc(5 * 1024 ** 2))",
+            "process.stdout.write(Buffer.alloc(3 * 1024 ** 2)); process.stderr.write(Buffer.alloc(3 * 1024 ** 2))",
+          ])
+            await rejects(() => host("node", ["-e", script]), /exceeds 4 MiB/);
         },
         sandboxed,
       );

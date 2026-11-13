@@ -13,11 +13,13 @@ import {
 import type { Harness, ModelId } from "@usine/core/agent/brain";
 import { directoryName } from "./names.ts";
 import { bindMount } from "../bind-mount.ts";
+import { prepareImage } from "./image.ts";
 import { checkConversationStorage, mountConversation } from "./storage.ts";
 import { type ContainerImage, SupervisorLimits, WorkerName } from "@usine/core/worker";
 import {
   Cause,
   Effect,
+  Fiber,
   FileSystem,
   Layer,
   Option,
@@ -537,34 +539,39 @@ const makeContainerSandbox = Effect.fn("SupervisorSandbox.make")(function* (
       ),
     );
   yield* Effect.addFinalizer(() => cleanup().pipe(Effect.asVoid));
-  if (!(yield* cleanup()))
+  if (!(yield* cleanup())) {
+    yield* Effect.logWarning(
+      "Supervisor startup refused: containers from an earlier process remain",
+      { root: options.root },
+    );
     return yield* SupervisorUnavailable.make({
       message: "Supervisor containers from an earlier process remain; refusing new turns",
     });
+  }
   yield* checkConversationStorage(options.root);
-  const image = yield* collectCommand(
-    spawner,
-    "preflight",
-    runtime.runtime,
-    ["pull", options.image],
-    { forceKillAfter: "2 seconds" },
-    65536,
-  ).pipe(
-    Effect.timeout("5 minutes"),
-    Effect.mapError(unavailableBecause("pull the supervisor image")),
+  const imageReady = yield* prepareImage(spawner, runtime.runtime, options.image).pipe(
+    Effect.tapError((error) =>
+      Effect.logWarning("Supervisor image preparation failed; retrying in one minute", {
+        image: options.image,
+        message: error.message,
+      }),
+    ),
+    Effect.retry({ schedule: Schedule.spaced("1 minute") }),
+    Effect.forkScoped,
   );
-  if (image.exitCode !== 0)
-    return yield* SupervisorUnavailable.make({
-      message: `Cannot pull the supervisor image: ${image.stderr.trim().split("\n")[0]}`,
-    });
   const running = new Map<string, "active" | "cleanup failed">();
   const holdConversation = (conversation: string, directory: string) =>
     Effect.acquireRelease(
       Effect.gen(function* () {
-        if (running.get(directory) === "active")
+        if (running.get(directory) === "active") {
+          yield* Effect.logWarning("Another turn of this supervisor conversation is running", {
+            conversation,
+            directory,
+          });
           return yield* SupervisorUnavailable.make({
             message: "Another turn of this supervisor conversation is running",
           });
+        }
         running.set(directory, "active");
       }),
       () =>
@@ -592,14 +599,32 @@ const makeContainerSandbox = Effect.fn("SupervisorSandbox.make")(function* (
       harness: request.harness,
       sources: request.sources.length,
     });
+    yield* Fiber.join(imageReady).pipe(
+      Effect.timeout("30 seconds"),
+      Effect.mapError(() =>
+        SupervisorUnavailable.make({
+          message: "The supervisor image is still being prepared; retry the turn later",
+        }),
+      ),
+      Effect.tapError((error) =>
+        Effect.logWarning(error.message, {
+          conversation: request.conversation,
+          image: options.image,
+        }),
+      ),
+    );
     const segment = directoryName(request.conversation);
     const root = `${options.root}/conversations/${segment}`;
     // No sandbox of the conversation writes to its directory while this turn prepares it.
     yield* holdConversation(request.conversation, root);
-    if ((yield* listContainers(request.conversation)).length !== 0)
+    if ((yield* listContainers(request.conversation)).length !== 0) {
+      yield* Effect.logWarning("A supervisor container remains; refusing a new turn", {
+        conversation: request.conversation,
+      });
       return yield* SupervisorUnavailable.make({
         message: "A supervisor container remains for this conversation; refusing a new turn",
       });
+    }
     yield* mountConversation(fs, spawner, options.root, segment, limits);
     const paths: ConversationPaths = { root, home: `${root}/home`, workspace: `${root}/workspace` };
     // The workspace, and the mount points of the sources in it, exist before they're mounted, even
@@ -667,11 +692,17 @@ const makeContainerSandbox = Effect.fn("SupervisorSandbox.make")(function* (
       String(limits.memoryMib * 1024 ** 2),
       String(limits.pids),
     ]).pipe(Effect.mapError(unavailableBecause("verify supervisor resource limits")));
-    if (enforced.exitCode !== 0)
+    if (enforced.exitCode !== 0) {
+      yield* Effect.logWarning("The supervisor runtime did not enforce resource limits", {
+        conversation: request.conversation,
+        container: name,
+        runtime: runtime.runtime,
+      });
       return yield* SupervisorUnavailable.make({
         message:
           "The runtime did not enforce supervisor CPU, memory, zero-swap and PID limits; check cgroup v2 delegation",
       });
+    }
     return SupervisorSeat.make({
       host: yield* Schema.decodeEffect(SupervisorSeat.fields.host)(
         ExecShell.make({

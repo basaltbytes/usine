@@ -89,15 +89,17 @@ Pi's `grep` and `find` accept patterns that start with `-`, such as `--network`,
 
 ### Host requirements
 
-The orchestrator host needs Linux, Docker or Podman, and cgroup v2 with CPU, memory, swap and PID controls. usine uses Podman when both runtimes are installed. CI tests Docker. No hardware virtualization is required. Each container runs `ghcr.io/basaltbytes/usine-worker` with the content-derived tag pinned by the installed usine version. Startup pulls that image before admitting turns; a turn never pulls an image. Container startup times out after 30 seconds. The supervisor reaches the model through the gateway of the instance's first SSH worker that has one.
+The orchestrator host needs Linux, Docker or Podman, and cgroup v2 with CPU, memory, swap and PID controls. usine uses Podman when both runtimes are installed. CI tests Docker; the Podman storage and resource-limit path is untested on a real runtime. No hardware virtualization is required. Each container runs `ghcr.io/basaltbytes/usine-worker` with the content-derived tag pinned by the installed usine version. Startup prepares that image in the background, using a cached copy when available and pulling it otherwise. Failed preparation retries every minute without delaying the API or orchestrator startup. A turn waits up to 30 seconds for preparation before asking you to retry; it never pulls an image. Container startup times out after 30 seconds. The supervisor reaches the model through the gateway of the instance's first SSH worker that has one.
 
 Conversation storage requires `fuse2fs`, `fusermount`, `mkfs.ext4`, `e2fsck`, `fallocate` and `mountpoint`, access to `/dev/fuse`, and `user_allow_other` in `/etc/fuse.conf`. On Debian or Ubuntu, install `fuse`, `fuse2fs`, `e2fsprogs` and `util-linux`. The orchestrator user must be allowed to mount FUSE filesystems. Both runtimes bind-mount the same bounded filesystem; Docker volume options and Podman storage quotas are not required.
 
 Without the runtime, storage prerequisites, enforced cgroup limits or a gateway, the supervisor refuses turns. The instance still starts and logs the reason; **Configuration > Settings** reports when preparation makes the supervisor unavailable.
 
+Codex output and process-owner protocol frames are limited to 4 MiB per line, including unfinished lines. Exceeding the limit fails the session.
+
 ### Host limits
 
-Limits are always enabled, including when `supervisor_limits` is omitted. All values must be positive. Changes take effect after restarting the orchestrator.
+Limits are always enabled, including when `supervisor_limits` is omitted. `cpus` must be positive; fractional values are accepted. The other values must be integers: `memory_mib` is at least 256, `pids` is at least 64, and both filesystem sizes are at least 1 MiB. Changes take effect after restarting the orchestrator.
 
 | Field in `settings.supervisor_limits` | Default | Description |
 | --- | --- | --- |

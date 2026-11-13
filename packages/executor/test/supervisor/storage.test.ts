@@ -83,6 +83,24 @@ describe("bounded supervisor storage", () => {
     }).pipe(Effect.scoped, Effect.provide(NodeFileSystem.layer)),
   );
 
+  it.live("unmounts the conversation when its turn scope ends", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const root = yield* fs.makeTempDirectoryScoped();
+      const calls: Array<ReadonlyArray<string>> = [];
+      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner.pipe(
+        Effect.provide(podman(calls)),
+      );
+      yield* mountConversation(fs, spawner, root, "test", SupervisorLimits.make({})).pipe(
+        Effect.scoped,
+      );
+      assert.deepStrictEqual(
+        calls.filter(([command, flag]) => command === "fusermount" && flag === "-u"),
+        [["fusermount", "-u", `${root}/conversations/test`]],
+      );
+    }).pipe(Effect.scoped, Effect.provide(NodeFileSystem.layer)),
+  );
+
   it.live("refuses an existing image with the wrong size instead of growing it", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
