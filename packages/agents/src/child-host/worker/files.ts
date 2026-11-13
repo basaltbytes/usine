@@ -36,8 +36,21 @@ export const processIdentity: IdentityReader = (pid) => {
   }
 };
 
+/** The file's text, or `undefined` once the file is gone; an owner removes its PID file on exit. */
+const readIfPresent = (file: string) => {
+  try {
+    return readFileSync(file, "utf8");
+  } catch (error) {
+    if (hasCode(error, "ENOENT")) return undefined;
+    throw error;
+  }
+};
+
+/** The PID in `file`, or `undefined` once the file is gone. */
 const readPid = (file: string) => {
-  const pid = Number(readFileSync(file, "utf8"));
+  const text = readIfPresent(file);
+  if (text === undefined) return undefined;
+  const pid = Number(text);
   if (!Number.isSafeInteger(pid) || pid === 0) throw new Error("Invalid child process PID");
   return pid;
 };
@@ -49,15 +62,15 @@ export const ownerFiles = (pidFile: string, readIdentity: IdentityReader) => {
   const identityFile = (file: string) =>
     file === pidFile ? join(root, "identity") : `${file}.identity`;
   const ownerAlive = (file: string) => {
-    if (!existsSync(file)) return false;
     const pid = readPid(file);
+    if (pid === undefined) return false;
     if (!existsSync(root)) return signal(pid, 0);
-    const identity = identityFile(file);
-    return existsSync(identity) && readFileSync(identity, "utf8") === readIdentity(pid);
+    const identity = readIfPresent(identityFile(file));
+    return identity !== undefined && identity === readIdentity(pid);
   };
   const stopOwner = async (file = pidFile): Promise<void> => {
-    if (ownerAlive(file)) {
-      const target = readPid(file);
+    const target = readPid(file);
+    if (target !== undefined && ownerAlive(file)) {
       signal(target, "SIGTERM");
       for (let n = 0; ownerAlive(file); n++) {
         if (n === 240) signal(target, "SIGKILL");

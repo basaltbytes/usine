@@ -5,8 +5,12 @@
 // @effect-diagnostics schemaSync:off
 import { assert } from "@effect/vitest";
 import type { HookCallback } from "@anthropic-ai/claude-agent-sdk";
-import { Deferred, Effect, Layer, Schema } from "effect";
-import { ClaudeSdk, type ClaudeQuery } from "../../src/harness/claude/sdk.ts";
+import { Deferred, Effect, Layer, Option, Schema } from "effect";
+import {
+  ClaudeSdk,
+  type ClaudeQuery,
+  type ClaudeToolServer,
+} from "../../src/harness/claude/sdk.ts";
 import { Tape } from "./transcript.ts";
 
 const json = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json));
@@ -14,6 +18,9 @@ const optionsJson = Schema.decodeUnknownSync(
   Schema.fromJsonString(Schema.Record(Schema.String, Schema.Json)),
 );
 const encode = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
+
+/** A recorded tool call, without `input` when Claude Code's arguments weren't JSON. */
+const ToolCall = Schema.Struct({ name: Schema.String, input: Schema.optionalKey(Schema.Json) });
 
 const Models = Schema.Array(
   Schema.Struct({
@@ -34,7 +41,7 @@ export const claudeTransport = (
 ) => {
   const ids = new Map<string, string>();
   return Layer.succeed(ClaudeSdk)({
-    open: (input, options) => {
+    open: (input, options, tools) => {
       const port = tape.port("claude");
       const serializedOptions = optionsJson(encode(options));
       if (options.sessionId !== undefined) {
@@ -64,7 +71,43 @@ export const claudeTransport = (
           ...serializedOptions,
           spawnClaudeCodeProcess: options.spawnClaudeCodeProcess !== undefined,
         },
+        // The tools that the session's tool server lists, which a replay serves from the same toolkit.
+        ...Option.match(tools, {
+          onNone: () => ({}),
+          onSome: (server) => ({ tools: json(encode({ name: server.name, tools: server.tools })) }),
+        }),
       });
+      // A recording keeps each tool call and its result; a replay sends the recorded calls to the
+      // session's tool server and checks its results.
+      const recordedTools = Option.map(tools, (server): ClaudeToolServer => ({
+        ...server,
+        call: async (name, toolInput, callId, signal) => {
+          tape.inbound(`${port}/tools`, {
+            name,
+            ...Option.match(toolInput, { onNone: () => ({}), onSome: (json) => ({ input: json }) }),
+          });
+          const result = await server.call(name, toolInput, callId, signal);
+          tape.outbound(`${port}/tools`, json(encode(result)));
+          return result;
+        },
+      }));
+      if (live === undefined && Option.isSome(tools)) {
+        const server = tools.value;
+        void (async () => {
+          for (;;) {
+            const entry = await tape.read(`${port}/tools`);
+            if (entry.type === "runtime_exit") return;
+            const call = Schema.decodeUnknownSync(ToolCall)(entry.payload);
+            const result = await server.call(
+              call.name,
+              Option.fromUndefinedOr(call.input),
+              Option.none(),
+              new AbortController().signal,
+            );
+            tape.outbound(`${port}/tools`, json(encode(result)));
+          }
+        })().catch((cause: unknown) => tape.fail(cause));
+      }
       const wrappedInput = async function* () {
         for await (const message of input) {
           if (message.uuid !== undefined) {
@@ -160,6 +203,7 @@ export const claudeTransport = (
               },
             }
           : hookedOptions,
+        recordedTools,
       );
       if (query === undefined) {
         void (async () => {
@@ -216,9 +260,11 @@ export const claudeTransport = (
                 yield message;
               }
               if (hooks !== undefined) tape.exit(`${port}/hooks`, 0, null);
+              if (Option.isSome(tools)) tape.exit(`${port}/tools`, 0, null);
               tape.exit(`${port}/output`, 0, null);
             } catch (cause) {
               if (hooks !== undefined) tape.exit(`${port}/hooks`, null, String(cause));
+              if (Option.isSome(tools)) tape.exit(`${port}/tools`, null, String(cause));
               tape.exit(`${port}/output`, null, String(cause));
               throw cause;
             }

@@ -23632,76 +23632,73 @@
             }
           },
           "503": {
-            "description": "Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "string",
-                      "enum": [
-                        "AccessDenied",
-                        "WorkerPreflightRejectedError",
-                        "UpgradeError",
-                        "ConfigurationNotFound",
-                        "ConfigurationStoreError",
-                        "SchemaError",
-                        "InvalidRequestError",
-                        "CrossSiteRequestError",
-                        "RunNotFoundError",
-                        "TranscriptAttemptNotFoundError",
-                        "BoardProjectNotFoundError",
-                        "BoardItemNotFoundError",
-                        "BoardLaneNotFoundError",
-                        "GitHubItemNotFoundError",
-                        "FileChangesNotFoundError",
-                        "PullRequestFilesChangedError",
-                        "RunOperationRejectedError",
-                        "CiNotPassedError",
-                        "RunRetryBlockedError",
-                        "RunInterventionRejectedError",
-                        "LeftoversDiscardRejectedError",
-                        "RosterAgentNotFoundError",
-                        "LoopNotFoundError",
-                        "CycleBudgetResetRejectedError",
-                        "BoardLaneReadOnlyError",
-                        "RestartRequiredError",
-                        "ReloadPreflightError",
-                        "FactoryConfigError",
-                        "EnginePersistenceError",
-                        "AttemptCancellationError",
-                        "HttpBodyError",
-                        "GitHubApiError",
-                        "InvalidGitHubResponseError",
-                        "BackendUnavailableError",
-                        "InstallationDiscoveryError",
-                        "AppPermissionError",
-                        "ProjectNotInstalledError",
-                        "GitHubRateLimitError"
-                      ],
-                      "description": "Domain failure tag that selects the HTTP status."
-                    },
-                    "message": {
-                      "type": "string",
-                      "description": "Diagnostic text safe to show to the operator."
-                    }
-                  },
-                  "required": [
-                    "error",
-                    "message"
-                  ],
-                  "additionalProperties": false
-                }
-              }
-            }
-          },
-          "504": {
             "description": "@usine/orchestrator/ValidationTimeoutRefusal",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/_usine_orchestrator_ValidationTimeoutRefusalEncoded"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/_usine_orchestrator_ValidationTimeoutRefusalEncoded"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "enum": [
+                            "AccessDenied",
+                            "WorkerPreflightRejectedError",
+                            "UpgradeError",
+                            "ConfigurationNotFound",
+                            "ConfigurationStoreError",
+                            "SchemaError",
+                            "InvalidRequestError",
+                            "CrossSiteRequestError",
+                            "RunNotFoundError",
+                            "TranscriptAttemptNotFoundError",
+                            "BoardProjectNotFoundError",
+                            "BoardItemNotFoundError",
+                            "BoardLaneNotFoundError",
+                            "GitHubItemNotFoundError",
+                            "FileChangesNotFoundError",
+                            "PullRequestFilesChangedError",
+                            "RunOperationRejectedError",
+                            "CiNotPassedError",
+                            "RunRetryBlockedError",
+                            "RunInterventionRejectedError",
+                            "LeftoversDiscardRejectedError",
+                            "RosterAgentNotFoundError",
+                            "LoopNotFoundError",
+                            "CycleBudgetResetRejectedError",
+                            "BoardLaneReadOnlyError",
+                            "RestartRequiredError",
+                            "ReloadPreflightError",
+                            "FactoryConfigError",
+                            "EnginePersistenceError",
+                            "AttemptCancellationError",
+                            "HttpBodyError",
+                            "GitHubApiError",
+                            "InvalidGitHubResponseError",
+                            "BackendUnavailableError",
+                            "InstallationDiscoveryError",
+                            "AppPermissionError",
+                            "ProjectNotInstalledError",
+                            "GitHubRateLimitError"
+                          ],
+                          "description": "Domain failure tag that selects the HTTP status."
+                        },
+                        "message": {
+                          "type": "string",
+                          "description": "Diagnostic text safe to show to the operator."
+                        }
+                      },
+                      "required": [
+                        "error",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
                 }
               }
             }
@@ -24343,76 +24340,73 @@
             }
           },
           "503": {
-            "description": "Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "string",
-                      "enum": [
-                        "AccessDenied",
-                        "WorkerPreflightRejectedError",
-                        "UpgradeError",
-                        "ConfigurationNotFound",
-                        "ConfigurationStoreError",
-                        "SchemaError",
-                        "InvalidRequestError",
-                        "CrossSiteRequestError",
-                        "RunNotFoundError",
-                        "TranscriptAttemptNotFoundError",
-                        "BoardProjectNotFoundError",
-                        "BoardItemNotFoundError",
-                        "BoardLaneNotFoundError",
-                        "GitHubItemNotFoundError",
-                        "FileChangesNotFoundError",
-                        "PullRequestFilesChangedError",
-                        "RunOperationRejectedError",
-                        "CiNotPassedError",
-                        "RunRetryBlockedError",
-                        "RunInterventionRejectedError",
-                        "LeftoversDiscardRejectedError",
-                        "RosterAgentNotFoundError",
-                        "LoopNotFoundError",
-                        "CycleBudgetResetRejectedError",
-                        "BoardLaneReadOnlyError",
-                        "RestartRequiredError",
-                        "ReloadPreflightError",
-                        "FactoryConfigError",
-                        "EnginePersistenceError",
-                        "AttemptCancellationError",
-                        "HttpBodyError",
-                        "GitHubApiError",
-                        "InvalidGitHubResponseError",
-                        "BackendUnavailableError",
-                        "InstallationDiscoveryError",
-                        "AppPermissionError",
-                        "ProjectNotInstalledError",
-                        "GitHubRateLimitError"
-                      ],
-                      "description": "Domain failure tag that selects the HTTP status."
-                    },
-                    "message": {
-                      "type": "string",
-                      "description": "Diagnostic text safe to show to the operator."
-                    }
-                  },
-                  "required": [
-                    "error",
-                    "message"
-                  ],
-                  "additionalProperties": false
-                }
-              }
-            }
-          },
-          "504": {
             "description": "@usine/orchestrator/ValidationTimeoutRefusal",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/_usine_orchestrator_ValidationTimeoutRefusalEncoded"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/_usine_orchestrator_ValidationTimeoutRefusalEncoded"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "enum": [
+                            "AccessDenied",
+                            "WorkerPreflightRejectedError",
+                            "UpgradeError",
+                            "ConfigurationNotFound",
+                            "ConfigurationStoreError",
+                            "SchemaError",
+                            "InvalidRequestError",
+                            "CrossSiteRequestError",
+                            "RunNotFoundError",
+                            "TranscriptAttemptNotFoundError",
+                            "BoardProjectNotFoundError",
+                            "BoardItemNotFoundError",
+                            "BoardLaneNotFoundError",
+                            "GitHubItemNotFoundError",
+                            "FileChangesNotFoundError",
+                            "PullRequestFilesChangedError",
+                            "RunOperationRejectedError",
+                            "CiNotPassedError",
+                            "RunRetryBlockedError",
+                            "RunInterventionRejectedError",
+                            "LeftoversDiscardRejectedError",
+                            "RosterAgentNotFoundError",
+                            "LoopNotFoundError",
+                            "CycleBudgetResetRejectedError",
+                            "BoardLaneReadOnlyError",
+                            "RestartRequiredError",
+                            "ReloadPreflightError",
+                            "FactoryConfigError",
+                            "EnginePersistenceError",
+                            "AttemptCancellationError",
+                            "HttpBodyError",
+                            "GitHubApiError",
+                            "InvalidGitHubResponseError",
+                            "BackendUnavailableError",
+                            "InstallationDiscoveryError",
+                            "AppPermissionError",
+                            "ProjectNotInstalledError",
+                            "GitHubRateLimitError"
+                          ],
+                          "description": "Domain failure tag that selects the HTTP status."
+                        },
+                        "message": {
+                          "type": "string",
+                          "description": "Diagnostic text safe to show to the operator."
+                        }
+                      },
+                      "required": [
+                        "error",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
                 }
               }
             }
@@ -25001,76 +24995,73 @@
             }
           },
           "503": {
-            "description": "Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "string",
-                      "enum": [
-                        "AccessDenied",
-                        "WorkerPreflightRejectedError",
-                        "UpgradeError",
-                        "ConfigurationNotFound",
-                        "ConfigurationStoreError",
-                        "SchemaError",
-                        "InvalidRequestError",
-                        "CrossSiteRequestError",
-                        "RunNotFoundError",
-                        "TranscriptAttemptNotFoundError",
-                        "BoardProjectNotFoundError",
-                        "BoardItemNotFoundError",
-                        "BoardLaneNotFoundError",
-                        "GitHubItemNotFoundError",
-                        "FileChangesNotFoundError",
-                        "PullRequestFilesChangedError",
-                        "RunOperationRejectedError",
-                        "CiNotPassedError",
-                        "RunRetryBlockedError",
-                        "RunInterventionRejectedError",
-                        "LeftoversDiscardRejectedError",
-                        "RosterAgentNotFoundError",
-                        "LoopNotFoundError",
-                        "CycleBudgetResetRejectedError",
-                        "BoardLaneReadOnlyError",
-                        "RestartRequiredError",
-                        "ReloadPreflightError",
-                        "FactoryConfigError",
-                        "EnginePersistenceError",
-                        "AttemptCancellationError",
-                        "HttpBodyError",
-                        "GitHubApiError",
-                        "InvalidGitHubResponseError",
-                        "BackendUnavailableError",
-                        "InstallationDiscoveryError",
-                        "AppPermissionError",
-                        "ProjectNotInstalledError",
-                        "GitHubRateLimitError"
-                      ],
-                      "description": "Domain failure tag that selects the HTTP status."
-                    },
-                    "message": {
-                      "type": "string",
-                      "description": "Diagnostic text safe to show to the operator."
-                    }
-                  },
-                  "required": [
-                    "error",
-                    "message"
-                  ],
-                  "additionalProperties": false
-                }
-              }
-            }
-          },
-          "504": {
             "description": "@usine/orchestrator/ValidationTimeoutRefusal",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/_usine_orchestrator_ValidationTimeoutRefusalEncoded"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/_usine_orchestrator_ValidationTimeoutRefusalEncoded"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "enum": [
+                            "AccessDenied",
+                            "WorkerPreflightRejectedError",
+                            "UpgradeError",
+                            "ConfigurationNotFound",
+                            "ConfigurationStoreError",
+                            "SchemaError",
+                            "InvalidRequestError",
+                            "CrossSiteRequestError",
+                            "RunNotFoundError",
+                            "TranscriptAttemptNotFoundError",
+                            "BoardProjectNotFoundError",
+                            "BoardItemNotFoundError",
+                            "BoardLaneNotFoundError",
+                            "GitHubItemNotFoundError",
+                            "FileChangesNotFoundError",
+                            "PullRequestFilesChangedError",
+                            "RunOperationRejectedError",
+                            "CiNotPassedError",
+                            "RunRetryBlockedError",
+                            "RunInterventionRejectedError",
+                            "LeftoversDiscardRejectedError",
+                            "RosterAgentNotFoundError",
+                            "LoopNotFoundError",
+                            "CycleBudgetResetRejectedError",
+                            "BoardLaneReadOnlyError",
+                            "RestartRequiredError",
+                            "ReloadPreflightError",
+                            "FactoryConfigError",
+                            "EnginePersistenceError",
+                            "AttemptCancellationError",
+                            "HttpBodyError",
+                            "GitHubApiError",
+                            "InvalidGitHubResponseError",
+                            "BackendUnavailableError",
+                            "InstallationDiscoveryError",
+                            "AppPermissionError",
+                            "ProjectNotInstalledError",
+                            "GitHubRateLimitError"
+                          ],
+                          "description": "Domain failure tag that selects the HTTP status."
+                        },
+                        "message": {
+                          "type": "string",
+                          "description": "Diagnostic text safe to show to the operator."
+                        }
+                      },
+                      "required": [
+                        "error",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
                 }
               }
             }
@@ -27591,76 +27582,73 @@
             }
           },
           "503": {
-            "description": "Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "string",
-                      "enum": [
-                        "AccessDenied",
-                        "WorkerPreflightRejectedError",
-                        "UpgradeError",
-                        "ConfigurationNotFound",
-                        "ConfigurationStoreError",
-                        "SchemaError",
-                        "InvalidRequestError",
-                        "CrossSiteRequestError",
-                        "RunNotFoundError",
-                        "TranscriptAttemptNotFoundError",
-                        "BoardProjectNotFoundError",
-                        "BoardItemNotFoundError",
-                        "BoardLaneNotFoundError",
-                        "GitHubItemNotFoundError",
-                        "FileChangesNotFoundError",
-                        "PullRequestFilesChangedError",
-                        "RunOperationRejectedError",
-                        "CiNotPassedError",
-                        "RunRetryBlockedError",
-                        "RunInterventionRejectedError",
-                        "LeftoversDiscardRejectedError",
-                        "RosterAgentNotFoundError",
-                        "LoopNotFoundError",
-                        "CycleBudgetResetRejectedError",
-                        "BoardLaneReadOnlyError",
-                        "RestartRequiredError",
-                        "ReloadPreflightError",
-                        "FactoryConfigError",
-                        "EnginePersistenceError",
-                        "AttemptCancellationError",
-                        "HttpBodyError",
-                        "GitHubApiError",
-                        "InvalidGitHubResponseError",
-                        "BackendUnavailableError",
-                        "InstallationDiscoveryError",
-                        "AppPermissionError",
-                        "ProjectNotInstalledError",
-                        "GitHubRateLimitError"
-                      ],
-                      "description": "Domain failure tag that selects the HTTP status."
-                    },
-                    "message": {
-                      "type": "string",
-                      "description": "Diagnostic text safe to show to the operator."
-                    }
-                  },
-                  "required": [
-                    "error",
-                    "message"
-                  ],
-                  "additionalProperties": false
-                }
-              }
-            }
-          },
-          "504": {
             "description": "@usine/orchestrator/ValidationTimeoutRefusal",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/_usine_orchestrator_ValidationTimeoutRefusalEncoded"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/_usine_orchestrator_ValidationTimeoutRefusalEncoded"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "enum": [
+                            "AccessDenied",
+                            "WorkerPreflightRejectedError",
+                            "UpgradeError",
+                            "ConfigurationNotFound",
+                            "ConfigurationStoreError",
+                            "SchemaError",
+                            "InvalidRequestError",
+                            "CrossSiteRequestError",
+                            "RunNotFoundError",
+                            "TranscriptAttemptNotFoundError",
+                            "BoardProjectNotFoundError",
+                            "BoardItemNotFoundError",
+                            "BoardLaneNotFoundError",
+                            "GitHubItemNotFoundError",
+                            "FileChangesNotFoundError",
+                            "PullRequestFilesChangedError",
+                            "RunOperationRejectedError",
+                            "CiNotPassedError",
+                            "RunRetryBlockedError",
+                            "RunInterventionRejectedError",
+                            "LeftoversDiscardRejectedError",
+                            "RosterAgentNotFoundError",
+                            "LoopNotFoundError",
+                            "CycleBudgetResetRejectedError",
+                            "BoardLaneReadOnlyError",
+                            "RestartRequiredError",
+                            "ReloadPreflightError",
+                            "FactoryConfigError",
+                            "EnginePersistenceError",
+                            "AttemptCancellationError",
+                            "HttpBodyError",
+                            "GitHubApiError",
+                            "InvalidGitHubResponseError",
+                            "BackendUnavailableError",
+                            "InstallationDiscoveryError",
+                            "AppPermissionError",
+                            "ProjectNotInstalledError",
+                            "GitHubRateLimitError"
+                          ],
+                          "description": "Domain failure tag that selects the HTTP status."
+                        },
+                        "message": {
+                          "type": "string",
+                          "description": "Diagnostic text safe to show to the operator."
+                        }
+                      },
+                      "required": [
+                        "error",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
                 }
               }
             }
@@ -28237,76 +28225,73 @@
             }
           },
           "503": {
-            "description": "Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "string",
-                      "enum": [
-                        "AccessDenied",
-                        "WorkerPreflightRejectedError",
-                        "UpgradeError",
-                        "ConfigurationNotFound",
-                        "ConfigurationStoreError",
-                        "SchemaError",
-                        "InvalidRequestError",
-                        "CrossSiteRequestError",
-                        "RunNotFoundError",
-                        "TranscriptAttemptNotFoundError",
-                        "BoardProjectNotFoundError",
-                        "BoardItemNotFoundError",
-                        "BoardLaneNotFoundError",
-                        "GitHubItemNotFoundError",
-                        "FileChangesNotFoundError",
-                        "PullRequestFilesChangedError",
-                        "RunOperationRejectedError",
-                        "CiNotPassedError",
-                        "RunRetryBlockedError",
-                        "RunInterventionRejectedError",
-                        "LeftoversDiscardRejectedError",
-                        "RosterAgentNotFoundError",
-                        "LoopNotFoundError",
-                        "CycleBudgetResetRejectedError",
-                        "BoardLaneReadOnlyError",
-                        "RestartRequiredError",
-                        "ReloadPreflightError",
-                        "FactoryConfigError",
-                        "EnginePersistenceError",
-                        "AttemptCancellationError",
-                        "HttpBodyError",
-                        "GitHubApiError",
-                        "InvalidGitHubResponseError",
-                        "BackendUnavailableError",
-                        "InstallationDiscoveryError",
-                        "AppPermissionError",
-                        "ProjectNotInstalledError",
-                        "GitHubRateLimitError"
-                      ],
-                      "description": "Domain failure tag that selects the HTTP status."
-                    },
-                    "message": {
-                      "type": "string",
-                      "description": "Diagnostic text safe to show to the operator."
-                    }
-                  },
-                  "required": [
-                    "error",
-                    "message"
-                  ],
-                  "additionalProperties": false
-                }
-              }
-            }
-          },
-          "504": {
             "description": "@usine/orchestrator/ValidationTimeoutRefusal",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/_usine_orchestrator_ValidationTimeoutRefusalEncoded"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/_usine_orchestrator_ValidationTimeoutRefusalEncoded"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "enum": [
+                            "AccessDenied",
+                            "WorkerPreflightRejectedError",
+                            "UpgradeError",
+                            "ConfigurationNotFound",
+                            "ConfigurationStoreError",
+                            "SchemaError",
+                            "InvalidRequestError",
+                            "CrossSiteRequestError",
+                            "RunNotFoundError",
+                            "TranscriptAttemptNotFoundError",
+                            "BoardProjectNotFoundError",
+                            "BoardItemNotFoundError",
+                            "BoardLaneNotFoundError",
+                            "GitHubItemNotFoundError",
+                            "FileChangesNotFoundError",
+                            "PullRequestFilesChangedError",
+                            "RunOperationRejectedError",
+                            "CiNotPassedError",
+                            "RunRetryBlockedError",
+                            "RunInterventionRejectedError",
+                            "LeftoversDiscardRejectedError",
+                            "RosterAgentNotFoundError",
+                            "LoopNotFoundError",
+                            "CycleBudgetResetRejectedError",
+                            "BoardLaneReadOnlyError",
+                            "RestartRequiredError",
+                            "ReloadPreflightError",
+                            "FactoryConfigError",
+                            "EnginePersistenceError",
+                            "AttemptCancellationError",
+                            "HttpBodyError",
+                            "GitHubApiError",
+                            "InvalidGitHubResponseError",
+                            "BackendUnavailableError",
+                            "InstallationDiscoveryError",
+                            "AppPermissionError",
+                            "ProjectNotInstalledError",
+                            "GitHubRateLimitError"
+                          ],
+                          "description": "Domain failure tag that selects the HTTP status."
+                        },
+                        "message": {
+                          "type": "string",
+                          "description": "Diagnostic text safe to show to the operator."
+                        }
+                      },
+                      "required": [
+                        "error",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
                 }
               }
             }
@@ -28892,76 +28877,73 @@
             }
           },
           "503": {
-            "description": "Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "string",
-                      "enum": [
-                        "AccessDenied",
-                        "WorkerPreflightRejectedError",
-                        "UpgradeError",
-                        "ConfigurationNotFound",
-                        "ConfigurationStoreError",
-                        "SchemaError",
-                        "InvalidRequestError",
-                        "CrossSiteRequestError",
-                        "RunNotFoundError",
-                        "TranscriptAttemptNotFoundError",
-                        "BoardProjectNotFoundError",
-                        "BoardItemNotFoundError",
-                        "BoardLaneNotFoundError",
-                        "GitHubItemNotFoundError",
-                        "FileChangesNotFoundError",
-                        "PullRequestFilesChangedError",
-                        "RunOperationRejectedError",
-                        "CiNotPassedError",
-                        "RunRetryBlockedError",
-                        "RunInterventionRejectedError",
-                        "LeftoversDiscardRejectedError",
-                        "RosterAgentNotFoundError",
-                        "LoopNotFoundError",
-                        "CycleBudgetResetRejectedError",
-                        "BoardLaneReadOnlyError",
-                        "RestartRequiredError",
-                        "ReloadPreflightError",
-                        "FactoryConfigError",
-                        "EnginePersistenceError",
-                        "AttemptCancellationError",
-                        "HttpBodyError",
-                        "GitHubApiError",
-                        "InvalidGitHubResponseError",
-                        "BackendUnavailableError",
-                        "InstallationDiscoveryError",
-                        "AppPermissionError",
-                        "ProjectNotInstalledError",
-                        "GitHubRateLimitError"
-                      ],
-                      "description": "Domain failure tag that selects the HTTP status."
-                    },
-                    "message": {
-                      "type": "string",
-                      "description": "Diagnostic text safe to show to the operator."
-                    }
-                  },
-                  "required": [
-                    "error",
-                    "message"
-                  ],
-                  "additionalProperties": false
-                }
-              }
-            }
-          },
-          "504": {
             "description": "@usine/orchestrator/ValidationTimeoutRefusal",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/_usine_orchestrator_ValidationTimeoutRefusalEncoded"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/_usine_orchestrator_ValidationTimeoutRefusalEncoded"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "enum": [
+                            "AccessDenied",
+                            "WorkerPreflightRejectedError",
+                            "UpgradeError",
+                            "ConfigurationNotFound",
+                            "ConfigurationStoreError",
+                            "SchemaError",
+                            "InvalidRequestError",
+                            "CrossSiteRequestError",
+                            "RunNotFoundError",
+                            "TranscriptAttemptNotFoundError",
+                            "BoardProjectNotFoundError",
+                            "BoardItemNotFoundError",
+                            "BoardLaneNotFoundError",
+                            "GitHubItemNotFoundError",
+                            "FileChangesNotFoundError",
+                            "PullRequestFilesChangedError",
+                            "RunOperationRejectedError",
+                            "CiNotPassedError",
+                            "RunRetryBlockedError",
+                            "RunInterventionRejectedError",
+                            "LeftoversDiscardRejectedError",
+                            "RosterAgentNotFoundError",
+                            "LoopNotFoundError",
+                            "CycleBudgetResetRejectedError",
+                            "BoardLaneReadOnlyError",
+                            "RestartRequiredError",
+                            "ReloadPreflightError",
+                            "FactoryConfigError",
+                            "EnginePersistenceError",
+                            "AttemptCancellationError",
+                            "HttpBodyError",
+                            "GitHubApiError",
+                            "InvalidGitHubResponseError",
+                            "BackendUnavailableError",
+                            "InstallationDiscoveryError",
+                            "AppPermissionError",
+                            "ProjectNotInstalledError",
+                            "GitHubRateLimitError"
+                          ],
+                          "description": "Domain failure tag that selects the HTTP status."
+                        },
+                        "message": {
+                          "type": "string",
+                          "description": "Diagnostic text safe to show to the operator."
+                        }
+                      },
+                      "required": [
+                        "error",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
                 }
               }
             }
@@ -29568,76 +29550,73 @@
             }
           },
           "503": {
-            "description": "Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "string",
-                      "enum": [
-                        "AccessDenied",
-                        "WorkerPreflightRejectedError",
-                        "UpgradeError",
-                        "ConfigurationNotFound",
-                        "ConfigurationStoreError",
-                        "SchemaError",
-                        "InvalidRequestError",
-                        "CrossSiteRequestError",
-                        "RunNotFoundError",
-                        "TranscriptAttemptNotFoundError",
-                        "BoardProjectNotFoundError",
-                        "BoardItemNotFoundError",
-                        "BoardLaneNotFoundError",
-                        "GitHubItemNotFoundError",
-                        "FileChangesNotFoundError",
-                        "PullRequestFilesChangedError",
-                        "RunOperationRejectedError",
-                        "CiNotPassedError",
-                        "RunRetryBlockedError",
-                        "RunInterventionRejectedError",
-                        "LeftoversDiscardRejectedError",
-                        "RosterAgentNotFoundError",
-                        "LoopNotFoundError",
-                        "CycleBudgetResetRejectedError",
-                        "BoardLaneReadOnlyError",
-                        "RestartRequiredError",
-                        "ReloadPreflightError",
-                        "FactoryConfigError",
-                        "EnginePersistenceError",
-                        "AttemptCancellationError",
-                        "HttpBodyError",
-                        "GitHubApiError",
-                        "InvalidGitHubResponseError",
-                        "BackendUnavailableError",
-                        "InstallationDiscoveryError",
-                        "AppPermissionError",
-                        "ProjectNotInstalledError",
-                        "GitHubRateLimitError"
-                      ],
-                      "description": "Domain failure tag that selects the HTTP status."
-                    },
-                    "message": {
-                      "type": "string",
-                      "description": "Diagnostic text safe to show to the operator."
-                    }
-                  },
-                  "required": [
-                    "error",
-                    "message"
-                  ],
-                  "additionalProperties": false
-                }
-              }
-            }
-          },
-          "504": {
             "description": "@usine/orchestrator/ValidationTimeoutRefusal",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/_usine_orchestrator_ValidationTimeoutRefusalEncoded"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/_usine_orchestrator_ValidationTimeoutRefusalEncoded"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "enum": [
+                            "AccessDenied",
+                            "WorkerPreflightRejectedError",
+                            "UpgradeError",
+                            "ConfigurationNotFound",
+                            "ConfigurationStoreError",
+                            "SchemaError",
+                            "InvalidRequestError",
+                            "CrossSiteRequestError",
+                            "RunNotFoundError",
+                            "TranscriptAttemptNotFoundError",
+                            "BoardProjectNotFoundError",
+                            "BoardItemNotFoundError",
+                            "BoardLaneNotFoundError",
+                            "GitHubItemNotFoundError",
+                            "FileChangesNotFoundError",
+                            "PullRequestFilesChangedError",
+                            "RunOperationRejectedError",
+                            "CiNotPassedError",
+                            "RunRetryBlockedError",
+                            "RunInterventionRejectedError",
+                            "LeftoversDiscardRejectedError",
+                            "RosterAgentNotFoundError",
+                            "LoopNotFoundError",
+                            "CycleBudgetResetRejectedError",
+                            "BoardLaneReadOnlyError",
+                            "RestartRequiredError",
+                            "ReloadPreflightError",
+                            "FactoryConfigError",
+                            "EnginePersistenceError",
+                            "AttemptCancellationError",
+                            "HttpBodyError",
+                            "GitHubApiError",
+                            "InvalidGitHubResponseError",
+                            "BackendUnavailableError",
+                            "InstallationDiscoveryError",
+                            "AppPermissionError",
+                            "ProjectNotInstalledError",
+                            "GitHubRateLimitError"
+                          ],
+                          "description": "Domain failure tag that selects the HTTP status."
+                        },
+                        "message": {
+                          "type": "string",
+                          "description": "Diagnostic text safe to show to the operator."
+                        }
+                      },
+                      "required": [
+                        "error",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
                 }
               }
             }
@@ -30311,76 +30290,73 @@
             }
           },
           "503": {
-            "description": "Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "string",
-                      "enum": [
-                        "AccessDenied",
-                        "WorkerPreflightRejectedError",
-                        "UpgradeError",
-                        "ConfigurationNotFound",
-                        "ConfigurationStoreError",
-                        "SchemaError",
-                        "InvalidRequestError",
-                        "CrossSiteRequestError",
-                        "RunNotFoundError",
-                        "TranscriptAttemptNotFoundError",
-                        "BoardProjectNotFoundError",
-                        "BoardItemNotFoundError",
-                        "BoardLaneNotFoundError",
-                        "GitHubItemNotFoundError",
-                        "FileChangesNotFoundError",
-                        "PullRequestFilesChangedError",
-                        "RunOperationRejectedError",
-                        "CiNotPassedError",
-                        "RunRetryBlockedError",
-                        "RunInterventionRejectedError",
-                        "LeftoversDiscardRejectedError",
-                        "RosterAgentNotFoundError",
-                        "LoopNotFoundError",
-                        "CycleBudgetResetRejectedError",
-                        "BoardLaneReadOnlyError",
-                        "RestartRequiredError",
-                        "ReloadPreflightError",
-                        "FactoryConfigError",
-                        "EnginePersistenceError",
-                        "AttemptCancellationError",
-                        "HttpBodyError",
-                        "GitHubApiError",
-                        "InvalidGitHubResponseError",
-                        "BackendUnavailableError",
-                        "InstallationDiscoveryError",
-                        "AppPermissionError",
-                        "ProjectNotInstalledError",
-                        "GitHubRateLimitError"
-                      ],
-                      "description": "Domain failure tag that selects the HTTP status."
-                    },
-                    "message": {
-                      "type": "string",
-                      "description": "Diagnostic text safe to show to the operator."
-                    }
-                  },
-                  "required": [
-                    "error",
-                    "message"
-                  ],
-                  "additionalProperties": false
-                }
-              }
-            }
-          },
-          "504": {
             "description": "@usine/orchestrator/ValidationTimeoutRefusal",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/_usine_orchestrator_ValidationTimeoutRefusalEncoded"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/_usine_orchestrator_ValidationTimeoutRefusalEncoded"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "enum": [
+                            "AccessDenied",
+                            "WorkerPreflightRejectedError",
+                            "UpgradeError",
+                            "ConfigurationNotFound",
+                            "ConfigurationStoreError",
+                            "SchemaError",
+                            "InvalidRequestError",
+                            "CrossSiteRequestError",
+                            "RunNotFoundError",
+                            "TranscriptAttemptNotFoundError",
+                            "BoardProjectNotFoundError",
+                            "BoardItemNotFoundError",
+                            "BoardLaneNotFoundError",
+                            "GitHubItemNotFoundError",
+                            "FileChangesNotFoundError",
+                            "PullRequestFilesChangedError",
+                            "RunOperationRejectedError",
+                            "CiNotPassedError",
+                            "RunRetryBlockedError",
+                            "RunInterventionRejectedError",
+                            "LeftoversDiscardRejectedError",
+                            "RosterAgentNotFoundError",
+                            "LoopNotFoundError",
+                            "CycleBudgetResetRejectedError",
+                            "BoardLaneReadOnlyError",
+                            "RestartRequiredError",
+                            "ReloadPreflightError",
+                            "FactoryConfigError",
+                            "EnginePersistenceError",
+                            "AttemptCancellationError",
+                            "HttpBodyError",
+                            "GitHubApiError",
+                            "InvalidGitHubResponseError",
+                            "BackendUnavailableError",
+                            "InstallationDiscoveryError",
+                            "AppPermissionError",
+                            "ProjectNotInstalledError",
+                            "GitHubRateLimitError"
+                          ],
+                          "description": "Domain failure tag that selects the HTTP status."
+                        },
+                        "message": {
+                          "type": "string",
+                          "description": "Diagnostic text safe to show to the operator."
+                        }
+                      },
+                      "required": [
+                        "error",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
                 }
               }
             }
@@ -30990,76 +30966,73 @@
             }
           },
           "503": {
-            "description": "Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "string",
-                      "enum": [
-                        "AccessDenied",
-                        "WorkerPreflightRejectedError",
-                        "UpgradeError",
-                        "ConfigurationNotFound",
-                        "ConfigurationStoreError",
-                        "SchemaError",
-                        "InvalidRequestError",
-                        "CrossSiteRequestError",
-                        "RunNotFoundError",
-                        "TranscriptAttemptNotFoundError",
-                        "BoardProjectNotFoundError",
-                        "BoardItemNotFoundError",
-                        "BoardLaneNotFoundError",
-                        "GitHubItemNotFoundError",
-                        "FileChangesNotFoundError",
-                        "PullRequestFilesChangedError",
-                        "RunOperationRejectedError",
-                        "CiNotPassedError",
-                        "RunRetryBlockedError",
-                        "RunInterventionRejectedError",
-                        "LeftoversDiscardRejectedError",
-                        "RosterAgentNotFoundError",
-                        "LoopNotFoundError",
-                        "CycleBudgetResetRejectedError",
-                        "BoardLaneReadOnlyError",
-                        "RestartRequiredError",
-                        "ReloadPreflightError",
-                        "FactoryConfigError",
-                        "EnginePersistenceError",
-                        "AttemptCancellationError",
-                        "HttpBodyError",
-                        "GitHubApiError",
-                        "InvalidGitHubResponseError",
-                        "BackendUnavailableError",
-                        "InstallationDiscoveryError",
-                        "AppPermissionError",
-                        "ProjectNotInstalledError",
-                        "GitHubRateLimitError"
-                      ],
-                      "description": "Domain failure tag that selects the HTTP status."
-                    },
-                    "message": {
-                      "type": "string",
-                      "description": "Diagnostic text safe to show to the operator."
-                    }
-                  },
-                  "required": [
-                    "error",
-                    "message"
-                  ],
-                  "additionalProperties": false
-                }
-              }
-            }
-          },
-          "504": {
             "description": "@usine/orchestrator/ValidationTimeoutRefusal",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/_usine_orchestrator_ValidationTimeoutRefusalEncoded"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/_usine_orchestrator_ValidationTimeoutRefusalEncoded"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "enum": [
+                            "AccessDenied",
+                            "WorkerPreflightRejectedError",
+                            "UpgradeError",
+                            "ConfigurationNotFound",
+                            "ConfigurationStoreError",
+                            "SchemaError",
+                            "InvalidRequestError",
+                            "CrossSiteRequestError",
+                            "RunNotFoundError",
+                            "TranscriptAttemptNotFoundError",
+                            "BoardProjectNotFoundError",
+                            "BoardItemNotFoundError",
+                            "BoardLaneNotFoundError",
+                            "GitHubItemNotFoundError",
+                            "FileChangesNotFoundError",
+                            "PullRequestFilesChangedError",
+                            "RunOperationRejectedError",
+                            "CiNotPassedError",
+                            "RunRetryBlockedError",
+                            "RunInterventionRejectedError",
+                            "LeftoversDiscardRejectedError",
+                            "RosterAgentNotFoundError",
+                            "LoopNotFoundError",
+                            "CycleBudgetResetRejectedError",
+                            "BoardLaneReadOnlyError",
+                            "RestartRequiredError",
+                            "ReloadPreflightError",
+                            "FactoryConfigError",
+                            "EnginePersistenceError",
+                            "AttemptCancellationError",
+                            "HttpBodyError",
+                            "GitHubApiError",
+                            "InvalidGitHubResponseError",
+                            "BackendUnavailableError",
+                            "InstallationDiscoveryError",
+                            "AppPermissionError",
+                            "ProjectNotInstalledError",
+                            "GitHubRateLimitError"
+                          ],
+                          "description": "Domain failure tag that selects the HTTP status."
+                        },
+                        "message": {
+                          "type": "string",
+                          "description": "Diagnostic text safe to show to the operator."
+                        }
+                      },
+                      "required": [
+                        "error",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
                 }
               }
             }

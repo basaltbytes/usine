@@ -7,7 +7,7 @@
   "type": "module",
   "scripts": {
     "dev": "astro dev",
-    "build": "pnpm test && pnpm openapi:generate && astro build && node --test test/built-navigation.mjs test/llms.build.mjs",
+    "build": "pnpm test && pnpm openapi:generate && astro build && node --test test/built-navigation.mjs test/built-quickstart.mjs test/llms.build.mjs",
     "preview": "astro preview",
     "check": "astro sync && tsc --noEmit",
     "deploy": "wrangler deploy",

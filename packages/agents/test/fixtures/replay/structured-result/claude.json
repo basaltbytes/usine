@@ -29,6 +29,7 @@
           "effort": "low",
           "thinking": { "type": "adaptive" },
           "tools": [],
+          "strictMcpConfig": true,
           "outputFormat": {
             "type": "json_schema",
             "schema": {

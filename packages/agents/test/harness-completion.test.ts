@@ -27,6 +27,7 @@ import { continuationPolicy } from "../src/harness/continuation.ts";
 import { SessionSpec, StartPrompt } from "../src/harness/contract.ts";
 import { HarnessCatalog, HarnessDescriptor } from "../src/harness/harness.ts";
 import { Harnesses, type HarnessRuntime } from "../src/harness/node.ts";
+import { pi } from "../src/harness/pi/descriptor.ts";
 import { RolePlacements, RoleSpec } from "../src/harness/role.ts";
 import { checkedPreflight } from "../src/harness/runtime.ts";
 import {
@@ -187,6 +188,41 @@ describe("structured completions through the registry", () => {
       assert.strictEqual(scalar.reason._tag, "CompletionRefused");
       assert.include(scalar.message, "JSON object");
       assert.deepStrictEqual(calls, []);
+    }).pipe(Effect.provide(Harnesses.layerFrom(catalog, runtimes)));
+  });
+
+  it.effect("refuses a completion for a role that runs a usine tool set", () => {
+    const { calls, runtimes } = answering();
+    return Effect.gen(function* () {
+      const harnesses = yield* Harnesses;
+      for (const harness of [claude.id, pi.id]) {
+        const runtime = yield* harnesses.runtime(harness);
+        for (const role of [
+          RoleSpec.make({ ...decision, hostTools: true }),
+          RoleSpec.make({ ...decision, hostTools: true, nativeTools: false }),
+        ]) {
+          const refused = yield* runtime
+            .complete(specFor(role, harness), "Approve?", Verdict)
+            .pipe(Effect.flip);
+          assert.strictEqual(refused.reason._tag, "CompletionRefused", harness);
+          assert.include(
+            refused.message,
+            "runs a usine tool set, but a completion serves no usine tools",
+            harness,
+          );
+          assert.deepStrictEqual(refused.usage, Option.none());
+        }
+        const closed = yield* runtime.complete(
+          specFor(RoleSpec.make({ ...decision, nativeTools: false }), harness),
+          "Approve?",
+          Verdict,
+        );
+        assert.deepStrictEqual(closed.value, { approved: true }, harness);
+      }
+      assert.deepStrictEqual(
+        calls.map(({ session }) => session.brain.harness),
+        [claude.id, pi.id],
+      );
     }).pipe(Effect.provide(Harnesses.layerFrom(catalog, runtimes)));
   });
 

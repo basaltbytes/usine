@@ -44,7 +44,7 @@ mkdir my-factory && cd my-factory
 usine up
 ```
 
-`usine up` prints a sign-in link and opens setup in your browser. In setup, you create the GitHub App, install it on your repositories, and connect a Claude or ChatGPT login.
+`usine up` prints a sign-in link and opens setup in your browser. In setup, you create the GitHub App, install it on your repositories, and connect a Claude or ChatGPT login or an API key. Pi agents use the login or API key that you save in Pi.
 
 The [quickstart](https://docs.usine.dev/get-started/quickstart/) covers the full path, including the agent CLIs to install, up to a first pull request opened by an agent on a scratch repository.
 
@@ -79,7 +79,7 @@ usine ships no built-in loop. Loops usually hand work to each other with labels:
 ## Features
 
 - Runs Claude Code, Codex, and Pi. An agent names a harness, a model, a reasoning effort, and standing instructions.
-- Uses your Claude or ChatGPT subscription, or API keys.
+- Runs on whichever single login or key you have: a Claude subscription through Claude Code, a ChatGPT subscription through Codex or Pi, or an API key for Claude Code, Codex, or any provider that Pi supports. The event-driven coordinator needs no model credential of its own.
 - Triggers on issues, pull requests, and schedules. Each loop selects its items with an expression, so one instance serves many repositories with different rules.
 - Starts runs on its own or holds each one for your approval, per loop.
 - Waits for CI after a fix is pushed and moves the pull request back to review when the checks pass. A cycle budget stops a review and fix cycle that doesn't converge.

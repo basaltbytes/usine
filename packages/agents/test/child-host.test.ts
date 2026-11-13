@@ -28,7 +28,7 @@ import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSy
 import { tmpdir } from "node:os";
 import { PROCESS_OWNER } from "../src/child-host/supervisor.ts";
 import { CHILD_LIFELINE, childProcessCommand, startChildProcess } from "../src/child-host/node.ts";
-import { signal } from "../src/child-host/worker/files.ts";
+import { ownerFiles, processIdentity, signal } from "../src/child-host/worker/files.ts";
 import { ChildSessionLifecycle } from "../src/runtime.ts";
 import {
   detachAfterHookResponse,
@@ -847,6 +847,48 @@ describe.skipIf(process.platform !== "linux")("worker process owner", () => {
     assert.strictEqual(result.status, 1);
     assert.include(result.stderr, "Invalid child process PID");
   });
+
+  it.live(
+    "reports an owner stopped when its PID or identity file disappears while it is checked",
+    () => {
+      const cwd = mkdtempSync(join(tmpdir(), "usine-owner-race-"));
+      const pidFile = childPidFile(cwd, AgentSessionId.make("attempt:child:1"));
+      const files = ownerFiles(pidFile, processIdentity);
+      const identity = processIdentity(process.pid);
+      assert(identity !== null);
+      // Creates the transport directory, so a check reads the identity file, then writes both files
+      // and removes the identity file before the PID file, as stopping an owner removes them one
+      // after the other, so a check can read the PID and miss the identity.
+      const churn = spawn(
+        process.execPath,
+        [
+          "-e",
+          `const fs = require('node:fs');
+const [pidFile, identityFile, pid, identity] = process.argv.slice(1);
+fs.mkdirSync(require('node:path').dirname(identityFile));
+const write = (file, text) => {
+  fs.writeFileSync(file + '.next', text);
+  fs.renameSync(file + '.next', file);
+};
+for (;;) {
+  write(pidFile, pid);
+  write(identityFile, identity);
+  fs.rmSync(identityFile, { force: true });
+  fs.rmSync(pidFile, { force: true });
+}`,
+          pidFile,
+          files.identityFile(pidFile),
+          String(process.pid),
+          identity,
+        ],
+        { stdio: "ignore" },
+      );
+      return Effect.gen(function* () {
+        yield* eventually(() => existsSync(files.identityFile(pidFile)));
+        for (let n = 0; n < 20_000; n++) files.ownerAlive(pidFile);
+      }).pipe(Effect.ensuring(Effect.sync(() => churn.kill("SIGKILL"))));
+    },
+  );
 
   it.live(
     "reports exit before first output with a bounded stderr tail",

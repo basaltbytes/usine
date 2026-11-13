@@ -197,6 +197,8 @@ interface FakeMachineState {
   stdinVariables: "received" | "dropped" | "no-base64" | "disconnects";
   /** Whether `git.<domain>` resolves and responds from the machine. */
   gatewayReachable: boolean;
+  /** How many of the next requests to `git.<domain>` time out before the Gateway answers. */
+  gatewayTimeouts: number;
   tailscaleJoin: "ready" | "refused";
   tailnetConfigure: "ready" | "refused";
   gatewayRefusal: string;
@@ -384,6 +386,7 @@ export const fakeMachine = () => {
     codexVersion: `codex-cli ${CODEX_CLI_VERSION}`,
     stdinVariables: "received",
     gatewayReachable: true,
+    gatewayTimeouts: 0,
     tailscaleJoin: "ready",
     tailnetConfigure: "ready",
     gatewayRefusal: "missing-caller-token",
@@ -668,6 +671,10 @@ export const fakeMachine = () => {
         return `${host} 0 200 404\n`;
       };
       return oneShotHandle(remoteWords(line).slice(5).map(answer).join(""), 0);
+    }
+    if (line.startsWith("exec 'curl'") && state.gatewayTimeouts > 0) {
+      state.gatewayTimeouts -= 1;
+      return oneShotHandle("", 28, "curl: (28) Operation timed out after 13000 milliseconds");
     }
     if (line.startsWith("exec 'curl'"))
       return state.gatewayReachable

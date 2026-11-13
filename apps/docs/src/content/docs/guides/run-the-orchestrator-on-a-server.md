@@ -32,7 +32,7 @@ A configured gateway and private network, a matching usine checkout, `hcloud`, S
    Replace the sample private address. Complete the printed Tailscale login. The script enables nftables, which restricts SSH to the tailnet, and prints the HTTPS address.
 
 4. Connect as `usine` over the tailnet. Set up the gateway and worker SSH aliases, private keys, and trusted known-hosts entries in `/home/usine/.ssh/`. Check `ssh usine-gateway true` and each fixed worker connection as this user.
-5. Create `/home/usine/factory` and initialize it using the [quickstart](/get-started/quickstart/), or [move an existing instance](/guides/move-an-instance/). Configure remote workers. Set `USINE_ORIGIN` in the instance’s private `.env` to the printed HTTPS address, and supply the Pi parent credential as the `usine` user.
+5. Create `/home/usine/factory` and initialize it using the [quickstart](/get-started/quickstart/), or [move an existing instance](/guides/move-an-instance/). Configure remote workers. Set `USINE_ORIGIN` in the instance’s private `.env` to the printed HTTPS address, and, for agents with `coordinator: session`, supply the Pi parent credential as the `usine` user.
 6. Start the service from the instance folder:
 
    ```sh

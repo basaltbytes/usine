@@ -4,10 +4,7 @@ import { ProviderLogins } from "./providers/control.ts";
 import { providerLoginRunnerLayer } from "./providers/runner.ts";
 import type { StepOutputStore } from "@usine/engine/step-outputs";
 import { changeBusLayer } from "@usine/core/changes";
-import { startupListener, type StartupListener } from "./listener.ts";
-// The Node server adapter requires native HTTP server and connection types.
-// @effect-diagnostics-next-line nodeBuiltinImport:off
-import { createServer } from "node:http";
+import { listenForStartup, type StartupListener } from "./listener.ts";
 import { memberAccessLayer } from "./auth/access.ts";
 import { Setup } from "./setup/control.ts";
 import { webhookEndpoint } from "./webhooks.ts";
@@ -19,7 +16,7 @@ import { AuthStore } from "./auth/store.ts";
 import { sqliteAuthLayer } from "./auth/sqlite.ts";
 import { writeAdminToken } from "./auth/local.ts";
 import type { AuthServices } from "./auth/http.ts";
-import { FetchHttpClient, HttpServer, type HttpRouter } from "effect/http";
+import { FetchHttpClient, type HttpRouter } from "effect/http";
 import type { SqlClient } from "effect/sql";
 import { ItemProjectionReader } from "@usine/engine/item-projection";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
@@ -31,7 +28,7 @@ import type { RunDatabase, TranscriptCodec } from "@usine/engine/database";
 import type { EnginePersistenceError } from "@usine/engine/engine";
 import { configurationLayer, initializeConfiguration } from "./configuration/runtime.ts";
 import { AttentionAcknowledgements } from "@usine/engine/attention";
-import { NodeHttpServer, NodeServices } from "@effect/platform-node";
+import { NodeServices } from "@effect/platform-node";
 import { InstanceDirectory, type InstanceId } from "@usine/core/instance";
 import { RunEngine, RunEngineShutdown } from "@usine/engine/engine";
 import { GitHubApp, GitHubCredentials } from "@usine/github/github-app";
@@ -69,10 +66,6 @@ import {
   VolatileInstanceDirectoryError,
   openBrowser,
   packageVersion,
-  portInUse,
-  refuseTakenPort,
-  serverStartError,
-  SERVER_HOST,
   volatileRoot,
   volatileRoots,
 } from "./cli.ts";
@@ -95,20 +88,19 @@ const serve = Effect.fnUntraced(function* (options: {
   readonly providers: ProviderLogins["Service"];
   readonly backend: ReturnType<typeof liveBackendLayer>;
   readonly webRoot: string;
-  readonly port: Port;
   readonly url: string;
   readonly openSetupPage: boolean;
   readonly upgrades: ServerUpgrades["Service"];
   readonly configurationEditor: ConfigurationEditor["Service"];
   readonly catalog?: Layer.Layer<GitHubApp | GitHubPolling | GitHubFiles>;
   readonly webhooks?: Layer.Layer<never, never, HttpRouter.HttpRouter>;
-  readonly listener?: StartupListener;
+  readonly listener: StartupListener;
 }) {
   yield* Layer.build(
     serverLayer(
       options.backend,
       options.webRoot,
-      options.port,
+      options.listener,
       options.auth,
       Layer.mergeAll(
         options.catalog ?? Layer.empty,
@@ -118,11 +110,7 @@ const serve = Effect.fnUntraced(function* (options: {
       ),
       options.webhooks,
       options.setup,
-      options.listener,
     ),
-  ).pipe(
-    Effect.mapError((error) => serverStartError(options.port, error)),
-    Effect.catchTag("PortInUseError", ({ port }) => portInUse(port)),
   );
   yield* options.upgrades.polling.pipe(Effect.forkScoped);
   yield* Console.log(
@@ -186,6 +174,7 @@ const start = Effect.fnUntraced(function* (
   >,
   configurationEditor: ConfigurationEditor["Service"],
   auth: AuthServices,
+  listener: StartupListener,
 ) {
   yield* reloadOnHangup(instances);
   const credentials = yield* loadLocalCredentials(directory).pipe(Effect.result);
@@ -248,9 +237,9 @@ const start = Effect.fnUntraced(function* (
       backend,
       configurationEditor,
       webRoot,
-      port,
       url,
       openSetupPage: true,
+      listener,
       upgrades: Context.get(upgradeContext, ServerUpgrades),
     }).pipe(
       Effect.raceFirst(setup.changed),
@@ -260,15 +249,6 @@ const start = Effect.fnUntraced(function* (
 
   const shutdown = yield* Deferred.make<void>();
   const startup = Effect.gen(function* () {
-    const http = yield* Layer.build(
-      NodeHttpServer.layer(createServer, { host: SERVER_HOST, port }),
-    ).pipe(
-      Effect.mapError((error) => serverStartError(port, error)),
-      Effect.catchTag("PortInUseError", ({ port }) => portInUse(port)),
-    );
-    const listener = yield* startupListener(record.version).pipe(
-      Effect.provideService(HttpServer.HttpServer, Context.get(http, HttpServer.HttpServer)),
-    );
     const runtime = runtimeLayer(directory, instanceId, database).pipe(
       Layer.provide(Layer.succeed(GitHubCredentials, credentials.success)),
       Layer.provide(Layer.succeed(CurrentInstance, instances)),
@@ -319,7 +299,6 @@ const start = Effect.fnUntraced(function* (
             Layer.succeed(GitHubFiles, Context.get(context, GitHubFiles)),
           ),
           webRoot,
-          port,
           url,
           openSetupPage: false,
           listener,
@@ -377,7 +356,7 @@ export const up = (command: UpCommand) =>
         // Acquired before any store opens and released after every store closes.
         yield* holdInstance(directory, record);
         const instanceId = yield* instanceIdOf(instanceFiles(directory));
-        yield* refuseTakenPort(port);
+        const listener = yield* listenForStartup(port, record.version);
         if (process.platform === "darwin") yield* warnIfSystemSleeps();
         const databaseContext = yield* Layer.build(localSqliteLayer(directory));
         const database = Layer.succeedContext(databaseContext);
@@ -454,6 +433,7 @@ export const up = (command: UpCommand) =>
           database,
           configurationEditor,
           auth,
+          listener,
         ).pipe(
           Effect.scoped,
           Effect.forever,

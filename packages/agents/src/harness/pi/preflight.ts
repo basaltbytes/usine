@@ -21,6 +21,8 @@ const check = Effect.fn("PiRuntime.check")(function* (brain: BrainSpec, target: 
         storage: { _tag: "InMemory" },
         environment: Option.some(environment),
         extensions: [],
+        nativeTools: true,
+        hostTools: [],
         model: brain.model,
         signal,
         thinkingLevel: brain.effort,
