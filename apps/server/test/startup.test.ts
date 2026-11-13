@@ -15,18 +15,18 @@ import {
   Context,
   Deferred,
   Effect,
+  Exit,
   Fiber,
   FileSystem,
   Layer,
   Option,
   Result,
   Schema,
+  Scope,
 } from "effect";
-import { FetchHttpClient, HttpClient } from "effect/http";
-import { createServer } from "node:net";
+import { HttpClient } from "effect/http";
 import { serverLayer } from "../src/http.ts";
 import { FactoryBackend } from "../src/backend.ts";
-import { Port, SERVER_HOST } from "../src/cli.ts";
 import { authFixture } from "./auth/fixture.ts";
 import { assert, it } from "@effect/vitest";
 import { committedBeforeCrash, submission } from "../../../packages/engine/test/support.ts";
@@ -39,9 +39,8 @@ import {
   noGateway,
   COMMIT_AUTHOR,
 } from "../../../packages/executor/test/ssh/support.ts";
-import { listenThenBuild, startupListener } from "../src/listener.ts";
+import { startupListener } from "../src/listener.ts";
 import { sqliteTempDirectory } from "../../../tooling/test/sqlite.mts";
-import { webRequest } from "../../../tooling/test/http.mts";
 
 it.live(
   "answers the version while recovering 400 finished attempts without per-attempt remote commands",
@@ -135,9 +134,14 @@ it.live(
         Layer.provide(CompletionCheck.unverified),
       );
       const listener = yield* startupListener("0.5.1-next.341");
+      const client = yield* HttpClient.HttpClient;
+      const beforeStart = yield* client.get("/api/version");
+      assert.strictEqual(beforeStart.status, 503);
+      assert.strictEqual(beforeStart.headers["retry-after"], "1");
+      assert.strictEqual(beforeStart.headers["connection"], "close");
+      yield* listener.started;
       const starting = yield* Layer.build(runtime).pipe(Effect.forkChild);
       yield* Deferred.await(recovering);
-      const client = yield* HttpClient.HttpClient;
       const version = yield* client.get("/api/version");
       assert.strictEqual(version.status, 200);
       const currentJson = yield* version.json;
@@ -187,42 +191,29 @@ it.live(
   30_000,
 );
 
-/** A port on the server host that was free when the probe closed it. */
-const freePort = Effect.callback<Port>((resume) => {
-  const probe = createServer();
-  probe.listen({ host: SERVER_HOST, port: 0 }, () => {
-    // Node event callbacks decode their arguments synchronously.
-    // @effect-diagnostics-next-line schemaSync:off
-    const { port } = Schema.decodeUnknownSync(Schema.Struct({ port: Port }))(probe.address());
-    probe.close(() => resume(Effect.succeed(port)));
-  });
-});
-
-it.live("answers on the port while a runtime startup step is still pending", () =>
+it.live("restores the startup responses when the installed routes close", () =>
   Effect.gen(function* () {
-    const port = yield* freePort;
-    const checking = yield* Deferred.make<void>();
-    const finish = yield* Deferred.make<void>();
-    // Stands in for the startup coordinator brain check, which has no time limit.
-    const runtime = Layer.effectDiscard(
-      Deferred.succeed(checking, undefined).pipe(Effect.andThen(Deferred.await(finish))),
+    const listener = yield* startupListener("0.5.1-next.341");
+    const auth = yield* authFixture();
+    const client = yield* HttpClient.HttpClient;
+    const routes = yield* Scope.make();
+    yield* Layer.buildWithScope(
+      serverLayer(Layer.mock(FactoryBackend)({}), "", listener, auth, Layer.empty, Layer.empty),
+      routes,
     );
-    const starting = yield* listenThenBuild(port, "0.5.1-next.341", runtime).pipe(
-      Effect.forkScoped,
-    );
-    yield* Deferred.await(checking);
-    const origin = `http://${SERVER_HOST}:${port}`;
-    const version = yield* webRequest(`${origin}/api/version`).pipe(Effect.timeout("5 seconds"));
+    const unstarted = yield* client.get("/api/overview");
+    assert.strictEqual(unstarted.status, 503, "routes wait until startup has finished");
+    yield* listener.started;
+    const installed = yield* client.get("/api/overview");
+    assert.strictEqual(installed.status, 401);
+    yield* Scope.close(routes, Exit.void);
+    const restored = yield* client.get("/api/overview");
+    assert.strictEqual(restored.status, 503);
+    assert.strictEqual(restored.headers["retry-after"], "1");
+    const version = yield* client.get("/api/version");
     assert.strictEqual(version.status, 200);
-    const body = yield* Effect.promise(() => version.json());
-    assert.strictEqual(body, "0.5.1-next.341");
-    const pending = yield* webRequest(`${origin}/api/overview`).pipe(Effect.timeout("5 seconds"));
-    assert.strictEqual(pending.status, 503);
-    assert.strictEqual(pending.headers.get("retry-after"), "1");
-    yield* Deferred.succeed(finish, undefined);
-    yield* Fiber.join(starting);
   }).pipe(
     Effect.scoped,
-    Effect.provide(Layer.provideMerge(NodeServices.layer, FetchHttpClient.layer)),
+    Effect.provide(NodeHttpServer.layerTest.pipe(Layer.provideMerge(NodeServices.layer))),
   ),
 );

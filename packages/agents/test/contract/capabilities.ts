@@ -7,7 +7,7 @@ import { catalog } from "../../src/harness/catalog.ts";
 import { completionScenarios } from "../replay/completion.ts";
 import { piScenarios, type Provider, scenarios } from "../replay/fixture.ts";
 import type { Scenario } from "../replay/transcript.ts";
-import { toolProviders, toolScenarios } from "./host-tools.ts";
+import { toolProviders, toolScenariosOf } from "./host-tools.ts";
 
 /** How the contract suite proves that a harness provides a capability. */
 export type Proof =
@@ -71,7 +71,7 @@ export const replayedScenarios = (harness: Harness): ReadonlyArray<Scenario> => 
     ? piScenarios
     : [...scenarios, "restart" as const, "credential-changed" as const]),
   ...completionScenarios,
-  ...(toolProviders.some((provider) => provider === harness) ? toolScenarios : []),
+  ...toolProviders.flatMap((provider) => (provider === harness ? toolScenariosOf(provider) : [])),
 ];
 
 /** The capabilities that `harness` declares for any placement and credential route. */

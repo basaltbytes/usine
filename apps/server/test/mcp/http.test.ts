@@ -884,6 +884,7 @@ describe("operator MCP endpoint", () => {
         ),
       );
       yield* Layer.build(serverLayer(backend, webRoot, listener, services, upgrades, webhooks));
+      yield* listener.started;
       const initialize = (headers: Readonly<Record<string, string>>) =>
         webRequest(`${origin}${MCP_PATH}`, {
           method: "POST",

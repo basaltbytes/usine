@@ -4,7 +4,7 @@ import { ProviderLogins } from "./providers/control.ts";
 import { providerLoginRunnerLayer } from "./providers/runner.ts";
 import type { StepOutputStore } from "@usine/engine/step-outputs";
 import { changeBusLayer } from "@usine/core/changes";
-import { listenForStartup, listenThenBuild, type StartupListener } from "./listener.ts";
+import { listenForStartup, type StartupListener } from "./listener.ts";
 import { memberAccessLayer } from "./auth/access.ts";
 import { Setup } from "./setup/control.ts";
 import { webhookEndpoint } from "./webhooks.ts";
@@ -66,7 +66,6 @@ import {
   VolatileInstanceDirectoryError,
   openBrowser,
   packageVersion,
-  refuseTakenPort,
   volatileRoot,
   volatileRoots,
 } from "./cli.ts";
@@ -119,23 +118,27 @@ const serve = Effect.fnUntraced(function* (options: {
       ? `usine is running in setup mode at ${options.url}`
       : `usine is running at ${options.url}`,
   );
-  if (process.stdout.isTTY) {
-    const signInLink = yield* options.auth.authentication.link;
-    yield* Console.log(`Sign in: ${signInLink}`);
-    if (options.openSetupPage) {
-      yield* openBrowser(signInLink).pipe(
-        Effect.tapError((error) =>
-          Effect.logWarning("The setup page could not be opened automatically", {
-            command: error.command,
-            cause: error.cause,
-            url: options.url,
-          }),
-        ),
-        Effect.ignore,
-      );
-    }
-  } else {
-    yield* Console.log("Run usine sign-in-link in the instance folder to sign in.");
+  const signInLink = yield* process.stdout.isTTY
+    ? Effect.asSome(options.auth.authentication.link)
+    : Effect.succeedNone;
+  yield* Console.log(
+    Option.match(signInLink, {
+      onNone: () => "Run usine sign-in-link in the instance folder to sign in.",
+      onSome: (link) => `Sign in: ${link}`,
+    }),
+  );
+  yield* options.listener.started;
+  if (Option.isSome(signInLink) && options.openSetupPage) {
+    yield* openBrowser(signInLink.value).pipe(
+      Effect.tapError((error) =>
+        Effect.logWarning("The setup page could not be opened automatically", {
+          command: error.command,
+          cause: error.cause,
+          url: options.url,
+        }),
+      ),
+      Effect.ignore,
+    );
   }
   return yield* Effect.never;
 });
@@ -175,6 +178,7 @@ const start = Effect.fnUntraced(function* (
   >,
   configurationEditor: ConfigurationEditor["Service"],
   auth: AuthServices,
+  listener: StartupListener,
 ) {
   yield* reloadOnHangup(instances);
   const credentials = yield* loadLocalCredentials(directory).pipe(Effect.result);
@@ -209,7 +213,6 @@ const start = Effect.fnUntraced(function* (
       message: error.message,
       instanceDirectory: directory,
     });
-    const listener = yield* listenForStartup(port, record.version);
     const observationContext = yield* Layer.build(operatorObservationLayer(directory, database));
     const backend = needsSetupBackendLayer(
       instances,
@@ -254,7 +257,8 @@ const start = Effect.fnUntraced(function* (
       Layer.provide(Layer.succeed(GitHubCredentials, credentials.success)),
       Layer.provide(Layer.succeed(CurrentInstance, instances)),
     );
-    const { listener, context } = yield* listenThenBuild(port, record.version, runtime).pipe(
+    yield* listener.started;
+    const context = yield* Layer.build(runtime).pipe(
       Effect.provideService(RunEngineShutdown, shutdown),
     );
     const webhooks = yield* webhookEndpoint(
@@ -357,7 +361,7 @@ export const up = (command: UpCommand) =>
         // Acquired before any store opens and released after every store closes.
         yield* holdInstance(directory, record);
         const instanceId = yield* instanceIdOf(instanceFiles(directory));
-        yield* refuseTakenPort(port);
+        const listener = yield* listenForStartup(port, record.version);
         if (process.platform === "darwin") yield* warnIfSystemSleeps();
         const databaseContext = yield* Layer.build(localSqliteLayer(directory));
         const database = Layer.succeedContext(databaseContext);
@@ -434,6 +438,7 @@ export const up = (command: UpCommand) =>
           database,
           configurationEditor,
           auth,
+          listener,
         ).pipe(
           Effect.scoped,
           Effect.forever,

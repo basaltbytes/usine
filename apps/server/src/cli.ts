@@ -3,7 +3,6 @@ import type { HttpServerError } from "effect/http";
 import { UiOrigin } from "@usine/config/factory";
 import { UpgradeChannel } from "@usine/core/upgrade";
 import { ConfigCommand, parseConfigCommand } from "./configuration/command.ts";
-import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 // volatileRoots and volatileRoot synchronously normalize paths for CLI validation.
 // @effect-diagnostics-next-line nodeBuiltinImport:off
@@ -675,30 +674,6 @@ export const portInUse = Effect.fn("Cli.portInUse")(function* (port: Port) {
     holder: Option.getOrUndefined(holder),
   });
   return yield* PortInUseError.make({ port, holder });
-});
-
-const portTaken = (port: Port) =>
-  Effect.callback<boolean, ServerStartError>((resume) => {
-    const server = createServer();
-    server.once("error", (cause) =>
-      resume(
-        Schema.is(AddressInUse)(cause)
-          ? Effect.succeed(true)
-          : Effect.fail(ServerStartError.make({ port, cause })),
-      ),
-    );
-    server.listen({ host: SERVER_HOST, port }, () =>
-      server.close(() => resume(Effect.succeed(false))),
-    );
-    return Effect.sync(() => server.close());
-  });
-
-/**
- * Fails with `PortInUseError` if another process is listening on `port`. Call it before `usine up`
- * builds its runtime.
- */
-export const refuseTakenPort = Effect.fn("Cli.refuseTakenPort")(function* (port: Port) {
-  if (yield* portTaken(port)) return yield* portInUse(port);
 });
 
 const browserCommand = (url: string) => {

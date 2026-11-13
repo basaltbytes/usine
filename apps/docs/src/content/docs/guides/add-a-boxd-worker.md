@@ -94,7 +94,7 @@ The list isn't always fully in force when the restored machine resumes, even tho
 
 An address entry admits all traffic to that address, and usine can't tell whose address it is. The gateway check therefore covers host names only: behind a gateway, preflight logs a warning that names the address entries. Make sure none of them belongs to GitHub or to a provider the gateway serves. Like boxd, usine refuses an address or range with host bits set, and one that overlaps a private, CGNAT, loopback, link-local, multicast, or reserved range. usine also refuses a range with a prefix length under 8.
 
-Preflight logs the number of entries in `boxd provisioner verified`. If a restricted machine can't join the tailnet or reach the gateway, the error says that `provisioner.egress` restricts the machine.
+Preflight logs the number of entries in `boxd provisioner verified`. The first request over the relays after a join can be slow while the relay path comes up, so a new machine checks the gateway up to three times before usine deletes it. If a restricted machine can't join the tailnet or reach the gateway, the error says that `provisioner.egress` restricts the machine.
 
 ## Check the result
 

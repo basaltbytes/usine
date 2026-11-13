@@ -18,26 +18,62 @@ type HttpHandler = Effect.Effect<
   HttpServerRequest.HttpServerRequest | Scope.Scope
 >;
 
-/** Serves the version during startup, then installs the runtime routes on the same listener. */
+// Startup responses close the connection, so a client that keeps polling can't hold the server
+// open after a failed startup.
+const startupHeaders = { connection: "close" };
+
+const startupResponse = (message: string) =>
+  HttpServerResponse.jsonUnsafe(
+    { error: "Starting", message },
+    {
+      status: 503,
+      headers: { ...startupHeaders, "retry-after": "1" },
+    },
+  );
+
+/**
+ * Answers every request with HTTP 503 and `Retry-After: 1` until `started` runs. From then on,
+ * `GET /api/version` returns `version`, and `install` serves the routes it receives on the same
+ * listener until its scope closes, then restores the startup responses.
+ */
 export const startupListener = Effect.fnUntraced(function* (version: string) {
   const server = yield* HttpServer.HttpServer;
-  const handler = yield* Ref.make<HttpHandler>(
-    Effect.gen(function* () {
-      const request = yield* HttpServerRequest.HttpServerRequest;
-      if (request.method === "GET" && request.url.split("?")[0] === "/api/version")
-        return HttpServerResponse.jsonUnsafe(version);
-      return HttpServerResponse.jsonUnsafe(
-        { error: "Starting", message: "Startup recovery is in progress." },
-        {
-          status: 503,
-          headers: { "retry-after": "1" },
-        },
-      );
-    }),
+  const starting: HttpHandler = Effect.gen(function* () {
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    if (request.method === "GET" && request.url.split("?")[0] === "/api/version")
+      return HttpServerResponse.jsonUnsafe(version, { headers: startupHeaders });
+    return startupResponse("Startup recovery is in progress.");
+  });
+  const handler = yield* Ref.make(starting);
+  const isStarted = yield* Ref.make(false);
+  yield* server.serve(
+    Effect.flatMap(Ref.get(isStarted), (started) =>
+      started
+        ? Effect.flatten(Ref.get(handler))
+        : Effect.succeed(startupResponse("Startup is in progress.")),
+    ),
+    HttpMiddleware.logger,
   );
-  yield* server.serve(Effect.flatten(Ref.get(handler)), HttpMiddleware.logger);
-  yield* Effect.logInfo("HTTP listener ready; startup recovery can continue", { version });
-  return { install: (next: HttpHandler) => Ref.set(handler, next) };
+  yield* Effect.logInfo("HTTP listener ready; startup can continue", { version });
+  return {
+    install: (next: HttpHandler) =>
+      Effect.acquireRelease(Ref.set(handler, next), () =>
+        Ref.set(handler, starting).pipe(
+          Effect.andThen(Effect.logInfo("HTTP routes removed; startup responses restored")),
+        ),
+      ),
+    /**
+     * Marks the instance as started: `GET /api/version` returns HTTP 200, which `usine up --detach`
+     * and `usine restart` wait for, and installed routes answer. Run it after the admin token is
+     * written, once setup mode serves and has logged its sign-in line, or before the runtime starts
+     * worker checks and attempt recovery.
+     */
+    started: Ref.getAndSet(isStarted, true).pipe(
+      Effect.flatMap((already) =>
+        already ? Effect.void : Effect.logInfo("Instance started; GET /api/version answers"),
+      ),
+    ),
+  };
 });
 
 export type StartupListener = Effect.Success<ReturnType<typeof startupListener>>;
@@ -58,20 +94,3 @@ export const listenForStartup = Effect.fnUntraced(function* (port: Port, version
     Effect.provideService(HttpServer.HttpServer, Context.get(http, HttpServer.HttpServer)),
   );
 });
-
-/**
- * Opens the startup listener on `port`, then builds `runtime`. The listener answers while
- * `runtime` builds, so a slow startup step, such as the coordinator brain check, can't keep the
- * port closed. Fails with `PortInUseError` or `ServerStartError` before `runtime` builds when the
- * port can't be opened.
- */
-export const listenThenBuild = <A, E, R>(
-  port: Port,
-  version: string,
-  runtime: Layer.Layer<A, E, R>,
-) =>
-  Effect.gen(function* () {
-    const listener = yield* listenForStartup(port, version);
-    const context = yield* Layer.build(runtime);
-    return { listener, context };
-  });
