@@ -215,3 +215,5 @@ export const missingMemoryProcessesLine = (count: number): string =>
   `Process details unavailable for ${count} ${count === 1 ? "kill" : "kills"}.`;
 
 export const memoryProcessesLabel = "Killed processes (kernel task names)";
+
+export const finalReportLabel = "Final report";

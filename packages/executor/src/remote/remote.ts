@@ -507,7 +507,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
       yield* session.stopForRecovery(attempt);
       const located = yield* leftoversOf(attempt);
       if (Option.isNone(located)) {
-        yield* Effect.logDebug("The Attempt's machine is gone; nothing is left to reconcile", {
+        yield* Effect.logInfo("The Attempt's machine is gone; nothing is left to reconcile", {
           attemptId: attempt.attemptId,
           worker: attempt.worker,
         });
@@ -517,7 +517,12 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
       const { machine, checkouts } = located.value;
       const worktree = `${machine.workerDirectory}/attempts/${safeSegment(attempt.attemptId)}`;
       yield* Effect.addFinalizer(
-        () => worker.released?.(attempt.attemptId, machine) ?? Effect.void,
+        (exit) =>
+          worker.released?.(
+            attempt.attemptId,
+            machine,
+            Exit.isSuccess(exit) && exit.value === "gone",
+          ) ?? Effect.void,
       );
       yield* Effect.addFinalizer((exit) => recovered(attempt, Exit.isSuccess(exit)));
       // Checks the cached listing first to avoid an SSH round trip per persisted Attempt.
@@ -530,10 +535,19 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
           : Option.none(),
         record,
       );
-      // The machine stays until the finalizers release it, so a later recovery visits it again.
-      if (present)
+      if (present) {
         yield* reconcileCheckout(attempt, machine, worktree, record.salvage, commitAuthor);
-      return "found" satisfies RecoveredLeftovers;
+        return "found" satisfies RecoveredLeftovers;
+      }
+      // A machine created for the Attempt stays until the finalizers release it, so a later
+      // recovery visits it again. A long-lived machine keeps nothing of the Attempt outside its
+      // checkout: listing its leftovers reclaimed whatever else no Attempt holds.
+      if (Option.isSome(machine.provisioned)) return "found" satisfies RecoveredLeftovers;
+      yield* Effect.logInfo(
+        "The Attempt's checkout is gone from its Worker's machine; nothing is left to reconcile",
+        { attemptId: attempt.attemptId, worker: attempt.worker },
+      );
+      return "gone" satisfies RecoveredLeftovers;
     }, Effect.scoped);
 
     /** Reconciles a kept checkout after its parent stops; skips a missing checkout. */

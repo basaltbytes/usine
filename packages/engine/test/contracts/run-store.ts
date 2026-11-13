@@ -35,10 +35,16 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
           const store = yield* RunStore;
           const runId = RunId.make("late-completion");
           yield* store.recordAndClaim(lifecycleSubmission, runId);
-          const first = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
+          const first = yield* store.beginAttempt(
+            runId,
+            WorkerName.make("local"),
+            "local",
+            Option.none(),
+          );
           const recovered = yield* store.beginAttempt(
             runId,
             WorkerName.make("local"),
+            "local",
             Option.none(),
           );
           assert(first._tag === "AttemptStarted" && recovered._tag === "AttemptStarted");
@@ -80,7 +86,12 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
             const store = yield* RunStore;
             const runId = RunId.make("reattached");
             yield* store.recordAndClaim(lifecycleSubmission, runId);
-            const first = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
+            const first = yield* store.beginAttempt(
+              runId,
+              WorkerName.make("local"),
+              "local",
+              Option.none(),
+            );
             assert(first._tag === "AttemptStarted");
             const attemptId = first.execution.attempt.id;
             const session = ParentSession.make({
@@ -107,6 +118,7 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
             const reattached = yield* store.beginAttempt(
               runId,
               WorkerName.make("local"),
+              "local",
               Option.some(attemptId),
             );
             assert(reattached._tag === "AttemptStarted");
@@ -149,13 +161,14 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
           const failures = yield* WriteFailures;
           const runId = RunId.make("atomic-lifecycle");
           yield* store.recordAndClaim(lifecycleSubmission, runId);
-          yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
+          yield* store.beginAttempt(runId, WorkerName.make("local"), "local", Option.none());
           const running = yield* store.snapshot(runId);
           // Reject the new Attempt after recovery has tried closing its predecessor.
           const restoreAttempt = yield* failures.rejectAttemptInsert;
           assert.strictEqual(
-            (yield* Effect.flip(store.beginAttempt(runId, WorkerName.make("local"), Option.none())))
-              ._tag,
+            (yield* Effect.flip(
+              store.beginAttempt(runId, WorkerName.make("local"), "local", Option.none()),
+            ))._tag,
             "EnginePersistenceError",
           );
           const currentSnapshot = yield* store.snapshot(runId);
@@ -164,6 +177,7 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
           const recovered = yield* store.beginAttempt(
             runId,
             WorkerName.make("local"),
+            "local",
             Option.none(),
           );
           assert(recovered._tag === "AttemptStarted");
@@ -217,6 +231,7 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
             const started = yield* store.beginAttempt(
               runId,
               WorkerName.make("local"),
+              "local",
               Option.none(),
             );
             assert(started._tag === "AttemptStarted");
@@ -273,6 +288,7 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
           const started = yield* store.beginAttempt(
             failedRun,
             WorkerName.make("local"),
+            "local",
             Option.none(),
           );
           assert(started._tag === "AttemptStarted");
@@ -319,6 +335,7 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
               const started = yield* store.beginAttempt(
                 runId,
                 WorkerName.make("local"),
+                "local",
                 Option.none(),
               );
               assert(started._tag === "AttemptStarted");
@@ -327,6 +344,7 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
             const exhausted = yield* store.beginAttempt(
               runId,
               WorkerName.make("local"),
+              "local",
               Option.none(),
             );
             assert.strictEqual(exhausted._tag, "AttemptRecoveryFailed");
@@ -341,7 +359,8 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
             const canceled = yield* store.cancel(runId);
             assert(canceled._tag === "Canceled" && Option.isNone(canceled.openAttempt));
             assert.strictEqual(
-              (yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none()))._tag,
+              (yield* store.beginAttempt(runId, WorkerName.make("local"), "local", Option.none()))
+                ._tag,
               "RunClosed",
             );
             assert.deepStrictEqual((yield* store.snapshot(runId)).attempts, failed.attempts);
@@ -355,7 +374,12 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
           const store = yield* RunStore;
           const runId = RunId.make("attempt-end-times");
           yield* store.recordAndClaim(lifecycleSubmission, runId);
-          const first = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
+          const first = yield* store.beginAttempt(
+            runId,
+            WorkerName.make("local"),
+            "local",
+            Option.none(),
+          );
           assert(first._tag === "AttemptStarted");
           assert.deepStrictEqual(
             (yield* store.snapshot(runId)).attempts[0]?.endedAt,
@@ -366,7 +390,12 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
             Result.fail(AgentFailure.make({ message: "Checks failed" })),
           );
           yield* store.retry(runId);
-          const second = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
+          const second = yield* store.beginAttempt(
+            runId,
+            WorkerName.make("local"),
+            "local",
+            Option.none(),
+          );
           assert(second._tag === "AttemptStarted");
           assert.deepStrictEqual(
             (yield* store.snapshot(runId)).attempts[1]?.endedAt,
@@ -413,6 +442,7 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
             const first = yield* store.beginAttempt(
               readRun,
               WorkerName.make("local"),
+              "local",
               Option.none(),
             );
             assert(first._tag === "AttemptStarted");
@@ -425,6 +455,7 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
             const retried = yield* store.beginAttempt(
               readRun,
               WorkerName.make("local"),
+              "local",
               Option.none(),
             );
             assert(retried._tag === "AttemptStarted");
@@ -434,6 +465,7 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
             const written = yield* store.beginAttempt(
               writeRun,
               WorkerName.make("local"),
+              "local",
               Option.none(),
             );
             assert(written._tag === "AttemptStarted");
@@ -462,14 +494,24 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
             Submission.make({ ...lifecycleSubmission, outcomeLabels }),
             runId,
           );
-          const first = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
+          const first = yield* store.beginAttempt(
+            runId,
+            WorkerName.make("local"),
+            "local",
+            Option.none(),
+          );
           assert(first._tag === "AttemptStarted");
           yield* store.finishAttempt(
             first.execution.attempt,
             Result.fail(AgentFailure.make({ message: "Checks failed" })),
           );
           yield* store.retry(runId);
-          const retried = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
+          const retried = yield* store.beginAttempt(
+            runId,
+            WorkerName.make("local"),
+            "local",
+            Option.none(),
+          );
           assert(retried._tag === "AttemptStarted");
 
           assert.deepStrictEqual(first.execution.outcomeLabels, outcomeLabels);
@@ -485,7 +527,12 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
           const store = yield* RunStore;
           const runId = RunId.make("closed-attempt-discard");
           yield* store.recordAndClaim(lifecycleSubmission, runId);
-          const first = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
+          const first = yield* store.beginAttempt(
+            runId,
+            WorkerName.make("local"),
+            "local",
+            Option.none(),
+          );
           assert(first._tag === "AttemptStarted");
           const open = first.execution.attempt.id;
           const whileOpen = yield* store.discardClosedAttempt(open);
@@ -513,10 +560,11 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
           const store = yield* RunStore;
           const runId = RunId.make("late-after-cancel");
           yield* store.recordAndClaim(lifecycleSubmission, runId);
-          yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
+          yield* store.beginAttempt(runId, WorkerName.make("local"), "local", Option.none());
           const recovered = yield* store.beginAttempt(
             runId,
             WorkerName.make("local"),
+            "local",
             Option.none(),
           );
           assert(recovered._tag === "AttemptStarted");
@@ -567,7 +615,7 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
                 .pipe(Effect.as(RunId.make(name)));
             const begin = (runId: RunId) =>
               store
-                .beginAttempt(runId, worker, Option.none())
+                .beginAttempt(runId, worker, "local", Option.none())
                 .pipe(
                   Effect.flatMap((started) =>
                     started._tag === "AttemptStarted"
@@ -672,6 +720,7 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
               const started = yield* store.beginAttempt(
                 runId,
                 WorkerName.make("local"),
+                "local",
                 Option.none(),
               );
               assert(started._tag === "AttemptStarted");
@@ -741,6 +790,7 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
               const started = yield* store.beginAttempt(
                 runId,
                 WorkerName.make("local"),
+                "local",
                 Option.none(),
               );
               assert(started._tag === "AttemptStarted");
@@ -810,6 +860,7 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
             const started = yield* store.beginAttempt(
               runId,
               WorkerName.make("local"),
+              "local",
               Option.none(),
             );
             assert.strictEqual(started._tag, "AttemptStarted");
@@ -836,6 +887,7 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
           const restarted = yield* store.beginAttempt(
             runId,
             WorkerName.make("local"),
+            "local",
             Option.none(),
           );
           assert(restarted._tag === "AttemptStarted");
@@ -914,7 +966,12 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
           const [history] = yield* reader.forItems([submission.itemKey]);
           assert.deepStrictEqual(history?.approval, recorded);
 
-          const started = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
+          const started = yield* store.beginAttempt(
+            runId,
+            WorkerName.make("local"),
+            "local",
+            Option.none(),
+          );
           assert.strictEqual(started._tag, "AttemptStarted");
           const updatedRunState = yield* state();
           assert.strictEqual(updatedRunState, "Running");
@@ -950,7 +1007,12 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
           // that is not a defect.
           const outcome = yield* store.cancel(runId);
           assert.strictEqual(outcome._tag, "Canceled");
-          const started = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
+          const started = yield* store.beginAttempt(
+            runId,
+            WorkerName.make("local"),
+            "local",
+            Option.none(),
+          );
           assert.strictEqual(started._tag, "RunClosed");
           const snapshot = yield* store.snapshot(runId);
           assert.strictEqual(snapshot.attempts.length, 0);

@@ -212,6 +212,10 @@ _Avoid_: backend, adapter, runner, agent
 What a session does for usine, such as the coordinator, the coding agent, or the supervisor. A role states the placements, credential routes, tools, and persistence it needs; admission refuses a harness that lacks one. A member's access comes from a role binding instead.
 _Avoid_: agent type, mode, persona
 
+**Supervisor**:
+The role that observes and operates the factory for a member, with the operator tools that the member's token allows. It runs on the orchestrator with the instance's `supervisor` brain and keeps its conversation between turns.
+_Avoid_: orchestrator agent, assistant, operator agent
+
 **Usine tool set**:
 The tools that usine gives a session through the harness contract, defined once as a toolkit. The role that opens the session supplies their handlers, so it decides what each call can reach.
 _Avoid_: MCP tools, custom tools, plugin
@@ -233,7 +237,7 @@ The branch `usine/salvage/<run>/<attempt>` that the executor pushes with the wor
 _Avoid_: backup, checkpoint, recovery branch
 
 **Coordinator**:
-What starts an attempt's children and turns their reports into the attempt's outcome: a Pi parent session, or the event-driven coordinator, which handles each attempt lifecycle event with a rule and has no parent session.
+What starts an attempt's children and turns their reports into the attempt's outcome: a Pi parent session, or the event-driven coordinator, which handles each attempt lifecycle event with a rule, or a child's report with a completion from the decision brain, and has no parent session.
 _Avoid_: orchestrator, supervisor
 
 **Coordinator kind**:
@@ -241,7 +245,7 @@ The `coordinator` setting of an instance or agent: `session`, where a parent ses
 _Avoid_: parent kind, `parent: pi | none`
 
 **Decision brain**:
-The model and effort of an agent's decision sessions, set by its `decision` field; the harness is the agent's own.
+The model and effort that decide a child's report for the event-driven coordinator, set by an agent's `decision` field; the harness is the agent's own.
 _Avoid_: parent model, decision harness
 
 **Child-session budget**:

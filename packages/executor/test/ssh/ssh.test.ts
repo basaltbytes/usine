@@ -634,6 +634,60 @@ describe("SSH Worker", () => {
   );
 
   it.effect(
+    "keeps a closed Attempt's checkout whose salvage is retained, and finds it again at the next start",
+    () => {
+      const machine = fakeMachine();
+      const credentials = mintingProvider();
+      machine.state.cacheExists = true;
+      machine.state.salvage = "stalls";
+      const inspections = () =>
+        machine.state.calls.filter(({ line }) => line.includes("'status' '--porcelain'")).length;
+      const start = Effect.gen(function* () {
+        const executor = yield* Executor;
+        const recorded: Array<AttemptSalvage> = [];
+        const before = inspections();
+        const recovery = yield* executor
+          .recover(
+            {
+              attemptId: request.attemptId,
+              repository: request.repository,
+              worker: WORKER,
+              ref: request.salvageRef,
+              permissions: "write",
+              succeeded: false,
+              open: false,
+              rejected: Option.none(),
+            },
+            {
+              salvage: (salvage) => Effect.sync(() => void recorded.push(salvage)),
+              comments: () => Effect.void,
+              windows: aloneOnItem(),
+            },
+            Effect.succeed(COMMIT_AUTHOR),
+          )
+          .pipe(Effect.forkChild);
+        while (inspections() === before) yield* Effect.yieldNow;
+        yield* TestClock.adjust("10 minutes");
+        const found = yield* Fiber.join(recovery);
+        return { found, salvage: recorded[0] };
+      }).pipe(Effect.scoped);
+      return Effect.gen(function* () {
+        for (const _ of [1, 2]) {
+          const { found, salvage } = yield* start.pipe(
+            Effect.provide(runtime(machine, credentials)),
+          );
+          assert.strictEqual(found, "found");
+          assert(salvage?._tag === "Retained");
+          assert.strictEqual(salvage.path, WORKTREE);
+        }
+        const lines = machine.state.calls.map(({ line }) => line);
+        assert(!lines.some((line) => line.includes("'worktree' 'remove'")));
+        assert(!lines.some((line) => line.includes('rm -rf "$1"') && line.includes(WORKTREE)));
+      });
+    },
+  );
+
+  it.effect(
     "reattaches after a restart with a fresh credential and clears the persisted worker outage",
     () => {
       const machine = fakeMachine();

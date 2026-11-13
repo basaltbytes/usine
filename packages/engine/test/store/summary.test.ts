@@ -48,7 +48,12 @@ for (const [method, phase, selection, transition] of [
         const store = yield* RunStore;
         const runId = RunId.make("changing-during-summary");
         yield* store.recordAndClaim(lifecycleSubmission, runId);
-        const started = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
+        const started = yield* store.beginAttempt(
+          runId,
+          WorkerName.make("local"),
+          "local",
+          Option.none(),
+        );
         assert(started._tag === "AttemptStarted");
         if (transition === "retry") {
           yield* store.finishAttempt(
@@ -79,6 +84,7 @@ for (const [method, phase, selection, transition] of [
                 const retried = yield* store.beginAttempt(
                   runId,
                   WorkerName.make("local"),
+                  "local",
                   Option.none(),
                 );
                 assert(retried._tag === "AttemptStarted");
@@ -219,7 +225,12 @@ it.effect(
           });
           const claim = yield* store.recordAndClaim(submission, runId);
           assert.strictEqual(claim.result._tag, "Claimed");
-          const started = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
+          const started = yield* store.beginAttempt(
+            runId,
+            WorkerName.make("local"),
+            "local",
+            Option.none(),
+          );
           assert(started._tag === "AttemptStarted");
           yield* store.recordComments(started.execution.attempt.id, [comment]);
           yield* TestClock.adjust("1 second");

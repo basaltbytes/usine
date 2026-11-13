@@ -2,7 +2,7 @@ import { jsonKey } from "@usine/core/json-key";
 import { NodeFileSystem, NodePath } from "@effect/platform-node";
 import { assert, describe, expect, it } from "@effect/vitest";
 import { DecisionBrain } from "@usine/core/agent";
-import { ModelId } from "@usine/core/agent/brain";
+import { BrainSpec, Harness, ModelId } from "@usine/core/agent/brain";
 import { InstanceDirectory } from "@usine/core/instance";
 import { type Environment, ExpressionEngine, Source } from "@usine/expression/expression-engine";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
@@ -1197,6 +1197,38 @@ workers:
         "---\nharness: codex\nmodel: gpt-5.6-sol\neffort: xhigh\ncoordinator: session\nparent_model: openai-codex/gpt-5.6-terra\n---\nPersona body.",
       );
       expect(Option.getOrNull(sessionWithParent.agent.coordinator)).toBe("session");
+    }).pipe(Effect.provide(parserLayer)),
+  );
+
+  it.effect("parses the supervisor brain in settings", () =>
+    Effect.gen(function* () {
+      const parser = yield* ConfigParser;
+      const unset = yield* parser.parseUsineYaml(
+        InstancePath.make("usine.yaml"),
+        "version: 1\nrepos: []\n",
+      );
+      expect(unset.settings.supervisor).toEqual(Option.none());
+      const configured = yield* parser.parseUsineYaml(
+        InstancePath.make("usine.yaml"),
+        "version: 1\nrepos: []\nsettings:\n  supervisor:\n    harness: claude\n    model: claude-sonnet-5-5\n    effort: medium\n",
+      );
+      expect(Option.getOrNull(configured.settings.supervisor)).toEqual(
+        BrainSpec.make({
+          harness: Harness.make("claude"),
+          model: ModelId.make("claude-sonnet-5-5"),
+          effort: "medium",
+        }),
+      );
+      const incomplete = yield* parser
+        .parseUsineYaml(
+          InstancePath.make("usine.yaml"),
+          "version: 1\nrepos: []\nsettings:\n  supervisor:\n    harness: claude\n",
+        )
+        .pipe(Effect.flip);
+      expect(incomplete.details?.map(({ path }) => path)).toEqual([
+        ["settings", "supervisor", "model"],
+        ["settings", "supervisor", "effort"],
+      ]);
     }).pipe(Effect.provide(parserLayer)),
   );
 

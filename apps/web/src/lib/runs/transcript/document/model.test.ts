@@ -189,6 +189,31 @@ describe("repeated final messages", () => {
     assert.equal(ending.speaker?.name, "Parent");
   });
 
+  it("shows a rejected final report once, in the failed outcome beside the failure", () => {
+    const summary = "Review published on PR #320.";
+    const failure = AgentFailureView.make({
+      message: "The run added no outcome label; expected one of: review-passed.",
+    });
+    const events = [
+      said(3, "Reviewing the pull request."),
+      said(4, summary, parent),
+      record(
+        5,
+        AttemptChannel.Final.make({ result: StepResult.make({ message: summary, facts: [] }) }),
+      ),
+    ];
+    const chapter = document(events, [
+      attempt(FailedAttemptView.make({ failure, report: summary })),
+    ]).chapters[0];
+    assert.isDefined(chapter);
+    assert.deepEqual(shown(chapter.rows), ["developer: Reviewing the pull request.", "Ending"]);
+    const ending = chapter.rows.at(-1);
+    assert(ending?._tag === "Ending" && ending.end._tag === "Failed");
+    assert.deepEqual(ending.end.failure, failure);
+    assert.deepEqual(ending.end.report, Option.some(summary));
+    assert.equal(ending.speaker?.name, "Parent");
+  });
+
   it("keeps the last message when the failure is not the Agent's own report", () => {
     const failure = InfraFailureView.make({ message: "Worker disconnected" });
     const chapter = document(

@@ -12,6 +12,7 @@ import {
 } from "./fixture.ts";
 import { runScenario } from "./scenarios.ts";
 import { runToolScenario, toolProviders, toolScenariosOf } from "../contract/host-tools.ts";
+import { runSupervisorScenario, supervisorProviders } from "../contract/supervisor.ts";
 
 export const recordContracts = (provider: Provider): void => {
   for (const scenario of provider === "pi" ? piScenarios : scenarios)
@@ -45,6 +46,17 @@ export const recordContracts = (provider: Provider): void => {
             ),
           240_000,
         );
+  for (const supervised of supervisorProviders)
+    if (supervised === provider)
+      it.live.skipIf(recordingModel(provider) === undefined)(
+        `records ${provider}: supervisor`,
+        () =>
+          runSupervisorScenario(supervised, "record").pipe(
+            Effect.scoped,
+            Effect.provide(NodeServices.layer),
+          ),
+        240_000,
+      );
   for (const scenario of completionScenarios)
     it.live.skipIf(recordingModel(provider) === undefined)(
       `records ${provider}: ${scenario}`,

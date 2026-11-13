@@ -16,7 +16,8 @@ const OUTPUT_CHARACTERS = 2_000;
 const LINE_CHARACTERS = 160;
 
 const decodeEvent = Schema.decodeUnknownEffect(Schema.toCodecJson(CoordinatorEvent));
-const encodeContext = Schema.encodeEffect(
+/** Encodes a context as the JSON text that a model reads. */
+export const encodeAttemptContext = Schema.encodeEffect(
   Schema.fromJsonString(Schema.toCodecJson(AttemptContext)),
 );
 
@@ -87,7 +88,7 @@ const summaries = Effect.fn("AttemptContext.delegations")(function* (
 });
 
 const characters = (context: AttemptContext) =>
-  encodeContext(context).pipe(
+  encodeAttemptContext(context).pipe(
     // Every field was validated at construction.
     Effect.orDie,
     Effect.map((encoded) => encoded.length),

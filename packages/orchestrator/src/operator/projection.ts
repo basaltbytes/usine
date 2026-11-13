@@ -73,12 +73,12 @@ export const failureView = (failure: AttemptFailure): FailureView =>
       ChildSessionBudgetFailureView.make({ attemptedChildren, maxChildren }),
   });
 
-const attemptOutcomeView = (outcome: AttemptOutcome) =>
+const attemptOutcomeView = (outcome: AttemptOutcome, report: string | null) =>
   Match.valueTags(outcome, {
     Succeeded: () => SucceededAttemptView.make(),
     AwaitingCi: () => AwaitingCiAttemptView.make(),
     HandedOff: () => HandedOffAttemptView.make(),
-    Failed: ({ failure }) => FailedAttemptView.make({ failure: failureView(failure) }),
+    Failed: ({ failure }) => FailedAttemptView.make({ failure: failureView(failure), report }),
     Canceled: () => CanceledAttemptView.make(),
   });
 
@@ -117,9 +117,11 @@ const workerAccess = (worker: ConfigWorker): WorkerAccess => {
 export const workerAccesses = (workers: ReadonlyArray<ConfigWorker>): WorkerAccesses =>
   new Map(workers.map((worker) => [worker.name, workerAccess(worker)]));
 
+/** Returns the operator's view of `attempt`, with `report`, the final report it kept, if any. */
 const attemptSummaryView = (
   attempt: RunSummary["attempts"][number] | RunSnapshot["attempts"][number],
   workers: WorkerAccesses,
+  report: string | null = null,
 ): AttemptSummaryView =>
   AttemptSummaryView.make({
     id: attempt.id,
@@ -132,7 +134,7 @@ const attemptSummaryView = (
     startedAt: DateTime.formatIso(attempt.startedAt),
     outcome: Option.match(attempt.outcome, {
       onNone: () => null,
-      onSome: attemptOutcomeView,
+      onSome: (outcome) => attemptOutcomeView(outcome, report),
     }),
     endedAt: Option.match(attempt.endedAt, { onNone: () => null, onSome: DateTime.formatIso }),
     salvage: Option.getOrNull(attempt.salvage),
@@ -287,7 +289,11 @@ export const runView = (
     }),
     attempts: snapshot.attempts.map((attempt) =>
       AttemptView.make({
-        ...attemptSummaryView(attempt, workers),
+        ...attemptSummaryView(
+          attempt,
+          workers,
+          Option.getOrNull(Option.map(attempt.result, ({ message }) => message)),
+        ),
         task: attempt.task,
       }),
     ),

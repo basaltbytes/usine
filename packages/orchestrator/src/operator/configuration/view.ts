@@ -475,6 +475,11 @@ export class SettingsView extends Schema.Class<
   parentEffort: Schema.NullOr(Effort),
   /** The coordinator kind of attempts whose agent sets none. */
   coordinator: CoordinatorKind,
+  /**
+   * The harness, model, and effort of the supervisor role, or null when the role is not
+   * configured.
+   */
+  supervisor: Schema.NullOr(Schema.Struct({ harness: Harness, model: ModelId, effort: Effort })),
   /** The configured operator login, or null when unset. */
   operator: Schema.NullOr(OperatorLogin),
   /** The hint delivery mode: disabled, GitHub delivery polling, or an HTTP endpoint. */
@@ -797,6 +802,10 @@ const makeOperatorConfiguration = Effect.gen(function* () {
         parentModel: Option.getOrNull(settings.parentModel),
         parentEffort: Option.getOrNull(settings.parentEffort),
         coordinator: settings.coordinator,
+        supervisor: Option.match(settings.supervisor, {
+          onNone: () => null,
+          onSome: ({ harness, model, effort }) => ({ harness, model, effort }),
+        }),
         operator: Option.getOrNull(config.operator),
         webhooks: webhooks.mode,
         lastHintAt: Option.getOrNull(Option.map(lastHint, DateTime.formatIso)),

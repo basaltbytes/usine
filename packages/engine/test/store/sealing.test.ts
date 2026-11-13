@@ -85,7 +85,12 @@ const start = Effect.gen(function* () {
   const store = yield* RunStore;
   const runId = RunId.make("sealing-run");
   yield* store.recordAndClaim(lifecycleSubmission, runId);
-  const started = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
+  const started = yield* store.beginAttempt(
+    runId,
+    WorkerName.make("local"),
+    "local",
+    Option.none(),
+  );
   assert(started._tag === "AttemptStarted");
   return { runId, attemptId: started.execution.attempt.id };
 });
@@ -495,6 +500,7 @@ describe("SQLite transcript sealing", () => {
           const healthy = yield* store.beginAttempt(
             healthyRun,
             WorkerName.make("local"),
+            "local",
             Option.none(),
           );
           assert(healthy._tag === "AttemptStarted");

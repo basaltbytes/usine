@@ -63,12 +63,34 @@ const ClaudeModelUsage = Schema.Struct({
   cacheCreationInputTokens: UsageCount,
   costUSD: Schema.optionalKey(Dollars),
 });
+const ClaudeModelUsages = Schema.Record(Schema.String, ClaudeModelUsage);
 const ClaudeResultUsage = Schema.Struct({
   type: Schema.Literal("result"),
-  modelUsage: Schema.Record(Schema.String, ClaudeModelUsage),
+  modelUsage: ClaudeModelUsages,
+  /** This process's usage since its previous result; absent from older Claude Code versions. */
+  model_usage_since_last_result: Schema.optionalKey(ClaudeModelUsages),
 });
 const decodeAssistant = Schema.decodeUnknownOption(ClaudeAssistantUsage);
 const decodeResult = Schema.decodeUnknownOption(ClaudeResultUsage);
+
+/** The usage that a Claude result's `modelUsage` counts, as `claudeTokenMeter` counts it. */
+const modelsUsage = (models: typeof ClaudeModelUsages.Type): SessionUsage => {
+  const counted = Object.values(models);
+  const priced = counted.flatMap(({ costUSD }) => (costUSD === undefined ? [] : [costUSD]));
+  return {
+    totalTokens: TokenCount.make(
+      counted.reduce(
+        (sum, model) =>
+          sum + model.outputTokens + model.inputTokens + model.cacheCreationInputTokens,
+        0,
+      ),
+    ),
+    costUsd:
+      priced.length === 0
+        ? Option.none()
+        : Option.some(UsdAmount.make(priced.reduce((sum, value) => sum + value, 0))),
+  };
+};
 
 /** A Claude process's cumulative usage, as `SessionTokensUpdated` saves it. */
 export type ProcessUsage = Option.Option.Value<SessionTokensUpdated["processUsage"]>;
@@ -124,16 +146,9 @@ export const claudeTokenMeter = (seed: ProcessUsage = NO_USAGE) => {
       if (Option.isNone(result)) return Option.none();
       for (const id of replayable) superseded.add(id);
       active.clear();
-      const models = Object.values(result.value.modelUsage);
-      const consumed = models.reduce(
-        (sum, model) =>
-          sum + model.outputTokens + model.inputTokens + model.cacheCreationInputTokens,
-        0,
-      );
-      total = Math.max(total, consumed);
-      const priced = models.flatMap(({ costUSD }) => (costUSD === undefined ? [] : [costUSD]));
-      if (priced.length > 0)
-        cost = Option.some(UsdAmount.make(priced.reduce((sum, value) => sum + value, 0)));
+      const counted = modelsUsage(result.value.modelUsage);
+      total = Math.max(total, counted.totalTokens);
+      if (Option.isSome(counted.costUsd)) cost = counted.costUsd;
       return Option.some(usage());
     },
     covered: () => {
@@ -146,38 +161,95 @@ export const claudeTokenMeter = (seed: ProcessUsage = NO_USAGE) => {
 const NO_USAGE: SessionUsage = { totalTokens: TokenCount.make(0), costUsd: Option.none() };
 
 /**
+ * How the first result of a Claude process settled the usage that Claude restored from the resumed
+ * session. `resultTokens` is what the result's `modelUsage` counts. `processTokens` is what it
+ * counts for this process alone, or `None` when Claude Code doesn't report it; the meter then
+ * treats nothing as restored. `restored` is the difference, which the meter counts once.
+ */
+export interface RestoredUsage {
+  readonly resultTokens: TokenCount;
+  readonly processTokens: Option.Option<TokenCount>;
+  readonly restored: SessionUsage;
+}
+
+/** A session meter's reading: the session's usage and, at a process's first result, `restored`. */
+export interface SessionReading {
+  readonly usage: SessionUsage & { readonly processUsage: Option.Option<ProcessUsage> };
+  readonly restored: Option.Option<RestoredUsage>;
+}
+
+const subtractUsage = (total: SessionUsage, part: SessionUsage): SessionUsage => ({
+  totalTokens: TokenCount.make(Math.max(0, total.totalTokens - part.totalTokens)),
+  costUsd: Option.map(total.costUsd, (cost) =>
+    UsdAmount.make(Math.max(0, cost - Option.getOrElse(part.costUsd, () => 0))),
+  ),
+});
+
+/**
  * Returns a Claude token meter for a session that another process can resume. `read` returns the
  * session's usage: the current process's, as `claudeTokenMeter` reads it, plus the earlier
  * processes'. `restart` starts on a new process and returns the usage checkpoint to persist.
  * `covered` works as in `claudeTokenMeter`.
+ *
+ * Claude Code can restore a resumed session's totals, so the `modelUsage` of a new process's
+ * results can count earlier processes' usage too. At the first result of a process that `seed`
+ * doesn't retain, that follows `restart`, or that `seed` retains before its first result, the
+ * restored usage is `modelUsage` minus `model_usage_since_last_result`; the meter counts it once
+ * and `read` reports it. Until then, the process usage that `read` and `restart` return sets
+ * `awaitsFirstResult`, so that a meter reattached to the process from that checkpoint settles it.
  */
 export const claudeSessionMeter = (
   seed: SessionUsage & { readonly processUsage?: Option.Option<ProcessUsage> } = NO_USAGE,
   retained = false,
 ) => {
-  let current: ProcessUsage = retained
-    ? Option.getOrElse(seed.processUsage ?? Option.none(), () => seed)
-    : NO_USAGE;
-  let earlier: SessionUsage = {
-    totalTokens: TokenCount.make(Math.max(0, seed.totalTokens - current.totalTokens)),
-    costUsd: Option.map(seed.costUsd, (cost) =>
-      UsdAmount.make(Math.max(0, cost - Option.getOrElse(current.costUsd, () => 0))),
-    ),
-  };
+  const retainedUsage = retained ? (seed.processUsage ?? Option.none()) : Option.none();
+  let current: ProcessUsage = retained ? Option.getOrElse(retainedUsage, () => seed) : NO_USAGE;
+  let earlier = subtractUsage(seed, current);
   let meter = claudeTokenMeter(current);
+  // Whether the current process hasn't reported a result yet.
+  let unsettled =
+    !retained ||
+    Option.exists(retainedUsage, ({ awaitsFirstResult }) => awaitsFirstResult === true);
+  const checkpoint = (usage: ProcessUsage): ProcessUsage =>
+    unsettled ? { ...usage, awaitsFirstResult: true } : usage;
+  const settle = (message: Schema.Json): Option.Option<RestoredUsage> => {
+    if (!unsettled) return Option.none();
+    const result = decodeResult(message);
+    if (Option.isNone(result)) return Option.none();
+    unsettled = false;
+    const counted = modelsUsage(result.value.modelUsage);
+    const own = Option.map(
+      Option.fromNullishOr(result.value.model_usage_since_last_result),
+      modelsUsage,
+    );
+    const restored = Option.match(own, {
+      onNone: () => NO_USAGE,
+      onSome: (process) => subtractUsage(counted, process),
+    });
+    earlier = subtractUsage(earlier, restored);
+    return Option.some({
+      resultTokens: counted.totalTokens,
+      processTokens: Option.map(own, ({ totalTokens }) => totalTokens),
+      restored,
+    });
+  };
   return {
-    read: (
-      message: Schema.Json,
-    ): Option.Option<SessionUsage & { readonly processUsage: Option.Option<ProcessUsage> }> =>
-      Option.map(meter.read(message), (usage) => {
+    read: (message: Schema.Json): Option.Option<SessionReading> => {
+      const restored = settle(message);
+      return Option.map(meter.read(message), (usage) => {
         current = usage;
-        return { ...addUsage(earlier, usage), processUsage: Option.some(usage) };
-      }),
+        return {
+          usage: { ...addUsage(earlier, usage), processUsage: Option.some(checkpoint(usage)) },
+          restored,
+        };
+      });
+    },
     restart: () => {
+      unsettled = true;
       earlier = addUsage(earlier, current);
       current = NO_USAGE;
       meter = claudeTokenMeter();
-      return { ...earlier, processUsage: Option.some(current) };
+      return { ...earlier, processUsage: Option.some(checkpoint(current)) };
     },
     covered: () => meter.covered(),
   };

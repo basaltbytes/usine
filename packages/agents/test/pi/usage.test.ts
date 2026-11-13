@@ -8,8 +8,12 @@ import {
   codexThreadTokens,
   codexTokenBreakdown,
   piMessageUsage,
+  type SessionReading,
 } from "../../src/harness/usage.ts";
 import { CodexTokenUsage } from "../../src/protocol/codex/codex.ts";
+
+/** The session usage of a Claude session meter's reading. */
+const sessionUsage = (reading: Option.Option<SessionReading>) => Option.getOrThrow(reading).usage;
 
 describe("Claude query tokens", () => {
   it("restores a retained process's usage separately from earlier processes", () => {
@@ -22,22 +26,169 @@ describe("Claude query tokens", () => {
     const first = claudeSessionMeter();
     first.read(result(100, 1));
     first.restart();
-    const saved = first.read(result(20, 0.2));
-    assert(Option.isSome(saved));
-    const retained = claudeSessionMeter(saved.value, true);
-    const updated = retained.read(result(30, 0.3));
-    assert(Option.isSome(updated));
-    assert.strictEqual(updated.value.totalTokens, 130);
-    assert.deepStrictEqual(updated.value.costUsd, Option.some(1.3));
+    const saved = sessionUsage(first.read(result(20, 0.2)));
+    const retained = claudeSessionMeter(saved, true);
+    const updated = sessionUsage(retained.read(result(30, 0.3)));
+    assert.strictEqual(updated.totalTokens, 130);
+    assert.deepStrictEqual(updated.costUsd, Option.some(1.3));
     retained.restart();
-    assert.strictEqual(Option.getOrThrow(retained.read(result(5, 0.1))).totalTokens, 135);
-    const replacement = claudeSessionMeter(saved.value, false);
-    assert.strictEqual(Option.getOrThrow(replacement.read(result(5, 0.1))).totalTokens, 125);
+    assert.strictEqual(sessionUsage(retained.read(result(5, 0.1))).totalTokens, 135);
+    const replacement = claudeSessionMeter(saved, false);
+    assert.strictEqual(sessionUsage(replacement.read(result(5, 0.1))).totalTokens, 125);
     const legacy = claudeSessionMeter(
       { totalTokens: TokenCount.make(100), costUsd: Option.some(UsdAmount.make(1)) },
       true,
     );
-    assert.strictEqual(Option.getOrThrow(legacy.read(result(110, 1.1))).totalTokens, 110);
+    assert.strictEqual(sessionUsage(legacy.read(result(110, 1.1))).totalTokens, 110);
+  });
+
+  describe("usage that Claude restores on resume, in the recorded supervisor proportions", () => {
+    const models = (input: number, output: number, cost: number) => ({
+      "claude-haiku-4-5": {
+        inputTokens: input,
+        outputTokens: output,
+        cacheCreationInputTokens: 0,
+        costUSD: cost,
+      },
+    });
+    /** A result whose `modelUsage` counts `total`, of which this process spent `own`. */
+    const result = (total: ReturnType<typeof models>, own = total) => ({
+      type: "result",
+      modelUsage: total,
+      model_usage_since_last_result: own,
+    });
+    // Streamed assistant messages count the output only from the start of each message.
+    const assistant = (id: string, input: number) => ({
+      type: "assistant",
+      message: { id, usage: { input_tokens: input, output_tokens: 1 } },
+    });
+    const firstTurn = result(models(3387, 204, 0.004407));
+    const firstProcess = () => {
+      const meter = claudeSessionMeter();
+      meter.read(assistant("turn-1", 2464));
+      return { meter, saved: sessionUsage(meter.read(firstTurn)) };
+    };
+    const restoringTurn = result(models(4853, 280, 0.006253), models(1466, 76, 0.001846));
+
+    it("counts once the usage that a replacement process restores", () => {
+      const { saved } = firstProcess();
+      assert.strictEqual(saved.totalTokens, 3591);
+      const replacement = claudeSessionMeter(saved, false);
+      assert.strictEqual(
+        sessionUsage(replacement.read(assistant("turn-2", 1466))).totalTokens,
+        5058,
+      );
+      const reading = Option.getOrThrow(replacement.read(restoringTurn));
+      assert.strictEqual(reading.usage.totalTokens, 5133);
+      assert.closeTo(Option.getOrThrow(reading.usage.costUsd), 0.006253, 1e-9);
+      assert.deepStrictEqual(
+        Option.map(reading.restored, ({ resultTokens, processTokens, restored }) => ({
+          resultTokens,
+          processTokens,
+          restoredTokens: restored.totalTokens,
+        })),
+        Option.some({
+          resultTokens: TokenCount.make(5133),
+          processTokens: Option.some(TokenCount.make(1542)),
+          restoredTokens: TokenCount.make(3591),
+        }),
+      );
+      const later = Option.getOrThrow(
+        replacement.read(result(models(5853, 380, 0.0075), models(1000, 100, 0.00125))),
+      );
+      assert.strictEqual(later.usage.totalTokens, 6233);
+      assert(Option.isNone(later.restored), "only a process's first result settles restored usage");
+    });
+
+    it("adds a replacement process that restored nothing, even when it writes more than the replaced usage", () => {
+      const { saved } = firstProcess();
+      const replacement = claudeSessionMeter(saved, false);
+      replacement.read(assistant("turn-2", 1466));
+      const reading = Option.getOrThrow(replacement.read(result(models(1466, 3700, 0.02))));
+      assert.strictEqual(reading.usage.totalTokens, 8757);
+      assert.closeTo(Option.getOrThrow(reading.usage.costUsd), 0.024407, 1e-9);
+      assert.deepStrictEqual(
+        Option.map(reading.restored, ({ restored }) => restored.totalTokens),
+        Option.some(TokenCount.make(0)),
+      );
+    });
+
+    it("counts once the usage that a process restores after a restart", () => {
+      const { meter } = firstProcess();
+      meter.restart();
+      meter.read(assistant("turn-2", 1466));
+      const reading = Option.getOrThrow(meter.read(restoringTurn));
+      assert.strictEqual(reading.usage.totalTokens, 5133);
+      assert.deepStrictEqual(
+        Option.map(reading.restored, ({ restored }) => restored.totalTokens),
+        Option.some(TokenCount.make(3591)),
+      );
+    });
+
+    it("counts once the usage that a replacement restores when it is reattached before its first result", () => {
+      const { saved } = firstProcess();
+      const replacement = claudeSessionMeter(saved, false);
+      const checkpoint = sessionUsage(replacement.read(assistant("turn-2", 1466)));
+      assert.strictEqual(checkpoint.totalTokens, 5058);
+      assert.deepStrictEqual(
+        Option.map(checkpoint.processUsage, ({ awaitsFirstResult }) => awaitsFirstResult),
+        Option.some(true),
+      );
+      const reattached = claudeSessionMeter(checkpoint, true);
+      const reading = Option.getOrThrow(reattached.read(restoringTurn));
+      assert.strictEqual(reading.usage.totalTokens, 5133);
+      assert.deepStrictEqual(
+        Option.map(reading.restored, ({ restored }) => restored.totalTokens),
+        Option.some(TokenCount.make(3591)),
+      );
+      assert.deepStrictEqual(
+        Option.map(reading.usage.processUsage, ({ awaitsFirstResult }) => awaitsFirstResult),
+        Option.some(undefined),
+        "a settled process's checkpoint doesn't settle it again",
+      );
+    });
+
+    it("counts once the usage that a process restores after a restart when it is reattached", () => {
+      const fromRestart = firstProcess().meter.restart();
+      const reattached = claudeSessionMeter(fromRestart, true);
+      const reading = Option.getOrThrow(reattached.read(restoringTurn));
+      assert.strictEqual(reading.usage.totalTokens, 5133);
+      assert.deepStrictEqual(
+        Option.map(reading.restored, ({ restored }) => restored.totalTokens),
+        Option.some(TokenCount.make(3591)),
+      );
+
+      const { meter } = firstProcess();
+      meter.restart();
+      const streamed = claudeSessionMeter(
+        sessionUsage(meter.read(assistant("turn-2", 1466))),
+        true,
+      );
+      assert.strictEqual(sessionUsage(streamed.read(restoringTurn)).totalTokens, 5133);
+    });
+
+    it("keeps a retained process's own usage when it more than doubles", () => {
+      const { saved } = firstProcess();
+      const retained = claudeSessionMeter(saved, true);
+      const reading = Option.getOrThrow(
+        retained.read(result(models(8000, 500, 0.01), models(4613, 296, 0.005593))),
+      );
+      assert.strictEqual(reading.usage.totalTokens, 8500);
+      assert(Option.isNone(reading.restored));
+    });
+
+    it("counts all of a replacement's result when Claude Code reports no usage of the process alone", () => {
+      const { saved } = firstProcess();
+      const replacement = claudeSessionMeter(saved, false);
+      const reading = Option.getOrThrow(
+        replacement.read({ type: "result", modelUsage: models(1466, 76, 0.001846) }),
+      );
+      assert.strictEqual(reading.usage.totalTokens, 5133);
+      assert.deepStrictEqual(
+        Option.map(reading.restored, ({ processTokens }) => processTokens),
+        Option.some(Option.none()),
+      );
+    });
   });
 
   it("does not count a retained process's replayed assistant messages again", () => {
@@ -50,22 +201,20 @@ describe("Claude query tokens", () => {
     first.covered();
     first.read(assistant("two", 5));
     first.covered();
-    const saved = first.read(assistant("two", 5));
-    assert(Option.isSome(saved));
-    assert(Option.isSome(saved.value.processUsage));
-    assert.deepStrictEqual(saved.value.processUsage.value.messages, { two: TokenCount.make(15) });
-    const retained = claudeSessionMeter(saved.value, true);
+    const saved = sessionUsage(first.read(assistant("two", 5)));
+    assert(Option.isSome(saved.processUsage));
+    assert.deepStrictEqual(saved.processUsage.value.messages, { two: TokenCount.make(15) });
+    const retained = claudeSessionMeter(saved, true);
     const replayed = retained.read(assistant("two", 5));
-    assert.strictEqual(Option.getOrThrow(replayed).totalTokens, 30);
-    assert.strictEqual(Option.getOrThrow(retained.read(assistant("two", 8))).totalTokens, 33);
+    assert.strictEqual(sessionUsage(replayed).totalTokens, 30);
+    assert.strictEqual(sessionUsage(retained.read(assistant("two", 8))).totalTokens, 33);
     const next = retained.read(assistant("three", 1));
-    assert.strictEqual(Option.getOrThrow(next).totalTokens, 44);
+    assert.strictEqual(sessionUsage(next).totalTokens, 44);
     retained.read({ type: "result", modelUsage: {} });
     retained.covered();
-    const result = retained.read({ type: "result", modelUsage: {} });
-    assert(Option.isSome(result));
-    assert(Option.isSome(result.value.processUsage));
-    assert.isUndefined(result.value.processUsage.value.messages);
+    const result = sessionUsage(retained.read({ type: "result", modelUsage: {} }));
+    assert(Option.isSome(result.processUsage));
+    assert.isUndefined(result.processUsage.value.messages);
   });
 
   it("keeps the latest message of each parent stream when a checkpoint covers interleaved messages", () => {

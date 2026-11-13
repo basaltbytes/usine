@@ -75,6 +75,14 @@
       "types": "./dist/harness/contract.d.ts",
       "default": "./dist/harness/contract.js"
     },
+    "./harness/registry": {
+      "types": "./dist/harness/registry.d.ts",
+      "default": "./dist/harness/registry.js"
+    },
+    "./supervisor": {
+      "types": "./dist/harness/supervisor/turn.d.ts",
+      "default": "./dist/harness/supervisor/turn.js"
+    },
     "./harness/node": {
       "types": "./dist/harness/node.d.ts",
       "default": "./dist/harness/node.js"

@@ -1,5 +1,7 @@
 import { ChildSessionBudget, ChildSessionCount } from "@usine/core/agent/session";
+import { AttemptId } from "@usine/core/attempt";
 import { Deferred, Effect, Option } from "effect";
+import { JournalError } from "../src/coordinator/journal.ts";
 import type {
   DelegationCall,
   DelegationDetails,
@@ -60,14 +62,31 @@ const emptyDelegation = (): MemoryDelegation => ({
 
 /**
  * A `DelegationJournal` and its `DelegationCall` that keep one delegation and its Attempt in
- * memory. `start` counts the delegation as the Attempt's next one within `budget`. Operations
- * never fail. `release` ends the operator's Hold of a child.
+ * memory. `start` counts the delegation as the Attempt's next one within `budget`. A journal
+ * operation named in `failing` fails with `JournalError`; the others never fail. `release` ends
+ * the operator's Hold of a child, and `abort` completes the call's `aborted`.
  */
 export const memoryJournal = (
   attempt: MemoryAttempt = emptyAttempt(),
   delegation: MemoryDelegation = emptyDelegation(),
   budget = 3,
 ) => {
+  const failing = new Set<keyof DelegationJournal>();
+  const aborted = Deferred.makeUnsafe<void>();
+  const guarded =
+    (operation: keyof DelegationJournal) =>
+    <A, E>(effect: Effect.Effect<A, E>): Effect.Effect<A, E | JournalError> =>
+      Effect.suspend((): Effect.Effect<A, E | JournalError> =>
+        failing.has(operation)
+          ? Effect.fail(
+              JournalError.make({
+                operation,
+                attemptId: AttemptId.make("memory-journal"),
+                cause: new Error("The test failed this journal operation"),
+              }),
+            )
+          : effect,
+      );
   const running: Array<string> = [];
   const published: Array<DelegationDetails> = [];
   const waiting: Array<{ readonly sessionId: string; readonly ended: Deferred.Deferred<void> }> =
@@ -100,62 +119,64 @@ export const memoryJournal = (
         return { _tag: "Refused", attempted: count, max: ChildSessionBudget.make(budget) } as const;
       }
       return { _tag: "Admitted", count, resumed: false, progress: saved } as const;
-    }),
+    }).pipe(guarded("start")),
     queuedInputs: (sessionId) =>
-      Effect.sync(() => attempt.queued.filter(({ child }) => child === sessionId)),
+      Effect.sync(() => attempt.queued.filter(({ child }) => child === sessionId)).pipe(
+        guarded("queuedInputs"),
+      ),
     supervision: (sessionId) =>
       Effect.sync(() => ({
         held: attempt.held.includes(sessionId),
         paused: attempt.paused.includes(sessionId),
-      })),
+      })).pipe(guarded("supervision")),
     holdEnded: (sessionId) =>
       Effect.suspend(() => {
         if (!attempt.held.includes(sessionId)) return Effect.void;
         const ended = Deferred.makeUnsafe<void>();
         waiting.push({ sessionId, ended });
         return Deferred.await(ended);
-      }),
+      }).pipe(guarded("holdEnded")),
     releaseSupervision: (sessionId) =>
       Effect.sync(() => {
         attempt.held = attempt.held.filter((id) => id !== sessionId);
         attempt.paused = attempt.paused.filter((id) => id !== sessionId);
-      }),
+      }).pipe(guarded("releaseSupervision")),
     saveSession: (saved, { beforePrompt }) =>
       Effect.sync(() => {
         if (beforePrompt && Option.isNone(delegation.saved)) delegation.prompted = false;
         delegation.saved = Option.some(saved);
-      }),
+      }).pipe(guarded("saveSession")),
     savePrompted: Effect.sync(() => {
       delegation.prompted = true;
-    }),
+    }).pipe(guarded("savePrompted")),
     saveContinuations: (timestamps) =>
       Effect.sync(() => {
         delegation.continuations = [...timestamps];
-      }),
+      }).pipe(guarded("saveContinuations")),
     saveUsage: (usage) =>
       Effect.sync(() => {
         delegation.saved = Option.map(delegation.saved, (saved) => ({ ...saved, usage }));
-      }),
+      }).pipe(guarded("saveUsage")),
     toolStarted: (callId, tool) =>
       Effect.sync(() => {
         delegation.inFlight = [
           ...delegation.inFlight.filter((call) => call.callId !== callId),
           { callId, tool },
         ];
-      }),
+      }).pipe(guarded("toolStarted")),
     toolFinished: (callId) =>
       Effect.sync(() => {
         delegation.inFlight = delegation.inFlight.filter((call) => call.callId !== callId);
-      }),
+      }).pipe(guarded("toolFinished")),
     saveIdle: (report, answeredOperator) =>
       Effect.sync(() => {
         delegation.idle = report;
         delegation.idleAnsweredOperator = answeredOperator;
-      }),
+      }).pipe(guarded("saveIdle")),
     saveOutput: (output) =>
       Effect.sync(() => {
         delegation.output = output;
-      }),
+      }).pipe(guarded("saveOutput")),
   };
   const call: DelegationCall = {
     output: (chunk) =>
@@ -167,7 +188,7 @@ export const memoryJournal = (
       Effect.sync(() => {
         published.push(details);
       }),
-    aborted: Effect.never,
+    aborted: Deferred.await(aborted),
     infrastructureFailed: (sessionId, message) =>
       Effect.sync(() => {
         attempt.reports.push({ _tag: "Infrastructure", sessionId, message });
@@ -188,5 +209,6 @@ export const memoryJournal = (
         if (waiter.sessionId === sessionId) yield* Deferred.succeed(waiter.ended, undefined);
         else waiting.push(waiter);
     });
-  return { journal, call, attempt, delegation, published, release };
+  const abort = Deferred.succeed(aborted, undefined).pipe(Effect.asVoid);
+  return { journal, call, attempt, delegation, published, failing, release, abort };
 };

@@ -1,6 +1,11 @@
 import { CredentialRoute } from "@usine/agents/harness";
 import { BrainSpec } from "@usine/core/agent/brain";
-import { BillingPool, TokenCount, UsdAmount } from "@usine/core/agent/session";
+import {
+  BillingPool,
+  type SessionTokensUpdated,
+  TokenCount,
+  UsdAmount,
+} from "@usine/core/agent/session";
 import type { AttemptId } from "@usine/core/attempt";
 import type * as AttemptChannel from "@usine/core/attempt/channel";
 import { type Brand, Context, Effect, Layer, Option, Schema } from "effect";
@@ -76,6 +81,11 @@ export interface WakeUpAttempt {
    * directory, environment, and gateway credential that a session on the Attempt's worker needs.
    */
   readonly request: Effect.Effect<AttemptRequest>;
+  /**
+   * Records the cumulative usage of the handler's model call as a session's: the engine counts it
+   * with the Attempt's other sessions. A later report for the same session replaces it.
+   */
+  readonly recordUsage: (usage: SessionTokensUpdated) => Effect.Effect<void>;
 }
 
 /**

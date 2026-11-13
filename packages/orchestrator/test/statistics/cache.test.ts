@@ -282,10 +282,10 @@ describe("Statistics cache", () => {
         recover: () => Effect.succeed("found" as const),
         intervene: () => Effect.void,
         interrupt: () => Effect.void,
-        occupy: () => Effect.succeed({ worker, release: Effect.void }),
+        occupy: () => Effect.succeed({ worker, kind: "local", release: Effect.void }),
         sweep: Effect.void,
         discard: () => Effect.void,
-        reserve: () => Effect.succeed({ worker, release: Effect.void }),
+        reserve: () => Effect.succeed({ worker, kind: "local", release: Effect.void }),
         execute: () => Effect.fail(AgentFailure.make({ message: "Needs operator input" })),
       });
       const engineLayer = localEngineLayer(directory).pipe(

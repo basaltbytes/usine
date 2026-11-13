@@ -233,7 +233,12 @@ describe("Attempt migrations", () => {
         const sql = yield* SqlClient.SqlClient;
         const runId = RunId.make("backfilled-result");
         yield* store.recordAndClaim(lifecycleSubmission, runId);
-        const started = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
+        const started = yield* store.beginAttempt(
+          runId,
+          WorkerName.make("local"),
+          "local",
+          Option.none(),
+        );
         assert(started._tag === "AttemptStarted");
         const attempt = started.execution.attempt;
         const previous = StepResult.make({ message: "Previous attempt", facts: [] });

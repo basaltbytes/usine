@@ -415,6 +415,8 @@ const make = Effect.gen(function* () {
               sequence,
               spec: snapshot.request.spec,
               request: Effect.suspend(() => Deferred.await(hub.attached)),
+              recordUsage: (usage) =>
+                hub.outbox.relay([AttemptChannel.SessionEvent.make({ event: usage })]),
             })
             .pipe(
               Effect.raceFirst(

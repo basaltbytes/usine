@@ -223,7 +223,10 @@ export const openFixture = (
       tape.bind(env.PATH, "$PATH");
       environment.PATH = env.PATH;
     }
-    if (provider === "claude" && (scenario === "restart" || scenario === "credential-changed")) {
+    if (
+      provider === "claude" &&
+      (scenario === "restart" || scenario === "credential-changed" || scenario === "supervisor")
+    ) {
       environment.CLAUDE_CONFIG_DIR ??= `${environment.HOME}/.claude`;
     }
     const model = source === "record" ? recordingModel(provider) : source.model;

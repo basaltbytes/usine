@@ -3,7 +3,7 @@ import type { TaskId } from "@earendil-works/pi-durable";
 import { ChildBackend } from "@usine/agents/runtime";
 import { AgentSessionId, ChildSessionBudget, ChildSessionCount } from "@usine/core/agent/session";
 import * as AttemptChannel from "@usine/core/attempt/channel";
-import { Deferred, Effect, Fiber, Option } from "effect";
+import { Deferred, Effect, Exit, Fiber, Option } from "effect";
 import { delegate } from "../src/attempt/delegation/delegation.ts";
 import { attemptHubs } from "../src/attempt/hubs.ts";
 import { stubChildBackendLayer, StubChildren } from "../src/testing.ts";
@@ -13,13 +13,16 @@ import { attemptRequest } from "./support.ts";
 // SAFETY: the hub uses the task ID only as a lookup key; no durable task backs these tests.
 const ATTEMPT_TASK = 1 as TaskId;
 
-/** Starts one delegation with an attached `execute` call and returns its fiber. */
-const start = (attemptId: string, memory: ReturnType<typeof memoryJournal>) =>
+/**
+ * Starts one delegation and returns its fiber. Unless `attached` is false, an `execute` call has
+ * supplied the child host.
+ */
+const start = (attemptId: string, memory: ReturnType<typeof memoryJournal>, attached = true) =>
   Effect.gen(function* () {
     const request = attemptRequest(attemptId);
     const hubs = yield* attemptHubs;
     const hub = yield* hubs.hub(request.spec.attemptId, ATTEMPT_TASK);
-    yield* Deferred.succeed(hub.attached, request);
+    if (attached) yield* Deferred.succeed(hub.attached, request);
     const backend = yield* ChildBackend;
     const fiber = yield* Effect.forkChild(
       delegate(backend, {
@@ -176,6 +179,66 @@ describe("delegate", () => {
           message: "unexpected end of output",
         },
       ]);
+    }).pipe(Effect.provide(stubChildBackendLayer)),
+  );
+
+  it.effect("returns the child's report when a progress checkpoint fails", () =>
+    Effect.gen(function* () {
+      const memory = memoryJournal();
+      memory.failing.add("saveOutput");
+      const { fiber } = yield* start("delegation/checkpoint-failed", memory);
+      const child = yield* (yield* StubChildren).next;
+      yield* child.reply("Finished.");
+      const outcome = yield* Fiber.join(fiber);
+
+      assert.deepStrictEqual(outcome, {
+        _tag: "Reported",
+        sessionId: child.request.session.id,
+        report: "Finished.",
+        answeredOperator: false,
+      });
+      assert.strictEqual(memory.delegation.output, "");
+    }).pipe(Effect.provide(stubChildBackendLayer)),
+  );
+
+  it.effect("fails the delegation when the journal fails outside a progress checkpoint", () =>
+    Effect.gen(function* () {
+      const memory = memoryJournal();
+      memory.failing.add("holdEnded");
+      const { fiber } = yield* start("delegation/journal-failed", memory);
+      const child = yield* (yield* StubChildren).next;
+      yield* child.reply("Finished.");
+      const error = yield* Fiber.join(fiber).pipe(Effect.flip);
+
+      assert.strictEqual(error._tag, "JournalError");
+      if (error._tag !== "JournalError") return;
+      assert.strictEqual(error.operation, "holdEnded");
+    }).pipe(Effect.provide(stubChildBackendLayer)),
+  );
+
+  it.effect("interrupts the running child when the call aborts", () =>
+    Effect.gen(function* () {
+      const memory = memoryJournal();
+      const { fiber, hub } = yield* start("delegation/aborted", memory);
+      const child = yield* (yield* StubChildren).next;
+      yield* memory.abort;
+      const exit = yield* Fiber.await(fiber);
+
+      assert.isTrue(Exit.hasInterrupts(exit));
+      yield* child.interrupted;
+      assert.isFalse(hub.children.has(child.request.session.id));
+    }).pipe(Effect.provide(stubChildBackendLayer)),
+  );
+
+  it.effect("abandons the spawn when the call aborts before an execute call attaches", () =>
+    Effect.gen(function* () {
+      const memory = memoryJournal();
+      const { fiber, hub } = yield* start("delegation/aborted-detached", memory, false);
+      yield* memory.abort;
+      const exit = yield* Fiber.await(fiber);
+
+      assert.isTrue(Exit.hasInterrupts(exit));
+      assert.strictEqual(hub.children.size, 0);
     }).pipe(Effect.provide(stubChildBackendLayer)),
   );
 });

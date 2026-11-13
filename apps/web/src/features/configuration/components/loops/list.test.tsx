@@ -1,4 +1,5 @@
 import { capabilitiesQuery } from "~/lib/configuration/capabilities";
+import { Harness, ModelId } from "@usine/core/agent/brain";
 import { administratorPermissions } from "@usine/core/access";
 import { PermissionsContext } from "~/lib/permissions";
 import { ProjectDetail } from "~/features/configuration/components/projects/detail";
@@ -599,6 +600,30 @@ describe("Settings page", () => {
     );
   });
 
+  it("reports a supervisor that is not configured, and shows a configured one", async () => {
+    const configuration = configurationFixture();
+    const unset = text(await render(() => <SettingsPage configuration={configuration} />));
+    assert.include(unset, "settings.supervisor Not configured The instance runs no supervisor.");
+    const page = text(
+      await render(() => (
+        <SettingsPage
+          configuration={ConfigurationView.make({
+            ...configuration,
+            settings: SettingsView.make({
+              ...configuration.settings,
+              supervisor: {
+                harness: Harness.make("claude"),
+                model: ModelId.make("claude-sonnet-5-5"),
+                effort: "medium",
+              },
+            }),
+          })}
+        />
+      )),
+    );
+    assert.include(page, "settings.supervisor claude claude-sonnet-5-5 medium");
+  });
+
   it("lists settings, the operator, the webhooks mode, and tracing with what each does", async () => {
     const page = text(await render(() => <SettingsPage configuration={configurationFixture()} />));
     assert.include(page, "settings.poll_interval 60");
@@ -654,6 +679,15 @@ const selectLabeled = (markup: string, label: string): string => {
   return markup.slice(start, end);
 };
 
+/** Returns the markup of the input labeled `label`, from its label to the end of the input tag. */
+const inputLabeled = (markup: string, label: string): string => {
+  const start = markup.indexOf(`>${label}</label>`);
+  assert.isAtLeast(start, 0, `the form has a ${label} field`);
+  const input = markup.indexOf("<input", start);
+  assert.isAtLeast(input, 0, `the ${label} field is an input`);
+  return markup.slice(start, markup.indexOf(">", input) + 1);
+};
+
 describe("Configuration forms", () => {
   const noop = () => {};
 
@@ -668,6 +702,35 @@ describe("Configuration forms", () => {
     const select = selectLabeled(markup, "Coordinator");
     assert.include(select, '<option value="session">session</option>');
     assert.include(select, '<option value="events" selected="">events</option>');
+  });
+
+  it("edits the supervisor's brain in the settings form", async () => {
+    const without = text(
+      await render(() => <SettingsFields value={{ settings: {} }} onChange={noop} problems={[]} />),
+    );
+    assert.include(without, "Run a supervisor");
+    assert.notInclude(without, "Supervisor model");
+    const markup = await render(() => (
+      <SettingsFields
+        value={{
+          settings: {
+            supervisor: { harness: "claude", model: "claude-sonnet-5-5", effort: "medium" },
+          },
+        }}
+        onChange={noop}
+        problems={[]}
+      />
+    ));
+    assert.include(
+      selectLabeled(markup, "Supervisor harness"),
+      '<option value="claude" selected="">',
+    );
+    assert.include(inputLabeled(markup, "Supervisor model"), 'value="claude-sonnet-5-5"');
+    assert.include(
+      selectLabeled(markup, "Supervisor effort"),
+      '<option value="medium" selected="">',
+    );
+    assert.include(text(markup), "The harness must serve usine tool sets.");
   });
 
   it("edits an Agent's coordinator in the agent form", async () => {

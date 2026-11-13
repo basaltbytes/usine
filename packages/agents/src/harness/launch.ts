@@ -1,4 +1,6 @@
+import type { Harness } from "@usine/core/agent/brain";
 import { RoleName } from "@usine/core/agent/session";
+import type { GatewayCredentialKind } from "@usine/core/worker";
 import type { ChildHost } from "../child-host/child-host.ts";
 import { AgentResultError, type ChildRequest, RestartState } from "../runtime.ts";
 import { Effect, Option, Struct } from "effect";
@@ -29,28 +31,54 @@ export const codingAgent = RoleSpec.make({
 export const hostPlacement = (host: ChildHost): Placement =>
   host._tag === "LocalProcess" ? "local" : host.container === undefined ? "ssh" : "container";
 
-/** Reads credential metadata without retaining credential values. */
-export const childAdmissionContext = (
+/** What `workerAdmissionContext` reads of a session that runs on a worker. */
+export interface WorkerSession {
+  readonly harness: Harness;
+  readonly host: ChildHost;
+  /** The environment of the harness process. */
+  readonly environment: Readonly<Record<string, string>>;
+  /** The credential kind that the worker's gateway injects, or `None` without one. */
+  readonly gatewayCredential: Option.Option<GatewayCredentialKind>;
+}
+
+/**
+ * Returns the placement and credential route of a session of any role on a worker: the gateway's
+ * credential kind, else the harness's API key when `environment` sets it, else the host's login.
+ * Reads credential metadata without retaining credential values.
+ */
+export const workerAdmissionContext = (
   catalog: HarnessCatalog,
-  request: ChildRequest,
+  session: WorkerSession,
 ): AdmissionContext => {
-  const credential = request.session.gatewayCredential;
+  const credential = session.gatewayCredential;
   const provider = Option.flatMap(
-    catalog.get(request.session.brain.harness),
+    catalog.get(session.harness),
     (descriptor) => descriptor.worker.credential,
   );
   return AdmissionContext.make({
-    placement: hostPlacement(request.host),
+    placement: hostPlacement(session.host),
     credential: Option.isSome(credential)
       ? credential.value === "subscription"
         ? "gateway-subscription"
         : "gateway-api-key"
       : Option.isSome(provider) &&
-          request.environment[provider.value.apiKey.tokenVariable] !== undefined
+          session.environment[provider.value.apiKey.tokenVariable] !== undefined
         ? "api-key"
         : "host-login",
   });
 };
+
+/** Reads credential metadata without retaining credential values. */
+export const childAdmissionContext = (
+  catalog: HarnessCatalog,
+  request: ChildRequest,
+): AdmissionContext =>
+  workerAdmissionContext(catalog, {
+    harness: request.session.brain.harness,
+    host: request.host,
+    environment: request.environment,
+    gatewayCredential: request.session.gatewayCredential,
+  });
 
 export const admitChild = Effect.fn("HarnessAdmission.child")(function* (
   catalog: HarnessCatalog,

@@ -219,7 +219,7 @@ describe("Board self-writes", () => {
             recover: () => Effect.succeed("found" as const),
             intervene: () => Effect.void,
             interrupt: () => Effect.void,
-            occupy: (worker) => Effect.succeed({ worker, release: Effect.void }),
+            occupy: (worker) => Effect.succeed({ worker, kind: "local", release: Effect.void }),
             sweep: Effect.void,
             discard: () => Effect.void,
             reserve: () => Effect.die("approval must precede worker reservation"),

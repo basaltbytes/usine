@@ -36815,6 +36815,14 @@
                         },
                         "description": "Operation IDs from this document, such as operator.approve, that the token may call. Requests also need the token's scopes."
                       },
+                      "unknownOperations": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "pattern": "^[a-z]+\\.[A-Za-z]+$"
+                        },
+                        "description": "The operation IDs of the ceiling that match no operation, such as an ID that a release renamed. The token cannot call them."
+                      },
                       "expiresAt": {
                         "anyOf": [
                           {
@@ -44692,11 +44700,22 @@
                 "$ref": "#/components/schemas/_usine_orchestrator_ChildSessionBudgetFailureViewEncoded"
               }
             ]
+          },
+          "report": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
           "_tag",
-          "failure"
+          "failure",
+          "report"
         ],
         "additionalProperties": false
       },
@@ -46026,6 +46045,44 @@
               "events"
             ]
           },
+          "supervisor": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "harness": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+                  },
+                  "model": {
+                    "type": "string",
+                    "pattern": "\\S"
+                  },
+                  "effort": {
+                    "type": "string",
+                    "enum": [
+                      "off",
+                      "minimal",
+                      "low",
+                      "medium",
+                      "high",
+                      "xhigh",
+                      "max"
+                    ]
+                  }
+                },
+                "required": [
+                  "harness",
+                  "model",
+                  "effort"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "operator": {
             "anyOf": [
               {
@@ -46098,6 +46155,7 @@
           "parentModel",
           "parentEffort",
           "coordinator",
+          "supervisor",
           "operator",
           "webhooks",
           "webhooksPublicUrl",
@@ -51757,6 +51815,9 @@
                   "minimum": 0,
                   "maximum": 9007199254740991
                 }
+              },
+              "awaitsFirstResult": {
+                "type": "boolean"
               }
             },
             "required": [

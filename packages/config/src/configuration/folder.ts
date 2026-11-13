@@ -1,4 +1,4 @@
-import { brainAdmissionProblems } from "../instance/admission.ts";
+import { brainAdmissionProblems, supervisorAdmissionProblems } from "../instance/admission.ts";
 import { InstanceDirectory } from "@usine/core/instance";
 import {
   Array as Arr,
@@ -140,7 +140,10 @@ export class ConfigurationFolder extends Context.Service<
                   )).flat()
                 : yield* load<LoopFile>("loops", "error", parser.parseLoopFile);
             if (Result.isSuccess(config)) {
-              problems.push(...brainAdmissionProblems(config.success, agents));
+              problems.push(
+                ...brainAdmissionProblems(config.success, agents),
+                ...supervisorAdmissionProblems(config.success),
+              );
               const references = referenceIndex(config.success, agents);
               for (const loop of loops) {
                 const failure = loopReferenceFailure(loopPath(loop.name), loop, references);

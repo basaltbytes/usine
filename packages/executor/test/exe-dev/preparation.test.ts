@@ -3,7 +3,12 @@ import { assert, describe, it } from "@effect/vitest";
 
 import { AttemptId } from "@usine/core/attempt";
 
-import { type AttemptSalvage, SalvagePushed, SalvageRef } from "@usine/core/attempt/salvage";
+import {
+  type AttemptSalvage,
+  type RecoveredLeftovers,
+  SalvagePushed,
+  SalvageRef,
+} from "@usine/core/attempt/salvage";
 import { InfraFailure } from "@usine/core/attempt/failure";
 import { GitHubLabelName } from "@usine/core/label";
 import { LoopName } from "@usine/core/loop";
@@ -354,9 +359,10 @@ describe("exe.dev preparation", () => {
     return Effect.gen(function* () {
       const executor = yield* Executor;
       const recorded: Array<AttemptSalvage> = [];
+      const leftovers: Array<RecoveredLeftovers> = [];
       // Reconciliation runs for every Attempt, succeeded or not.
       for (const [index, succeeded] of [true, false, true, true].entries()) {
-        yield* executor.recover(
+        const found = yield* executor.recover(
           {
             attemptId: AttemptId.make(`finished-run/execute/${index + 1}`),
             repository: request.repository,
@@ -374,8 +380,11 @@ describe("exe.dev preparation", () => {
           },
           Effect.die("An Attempt without a checkout has no salvage to commit"),
         );
+        leftovers.push(found);
       }
       const remote = ssh.state.commands.map(remoteLine);
+      // Nothing of these Attempts is left on the Worker's long-lived machine.
+      assert.deepStrictEqual(leftovers, ["gone", "gone", "gone", "gone"]);
       assert.strictEqual(recorded.length, 0);
       assert.strictEqual(remote.filter((line) => line.startsWith("exec 'find' ")).length, 1);
       assert(!remote.some((line) => line.startsWith("exec 'test' ")));

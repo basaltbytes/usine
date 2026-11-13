@@ -7,9 +7,11 @@ import {
   InfraFailure,
 } from "@usine/core/attempt/failure";
 import { SalvageRetained } from "@usine/core/attempt/salvage";
+import { CiPolicy } from "@usine/core/ci";
 import { DedupKey, Event, EventId } from "@usine/core/event";
 import { ItemKey } from "@usine/core/item";
 import { GitHubLabelName } from "@usine/core/label";
+import { LoopName } from "@usine/core/loop";
 import { CommitSha } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
 import { Comment, StepCompletion, StepResult } from "@usine/core/step/result";
@@ -238,7 +240,12 @@ it.live("checks saved outcome labels before accepting a completion recovered aft
       yield* committedBeforeCrash(directory, (store) =>
         Effect.gen(function* () {
           yield* store.recordAndClaim(requiringLabels, runId);
-          const started = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
+          const started = yield* store.beginAttempt(
+            runId,
+            WorkerName.make("local"),
+            "local",
+            Option.none(),
+          );
           assert.strictEqual(started._tag, "AttemptStarted");
         }),
       );
@@ -322,6 +329,57 @@ it.live("skips the check when a refused push already fails the Attempt", () =>
   ),
 );
 
+it.live("fails a rejected report on a CI loop with the check's failure, not the missing head", () =>
+  withInstance((directory) =>
+    Effect.gen(function* () {
+      const worker = yield* slottedExecutor([Effect.succeed(reviewed)]);
+      const verified: Array<Attempt> = [];
+      yield* Effect.gen(function* () {
+        const engine = yield* RunEngine;
+        // The report has no pushed pull request head, which a CI loop also rejects.
+        const accepted = yield* engine.submit(
+          Submission.make({
+            ...requiringLabels,
+            ciPolicy: Option.some(
+              CiPolicy.make({ fixLoop: LoopName.make("fix"), timeoutSeconds: 3600 }),
+            ),
+          }),
+        );
+        assert(accepted._tag === "Claimed");
+        const finished = yield* waitFor(
+          engine,
+          accepted.runId,
+          ({ run }) => run.state._tag === "Failed",
+        );
+        const [attempt] = finished.attempts;
+        assert(attempt !== undefined && Option.isSome(attempt.outcome));
+        assert(attempt.outcome.value._tag === "Failed");
+        assert.strictEqual(
+          attempt.outcome.value.failure.message,
+          "The review ended without an outcome label.",
+        );
+        assert.deepStrictEqual(
+          Option.map(attempt.result, ({ message }) => message),
+          Option.some(reviewed.message),
+        );
+        assert.deepStrictEqual(
+          verified.map(({ id }) => id),
+          [attempt.id],
+        );
+      }).pipe(
+        Effect.provide(
+          engineLayer(
+            directory,
+            worker.executor,
+            conditionLayer(stillMatches),
+            rejecting(verified),
+          ),
+        ),
+      );
+    }),
+  ),
+);
+
 const onItem = (item: string) =>
   Submission.make({
     ...lifecycleSubmission,
@@ -339,7 +397,7 @@ it.live("names why the Run would not record a success", () =>
       const store = yield* RunStore;
       const worker = WorkerName.make("local");
       const begin = Effect.fn("test.begin")(function* (runId: RunId) {
-        const started = yield* store.beginAttempt(runId, worker, Option.none());
+        const started = yield* store.beginAttempt(runId, worker, "local", Option.none());
         assert(started._tag === "AttemptStarted");
         return started.execution.attempt;
       });
@@ -385,6 +443,8 @@ it.live("names why the Run would not record a success", () =>
         Result.fail(InfraFailure.make({ message: "worker lost", cause: "test" })),
       );
       assert.strictEqual(retried._tag, "RetryAttempt");
+      // The Run waits for its retry with no open Attempt.
+      yield* expectReason(replaced, first, Option.some("NoOpenAttempt"));
       yield* begin(replaced);
       yield* expectReason(replaced, first, Option.some("AttemptReplaced"));
 

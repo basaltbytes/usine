@@ -19,6 +19,7 @@ Fields in this table belong to `settings`.
 | `coordinator` | `session` or `events` | `session` | What coordinates attempts of agents without an override: a parent session, or rules on lifecycle events. See [Coordinator](/reference/configuration/agents/#coordinator). |
 | `parent_model` | string | Pi selection | Parent model in `provider/model` form for agents without an override. Not allowed with `coordinator: events`. |
 | `parent_effort` | effort | agent effort | Parent reasoning effort for agents without an override. Not allowed with `coordinator: events`. |
+| `supervisor` | object | not configured | The harness, model, and effort of the supervisor. See [Supervisor](#supervisor). |
 | `upgrade_channel` | `latest` or `next` | `latest` | npm channel checked for global installations managed by systemd or launchd. |
 | `upgrade_mode` | `off`, `propose`, or `automatic` | `propose` | Disable upgrade checks, offer upgrades, or upgrade after admitted attempts finish. |
 
@@ -42,6 +43,27 @@ A child can answer while background tasks that it started, such as a test suite 
 Set `max_background_wait_minutes` to bound that wait. Claude Code children apply it. If the child is still idle with background work when the limit passes, usine returns the child's last answer as its report and logs a warning with the limit and the remaining task IDs. Closing the child ends the Claude Code process, which stops its background tasks; their results never reach the attempt, even if the answer said that the work was still running. When the attempt ends, even as a success, cleanup salvages its checkout as after a failure: for a loop with `write` permissions, it commits uncommitted changes and pushes them, with local commits, to a salvage branch before it removes the checkout. A checkout at its base commit has nothing to salvage. Cleanup applies the limit that the attempt started with, so a change to the setting doesn't affect an attempt that is running. If the salvage doesn't push all the work, the checkout stays on the worker, and the next startup of usine salvages it again. A turn that starts within the limit runs to its own answer. An operator Hold or pause keeps the child open past the limit. See [Agents](/reference/configuration/agents/) for the Hold and Release behavior.
 
 Effort values are `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max`. The selected model and harness must support the value. See [Agents](/reference/configuration/agents/#parent-selection).
+
+## Supervisor
+
+The supervisor observes and operates the factory for a member. It runs on the orchestrator with the instance's gateway credential, and each turn reopens the conversation that the previous turn saved. It lists only the operator tools that the member's token allows, the same tools that the [MCP endpoint](/guides/connect-an-mcp-client/) serves, and every call goes through the operator API with that token, so the supervisor can do no more than the member. The setting selects and checks the supervisor's brain; this release has no interface that opens a conversation with it.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `supervisor.harness` | harness ID | required | The harness that runs the supervisor. |
+| `supervisor.model` | string | required | The model that the harness runs. |
+| `supervisor.effort` | effort | required | The reasoning effort of the model. |
+
+```yaml
+version: 2
+settings:
+  supervisor:
+    harness: claude
+    model: claude-sonnet-5-5
+    effort: medium
+```
+
+Without `supervisor`, the instance starts and **Configuration > Settings** reports the supervisor as not configured. Saving refuses a harness that can't serve the role and names what it lacks: the harness must serve usine tool sets with its own tools off, reopen a saved conversation, take steering and interrupts, and report token usage. Claude Code and Pi serve the role. Codex is refused, because it lists its own tools in every thread.
 
 ## Instance metadata
 

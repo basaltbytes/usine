@@ -1,15 +1,32 @@
 import { canonicalLabelName } from "@usine/core/label";
-import type { Attempt } from "@usine/core/attempt";
+import { type Attempt, type AttemptWindow, windowHolds, windowOf } from "@usine/core/attempt";
 import { AgentFailure } from "@usine/core/attempt/failure";
 import { GitHubItemKey, type ItemNumber } from "@usine/core/item";
 import type { RepositoryName } from "@usine/core/repository";
+import type { BotLogin } from "@usine/core/worker";
+import type { Worker as ConfigWorker } from "@usine/config/factory";
 import { CompletionCheck } from "@usine/engine/completion-check";
 import type { Submission } from "@usine/engine/engine";
 import { githubBotLogin } from "@usine/executor";
 import { GitHubApp, type GitHubAppError, isRefusal } from "@usine/github/github-app";
-import { GitHubItemHistory, type GitHubItemNotFoundError } from "@usine/github/item-history";
+import {
+  GitHubItemHistory,
+  type GitHubItemNotFoundError,
+  type GitHubTimelineTooLongError,
+} from "@usine/github/item-history";
 import { GitHubPolling } from "@usine/github/polling";
-import { type Brand, DateTime, Duration, Effect, Layer, Result, Schedule, Schema } from "effect";
+import {
+  type Brand,
+  type Cause,
+  DateTime,
+  Duration,
+  Effect,
+  Layer,
+  Option,
+  Result,
+  Schedule,
+  Schema,
+} from "effect";
 import { CurrentInstance } from "./current-instance/current-instance.ts";
 
 /** The error when the Attempt's Worker is no longer configured, so its GitHub writer is unknown. */
@@ -33,22 +50,50 @@ const logFields = (attempt: Attempt, submission: Submission) => ({
 });
 type LogFields = ReturnType<typeof logFields>;
 
+/** Returns whether a retry of the failed read can succeed. */
+const isTransient = (
+  error:
+    | GitHubAppError
+    | GitHubItemNotFoundError
+    | GitHubTimelineTooLongError
+    | UnknownWriterError
+    | Cause.TimeoutError,
+): boolean => {
+  switch (error._tag) {
+    case "TimeoutError":
+      return true;
+    case "GitHubItemNotFoundError":
+    case "GitHubTimelineTooLongError":
+    case "UnknownWriterError":
+      return false;
+    default:
+      return !isRefusal(error);
+  }
+};
+
 /**
- * Bounds `read` and retries it twice, after one and two seconds, unless GitHub
- * refuses the request or the Item is missing. Transport failures and timeouts are retryable.
+ * Bounds `read` and retries it twice, after one and two seconds, after a timeout, a transport
+ * failure, a server error, a rate limit, or an invalid response, such as a body that fails
+ * partway through. A refusal, a missing Item, and a timeline longer than ten pages end the read:
+ * GitHub returns them again.
  */
 const transientlyRetried =
   (fields: LogFields, read: "label events" | "current labels") =>
-  <A, E extends GitHubAppError | GitHubItemNotFoundError>(effect: Effect.Effect<A, E>) =>
+  <
+    A,
+    E extends
+      | GitHubAppError
+      | GitHubItemNotFoundError
+      | GitHubTimelineTooLongError
+      | UnknownWriterError,
+  >(
+    effect: Effect.Effect<A, E>,
+  ) =>
     effect.pipe(
       Effect.timeout(READ_TIMEOUT),
       Effect.retry(($) =>
         $(Schedule.exponential("1 second")).pipe(
-          Schedule.while(
-            ({ input: error }) =>
-              error._tag === "TimeoutError" ||
-              (error._tag !== "GitHubItemNotFoundError" && !isRefusal(error)),
-          ),
+          Schedule.while(({ input: error }) => isTransient(error)),
           Schedule.upTo({ times: 2 }),
           Schedule.tap(({ input: error, attempt, duration }) =>
             Effect.logWarning("An outcome label read failed; retrying it", {
@@ -71,9 +116,9 @@ const matching = (submission: Submission, names: ReadonlyArray<string>) => {
 
 /**
  * Verifies the outcome labels of an Attempt on the Run's GitHub issue or pull request. Accepts an
- * outcome label that any of the Run's GitHub writers added since its first Attempt started,
- * even if a later change removed it. If the Item's label events can't be read, accepts an outcome
- * label that is on the Item now.
+ * outcome label that the Attempt's GitHub writer added during the Attempt, or that an earlier
+ * Attempt of the Run added during that Attempt, even if a later change removed it. If the Item's
+ * label events can't be read, accepts an outcome label that is on the Item now.
  */
 export const completionCheckLayer: Layer.Layer<
   CompletionCheck,
@@ -87,7 +132,29 @@ export const completionCheckLayer: Layer.Layer<
     const polling = yield* GitHubPolling;
     const instances = yield* CurrentInstance;
 
-    /** Returns labels added by the Run's writers since its first Attempt started. */
+    /**
+     * Returns the writer of `attempt`: the bot of the Worker kind it started on, or, for an
+     * Attempt recorded without one, of its Worker's configured kind.
+     */
+    const writerOf = (attempt: Attempt, workers: ReadonlyArray<ConfigWorker>, app: BotLogin) =>
+      Option.match(attempt.workerKind, {
+        onSome: (kind) => Effect.succeed(githubBotLogin(kind, app)),
+        onNone: () => {
+          const worker = workers.find(({ name }) => name === attempt.worker);
+          return worker === undefined
+            ? Effect.fail(
+                UnknownWriterError.make({
+                  message: `Worker ${attempt.worker} is no longer configured, so its GitHub writer is unknown`,
+                }),
+              )
+            : Effect.succeed(githubBotLogin(worker.kind, app));
+        },
+      });
+
+    /**
+     * Returns the labels that the Run's Attempts added: each label added by an Attempt's writer
+     * during that Attempt. An earlier Attempt without a recorded end adds none.
+     */
     const addedLabels = Effect.fn("CompletionCheck.addedLabels")(function* (
       attempt: Attempt,
       repository: RepositoryName,
@@ -96,37 +163,58 @@ export const completionCheckLayer: Layer.Layer<
       runAttempts: ReadonlyArray<Attempt>,
     ) {
       const { config } = yield* instances.get;
-      const workers = yield* Effect.forEach(runAttempts, (previous) => {
-        const worker = config.workers.find(({ name }) => name === previous.worker);
-        return worker === undefined
-          ? Effect.fail(
-              UnknownWriterError.make({
-                message: `Worker ${previous.worker} is no longer configured, so its GitHub writer is unknown`,
-              }),
-            )
-          : Effect.succeed(worker);
-      });
-      const first = runAttempts.reduce(
-        (first, previous) => (previous.number < first.number ? previous : first),
+      const attempts = [
+        ...runAttempts.filter((previous) => previous.number < attempt.number),
         attempt,
+      ];
+      // The open Attempt's window has no end; an earlier one without a recorded end has none.
+      const windowed = attempts.flatMap((counted) =>
+        Option.toArray(Option.map(windowOf(counted), (window) => ({ counted, window }))),
       );
-      // GitHub records label events to the second.
-      const since = DateTime.startOf(first.startedAt, "second");
-      const changes = yield* Effect.gen(function* () {
+      if (windowed.length < attempts.length)
+        yield* Effect.logInfo(
+          "Earlier Attempts have no recorded end, so their label events don't count",
+          {
+            ...fields,
+            attempts: attempts
+              .filter((unended) => Option.isNone(windowOf(unended)))
+              .map(({ id }) => id),
+          },
+        );
+      return yield* Effect.gen(function* () {
         const { login } = yield* app.botAccount;
-        const writers = new Set(workers.map(({ kind }) => githubBotLogin(kind, login)));
+        const windows = new Map<BotLogin, Array<AttemptWindow>>();
+        for (const { counted, window } of windowed) {
+          const writer = yield* writerOf(counted, config.workers, login);
+          windows.set(writer, [...(windows.get(writer) ?? []), window]);
+        }
+        // At most two writers exist, the App's bot and the exe.dev integration's bot, so the
+        // reads run together and share one timeout.
         const timelines = yield* Effect.forEach(
-          writers,
-          (writer) => history.appChanges(repository, item, since, writer),
-          { concurrency: "unbounded" },
+          windows,
+          ([writer, held]) => {
+            const first = held.reduce((earliest, window) =>
+              DateTime.isLessThan(window.startedAt, earliest.startedAt) ? window : earliest,
+            );
+            // GitHub records label events to the second.
+            const since = DateTime.startOf(first.startedAt, "second");
+            return history
+              .appChanges(repository, item, since, writer)
+              .pipe(
+                Effect.map((changes) =>
+                  changes.flatMap((change) =>
+                    change._tag === "LabelAdded" &&
+                    held.some((window) => windowHolds(window, change.at))
+                      ? [change.label.name]
+                      : [],
+                  ),
+                ),
+              );
+          },
+          { concurrency: 2 },
         );
         return timelines.flat();
       }).pipe(transientlyRetried(fields, "label events"));
-      return changes.flatMap((change) =>
-        change._tag === "LabelAdded" && DateTime.isGreaterThanOrEqualTo(change.at, since)
-          ? [change.label.name]
-          : [],
-      );
     });
 
     const verify = Effect.fn("CompletionCheck.verify")(function* (

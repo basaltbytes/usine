@@ -113,9 +113,9 @@ export interface AttemptRecovery {
 }
 
 /**
- * What recovery found of an Attempt on its Worker. `gone`: neither the Attempt's machine nor its
- * checkout is left, so a later recovery has nothing to reconcile. `found`: recovery found the
- * machine or the checkout, which it reconciled or kept.
+ * What recovery found of an Attempt on its Worker. `gone`: neither the Attempt's checkout nor a
+ * machine created for the Attempt is left, so a later recovery has nothing to reconcile. `found`:
+ * recovery found the checkout or the Attempt's own machine, which it reconciled or kept.
  */
 export const RecoveredLeftovers = Schema.Literals(["gone", "found"]);
 export type RecoveredLeftovers = typeof RecoveredLeftovers.Type;
