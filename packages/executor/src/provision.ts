@@ -188,7 +188,7 @@ export interface ProvisionedWorktree {
 }
 
 /** The part of an Attempt's sink that its checkout's cleanup uses. */
-export type SalvageSink = Pick<AttemptChannel.Sink, "salvage" | "transcript">;
+type SalvageSink = Pick<AttemptChannel.Sink, "salvage" | "transcript">;
 
 /** Whether `envelope` reports a session whose answer returned at its background wait limit. */
 const finishedAtWaitLimit = (envelope: AttemptChannel.Envelope) =>
