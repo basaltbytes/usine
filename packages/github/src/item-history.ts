@@ -12,6 +12,26 @@ import { RepositoryLabel, RepositoryLabelColor, RepositoryLabelName } from "./po
 /** The maximum timeline pages per walk; more changes since `since` fail instead of returning partial results. */
 const MAX_TIMELINE_PAGES = 10;
 
+/**
+ * The error when an Item's timeline since `since` has more than `pages` pages. GitHub returns the
+ * same timeline again, so a retry can't succeed.
+ */
+export class GitHubTimelineTooLongError extends Schema.TaggedError<
+  GitHubTimelineTooLongError,
+  Brand.Brand<"@usine/github/item-history/GitHubTimelineTooLongError">
+>("@usine/github/GitHubTimelineTooLongError")("GitHubTimelineTooLongError", {
+  /** The repository of the Item. */
+  repository: RepositoryName,
+  /** The issue or pull request number. */
+  item: ItemNumber,
+  /** The ISO 8601 time from which the timeline was read. */
+  since: Schema.NonEmptyString,
+  /** The number of pages read before the walk stopped. */
+  pages: Schema.Int,
+  /** An operator-facing explanation; branch on the error tag and fields instead of matching this text. */
+  message: Schema.NonEmptyString,
+}) {}
+
 /** A label the bot added to the item; `label` is its current GitHub definition. */
 export class LabelAdded extends Schema.TaggedClass<
   LabelAdded,
@@ -193,14 +213,17 @@ export class GitHubItemHistory extends Context.Service<
      * issue or pull request at or after `since`, oldest first. Labels have their current name,
      * color, and description. Fails with `GitHubItemNotFoundError` if the repository responds but
      * has no such item. Reads at most ten pages of 100 timeline entries and fails with
-     * `InvalidGitHubResponseError` if more remain, rather than returning partial history.
+     * `GitHubTimelineTooLongError` if more remain, rather than returning partial history.
      */
     readonly appChanges: (
       repository: RepositoryName,
       item: ItemNumber,
       since: DateTime.Utc,
       actor: BotLogin,
-    ) => Effect.Effect<ReadonlyArray<ItemChange>, GitHubAppError | GitHubItemNotFoundError>;
+    ) => Effect.Effect<
+      ReadonlyArray<ItemChange>,
+      GitHubAppError | GitHubItemNotFoundError | GitHubTimelineTooLongError
+    >;
   }
 >()("@usine/github/item-history/GitHubItemHistory") {
   /** Provides bot timeline reads through GraphQL with the App's shared token and HTTP client. */
@@ -268,10 +291,13 @@ export class GitHubItemHistory extends Context.Service<
             pages += 1;
           } while (Option.isSome(next) && pages < MAX_TIMELINE_PAGES);
           if (Option.isSome(next))
-            return yield* invalidResponse(
-              "fetch-item-timeline",
-              `the timeline of ${repository}#${item} since ${sinceIso} has more than ${MAX_TIMELINE_PAGES} pages`,
-            );
+            return yield* GitHubTimelineTooLongError.make({
+              repository,
+              item,
+              since: sinceIso,
+              pages,
+              message: `The timeline of ${repository}#${item} since ${sinceIso} has more than ${MAX_TIMELINE_PAGES} pages`,
+            });
           const changes = nodes.flatMap((node) => (node === null ? [] : appChange(actor, node)));
           yield* Effect.logDebug("Read the bot's changes from an Item timeline", {
             repository,

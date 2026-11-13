@@ -11,7 +11,11 @@ import { type BoardMoveRecord, BoardMoves } from "@usine/engine/board-moves";
 import type { RunStoreError } from "@usine/engine/engine";
 import { RunReader } from "@usine/engine/run-reader";
 import { TranscriptPageQuery } from "@usine/engine/transcript";
-import { GitHubApp, type GitHubAppError } from "@usine/github/github-app";
+import {
+  GitHubApp,
+  type GitHubAppError,
+  InvalidGitHubResponseError,
+} from "@usine/github/github-app";
 import {
   GitHubItemHistory,
   type GitHubItemNotFoundError,
@@ -385,9 +389,19 @@ const makeRunGitHubChanges = Effect.gen(function* () {
               ]),
             ],
             (actor) =>
-              history
-                .appChanges(repository, number, since, actor)
-                .pipe(Effect.map((changes) => [actor, changes] as const)),
+              history.appChanges(repository, number, since, actor).pipe(
+                Effect.map((changes) => [actor, changes] as const),
+                // The run page reports a timeline over the page cap as an invalid response.
+                Effect.catchTag("GitHubTimelineTooLongError", (error) =>
+                  Effect.fail(
+                    InvalidGitHubResponseError.make({
+                      operation: "fetch-item-timeline",
+                      message: "GitHub returned a response in an unexpected format",
+                      detail: error.message,
+                    }),
+                  ),
+                ),
+              ),
             { concurrency: "unbounded" },
           ),
           boardMoves.onItem(
