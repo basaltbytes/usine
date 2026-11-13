@@ -1771,6 +1771,9 @@ describe("Claude child backend", () => {
   const retainedSdk = Effect.gen(function* () {
     const inputs = yield* Queue.make<ClaudeUserMessage>();
     const output = yield* Queue.make<Schema.Json, Cause.Done>();
+    const outputs: Array<Queue.Queue<Schema.Json, Cause.Done>> = [];
+    const lost = { type: "test_process_lost" };
+    const context = yield* Effect.context<never>();
     const init = yield* jsonLine({ type: "system", subtype: "init", session_id: "saved-claude" });
     const { spawner } = yield* scriptedOwner(
       [
@@ -1781,6 +1784,11 @@ describe("Claude child backend", () => {
     );
     const sdk = Layer.succeed(ClaudeSdk)({
       open: (input, options) => {
+        const current =
+          outputs.length === 0
+            ? output
+            : Effect.runSyncWith(context)(Queue.make<Schema.Json, Cause.Done>());
+        outputs.push(current);
         assert(options.spawnClaudeCodeProcess !== undefined);
         const child = options.spawnClaudeCodeProcess({
           command: "claude",
@@ -1802,10 +1810,14 @@ describe("Claude child backend", () => {
           },
           close: () => {
             lines.close();
-            Queue.endUnsafe(output);
+            Queue.endUnsafe(current);
           },
-          [Symbol.asyncIterator]: () =>
-            Stream.toAsyncIterable(Stream.fromQueue(output))[Symbol.asyncIterator](),
+          async *[Symbol.asyncIterator]() {
+            for await (const message of Stream.toAsyncIterable(Stream.fromQueue(current))) {
+              if (message === lost) throw ChildProcessLost.make({ exitCode: 255, stderrTail: "" });
+              yield message;
+            }
+          },
         };
       },
     });
@@ -1822,7 +1834,7 @@ describe("Claude child backend", () => {
     const layer = claudeChildWith(
       Layer.succeed(ChildProcessSpawner.ChildProcessSpawner)(owner),
     ).pipe(Layer.provideMerge(sdk));
-    return { inputs, output, layer };
+    return { inputs, output, outputs, lost, layer };
   });
 
   /** A request that reattaches the retained process of the saved session `saved-claude`. */
@@ -1878,6 +1890,19 @@ describe("Claude child backend", () => {
         }).pipe(Effect.scoped, Effect.provide(layer));
       }).pipe(Effect.scoped),
     );
+
+  it.live("sends the task again when an unprompted reattached Claude process is lost", () =>
+    Effect.gen(function* () {
+      const { inputs, output, outputs, lost, layer } = yield* retainedSdk;
+      yield* Effect.gen(function* () {
+        yield* (yield* ChildBackend).launch(reattach({ prompted: false }));
+        assert.strictEqual((yield* Queue.take(inputs)).message.content, request().prompt);
+        yield* Queue.offer(output, lost);
+        assert.strictEqual((yield* Queue.take(inputs)).message.content, request().prompt);
+        assert.lengthOf(outputs, 2);
+      }).pipe(Effect.scoped, Effect.provide(layer));
+    }).pipe(Effect.scoped),
+  );
 
   // A reattached process that never got its task, or that waits idle under a Hold, runs no turn, so
   // the next message starts one and Claude reads it before the turn's tool calls.

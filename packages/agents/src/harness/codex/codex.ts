@@ -509,14 +509,20 @@ const makeCodexSessions = Effect.gen(function* () {
         turnId: turn.id,
       }));
       const count = unread.length;
-      for (const item of turn.items)
-        if (Schema.is(UserMessageKindItem)(item)) yield* receive(item, turn.id, unread);
+      let skipped = 0;
+      for (const item of turn.items) {
+        if (!Schema.is(UserMessageKindItem)(item)) continue;
+        if (Schema.is(UserMessageItem)(item) && observedItems.has(item.id)) skipped++;
+        yield* receive(item, turn.id, unread);
+      }
       const read = count - unread.length;
-      if (read > 0)
-        yield* Effect.logInfo("The restored Codex thread already read unread operator messages", {
+      if (count > 0)
+        yield* Effect.logInfo("Checked restored Codex user-message receipts", {
           sessionId: session.id,
           turnId: turn.id,
+          skipped,
           read,
+          unread: unread.length,
         });
     });
 

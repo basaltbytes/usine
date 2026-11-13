@@ -1229,7 +1229,7 @@ describe("Codex child backend", () => {
     );
   }
 
-  it.effect("doesn't resend a restored message that the finished Codex turn read", () =>
+  it.effect("doesn't resend a restored message that the last finished Codex turn read", () =>
     Effect.gen(function* () {
       const notifications = yield* Queue.make<CodexNotification, Cause.Done>();
       const read = OperatorMessage.make({ message: "Check the diff" });
@@ -1256,10 +1256,12 @@ describe("Codex child backend", () => {
                 {
                   id: "turn-1",
                   status: "completed",
-                  items: [
-                    userMessage("task", request().prompt),
-                    userMessage("guidance", read.message),
-                  ],
+                  items: [userMessage("task", request().prompt)],
+                },
+                {
+                  id: "turn-2",
+                  status: "completed",
+                  items: [userMessage("guidance", read.message)],
                 },
               ],
             },
@@ -1317,6 +1319,7 @@ describe("Codex child backend", () => {
 
   it.effect("sends a restored message whose text a saved receipt already acknowledged", () =>
     Effect.gen(function* () {
+      const logs = collectLogs(["Info"]);
       const notifications = yield* Queue.make<CodexNotification, Cause.Done>();
       const repeated = OperatorMessage.make({ message: "Check the tests" });
       const task = OperatorMessage.make({ message: request().prompt });
@@ -1383,6 +1386,14 @@ describe("Codex child backend", () => {
         );
         assert.deepStrictEqual(journal, [], "the saved items acknowledged earlier input");
         assert.deepStrictEqual(
+          logs.records.flatMap(({ message }) =>
+            Array.isArray(message) && message[0] === "Checked restored Codex user-message receipts"
+              ? [message[1]]
+              : [],
+          ),
+          [{ sessionId: request().session.id, turnId: "turn-1", skipped: 2, read: 0, unread: 2 }],
+        );
+        assert.deepStrictEqual(
           inputs.map(({ method }) => method),
           ["turn/start", "turn/steer", "turn/steer"],
         );
@@ -1400,7 +1411,7 @@ describe("Codex child backend", () => {
         yield* Deferred.await(read);
         assert.deepStrictEqual(journal, ["received guidance-2", `read ${repeated.id}`]);
       }).pipe(
-        Effect.provide(codexChildLayer.pipe(Layer.provide(server))),
+        Effect.provide(codexChildLayer.pipe(Layer.provide(server), Layer.provideMerge(logs.layer))),
         Effect.provideService(ChildSessionJournal, {
           started: () => Effect.void,
           prompted: Effect.void,
