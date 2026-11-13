@@ -121,9 +121,13 @@ const TOOL_PREFIX = `mcp__${TOOL_SERVER}__`;
 /** The API takes tool names of at most 64 characters, and Claude Code adds the server prefix. */
 const toolNameRule = { maxLength: 64 - TOOL_PREFIX.length, reserved: new Set<string>() };
 
+/** Claude Code's tools that read and search files, which a role that keeps only `read` tools lists. */
+const READ_TOOLS = ["Read", "Grep", "Glob"];
+
 /**
  * Returns the SDK options; each launch supplies the shared process callback. A role that closes
- * native tools gets no built-in tool and no MCP server beyond its usine tools.
+ * native tools gets no built-in tool, and a role that keeps only `read` tools gets only Claude
+ * Code's read and search tools; neither gets an MCP server beyond its usine tools.
  */
 const optionsFor = (spec: SessionSpec, start: Start, sessionId: string): ClaudeQueryOptions => {
   const options: ClaudeQueryOptions = {
@@ -138,9 +142,14 @@ const optionsFor = (spec: SessionSpec, start: Start, sessionId: string): ClaudeQ
     // Flag settings take precedence over the Worker user's settings file.
     settings: { attribution: { commit: "", pr: "" } },
   };
-  return spec.admitted.role.nativeTools
-    ? options
-    : { ...options, tools: [], strictMcpConfig: true };
+  switch (spec.admitted.role.nativeTools) {
+    case "all":
+      return options;
+    case "read":
+      return { ...options, tools: READ_TOOLS, strictMcpConfig: true };
+    case "none":
+      return { ...options, tools: [], strictMcpConfig: true };
+  }
 };
 
 const modelExists = (models: ReadonlyArray<ClaudeModelInfo>, model: ModelId): boolean =>

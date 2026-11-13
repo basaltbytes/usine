@@ -19,7 +19,7 @@ export const codingAgent = RoleSpec.make({
     reason: "The coding agent runs on a worker",
   }),
   credential: Option.none(),
-  nativeTools: true,
+  nativeTools: "all",
   hostTools: false,
   persistence: "saved",
   interventions: true,

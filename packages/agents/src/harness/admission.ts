@@ -1,7 +1,7 @@
 import { BrainSpec, Harness, ModelId } from "@usine/core/agent/brain";
 import { BillingPool, RoleName } from "@usine/core/agent/session";
 import type { GatewayLlmProvider } from "@usine/core/worker";
-import { Array as Arr, type Brand, Option, Result, Schema } from "effect";
+import { Array as Arr, type Brand, Effect, Option, Result, Schema } from "effect";
 import { CredentialRoute, Lacking, Placement } from "./capability.ts";
 import type { HarnessCatalog, HarnessDescriptor } from "./harness.ts";
 import { requirements, RoleSpec } from "./role.ts";
@@ -23,6 +23,15 @@ export class AdmittedBrain extends Schema.Class<
    * pool at launch, as with its own login.
    */
   pool: Schema.Option(BillingPool),
+  /**
+   * Why the harness keeps all its own tools for a role that keeps only its `read` tools: the
+   * reason that the descriptor gives for lacking `closed-tools`. `None` when the harness lists
+   * the tools that the role keeps.
+   */
+  ownToolsKept: Schema.Option(Schema.NonEmptyString).pipe(
+    Schema.withConstructorDefault(Effect.succeedNone),
+    Schema.withDecodingDefaultKey(Effect.succeedNone),
+  ),
 }) {}
 
 export class BrainRefused extends Schema.TaggedError<
@@ -60,7 +69,8 @@ export const routePool = (
  * Checks what `role` requires of `brain` at `context`, without IO or inspecting secret values.
  * `reopens` adds what reopening a saved conversation needs. A refusal lists every missing
  * capability, placement, or credential route with the reason that the role or the harness
- * descriptor gives for it.
+ * descriptor gives for it. A harness that can't list only the `read` tools that a role keeps is
+ * admitted with all its own tools, and the admission says why in `ownToolsKept`.
  */
 export const admitBrain = (
   catalog: HarnessCatalog,
@@ -70,6 +80,7 @@ export const admitBrain = (
   options: { readonly reopens: boolean } = { reopens: false },
 ): Result.Result<AdmittedBrain, BrainRefused> => {
   const missing: Array<Lacking> = [];
+  let ownToolsKept = Option.none<string>();
   const descriptor = catalog.get(brain.harness);
   const { placement, credential } = context;
   if (Option.isNone(descriptor)) {
@@ -112,6 +123,11 @@ export const admitBrain = (
         missing.push(
           ...profile.lacking.filter((gap) => required.some((need) => need === gap.capability)),
         );
+        if (role.nativeTools === "read")
+          ownToolsKept = Option.map(
+            Arr.findFirst(profile.lacking, ({ capability }) => capability === "closed-tools"),
+            ({ reason }) => reason,
+          );
       }
     }
   }
@@ -132,6 +148,7 @@ export const admitBrain = (
       brain,
       context,
       pool: Option.flatMap(descriptor, (adapter) => routePool(adapter, credential)),
+      ownToolsKept,
     }),
   );
 };

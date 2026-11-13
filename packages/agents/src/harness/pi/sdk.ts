@@ -25,6 +25,8 @@ import { Effort, ModelId } from "@usine/core/agent/brain";
 import { HarnessSession, HarnessSessionId } from "@usine/core/agent/session";
 import { Context, Effect, Exit, Layer, Option } from "effect";
 import type { CompletionSchema } from "../completion.ts";
+import type { NativeTools } from "../role.ts";
+import { hostReadTools, type PiHostCommand } from "./host-files.ts";
 import {
   type PiAuthentication,
   type PiPool,
@@ -71,8 +73,13 @@ export interface PiStartOptions {
   readonly environment: Option.Option<Readonly<Record<string, string>>>;
   /** Trusted inline extensions to register, such as the operator pause gate. */
   readonly extensions: ReadonlyArray<InlineExtension>;
-  /** Whether the session keeps Pi's own read, bash, edit, and write tools. */
-  readonly nativeTools: boolean;
+  /** Which of Pi's own tools the session keeps. */
+  readonly nativeTools: NativeTools;
+  /**
+   * Runs Pi's read and search tools on the session's host instead of in this process; `None`
+   * runs them here.
+   */
+  readonly host: Option.Option<PiHostCommand>;
   /** The usine tools that the session lists beside, or instead of, Pi's own. */
   readonly hostTools: ReadonlyArray<ToolDefinition>;
   /** The requested model in `provider/model` form. */
@@ -189,19 +196,32 @@ export const piBuiltInToolNames: ReadonlySet<string> = new Set([
   "ls",
 ]);
 
+/** Pi's tools that read and search files, which a role that keeps only `read` tools lists. */
+const piReadToolNames = ["read", "grep", "find", "ls"];
+
 /**
- * Returns the session options that list exactly `hostTools`, and with `nativeTools` also Pi's
- * default tools. With `environment`, the bash tool runs its commands with exactly that
- * environment.
+ * Returns the session options that list `hostTools` and the Pi tools that `nativeTools` keeps:
+ * none, the read and search tools, or Pi's default tools. With `environment`, the bash tool runs
+ * its commands with exactly that environment. With `host`, the read and search tools run their
+ * file operations on the session's host.
  */
 export const piSessionTools = (
   cwd: string,
   environment: Option.Option<Readonly<Record<string, string>>>,
-  nativeTools: boolean,
+  nativeTools: NativeTools,
   hostTools: ReadonlyArray<ToolDefinition>,
+  host: Option.Option<PiHostCommand>,
 ): Pick<CreateAgentSessionOptions, "customTools" | "tools"> => {
   const hosted = hostTools.map(({ name }) => name);
-  if (!nativeTools) return { tools: hosted, customTools: [...hostTools] };
+  if (nativeTools === "none") return { tools: hosted, customTools: [...hostTools] };
+  if (nativeTools === "read")
+    return {
+      tools: [...piReadToolNames, ...hosted],
+      customTools: [
+        ...Option.match(host, { onNone: () => [], onSome: (run) => hostReadTools(cwd, run) }),
+        ...hostTools,
+      ],
+    };
   return {
     tools: [...piChildToolNames, ...hosted],
     // A custom tool replaces the built-in tool of the same name.
@@ -356,7 +376,13 @@ const piSdk = (sources: PiSdkSources): PiSdk["Service"] => ({
       }
     }
     const { session } = await createAgentSession({
-      ...piSessionTools(options.cwd, options.environment, options.nativeTools, options.hostTools),
+      ...piSessionTools(
+        options.cwd,
+        options.environment,
+        options.nativeTools,
+        options.hostTools,
+        options.host,
+      ),
       cwd: options.cwd,
       model: selected,
       modelRuntime,

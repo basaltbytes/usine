@@ -9,8 +9,10 @@ import { RoleCredentials, RolePlacements, RoleSpec } from "../role.ts";
 
 /**
  * The supervisor: observes and operates the factory for a member, through the operator tools that
- * the member's token allows. It runs on the orchestrator with the gateway credential that the
- * instance already has, keeps its conversation between turns, and lists no harness tools.
+ * the member's token allows, and reads the instance's source. It runs on the orchestrator, in the
+ * supervisor sandbox, with the gateway credential that the instance already has, and keeps its
+ * conversation between turns. It keeps the harness's read and search tools; a harness that can't
+ * list only those keeps all its own tools, and the sandbox limits what they reach.
  */
 export const supervisor = RoleSpec.make({
   name: RoleName.make("supervisor"),
@@ -24,7 +26,7 @@ export const supervisor = RoleSpec.make({
       reason: "The supervisor uses the gateway credential that the instance already has",
     }),
   ),
-  nativeTools: false,
+  nativeTools: "read",
   hostTools: true,
   persistence: "saved",
   interventions: true,

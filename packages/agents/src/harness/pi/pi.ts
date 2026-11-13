@@ -41,6 +41,8 @@ import {
 } from "./sdk.ts";
 import type { PiPool } from "./authentication.ts";
 import { failedPiTurn } from "./refusal.ts";
+import type { PiHostCommand, PiHostOutput } from "./host-files.ts";
+import { execHandle } from "../../child-host/exec.ts";
 import { piMessageUsage } from "../usage.ts";
 import { CompletionReply, type CompletionRequest, structuredCompletion } from "../completion.ts";
 import { piPauseGate, piTurns } from "./turns.ts";
@@ -165,6 +167,52 @@ const serveTools = Effect.fn("PiRuntime.serveTools")(function* (tools: HostToolS
   };
 });
 
+/**
+ * Runs Pi's file commands on `spec`'s exec shell host, in the session's working directory, with
+ * the calling scope's services. Returns `None` for any other host: Pi's tools then run in this
+ * process.
+ */
+const hostCommand = Effect.fn("PiRuntime.hostCommand")(function* (spec: SessionSpec) {
+  const host = spec.host;
+  if (host._tag !== "ExecShell") return Option.none<PiHostCommand>();
+  const run = yield* FiberSet.makeRuntimePromise();
+  const output = (args: ReadonlyArray<string>) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const [command = "true", ...rest] = args;
+        const handle = yield* execHandle(
+          host,
+          { cwd: spec.cwd, command, args: rest, environment: {} },
+          {},
+        );
+        const [stdout, stderr] = yield* Effect.all(
+          [
+            Stream.runCollect(handle.stdout),
+            handle.stderr.pipe(Stream.decodeText(), Stream.mkString),
+          ],
+          { concurrency: "unbounded" },
+        );
+        const exitCode = yield* handle.exitCode;
+        return { stdout: Buffer.concat(stdout), stderr, exitCode } satisfies PiHostOutput;
+      }),
+    ).pipe(
+      Effect.tapError((error) =>
+        Effect.logWarning("Pi could not run a file command on the session's host", {
+          sessionId: spec.session.id,
+          host: host.destination,
+          command: args[0],
+          message: error.message,
+        }),
+      ),
+    );
+  yield* Effect.logInfo("Pi runs its file tools on the session's host", {
+    sessionId: spec.session.id,
+    host: host.destination,
+    nativeTools: spec.admitted.role.nativeTools,
+  });
+  return Option.some<PiHostCommand>((args, signal) => run(output(args), { signal }));
+});
+
 const makePiSessions = Effect.gen(function* () {
   const sdk = yield* PiSdk;
 
@@ -194,6 +242,7 @@ const makePiSessions = Effect.gen(function* () {
       );
       const gate = yield* piPauseGate;
       const served = yield* serveTools(hostTools);
+      const host = yield* hostCommand(spec);
       return yield* usePiStart(
         (signal) =>
           sdk.start({
@@ -202,6 +251,7 @@ const makePiSessions = Effect.gen(function* () {
             environment: Option.some(spec.environment),
             extensions: [gate.extension],
             nativeTools: spec.admitted.role.nativeTools,
+            host,
             hostTools: served.definitions,
             model: spec.session.brain.model,
             signal,

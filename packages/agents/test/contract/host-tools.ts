@@ -18,7 +18,7 @@ import { HarnessCatalog } from "../../src/harness/harness.ts";
 import { piRuntime } from "../../src/harness/pi/pi.ts";
 import { Harnesses } from "../../src/harness/registry.ts";
 import type { HarnessRuntime } from "../../src/harness/runtime.ts";
-import { RolePlacements, RoleSpec } from "../../src/harness/role.ts";
+import { type NativeTools, RolePlacements, RoleSpec } from "../../src/harness/role.ts";
 import { RestartState } from "../../src/runtime.ts";
 import { openFixture, openPiFixture } from "../replay/fixture.ts";
 import type { Transcript } from "../replay/transcript.ts";
@@ -70,7 +70,7 @@ const prompts = {
     "returns.",
 } satisfies Record<ToolScenario, string>;
 
-const probe = (nativeTools: boolean) =>
+const probe = (nativeTools: NativeTools) =>
   RoleSpec.make({
     name: RoleName.make("contract-probe"),
     placement: RolePlacements.make({
@@ -214,7 +214,7 @@ export const runToolScenario = (
   Effect.gen(function* () {
     const fixture = yield* toolFixture(provider, scenario, mode);
     const { host, worker, machine, cwd, environment } = fixture.request;
-    const role = probe(scenario !== "closed-tools");
+    const role = probe(scenario === "closed-tools" ? "none" : "all");
     const session = RoleSession.make({
       // The recorded traffic names the session in process and pid file paths.
       id: AgentSessionId.make("replay-parent:child:1"),

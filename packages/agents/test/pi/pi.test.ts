@@ -851,8 +851,9 @@ describe("Pi child backend", () => {
         piSessionTools(
           directory,
           Option.some({ PATH: "/usr/bin:/bin", USINE_REQUEST_ONLY: "yes" }),
-          true,
+          "all",
           [],
+          Option.none(),
         ),
       );
       assert.sameMembers(child.getActiveToolNames(), childTools);
