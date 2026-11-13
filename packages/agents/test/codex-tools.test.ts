@@ -198,21 +198,37 @@ const readNoteTools = Toolkit.make(
   Tool.make("read_note", { description: "Reads a usine note.", ...note }),
 );
 
-/** Handlers of `read_note` that report their start and interruption, and wait for `release`. */
-const readNoteGate = Effect.gen(function* () {
-  const started = yield* Deferred.make<void>();
-  const release = yield* Deferred.make<void>();
-  const interrupted = yield* Deferred.make<void>();
-  const handlers = readNoteTools.toLayer({
-    read_note: ({ name }) =>
-      Deferred.succeed(started, undefined).pipe(
-        Effect.andThen(Deferred.await(release)),
-        Effect.as(`Note ${name}`),
-        Effect.onInterrupt(() => Deferred.succeed(interrupted, undefined)),
-      ),
+/**
+ * Handlers of `read_note` that report their start and interruption, and wait for `release`.
+ *
+ * With `holdStop`, an interrupted handler reports `stopping` and finishes stopping only after
+ * `allowStop` completes.
+ */
+const readNoteGateWith = (options: { readonly holdStop: boolean }) =>
+  Effect.gen(function* () {
+    const started = yield* Deferred.make<void>();
+    const release = yield* Deferred.make<void>();
+    const stopping = yield* Deferred.make<void>();
+    const allowStop = yield* Deferred.make<void>();
+    const interrupted = yield* Deferred.make<void>();
+    if (!options.holdStop) yield* Deferred.succeed(allowStop, undefined);
+    const handlers = readNoteTools.toLayer({
+      read_note: ({ name }) =>
+        Deferred.succeed(started, undefined).pipe(
+          Effect.andThen(Deferred.await(release)),
+          Effect.as(`Note ${name}`),
+          Effect.onInterrupt(() =>
+            Deferred.succeed(stopping, undefined).pipe(
+              Effect.andThen(Deferred.await(allowStop)),
+              Effect.andThen(Deferred.succeed(interrupted, undefined)),
+            ),
+          ),
+        ),
+    });
+    return { started, release, stopping, allowStop, interrupted, handlers };
   });
-  return { started, release, interrupted, handlers };
-});
+
+const readNoteGate = readNoteGateWith({ holdStop: false });
 
 const noteAnswer = { contentItems: [{ type: "inputText", text: "Note plan" }], success: true };
 
@@ -445,7 +461,8 @@ describe("usine tool sets on Codex", () => {
   for (const ending of ["completes the call's item", "ends the turn"] as const)
     it.effect(`interrupts a pending call's handler when Codex ${ending} first`, () =>
       Effect.gen(function* () {
-        const gate = yield* readNoteGate;
+        // The handler waits in its interruption until the test sees whether the item finished.
+        const gate = yield* readNoteGateWith({ holdStop: ending === "completes the call's item" });
         const observed: Observed = { calls: [], clients: [] };
         const inbox = yield* Queue.make<CodexNotification, SessionOperationError | Cause.Done>();
         const logs = collectLogs(["Info"]);
@@ -482,6 +499,12 @@ describe("usine tool sets on Codex", () => {
           // Codex fails the item of a call that it cancelled, and drops a late answer.
           if (ending === "completes the call's item") {
             yield* Queue.offer(inbox, readNoteItem("item/completed", "failed"));
+            yield* Deferred.await(gate.stopping);
+            // Lets the events consumer see a ToolFinished that the session emitted too early.
+            yield* Effect.repeat(Effect.yieldNow, { times: 20 });
+            const early = yield* Deferred.isDone(finished);
+            yield* Deferred.succeed(gate.allowStop, undefined);
+            assert.isFalse(early, "the item isn't reported finished while the handler stops");
             yield* Deferred.await(finished);
             const stopped = yield* Deferred.isDone(gate.interrupted);
             assert.isTrue(stopped, "the handler stops before the item is reported finished");
