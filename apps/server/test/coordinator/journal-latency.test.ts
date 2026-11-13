@@ -21,9 +21,11 @@ import {
   Delegation,
   EncodedDecision,
   EncodedEvent,
+  encodeIntervention,
   EncodedState,
   JournalRevision,
   OutputSaved,
+  QueuedInput,
   SessionSaved,
   Transition,
 } from "@usine/durable/coordinator/journal";
@@ -39,12 +41,11 @@ const CHILDREN = 30;
 const OUTPUT = "x".repeat(50_000);
 const SAVED_SESSION = { harnessSession: { id: "native-session", cwd: "/workspace/usine" } };
 const ROUNDS = 200;
-// The median of each of one child event's writes, in milliseconds: about 0.25 ms locally with
-// targeted statements, and about 2.3 ms for a write that loads the journal.
+// Each write has its own median budget. Output saves decode and encode one delegation's progress;
+// reserve, acknowledge, and forgetInput use targeted statements independent of the other children.
 const BUDGET_MILLIS = 1;
 
-/** The writes of one child event, in the order the coordinator makes them. */
-const WRITES = ["reserve", "output save", "acknowledge"] as const;
+const WRITES = ["reserve", "output save", "acknowledge", "forgetInput"] as const;
 type Write = (typeof WRITES)[number];
 
 const attemptId = AttemptId.make("latency/coordinator-journal");
@@ -138,7 +139,7 @@ const timed = <A, E, R>(write: Effect.Effect<A, E, R>) =>
 
 /**
  * Writes one child event as the coordinator does: reserve its envelope, save the output, and
- * acknowledge. Returns the duration of each write.
+ * acknowledge, followed by a queued operator input's receipt. Returns the duration of each write.
  */
 const childEvent = (sequence: AttemptChannel.Sequence) =>
   Effect.gen(function* () {
@@ -161,7 +162,37 @@ const childEvent = (sequence: AttemptChannel.Sequence) =>
       ),
     );
     const acknowledge = yield* timed(journal.acknowledge(attemptId, sequence));
-    return { reserve, "output save": output, acknowledge } satisfies Record<Write, number>;
+    const intervention = AttemptChannel.Intervention.make({
+      target: AttemptChannel.ChildTarget.make({ sessionId: childSession.id }),
+      operator: "octocat",
+      action: AttemptChannel.Steer.make({ message: "Run the tests." }),
+    });
+    const encoded = yield* encodeIntervention(intervention);
+    yield* journal.queueInput(
+      attemptId,
+      QueuedInput.make({
+        inputSequence: sequence,
+        sessionId: childSession.id,
+        intervention: encoded,
+      }),
+    );
+    const receipt = AttemptChannel.OutboundEnvelope.make({
+      version: AttemptChannel.PROTOCOL_VERSION,
+      attemptId,
+      sequence: AttemptChannel.Sequence.make(sequence + 1),
+      sentAt: yield* DateTime.now,
+      payload: AttemptChannel.InterventionApplied.make({
+        inputSequence: sequence,
+        intervention,
+        state: AttemptChannel.InterventionState.make({ held: true, paused: false }),
+      }),
+    });
+    const forgetInput = yield* timed(journal.forgetInput(attemptId, sequence, [receipt]));
+    yield* journal.acknowledge(attemptId, receipt.sequence);
+    return { reserve, "output save": output, acknowledge, forgetInput } satisfies Record<
+      Write,
+      number
+    >;
   });
 
 const median = (durations: ReadonlyArray<number>) => {
@@ -181,7 +212,7 @@ it.live(
         yield* seeded;
         const events: Array<Record<Write, number>> = [];
         for (let round = 1; round <= ROUNDS; round += 1) {
-          const event = yield* childEvent(AttemptChannel.Sequence.make(round));
+          const event = yield* childEvent(AttemptChannel.Sequence.make(round * 2 - 1));
           events.push(event);
         }
         return events;

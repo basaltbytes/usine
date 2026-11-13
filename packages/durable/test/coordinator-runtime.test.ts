@@ -135,6 +135,31 @@ const failingTransitionOnce = (tag: string) => (journal: Layer.Layer<AttemptJour
     }),
   ).pipe(Layer.provide(journal));
 
+const failingLoads = (fails: Ref.Ref<boolean>) => (journal: Layer.Layer<AttemptJournal>) =>
+  Layer.effect(
+    AttemptJournal,
+    Effect.gen(function* () {
+      const inner = yield* AttemptJournal;
+      return AttemptJournal.of({
+        ...inner,
+        load: (attemptId) =>
+          Ref.get(fails).pipe(
+            Effect.flatMap((failed) =>
+              failed
+                ? Effect.fail(
+                    JournalError.make({
+                      operation: "load an attempt journal",
+                      attemptId,
+                      cause: new Error("disk I/O error"),
+                    }),
+                  )
+                : inner.load(attemptId),
+            ),
+          ),
+      });
+    }),
+  ).pipe(Layer.provide(journal));
+
 /** Holds the `decide` call for event `sequence` after completing `reached`, until `release` completes. */
 const holdingDecide =
   (sequence: EventSequence, reached: Deferred.Deferred<void>, release: Deferred.Deferred<void>) =>
@@ -720,7 +745,10 @@ describe("event-driven coordinator runtime", () => {
         // A late notice, wait, or input doesn't bring a finished Attempt's state back.
         for (const { spec } of [completed, blocked, canceled]) {
           yield* process.attempts.notify(spec.attemptId, unresponsive("after the end"));
-          yield* process.attempts.attached(spec.attemptId).pipe(Effect.timeoutOption("50 millis"));
+          const attached = yield* process.attempts
+            .attached(spec.attemptId)
+            .pipe(Effect.timeoutOption("50 millis"));
+          assert.isTrue(Option.isNone(attached), "a finished Attempt has no attached execute call");
         }
         const refused = yield* process.attempts
           .intervene(
@@ -745,6 +773,82 @@ describe("event-driven coordinator runtime", () => {
         ]),
       );
       assert.strictEqual(refused.message, "This attempt has no live channel");
+    }).pipe(Effect.scoped),
+  );
+
+  it.live("relays a pre-start Worker notice after the journal becomes readable again", () =>
+    Effect.gen(function* () {
+      const database = yield* temporaryDatabase;
+      const request = coordinated("coordinator/notice-unreadable-journal");
+      const attemptId = request.spec.attemptId;
+      const fails = yield* Ref.make(true);
+      const logged: Array<unknown> = [];
+      const logger = Logger.layer([Logger.make(({ message }) => logged.push(message))]);
+      const process = yield* orchestrator(
+        sqliteJournal(database).pipe(failingLoads(fails), coordinator),
+      );
+      const recording = recordingSink();
+      yield* process.attempts
+        .notify(attemptId, unresponsive("journal unavailable before start"))
+        .pipe(Effect.provide(logger));
+      yield* Ref.set(fails, false);
+      const execution = yield* process.execute(request, recording.sink);
+      yield* (yield* process.nextChild).reply("Done.");
+      yield* Fiber.join(execution);
+      yield* process.stop;
+
+      assert.deepStrictEqual(unresponsiveReasons(recording.outbound()), [
+        "journal unavailable before start",
+      ]);
+      assert.strictEqual(recording.outbound()[0]?.payload._tag, "Started");
+      assert.deepInclude(logged, [
+        "Could not read whether the Attempt is finished; keeping its state",
+        { attemptId, message: "Could not load an attempt journal: disk I/O error" },
+      ]);
+    }).pipe(Effect.scoped),
+  );
+
+  it.live("keeps a canceled Attempt's state when its journal cannot be read", () =>
+    Effect.gen(function* () {
+      const database = yield* temporaryDatabase;
+      const request = coordinated("coordinator/cancel-unreadable-journal");
+      const attemptId = request.spec.attemptId;
+      const first = yield* orchestrator(sqliteJournal(database).pipe(coordinator));
+      yield* first.execute(request, recordingSink().sink);
+      yield* first.nextChild;
+      yield* first.stop;
+
+      const fails = yield* Ref.make(false);
+      const logged: Array<unknown> = [];
+      const logger = Logger.layer([Logger.make(({ message }) => logged.push(message))]);
+      const second = yield* orchestrator(
+        sqliteJournal(database).pipe(failingLoads(fails), coordinator),
+      );
+      yield* Effect.gen(function* () {
+        yield* second.attempts.notify(attemptId, unresponsive("after restart"));
+        yield* Ref.set(fails, true);
+        yield* second.attempts.cancel(attemptId);
+        assert.deepInclude(logged, [
+          "Could not read whether the Attempt is finished; keeping its state",
+          { attemptId, message: "Could not load an attempt journal: disk I/O error" },
+        ]);
+        assert.deepStrictEqual(
+          logged.flatMap((message) => Option.toArray(decodeHubChange(message))),
+          [["Created the Attempt's in-process state", { attemptId, hubs: 1 }]],
+        );
+        yield* Ref.set(fails, false);
+        const liveAfterCancel = yield* second.attempts.isLive(attemptId);
+        assert.isFalse(liveAfterCancel);
+        yield* second.attempts.settle(attemptId);
+        assert.deepStrictEqual(
+          logged.flatMap((message) => Option.toArray(decodeHubChange(message))),
+          [
+            ["Created the Attempt's in-process state", { attemptId, hubs: 1 }],
+            ["Dropped the Attempt's in-process state", { attemptId, hubs: 0 }],
+          ],
+        );
+      }).pipe(Effect.provide(logger));
+      yield* second.stop;
     }).pipe(Effect.scoped),
   );
 
@@ -1464,6 +1568,51 @@ describe("event-driven coordinator restarts on SQLite", () => {
         assert.isTrue(logged.some((message) => Option.isSome(unreadable(message))));
         assert.strictEqual(report.message, "Opened #13.");
       }).pipe(Effect.scoped),
+  );
+
+  it.live("fails as infrastructure when an earlier delegation's outcome no longer decodes", () =>
+    Effect.gen(function* () {
+      const database = yield* temporaryDatabase;
+      const request = coordinated("restart/older-earlier-outcome");
+      const attemptId = request.spec.attemptId;
+      const first = yield* orchestrator(sqliteJournal(database).pipe(coordinator));
+      yield* first.execute(request, recordingSink().sink);
+      yield* first.nextChild;
+      yield* first.stop;
+
+      const second = yield* orchestrator(sqliteJournal(database).pipe(coordinator));
+      yield* second.execute(request, recordingSink().sink);
+      yield* second.nextChild;
+      yield* second.stop;
+      // Child 1's event was handled. Only the next event's context reads its outcome again.
+      const rewritten = yield* Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        yield* sql`UPDATE usine_attempt_delegations SET outcome = ${'{"_tag":"ChildInterrupted","child":1}'} WHERE attempt_id = ${attemptId} AND number = 1`;
+        return yield* sql<{ readonly count: number }>`SELECT changes() AS count`;
+      }).pipe(Effect.provide(SqliteClient.layer({ filename: database })), Effect.orDie);
+
+      const logged: Array<unknown> = [];
+      const logger = Logger.layer([Logger.make(({ message }) => logged.push(message))]);
+      const third = yield* orchestrator(sqliteJournal(database).pipe(coordinator));
+      const failure = yield* third.attempts
+        .execute(request, recordingSink().sink)
+        .pipe(Effect.provide(logger), Effect.flip);
+      yield* third.stop;
+
+      assert.deepStrictEqual(rewritten, [{ count: 1 }]);
+      assert.strictEqual(failure._tag, "InfraFailure");
+      assert.include(failure.message, `The stored delegation outcome of Attempt ${attemptId}`);
+      const unreadable = Schema.decodeUnknownOption(
+        Schema.Tuple([
+          Schema.String,
+          Schema.Struct({
+            attemptId: Schema.Literal(attemptId),
+            record: Schema.Literal("delegation outcome"),
+          }),
+        ]),
+      );
+      assert.isTrue(logged.some((message) => Option.isSome(unreadable(message))));
+    }).pipe(Effect.scoped),
   );
 
   /** The record of `attemptId` that each case rewrites in an older shape. */
