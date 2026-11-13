@@ -164,7 +164,7 @@ export const attachmentFor = Effect.fn("Attachment.make")(function* (attemptId: 
     ).pipe(Effect.asVoid),
     request: nextAttached.pipe(Effect.map(({ request }) => request)),
     detached: (call) =>
-      awaitState((current): current is State => isDetached(current) || current.call !== call).pipe(
+      awaitState((current): current is State => isDetached(current)).pipe(
         Effect.asVoid,
       ),
     isIdle: SubscriptionRef.get(state).pipe(
