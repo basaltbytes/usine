@@ -9,15 +9,17 @@ import { AgentName } from "@usine/core/agent";
 import { BrainSpec, Harness, ModelId } from "@usine/core/agent/brain";
 import { AgentSessionId, RoleName, RoleSession } from "@usine/core/agent/session";
 import { WorkerName } from "@usine/core/worker";
-import { Effect, Layer, Option, Schema, Stream } from "effect";
+import { Effect, FileSystem, Layer, Option, Schema, Stream } from "effect";
+import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import { Tool, Toolkit } from "effect/ai";
-import { LocalProcess } from "../../src/child-host/child-host.ts";
+import { ExecShell, type ExecTransport, LocalProcess } from "../../src/child-host/child-host.ts";
 import { AdmissionContext, AdmittedBrain } from "../../src/harness/admission.ts";
 import { continuationPolicy } from "../../src/harness/continuation.ts";
 import { SessionSpec, StartPrompt } from "../../src/harness/contract.ts";
 import { piRuntime } from "../../src/harness/pi/pi.ts";
 import {
   PiSdk,
+  piSessionTools,
   type PiSession,
   type PiSessionEvent,
   type PiStartOptions,
@@ -39,7 +41,7 @@ const role = RoleSpec.make({
   name: RoleName.make("decision"),
   placement: RolePlacements.make({ placements: ["local"], reason: "The probe runs locally" }),
   credential: Option.none(),
-  nativeTools: false,
+  nativeTools: "none",
   hostTools: true,
   persistence: "saved",
   interventions: false,
@@ -79,6 +81,7 @@ const runPi = <Tools extends Record<string, Tool.Any>, R>(
   kit: Toolkit.Toolkit<Tools>,
   handlers: Layer.Layer<R>,
   turn: (options: PiStartOptions, publish: (event: PiSessionEvent) => void) => Promise<void>,
+  opened: SessionSpec = spec,
 ) => {
   let options: PiStartOptions | undefined;
   const listeners: Array<(event: PiSessionEvent) => void> = [];
@@ -116,9 +119,9 @@ const runPi = <Tools extends Record<string, Tool.Any>, R>(
   });
   return Effect.gen(function* () {
     const runtime = yield* piRuntime;
-    const policy = yield* continuationPolicy(spec, "Read the note", RestartState.make({}));
+    const policy = yield* continuationPolicy(opened, "Read the note", RestartState.make({}));
     const native = yield* runtime.open(
-      spec,
+      opened,
       StartPrompt.make({ text: "Read the note" }),
       policy,
       kit,
@@ -161,7 +164,7 @@ describe("Pi usine tool sets", () => {
           isError: result.isError === true,
         });
       });
-      assert.strictEqual(options.nativeTools, false);
+      assert.strictEqual(options.nativeTools, "none");
       const alias = options.hostTools[0]?.name;
       assert(alias !== undefined);
       assert.notStrictEqual(alias, "read", "the alias keeps Pi's own read tool name free");
@@ -238,4 +241,138 @@ describe("Pi usine tool sets", () => {
       );
     }).pipe(Effect.provide(logs.layer));
   });
+
+  it.live("run Pi's read and search tools on the session's exec shell host", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const cwd = yield* fs.makeTempDirectoryScoped({ prefix: "usine-pi-host-" });
+      yield* fs.makeDirectory(`${cwd}/acme/demo/docs`, { recursive: true });
+      yield* fs.writeFileString(`${cwd}/acme/demo/README.md`, "The needle is here.\n");
+      yield* fs.writeFileString(
+        `${cwd}/acme/demo/docs/--version`,
+        'const args = ["--network", "none", "--read-only", "-e"];\n',
+      );
+      yield* fs.makeDirectory(`${cwd}/acme/demo/src/lib`, { recursive: true });
+      yield* fs.writeFileString(`${cwd}/acme/demo/src/lib/a.spec.ts`, "const port = 8080;\n");
+      yield* fs.writeFileString(`${cwd}/acme/demo/src/b.ts`, "const port = 8080;\n");
+      yield* fs.writeFileString(
+        `${cwd}/acme/demo/bundle.min.js`,
+        `var needle=1;${"x".repeat(2_000)}\n`,
+      );
+      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+      const lines: Array<string> = [];
+      // Runs each command line with the local shell, as a sandbox's transport runs it in its container.
+      const transport: ExecTransport = {
+        run: (line, stdin) =>
+          Effect.gen(function* () {
+            lines.push(line);
+            const handle = yield* spawner
+              .spawn(ChildProcess.make("sh", ["-c", line], { stdin }))
+              .pipe(Effect.orDie);
+            return {
+              stdout: handle.stdout.pipe(Stream.orDie),
+              stderr: handle.stderr.pipe(Stream.orDie),
+              exitCode: handle.exitCode.pipe(Effect.orDie, Effect.map(Number)),
+            };
+          }),
+      };
+      const reader = RoleSpec.make({ ...role, nativeTools: "read" });
+      const sandboxed = SessionSpec.make({
+        ...spec,
+        admitted: AdmittedBrain.make({ ...spec.admitted, role: reader }),
+        host: ExecShell.make({ transport, destination: "supervisor-sandbox" }),
+        cwd: WorkingDirectory.make(cwd),
+      });
+      const outputs: Array<string> = [];
+      const { options } = yield* runPi(
+        Toolkit.empty,
+        Layer.empty,
+        async (options) => {
+          const listed = piSessionTools(
+            options.cwd,
+            Option.none(),
+            options.nativeTools,
+            [],
+            options.host,
+          );
+          const run = async (
+            name: string,
+            input: Readonly<Record<string, string | number | boolean>>,
+          ) => {
+            const tool = listed.customTools?.find((definition) => definition.name === name);
+            assert(tool !== undefined, name);
+            const result = await tool.execute(name, input, undefined, undefined, toolContext);
+            outputs.push(
+              result.content.flatMap((part) => (part.type === "text" ? [part.text] : [])).join(""),
+            );
+          };
+          await run("read", { path: "acme/demo/README.md" });
+          await run("ls", { path: "acme/demo" });
+          await run("find", { pattern: "**/*.md" });
+          await run("grep", { pattern: "needle" });
+          await run("grep", { pattern: "port = \\d+", path: "acme/demo", glob: "*.ts" });
+          await run("grep", { pattern: "port = \\d+", path: "acme/demo", glob: "**/*.spec.ts" });
+          await run("grep", { pattern: "port = \\d+", path: "acme/demo", glob: "src/**/*.ts" });
+          await run("grep", { pattern: "PORT", path: "acme/demo", ignoreCase: true, limit: 1 });
+          await run("grep", { pattern: "--network", path: "acme/demo/docs" });
+          await run("grep", { pattern: "--network", path: "acme/demo/docs", literal: true });
+          await run("grep", { pattern: "-e", path: "acme/demo/docs" });
+          await run("grep", { pattern: "-v", path: "acme/demo/docs" });
+          await run("find", { pattern: "--version", path: "acme/demo/docs" });
+        },
+        sandboxed,
+      );
+      assert.strictEqual(options.nativeTools, "read");
+      assert(Option.isSome(options.host), "Pi gets the host's command runner");
+      const [
+        read,
+        ls,
+        find,
+        grep,
+        anyTs,
+        specs,
+        underSrc,
+        limited,
+        flag,
+        literalFlag,
+        shortFlag,
+        absentFlag,
+        flagFile,
+      ] = outputs;
+      assert.include(read, "The needle is here.");
+      assert.sameMembers(ls?.split("\n") ?? [], ["README.md", "bundle.min.js", "docs/", "src/"]);
+      assert.include(find, "acme/demo/README.md");
+      assert.strictEqual(
+        grep,
+        [
+          `acme/demo/README.md:1: The needle is here.`,
+          `acme/demo/bundle.min.js:1: var needle=1;${"x".repeat(487)}... [truncated]`,
+          "",
+          "[Some lines truncated to 500 chars. Use read tool to see full lines]",
+        ].join("\n"),
+        "a match in a minified file shows 500 characters",
+      );
+      assert.strictEqual(
+        anyTs,
+        "src/b.ts:1: const port = 8080;\nsrc/lib/a.spec.ts:1: const port = 8080;",
+      );
+      assert.strictEqual(specs, "src/lib/a.spec.ts:1: const port = 8080;");
+      assert.strictEqual(underSrc, anyTs);
+      assert.strictEqual(
+        limited,
+        "src/b.ts:1: const port = 8080;\n\n[1 matches limit reached. Use limit=2 for more, or refine pattern]",
+      );
+      assert.strictEqual(
+        flag,
+        '--version:1: const args = ["--network", "none", "--read-only", "-e"];',
+      );
+      assert.strictEqual(literalFlag, flag);
+      assert.strictEqual(shortFlag, flag);
+      assert.strictEqual(absentFlag, "No matches found");
+      assert.strictEqual(flagFile, "--version");
+      assert.isNotEmpty(lines);
+      for (const line of lines)
+        assert.include(line, `cd '${cwd}'`, "each command runs in the session's directory");
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
 });

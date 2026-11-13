@@ -104,7 +104,7 @@ const base = RoleSpec.make({
     reason: "The probe runs anywhere",
   }),
   credential: Option.none(),
-  nativeTools: true,
+  nativeTools: "all",
   hostTools: false,
   persistence: "saved",
   interventions: false,
@@ -124,7 +124,7 @@ const requiring = (
     case "usine-tools":
       return role({ hostTools: true });
     case "closed-tools":
-      return role({ nativeTools: false });
+      return role({ nativeTools: "none" });
     case "structured-output":
       return role({ output: "structured" });
     case "ephemeral":

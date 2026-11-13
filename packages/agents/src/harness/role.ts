@@ -21,6 +21,14 @@ export class RoleCredentials extends Schema.Class<
 }) {}
 
 /**
+ * Which of the harness's own tools a role keeps. `none` turns them all off. `read` keeps only the
+ * tools that read and search files, on a harness that lists its tools exactly; a harness that
+ * can't keeps all its own tools, and admission reports why. `all` keeps every tool.
+ */
+export const NativeTools = Schema.Literals(["none", "read", "all"]);
+export type NativeTools = typeof NativeTools.Type;
+
+/**
  * What a role keeps of its conversation. `saved` keeps a conversation that a later session can
  * reopen. `journaled` runs the session inside usine's durable journal, which supplies its tools and
  * commits their intents and results, so a tool call continues after an orchestrator restart.
@@ -42,8 +50,7 @@ export class RoleSpec extends Schema.Class<
   placement: RolePlacements,
   /** `None` accepts every route that the harness offers at the placement. */
   credential: Schema.Option(RoleCredentials),
-  /** Whether the harness's own read, edit, and shell tools stay on. */
-  nativeTools: Schema.Boolean,
+  nativeTools: NativeTools,
   /** Whether the session runs a tool set that usine supplies. */
   hostTools: Schema.Boolean,
   persistence: RolePersistence,
@@ -63,7 +70,7 @@ const persistenceRequirements = {
  * The harness capabilities that `role` needs for a session. Every session needs `token-usage`,
  * and a session that reopens a saved conversation needs `resume-session`. A journaled session
  * takes its tools from the journal, so `durable-coordination` replaces `usine-tools` and
- * `closed-tools`.
+ * `closed-tools`. A role that keeps only `read` tools doesn't require `closed-tools`.
  */
 export const requirements = (
   role: RoleSpec,
@@ -72,7 +79,7 @@ export const requirements = (
   const contractTools = role.persistence !== "journaled";
   return [
     ...(contractTools && role.hostTools ? (["usine-tools"] as const) : []),
-    ...(contractTools && !role.nativeTools ? (["closed-tools"] as const) : []),
+    ...(contractTools && role.nativeTools === "none" ? (["closed-tools"] as const) : []),
     ...(role.output === "structured" ? (["structured-output"] as const) : []),
     ...persistenceRequirements[role.persistence],
     ...(options.reopens ? (["resume-session"] as const) : []),

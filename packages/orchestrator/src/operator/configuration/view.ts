@@ -51,7 +51,19 @@ import { LoopControl } from "@usine/engine/loop-control";
 import { RepositoryLabelProjectionReader } from "@usine/engine/repository-label-projection";
 import { WorkerCapability } from "@usine/executor";
 import { Source } from "@usine/expression/expression-engine";
-import { type Brand, Context, DateTime, Effect, Layer, Match, Option, Schema } from "effect";
+import {
+  type Brand,
+  Context,
+  DateTime,
+  Effect,
+  Layer,
+  Match,
+  Option,
+  Result,
+  Schema,
+} from "effect";
+import { admitSupervisor, catalog } from "@usine/agents/harness";
+import { SupervisorSandbox } from "@usine/agents/supervisor";
 import { LabelPreflightFinding } from "../../label-reconciler.ts";
 import { PollingTriggers } from "../../polling-triggers.ts";
 import { type PreflightCheck, WorkerStatus } from "../../worker-status.ts";
@@ -477,9 +489,20 @@ export class SettingsView extends Schema.Class<
   coordinator: CoordinatorKind,
   /**
    * The harness, model, and effort of the supervisor role, or null when the role is not
-   * configured.
+   * configured. `ownTools` says why the harness keeps all its own tools, which the supervisor's
+   * read-only container limits, or is null when the harness keeps only its read and search tools.
+   * `unavailable` says why supervisor sessions can't run on this orchestrator, or is null when
+   * they can.
    */
-  supervisor: Schema.NullOr(Schema.Struct({ harness: Harness, model: ModelId, effort: Effort })),
+  supervisor: Schema.NullOr(
+    Schema.Struct({
+      harness: Harness,
+      model: ModelId,
+      effort: Effort,
+      ownTools: Schema.NullOr(Schema.NonEmptyString),
+      unavailable: Schema.NullOr(Schema.NonEmptyString),
+    }),
+  ),
   /** The configured operator login, or null when unset. */
   operator: Schema.NullOr(OperatorLogin),
   /** The hint delivery mode: disabled, GitHub delivery polling, or an HTTP endpoint. */
@@ -590,6 +613,7 @@ const workerConnection = (worker: Worker) =>
 
 const makeOperatorConfiguration = Effect.gen(function* () {
   const controls = yield* LoopControl;
+  const sandbox = yield* SupervisorSandbox;
   const repositoryLabels = yield* RepositoryLabelProjectionReader;
   const polling = yield* PollingTriggers;
   const workerStatus = yield* WorkerStatus;
@@ -804,7 +828,18 @@ const makeOperatorConfiguration = Effect.gen(function* () {
         coordinator: settings.coordinator,
         supervisor: Option.match(settings.supervisor, {
           onNone: () => null,
-          onSome: ({ harness, model, effort }) => ({ harness, model, effort }),
+          onSome: (brain) => ({
+            harness: brain.harness,
+            model: brain.model,
+            effort: brain.effort,
+            ownTools: Result.match(admitSupervisor(catalog, brain, "gateway"), {
+              onFailure: () => null,
+              onSuccess: ({ ownToolsKept }) => Option.getOrNull(ownToolsKept),
+            }),
+            unavailable: Option.getOrNull(
+              Option.map(sandbox.unavailable, ({ message }) => message),
+            ),
+          }),
         }),
         operator: Option.getOrNull(config.operator),
         webhooks: webhooks.mode,

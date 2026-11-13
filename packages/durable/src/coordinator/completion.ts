@@ -53,7 +53,7 @@ const decisionCompletion = RoleSpec.make({
     reason: "The decision runs where the Attempt's child runs, with the same credential route",
   }),
   credential: Option.none(),
-  nativeTools: true,
+  nativeTools: "all",
   hostTools: false,
   persistence: "ephemeral",
   interventions: false,

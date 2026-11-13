@@ -47,7 +47,7 @@ const completionRole = RoleSpec.make({
     reason: "The contract completion runs anywhere",
   }),
   credential: Option.none(),
-  nativeTools: true,
+  nativeTools: "all",
   hostTools: false,
   persistence: "ephemeral",
   interventions: false,

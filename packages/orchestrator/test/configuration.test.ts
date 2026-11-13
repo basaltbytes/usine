@@ -1,11 +1,13 @@
 import { jsonKey } from "@usine/core/json-key";
+import { catalog } from "@usine/agents/harness";
+import { SupervisorSandbox } from "@usine/agents/supervisor";
 import { EnginePersistenceError } from "@usine/engine/engine";
-import { NodeServices } from "@effect/platform-node";
+import { NodeFileSystem, NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import { GitHubLabelName } from "@usine/core/label";
 import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { HarnessUnavailableError } from "@usine/core/agent/capability";
-import { InstanceDirectory } from "@usine/core/instance";
+import { InstanceDirectory, InstanceId } from "@usine/core/instance";
 import { LoopName } from "@usine/core/loop";
 import { RepositoryName } from "@usine/core/repository";
 import {
@@ -21,13 +23,25 @@ import {
   RepositoryLabelProjectionReader,
 } from "@usine/engine/repository-label-projection";
 import { fullPreflight, WorkerCapabilityError } from "@usine/executor";
-import { DateTime, Effect, FileSystem, Layer, Option, Result, Schema } from "effect";
+import {
+  DateTime,
+  Effect,
+  FileSystem,
+  Layer,
+  Logger,
+  Option,
+  PlatformError,
+  Result,
+  Schema,
+} from "effect";
+import { ChildProcessSpawner } from "effect/process";
 import { CurrentInstance } from "../src/current-instance/current-instance.ts";
 import { idleTriggersLayer } from "../src/idle-triggers.ts";
 import { LabelPreflightFinding } from "../src/label-reconciler.ts";
 import { ConfigurationView, OperatorConfiguration } from "../src/operator/configuration/view.ts";
 import { workerPreflightView } from "../src/operator/preflight.ts";
 import { PollCycle, PollingTriggers } from "../src/polling-triggers.ts";
+import { supervisorSandboxLayer } from "../src/supervisor-sandbox.ts";
 import { recordPreflight, unchecked, WorkerStatus } from "../src/worker-status.ts";
 import { reloadableInstanceLayer, writeInstanceFiles } from "./support/instance-folder.ts";
 
@@ -301,7 +315,10 @@ const workers = Layer.succeed(WorkerStatus)({
 });
 
 const readConfigurationOf = Effect.fn("test.readConfigurationOf")(
-  function* (instanceFiles: ReadonlyArray<readonly [string, string]>) {
+  function* (
+    instanceFiles: ReadonlyArray<readonly [string, string]>,
+    sandbox: Layer.Layer<never, never, CurrentInstance> = Layer.empty,
+  ) {
     const directory = yield* (yield* FileSystem.FileSystem).makeTempDirectoryScoped({
       prefix: "usine-config-",
     });
@@ -314,7 +331,7 @@ const readConfigurationOf = Effect.fn("test.readConfigurationOf")(
     }).pipe(
       Effect.provide(
         OperatorConfiguration.layer.pipe(
-          Layer.provide(Layer.mergeAll(controls, labels, polling, workers)),
+          Layer.provide(Layer.mergeAll(controls, labels, polling, workers, sandbox)),
           Layer.provideMerge(reloadableInstanceLayer(root)),
         ),
       ),
@@ -326,6 +343,26 @@ const readConfigurationOf = Effect.fn("test.readConfigurationOf")(
 );
 
 const readConfiguration = readConfigurationOf(files);
+
+/** A host on which no command is installed, so neither Podman nor Docker. */
+const withoutContainerRuntime = Layer.succeed(ChildProcessSpawner.ChildProcessSpawner)(
+  ChildProcessSpawner.make((command) =>
+    command._tag === "StandardCommand"
+      ? PlatformError.systemError({
+          _tag: "NotFound",
+          module: "ChildProcess",
+          method: "spawn",
+          description: `spawn ${command.command} ENOENT`,
+        })
+      : Effect.die("unexpected pipeline"),
+  ),
+);
+
+/** A logger that records the message of each warning in `warnings`. */
+const warningsIn = (warnings: Array<unknown>) =>
+  Logger.make<unknown, void>(({ logLevel, message }) => {
+    if (logLevel === "Warn") warnings.push(message);
+  });
 
 /**
  * The instance files with `settings.coordinator: events` in place of `settings.parent_model`, and
@@ -601,8 +638,85 @@ describe("Configuration view", () => {
         harness: "claude",
         model: "claude-sonnet-5-5",
         effort: "medium",
+        ownTools: null,
+        unavailable: "This orchestrator provides no supervisor sandbox",
       });
     }),
+  );
+
+  it.effect("says when the supervisor's harness keeps its own tools, and whether it can run", () =>
+    Effect.gen(function* () {
+      const codexFiles = supervisorFiles.map(([path, content]) =>
+        path === "usine.yaml"
+          ? ([
+              path,
+              content
+                .replace("    harness: claude\n", "    harness: codex\n")
+                .replace("    model: claude-sonnet-5-5\n", "    model: gpt-5.6-terra\n"),
+            ] as const)
+          : ([path, content] as const),
+      );
+      const available = Layer.succeed(SupervisorSandbox)({
+        unavailable: Option.none(),
+        open: () => Effect.die("the view opens no sandbox"),
+      });
+      const view = yield* readConfigurationOf(codexFiles, available);
+      const kept = Option.flatMap(catalog.get(Harness.make("codex")), ({ capabilities }) =>
+        Option.fromNullishOr(
+          capabilities
+            .flatMap(({ lacking }) => lacking)
+            .find(({ capability }) => capability === "closed-tools"),
+        ),
+      );
+      assert(Option.isSome(kept));
+      assert.deepStrictEqual(view.settings.supervisor, {
+        harness: "codex",
+        model: "gpt-5.6-terra",
+        effort: "medium",
+        ownTools: kept.value.reason,
+        unavailable: null,
+      });
+    }),
+  );
+
+  it.effect(
+    "reports the orchestrator's supervisor as unavailable, with the reason, on a host without a container runtime",
+    () =>
+      Effect.gen(function* () {
+        const reason =
+          "Supervisor sessions run in a container, and Podman or Docker isn't installed on the orchestrator host";
+        const read = (instanceFiles: ReadonlyArray<readonly [string, string]>) =>
+          Effect.gen(function* () {
+            const warnings: Array<unknown> = [];
+            const view = yield* readConfigurationOf(
+              instanceFiles,
+              supervisorSandboxLayer(
+                InstanceDirectory.make("/srv/instance"),
+                InstanceId.make("6f0d2a8e-3b9c-4f1e-9a7d-2c5b8e1f4a3d"),
+              ).pipe(Layer.provide(Layer.mergeAll(withoutContainerRuntime, NodeFileSystem.layer))),
+            ).pipe(Effect.withLogger(warningsIn(warnings)));
+            return { view, warnings };
+          });
+
+        const configured = yield* read(supervisorFiles);
+        assert.strictEqual(configured.view.settings.supervisor?.unavailable, reason);
+        assert.deepStrictEqual(
+          configured.warnings.filter(
+            (message) =>
+              Array.isArray(message) &&
+              message[0] === "The configured supervisor is unavailable on this orchestrator",
+          ),
+          [["The configured supervisor is unavailable on this orchestrator", { reason }]],
+        );
+
+        // The instance starts without a supervisor too, and then nothing warns about it.
+        const unset = yield* read(files);
+        assert.isNull(unset.view.settings.supervisor);
+        assert.notInclude(
+          jsonKey(unset.warnings),
+          "The configured supervisor is unavailable on this orchestrator",
+        );
+      }),
   );
 
   it.effect("shows the instance's coordinator and resolves Agents that don't set one to it", () =>

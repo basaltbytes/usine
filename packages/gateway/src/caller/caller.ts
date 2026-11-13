@@ -45,7 +45,7 @@ export class CallerTokenRejected extends Schema.TaggedError<
 export const GATEWAY_TOKEN_HEADER = "x-usine-gateway-token";
 
 /** The headers that can contain a caller credential; all are removed before forwarding. */
-const CALLER_CREDENTIAL_HEADERS = [
+export const CALLER_CREDENTIAL_HEADERS = [
   GATEWAY_TOKEN_HEADER,
   "authorization",
   "x-api-key",

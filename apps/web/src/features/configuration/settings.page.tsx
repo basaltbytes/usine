@@ -99,18 +99,45 @@ const groups = (
   ],
   [
     "Supervisor",
-    [
-      {
-        key: "settings.supervisor",
-        value:
-          settings.supervisor === null
-            ? unset(supervisorCopy.notConfigured)
-            : mono(
-                `${settings.supervisor.harness} ${settings.supervisor.model} ${settings.supervisor.effort}`,
-              ),
-        effect: settings.supervisor === null ? supervisorCopy.unsetEffect : supervisorCopy.effect,
-      },
-    ],
+    settings.supervisor === null
+      ? [
+          {
+            key: "settings.supervisor",
+            value: unset(supervisorCopy.notConfigured),
+            effect: supervisorCopy.unsetEffect,
+          },
+        ]
+      : [
+          {
+            key: "settings.supervisor",
+            value: mono(
+              `${settings.supervisor.harness} ${settings.supervisor.model} ${settings.supervisor.effort}`,
+            ),
+            effect: supervisorCopy.effect,
+          },
+          settings.supervisor.ownTools === null
+            ? {
+                key: supervisorCopy.toolsKey,
+                value: supervisorCopy.readTools,
+                effect: supervisorCopy.readToolsEffect,
+              }
+            : {
+                key: supervisorCopy.toolsKey,
+                value: supervisorCopy.ownTools,
+                effect: supervisorCopy.ownToolsEffect(settings.supervisor.ownTools),
+              },
+          settings.supervisor.unavailable === null
+            ? {
+                key: supervisorCopy.sandboxKey,
+                value: supervisorCopy.available,
+                effect: supervisorCopy.availableEffect,
+              }
+            : {
+                key: supervisorCopy.sandboxKey,
+                value: unset(supervisorCopy.unavailable),
+                effect: `${settings.supervisor.unavailable}.`,
+              },
+        ],
   ],
   [
     "Operator",

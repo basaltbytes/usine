@@ -38,6 +38,10 @@
     "./gateway": {
       "types": "./dist/ssh/gateway/model-route.d.ts",
       "default": "./dist/ssh/gateway/model-route.js"
+    },
+    "./supervisor": {
+      "types": "./dist/supervisor/supervisor.d.ts",
+      "default": "./dist/supervisor/supervisor.js"
     }
   },
   "publishConfig": {

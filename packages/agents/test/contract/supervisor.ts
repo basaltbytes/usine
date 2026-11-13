@@ -5,7 +5,7 @@ import {
   type HarnessSession,
   type SessionTokensUpdated,
 } from "@usine/core/agent/session";
-import { type Brand, Effect, Layer, Option, Schema } from "effect";
+import { type Brand, Effect, FileSystem, Layer, Option, Schema } from "effect";
 import { Tool, Toolkit } from "effect/ai";
 import type { CredentialRoute } from "../../src/harness/capability.ts";
 import {
@@ -54,25 +54,33 @@ export const operatorToolHandlers = operatorTools.toLayer({
       : Effect.fail(RunNotFound.make({ runId })),
 });
 
-/** The member's two messages: the first calls one operator tool, the second needs the first. */
+/** The repository file that the first turn reads, relative to the session's working directory. */
+export const SOURCE_FILE = "acme/demo/RUNBOOK.md";
+/** The code word that only `SOURCE_FILE` holds. */
+export const SOURCE_WORD = "HERON-2207";
+
+/** The member's two messages: the first reads the source and calls one operator tool, the second needs the first. */
 export const supervisorMessages = [
-  "Call the overview tool once, then reply with exactly the ID of the run that waits for " +
-    "approval. Do not approve it and call no other tool.",
+  `Read the file ${SOURCE_FILE}, then call the overview tool once. Reply with exactly the code ` +
+    "word that the file names, a space, and the ID of the run that waits for approval. Do not " +
+    "approve the run, and do not change any file.",
   `Reply with exactly the run ID from your previous answer, a space, and the word ${RESUMED}. ` +
     "Call no tools.",
 ] as const;
 
-/**
- * The harnesses whose descriptors admit the supervisor role. Codex serves usine tool sets but
- * lacks `closed-tools`, so admission refuses it.
- */
-export const supervisorProviders = ["claude", "pi"] as const satisfies ReadonlyArray<ToolProvider>;
+/** The harnesses whose descriptors admit the supervisor role: every harness that serves usine tool sets. */
+export const supervisorProviders = [
+  "claude",
+  "pi",
+  "codex",
+] as const satisfies ReadonlyArray<ToolProvider>;
 export type SupervisorProvider = (typeof supervisorProviders)[number];
 
 /** The credential route that each harness's recorded supervisor traffic used. */
 const recordedRoutes = {
   claude: "gateway-subscription",
   pi: "gateway",
+  codex: "gateway-subscription",
 } satisfies Record<SupervisorProvider, CredentialRoute>;
 
 /** The two turns of the supervisor scenario on `provider`, and the recorded traffic. */
@@ -80,6 +88,14 @@ export const runSupervisorScenario = (provider: SupervisorProvider, mode: "recor
   Effect.gen(function* () {
     const fixture = yield* toolFixture(provider, "supervisor", mode);
     const { host, worker, cwd, environment } = fixture.request;
+    // The session reads the instance's source from its working directory, one directory per
+    // repository, as the supervisor sandbox mounts it.
+    const fs = yield* FileSystem.FileSystem;
+    yield* fs.makeDirectory(`${cwd}/acme/demo`, { recursive: true });
+    yield* fs.writeFileString(
+      `${cwd}/${SOURCE_FILE}`,
+      `# Runbook\n\nThe code word for this repository is ${SOURCE_WORD}.\n`,
+    );
     const brain: BrainSpec = fixture.request.session.brain;
     const seat = SupervisorSeat.make({
       host,

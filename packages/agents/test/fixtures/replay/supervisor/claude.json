@@ -35,7 +35,7 @@
           "persistSession": true,
           "sessionId": "$SESSION_1",
           "settings": { "attribution": { "commit": "", "pr": "" } },
-          "tools": [],
+          "tools": ["Read", "Grep", "Glob"],
           "strictMcpConfig": true,
           "hooks": {
             "PreToolUse": [{ "hooks": [null], "timeout": 86400 }],
@@ -143,7 +143,7 @@
         "type": "user",
         "message": {
           "role": "user",
-          "content": "Call the overview tool once, then reply with exactly the ID of the run that waits for approval. Do not approve it and call no other tool."
+          "content": "Read the file acme/demo/RUNBOOK.md, then call the overview tool once. Reply with exactly the code word that the file names, a space, and the ID of the run that waits for approval. Do not approve the run, and do not change any file."
         },
         "parent_tool_use_id": null,
         "uuid": "$OPERATOR_1"
@@ -156,7 +156,7 @@
         "type": "command_lifecycle",
         "command_uuid": "$OPERATOR_1",
         "state": "queued",
-        "uuid": "16a673b6-a715-4d9a-a9ae-170d4b3224ef",
+        "uuid": "0d9df7f3-4082-4256-8f36-6d7011b5fddb",
         "session_id": "$SESSION_1"
       }
     },
@@ -167,7 +167,7 @@
         "type": "command_lifecycle",
         "command_uuid": "$OPERATOR_1",
         "state": "started",
-        "uuid": "6d7cd4e9-9a06-4435-a099-049c3456d895",
+        "uuid": "0cb0c75b-6ad8-406a-97ef-4e58a24933de",
         "session_id": "$SESSION_1"
       }
     },
@@ -179,7 +179,7 @@
         "subtype": "init",
         "cwd": "$WORKTREE",
         "session_id": "$SESSION_1",
-        "tools": ["mcp__usine__approve", "mcp__usine__overview"],
+        "tools": ["Glob", "Grep", "Read", "mcp__usine__approve", "mcp__usine__overview"],
         "mcp_servers": [{ "name": "usine", "status": "connected", "source": "sdk" }],
         "model": "claude-haiku-4-5",
         "permissionMode": "bypassPermissions",
@@ -292,11 +292,11 @@
         ],
         "analytics_disabled": false,
         "product_feedback_disabled": false,
-        "uuid": "b67c48b7-8185-4dcd-a248-6db370797c30",
-        "memory_paths": { "auto": "$HOME/.claude/projects/-tmp-usine-replay-EzOkGk/memory/" },
+        "uuid": "9c64ef01-6737-434b-b06d-f96704ac42dd",
+        "memory_paths": { "auto": "$HOME/.claude/projects/-tmp-usine-replay-lXz3Rz/memory/" },
         "original_cwd": "$WORKTREE",
         "additional_directories": [],
-        "messaging_socket_path": "/tmp/cc-socks/1904.sock",
+        "messaging_socket_path": "/tmp/cc-socks/1849.sock",
         "fast_mode_state": "off",
         "fast_mode_disabled_reason": "sdk_opt_in_required",
         "per_turn_effort_active": false,
@@ -313,7 +313,7 @@
         "estimated_tokens": 50,
         "estimated_tokens_delta": 50,
         "session_id": "$SESSION_1",
-        "uuid": "331b540e-8fd7-4a93-aba4-c261306eb026",
+        "uuid": "3d37b290-b513-40e1-8af9-13908aa568e9",
         "user_message_uuid": "$OPERATOR_1"
       }
     },
@@ -323,10 +323,10 @@
       "payload": {
         "type": "system",
         "subtype": "thinking_tokens",
-        "estimated_tokens": 137,
-        "estimated_tokens_delta": 87,
+        "estimated_tokens": 157,
+        "estimated_tokens_delta": 107,
         "session_id": "$SESSION_1",
-        "uuid": "79dab6f3-4c95-4ffa-bacf-f74b15534f1a",
+        "uuid": "cb5e26bb-8027-4d58-8898-fde7b6b9ca47",
         "user_message_uuid": "$OPERATOR_1"
       }
     },
@@ -337,14 +337,14 @@
         "type": "assistant",
         "message": {
           "model": "claude-haiku-4-5-20251001",
-          "id": "msg_011Cgyodw35CvwLA8iZsQnPC",
+          "id": "msg_011CgzmwRmxdLNkcTyf9EJJq",
           "type": "message",
           "role": "assistant",
           "content": [
             {
               "type": "thinking",
               "thinking": "",
-              "signature": "Ep0ECtABCBMYAipA+GMhie/A5cBu5FhVhb4a9EjWUtTpp5Oy0dQB8KVhIc7qG9ToJtnLmoh1jl0YQUsXM/V/ABvsDDZKX0bj9XU9aTIZY2xhdWRlLWhhaWt1LTQtNS0yMDI1MTAwMTgAQgh0aGlua2luZ1okZWFmZWIyYzQtNzQ4Yy00ZTdkLTk5ZmEtYTFiOGYzODUwMWM5chDVbV+8KA0GQThfgBdKQus5iAEBmgEbChljbGF1ZGUtaGFpa3UtNC01LTIwMjUxMDAxqAHU9NjXBrABAhIME62cKr3wWYbIH+FCGgzrGk+WCpNkveVpNXMiMEy4ygY9HM0rv8N2Q8/+ThBeyGSUesoZiIpwQen6CiB7+BgCC0kinNh+TAE3aYU/1yr5Ac6/qOns5oXUWpK53YZiYss6YfYiBbcm/kBcS+zSSn9iUU4wa0Mv5cKPIuajFdvxUMxr62M56QPj0GlKSLqHCQ2bLoEAv6ddUMadmgG+yFOKaOjjCINbbYuJzDuaUMvHLv/L1QtLoxulCZHI6nuf12y63ZuTSwn4uFw3E2B0FNfdI0fs5sC9cvYMevTsO33YkejEdq08H98qj0Qo5LalVwhq44lp5k+N4FYe2JJoOdfFEhOyt2AACvdBh5j54rYM0mcix7DBOj6I3Ik34PgR6blKxLlZH6fu9LbYsbwErS6gZ+rNJfVTOtZ38VGqbINIrzccmdo5LoE/ehgB"
+              "signature": "Eu4ECtABCBMYAipAmA2u8AmNMcYqF2JqUfwvMQv6zR+gbVWhjowc0PLCpDPIAh36VlscYd0bDaH9p8VkTsAcj4SdxOvCUidRNRtuejIZY2xhdWRlLWhhaWt1LTQtNS0yMDI1MTAwMTgAQgh0aGlua2luZ1okZWFmZWIyYzQtNzQ4Yy00ZTdkLTk5ZmEtYTFiOGYzODUwMWM5chD0oSohgq6ppJ4h9KJrKlUdiAEBmgEbChljbGF1ZGUtaGFpa3UtNC01LTIwMjUxMDAxqAHgztvXBrABAhIMMrKOgOzSkJu7/71UGgxpbNH/UmJekUqHnFciMHBBiZu/GaGYZ6i+03c2OIEF3ZiuWtiFiE/2P8Sh9FNOSLSoISeV75T84YMZd0UumSrKAp8tWR0ehDFcBCwgzeR/9+hQhmINikcjqXxb3R4IAcaj9c8KsIDkFMaE2gAysShMOc2aN9AWWyBhaDjD8Nc+JpjTNBPssziGUi0IimlTpd/VJTYEqWhI+I2jHRqIgMWZ4cPI2NeyZkttXzqQoLnczGyp/5oO8GdXuEhwAW6L+0c9GVY4IPABxQU5Anhv8f1Cc5SBSi6iNfD63Hypr3T4NF0rLaiDM7XOlQCA7m0+llIAx2AtwhdIivX22/4nj49K/I6qLKzQxrI8UzPSSBGQ+18Yt3e54hXDaUJlz+4N9pjPkUbaAwlUcOzdy2sERlIVeeqYhoxIRrH764rjk9jUFvZQ7GBcdxb7L8p0GX6jRn/W6bzVNn5p2C/Mg6OG4WMkQ2OTUxeCNuMFxQnUkrI18pg+RUgzURIgXKYrtsTisThs100P4i7mVU46oxgB"
             }
           ],
           "container": null,
@@ -352,11 +352,11 @@
           "stop_sequence": null,
           "stop_details": null,
           "usage": {
-            "input_tokens": 1145,
+            "input_tokens": 3257,
             "cache_creation_input_tokens": 0,
             "cache_read_input_tokens": 0,
             "cache_creation": { "ephemeral_5m_input_tokens": 0, "ephemeral_1h_input_tokens": 0 },
-            "output_tokens": 1,
+            "output_tokens": 8,
             "service_tier": "standard",
             "inference_geo": "not_available",
             "speed": "standard"
@@ -366,10 +366,10 @@
         },
         "parent_tool_use_id": null,
         "session_id": "$SESSION_1",
-        "uuid": "d82b79c6-0280-4db7-a880-ba16e503e79b",
-        "timestamp": "2026-11-12T22:14:45.087Z",
-        "request_id": "req_011CgyodvpRXa9sx3WuLkuGo",
-        "thinking_duration_ms": 564,
+        "uuid": "d5a8bcd8-6d22-40a8-805d-0413476fbb28",
+        "timestamp": "2026-11-13T10:33:04.361Z",
+        "request_id": "req_011CgzmwRU6Y4zLpL2X6tfv6",
+        "thinking_duration_ms": 405,
         "thinking_display": "updates",
         "user_message_uuid": "$OPERATOR_1",
         "user_message_uuids": ["$OPERATOR_1"]
@@ -382,13 +382,93 @@
         "type": "assistant",
         "message": {
           "model": "claude-haiku-4-5-20251001",
-          "id": "msg_011Cgyodw35CvwLA8iZsQnPC",
+          "id": "msg_011CgzmwRmxdLNkcTyf9EJJq",
+          "type": "message",
+          "role": "assistant",
+          "content": [
+            { "type": "text", "text": "I'll read the file and call the overview tool for you." }
+          ],
+          "container": null,
+          "stop_reason": null,
+          "stop_sequence": null,
+          "stop_details": null,
+          "usage": {
+            "input_tokens": 3257,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 0,
+            "cache_creation": { "ephemeral_5m_input_tokens": 0, "ephemeral_1h_input_tokens": 0 },
+            "output_tokens": 8,
+            "service_tier": "standard",
+            "inference_geo": "not_available",
+            "speed": "standard"
+          },
+          "diagnostics": null,
+          "context_management": null
+        },
+        "parent_tool_use_id": null,
+        "session_id": "$SESSION_1",
+        "uuid": "736291ba-0e63-4834-8153-d0f9d4972d6c",
+        "timestamp": "2026-11-13T10:33:04.537Z",
+        "request_id": "req_011CgzmwRU6Y4zLpL2X6tfv6"
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "claude:1/output",
+      "payload": {
+        "type": "assistant",
+        "message": {
+          "model": "claude-haiku-4-5-20251001",
+          "id": "msg_011CgzmwRmxdLNkcTyf9EJJq",
           "type": "message",
           "role": "assistant",
           "content": [
             {
               "type": "tool_use",
-              "id": "toolu_01RS258Pdd2LvhJYG4FjPjbm",
+              "id": "toolu_017o3NQUWMo18EGkoQWg3gWM",
+              "name": "Read",
+              "input": { "file_path": "$WORKTREE/acme/demo/RUNBOOK.md" },
+              "caller": { "type": "direct" }
+            }
+          ],
+          "container": null,
+          "stop_reason": null,
+          "stop_sequence": null,
+          "stop_details": null,
+          "usage": {
+            "input_tokens": 3257,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 0,
+            "cache_creation": { "ephemeral_5m_input_tokens": 0, "ephemeral_1h_input_tokens": 0 },
+            "output_tokens": 8,
+            "service_tier": "standard",
+            "inference_geo": "not_available",
+            "speed": "standard"
+          },
+          "diagnostics": null,
+          "context_management": null
+        },
+        "parent_tool_use_id": null,
+        "session_id": "$SESSION_1",
+        "uuid": "ee39126f-7516-4b85-92f1-c7f2d91fbb35",
+        "timestamp": "2026-11-13T10:33:04.935Z",
+        "request_id": "req_011CgzmwRU6Y4zLpL2X6tfv6"
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "claude:1/output",
+      "payload": {
+        "type": "assistant",
+        "message": {
+          "model": "claude-haiku-4-5-20251001",
+          "id": "msg_011CgzmwRmxdLNkcTyf9EJJq",
+          "type": "message",
+          "role": "assistant",
+          "content": [
+            {
+              "type": "tool_use",
+              "id": "toolu_01N263s8TQiQfcciKMFG4k3h",
               "name": "mcp__usine__overview",
               "input": {},
               "caller": { "type": "direct" }
@@ -399,11 +479,11 @@
           "stop_sequence": null,
           "stop_details": null,
           "usage": {
-            "input_tokens": 1145,
+            "input_tokens": 3257,
             "cache_creation_input_tokens": 0,
             "cache_read_input_tokens": 0,
             "cache_creation": { "ephemeral_5m_input_tokens": 0, "ephemeral_1h_input_tokens": 0 },
-            "output_tokens": 1,
+            "output_tokens": 8,
             "service_tier": "standard",
             "inference_geo": "not_available",
             "speed": "standard"
@@ -413,15 +493,56 @@
         },
         "parent_tool_use_id": null,
         "session_id": "$SESSION_1",
-        "uuid": "25eded71-cfc3-42f9-971a-277dbd8279e8",
-        "timestamp": "2026-11-12T22:14:45.131Z",
-        "request_id": "req_011CgyodvpRXa9sx3WuLkuGo",
+        "uuid": "cb49fe28-08f4-4414-9e79-94ce11d45eba",
+        "timestamp": "2026-11-13T10:33:04.986Z",
+        "request_id": "req_011CgzmwRU6Y4zLpL2X6tfv6",
         "tool_use_meta": [
           {
-            "id": "toolu_01RS258Pdd2LvhJYG4FjPjbm",
+            "id": "toolu_01N263s8TQiQfcciKMFG4k3h",
             "display_name": "Overview",
             "server_display_name": "usine",
             "tool_name": "overview"
+          }
+        ]
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "claude:1/output",
+      "payload": {
+        "type": "user",
+        "message": {
+          "role": "user",
+          "content": [
+            {
+              "tool_use_id": "toolu_017o3NQUWMo18EGkoQWg3gWM",
+              "type": "tool_result",
+              "content": "1\t# Runbook\n2\t\n3\tThe code word for this repository is HERON-2207.\n4\t"
+            }
+          ]
+        },
+        "parent_tool_use_id": null,
+        "session_id": "$SESSION_1",
+        "uuid": "18194aab-9bb7-483a-a5e4-8fddf2f32548",
+        "timestamp": "2026-11-13T10:33:04.988Z",
+        "tool_use_result": {
+          "type": "text",
+          "file": {
+            "filePath": "$WORKTREE/acme/demo/RUNBOOK.md",
+            "content": "# Runbook\n\nThe code word for this repository is HERON-2207.\n",
+            "numLines": 4,
+            "startLine": 1,
+            "totalLines": 4
+          }
+        },
+        "tool_result_meta": [
+          {
+            "id": "toolu_017o3NQUWMo18EGkoQWg3gWM",
+            "permission_decision": {
+              "decision": "accept",
+              "source": "config",
+              "reason_type": "mode"
+            }
           }
         ]
       }
@@ -448,7 +569,7 @@
           "role": "user",
           "content": [
             {
-              "tool_use_id": "toolu_01RS258Pdd2LvhJYG4FjPjbm",
+              "tool_use_id": "toolu_01N263s8TQiQfcciKMFG4k3h",
               "type": "tool_result",
               "content": [
                 {
@@ -461,14 +582,14 @@
         },
         "parent_tool_use_id": null,
         "session_id": "$SESSION_1",
-        "uuid": "eee1b08e-907a-4d2a-aed6-e9d20bdc2075",
-        "timestamp": "2026-11-12T22:14:45.177Z",
+        "uuid": "7c02eb4a-c6d4-4a5d-abc5-11f17dc49eed",
+        "timestamp": "2026-11-13T10:33:05.017Z",
         "tool_use_result": [
           { "type": "text", "text": "{\"waiting\":[{\"runId\":\"run-7431\",\"loop\":\"triage\"}]}" }
         ],
         "tool_result_meta": [
           {
-            "id": "toolu_01RS258Pdd2LvhJYG4FjPjbm",
+            "id": "toolu_01N263s8TQiQfcciKMFG4k3h",
             "permission_decision": {
               "decision": "accept",
               "source": "config",
@@ -487,7 +608,7 @@
         "estimated_tokens": 50,
         "estimated_tokens_delta": 50,
         "session_id": "$SESSION_1",
-        "uuid": "3439deb9-7751-475c-839e-5bb32f2b3f2b",
+        "uuid": "17d26110-261f-4abf-9525-94478bcf4db2",
         "user_message_uuid": "$OPERATOR_1"
       }
     },
@@ -497,10 +618,10 @@
       "payload": {
         "type": "system",
         "subtype": "thinking_tokens",
-        "estimated_tokens": 141,
-        "estimated_tokens_delta": 91,
+        "estimated_tokens": 171,
+        "estimated_tokens_delta": 121,
         "session_id": "$SESSION_1",
-        "uuid": "ad2518bb-96a7-4eec-b535-4bc475ec6ca4",
+        "uuid": "064c74fc-2dcc-4d92-af9d-e886bcf575a2",
         "user_message_uuid": "$OPERATOR_1"
       }
     },
@@ -511,14 +632,14 @@
         "type": "assistant",
         "message": {
           "model": "claude-haiku-4-5-20251001",
-          "id": "msg_011Cgyoe25gLDtU4PPT3kNrR",
+          "id": "msg_011CgzmwYrMBqpxw8xQf5kB2",
           "type": "message",
           "role": "assistant",
           "content": [
             {
               "type": "thinking",
               "thinking": "",
-              "signature": "Eq8ECtABCBMYAipAZ5tiLxuwMcR5XUb6y/AJrFNYbyBmMirgJAShU4xyXZ++/dEnSzsE1FdcYoldd4eHtS368huz1Fz3Mar7lB2ibjIZY2xhdWRlLWhhaWt1LTQtNS0yMDI1MTAwMTgAQgh0aGlua2luZ1okZWFmZWIyYzQtNzQ4Yy00ZTdkLTk5ZmEtYTFiOGYzODUwMWM5chDVbV+8KA0GQThfgBdKQus5iAEBmgEbChljbGF1ZGUtaGFpa3UtNC01LTIwMjUxMDAxqAHW9NjXBrABAhIMWf3J24jPUp0pyLp8GgwZ9lBf+WBntvXKJvciMMQlsrQTby2gGqPOAbOf0lxj4jOTaJls3BNVplQ+pjIsOdPz5al+CK/vskNzrQDjHyqLAoIqLHspvSjUBp/KaO9ydUx8x8MuptiOWzIoG7Hp89dqWLOF4LVTPMG2LK6VJyWQFWW4oPSTeeSVMm6dSV+yycpaJSiQUO/VXtCuDMifzX9zL5jjofaZojlcBdTmkBHduvVAsrUWHacLogeGTt2XFOnuxsXt2qQgbF6LFj0ghrCQtooIvZ1RyBQWIiJ73boNTPZ+f6hCDGqeSTuNWohloOxGo9meukG/gCGO66XgodWP7qcsu/XyNiejJspVB3AEpwrtnMV7l1mBDhT97asKPcPJK9XGD9lTtrKh92w/+W+YztXhgSjXLtMN/0QArHBsGbiij4g1PMp+25plsk58fdM+Jk1sD7rqOz6M2xgB"
+              "signature": "EqMFCtABCBMYAipAqyqhh5RH9jDp81HyEmee/vGUrVJdk4sbCjf64Y5iLCZDDuhxh3cUlMp+lJEGmwndPrVN4TJQ29SZ3phkp1J7ujIZY2xhdWRlLWhhaWt1LTQtNS0yMDI1MTAwMTgAQgh0aGlua2luZ1okZWFmZWIyYzQtNzQ4Yy00ZTdkLTk5ZmEtYTFiOGYzODUwMWM5chD0oSohgq6ppJ4h9KJrKlUdiAEBmgEbChljbGF1ZGUtaGFpa3UtNC01LTIwMjUxMDAxqAHiztvXBrABAhIM2zs88tnPFf3HkPN3GgyCCCH4rrVZYlNuZWkiME8woDZs1I93G1E58niyTspRMXvFn/+wTY+IKhaozpBd9GyqEc2A7baDMZQE8L565ir/Aj0SKsKy06YaBJXmkAMJxOdNBL89/2rdS1Uk1UgzEy5DzSd/JueNOBQgAwRiW8STVF/g6mK0OYqi4St4AkNe5Eq2mvz11izXOmZ2U8IaL23SJ16TrYBKFtOh4oYj9rGbEvcEZOIj4NDs5g33k2SHB8FIHDTzltzZCX2ZXFUyUXbokq12OwnQ7fRGKcXFCof1DhCApB80xOGfJMIsh5vNtdM5uH81HjnF2VhFwNO8rzJjWwFcAbPOjIUi7DDtnEnPKPFkdE15cynBSk1fXaABl+i8/+1ysUPQNbKH2cQH65Jk1UKWlrxhJNcRVbRnnH2qN5FR/J9dtJrUMk+QFXZZJ/PAFPZ1GvG4Mcql8pGTTU894AkbMRIHSRxoer1jjNVODD7UT2g60Zs+g7RjUow3TjLDIuA4R1O5it24Agl5zcBbfdyA5RCNRR9JxWovYP0IyvID0AKNXyqQ5SOngxUJLRVeDxfkJW8dfQgOQFb6k9esM5dcKW753Z1lMS1i2PQVGAE="
             }
           ],
           "container": null,
@@ -526,11 +647,11 @@
           "stop_sequence": null,
           "stop_details": null,
           "usage": {
-            "input_tokens": 1319,
+            "input_tokens": 3618,
             "cache_creation_input_tokens": 0,
             "cache_read_input_tokens": 0,
             "cache_creation": { "ephemeral_5m_input_tokens": 0, "ephemeral_1h_input_tokens": 0 },
-            "output_tokens": 1,
+            "output_tokens": 3,
             "service_tier": "standard",
             "inference_geo": "not_available",
             "speed": "standard"
@@ -540,10 +661,10 @@
         },
         "parent_tool_use_id": null,
         "session_id": "$SESSION_1",
-        "uuid": "0bb6d2ea-0c20-4945-8f33-59467f6d1ee7",
-        "timestamp": "2026-11-12T22:14:46.209Z",
-        "request_id": "req_011Cgyoe1s35iy9HcQ4DU5YU",
-        "thinking_duration_ms": 295,
+        "uuid": "a7217beb-ba23-42f3-9cfc-e8d0da203e30",
+        "timestamp": "2026-11-13T10:33:06.331Z",
+        "request_id": "req_011CgzmwYfgfWVEGhDrMaswP",
+        "thinking_duration_ms": 451,
         "thinking_display": "updates"
       }
     },
@@ -554,20 +675,20 @@
         "type": "assistant",
         "message": {
           "model": "claude-haiku-4-5-20251001",
-          "id": "msg_011Cgyoe25gLDtU4PPT3kNrR",
+          "id": "msg_011CgzmwYrMBqpxw8xQf5kB2",
           "type": "message",
           "role": "assistant",
-          "content": [{ "type": "text", "text": "run-7431" }],
+          "content": [{ "type": "text", "text": "HERON-2207 run-7431" }],
           "container": null,
           "stop_reason": null,
           "stop_sequence": null,
           "stop_details": null,
           "usage": {
-            "input_tokens": 1319,
+            "input_tokens": 3618,
             "cache_creation_input_tokens": 0,
             "cache_read_input_tokens": 0,
             "cache_creation": { "ephemeral_5m_input_tokens": 0, "ephemeral_1h_input_tokens": 0 },
-            "output_tokens": 1,
+            "output_tokens": 3,
             "service_tier": "standard",
             "inference_geo": "not_available",
             "speed": "standard"
@@ -577,25 +698,25 @@
         },
         "parent_tool_use_id": null,
         "session_id": "$SESSION_1",
-        "uuid": "bbb66d66-b777-4c97-8581-5b0dccb8e502",
-        "timestamp": "2026-11-12T22:14:46.229Z",
-        "request_id": "req_011Cgyoe1s35iy9HcQ4DU5YU"
+        "uuid": "99a31bd1-cb38-4675-91e3-475da2919cc2",
+        "timestamp": "2026-11-13T10:33:06.348Z",
+        "request_id": "req_011CgzmwYfgfWVEGhDrMaswP"
       }
     },
     {
       "type": "emit_inbound",
       "port": "claude:1/output",
       "payload": {
-        "duration_api_ms": 2964,
+        "duration_api_ms": 3854,
         "stop_reason": "end_turn",
         "session_id": "$SESSION_1",
-        "total_cost_usd": 0.0044069999999999995,
+        "total_cost_usd": 0.009566999999999999,
         "usage": {
-          "input_tokens": 2464,
+          "input_tokens": 6875,
           "cache_creation_input_tokens": 0,
           "cache_read_input_tokens": 0,
-          "output_tokens": 192,
-          "output_tokens_details": { "thinking_tokens": 140 },
+          "output_tokens": 334,
+          "output_tokens_details": { "thinking_tokens": 200 },
           "server_tool_use": { "web_search_requests": 0, "web_fetch_requests": 0 },
           "service_tier": "standard",
           "cache_creation": { "ephemeral_1h_input_tokens": 0, "ephemeral_5m_input_tokens": 0 },
@@ -606,15 +727,15 @@
         },
         "modelUsage": {
           "claude-haiku-4-5": {
-            "inputTokens": 3387,
-            "outputTokens": 204,
+            "inputTokens": 7827,
+            "outputTokens": 348,
             "cacheReadInputTokens": 0,
             "cacheCreationInputTokens": 0,
             "webSearchRequests": 0,
-            "costUSD": 0.0044069999999999995,
+            "costUSD": 0.009566999999999999,
             "contextWindow": 200000,
             "maxOutputTokens": 32000,
-            "thinkingTokens": 140,
+            "thinkingTokens": 200,
             "cacheCreationEphemeral5mInputTokens": 0,
             "cacheCreationEphemeral1hInputTokens": 0,
             "canonicalModel": "claude-haiku-4-5",
@@ -640,34 +761,34 @@
         },
         "safety_stops": 0,
         "is_error": false,
-        "num_turns": 2,
+        "num_turns": 3,
         "subtype": "success",
         "api_error_status": null,
-        "result": "run-7431",
-        "ttft_ms": 1158,
+        "result": "HERON-2207 run-7431",
+        "ttft_ms": 1099,
         "type": "result",
-        "duration_ms": 2309,
-        "uuid": "2cf57643-0fe4-4f6a-96ea-5c54eff2f82d",
-        "ttft_stream_ms": 594,
-        "time_to_request_ms": 61,
-        "first_content_frame_ms": 594,
+        "duration_ms": 3100,
+        "uuid": "15cb8a4d-bd97-448f-86d4-5fc760e01307",
+        "ttft_stream_ms": 694,
+        "time_to_request_ms": 53,
+        "first_content_frame_ms": 694,
         "user_message_uuid": "$OPERATOR_1",
         "user_message_uuids": ["$OPERATOR_1"],
-        "request_sent_wall_ms": 1794521683990,
-        "first_request_input_tokens": 1145,
+        "request_sent_wall_ms": 1794565983316,
+        "first_request_input_tokens": 3257,
         "queued_turn_count": 0,
         "result_index": 0,
         "model_usage_since_last_result": {
           "claude-haiku-4-5": {
-            "inputTokens": 3387,
-            "outputTokens": 204,
+            "inputTokens": 7827,
+            "outputTokens": 348,
             "cacheReadInputTokens": 0,
             "cacheCreationInputTokens": 0,
             "webSearchRequests": 0,
-            "costUSD": 0.0044069999999999995,
+            "costUSD": 0.009566999999999999,
             "contextWindow": 200000,
             "maxOutputTokens": 32000,
-            "thinkingTokens": 140,
+            "thinkingTokens": 200,
             "cacheCreationEphemeral5mInputTokens": 0,
             "cacheCreationEphemeral1hInputTokens": 0,
             "canonicalModel": "claude-haiku-4-5",
@@ -684,7 +805,7 @@
         "type": "command_lifecycle",
         "command_uuid": "$OPERATOR_1",
         "state": "completed",
-        "uuid": "74cf18a6-5271-4152-8299-6944cbe50fc1",
+        "uuid": "e50a1682-f037-4d8e-80cd-ae94a3089573",
         "session_id": "$SESSION_1"
       }
     },
@@ -713,7 +834,7 @@
           "persistSession": true,
           "resume": "$SESSION_1",
           "settings": { "attribution": { "commit": "", "pr": "" } },
-          "tools": [],
+          "tools": ["Read", "Grep", "Glob"],
           "strictMcpConfig": true,
           "hooks": {
             "PreToolUse": [{ "hooks": [null], "timeout": 86400 }],
@@ -834,7 +955,7 @@
         "type": "command_lifecycle",
         "command_uuid": "$OPERATOR_2",
         "state": "queued",
-        "uuid": "77c33df9-50df-4208-a0cb-3d4f66e322ab",
+        "uuid": "ab434f55-2979-4aad-8bfe-8caa119ca1be",
         "session_id": "$SESSION_1"
       }
     },
@@ -845,7 +966,7 @@
         "type": "command_lifecycle",
         "command_uuid": "$OPERATOR_2",
         "state": "started",
-        "uuid": "7e486f04-d1fe-4255-8ed1-3321816a82d1",
+        "uuid": "eb2f9394-df07-4fd9-a5ee-a3520c300f12",
         "session_id": "$SESSION_1"
       }
     },
@@ -857,7 +978,7 @@
         "subtype": "init",
         "cwd": "$WORKTREE",
         "session_id": "$SESSION_1",
-        "tools": ["mcp__usine__approve", "mcp__usine__overview"],
+        "tools": ["Glob", "Grep", "Read", "mcp__usine__approve", "mcp__usine__overview"],
         "mcp_servers": [{ "name": "usine", "status": "connected", "source": "sdk" }],
         "model": "claude-haiku-4-5",
         "permissionMode": "bypassPermissions",
@@ -970,11 +1091,11 @@
         ],
         "analytics_disabled": false,
         "product_feedback_disabled": false,
-        "uuid": "4b9e397f-fe23-48c9-91ee-0e57a1a26435",
-        "memory_paths": { "auto": "$HOME/.claude/projects/-tmp-usine-replay-EzOkGk/memory/" },
+        "uuid": "04ebab22-b69d-4271-afb9-0df45cdb36e1",
+        "memory_paths": { "auto": "$HOME/.claude/projects/-tmp-usine-replay-lXz3Rz/memory/" },
         "original_cwd": "$WORKTREE",
         "additional_directories": [],
-        "messaging_socket_path": "/tmp/cc-socks/1931.sock",
+        "messaging_socket_path": "/tmp/cc-socks/1875.sock",
         "fast_mode_state": "off",
         "fast_mode_disabled_reason": "sdk_opt_in_required",
         "per_turn_effort_active": false,
@@ -991,7 +1112,7 @@
         "estimated_tokens": 50,
         "estimated_tokens_delta": 50,
         "session_id": "$SESSION_1",
-        "uuid": "c978292c-3f6a-4d91-83d8-3f8792608c42",
+        "uuid": "e11df745-1d19-4b9a-870c-2e58b0f5f1c0",
         "user_message_uuid": "$OPERATOR_2"
       }
     },
@@ -1001,10 +1122,10 @@
       "payload": {
         "type": "system",
         "subtype": "thinking_tokens",
-        "estimated_tokens": 125,
-        "estimated_tokens_delta": 75,
+        "estimated_tokens": 126,
+        "estimated_tokens_delta": 76,
         "session_id": "$SESSION_1",
-        "uuid": "5a7fdbe8-ca7c-4778-a257-cd1089bef57a",
+        "uuid": "23710a56-8b74-4433-8aba-12d119faa85d",
         "user_message_uuid": "$OPERATOR_2"
       }
     },
@@ -1015,14 +1136,14 @@
         "type": "assistant",
         "message": {
           "model": "claude-haiku-4-5-20251001",
-          "id": "msg_011Cgyoe8f56Ax1sGYun3DFm",
+          "id": "msg_011CgzmwgbvaDDpY6L8q8sk2",
           "type": "message",
           "role": "assistant",
           "content": [
             {
               "type": "thinking",
               "thinking": "",
-              "signature": "EusDCtABCBMYAipA3bH0UFRmZUdfNKXgj0NFq/gq5RYoq1ppcoVQACiASPGn0AUObMUJ90JIBkSP28YNjv3dNwVP2/v5tso++5Q8+DIZY2xhdWRlLWhhaWt1LTQtNS0yMDI1MTAwMTgAQgh0aGlua2luZ1okZWFmZWIyYzQtNzQ4Yy00ZTdkLTk5ZmEtYTFiOGYzODUwMWM5chDVbV+8KA0GQThfgBdKQus5iAEBmgEbChljbGF1ZGUtaGFpa3UtNC01LTIwMjUxMDAxqAHX9NjXBrABAhIMrfXXU5t/pvTyWdxjGgyLSDfs2I8FLEl/tiMiMBx6WVD5VvXyGHi5VzkDnqAtVjwbur8BPgdceTtzLkBboeJtPaF25MokZ0GaTSfG1SrHAcctXqVh72DlpifrleYYMR+TUwGMNsyILNMXA0R+AQbs0M2zIBSUDvE4LXwXYDmuT/TPsdSmpQ3t9KiQnEGzTc10bIvjcSEk5QcDiB5cO8VgH3+cJwVj7/uM50RJpPGJMSV6YKgRP00gCAKVvAH80ZN8KsABR4nGOvpcxBvR11fOhLvXk64ojRknHgSlyTqqhEjbhrSXFttBPOhdL/BHlV/KEUgUvzBKVO3UEthz3RU0k9kZ0YwX1aSGD0rdJwOINdKKztLEVvYYAQ=="
+              "signature": "EvMDCtABCBMYAipAaegyuWMhMShdxSoFUJYi8ew7Vl89m88sGcao/Shlg3xvHToxnTtuYgsLOLQu3seemuU6V+puLAGrXh6+H60IVzIZY2xhdWRlLWhhaWt1LTQtNS0yMDI1MTAwMTgAQgh0aGlua2luZ1okZWFmZWIyYzQtNzQ4Yy00ZTdkLTk5ZmEtYTFiOGYzODUwMWM5chD0oSohgq6ppJ4h9KJrKlUdiAEBmgEbChljbGF1ZGUtaGFpa3UtNC01LTIwMjUxMDAxqAHjztvXBrABAhIMdTFEMS6cNJ8V3IKZGgz6tQTNnP4BQh3CCs8iMMrNA+mLd1/TAXaOVJG9Jls0Zq+7wFPRxmGoVDIPnvZsEmDJTuXnNIYQKDqY1tIanSrPAerfI8B5yrGJhst+01PhfDtaygmMrySL+cdISzHoBZQjPUXfdDaRIqBcqekMRhCasI607jqu5ui/AaMFOLQx5CGri3VKgYm2hzN/p1zHdVkJgaAOCxyg3DOMZdUN5acuOvY8qr5f7eJbHyBjpz8QwyOefMaZIAZIaORnqQ4xDXsTFzuK3giA7o6Do4dCb76gztzZM8AOmQE3higFIdkudMnGwg+dSolh8UGm9gRBBlgrEXD8FWhfuAjwFMTyEIE3PndrtC9lq/Q1SiEvz/dHRhgB"
             }
           ],
           "container": null,
@@ -1030,11 +1151,11 @@
           "stop_sequence": null,
           "stop_details": null,
           "usage": {
-            "input_tokens": 1466,
+            "input_tokens": 3808,
             "cache_creation_input_tokens": 0,
             "cache_read_input_tokens": 0,
             "cache_creation": { "ephemeral_5m_input_tokens": 0, "ephemeral_1h_input_tokens": 0 },
-            "output_tokens": 6,
+            "output_tokens": 8,
             "service_tier": "standard",
             "inference_geo": "not_available",
             "speed": "standard"
@@ -1044,10 +1165,10 @@
         },
         "parent_tool_use_id": null,
         "session_id": "$SESSION_1",
-        "uuid": "96360d0a-420a-4729-abb8-77a11f71656c",
-        "timestamp": "2026-11-12T22:14:47.532Z",
-        "request_id": "req_011Cgyoe8SBMakhcrs4iEPKm",
-        "thinking_duration_ms": 292,
+        "uuid": "ea1b34a9-af60-487d-af9f-aadab97464a1",
+        "timestamp": "2026-11-13T10:33:07.736Z",
+        "request_id": "req_011CgzmwgKogzqZF1CXFhhpj",
+        "thinking_duration_ms": 295,
         "thinking_display": "updates",
         "user_message_uuid": "$OPERATOR_2",
         "user_message_uuids": ["$OPERATOR_2"]
@@ -1060,7 +1181,7 @@
         "type": "assistant",
         "message": {
           "model": "claude-haiku-4-5-20251001",
-          "id": "msg_011Cgyoe8f56Ax1sGYun3DFm",
+          "id": "msg_011CgzmwgbvaDDpY6L8q8sk2",
           "type": "message",
           "role": "assistant",
           "content": [{ "type": "text", "text": "run-7431 RESUMED" }],
@@ -1069,11 +1190,11 @@
           "stop_sequence": null,
           "stop_details": null,
           "usage": {
-            "input_tokens": 1466,
+            "input_tokens": 3808,
             "cache_creation_input_tokens": 0,
             "cache_read_input_tokens": 0,
             "cache_creation": { "ephemeral_5m_input_tokens": 0, "ephemeral_1h_input_tokens": 0 },
-            "output_tokens": 6,
+            "output_tokens": 8,
             "service_tier": "standard",
             "inference_geo": "not_available",
             "speed": "standard"
@@ -1083,25 +1204,25 @@
         },
         "parent_tool_use_id": null,
         "session_id": "$SESSION_1",
-        "uuid": "dfcebc4f-378a-4a35-b992-3be69ad93ffb",
-        "timestamp": "2026-11-12T22:14:47.539Z",
-        "request_id": "req_011Cgyoe8SBMakhcrs4iEPKm"
+        "uuid": "fc99053f-2b7e-43c1-9638-6f73d54a920b",
+        "timestamp": "2026-11-13T10:33:07.768Z",
+        "request_id": "req_011CgzmwgKogzqZF1CXFhhpj"
       }
     },
     {
       "type": "emit_inbound",
       "port": "claude:2/output",
       "payload": {
-        "duration_api_ms": 3786,
+        "duration_api_ms": 4821,
         "stop_reason": "end_turn",
         "session_id": "$SESSION_1",
-        "total_cost_usd": 0.006253,
+        "total_cost_usd": 0.013774999999999999,
         "usage": {
-          "input_tokens": 1466,
+          "input_tokens": 3808,
           "cache_creation_input_tokens": 0,
           "cache_read_input_tokens": 0,
-          "output_tokens": 76,
-          "output_tokens_details": { "thinking_tokens": 64 },
+          "output_tokens": 80,
+          "output_tokens_details": { "thinking_tokens": 68 },
           "server_tool_use": { "web_search_requests": 0, "web_fetch_requests": 0 },
           "service_tier": "standard",
           "cache_creation": { "ephemeral_1h_input_tokens": 0, "ephemeral_5m_input_tokens": 0 },
@@ -1112,15 +1233,15 @@
         },
         "modelUsage": {
           "claude-haiku-4-5": {
-            "inputTokens": 4853,
-            "outputTokens": 280,
-            "thinkingTokens": 204,
+            "inputTokens": 11635,
+            "outputTokens": 428,
+            "thinkingTokens": 268,
             "cacheReadInputTokens": 0,
             "cacheCreationInputTokens": 0,
             "cacheCreationEphemeral5mInputTokens": 0,
             "cacheCreationEphemeral1hInputTokens": 0,
             "webSearchRequests": 0,
-            "costUSD": 0.006253,
+            "costUSD": 0.013774999999999999,
             "contextWindow": 200000,
             "maxOutputTokens": 32000,
             "canonicalModel": "claude-haiku-4-5",
@@ -1150,30 +1271,30 @@
         "subtype": "success",
         "api_error_status": null,
         "result": "run-7431 RESUMED",
-        "ttft_ms": 859,
+        "ttft_ms": 971,
         "type": "result",
-        "duration_ms": 876,
-        "uuid": "cde0d3da-0c72-4105-b69e-2e83597bec0a",
-        "ttft_stream_ms": 567,
-        "time_to_request_ms": 55,
-        "first_content_frame_ms": 567,
+        "duration_ms": 1014,
+        "uuid": "38893a94-97d7-4251-b501-b1c4ce45a07a",
+        "ttft_stream_ms": 676,
+        "time_to_request_ms": 47,
+        "first_content_frame_ms": 676,
         "user_message_uuid": "$OPERATOR_2",
         "user_message_uuids": ["$OPERATOR_2"],
-        "request_sent_wall_ms": 1794521686728,
-        "first_request_input_tokens": 1466,
+        "request_sent_wall_ms": 1794565986812,
+        "first_request_input_tokens": 3808,
         "queued_turn_count": 0,
         "result_index": 0,
         "model_usage_since_last_result": {
           "claude-haiku-4-5": {
-            "inputTokens": 1466,
-            "outputTokens": 76,
+            "inputTokens": 3808,
+            "outputTokens": 80,
             "cacheReadInputTokens": 0,
             "cacheCreationInputTokens": 0,
             "webSearchRequests": 0,
-            "costUSD": 0.001846,
+            "costUSD": 0.004208,
             "contextWindow": 200000,
             "maxOutputTokens": 32000,
-            "thinkingTokens": 64,
+            "thinkingTokens": 68,
             "cacheCreationEphemeral5mInputTokens": 0,
             "cacheCreationEphemeral1hInputTokens": 0,
             "canonicalModel": "claude-haiku-4-5",
@@ -1190,7 +1311,7 @@
         "type": "command_lifecycle",
         "command_uuid": "$OPERATOR_2",
         "state": "completed",
-        "uuid": "87dde0dd-7752-4e46-9aaf-2599e5ae4874",
+        "uuid": "136341da-dc47-41b6-a8e6-dd6115ec4fac",
         "session_id": "$SESSION_1"
       }
     },

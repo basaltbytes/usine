@@ -52,17 +52,35 @@ import {
   operatorTools,
   RESUMED,
   runSupervisorScenario,
+  SOURCE_WORD,
   supervisorMessages,
   type SupervisorProvider,
   supervisorProviders,
   WAITING_RUN,
 } from "./supervisor.ts";
 
-/** The names under which `provider` lists the toolkit's tools, sorted. */
+/** The names under which `provider` lists the toolkit's tools. */
 const operatorNames = (provider: SupervisorProvider) =>
-  Object.keys(operatorTools.tools)
-    .map((name) => (provider === "claude" ? `mcp__usine__${name}` : name))
-    .sort();
+  Object.keys(operatorTools.tools).map((name) =>
+    provider === "claude" ? `mcp__usine__${name}` : provider === "codex" ? `usine.${name}` : name,
+  );
+
+/**
+ * The harness tools that each recorded session lists: Claude Code's and Pi's read and search
+ * tools. Codex lists its own tools only in its model requests, which its traffic doesn't carry.
+ */
+const readTools = {
+  claude: ["Glob", "Grep", "Read"],
+  pi: ["find", "grep", "ls", "read"],
+  codex: [],
+} satisfies Record<SupervisorProvider, ReadonlyArray<string>>;
+
+/** The tool with which each recorded session read the source file. */
+const sourceReads = {
+  claude: "Read",
+  pi: "read",
+  codex: "command",
+} satisfies Record<SupervisorProvider, string>;
 
 const seat = SupervisorSeat.make({
   host: LocalProcess.make(),
@@ -157,12 +175,13 @@ const lacking = (capabilities: ReadonlyArray<Capability>, reason: string) =>
   });
 
 /**
- * The pool that each recorded scenario's credential route bills: Claude Code ran on
+ * The pool that each recorded scenario's credential route bills: Claude Code and Codex ran on
  * `gateway-subscription`, Pi on `gateway`.
  */
 const recordedPools = {
   claude: "claudePlan",
   pi: "apiKeys",
+  codex: "chatgptPlan",
 } satisfies Record<SupervisorProvider, BillingPool>;
 
 const unresumable = lacking(["resume-session"], "This test's harness reopens no saved session");
@@ -178,7 +197,7 @@ const finished = (events: ReadonlyArray<AgentSessionEvent>) =>
 describe("the supervisor role", () => {
   for (const provider of supervisorProviders)
     it.live(
-      `${provider}: lists only the operator tools, calls one, and resumes the session`,
+      `${provider}: reads the source, calls one operator tool, and resumes the session`,
       () =>
         Effect.gen(function* () {
           const logs = collectLogs(["Info"]);
@@ -186,9 +205,13 @@ describe("the supervisor role", () => {
             Effect.provide(logs.layer),
           );
           const [first, second] = replies;
+          assert.include(first.message, SOURCE_WORD, "the answer quotes the repository file");
           assert.include(first.message, WAITING_RUN);
-          assert.deepStrictEqual(started(first.events), ["overview"]);
-          assert.deepStrictEqual(finished(first.events), [{ tool: "overview", isError: false }]);
+          assert.deepStrictEqual(started(first.events), [sourceReads[provider], "overview"]);
+          assert.deepStrictEqual(finished(first.events), [
+            { tool: sourceReads[provider], isError: false },
+            { tool: "overview", isError: false },
+          ]);
           assert.strictEqual(first.events.at(-1)?._tag, "SessionFinished");
 
           const listed = listedTools(provider, entries);
@@ -196,8 +219,8 @@ describe("the supervisor role", () => {
           for (const offered of listed)
             assert.deepStrictEqual(
               [...offered].sort(),
-              operatorNames(provider),
-              "the session lists the operator tools and no harness tool",
+              [...readTools[provider], ...operatorNames(provider)].sort(),
+              "the session lists the harness's read and search tools and the operator tools",
             );
 
           assert.include(second.message, WAITING_RUN, "the second turn recalls the first");
@@ -222,10 +245,10 @@ describe("the supervisor role", () => {
             "the second turn's usage includes the first turn's",
           );
           if (provider === "claude") {
-            // Claude restores the first process's 3591 tokens on resume; the session counts them once.
+            // Claude restores the first process's 8175 tokens on resume; the session counts them once.
             assert.deepStrictEqual(
               [first.usage.value.totalTokens, second.usage.value.totalTokens],
-              [3591, 5133],
+              [8175, 12063],
             );
             assert.deepInclude(
               logs.records.map(({ message }) => message),
@@ -233,9 +256,9 @@ describe("the supervisor role", () => {
                 "Claude restored the resumed session's usage; counting it once",
                 {
                   sessionId: "replay-parent:child:1",
-                  resultTokens: 5133,
-                  processTokens: 1542,
-                  restoredTokens: 3591,
+                  resultTokens: 12063,
+                  processTokens: 3888,
+                  restoredTokens: 8175,
                 },
               ],
             );
@@ -273,60 +296,30 @@ describe("the supervisor role", () => {
       30_000,
     );
 
-  it.effect("codex: the descriptor refuses the role because Codex lists its own tools", () =>
-    Effect.gen(function* () {
-      const brain = BrainSpec.make({
-        harness: Harness.make("codex"),
-        model: ModelId.make("gpt-5.6-terra"),
-        effort: "low",
-      });
-      const refused = admitSupervisor(catalog, brain, "gateway");
-      assert(Result.isFailure(refused));
-      const closedTools = codex.capabilities
-        .flatMap(({ lacking }) => lacking)
-        .find(({ capability }) => capability === "closed-tools");
-      assert(closedTools !== undefined);
-      assert.deepStrictEqual(
-        refused.failure.missing.map(({ capability }) => capability),
-        ["closed-tools"],
-      );
-      assert.include(refused.failure.message, `lacks closed-tools (${closedTools.reason})`);
-
-      // The same toolkit and turn as on the other harnesses: admission refuses it before any
-      // session opens.
-      const unreachable = () => assert.fail("a refused supervisor turn opens no session");
-      const harnesses = Harnesses.layerFrom(HarnessCatalog.make({ descriptors: [codex] }), [
-        {
-          id: brain.harness,
-          open: unreachable,
-          complete: unreachable,
-          stop: unreachable,
-          preflight: unreachable,
-        },
-      ]);
-      const failure = yield* runSupervisorTurn(
-        SupervisorTurn.make({
-          session: AgentSessionId.make("supervisor:codex"),
-          brain,
-          seat: SupervisorSeat.make({
-            host: LocalProcess.make(),
-            worker: WorkerName.make("orchestrator"),
-            cwd: WorkingDirectory.make("/tmp"),
-            environment: {},
-            credential: "gateway",
-          }),
-          saved: Option.none(),
-          usage: Option.none(),
-          message: supervisorMessages[0],
+  it("admits every harness that serves usine tools, and says which keep all their own tools", () => {
+    const closedTools = codex.capabilities
+      .flatMap(({ lacking }) => lacking)
+      .find(({ capability }) => capability === "closed-tools");
+    assert(closedTools !== undefined);
+    const kept = supervisorProviders.map((provider) => {
+      const admitted = admitSupervisor(
+        catalog,
+        BrainSpec.make({
+          harness: Harness.make(provider),
+          model: ModelId.make("probe"),
+          effort: "low",
         }),
-        operatorTools,
-      ).pipe(Effect.flip, Effect.provide(Layer.merge(operatorToolHandlers, harnesses)));
-      assert(failure._tag === "SupervisorTurnError");
-      assert.strictEqual(failure.reason._tag, "AgentResultError");
-      assert.strictEqual(failure.message, refused.failure.message);
-      assert.deepStrictEqual(failure.usage, Option.none());
-    }),
-  );
+        "gateway",
+      );
+      assert(Result.isSuccess(admitted), provider);
+      return [provider, admitted.success.ownToolsKept] as const;
+    });
+    assert.deepStrictEqual(kept, [
+      ["claude", Option.none()],
+      ["pi", Option.none()],
+      ["codex", Option.some(closedTools.reason)],
+    ]);
+  });
 
   it("refuses a harness that can't reopen the saved session", () => {
     assert(Result.isSuccess(admitSupervisor(catalog, claudeBrain, "gateway")));
