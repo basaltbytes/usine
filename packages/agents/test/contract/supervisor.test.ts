@@ -4,6 +4,7 @@ import { BrainSpec, Harness, ModelId } from "@usine/core/agent/brain";
 import {
   AgentSessionId,
   type AgentSessionEvent,
+  type BillingPool,
   HarnessSession,
   HarnessSessionId,
   RoleSession,
@@ -19,6 +20,7 @@ import { AdmissionContext, admitBrain } from "../../src/harness/admission.ts";
 import {
   type Capability,
   CapabilityProfile,
+  type CredentialRoute,
   Lacking,
   Placement,
 } from "../../src/harness/capability.ts";
@@ -154,6 +156,15 @@ const lacking = (capabilities: ReadonlyArray<Capability>, reason: string) =>
     ),
   });
 
+/**
+ * The pool that each recorded scenario's credential route bills: Claude Code ran on
+ * `gateway-subscription`, Pi on `gateway`.
+ */
+const recordedPools = {
+  claude: "claudePlan",
+  pi: "apiKeys",
+} satisfies Record<SupervisorProvider, BillingPool>;
+
 const unresumable = lacking(["resume-session"], "This test's harness reopens no saved session");
 const unsteerable = lacking(["steer", "interrupt"], "This test's harness takes no interventions");
 
@@ -171,7 +182,7 @@ describe("the supervisor role", () => {
       () =>
         Effect.gen(function* () {
           const logs = collectLogs(["Info"]);
-          const { replies, entries } = yield* runSupervisorScenario(provider, "replay").pipe(
+          const { replies, entries, brain } = yield* runSupervisorScenario(provider, "replay").pipe(
             Effect.provide(logs.layer),
           );
           const [first, second] = replies;
@@ -236,6 +247,12 @@ describe("the supervisor role", () => {
             assert(session._tag === "RoleSession");
             assert.strictEqual(session.role, supervisor.name);
             assert.strictEqual(session.id, "replay-parent:child:1");
+            assert.deepStrictEqual(session.brain, brain, "the session records the brain that ran");
+            assert.deepStrictEqual(
+              session.pool,
+              Option.some(recordedPools[provider]),
+              "the seat's credential route sets the pool that pays",
+            );
             assert.isAbove(totalTokens, 0);
             for (const event of reply.events)
               assert(event.session._tag === "RoleSession", `${event._tag} keeps the role session`);
@@ -330,6 +347,47 @@ describe("the supervisor role", () => {
       );
     }
   });
+
+  it.effect("refuses a turn on a seat outside the gateway credential routes before it opens", () =>
+    Effect.gen(function* () {
+      const opened: Array<CredentialRoute> = [];
+      const unused = () => assert.fail("the supervisor turn calls only open");
+      const harnesses = Harnesses.layerFrom(HarnessCatalog.make({ descriptors: [claude] }), [
+        {
+          id: claudeBrain.harness,
+          open: (spec) => {
+            opened.push(spec.admitted.context.credential);
+            return Effect.die("a refused supervisor turn opens no session");
+          },
+          complete: unused,
+          stop: unused,
+          preflight: unused,
+        },
+      ]);
+      for (const credential of ["host-login", "api-key"] as const) {
+        const failure = yield* runSupervisorTurn(
+          SupervisorTurn.make({
+            session: conversation,
+            brain: claudeBrain,
+            seat: SupervisorSeat.make({ ...seat, credential }),
+            saved: Option.none(),
+            usage: Option.none(),
+            message: supervisorMessages[0],
+          }),
+          operatorTools,
+        ).pipe(Effect.flip, Effect.provide(Layer.merge(operatorToolHandlers, harnesses)));
+        assert(failure._tag === "SupervisorTurnError", credential);
+        assert.strictEqual(failure.reason._tag, "AgentResultError", credential);
+        assert.include(
+          failure.message,
+          "lacks credential-route (The supervisor uses the gateway credential that the instance already has)",
+          credential,
+        );
+        assert.deepStrictEqual(failure.usage, Option.none(), credential);
+      }
+      assert.deepStrictEqual(opened, [], "no refused turn opens a session");
+    }),
+  );
 
   it("runs only at the orchestrator placement", () => {
     const elsewhere = Placement.literals.filter((placement) => placement !== "orchestrator");

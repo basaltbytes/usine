@@ -112,5 +112,5 @@ export const runSupervisorScenario = (provider: SupervisorProvider, mode: "recor
     const entries: Transcript["entries"] =
       tape.source === "record" ? tape.entries : tape.source.entries;
     assert(entries.length > 0, "the scenario recorded traffic");
-    return { replies, entries };
+    return { replies, entries, brain };
   });
