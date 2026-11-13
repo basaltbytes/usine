@@ -1,5 +1,11 @@
 import { assert, describe, it } from "@effect/vitest";
-import { catalog } from "@usine/agents/harness";
+import {
+  CapabilityProfile,
+  catalog,
+  HarnessCatalog,
+  HarnessDescriptor,
+  Lacking,
+} from "@usine/agents/harness";
 import {
   type Completion,
   CompletionError,
@@ -15,22 +21,48 @@ import { Agent, DecisionBrain } from "@usine/core/agent";
 import { BrainSpec, Harness, ModelId } from "@usine/core/agent/brain";
 import {
   AgentSessionId,
+  type BillingPool,
   ChildSessionCount,
+  RoleSession,
   SessionTokensUpdated,
   TokenCount,
   UsdAmount,
 } from "@usine/core/agent/session";
 import * as AttemptChannel from "@usine/core/attempt/channel";
-import { Effect, Fiber, Formatter, Layer, Logger, Option, Schema } from "effect";
+import type { GatewayCredentialKind } from "@usine/core/worker";
+import {
+  Array as Arr,
+  DateTime,
+  Effect,
+  Fiber,
+  Formatter,
+  Layer,
+  Logger,
+  Option,
+  Schema,
+} from "effect";
 
 import { AttemptRequest } from "../src/attempt-runtime.ts";
 import {
+  AtCapacity,
   AttemptContext,
+  AttemptStarted,
+  Blocked,
+  BudgetExceeded,
+  ChildAtCapacity,
+  ChildFailed,
+  ChildInterrupted,
   ChildReported,
   Complete,
+  type CoordinatorEvent,
+  Failed,
+  InfraFailed,
+  type ModelDecision,
+  Question,
   ReservedReport,
   RetryChild,
 } from "../src/attempt/coordinator/rules.ts";
+import { childSessionId } from "../src/attempt/sessions.ts";
 import { CompletionAnswer, completionWakeUp } from "../src/coordinator/completion.ts";
 import { EventSequence } from "../src/coordinator/journal.ts";
 import {
@@ -44,11 +76,24 @@ import { recordingSink, temporaryDatabase, sqliteJournal } from "./support.ts";
 
 const DECISION_MODEL = ModelId.make("claude-haiku-4-5");
 
+/** The worker's credential for a request: the gateway's kind and the harness environment. */
+interface WorkerCredential {
+  readonly gateway?: GatewayCredentialKind;
+  readonly environment?: Readonly<Record<string, string>>;
+}
+
 /** A request whose agent decides with `DECISION_MODEL`, or without a decision brain. */
-const requestFor = (attemptId: string, decision = true, maxChildren = 3) => {
+const requestFor = (
+  attemptId: string,
+  decision = true,
+  maxChildren = 3,
+  credential: WorkerCredential = {},
+) => {
   const request = coordinated(attemptId, maxChildren);
   return AttemptRequest.make({
     ...request,
+    environment: { ...request.environment, ...credential.environment },
+    gatewayCredential: Effect.succeed(Option.fromNullishOr(credential.gateway)),
     spec: AttemptChannel.RunSpec.make({
       ...request.spec,
       agent: Agent.make({
@@ -69,7 +114,7 @@ const reported = (report: string, reserved = Option.none<ReservedReport>()) =>
     reserved,
   });
 
-const contextFor = (request: AttemptRequest, event: ChildReported) =>
+const contextFor = (request: AttemptRequest, event: CoordinatorEvent) =>
   AttemptContext.make({
     event,
     maxChildren: request.spec.maxChildren,
@@ -82,10 +127,13 @@ const contextFor = (request: AttemptRequest, event: ChildReported) =>
     output: "",
   });
 
-/** The usage that a scripted completion reports for `spec`. */
+/** The usage that a scripted completion reports for `spec`, with the pool that admission set. */
 const usageOf = (spec: SessionSpec) =>
   SessionTokensUpdated.make({
-    session: spec.session,
+    session:
+      spec.session._tag === "RoleSession" && Option.isSome(spec.admitted.pool)
+        ? RoleSession.make({ ...spec.session, pool: spec.admitted.pool })
+        : spec.session,
     totalTokens: TokenCount.make(800),
     costUsd: Option.some(UsdAmount.make(0.002)),
   });
@@ -111,10 +159,13 @@ const failing =
       }),
     );
 
-/** Harness runtimes whose completions follow `script`, recording each call's spec and prompt. */
-const harnessesWith = (script: Script) => {
+/**
+ * Harness runtimes from `harnesses` whose completions follow `script`, recording each call's spec
+ * and prompt.
+ */
+const harnessesWith = (script: Script, harnesses: HarnessCatalog = catalog) => {
   const calls: Array<{ readonly spec: SessionSpec; readonly prompt: string }> = [];
-  const runtimes = catalog.ids.map((id): HarnessRuntime => ({
+  const runtimes = harnesses.ids.map((id): HarnessRuntime => ({
     id,
     open: () => Effect.die(new Error("A completion opens no session")),
     stop: () => Effect.void,
@@ -135,19 +186,29 @@ const harnessesWith = (script: Script) => {
   return {
     calls,
     layer: completionWakeUp.pipe(
-      Layer.provide(Harnesses.layerFrom(catalog, runtimes).pipe(Layer.orDie)),
+      Layer.provide(Harnesses.layerFrom(harnesses, runtimes).pipe(Layer.orDie)),
     ),
   };
 };
 
-/** Wakes the completion handler for `event` and returns its answer and the usage it recorded. */
-const wake = (script: Script, request: AttemptRequest, event: ChildReported) =>
+/**
+ * Wakes the completion handler for `event` and returns its answer, the usage it recorded, and its
+ * logs.
+ */
+const wake = (
+  script: Script,
+  request: AttemptRequest,
+  event: CoordinatorEvent,
+  harnessCatalog: HarnessCatalog = catalog,
+) =>
   Effect.gen(function* () {
-    const harnesses = harnessesWith(script);
+    const harnesses = harnessesWith(script, harnessCatalog);
     const recorded: Array<SessionTokensUpdated> = [];
-    const logged: Array<string> = [];
+    const logged: Array<{ readonly level: string; readonly entry: string }> = [];
     const logger = Logger.layer([
-      Logger.make(({ message }) => logged.push(Formatter.format(message))),
+      Logger.make(({ logLevel, message }) =>
+        logged.push({ level: logLevel, entry: Formatter.format(message) }),
+      ),
     ]);
     const decision = yield* Effect.flatMap(Effect.service(WakeUp), (wakeUp) =>
       wakeUp.handle(event, contextFor(request, event), {
@@ -158,10 +219,13 @@ const wake = (script: Script, request: AttemptRequest, event: ChildReported) =>
         recordUsage: (usage) => Effect.sync(() => recorded.push(usage)),
       }),
     ).pipe(Effect.provide(Layer.merge(harnesses.layer, logger)));
-    /** Whether the handler logged that the rule applies because of `reason`. */
+    /** Whether the handler logged at Warning that the rule applies because of `reason`. */
     const fellBack = (reason: string) =>
-      logged.some((entry) => entry.includes("its rule applies") && entry.includes(reason));
-    return { decision, recorded, calls: harnesses.calls, fellBack };
+      logged.some(
+        ({ level, entry }) =>
+          level === "Warn" && entry.includes("its rule applies") && entry.includes(reason),
+      );
+    return { decision, recorded, calls: harnesses.calls, logged, fellBack };
   });
 
 const retry = {
@@ -173,7 +237,7 @@ describe("structured completion wake-up", () => {
   it.effect("records a valid decision with the completion's brain, route, pool, and usage", () =>
     Effect.gen(function* () {
       const request = requestFor("completion/valid");
-      const { decision, recorded, calls } = yield* wake(
+      const { decision, recorded, calls, logged } = yield* wake(
         answering(retry),
         request,
         reported("Committed the fix, but the push failed."),
@@ -212,6 +276,7 @@ describe("structured completion wake-up", () => {
         {
           id: spec.session.id,
           session: spec.session._tag,
+          parentId: spec.session._tag === "RoleSession" ? spec.session.parentId : Option.none(),
           role: spec.admitted.role.name,
           brain: spec.session.brain,
           placement: spec.admitted.context.placement,
@@ -223,6 +288,7 @@ describe("structured completion wake-up", () => {
         {
           id: AgentSessionId.make("parent:completion/valid:decision:2"),
           session: "RoleSession",
+          parentId: Option.some(childSessionId(request.spec.attemptId, ChildSessionCount.make(1))),
           role: "decision-completion",
           brain,
           placement: "local",
@@ -237,6 +303,185 @@ describe("structured completion wake-up", () => {
         recorded.map(({ session, totalTokens }) => [session.id, totalTokens]),
         [[spec.session.id, 800]],
       );
+      assert.isTrue(
+        logged.some(
+          ({ level, entry }) =>
+            level === "Info" &&
+            entry.includes("The structured completion decided the event") &&
+            entry.includes(retry.reason),
+        ),
+      );
+    }),
+  );
+
+  const branches: ReadonlyArray<readonly [string, Schema.Json, ModelDecision]> = [
+    [
+      "Complete with a message",
+      { _tag: "Complete", message: "Opened #12." },
+      Complete.make({ message: "Opened #12." }),
+    ],
+    [
+      "RetryChild without an assignment",
+      { _tag: "RetryChild", assignment: null },
+      RetryChild.make({}),
+    ],
+    ["Blocked without a message", { _tag: "Blocked", message: null }, Blocked.make({})],
+    [
+      "Blocked with a message",
+      { _tag: "Blocked", message: "No access." },
+      Blocked.make({ message: "No access." }),
+    ],
+    [
+      "Question",
+      { _tag: "Question", question: "Which branch?" },
+      Question.make({ question: "Which branch?" }),
+    ],
+    [
+      "Failed",
+      { _tag: "Failed", message: "The tests fail." },
+      Failed.make({ message: "The tests fail." }),
+    ],
+    [
+      "InfraFailed",
+      { _tag: "InfraFailed", message: "The checkout is gone." },
+      InfraFailed.make({ message: "The checkout is gone." }),
+    ],
+    [
+      "AtCapacity without a reset time",
+      { _tag: "AtCapacity", message: "Usage limit.", resetsAt: null },
+      AtCapacity.make({ message: "Usage limit." }),
+    ],
+    [
+      "AtCapacity with a reset time",
+      { _tag: "AtCapacity", message: "Usage limit.", resetsAt: "2026-11-13T15:00:00.000Z" },
+      AtCapacity.make({
+        message: "Usage limit.",
+        resetsAt: DateTime.makeUnsafe("2026-11-13T15:00:00Z"),
+      }),
+    ],
+  ];
+
+  for (const [name, answer, expected] of branches) {
+    it.effect(`decides ${name} as the answer states`, () =>
+      Effect.gen(function* () {
+        const { decision } = yield* wake(
+          answering({ decision: answer, reason: "The report says so." }),
+          requestFor(`completion/branch-${expected._tag}`),
+          reported("Stopped before the push."),
+        );
+
+        assert.deepStrictEqual(
+          Option.map(decision, ({ decision }) => decision),
+          Option.some(expected),
+        );
+      }),
+    );
+  }
+
+  const routes: ReadonlyArray<readonly [WorkerCredential, string, Option.Option<BillingPool>]> = [
+    [{ gateway: "api-key" }, "gateway-api-key", Option.some("apiKeys")],
+    [{ gateway: "subscription" }, "gateway-subscription", Option.some("claudePlan")],
+    [{ environment: { ANTHROPIC_API_KEY: "sk-test" } }, "api-key", Option.none()],
+    [{}, "host-login", Option.none()],
+  ];
+
+  for (const [credential, route, pool] of routes) {
+    it.effect(`admits and records the child's ${route} credential route`, () =>
+      Effect.gen(function* () {
+        const { decision, calls } = yield* wake(
+          answering(retry),
+          requestFor(`completion/route-${route}`, true, 3, credential),
+          reported("Committed the fix, but the push failed."),
+        );
+
+        const [call] = calls;
+        if (call === undefined) return assert.fail("The handler called no completion");
+        assert.deepStrictEqual(
+          {
+            admitted: call.spec.admitted.context.credential,
+            pool: call.spec.admitted.pool,
+            recorded: Option.map(
+              Option.flatMap(decision, ({ session }) => session),
+              (session) => session.route,
+            ),
+          },
+          { admitted: route, pool, recorded: Option.some(route) },
+        );
+        if (Option.isSome(pool))
+          assert.deepStrictEqual(
+            Option.map(
+              Option.flatMap(decision, ({ session }) => session),
+              (session) => session.pool,
+            ),
+            pool,
+          );
+      }),
+    );
+  }
+
+  it.effect("leaves every event other than a report to the rule without a model call", () =>
+    Effect.gen(function* () {
+      const child = ChildSessionCount.make(1);
+      const events: ReadonlyArray<CoordinatorEvent> = [
+        AttemptStarted.make({}),
+        ChildFailed.make({ child, message: "The worker lost its transport." }),
+        ChildInterrupted.make({ child, reason: "The checkout is gone." }),
+        ChildAtCapacity.make({ child, message: "Usage limit.", resetsAt: Option.none() }),
+        BudgetExceeded.make({ child, attempted: ChildSessionCount.make(4) }),
+      ];
+
+      for (const event of events) {
+        const { decision, calls, recorded } = yield* wake(
+          answering({ decision: { _tag: "Complete", message: "Done." }, reason: "Done." }),
+          requestFor(`completion/event-${event._tag}`),
+          event,
+        );
+
+        assert.isTrue(Option.isNone(decision), event._tag);
+        assert.strictEqual(calls.length, 0, event._tag);
+        assert.strictEqual(recorded.length, 0, event._tag);
+      }
+    }),
+  );
+
+  it.effect("falls back to the rule when admission refuses the decision brain", () =>
+    Effect.gen(function* () {
+      const harness = Harness.make("claude");
+      const claude = Option.getOrThrow(catalog.get(harness));
+      const withoutStructuredOutput = HarnessDescriptor.make({
+        ...claude,
+        capabilities: Arr.map(claude.capabilities, (profile) =>
+          CapabilityProfile.make({
+            ...profile,
+            supported: profile.supported.filter((capability) => capability !== "structured-output"),
+            lacking: [
+              ...profile.lacking,
+              Lacking.make({
+                capability: "structured-output",
+                reason: "The test harness returns no structured value",
+              }),
+            ],
+          }),
+        ),
+      });
+      const refusing = HarnessCatalog.make({
+        descriptors: catalog.descriptors.map((descriptor) =>
+          descriptor.id === harness ? withoutStructuredOutput : descriptor,
+        ),
+      });
+
+      const { decision, calls, recorded, fellBack } = yield* wake(
+        answering(retry),
+        requestFor("completion/refused-admission"),
+        reported("Committed the fix, but the push failed."),
+        refusing,
+      );
+
+      assert.isTrue(Option.isNone(decision));
+      assert.strictEqual(calls.length, 0);
+      assert.strictEqual(recorded.length, 0);
+      assert.isTrue(fellBack("claude cannot run as decision-completion at local"));
+      assert.isTrue(fellBack("The test harness returns no structured value"));
     }),
   );
 
@@ -378,6 +623,11 @@ describe("structured completion wake-up", () => {
         assert.strictEqual(calls.length, 0);
         assert.strictEqual(recorded.length, 0);
       }
+      assert.isTrue(
+        withoutBrain.logged.some(
+          ({ level, entry }) => level === "Info" && entry.includes("has no decision brain"),
+        ),
+      );
     }),
   );
 

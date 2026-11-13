@@ -147,7 +147,7 @@ const make = Effect.gen(function* () {
     if (event._tag !== "ChildReported" || !modelEligible(event)) return Option.none();
     const agent = attempt.spec.agent;
     if (Option.isNone(agent.decision)) {
-      yield* Effect.logDebug("The agent has no decision brain; the event's rule applies", {
+      yield* Effect.logInfo("The agent has no decision brain; the event's rule applies", {
         attemptId,
         sequence,
         agent: agent.name,
