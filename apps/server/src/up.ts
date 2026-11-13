@@ -4,7 +4,7 @@ import { ProviderLogins } from "./providers/control.ts";
 import { providerLoginRunnerLayer } from "./providers/runner.ts";
 import type { StepOutputStore } from "@usine/engine/step-outputs";
 import { changeBusLayer } from "@usine/core/changes";
-import { listenForStartup, listenThenBuild, type StartupListener } from "./listener.ts";
+import { listenForStartup, type StartupListener } from "./listener.ts";
 import { memberAccessLayer } from "./auth/access.ts";
 import { Setup } from "./setup/control.ts";
 import { webhookEndpoint } from "./webhooks.ts";
@@ -66,7 +66,6 @@ import {
   VolatileInstanceDirectoryError,
   openBrowser,
   packageVersion,
-  refuseTakenPort,
   volatileRoot,
   volatileRoots,
 } from "./cli.ts";
@@ -175,6 +174,7 @@ const start = Effect.fnUntraced(function* (
   >,
   configurationEditor: ConfigurationEditor["Service"],
   auth: AuthServices,
+  listener: StartupListener,
 ) {
   yield* reloadOnHangup(instances);
   const credentials = yield* loadLocalCredentials(directory).pipe(Effect.result);
@@ -209,7 +209,6 @@ const start = Effect.fnUntraced(function* (
       message: error.message,
       instanceDirectory: directory,
     });
-    const listener = yield* listenForStartup(port, record.version);
     const observationContext = yield* Layer.build(operatorObservationLayer(directory, database));
     const backend = needsSetupBackendLayer(
       instances,
@@ -254,7 +253,7 @@ const start = Effect.fnUntraced(function* (
       Layer.provide(Layer.succeed(GitHubCredentials, credentials.success)),
       Layer.provide(Layer.succeed(CurrentInstance, instances)),
     );
-    const { listener, context } = yield* listenThenBuild(port, record.version, runtime).pipe(
+    const context = yield* Layer.build(runtime).pipe(
       Effect.provideService(RunEngineShutdown, shutdown),
     );
     const webhooks = yield* webhookEndpoint(
@@ -357,7 +356,7 @@ export const up = (command: UpCommand) =>
         // Acquired before any store opens and released after every store closes.
         yield* holdInstance(directory, record);
         const instanceId = yield* instanceIdOf(instanceFiles(directory));
-        yield* refuseTakenPort(port);
+        const listener = yield* listenForStartup(port, record.version);
         if (process.platform === "darwin") yield* warnIfSystemSleeps();
         const databaseContext = yield* Layer.build(localSqliteLayer(directory));
         const database = Layer.succeedContext(databaseContext);
@@ -434,6 +433,7 @@ export const up = (command: UpCommand) =>
           database,
           configurationEditor,
           auth,
+          listener,
         ).pipe(
           Effect.scoped,
           Effect.forever,
