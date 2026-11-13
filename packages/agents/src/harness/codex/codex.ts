@@ -481,6 +481,8 @@ const makeCodexSessions = Effect.gen(function* () {
         sessionId: session.id,
         threadId: thread.id,
       });
+      // The lost process no longer waits for its calls; the resumed thread sends them again.
+      yield* tools.cancelAll;
       const restored = yield* policy.reopen(
         Effect.gen(function* () {
           connection = yield* appServer.open({
@@ -622,6 +624,8 @@ const makeCodexSessions = Effect.gen(function* () {
             }
             const tool = yield* decodeNotifiedToolItem(session.id, item);
             if (Option.isNone(tool)) return;
+            // Codex completes the item of a call that it cancelled without waiting for the answer.
+            yield* tools.cancel(tool.value.id);
             toolsInFlight.delete(tool.value.id);
             yield* channel.emit(
               ToolFinished.make({
@@ -699,6 +703,7 @@ const makeCodexSessions = Effect.gen(function* () {
             turnActive = false;
             const wasInterrupted = interrupting;
             interrupting = false;
+            yield* tools.cancelAll;
             toolsInFlight.clear();
             const hasNewGuidance = pendingMessages.length > 0;
             const unread = submitted.splice(0).filter((input) => input.id !== undefined);
