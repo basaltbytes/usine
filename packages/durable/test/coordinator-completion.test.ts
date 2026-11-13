@@ -31,6 +31,7 @@ import {
   UsdAmount,
 } from "@usine/core/agent/session";
 import * as AttemptChannel from "@usine/core/attempt/channel";
+import { AWAITING_CI_MARKER, ciHandoff } from "@usine/core/ci";
 import { type GatewayCredentialKind, MachineId } from "@usine/core/worker";
 import {
   Array as Arr,
@@ -238,6 +239,10 @@ const wake = (
       );
     return { decision, recorded, calls: harnesses.calls, logged, fellBack };
   });
+
+/** A child's final report that hands CI off to usine. */
+const handoff = `${AWAITING_CI_MARKER}
+{"pull_request":12,"head":"${"a".repeat(40)}","fix_loop":"act-on-findings","timeout_seconds":1800,"on_green":[{"item":12,"add":["ready-for-review"],"remove":[]}]}`;
 
 const retry = {
   decision: { _tag: "RetryChild", assignment: "Push the branch you committed." },
@@ -823,6 +828,26 @@ describe("structured completion wake-up", () => {
     }),
   );
 
+  it.effect("leaves a report that hands CI off to the rule without a model call", () =>
+    Effect.gen(function* () {
+      const { decision, calls, recorded, logged } = yield* wake(
+        answering({
+          decision: { _tag: "Complete", message: "Opened #12 and handed CI off to usine." },
+          reason: "The pull request is open.",
+        }),
+        requestFor("completion/handoff"),
+        reported(`\n${handoff}`),
+      );
+
+      assert.isTrue(Option.isNone(decision));
+      assert.strictEqual(calls.length, 0);
+      assert.strictEqual(recorded.length, 0);
+      assert.isTrue(
+        logged.some(({ level, entry }) => level === "Info" && entry.includes("hands CI off")),
+      );
+    }),
+  );
+
   it("offers one branch per ModelDecision tag", () => {
     const decision = CompletionAnswer.fields.decision;
     assert.deepStrictEqual(
@@ -889,5 +914,40 @@ describe("coordinator with the structured completion", () => {
         ])
           assert.include(call.prompt, part);
       }).pipe(Effect.scoped),
+  );
+
+  it.live("relays a child's CI handoff as the Attempt's message without a model call", () =>
+    Effect.gen(function* () {
+      const database = yield* temporaryDatabase;
+      const coordinatedRequest = requestFor("completion/coordinator-handoff");
+      const request = AttemptRequest.make({
+        ...coordinatedRequest,
+        spec: AttemptChannel.RunSpec.make({ ...coordinatedRequest.spec, requiresCi: true }),
+      });
+      const harnesses = harnessesWith(
+        answering({
+          decision: { _tag: "Complete", message: "Opened #12 and handed CI off to usine." },
+          reason: "The pull request is open.",
+        }),
+      );
+      const recording = recordingSink();
+      const process = yield* orchestrator(
+        coordinatorLayer.pipe(
+          Layer.provide(harnesses.registry),
+          Layer.provide(SqliteClient.layer({ filename: database })),
+          Layer.orDie,
+          Layer.provideMerge(stubChildBackendLayer),
+        ),
+      );
+      const execution = yield* process.execute(request, recording.sink);
+      yield* (yield* process.nextChild).reply(handoff);
+      const report = yield* Fiber.join(execution);
+      yield* process.stop;
+      const relayed = ciHandoff(report.message);
+
+      assert.strictEqual(report.message, handoff);
+      assert.strictEqual(harnesses.calls.length, 0);
+      assert.isTrue(relayed._tag === "Success" && Option.isSome(relayed.success));
+    }).pipe(Effect.scoped),
   );
 });

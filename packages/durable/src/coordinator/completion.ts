@@ -24,6 +24,7 @@ import {
   Complete,
   type CoordinatorEvent,
   Failed,
+  handsOffCi,
   InfraFailed,
   type ModelDecision,
   modelEligible,
@@ -173,7 +174,16 @@ const make = Effect.gen(function* () {
   ) {
     const { attemptId, sequence } = attempt;
     yield* Effect.annotateCurrentSpan({ attemptId, sequence, event: event._tag });
-    if (event._tag !== "ChildReported" || !modelEligible(event)) return Option.none();
+    if (event._tag !== "ChildReported") return Option.none();
+    if (handsOffCi(event)) {
+      yield* Effect.logInfo("The child's report hands CI off; the event's rule relays it", {
+        attemptId,
+        sequence,
+        child: event.child,
+      });
+      return Option.none();
+    }
+    if (!modelEligible(event)) return Option.none();
     const agent = attempt.spec.agent;
     if (Option.isNone(agent.decision)) {
       yield* Effect.logInfo("The agent has no decision brain; the event's rule applies", {
