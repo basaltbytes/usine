@@ -70,7 +70,7 @@ const readOnReopen = Layer.effectContext(
   }),
 ).pipe(Layer.provide(stubChildBackendLayer));
 
-for (const failure of ["harness-mismatch", "native-reopen"] as const) {
+for (const failure of ["harness-mismatch", "native-reopen", "spawn-count"] as const) {
   it.live(`returns a restored forwarded steer to the parent after ${failure}`, () =>
     Effect.gen(function* () {
       const database = yield* temporaryDatabase;
@@ -120,9 +120,9 @@ for (const failure of ["harness-mismatch", "native-reopen"] as const) {
               action: AttemptChannel.Steer.make({ message: "Fix the third finding." }),
             }),
           );
-          if (failure === "harness-mismatch")
+          if (failure !== "native-reopen")
             yield* Context.get(services, DurableHarness).use(
-              "change the saved harness",
+              "change the saved delegation",
               (opened, context) =>
                 opened.commit(async (tx) => {
                   const tasks = await tx.scanTasks({ kind: "pi.tool" }, 100);
@@ -130,7 +130,10 @@ for (const failure of ["harness-mismatch", "native-reopen"] as const) {
                   assert(task !== undefined);
                   const record = await tx.doc(SubagentDoc, task.id);
                   assert(record.saved !== null);
-                  Object.assign(record.saved.session.brain, { harness: "codex" });
+                  if (failure === "harness-mismatch")
+                    Object.assign(record.saved.session.brain, { harness: "codex" });
+                  // The replay's spawn-count commit then fails before it restores the inputs.
+                  else Object.assign(record, { inFlight: "unreadable" });
                 }, context),
             );
           yield* Fiber.interrupt(execution);

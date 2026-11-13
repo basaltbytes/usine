@@ -9,6 +9,7 @@ import {
   type Page,
   type TaskId,
   type TaskRecord,
+  ToolResultEntry,
   UsageDoc,
   UserEntry,
 } from "@earendil-works/pi-durable";
@@ -317,7 +318,8 @@ const returnSteerToParent = Effect.fn("AttemptRelay.returnSteerToParent")(functi
 
 /**
  * Returns the child sessions whose `subagent` calls have not returned. A replayed call restores its
- * child's queued inputs and settles them when it ends.
+ * child's queued inputs and settles them when it ends. A call that fails before it restores them
+ * leaves them to the delivery pass that its tool result starts.
  */
 const unfinishedChildren = Effect.fn("AttemptRelay.unfinishedChildren")(function* (
   durable: DurableHarness["Service"],
@@ -690,7 +692,8 @@ export const relayAttempt = Effect.fn("AttemptRelay.relay")(function* (
     const session = Option.flatMap(started, ({ parent }) => parent);
     if (Option.isNone(session) || Option.isNone(hub.parent)) return;
     const parent = hub.parent.value;
-    let placedInput = false;
+    // A placed input or a returned `subagent` call can settle queued operator inputs.
+    let settles = false;
     let next = Option.none<Cursor>();
     do {
       const query = entryQuery(progress().entry + 1, bound);
@@ -705,7 +708,7 @@ export const relayAttempt = Effect.fn("AttemptRelay.relay")(function* (
         },
       );
       for (const entry of found.items) {
-        if (entry.kind === UserEntry.kind) placedInput = true;
+        if (entry.kind === UserEntry.kind || entry.kind === ToolResultEntry.kind) settles = true;
         const events = entryEvents(entry, session.value);
         if (events.length === 0) {
           progress().entry = entry.id;
@@ -721,7 +724,7 @@ export const relayAttempt = Effect.fn("AttemptRelay.relay")(function* (
       next = Option.fromNullishOr(found.next);
     } while (Option.isSome(next));
     yield* relayTokens(session.value);
-    if (placedInput) yield* deliveries("live");
+    if (settles) yield* deliveries("live");
   });
 
   const relayEvent = Effect.fn("AttemptRelay.event")(function* (event: AgentSessionEvent) {
