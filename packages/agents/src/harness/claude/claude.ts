@@ -703,15 +703,16 @@ const makeClaudeSessions = Effect.gen(function* () {
       );
     });
     /**
-     * Cancels the running wait limit, or drops the answer that a passed limit kept for a Release,
-     * and logs `reason` if either existed.
+     * Cancels the running wait limit and logs `reason` if a wait ran. A started turn also drops the
+     * answer that a passed limit kept for a Release; a process resume keeps it, so that the
+     * recovery reports it.
      */
     const resumeTurn = Effect.fn("ClaudeRuntime.resumeTurn")(function* (
       reason: "turn started" | "process resumed",
     ) {
       const wait = yield* FiberHandle.get(backgroundWait);
       if (Option.isSome(wait)) yield* FiberHandle.clear(backgroundWait);
-      const dropped = yield* conversation.dropOverdue;
+      const dropped = reason === "turn started" && (yield* conversation.dropOverdue);
       if (Option.isNone(wait) && !dropped) return;
       yield* Effect.annotateCurrentSpan({ sessionId: session.id });
       yield* Effect.logInfo("Claude child cancelled the wait limit for its background work", {

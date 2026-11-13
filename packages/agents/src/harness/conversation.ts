@@ -300,7 +300,7 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
     /**
      * Runs `announce` and then finishes with `message`, an answer whose wait limit passed, if the
      * session is neither held nor paused. Otherwise keeps `message`, without reporting the session
-     * idle, for a later Release, and returns `false`.
+     * idle, for a later Release or for the recovery after a process resume, and returns `false`.
      */
     finishOverdue: (message: string, announce: Effect.Effect<void>) =>
       mutex.withPermits(1)(
@@ -335,8 +335,17 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
         return yield* Effect.logDebug("Skipping continuation of a terminal child", {
           sessionId: session.id,
         });
-      if ((held || paused) && Option.isNone(idle))
-        yield* finish("Session interrupted before its turn returned");
+      if ((held || paused) && Option.isNone(idle)) {
+        if (Option.isSome(overdue)) {
+          const answer = overdue.value;
+          overdue = Option.none();
+          yield* Effect.logInfo(
+            "The recovered session reports the answer whose wait limit passed",
+            { sessionId: session.id, held, paused },
+          );
+          yield* finish(answer);
+        } else yield* finish("Session interrupted before its turn returned");
+      }
       for (const { id } of queued) unsent.add(id);
       yield* policy.recover(
         { held, paused, idle: Option.isSome(idle), empty },

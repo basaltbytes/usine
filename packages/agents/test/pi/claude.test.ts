@@ -2442,6 +2442,59 @@ describe("Claude child backend", () => {
           yield* running.intervene(Release.make(), noDelivery);
           yield* TestClock.adjust("5 minutes");
           assert.isUndefined(result.pollUnsafe(), "a Release does not end a paused child");
+          assert.notInclude(events, "SessionIdle", "a Release does not report a paused child idle");
+          assert.isFalse(
+            logs.lines.some((line) => line.includes("returning its answer")),
+            "a Release keeps a paused child's answer",
+          );
+        }).pipe(
+          Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk), Layer.provideMerge(logs.layer))),
+          Effect.scoped,
+        );
+      }),
+    );
+
+    it.effect("drops the kept answer when an operator message starts a turn", () =>
+      Effect.gen(function* () {
+        const { output, sdk } = yield* openOutput([
+          { type: "system", subtype: "session_state_changed", state: "running" },
+          gate,
+          answered("Waiting for CI"),
+          { type: "system", subtype: "session_state_changed", state: "idle" },
+        ]);
+        const logs = infoLines();
+        yield* Effect.gen(function* () {
+          const running = yield* (yield* ChildBackend).launch(
+            ChildRequest.make({ ...request(), held: true }),
+          );
+          const events: Array<string> = [];
+          yield* Effect.forkScoped(
+            running.events.pipe(
+              Stream.runForEach((event) => Effect.sync(() => events.push(event._tag))),
+            ),
+          );
+          const result = yield* Effect.forkChild(running.result);
+          while (!waiting(logs.lines)) yield* Effect.yieldNow;
+          yield* TestClock.adjust("2 minutes");
+          while (!supervisedLimit(logs.lines)) yield* Effect.yieldNow;
+          yield* running.intervene(OperatorMessage.make({ message: "Is CI done?" }), noDelivery);
+          assert.isTrue(
+            logs.lines.some((line) =>
+              line.includes("The operator's input starts a turn; dropping the overdue answer"),
+            ),
+          );
+          // The Release lands before Claude's first frame of the message's turn.
+          yield* running.intervene(Release.make(), noDelivery);
+          yield* TestClock.adjust("5 minutes");
+          assert.isUndefined(result.pollUnsafe(), "a Release does not return the dropped answer");
+          assert.notInclude(events, "SessionFinished");
+          yield* Queue.offerAll(output, [
+            { type: "system", subtype: "background_tasks_changed", tasks: [] },
+            { type: "system", subtype: "session_state_changed", state: "running" },
+            answered("CI is still running"),
+            { type: "system", subtype: "session_state_changed", state: "idle" },
+          ]);
+          assert.strictEqual((yield* Fiber.join(result)).message, "CI is still running");
         }).pipe(
           Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk), Layer.provideMerge(logs.layer))),
           Effect.scoped,
@@ -2520,35 +2573,41 @@ describe("Claude child backend", () => {
       }),
     );
 
+    const lost = { type: "test_process_lost" };
+    /** A Claude SDK whose launches each read a new queue, and throw `ChildProcessLost` on `lost`. */
+    const resumableSdk = Effect.gen(function* () {
+      const outputs: Array<Queue.Queue<Schema.Json, Cause.Done>> = [];
+      const context = yield* Effect.context<never>();
+      const sdk = Layer.succeed(ClaudeSdk)({
+        open: (input) => {
+          const output = Effect.runSyncWith(context)(Queue.make<Schema.Json, Cause.Done>());
+          outputs.push(output);
+          void (async () => {
+            for await (const _message of input) Queue.offerUnsafe(output, rateLimitEvent);
+          })();
+          return {
+            ...scripted([]),
+            close: () => Queue.endUnsafe(output),
+            async *[Symbol.asyncIterator]() {
+              for (;;) {
+                const next = await Effect.runPromiseWith(context)(
+                  Effect.option(Queue.take(output)),
+                );
+                if (Option.isNone(next)) return;
+                if (next.value === lost)
+                  throw ChildProcessLost.make({ exitCode: 255, stderrTail: "" });
+                yield next.value;
+              }
+            },
+          };
+        },
+      });
+      return { outputs, sdk };
+    });
+
     it.effect("returns the continuation's answer after a process resume within the limit", () =>
       Effect.gen(function* () {
-        const outputs: Array<Queue.Queue<Schema.Json, Cause.Done>> = [];
-        const lost = { type: "test_process_lost" };
-        const context = yield* Effect.context<never>();
-        const sdk = Layer.succeed(ClaudeSdk)({
-          open: (input) => {
-            const output = Effect.runSyncWith(context)(Queue.make<Schema.Json, Cause.Done>());
-            outputs.push(output);
-            void (async () => {
-              for await (const _message of input) Queue.offerUnsafe(output, rateLimitEvent);
-            })();
-            return {
-              ...scripted([]),
-              close: () => Queue.endUnsafe(output),
-              async *[Symbol.asyncIterator]() {
-                for (;;) {
-                  const next = await Effect.runPromiseWith(context)(
-                    Effect.option(Queue.take(output)),
-                  );
-                  if (Option.isNone(next)) return;
-                  if (next.value === lost)
-                    throw ChildProcessLost.make({ exitCode: 255, stderrTail: "" });
-                  yield next.value;
-                }
-              },
-            };
-          },
-        });
+        const { outputs, sdk } = yield* resumableSdk;
         const logs = infoLines();
         yield* Effect.gen(function* () {
           const session = yield* (yield* ChildBackend).launch(
@@ -2565,6 +2624,46 @@ describe("Claude child backend", () => {
           assert.isUndefined(result.pollUnsafe(), "the continuation turn keeps the child open");
           yield* Queue.offer(outputs.at(-1)!, answered("Continued"));
           assert.strictEqual((yield* Fiber.join(result)).message, "Continued");
+        }).pipe(
+          Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk), Layer.provideMerge(logs.layer))),
+          Effect.scoped,
+        );
+      }),
+    );
+
+    it.effect("returns the kept answer on a Release after a process resume", () =>
+      Effect.gen(function* () {
+        const { outputs, sdk } = yield* resumableSdk;
+        const logs = infoLines();
+        yield* Effect.gen(function* () {
+          const running = yield* (yield* ChildBackend).launch(
+            ChildRequest.make({ ...request(undefined, undefined, exitingHost(0)), held: true }),
+          );
+          const events: Array<string> = [];
+          yield* Effect.forkScoped(
+            running.events.pipe(
+              Stream.runForEach((event) => Effect.sync(() => events.push(event._tag))),
+            ),
+          );
+          const result = yield* Effect.forkChild(running.result);
+          yield* Queue.offerAll(outputs[0]!, [gate, answered("Waiting for CI")]);
+          while (!waiting(logs.lines)) yield* Effect.yieldNow;
+          yield* TestClock.adjust("2 minutes");
+          while (!supervisedLimit(logs.lines)) yield* Effect.yieldNow;
+          yield* Queue.offer(outputs[0]!, lost);
+          while (!logs.lines.some((line) => line.includes("Resumed the Claude child's session")))
+            yield* Effect.yieldNow;
+          assert.isTrue(
+            logs.lines.some((line) =>
+              line.includes("The recovered session reports the answer whose wait limit passed"),
+            ),
+          );
+          // The recovery reports the kept answer.
+          while (!events.includes("SessionIdle")) yield* Effect.yieldNow;
+          yield* TestClock.adjust("5 minutes");
+          assert.isUndefined(result.pollUnsafe(), "the Hold keeps the child open");
+          yield* running.intervene(Release.make(), noDelivery);
+          assert.strictEqual((yield* Fiber.join(result)).message, "Waiting for CI");
         }).pipe(
           Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk), Layer.provideMerge(logs.layer))),
           Effect.scoped,
