@@ -213,8 +213,12 @@ What a session does for usine, such as the coordinator, the coding agent, or the
 _Avoid_: agent type, mode, persona
 
 **Supervisor**:
-The role that observes and operates the factory for a member, with the operator tools that the member's token allows. It runs on the orchestrator with the instance's `supervisor` brain and keeps its conversation between turns.
+The role that observes and operates the factory for a member, with the operator tools that the member's token allows, and reads the instance's source. It runs in the supervisor sandbox with the instance's `supervisor` brain and keeps its conversation between turns.
 _Avoid_: orchestrator agent, assistant, operator agent
+
+**Supervisor sandbox**:
+The container on the orchestrator host that each supervisor turn runs in, with the instance's source read-only, no instance secret, and no network but the instance's model route.
+_Avoid_: jail, supervisor VM
 
 **Usine tool set**:
 The tools that usine gives a session through the harness contract, defined once as a toolkit. The role that opens the session supplies their handlers, so it decides what each call can reach.

@@ -1,3 +1,4 @@
+import { Option } from "effect";
 import { claude } from "./claude/descriptor.ts";
 import { codex } from "./codex/descriptor.ts";
 import { HarnessCatalog, HarnessPresentation } from "./harness.ts";
@@ -20,8 +21,9 @@ export const workerImageInputs = (source: HarnessCatalog) => {
 };
 
 /** Metadata for operator clients, in catalog order. */
-export const harnessPresentations = catalog.descriptors.map((descriptor) =>
-  HarnessPresentation.make(descriptor),
+export const harnessPresentations = catalog.descriptors.map(
+  ({ id, label, handoff, ownToolsKept }) =>
+    HarnessPresentation.make({ id, label, handoff, ownTools: Option.getOrNull(ownToolsKept) }),
 );
 
 export { admitBrain, AdmittedBrain, AdmissionContext, BrainRefused } from "./admission.ts";

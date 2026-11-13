@@ -1,4 +1,5 @@
 import { capabilitiesQuery } from "~/lib/configuration/capabilities";
+import { harnessPresentations } from "@usine/agents/harness";
 import { Harness, ModelId } from "@usine/core/agent/brain";
 import { administratorPermissions } from "@usine/core/access";
 import { PermissionsContext } from "~/lib/permissions";
@@ -615,6 +616,9 @@ describe("Settings page", () => {
                 harness: Harness.make("claude"),
                 model: ModelId.make("claude-sonnet-5-5"),
                 effort: "medium",
+                ownTools: null,
+                unavailable:
+                  "Supervisor sessions run in a container, and Podman or Docker isn't installed on the orchestrator host",
               },
             }),
           })}
@@ -622,6 +626,39 @@ describe("Settings page", () => {
       )),
     );
     assert.include(page, "settings.supervisor claude claude-sonnet-5-5 medium");
+    assert.include(page, "Supervisor tools Read and search The harness lists only its tools");
+    assert.include(
+      page,
+      "Supervisor container Unavailable Supervisor sessions run in a container, and Podman or Docker isn't installed on the orchestrator host.",
+    );
+  });
+
+  it("notes a supervisor harness whose own tools stay on", async () => {
+    const configuration = configurationFixture();
+    const page = text(
+      await render(() => (
+        <SettingsPage
+          configuration={ConfigurationView.make({
+            ...configuration,
+            settings: SettingsView.make({
+              ...configuration.settings,
+              supervisor: {
+                harness: Harness.make("codex"),
+                model: ModelId.make("gpt-5.6-terra"),
+                effort: "medium",
+                ownTools: "The harness lists its own tools in every thread",
+                unavailable: null,
+              },
+            }),
+          })}
+        />
+      )),
+    );
+    assert.include(
+      page,
+      "Supervisor tools All of the harness's own tools The harness's own tools stay on, and the read-only container limits what they reach: The harness lists its own tools in every thread.",
+    );
+    assert.include(page, "Supervisor container Available");
   });
 
   it("lists settings, the operator, the webhooks mode, and tracing with what each does", async () => {
@@ -727,6 +764,27 @@ describe("Configuration forms", () => {
       '<option value="medium" selected="">',
     );
     assert.include(text(markup), "The harness must serve usine tool sets.");
+    assert.notInclude(text(markup), "own tools stay on", "Claude Code lists only its read tools");
+
+    const kept = harnessPresentations.find(({ id }) => id === "codex")?.ownTools;
+    assert(kept !== undefined && kept !== null, "the descriptor says why Codex keeps its tools");
+    const codex = text(
+      await render(() => (
+        <SettingsFields
+          value={{
+            settings: {
+              supervisor: { harness: "codex", model: "gpt-5.6-terra", effort: "medium" },
+            },
+          }}
+          onChange={noop}
+          problems={[]}
+        />
+      )),
+    );
+    assert.include(
+      codex,
+      `The harness's own tools stay on, and the read-only container limits what they reach: ${kept}.`,
+    );
   });
 
   it("edits an Agent's coordinator in the agent form", async () => {

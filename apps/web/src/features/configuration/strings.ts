@@ -286,7 +286,19 @@ export const supervisorCopy = {
   notConfigured: "Not configured",
   unsetEffect: "The instance runs no supervisor. Set settings.supervisor to start one.",
   effect:
-    "The harness, model, and effort of the supervisor, which observes and operates the factory with the operator tools that a member's token allows.",
+    "The harness, model, and effort of the supervisor, which observes and operates the factory with the operator tools that a member's token allows, and reads the instance's source.",
+  toolsKey: "Supervisor tools",
+  readTools: "Read and search",
+  readToolsEffect:
+    "The harness lists only its tools that read and search files, in the supervisor's read-only container.",
+  ownTools: "All of the harness's own tools",
+  ownToolsEffect: (reason: string) =>
+    `The harness's own tools stay on, and the read-only container limits what they reach: ${reason}.`,
+  sandboxKey: "Supervisor container",
+  available: "Available",
+  availableEffect:
+    "Supervisor sessions run in a read-only container on the orchestrator host, with no network but the model route.",
+  unavailable: "Unavailable",
 };
 
 export const coordinatorCopy = {
@@ -435,7 +447,7 @@ export const settingsExtraCopy = {
   supervisor: "Run a supervisor",
   supervisorHarness: "Supervisor harness",
   supervisorHarnessHint:
-    "Runs the supervisor on the orchestrator with the instance's gateway credential. The harness must serve usine tool sets.",
+    "Runs the supervisor in a read-only container on the orchestrator, with the instance's gateway credential. The harness must serve usine tool sets.",
   supervisorModel: "Supervisor model",
   supervisorEffort: "Supervisor effort",
   publicUrl: "Public webhook URL",

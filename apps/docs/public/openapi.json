@@ -46046,12 +46046,36 @@
                       "xhigh",
                       "max"
                     ]
+                  },
+                  "ownTools": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "unavailable": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   }
                 },
                 "required": [
                   "harness",
                   "model",
-                  "effort"
+                  "effort",
+                  "ownTools",
+                  "unavailable"
                 ],
                 "additionalProperties": false
               },
@@ -48192,12 +48216,24 @@
                 "type": "null"
               }
             ]
+          },
+          "ownTools": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
           "id",
           "label",
-          "handoff"
+          "handoff",
+          "ownTools"
         ],
         "additionalProperties": false
       },

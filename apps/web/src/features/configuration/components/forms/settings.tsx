@@ -4,11 +4,21 @@ import { Checkbox } from "~/components/ui/checkbox";
 import { Label } from "~/components/ui/label";
 import { capabilitiesQuery } from "~/lib/configuration/capabilities";
 import { type FormFieldsProps, fieldValue, withField } from "~/features/configuration/lib/forms";
-import { formCopy, settingsFormFields, settingsExtraCopy } from "~/features/configuration/strings";
+import {
+  formCopy,
+  settingsFormFields,
+  settingsExtraCopy,
+  supervisorCopy,
+} from "~/features/configuration/strings";
 import { Fields } from "./fields";
 
 export const SettingsFields = (fields: FormFieldsProps) => {
   const capabilities = useQuery(capabilitiesQuery());
+  const supervisorHarness = fieldValue(fields.value, "settings.supervisor.harness");
+  // The note on the selected harness's own tools, as its descriptor gives it.
+  const ownTools = capabilities.data?.harnessDetails.find(
+    ({ id }) => id === supervisorHarness,
+  )?.ownTools;
   return (
     <div className="flex flex-col gap-4">
       <Fields
@@ -80,6 +90,9 @@ export const SettingsFields = (fields: FormFieldsProps) => {
             },
           ]}
         />
+      )}
+      {ownTools !== null && ownTools !== undefined && (
+        <p className="text-xs text-muted-foreground">{supervisorCopy.ownToolsEffect(ownTools)}</p>
       )}
       <Label>
         <Checkbox

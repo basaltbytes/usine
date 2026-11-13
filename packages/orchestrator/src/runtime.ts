@@ -26,7 +26,11 @@ import { GitHubItemHistory } from "@usine/github/item-history";
 import { GitHubItemWriter } from "@usine/github/item-writer";
 import { GitHubLabelWriter } from "@usine/github/label-writer";
 import { GitHubPolling } from "@usine/github/polling";
-import { Effect, Layer } from "effect";
+import { Context, Effect, Layer, Option } from "effect";
+import { SupervisorSandbox } from "@usine/agents/supervisor";
+import { WorkerName } from "@usine/core/worker";
+import { ATTEMPT_IMAGE } from "@usine/executor/ssh";
+import { containerSandboxLayer } from "@usine/executor/supervisor";
 import type { SqlClient } from "effect/sql";
 import { gitHubCredentialLayer } from "./credentials.ts";
 import { parentAdmissionLayer } from "./current-instance/parents.ts";
@@ -41,7 +45,7 @@ import { PollingTriggers } from "./polling-triggers.ts";
 import { ScheduleTriggers } from "./schedule-triggers.ts";
 import { triggerConditionLayer } from "./trigger-condition.ts";
 import { workerEngineLayer } from "./worker-engine.ts";
-import { parentModels } from "./parent-models.ts";
+import { instanceModelRoute, parentModels } from "./parent-models.ts";
 import { WorkerStatus } from "./worker-status.ts";
 
 /**
@@ -174,10 +178,34 @@ export const runtimeLayer = (
     Layer.provide(dependencies),
     Layer.provide(ci),
   );
+  // Supervisor sessions run in a container on this host; the view reports why they can't.
+  const supervisorSandbox = Layer.unwrap(
+    Effect.gen(function* () {
+      const startup = yield* (yield* CurrentInstance).get;
+      const route = yield* instanceModelRoute(startup, WorkerName.make(`supervisor-${instanceId}`));
+      return containerSandboxLayer({
+        root: `${instanceDirectory}/.usine/supervisor`,
+        image: ATTEMPT_IMAGE,
+        runtime: Option.none(),
+        route,
+      }).pipe(
+        Layer.tap((context) => {
+          const { unavailable } = Context.get(context, SupervisorSandbox);
+          return Option.isSome(startup.config.settings.supervisor) && Option.isSome(unavailable)
+            ? Effect.logWarning("The configured supervisor is unavailable on this orchestrator", {
+                reason: unavailable.value.message,
+              })
+            : Effect.void;
+        }),
+      );
+    }),
+  ).pipe(Layer.provide(NodeServices.layer));
   const services = Layer.mergeAll(
     Operator.layer,
     OperatorConfiguration.layer,
     Orchestrator.layer,
-  ).pipe(Layer.provide(Layer.mergeAll(dependencies, triggers, ci, itemHistory, app)));
+  ).pipe(
+    Layer.provide(Layer.mergeAll(dependencies, triggers, ci, itemHistory, app, supervisorSandbox)),
+  );
   return Layer.mergeAll(dependencies, triggers, services, app, files, WebhookHealth.layer);
 };

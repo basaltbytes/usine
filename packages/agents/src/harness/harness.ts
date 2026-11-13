@@ -15,14 +15,23 @@ export class ResumeCommand extends Schema.Class<
   gateway: Schema.Boolean,
 }) {}
 
+const presentationFields = {
+  id: Harness,
+  label: Schema.NonEmptyString,
+  handoff: Schema.NullOr(ResumeCommand),
+};
+
 /** The harness metadata served to operator clients. */
 export class HarnessPresentation extends Schema.Class<
   HarnessPresentation,
   Brand.Brand<"@usine/agents/harness/HarnessPresentation">
 >("@usine/agents/HarnessPresentation")({
-  id: Harness,
-  label: Schema.NonEmptyString,
-  handoff: Schema.NullOr(ResumeCommand),
+  ...presentationFields,
+  /**
+   * Why the harness keeps all its own tools when a role limits them, so that only the role's
+   * sandbox limits what they reach; null when the harness lists the tools that a role keeps.
+   */
+  ownTools: Schema.NullOr(Schema.NonEmptyString),
 }) {}
 
 /** A secret-free environment and config-file recipe. Values can contain {{baseUrl}} and {{home}}. */
@@ -133,7 +142,7 @@ export class HarnessDescriptor extends Schema.Class<
   HarnessDescriptor,
   Brand.Brand<"@usine/agents/harness/HarnessDescriptor">
 >("@usine/agents/HarnessDescriptor")({
-  ...HarnessPresentation.fields,
+  ...presentationFields,
   worker: WorkerRequirements,
   capabilities: Schema.NonEmptyArray(CapabilityProfile).check(
     Schema.makeFilter(
@@ -153,6 +162,15 @@ export class HarnessDescriptor extends Schema.Class<
   /** None when the harness supplies its own prices. */
   prices: Schema.Option(Schema.Record(Schema.String, TokenRates)),
 }) {
+  /** Why the harness can't turn its own tools off, or `None` when it lists the tools a role keeps. */
+  get ownToolsKept(): Option.Option<string> {
+    return Option.fromNullishOr(
+      this.capabilities
+        .flatMap(({ lacking }) => lacking)
+        .find(({ capability }) => capability === "closed-tools")?.reason,
+    );
+  }
+
   /** Returns a price from the bundled table, or None for a model without rates. */
   price(model: string, tokens: TokenBreakdown): Option.Option<UsdAmount> {
     return Option.flatMap(this.prices, (prices) =>

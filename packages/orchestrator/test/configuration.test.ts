@@ -1,4 +1,6 @@
 import { jsonKey } from "@usine/core/json-key";
+import { catalog } from "@usine/agents/harness";
+import { SupervisorSandbox } from "@usine/agents/supervisor";
 import { EnginePersistenceError } from "@usine/engine/engine";
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
@@ -301,7 +303,10 @@ const workers = Layer.succeed(WorkerStatus)({
 });
 
 const readConfigurationOf = Effect.fn("test.readConfigurationOf")(
-  function* (instanceFiles: ReadonlyArray<readonly [string, string]>) {
+  function* (
+    instanceFiles: ReadonlyArray<readonly [string, string]>,
+    sandbox: Layer.Layer<never> = Layer.empty,
+  ) {
     const directory = yield* (yield* FileSystem.FileSystem).makeTempDirectoryScoped({
       prefix: "usine-config-",
     });
@@ -314,7 +319,7 @@ const readConfigurationOf = Effect.fn("test.readConfigurationOf")(
     }).pipe(
       Effect.provide(
         OperatorConfiguration.layer.pipe(
-          Layer.provide(Layer.mergeAll(controls, labels, polling, workers)),
+          Layer.provide(Layer.mergeAll(controls, labels, polling, workers, sandbox)),
           Layer.provideMerge(reloadableInstanceLayer(root)),
         ),
       ),
@@ -591,6 +596,43 @@ describe("Configuration view", () => {
         harness: "claude",
         model: "claude-sonnet-5-5",
         effort: "medium",
+        ownTools: null,
+        unavailable: "This orchestrator provides no supervisor sandbox",
+      });
+    }),
+  );
+
+  it.effect("says when the supervisor's harness keeps its own tools, and whether it can run", () =>
+    Effect.gen(function* () {
+      const codexFiles = supervisorFiles.map(([path, content]) =>
+        path === "usine.yaml"
+          ? ([
+              path,
+              content
+                .replace("    harness: claude\n", "    harness: codex\n")
+                .replace("    model: claude-sonnet-5-5\n", "    model: gpt-5.6-terra\n"),
+            ] as const)
+          : ([path, content] as const),
+      );
+      const available = Layer.succeed(SupervisorSandbox)({
+        unavailable: Option.none(),
+        open: () => Effect.die("the view opens no sandbox"),
+      });
+      const view = yield* readConfigurationOf(codexFiles, available);
+      const kept = Option.flatMap(catalog.get(Harness.make("codex")), ({ capabilities }) =>
+        Option.fromNullishOr(
+          capabilities
+            .flatMap(({ lacking }) => lacking)
+            .find(({ capability }) => capability === "closed-tools"),
+        ),
+      );
+      assert(Option.isSome(kept));
+      assert.deepStrictEqual(view.settings.supervisor, {
+        harness: "codex",
+        model: "gpt-5.6-terra",
+        effort: "medium",
+        ownTools: kept.value.reason,
+        unavailable: null,
       });
     }),
   );
