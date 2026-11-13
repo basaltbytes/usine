@@ -19,7 +19,7 @@ import { PullRequestTrigger } from "@usine/config/trigger";
 import { AgentName, AgentPersona } from "@usine/core/agent";
 import { Harness, ModelId } from "@usine/core/agent/brain";
 import { AttemptTask } from "@usine/core/attempt";
-import { runView } from "../src/operator/projection.ts";
+import { runSummaryView, runView } from "../src/operator/projection.ts";
 import { runNeedsAttention } from "../src/board/items.ts";
 import { CiPolicy } from "@usine/core/ci";
 import { CycleGeneration, CycleLimit } from "@usine/core/cycle-budget";
@@ -35,7 +35,7 @@ import { StepName } from "@usine/core/step";
 import { PullRequest, StepCompletion, StepResult } from "@usine/core/step/result";
 import { WorkerName } from "@usine/core/worker";
 import { CycleBudgets } from "@usine/engine/cycle-budget";
-import { RunReader, type RunSnapshot } from "@usine/engine/run-reader";
+import { RunReader, type RunSnapshot, summarizeRun } from "@usine/engine/run-reader";
 import { LoopControl } from "@usine/engine/loop-control";
 import { EnginePersistenceError, RunEngine, Submission } from "@usine/engine/engine";
 import { layer as engineLayer } from "@usine/engine/local-sqlite";
@@ -804,7 +804,18 @@ it.live.each(["success", "failure"] as const)(
           const mutations = yield* Ref.get(setup.mutations);
           assert.deepStrictEqual(mutations, []);
           assert.strictEqual((yield* Ref.get(setup.tasks)).length, 1);
-          assert.strictEqual(runNeedsAttention(runView(failed, new Set(), new Map()), false), true);
+          const view = runView(failed, new Set(), new Map());
+          assert.strictEqual(runNeedsAttention(view, false), true);
+          // The CI-failed Attempt keeps the report that handed off to CI; Run lists omit it.
+          const projected = view.attempts.at(-1)?.outcome;
+          assert(projected?._tag === "Failed");
+          assert.isNotNull(projected.report);
+          assert.isTrue(projected.report.startsWith("[usine:awaiting-ci]\n"));
+          const listed = runSummaryView(summarizeRun(failed), new Set(), new Map()).attempts.at(
+            -1,
+          )?.outcome;
+          assert(listed?._tag === "Failed");
+          assert.isNull(listed.report);
         }).pipe(Effect.provide(setup.runtime));
       }),
     ).pipe(Effect.provide(NodeServices.layer)),

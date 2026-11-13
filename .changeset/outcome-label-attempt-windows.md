@@ -9,4 +9,4 @@ Outcome label verification counts only the labels that an attempt's GitHub accou
 
 `Attempt.workerKind` records the kind of the attempt's worker when it starts, and the check reads each attempt's GitHub account from it, so a later change to the worker's kind doesn't change the account. Older attempts have none and use their worker's configured kind. The SQLite store adds a nullable `worker_kind` column to `usine_attempts`. A `StepExecutor` lease (`WorkerLease`) has a required `kind`: the kind of the leased worker.
 
-`FailedAttemptView.report` is the final report that an attempt kept when the completion check rejected it, set in run detail reads and null in run lists. The run page and run drawer show it under **Final report**, after the failure.
+`FailedAttemptView.report` is the final report that a failed attempt kept, set in run detail reads and null in run lists: the report that the completion check rejected, or the report that handed off to CI before CI failed, timed out, or ended incomplete. The run page and run drawer show it under **Final report**, after the failure.

@@ -12,7 +12,7 @@ import {
   memoryProcessesLabel,
   missingMemoryProcessesLine,
   outOfMemoryLine,
-  rejectedReportLabel,
+  finalReportLabel,
 } from "~/lib/runs/strings";
 import type { AttemptEnd } from "~/lib/runs/transcript/document/model";
 
@@ -70,14 +70,14 @@ export const SalvageLine = ({ salvage }: SalvageLineProps) => (
   </p>
 );
 
-type RejectedReportProps = { readonly text: string };
+type FinalReportProps = { readonly text: string };
 
-const RejectedReport = ({ text }: RejectedReportProps) => {
+const FinalReport = ({ text }: FinalReportProps) => {
   const labelId = useId();
   return (
     <section aria-labelledby={labelId} className="space-y-1">
       <p id={labelId} className="text-xs text-muted-foreground">
-        {rejectedReportLabel}
+        {finalReportLabel}
       </p>
       <Markdown className="text-md wrap-anywhere">{text}</Markdown>
     </section>
@@ -93,7 +93,7 @@ const End = ({ end }: EndProps) =>
         <FailureNote failure={failure} />
         {Option.match(report, {
           onNone: () => null,
-          onSome: (text) => <RejectedReport text={text} />,
+          onSome: (text) => <FinalReport text={text} />,
         })}
         <SalvageLine salvage={salvage} />
       </div>

@@ -216,4 +216,4 @@ export const missingMemoryProcessesLine = (count: number): string =>
 
 export const memoryProcessesLabel = "Killed processes (kernel task names)";
 
-export const rejectedReportLabel = "Final report";
+export const finalReportLabel = "Final report";

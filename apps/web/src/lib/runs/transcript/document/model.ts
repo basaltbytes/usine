@@ -114,7 +114,7 @@ export type AttemptEnd =
   | {
       readonly _tag: "Failed";
       readonly failure: FailureView;
-      /** The final report that the completion check rejected, if the Attempt kept one. */
+      /** The final report that the Attempt kept: a rejected report or a failed CI handoff. */
       readonly report: Option.Option<string>;
       readonly salvage: AttemptSalvage | null;
     }
@@ -249,7 +249,7 @@ const isTerminal = (notice: TranscriptNotice) =>
     notice.origin.payload._tag === "Interrupted");
 
 /**
- * Returns the Agent text that a terminal outcome repeats: the result, the rejected final report,
+ * Returns the Agent text that a terminal outcome repeats: the result, the kept final report,
  * the failure report, the blocker, or the question.
  */
 export const terminalText = (end: AttemptEnd): string | null =>
