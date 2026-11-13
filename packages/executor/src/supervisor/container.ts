@@ -237,195 +237,203 @@ const credentialRoute = (
     ),
   );
 
+const unavailableBecause = (action: string) => (error: { readonly message: string }) =>
+  SupervisorUnavailable.make({ message: `Can't ${action}: ${error.message}` });
+
+/**
+ * Opens the sandboxes of supervisor turns on `runtime`, with the harness's model requests sent
+ * through `openRoute`.
+ */
+const makeContainerSandbox = Effect.fn("SupervisorSandbox.make")(function* (
+  options: Pick<ContainerSandboxOptions, "root" | "image">,
+  runtime: SandboxRuntime,
+  openRoute: Effect.Effect<GatewayModelRoute, GatewayModelError>,
+) {
+  const fs = yield* FileSystem.FileSystem;
+  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+  const transport = localTransport(spawner);
+  const runtimeCommand = (args: ReadonlyArray<string>) =>
+    collectCommand(spawner, "prepare", runtime.runtime, args, {});
+
+  /** Writes the harness's gateway settings, pointed at the relay, into the conversation's home. */
+  const writeWiring = Effect.fn("SupervisorSandbox.writeWiring")(function* (
+    harness: Harness,
+    home: string,
+  ) {
+    const credential = Option.flatMap(catalog.get(harness), ({ worker }) => worker.credential);
+    if (Option.isNone(credential)) return Option.none();
+    const { protocol, gatewayPath, gateway } = credential.value;
+    const rendered = gateway.render(
+      `http://127.0.0.1:${MODEL_RELAY_PORT}/${gatewayPath}`,
+      `${home}/.${harness}`,
+    );
+    for (const [path, contents] of rendered.files) {
+      yield* fs.makeDirectory(path.slice(0, path.lastIndexOf("/")), { recursive: true });
+      yield* fs.writeFileString(path, contents);
+    }
+    return Option.some({
+      protocol,
+      environment: { ...rendered.environment, [rendered.tokenVariable]: SANDBOX_TOKEN },
+    });
+  });
+
+  const serveRelay = Effect.fn("SupervisorSandbox.serveRelay")(function* (
+    socket: string,
+    route: GatewayModelRoute,
+  ) {
+    // A model response streams for as long as the turn's longest answer.
+    const server = yield* NodeHttpServer.make(() => createServer({ requestTimeout: 0 }), {
+      path: socket,
+    });
+    yield* server.serve(relayModelRequest(route));
+  });
+
+  const startContainer = Effect.fn("SupervisorSandbox.startContainer")(function* (
+    name: string,
+    args: ReadonlyArray<string>,
+  ) {
+    const started = yield* runtimeCommand(args).pipe(
+      Effect.mapError(unavailableBecause("start the supervisor sandbox")),
+    );
+    if (started.exitCode !== 0)
+      return yield* SupervisorUnavailable.make({
+        message: `Can't start the supervisor sandbox: ${started.stderr.trim().split("\n")[0] || `exit code ${started.exitCode}`}`,
+      });
+    yield* Effect.logInfo("Started a supervisor sandbox", { container: name });
+  });
+
+  const removeContainer = (name: string) =>
+    runtimeCommand(["rm", "--force", name]).pipe(
+      Effect.flatMap(({ exitCode, stderr }) =>
+        exitCode === 0
+          ? Effect.logInfo("Removed a supervisor sandbox", { container: name })
+          : Effect.logWarning("Could not remove a supervisor sandbox", {
+              container: name,
+              exitCode,
+              stderr: stderr.trim().split("\n")[0],
+            }),
+      ),
+      Effect.catch((error) =>
+        Effect.logWarning("Could not remove a supervisor sandbox", {
+          container: name,
+          message: error.message,
+        }),
+      ),
+    );
+
+  const awaitRelay = (name: string) =>
+    runtimeCommand(["exec", name, "node", "-e", RELAY_PROBE, String(MODEL_RELAY_PORT)]).pipe(
+      Effect.filterOrFail(({ exitCode }) => exitCode === 0),
+      Effect.retry({ schedule: Schedule.spaced("100 millis"), times: 100 }),
+      Effect.mapError(() =>
+        SupervisorUnavailable.make({
+          message: "The supervisor sandbox's model relay didn't start within 10 seconds",
+        }),
+      ),
+    );
+
+  return Effect.fn("SupervisorSandbox.open")(function* (request: SandboxRequest) {
+    yield* Effect.annotateCurrentSpan({
+      conversation: request.conversation,
+      harness: request.harness,
+      sources: request.sources.length,
+    });
+    const root = `${options.root}/conversations/${safeSegment(request.conversation)}`;
+    const paths: ConversationPaths = { root, home: `${root}/home`, workspace: `${root}/workspace` };
+    // The mount points of the sources exist before the read-only workspace is mounted.
+    yield* Effect.forEach(
+      [paths.home, ...request.sources.map(({ repository }) => `${paths.workspace}/${repository}`)],
+      (directory) => fs.makeDirectory(directory, { recursive: true }),
+    ).pipe(Effect.mapError(unavailableBecause("create the conversation's directories")));
+    const wiring = yield* writeWiring(request.harness, paths.home).pipe(
+      Effect.mapError(unavailableBecause("write the harness's model settings")),
+    );
+    const route = yield* openRoute.pipe(
+      Effect.mapError(unavailableBecause("open the instance's model route")),
+    );
+    const credential = yield* Option.match(wiring, {
+      onNone: () => Effect.succeed<CredentialRoute>("gateway"),
+      onSome: ({ protocol }) => credentialRoute(route, protocol),
+    }).pipe(Effect.mapError(unavailableBecause("check the instance's model credential")));
+    // A socket path has a short length limit, so the relay's directory is in the system's.
+    const relayDirectory = yield* fs
+      .makeTempDirectoryScoped({ prefix: "usine-supervisor-" })
+      .pipe(Effect.mapError(unavailableBecause("create the model relay's directory")));
+    yield* serveRelay(`${relayDirectory}/model.sock`, route).pipe(
+      Effect.mapError(unavailableBecause("serve the model relay")),
+    );
+    const suffix = (yield* Random.nextIntBetween(0, 0xffffffff)).toString(16);
+    const name = `usine-supervisor-${safeSegment(request.conversation).slice(0, 40)}-${suffix}`;
+    yield* Effect.acquireRelease(
+      startContainer(
+        name,
+        sandboxRunArguments({
+          name,
+          runtime,
+          image: options.image,
+          paths,
+          sources: request.sources,
+          relayDirectory,
+        }),
+      ),
+      () => removeContainer(name),
+    );
+    yield* awaitRelay(name);
+    return SupervisorSeat.make({
+      host: ExecShell.make({
+        transport,
+        destination: name,
+        container: { runtime: runtime.runtime, name },
+      }),
+      worker: WorkerName.make("supervisor"),
+      cwd: WorkingDirectory.make(paths.workspace),
+      environment: Option.match(wiring, {
+        onNone: () => ({}),
+        onSome: ({ environment }) => environment,
+      }),
+      credential,
+    });
+  });
+});
+
 /**
  * The supervisor sandbox as one container per turn, on Podman or Docker on the orchestrator host.
  * The container has no network: a relay inside it forwards the harness's model requests over a
  * socket to the orchestrator, which sends them through the instance's model route with the
  * instance's credential. Each repository's source is mounted read-only under the working
  * directory, and only the conversation's own directory is writable; no instance file is mounted.
- * The conversation's directory, with the harness's saved sessions, stays after the turn.
+ * The conversation's directory, with the harness's saved sessions, stays after the turn. Without
+ * a container runtime or a model route, every turn fails with the reason.
  */
 export const containerSandboxLayer = (options: ContainerSandboxOptions) =>
   Layer.effect(
     SupervisorSandbox,
     Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem;
-      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
       const detected = yield* detectSandboxRuntime(options.runtime);
-      const unavailable = Result.isFailure(detected)
-        ? Option.some(detected.failure)
-        : Option.isNone(options.route)
-          ? Option.some(
+      const available = Result.flatMap(detected, (runtime) =>
+        Option.match(options.route, {
+          onNone: () =>
+            Result.fail(
               SupervisorUnavailable.make({
                 message:
                   "Supervisor sessions reach the model through the instance's gateway, and no worker gateway is configured",
               }),
-            )
-          : Option.none();
-      if (Option.isSome(unavailable))
-        yield* Effect.logInfo("Supervisor sessions are unavailable on this orchestrator", {
-          reason: unavailable.value.message,
-        });
-      const transport = localTransport(spawner);
-      const runtimeCommand = (args: ReadonlyArray<string>) =>
-        Result.isSuccess(detected)
-          ? collectCommand(spawner, "prepare", detected.success.runtime, args, {})
-          : Effect.die("The sandbox runs no command without a container runtime");
-
-      const unavailableBecause = (action: string) => (error: { readonly message: string }) =>
-        SupervisorUnavailable.make({ message: `Can't ${action}: ${error.message}` });
-
-      const writeWiring = Effect.fn("SupervisorSandbox.writeWiring")(function* (
-        harness: Harness,
-        home: string,
-      ) {
-        const credential = Option.flatMap(catalog.get(harness), ({ worker }) => worker.credential);
-        if (Option.isNone(credential)) return Option.none();
-        const { protocol, gatewayPath, gateway } = credential.value;
-        const rendered = gateway.render(
-          `http://127.0.0.1:${MODEL_RELAY_PORT}/${gatewayPath}`,
-          `${home}/.${harness}`,
-        );
-        for (const [path, contents] of rendered.files) {
-          yield* fs.makeDirectory(path.slice(0, path.lastIndexOf("/")), { recursive: true });
-          yield* fs.writeFileString(path, contents);
-        }
-        return Option.some({
-          protocol,
-          environment: { ...rendered.environment, [rendered.tokenVariable]: SANDBOX_TOKEN },
-        });
-      });
-
-      const serveRelay = Effect.fn("SupervisorSandbox.serveRelay")(function* (
-        socket: string,
-        route: GatewayModelRoute,
-      ) {
-        // A model response streams for as long as the turn's longest answer.
-        const server = yield* NodeHttpServer.make(() => createServer({ requestTimeout: 0 }), {
-          path: socket,
-        });
-        yield* server.serve(relayModelRequest(route));
-      });
-
-      const startContainer = Effect.fn("SupervisorSandbox.startContainer")(function* (
-        name: string,
-        args: ReadonlyArray<string>,
-      ) {
-        const started = yield* runtimeCommand(args);
-        if (started.exitCode !== 0)
-          return yield* SupervisorUnavailable.make({
-            message: `Can't start the supervisor sandbox: ${started.stderr.trim().split("\n")[0] ?? `exit code ${started.exitCode}`}`,
-          });
-        yield* Effect.logInfo("Started a supervisor sandbox", { container: name });
-        return name;
-      });
-
-      const removeContainer = (name: string) =>
-        runtimeCommand(["rm", "--force", name]).pipe(
-          Effect.flatMap(({ exitCode, stderr }) =>
-            exitCode === 0
-              ? Effect.logInfo("Removed a supervisor sandbox", { container: name })
-              : Effect.logWarning("Could not remove a supervisor sandbox", {
-                  container: name,
-                  exitCode,
-                  stderr: stderr.trim().split("\n")[0],
-                }),
-          ),
-          Effect.catch((error) =>
-            Effect.logWarning("Could not remove a supervisor sandbox", {
-              container: name,
-              message: error.message,
-            }),
-          ),
-        );
-
-      const awaitRelay = (name: string) =>
-        runtimeCommand(["exec", name, "node", "-e", RELAY_PROBE, String(MODEL_RELAY_PORT)]).pipe(
-          Effect.filterOrFail(({ exitCode }) => exitCode === 0),
-          Effect.retry({ schedule: Schedule.spaced("100 millis"), times: 100 }),
-          Effect.mapError(() =>
-            SupervisorUnavailable.make({
-              message: "The supervisor sandbox's model relay didn't start within 10 seconds",
-            }),
-          ),
-        );
-
-      const open = Effect.fn("SupervisorSandbox.open")(function* (request: SandboxRequest) {
-        yield* Effect.annotateCurrentSpan({
-          conversation: request.conversation,
-          harness: request.harness,
-          sources: request.sources.length,
-        });
-        if (Option.isSome(unavailable)) return yield* unavailable.value;
-        if (Result.isFailure(detected) || Option.isNone(options.route))
-          return yield* Effect.die("An available sandbox has a runtime and a model route");
-        const root = `${options.root}/conversations/${safeSegment(request.conversation)}`;
-        const paths: ConversationPaths = {
-          root,
-          home: `${root}/home`,
-          workspace: `${root}/workspace`,
-        };
-        yield* Effect.forEach(
-          [
-            paths.home,
-            ...request.sources.map(({ repository }) => `${paths.workspace}/${repository}`),
-          ],
-          (directory) => fs.makeDirectory(directory, { recursive: true }),
-        ).pipe(Effect.mapError(unavailableBecause("create the conversation's directories")));
-        const wiring = yield* writeWiring(request.harness, paths.home).pipe(
-          Effect.mapError(unavailableBecause("write the harness's model settings")),
-        );
-        const route = yield* options.route.value.pipe(
-          Effect.mapError(unavailableBecause("open the instance's model route")),
-        );
-        const credential = yield* Option.match(wiring, {
-          onNone: () => Effect.succeed<CredentialRoute>("gateway"),
-          onSome: ({ protocol }) => credentialRoute(route, protocol),
-        }).pipe(Effect.mapError(unavailableBecause("check the instance's model credential")));
-        const relayDirectory = yield* fs
-          .makeTempDirectoryScoped({ prefix: "usine-supervisor-" })
-          .pipe(Effect.mapError(unavailableBecause("create the model relay's directory")));
-        yield* serveRelay(`${relayDirectory}/model.sock`, route).pipe(
-          Effect.mapError(unavailableBecause("serve the model relay")),
-        );
-        const suffix = (yield* Random.nextIntBetween(0, 0xffffffff)).toString(16);
-        const name = `usine-supervisor-${safeSegment(request.conversation).slice(0, 40)}-${suffix}`;
-        yield* Effect.acquireRelease(
-          startContainer(
-            name,
-            sandboxRunArguments({
-              name,
-              runtime: detected.success,
-              image: options.image,
-              paths,
-              sources: request.sources,
-              relayDirectory,
-            }),
-          ).pipe(
-            Effect.mapError((error) =>
-              error._tag === "SupervisorUnavailable"
-                ? error
-                : unavailableBecause("start the supervisor sandbox")(error),
             ),
-          ),
-          removeContainer,
-        );
-        yield* awaitRelay(name);
-        return SupervisorSeat.make({
-          host: ExecShell.make({
-            transport,
-            destination: name,
-            container: { runtime: detected.success.runtime, name },
-          }),
-          worker: WorkerName.make("supervisor"),
-          cwd: WorkingDirectory.make(paths.workspace),
-          environment: Option.match(wiring, {
-            onNone: () => ({}),
-            onSome: ({ environment }) => environment,
-          }),
-          credential,
+          onSome: (route) => Result.succeed({ runtime, route }),
+        }),
+      );
+      if (Result.isFailure(available)) {
+        const reason = available.failure;
+        yield* Effect.logInfo("Supervisor sessions are unavailable on this orchestrator", {
+          reason: reason.message,
         });
-      });
-      return { unavailable, open } satisfies SupervisorSandboxService;
+        return {
+          unavailable: Option.some(reason),
+          open: () => Effect.fail(reason),
+        } satisfies SupervisorSandboxService;
+      }
+      const { runtime, route } = available.success;
+      const open = yield* makeContainerSandbox(options, runtime, route);
+      return { unavailable: Option.none(), open } satisfies SupervisorSandboxService;
     }),
   );

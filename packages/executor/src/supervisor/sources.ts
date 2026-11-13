@@ -68,10 +68,11 @@ export const prepareSupervisorSources = Effect.fn("SupervisorSources.prepare")(f
         ),
       ),
     );
-  const unavailable = (repository: RepositoryName, action: string) => (error: unknown) =>
-    SupervisorUnavailable.make({
-      message: `Can't ${action} for the source of ${repository}: ${String(error)}`,
-    });
+  const unavailable =
+    (repository: RepositoryName, action: string) => (error: { readonly message: string }) =>
+      SupervisorUnavailable.make({
+        message: `Can't ${action} for the source of ${repository}: ${error.message}`,
+      });
   const prepare = Effect.fn("SupervisorSources.repository")(function* (repository: RepositoryName) {
     yield* Effect.annotateCurrentSpan({ repository });
     const segment = safeSegment(repository);
@@ -125,7 +126,7 @@ export const prepareSupervisorSources = Effect.fn("SupervisorSources.prepare")(f
       Effect.tapError((error) =>
         Effect.logWarning("Could not remove stale supervisor source trees", {
           repository,
-          message: String(error),
+          message: error.message,
         }),
       ),
       Effect.ignore,

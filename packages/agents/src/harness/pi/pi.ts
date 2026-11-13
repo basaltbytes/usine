@@ -176,13 +176,12 @@ const hostCommand = Effect.fn("PiRuntime.hostCommand")(function* (spec: SessionS
   const host = spec.host;
   if (host._tag !== "ExecShell") return Option.none<PiHostCommand>();
   const run = yield* FiberSet.makeRuntimePromise();
-  const output = (args: ReadonlyArray<string>) =>
+  const output = (command: string, args: ReadonlyArray<string>) =>
     Effect.scoped(
       Effect.gen(function* () {
-        const [command = "true", ...rest] = args;
         const handle = yield* execHandle(
           host,
-          { cwd: spec.cwd, command, args: rest, environment: {} },
+          { cwd: spec.cwd, command, args, environment: {} },
           {},
         );
         const [stdout, stderr] = yield* Effect.all(
@@ -200,7 +199,7 @@ const hostCommand = Effect.fn("PiRuntime.hostCommand")(function* (spec: SessionS
         Effect.logWarning("Pi could not run a file command on the session's host", {
           sessionId: spec.session.id,
           host: host.destination,
-          command: args[0],
+          command,
           message: error.message,
         }),
       ),
@@ -210,7 +209,9 @@ const hostCommand = Effect.fn("PiRuntime.hostCommand")(function* (spec: SessionS
     host: host.destination,
     nativeTools: spec.admitted.role.nativeTools,
   });
-  return Option.some<PiHostCommand>((args, signal) => run(output(args), { signal }));
+  return Option.some<PiHostCommand>((command, args, signal) =>
+    run(output(command, args), { signal }),
+  );
 });
 
 const makePiSessions = Effect.gen(function* () {

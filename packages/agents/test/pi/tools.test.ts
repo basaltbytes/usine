@@ -284,7 +284,7 @@ describe("Pi usine tool sets", () => {
             [],
             options.host,
           );
-          const run = async (name: string, input: Record<string, unknown>) => {
+          const run = async (name: string, input: Readonly<Record<string, string>>) => {
             const tool = listed.customTools?.find((definition) => definition.name === name);
             assert(tool !== undefined, name);
             const result = await tool.execute(name, input, undefined, undefined, toolContext);

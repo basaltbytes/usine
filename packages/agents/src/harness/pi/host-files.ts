@@ -16,8 +16,9 @@ export interface PiHostOutput {
   readonly exitCode: number;
 }
 
-/** Runs `args` on the session's host, in the session's working directory. */
+/** Runs `command` with `args` on the session's host, in the session's working directory. */
 export type PiHostCommand = (
+  command: string,
   args: ReadonlyArray<string>,
   signal?: AbortSignal,
 ) => Promise<PiHostOutput>;
@@ -27,18 +28,19 @@ const DEFAULT_LIMIT = 100;
 
 const decoder = new TextDecoder();
 
-const failed = (args: ReadonlyArray<string>, output: PiHostOutput) =>
-  new Error(output.stderr.trim() || `${args[0]} exited with code ${output.exitCode}`);
+const failed = (command: string, output: PiHostOutput) =>
+  new Error(output.stderr.trim() || `${command} exited with code ${output.exitCode}`);
 
-/** Runs `args` and returns its stdout, or throws with its stderr if it fails. */
-const succeeded = async (run: PiHostCommand, args: ReadonlyArray<string>, signal?: AbortSignal) => {
-  const output = await run(args, signal);
-  if (output.exitCode !== 0) throw failed(args, output);
+/** Runs `command` and returns its stdout, or throws with its stderr if it fails. */
+const succeeded = async (run: PiHostCommand, command: string, args: ReadonlyArray<string>) => {
+  const output = await run(command, args);
+  if (output.exitCode !== 0) throw failed(command, output);
   return output.stdout;
 };
 
-const holds = async (run: PiHostCommand, args: ReadonlyArray<string>) =>
-  (await run(args)).exitCode === 0;
+/** Whether `test` holds for `path` on the host. */
+const holds = async (run: PiHostCommand, test: "-e" | "-d" | "-r", path: string) =>
+  (await run("test", [test, path])).exitCode === 0;
 
 /**
  * Lists the files under `cwd` that match the glob `pattern`, at most `limit`, skipping version
@@ -69,27 +71,25 @@ export const hostReadTools = (cwd: string, run: PiHostCommand): ReadonlyArray<To
   const directories = new Map<string, boolean>();
   const read = createReadToolDefinition(cwd, {
     operations: {
-      readFile: async (path) => Buffer.from(await succeeded(run, ["cat", "--", path])),
+      readFile: async (path) => Buffer.from(await succeeded(run, "cat", ["--", path])),
       access: async (path) => {
-        const output = await run(["test", "-r", path]);
-        if (output.exitCode !== 0) throw new Error(`ENOENT: no readable file at ${path}`);
+        if (!(await holds(run, "-r", path))) throw new Error(`ENOENT: no readable file at ${path}`);
       },
     },
   });
   const ls = createLsToolDefinition(cwd, {
     operations: {
-      exists: (path) => holds(run, ["test", "-e", path]),
+      exists: (path) => holds(run, "-e", path),
       stat: async (path) => {
         const known = directories.get(path);
-        const directory = known ?? (await holds(run, ["test", "-d", path]));
-        if (known === undefined && !directory && !(await holds(run, ["test", "-e", path])))
+        const directory = known ?? (await holds(run, "-d", path));
+        if (known === undefined && !directory && !(await holds(run, "-e", path)))
           throw new Error(`ENOENT: no such file or directory, stat '${path}'`);
         return { isDirectory: () => directory };
       },
       readdir: async (path) => {
         const listing = decoder.decode(
-          await succeeded(run, [
-            "find",
+          await succeeded(run, "find", [
             path,
             "-mindepth",
             "1",
@@ -112,11 +112,11 @@ export const hostReadTools = (cwd: string, run: PiHostCommand): ReadonlyArray<To
   });
   const find = createFindToolDefinition(cwd, {
     operations: {
-      exists: (path) => holds(run, ["test", "-e", path]),
+      exists: (path) => holds(run, "-e", path),
       glob: async (pattern, searched, { limit }) =>
         decoder
           .decode(
-            await succeeded(run, ["node", "-e", GLOB_SCRIPT, pattern, searched, String(limit)]),
+            await succeeded(run, "node", ["-e", GLOB_SCRIPT, pattern, searched, String(limit)]),
           )
           .split("\n")
           .filter((line) => line.length > 0),
@@ -134,8 +134,8 @@ export const hostReadTools = (cwd: string, run: PiHostCommand): ReadonlyArray<To
       execute: async (_toolCallId, input, signal) => {
         const limit = input.limit ?? DEFAULT_LIMIT;
         const output = await run(
+          "grep",
           [
-            "grep",
             "-rnI",
             "--exclude-dir=.git",
             "--exclude-dir=node_modules",
@@ -151,7 +151,7 @@ export const hostReadTools = (cwd: string, run: PiHostCommand): ReadonlyArray<To
           signal,
         );
         // grep exits with 1 when nothing matches.
-        if (output.exitCode > 1) throw failed(["grep"], output);
+        if (output.exitCode > 1) throw failed("grep", output);
         const lines = decoder
           .decode(output.stdout)
           .split("\n")
