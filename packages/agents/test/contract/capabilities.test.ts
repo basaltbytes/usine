@@ -157,9 +157,9 @@ describe("harness capability declarations", () => {
 
   it.effect("fail when a descriptor declares a capability without a passing scenario", () =>
     Effect.gen(function* () {
-      const problems = yield* unproven(overclaiming("codex", "usine-tools"));
+      const problems = yield* unproven(overclaiming("codex", "closed-tools"));
       assert.deepStrictEqual(problems, [
-        "Codex declares usine-tools, but its adapter passes no host-tool scenario",
+        "Codex declares closed-tools, but its adapter passes no closed-tools scenario",
       ]);
     }).pipe(Effect.provide(NodeServices.layer)),
   );

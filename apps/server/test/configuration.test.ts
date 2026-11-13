@@ -766,7 +766,11 @@ it.live(
         );
         const answers = yield* Fiber.joinAll(probes).pipe(Effect.map((all) => new Set(all)));
         expect(answers).toContain("/api/configuration 401 -");
-        const startup = new Set(["/api/version 200 -", "/api/configuration 503 1"]);
+        const startup = new Set([
+          "/api/version 503 1",
+          "/api/version 200 -",
+          "/api/configuration 503 1",
+        ]);
         const unexpected = [...answers].filter(
           (answer) => answer !== "refused" && !startup.has(answer) && !answer.endsWith(" 401 -"),
         );

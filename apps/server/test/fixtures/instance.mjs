@@ -1,12 +1,15 @@
 // A stand-in for `usine up` that holds the instance like the real one: it parses its arguments as
-// `usine up` does, writes the instance record, drains on the first SIGTERM, and answers
-// GET /api/overview and /api/configuration. It reads the runs to list from `fixture-runs.json` in
-// its working directory, and a gateway admin token variable from `fixture-gateway-env`. If
-// `fixture-drain` contains `never`, only a second signal ends its drain. If `fixture-close`
-// contains `never`, its runtime scope never closes, so only SIGKILL stops it. If `fixture-startup`
-// contains `<lines> <milliseconds>`, it logs that many lines at that interval before it listens, as
-// startup recovery does; if it contains `never`, it never listens. If `fixture-unit` contains a
-// systemd service name, it records that a service by that name runs it.
+// `usine up` does, writes the instance record, listens with HTTP 503 for every request until it
+// has started, drains on the first SIGTERM, and then answers GET /api/version, /api/overview, and
+// /api/configuration. It reads the runs to list from `fixture-runs.json` in its working directory,
+// and a gateway admin token variable from `fixture-gateway-env`. If `fixture-drain` contains
+// `never`, only a second signal ends its drain. If `fixture-close` contains `never`, its runtime
+// scope never closes, so only SIGKILL stops it. If `fixture-startup` contains
+// `<lines> <milliseconds>`, it logs that many lines at that interval before it starts; if it
+// contains `never`, it never starts; if it contains `fail`, it answers a request with HTTP 503,
+// then exits with status 1 a second later, before it writes the admin token, as a failed migration
+// does. If
+// `fixture-unit` contains a systemd service name, it records that a service by that name runs it.
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { join } from "node:path";
@@ -27,10 +30,12 @@ const runs = () =>
     : [];
 const never = (name) =>
   existsSync(fixtureFile(name)) && readFileSync(fixtureFile(name), "utf8").trim() === "never";
-const startup = () => {
-  const plan = existsSync(fixtureFile("fixture-startup"))
+const startupPlan = () =>
+  existsSync(fixtureFile("fixture-startup"))
     ? readFileSync(fixtureFile("fixture-startup"), "utf8").trim()
     : "";
+const startup = () => {
+  const plan = startupPlan();
   if (plan === "never") return Effect.never;
   const [lines, milliseconds] = plan === "" ? [0, 0] : plan.split(" ").map(Number);
   return Effect.forEach(
@@ -62,10 +67,20 @@ const responses = {
   "/api/configuration": () => ({ workers: workers() }),
 };
 
-const listen = (port) =>
+const listen = (port, started, answered) =>
   Effect.acquireRelease(
     Effect.callback((resume) => {
       const server = createServer((request, response) => {
+        if (!started.value) {
+          response.writeHead(503, { connection: "close", "retry-after": "1" }).end();
+          Deferred.doneUnsafe(answered, Effect.void);
+          return;
+        }
+        if (request.url === "/api/version") {
+          response.writeHead(200, { "content-type": "application/json" });
+          response.end(JSON.stringify("0.0.0-fixture"));
+          return;
+        }
         if (request.headers.authorization !== `Bearer ${"l".repeat(43)}`) {
           response.writeHead(401).end();
           return;
@@ -111,16 +126,24 @@ NodeRuntime.runMain(
           : Option.none(),
       });
       yield* holdInstance(directory, record);
+      const started = { value: false };
+      const answered = yield* Deferred.make();
+      yield* listen(port, started, answered);
+      if (startupPlan() === "fail") {
+        yield* Deferred.await(answered);
+        yield* Effect.sleep("1 second");
+        return yield* Effect.die(new Error("fixture migration failed"));
+      }
       writeFileSync(join(directory, ".usine/admin-token"), "l".repeat(43), { mode: 0o600 });
       const requested = yield* Deferred.make();
       yield* withGracefulShutdown(
         Effect.gen(function* () {
           yield* startup();
-          yield* listen(port);
           yield* Effect.addFinalizer(() =>
             Effect.suspend(() => (never("fixture-close") ? Effect.never : Effect.void)),
           );
           yield* Console.log(`fixture listening on ${port}`);
+          started.value = true;
           return {
             running: Effect.never,
             drain: Effect.suspend(() => (never("fixture-drain") ? Effect.never : Effect.void)),

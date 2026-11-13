@@ -121,16 +121,8 @@ describe("brain admission", () => {
     const gateways = ["gateway", "gateway-subscription", "gateway-api-key"] as const;
     for (const credential of gateways) {
       const context = AdmissionContext.make({ placement: "orchestrator", credential });
-      for (const id of ["claude", "pi"])
+      for (const id of catalog.ids)
         assert(Result.isSuccess(admitBrain(catalog, supervisor, brain(id), context)), id);
-      // Codex serves no usine tool set until the next step of the harness adapter plan.
-      const codex = admitBrain(catalog, supervisor, brain("codex"), context);
-      assert(Result.isFailure(codex));
-      assert.deepStrictEqual(
-        codex.failure.missing.map(({ capability }) => capability),
-        ["usine-tools"],
-      );
-      assert.include(codex.failure.message, "until step 19 of the harness adapter plan");
     }
     const login = admitBrain(catalog, supervisor, brain("claude"), orchestrator);
     assert(Result.isFailure(login));

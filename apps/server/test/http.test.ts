@@ -1659,6 +1659,7 @@ describe("operator HTTP API", () => {
 
             const listener = yield* listenForStartup(port, "test");
             yield* Layer.build(serverLayer(fixtureBackend, webRoot, listener, authentication));
+            yield* listener.started;
             return yield* Effect.all([overview("127.0.0.1"), overview("127.0.0.2")]);
           }).pipe(Effect.scoped);
           assert.deepStrictEqual(statuses, [401, "unreachable"]);

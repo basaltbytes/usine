@@ -261,8 +261,8 @@ export const failureMessage = (failure: CliFailure): string =>
       `usine ${command} left the instance running: ${runList(runs)} ${runs.length === 1 ? "has a running attempt" : "have running attempts"}. Wait for ${runs.length === 1 ? "it" : "them"} to end, or run usine ${command} --force to stop without waiting; the next start reattaches the attempts.`,
     DetachedStartError: ({ outcome, pid, exit, timeout, port, log, tail }) =>
       outcome === "exited"
-        ? `usine up exited (${Option.getOrElse(exit, () => "unknown status")}) before it listened on port ${port}. ${logLines(tail)}`
-        : `usine up${holderOf(pid)} didn't answer on port ${port}, and wrote nothing to ${log} for ${Duration.format(timeout)}. It still runs. Check ${log}, or stop it with usine stop.`,
+        ? `usine up exited (${Option.getOrElse(exit, () => "unknown status")}) before it finished starting on port ${port}. ${logLines(tail)}`
+        : `usine up${holderOf(pid)} didn't finish starting on port ${port}, and wrote nothing to ${log} for ${Duration.format(timeout)}. It still runs. Check ${log}, or stop it with usine stop.`,
     DetachedSpawnError: ({ command, reason }) =>
       `Could not start ${command} in the background (${clause(reason)}).`,
     LaunchctlError: ({ command, service, reason }) =>
@@ -271,8 +271,8 @@ export const failureMessage = (failure: CliFailure): string =>
       `${command} failed (${clause(reason)}). ${unit} runs usine, so usine manages it with systemctl. Run the command as a user that may start and stop ${unit}, such as root, or let this user manage it with the polkit rule in the guide to running the orchestrator on a server.`,
     ServiceStartError: ({ unit, outcome, state, timeout }) =>
       outcome === "failed"
-        ? `${Schema.is(LaunchdService)(unit) ? `launchctl kickstart ${unit}` : serviceStartCommand(unit)} ran, but the service was ${state} before usine listened, and is now stopped. Read its output at ${serviceOutput(unit)}, then run ${startCommand(Option.some(unit))}.`
-        : `${unit} started, but usine didn't answer within ${Duration.format(timeout)}, and the service is ${state}. Startup recovery can take minutes: read ${serviceOutput(unit)} and check it with usine status.`,
+        ? `${Schema.is(LaunchdService)(unit) ? `launchctl kickstart ${unit}` : serviceStartCommand(unit)} ran, but the service was ${state} before usine finished starting, and is now stopped. Read its output at ${serviceOutput(unit)}, then run ${startCommand(Option.some(unit))}.`
+        : `${unit} started, but usine didn't finish starting within ${Duration.format(timeout)}, and the service is ${state}. Read ${serviceOutput(unit)} and check it with usine status.`,
     EngineOutsideInstanceError: ({ script, version, packaged }) =>
       packaged
         ? `usine upgrade changed nothing: the running engine, @usine/server ${version}, runs from ${script}, outside this instance's node_modules. Update that install with its package manager, then run usine restart.`

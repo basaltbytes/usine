@@ -43,6 +43,12 @@ const credentialConfig = (id: string, name: string, tokenVariable: string) =>
     "",
   ].join("\n");
 
+const closedToolsLacking = Lacking.make({
+  capability: "closed-tools",
+  reason:
+    "Codex lists apply_patch, its code-mode exec and wait tools, and its MCP resource tools in every thread: its model catalog turns them on, and no thread setting short of replacing the catalog turns them off",
+});
+
 export const codex = HarnessDescriptor.make({
   id: Harness.make("codex"),
   label: "Codex",
@@ -103,17 +109,10 @@ export const codex = HarnessDescriptor.make({
         "plan-windows",
         "structured-output",
         "ephemeral",
+        "usine-tools",
       ],
       lacking: [
-        Lacking.make({
-          capability: "usine-tools",
-          reason:
-            "The Codex adapter passes no usine tool set to a session until step 19 of the harness adapter plan",
-        }),
-        Lacking.make({
-          capability: "closed-tools",
-          reason: "The Codex adapter keeps the harness's own tools on in every session",
-        }),
+        closedToolsLacking,
         Lacking.make({
           capability: "durable-coordination",
           reason:
@@ -136,17 +135,10 @@ export const codex = HarnessDescriptor.make({
         "model-check",
         "structured-output",
         "ephemeral",
+        "usine-tools",
       ],
       lacking: [
-        Lacking.make({
-          capability: "usine-tools",
-          reason:
-            "The Codex adapter passes no usine tool set to a session until step 19 of the harness adapter plan",
-        }),
-        Lacking.make({
-          capability: "closed-tools",
-          reason: "The Codex adapter keeps the harness's own tools on in every session",
-        }),
+        closedToolsLacking,
         Lacking.make({
           capability: "durable-coordination",
           reason:
