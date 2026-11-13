@@ -8,7 +8,7 @@ import { InfraFailure } from "@usine/core/attempt/failure";
 import { AttemptFailed } from "@usine/core/attempt/outcome";
 import { Event } from "@usine/core/event";
 import { InstanceDirectory } from "@usine/core/instance";
-import { ItemKey } from "@usine/core/item";
+import { ItemKey, ItemNumber } from "@usine/core/item";
 import { GitHubLabelName } from "@usine/core/label";
 import { jsonKey } from "@usine/core/json-key";
 import { RepositoryName } from "@usine/core/repository";
@@ -30,6 +30,7 @@ import {
 import {
   GitHubItemHistory,
   GitHubItemNotFoundError,
+  GitHubTimelineTooLongError,
   type ItemChange,
   LabelAdded,
   LabelRemoved,
@@ -155,7 +156,10 @@ const removed = (
 
 type TimelineRead = (
   since: DateTime.Utc,
-) => Effect.Effect<ReadonlyArray<TimelineEntry>, GitHubAppError | GitHubItemNotFoundError>;
+) => Effect.Effect<
+  ReadonlyArray<TimelineEntry>,
+  GitHubAppError | GitHubItemNotFoundError | GitHubTimelineTooLongError
+>;
 
 /**
  * Returns GitHub fakes that record each read. The timeline fake returns every entry of the
@@ -614,11 +618,13 @@ describe("current label fallback", () => {
         timeline: () =>
           Deferred.succeed(started, undefined).pipe(
             Effect.andThen(
-              InvalidGitHubResponseError.make({
-                operation: "fetch-item-timeline",
-                message: "GitHub returned a response in an unexpected format",
-                detail:
-                  "the timeline of acme/demo#1 since 2026-11-08T15:50:10.000Z has more than 10 pages",
+              GitHubTimelineTooLongError.make({
+                repository,
+                item: ItemNumber.make(1),
+                since: "2026-11-08T15:50:10.000Z",
+                pages: 10,
+                message:
+                  "The timeline of acme/demo#1 since 2026-11-08T15:50:10.000Z has more than 10 pages",
               }),
             ),
           ),
@@ -633,6 +639,77 @@ describe("current label fallback", () => {
       assert.strictEqual((yield* Fiber.join(fiber))._tag, "Success");
       assert.strictEqual(fake.reads.timeline.length, 1);
       assert.strictEqual(fake.reads.labels, 1);
+    }),
+  );
+
+  const bodyFailure = (operation: "fetch-item-timeline" | "fetch-item-labels") =>
+    InvalidGitHubResponseError.make({
+      operation,
+      message: "GitHub returned a response in an unexpected format",
+      detail: "Decode error (200 GET https://api.github.com/graphql)",
+    });
+
+  it.effect("reads label events again after a response body fails partway through", () =>
+    Effect.gen(function* () {
+      const started = yield* Deferred.make<void>();
+      let reads = 0;
+      const fake = fakeGitHub({
+        timeline: () =>
+          Effect.suspend(() => {
+            reads += 1;
+            return reads === 1
+              ? Deferred.succeed(started, undefined).pipe(
+                  Effect.andThen(bodyFailure("fetch-item-timeline")),
+                )
+              : Effect.succeed([
+                  added(appActor, "agent-review-findings", at("2026-11-08T15:55:00Z")),
+                ]);
+          }),
+      });
+      const fiber = yield* verify(attemptOn("local"), review()).pipe(
+        Effect.provide(fake.check),
+        Effect.forkChild,
+      );
+      yield* Deferred.await(started);
+      yield* TestClock.adjust("1 second");
+      assert.strictEqual((yield* Fiber.join(fiber))._tag, "Success");
+      assert.strictEqual(fake.reads.timeline.length, 2);
+      assert.strictEqual(fake.reads.labels, 0);
+    }),
+  );
+
+  it.effect("reads current labels again after a response body fails partway through", () =>
+    Effect.gen(function* () {
+      const timelineStarted = yield* Deferred.make<void>();
+      const started = yield* Deferred.make<void>();
+      let labelReads = 0;
+      const fake = fakeGitHub({
+        timeline: () =>
+          Deferred.succeed(timelineStarted, undefined).pipe(
+            Effect.andThen(bodyFailure("fetch-item-timeline")),
+          ),
+        labels: Effect.suspend(() => {
+          labelReads += 1;
+          return labelReads === 1
+            ? Deferred.succeed(started, undefined).pipe(
+                Effect.andThen(bodyFailure("fetch-item-labels")),
+              )
+            : Effect.succeed(["ready-to-merge"]);
+        }),
+      });
+      const fiber = yield* verify(attemptOn("local"), review()).pipe(
+        Effect.provide(fake.check),
+        Effect.forkChild,
+      );
+      yield* Deferred.await(timelineStarted);
+      yield* TestClock.adjust("1 second");
+      yield* TestClock.adjust("2 seconds");
+      yield* Deferred.await(started);
+      assert.strictEqual(fake.reads.labels, 1);
+      yield* TestClock.adjust("1 second");
+      assert.strictEqual((yield* Fiber.join(fiber))._tag, "Success");
+      assert.strictEqual(fake.reads.timeline.length, 3);
+      assert.strictEqual(fake.reads.labels, 2);
     }),
   );
 

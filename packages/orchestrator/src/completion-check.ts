@@ -9,7 +9,11 @@ import { CompletionCheck } from "@usine/engine/completion-check";
 import type { Submission } from "@usine/engine/engine";
 import { githubBotLogin } from "@usine/executor";
 import { GitHubApp, type GitHubAppError, isRefusal } from "@usine/github/github-app";
-import { GitHubItemHistory, type GitHubItemNotFoundError } from "@usine/github/item-history";
+import {
+  GitHubItemHistory,
+  type GitHubItemNotFoundError,
+  type GitHubTimelineTooLongError,
+} from "@usine/github/item-history";
 import { GitHubPolling } from "@usine/github/polling";
 import {
   type Brand,
@@ -48,13 +52,18 @@ type LogFields = ReturnType<typeof logFields>;
 
 /** Returns whether a retry of the failed read can succeed. */
 const isTransient = (
-  error: GitHubAppError | GitHubItemNotFoundError | UnknownWriterError | Cause.TimeoutError,
+  error:
+    | GitHubAppError
+    | GitHubItemNotFoundError
+    | GitHubTimelineTooLongError
+    | UnknownWriterError
+    | Cause.TimeoutError,
 ): boolean => {
   switch (error._tag) {
     case "TimeoutError":
       return true;
     case "GitHubItemNotFoundError":
-    case "InvalidGitHubResponseError":
+    case "GitHubTimelineTooLongError":
     case "UnknownWriterError":
       return false;
     default:
@@ -64,13 +73,20 @@ const isTransient = (
 
 /**
  * Bounds `read` and retries it twice, after one and two seconds, after a timeout, a transport
- * failure, a server error, or a rate limit. A refusal, a missing Item, and an invalid response,
- * such as a timeline longer than ten pages, end the read: GitHub returns them again, and the
- * GraphQL client already retries GitHub's transient server errors.
+ * failure, a server error, a rate limit, or an invalid response, such as a body that fails
+ * partway through. A refusal, a missing Item, and a timeline longer than ten pages end the read:
+ * GitHub returns them again.
  */
 const transientlyRetried =
   (fields: LogFields, read: "label events" | "current labels") =>
-  <A, E extends GitHubAppError | GitHubItemNotFoundError | UnknownWriterError>(
+  <
+    A,
+    E extends
+      | GitHubAppError
+      | GitHubItemNotFoundError
+      | GitHubTimelineTooLongError
+      | UnknownWriterError,
+  >(
     effect: Effect.Effect<A, E>,
   ) =>
     effect.pipe(

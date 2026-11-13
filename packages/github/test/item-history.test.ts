@@ -238,12 +238,14 @@ describe("GitHubItemHistory", () => {
     }).pipe(Effect.provide(historyLayer(pagedClient(10, requests))));
   });
 
-  it.effect("stops after ten pages of a longer timeline with an invalid response", () => {
+  it.effect("stops after ten pages of a longer timeline with a too-long error", () => {
     const requests: Array<HttpClientRequest.HttpClientRequest> = [];
     return Effect.gen(function* () {
       const failure = yield* Effect.flip(readTimeline);
-      assert(failure._tag === "InvalidGitHubResponseError");
-      assert.include(failure.detail, "has more than 10 pages");
+      assert(failure._tag === "GitHubTimelineTooLongError");
+      assert.strictEqual(failure.pages, 10);
+      assert.strictEqual(failure.item, 247);
+      assert.include(failure.message, "has more than 10 pages");
       assert.strictEqual(requests.length, 10);
     }).pipe(Effect.provide(historyLayer(pagedClient(11, requests))));
   });
