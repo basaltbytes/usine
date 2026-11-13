@@ -62,12 +62,14 @@ export interface SessionChannel {
   readonly fail: (error: AgentSessionError) => Effect.Effect<void>;
   /**
    * Ends the session with `message`, or fails it with the report that `message` marks.
-   * `answeredOperator` becomes the result's `answeredOperator`.
+   * `answeredOperator` becomes the result's `answeredOperator`, and `backgroundWaitLimitPassed`
+   * the `SessionFinished` field of the same name.
    */
   readonly finish: (
     session: AgentSession,
     message: string,
     answeredOperator?: boolean,
+    backgroundWaitLimitPassed?: boolean,
   ) => Effect.Effect<void>;
 }
 
@@ -140,18 +142,20 @@ export const sessionChannel = Effect.fn("SessionChannel.make")(function* (
     session: AgentSession,
     message: string,
     answeredOperator = false,
+    backgroundWaitLimitPassed = false,
   ) {
     yield* Effect.annotateCurrentSpan({ sessionId: session.id });
     const own = reportedOutcome(Option.some(session.id), message);
     if (Option.isSome(own)) return yield* fail(own.value);
     if (yield* Ref.getAndSet(terminal, true)) return;
-    yield* Queue.offer(events, SessionFinished.make({ session }));
+    yield* Queue.offer(events, SessionFinished.make({ session, backgroundWaitLimitPassed }));
     yield* Deferred.succeed(result, SessionResult.make({ message, answeredOperator }));
     yield* Queue.end(events);
     yield* runCleanups;
     yield* Effect.logInfo(`${options.label} finished`, {
       sessionId: options.sessionId,
       answeredOperator,
+      backgroundWaitLimitPassed,
     });
   });
 

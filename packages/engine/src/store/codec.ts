@@ -24,7 +24,7 @@ import { RunId, Run } from "@usine/core/run";
 import { RunAgain } from "@usine/core/run/again";
 import { ApprovalChannel, ApprovalSource, RunApproval } from "@usine/core/run/approval";
 import { StepName, Step } from "@usine/core/step";
-import { WorkerName } from "@usine/core/worker";
+import { WorkerKind, WorkerName } from "@usine/core/worker";
 import * as RunState from "@usine/core/run/state";
 import { Comment, StepResult } from "@usine/core/step/result";
 import { Array as EffectArray, DateTime, Effect, flow, Option, Schema, Struct } from "effect";
@@ -89,6 +89,7 @@ export const AttemptRow = Schema.Struct({
   runId: RunId,
   stepName: StepName,
   worker: WorkerName,
+  workerKind: Schema.NullOr(WorkerKind),
   number: AttemptNumber,
   brain: BrainSpec,
   task: AttemptTask,
@@ -274,6 +275,7 @@ const attemptSummaryFromRow = (row: AttemptSummaryRow): AttemptSummary =>
     runId: row.runId,
     stepName: row.stepName,
     worker: row.worker,
+    workerKind: Option.fromNullishOr(row.workerKind),
     number: row.number,
     brain: row.brain,
     agent: row.agent,

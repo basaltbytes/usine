@@ -110,7 +110,7 @@ const complete = Effect.fn("test.completeCycleRun")(function* (value: Submission
   const runId = idFor(value);
   const claim = yield* store.recordAndClaim(value, runId);
   assert.strictEqual(claim.result._tag, "Claimed");
-  const started = yield* store.beginAttempt(runId, worker, Option.none());
+  const started = yield* store.beginAttempt(runId, worker, "local", Option.none());
   assert(started._tag === "AttemptStarted");
   yield* store.finishAttempt(started.execution.attempt, success);
 });
@@ -126,7 +126,7 @@ describe("Item cycle budgets", () => {
           for (let round = 1; round <= 3; round += 1) yield* complete(submission("review", round));
           const running = submission("fix", 1);
           yield* store.recordAndClaim(running, idFor(running));
-          const started = yield* store.beginAttempt(idFor(running), worker, Option.none());
+          const started = yield* store.beginAttempt(idFor(running), worker, "local", Option.none());
           assert(started._tag === "AttemptStarted");
           const older = submission("fix", 2);
           const newer = Submission.make({
@@ -182,12 +182,17 @@ describe("Item cycle budgets", () => {
               yield* complete(legacy(1));
               yield* complete(legacy(2));
               yield* store.recordAndClaim(third, idFor(third));
-              const started = yield* store.beginAttempt(idFor(third), worker, Option.none());
+              const started = yield* store.beginAttempt(
+                idFor(third),
+                worker,
+                "local",
+                Option.none(),
+              );
               assert(started._tag === "AttemptStarted");
               yield* store.recordAndClaim(legacy(4), idFor(legacy(4)));
               yield* store.finishAttempt(started.execution.attempt, success);
               yield* store.recordAndClaim(scheduled, idFor(scheduled));
-              yield* store.beginAttempt(idFor(scheduled), worker, Option.none());
+              yield* store.beginAttempt(idFor(scheduled), worker, "local", Option.none());
               const nextTick = Submission.make({ ...scheduled, event: event("legacy-next-tick") });
               yield* store.recordAndClaim(nextTick, idFor(nextTick));
             }),
@@ -248,7 +253,7 @@ describe("Item cycle budgets", () => {
           for (let round = 1; round <= 3; round += 1) yield* complete(submission("review", round));
           const sibling = submission("fix", 1);
           yield* store.recordAndClaim(sibling, idFor(sibling));
-          const running = yield* store.beginAttempt(idFor(sibling), worker, Option.none());
+          const running = yield* store.beginAttempt(idFor(sibling), worker, "local", Option.none());
           assert(running._tag === "AttemptStarted");
           const queued = submission("fix", 2);
           yield* store.recordAndClaim(queued, idFor(queued));
@@ -495,7 +500,12 @@ describe("Item cycle budgets", () => {
             yield* store.recordAndClaim(first, idFor(first));
             yield* store.recordAndClaim(second, idFor(second));
             yield* store.recordAndClaim(second, idFor(second));
-            const started = yield* store.beginAttempt(idFor(second), worker, Option.none());
+            const started = yield* store.beginAttempt(
+              idFor(second),
+              worker,
+              "local",
+              Option.none(),
+            );
             assert(started._tag === "AttemptStarted");
             yield* store.finishAttempt(
               started.execution.attempt,
@@ -503,7 +513,12 @@ describe("Item cycle budgets", () => {
                 InfraFailure.make({ message: "transport failed", cause: new Error("test") }),
               ),
             );
-            const retried = yield* store.beginAttempt(idFor(second), worker, Option.none());
+            const retried = yield* store.beginAttempt(
+              idFor(second),
+              worker,
+              "local",
+              Option.none(),
+            );
             assert(retried._tag === "AttemptStarted");
             yield* store.finishAttempt(retried.execution.attempt, success);
             yield* complete(submission("review", 3));
@@ -530,7 +545,7 @@ describe("Item cycle budgets", () => {
             cycleLimit: Option.some(CycleLimit.make(1)),
           });
           yield* store.recordAndClaim(first, idFor(first));
-          const started = yield* store.beginAttempt(idFor(first), worker, Option.none());
+          const started = yield* store.beginAttempt(idFor(first), worker, "local", Option.none());
           assert(started._tag === "AttemptStarted");
           const next = Submission.make({
             ...submission("review", 2),

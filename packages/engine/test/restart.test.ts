@@ -47,7 +47,7 @@ import {
 } from "../src/engine/engine.ts";
 import { runIdFor, type Submission } from "../src/engine/submission.ts";
 import { RunReader } from "../src/run-reader/run-reader.ts";
-import { StepExecutor } from "../src/step-executor.ts";
+import { StepExecutor, type WorkerLease } from "../src/step-executor.ts";
 import {
   approvalEvent,
   uiApproval,
@@ -182,8 +182,9 @@ const restartedExecutor = Effect.fn("test.restartedExecutor")(function* (
     gate: yield* Deferred.make<void>(),
     leased: yield* TxRef.make(0),
   };
-  const lease = {
+  const lease: WorkerLease = {
     worker: WorkerName.make("local"),
+    kind: "local",
     release: TxRef.update(state.leased, (count) => count - 1),
   };
   const freeSlot = Effect.tx(
@@ -420,10 +421,15 @@ describe("engine restart", () => {
           recover: () => Effect.succeed("found" as const),
           intervene: () => Effect.void,
           interrupt: () => Effect.void,
-          occupy: (worker) => Effect.succeed({ worker, release: Effect.void }),
+          occupy: (worker) => Effect.succeed({ worker, kind: "local", release: Effect.void }),
           sweep: Effect.void,
           discard: () => Effect.void,
-          reserve: () => Effect.succeed({ worker: WorkerName.make("local"), release: Effect.void }),
+          reserve: () =>
+            Effect.succeed({
+              worker: WorkerName.make("local"),
+              kind: "local",
+              release: Effect.void,
+            }),
           execute: (execution) =>
             Ref.updateAndGet(executions, (seen) => [
               ...seen,
@@ -508,6 +514,7 @@ describe("engine restart", () => {
                   reserve: (_, { itemKey }) =>
                     Effect.succeed({
                       worker: itemKey === onLocal.itemKey ? local : spare,
+                      kind: "local",
                       release: Effect.void,
                     }),
                   execute: () => Effect.never,
@@ -552,7 +559,11 @@ describe("engine restart", () => {
             TxRef.update(leased, (counts) =>
               new Map(counts).set(worker, (counts.get(worker) ?? 0) + change),
             );
-          const leaseOn = (worker: WorkerName) => ({ worker, release: counted(worker, -1) });
+          const leaseOn = (worker: WorkerName): WorkerLease => ({
+            worker,
+            kind: "local",
+            release: counted(worker, -1),
+          });
           const freeSlot = (worker: Option.Option<WorkerName>) =>
             Effect.tx(
               Effect.gen(function* () {
@@ -715,11 +726,15 @@ describe("engine restart", () => {
               ),
             intervene: () => Effect.void,
             interrupt: () => Effect.void,
-            occupy: (worker) => Effect.succeed({ worker, release: Effect.void }),
+            occupy: (worker) => Effect.succeed({ worker, kind: "local", release: Effect.void }),
             sweep: Effect.void,
             discard: () => Effect.void,
             reserve: () =>
-              Effect.succeed({ worker: WorkerName.make("local"), release: Effect.void }),
+              Effect.succeed({
+                worker: WorkerName.make("local"),
+                kind: "local",
+                release: Effect.void,
+              }),
             // The parent finishes and its result is stored, then the process stops before the Run records it.
             execute: (execution) =>
               Ref.update(executions, (count) => count + 1).pipe(
@@ -1452,6 +1467,7 @@ describe("engine restart", () => {
                 const started = yield* store.beginAttempt(
                   runId,
                   WorkerName.make("local"),
+                  "local",
                   Option.none(),
                 );
                 assert(started._tag === "AttemptStarted");
@@ -1564,7 +1580,7 @@ describe("engine restart", () => {
                   )
                 : Effect.void,
             reserve: () => Effect.never,
-            occupy: (worker) => Effect.succeed({ worker, release: Effect.void }),
+            occupy: (worker) => Effect.succeed({ worker, kind: "local", release: Effect.void }),
             sweep: Effect.void,
             discard: () => Effect.void,
             execute: () => Effect.die("no Attempt starts"),
@@ -1748,6 +1764,7 @@ describe("engine restart", () => {
             const started = yield* store.beginAttempt(
               runId,
               WorkerName.make("local"),
+              "local",
               Option.none(),
             );
             assert(started._tag === "AttemptStarted");
@@ -1796,6 +1813,7 @@ describe("engine restart", () => {
               const interrupted = yield* store.beginAttempt(
                 retryingRunId,
                 WorkerName.make("local"),
+                "local",
                 Option.none(),
               );
               assert(interrupted._tag === "AttemptStarted");
@@ -1809,6 +1827,7 @@ describe("engine restart", () => {
               const started = yield* store.beginAttempt(
                 closedRunId,
                 WorkerName.make("local"),
+                "local",
                 Option.none(),
               );
               assert(started._tag === "AttemptStarted");

@@ -56,6 +56,16 @@ export class RunSpec extends Schema.Class<
   parentModel: Schema.OptionFromNullOr(ModelId),
   /** The total child sessions the parent may start, including sequential starts. */
   maxChildren: ChildSessionBudget,
+  /**
+   * The minutes an idle child that answered waits for its background work to start a turn, or
+   * `None` for no limit. Decodes as `None` for older Attempts.
+   */
+  maxBackgroundWaitMinutes: Schema.OptionFromNullOr(
+    Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
+  ).pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed(null)),
+    Schema.withConstructorDefault(Effect.succeed(Option.none<number>())),
+  ),
   /** The resolved reasoning effort for the Pi parent session. */
   parentEffort: Effort,
   /**

@@ -66,7 +66,7 @@ it.live(
               }),
             });
             yield* store.recordAndClaim(value, runId);
-            const started = yield* store.beginAttempt(runId, WORKER, Option.none());
+            const started = yield* store.beginAttempt(runId, WORKER, "local", Option.none());
             assert(started._tag === "AttemptStarted");
             yield* store.finishAttempt(
               started.execution.attempt,
@@ -113,7 +113,7 @@ it.live(
                 }
                 return leftovers;
               }),
-            occupy: (worker) => Effect.succeed({ worker, release: Effect.void }),
+            occupy: (worker) => Effect.succeed({ worker, kind: "local", release: Effect.void }),
             reserve: () => Effect.die("finished runs start no attempt"),
             execute: () => Effect.die("finished runs start no attempt"),
             intervene: () => Effect.die("unused"),

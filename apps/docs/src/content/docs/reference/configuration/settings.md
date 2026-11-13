@@ -15,6 +15,7 @@ Fields in this table belong to `settings`.
 | `max_children` | integer ≥ 1 | `4` | Child sessions one attempt can start over its lifetime, including sequential sessions. |
 | `max_attempt_minutes` | integer ≥ 1 | unlimited | Wall-clock minutes per attempt, excluding operator holds and orchestrator downtime. |
 | `max_attempt_tokens` | integer ≥ 1 | unlimited | Tokens per attempt across the parent and all children. |
+| `max_background_wait_minutes` | integer ≥ 1 | unlimited | Minutes a child that answered waits for its background tasks to start a turn. When the limit passes, the child returns its answer and its background tasks stop. See [Background work](#background-work). |
 | `coordinator` | `session` or `events` | `session` | What coordinates attempts of agents without an override: a parent session, or rules on lifecycle events. See [Coordinator](/reference/configuration/agents/#coordinator). |
 | `parent_model` | string | Pi selection | Parent model in `provider/model` form for agents without an override. Not allowed with `coordinator: events`. |
 | `parent_effort` | effort | agent effort | Parent reasoning effort for agents without an override. Not allowed with `coordinator: events`. |
@@ -34,6 +35,12 @@ settings:
 ```
 
 A runaway guard warns the parent once at 80% of either attempt limit and fails the attempt with `RunawayFailure` at 100%. The engine does not retry that failure automatically. A hold stops the wall-clock count, but tokens still count. A restart preserves usage; crash recovery can omit up to 30 seconds of elapsed time.
+
+### Background work
+
+A child can answer while background tasks that it started, such as a test suite or a CI watch, still run. By default, the child waits for that work and for the turn the work starts, however long they take, so a child can fix what a background test run reports.
+
+Set `max_background_wait_minutes` to bound that wait. Claude Code children apply it. If the child is still idle with background work when the limit passes, usine returns the child's last answer as its report and logs a warning with the limit and the remaining task IDs. Closing the child ends the Claude Code process, which stops its background tasks; their results never reach the attempt, even if the answer said that the work was still running. When the attempt ends, even as a success, cleanup salvages its checkout as after a failure: for a loop with `write` permissions, it commits uncommitted changes and pushes them, with local commits, to a salvage branch before it removes the checkout. A checkout at its base commit has nothing to salvage. Cleanup applies the limit that the attempt started with, so a change to the setting doesn't affect an attempt that is running. If the salvage doesn't push all the work, the checkout stays on the worker, and the next startup of usine salvages it again. A turn that starts within the limit runs to its own answer. An operator Hold or pause keeps the child open past the limit. See [Agents](/reference/configuration/agents/) for the Hold and Release behavior.
 
 Effort values are `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max`. The selected model and harness must support the value. See [Agents](/reference/configuration/agents/#parent-selection).
 

@@ -60,6 +60,7 @@ const configuration = ConfigurationView.make({
     maxChildren: 4,
     maxAttemptMinutes: null,
     maxAttemptTokens: null,
+    maxBackgroundWaitMinutes: null,
     parentModel: null,
     parentEffort: null,
     coordinator: "session",

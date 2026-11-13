@@ -144,7 +144,7 @@ export const preparedAttemptsFor = (
                         "The Attempt's runaway guard cannot start; releasing its checkout without launching it",
                         { attemptId },
                       ).pipe(
-                        Effect.andThen(prepared.recordSalvage(io.salvage)),
+                        Effect.andThen(prepared.recordSalvage(io)),
                         Effect.andThen(releaseSalvaged(exit)),
                       ),
                 ),
@@ -186,7 +186,7 @@ export const preparedAttemptsFor = (
                   ),
                 ),
               );
-              yield* prepared.recordSalvage(io.salvage);
+              yield* prepared.recordSalvage(io);
               // Closing the owner's scope interrupts the session before the checkout and credential
               // finalizers. acquireUseRelease interrupts the forked fiber when the caller waiting on join
               // is interrupted.

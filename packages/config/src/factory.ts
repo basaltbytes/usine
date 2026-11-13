@@ -687,6 +687,12 @@ export class Settings extends Schema.Class<Settings, Brand.Brand<"@usine/config/
   /** The token limit per attempt, counting the parent and every child, or `None` for no limit. */
   maxAttemptTokens: Schema.OptionFromOptionalKey(PositiveInt),
   /**
+   * The minutes an idle child that answered waits for its background work to start a turn, or
+   * `None` for no limit. When the limit passes, the child returns its answer and its background
+   * tasks stop.
+   */
+  maxBackgroundWaitMinutes: Schema.OptionFromOptionalKey(PositiveInt),
+  /**
    * The coordinator kind of attempts whose agent sets none: `session` or `events`. Decoding
    * defaults to `session`.
    */
@@ -762,6 +768,7 @@ const SettingsFromYaml = Settings.pipe(
     maxChildren: "max_children",
     maxAttemptMinutes: "max_attempt_minutes",
     maxAttemptTokens: "max_attempt_tokens",
+    maxBackgroundWaitMinutes: "max_background_wait_minutes",
     parentModel: "parent_model",
     parentEffort: "parent_effort",
   }),

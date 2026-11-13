@@ -400,6 +400,13 @@ export const settingsFormFields = [
     description: "Tokens per attempt, parent and children combined. Leave blank for no ceiling.",
   },
   {
+    path: "settings.max_background_wait_minutes",
+    label: "Background wait limit (minutes)",
+    kind: "number",
+    description:
+      "Minutes a child that answered waits for its background tasks to start a turn. Then it returns its answer and its background tasks stop. Leave blank for no limit.",
+  },
+  {
     path: "settings.coordinator",
     label: "Coordinator",
     options: CoordinatorKind.literals,

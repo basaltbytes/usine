@@ -44700,11 +44700,22 @@
                 "$ref": "#/components/schemas/_usine_orchestrator_ChildSessionBudgetFailureViewEncoded"
               }
             ]
+          },
+          "report": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
           "_tag",
-          "failure"
+          "failure",
+          "report"
         ],
         "additionalProperties": false
       },
@@ -45985,6 +45996,18 @@
               }
             ]
           },
+          "maxBackgroundWaitMinutes": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "parentModel": {
             "anyOf": [
               {
@@ -46152,6 +46175,7 @@
           "maxChildren",
           "maxAttemptMinutes",
           "maxAttemptTokens",
+          "maxBackgroundWaitMinutes",
           "parentModel",
           "parentEffort",
           "coordinator",
@@ -51932,6 +51956,9 @@
                 "$ref": "#/components/schemas/Agent_RoleSessionEncoded"
               }
             ]
+          },
+          "backgroundWaitLimitPassed": {
+            "type": "boolean"
           }
         },
         "required": [
