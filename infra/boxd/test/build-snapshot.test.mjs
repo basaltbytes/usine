@@ -6,11 +6,10 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
 import { promisify } from "node:util";
-import { Boxd } from "@boxd-sh/sdk";
 import {
   build,
   clientOptions,
-  clients,
+  main,
   parseOptions,
   sendStdin,
   STDIN_CHUNK_BYTES,
@@ -95,7 +94,7 @@ const fakeStream = ({
  * `pending` for good when `neverReady` is set. `setup` holds the options of the setup's `Exec`
  * stream. When `reappliesEgress` is set, the reads after the first one that reports the allowlist
  * lifted report the allowlist of the machine's creation again. `create` waits for `creating`, and
- * each machine read waits `readMs` first.
+ * each machine read waits `readMs` first. `close` sets `state.closed`.
  */
 const fakeBoxd = ({
   setup,
@@ -118,6 +117,7 @@ const fakeBoxd = ({
     edits: 0,
     specEgress: [],
     created: [],
+    closed: false,
     liftedAt: undefined,
     setupDelay: undefined,
     snapshot: undefined,
@@ -127,6 +127,9 @@ const fakeBoxd = ({
   return {
     events,
     state,
+    close: async () => {
+      state.closed = true;
+    },
     machines: {
       create: async (params) => {
         events.push(["create", params]);
@@ -190,12 +193,15 @@ const fakeBoxd = ({
   };
 };
 
-/** Runs `build` with fast timings. `onLog` sees each line that the build logs. */
+/**
+ * Runs `build` with fast timings and with `boxd` as each new client, unless `timing.connect` is
+ * set. `onLog` sees each line that the build logs.
+ */
 const run = (boxd, options, signal = new AbortController().signal, { onLog, ...timing } = {}) => {
   const logged = [];
   const relayed = [];
   const result = build(boxd, options, {
-    cleanup: boxd,
+    connect: () => boxd,
     log: (line) => {
       logged.push(line);
       onLog?.(line);
@@ -213,6 +219,29 @@ const run = (boxd, options, signal = new AbortController().signal, { onLog, ...t
 };
 
 const names = (boxd) => boxd.events.map(([name]) => name);
+
+/** A `connect` that returns a new fake with `settings` for each call and records it in `made`. */
+const connector = (settings) => {
+  const made = [];
+  const connect = () => {
+    const client = fakeBoxd(settings);
+    made.push(client);
+    return client;
+  };
+  return { made, connect };
+};
+
+/**
+ * Asserts that `made` holds one client for each list of calls in `calls`, in order, so no client
+ * carries a call after another one, and that each client is closed.
+ */
+const assertClients = (made, calls) => {
+  assert.deepEqual(
+    made.map((client) => client.events),
+    calls,
+  );
+  assert.ok(made.every((client) => client.state.closed));
+};
 
 test("builds on an isolated, shared machine from a spec with the allowlist, over Exec", async () => {
   const boxd = fakeBoxd();
@@ -553,7 +582,7 @@ test("deletes the machine when the setup or the save fails, or boxd doesn't appl
 });
 
 test(
-  "an interrupt ends the setup and deletes the machine through the second client at once",
+  "an interrupt ends the setup and deletes the machine at once through a client of its own",
   { timeout: 10_000 },
   async () => {
     const controller = new AbortController();
@@ -561,21 +590,21 @@ test(
     const boxd = fakeBoxd({
       setup: { exit: null, cancellable: false, onEnd: () => controller.abort(130) },
     });
-    const cleanup = fakeBoxd();
+    const { made, connect } = connector();
     const { result, logged } = run(boxd, parseOptions(["usine-attempt"], env), controller.signal, {
-      cleanup,
+      connect,
     });
     await assert.rejects(result, /^Error: Interrupted$/u);
     assert.equal(boxd.state.stream.closed, true);
     assert.equal(names(boxd).at(-1), "exec");
-    assert.deepEqual(cleanup.events, [["delete", "vm-1"]]);
+    assertClients(made, [[["delete", "vm-1"]]]);
     assert.equal(logged.at(-2), "Interrupted; deleting the temporary machine");
     assert.match(logged.at(-1), /^Deleted temporary machine usine-snapshot-/u);
   },
 );
 
 test(
-  "stops a setup that prints nothing or runs too long, quotes its last lines, reads the egress through the second client, and deletes the machine",
+  "stops a setup that prints nothing or runs too long, quotes its last lines, reads the egress and deletes the machine through new clients",
   { timeout: 10_000 },
   async () => {
     const options = parseOptions(["usine-attempt"], env);
@@ -606,18 +635,15 @@ test(
       ],
     ]) {
       const boxd = fakeBoxd({ setup });
-      const cleanup = fakeBoxd();
+      const { made, connect } = connector();
       const { result, logged } = run(boxd, { ...options, setupTimeoutMs }, undefined, {
-        cleanup,
+        connect,
         quietMs,
       });
       await assert.rejects(result, message);
       assert.equal(boxd.state.stream.closed, true);
       assert.equal(names(boxd).at(-1), "exec");
-      assert.deepEqual(cleanup.events, [
-        ["machine", []],
-        ["delete", "vm-1"],
-      ]);
+      assertClients(made, [[["machine", []]], [["delete", "vm-1"]]]);
       assert.ok(
         logged.includes("boxd reports the temporary machine's egress as unrestricted"),
         logged.join("\n"),
@@ -661,8 +687,8 @@ test(
       [{ exit: null }, { ...options, setupTimeoutMs: 50 }],
     ]) {
       const boxd = fakeBoxd({ setup });
-      const cleanup = fakeBoxd({ readMs: 50 });
-      const { result, logged } = run(boxd, { ...options, ...settings }, undefined, { cleanup });
+      const { made, connect } = connector({ readMs: 50 });
+      const { result, logged } = run(boxd, { ...options, ...settings }, undefined, { connect });
       await result.catch(() => {});
       const read = logged.indexOf("boxd reports the temporary machine's egress as unrestricted");
       const after = logged.findIndex(
@@ -670,15 +696,12 @@ test(
           line.startsWith("Deleted temporary machine") || line.startsWith("Saving snapshot"),
       );
       assert.ok(read !== -1 && read < after, logged.join("\n"));
-      assert.deepEqual(cleanup.events, [
-        ["machine", []],
-        ["delete", "vm-1"],
-      ]);
+      assertClients(made, [[["machine", []]], [["delete", "vm-1"]]]);
     }
   },
 );
 
-test("reads the egress through the second client when a command in the setup times out", async () => {
+test("reads the egress through a new client when a command in the setup times out", async () => {
   const boxd = fakeBoxd({
     setup: {
       // The line is split across two chunks.
@@ -688,15 +711,12 @@ test("reads the egress through the second client when a command in the setup tim
       ],
     },
   });
-  const cleanup = fakeBoxd();
+  const { made, connect } = connector();
   const { result, logged } = run(boxd, parseOptions(["usine-attempt"], env), undefined, {
-    cleanup,
+    connect,
   });
   assert.equal(await result, "usine-attempt");
-  assert.deepEqual(cleanup.events, [
-    ["machine", []],
-    ["delete", "vm-1"],
-  ]);
+  assertClients(made, [[["machine", []]], [["delete", "vm-1"]]]);
   const read = logged.indexOf("boxd reports the temporary machine's egress as unrestricted");
   assert.ok(
     read !== -1 && read < logged.indexOf("Saving snapshot usine-attempt"),
@@ -710,11 +730,11 @@ test(
   async () => {
     const controller = new AbortController();
     const boxd = fakeBoxd();
-    const cleanup = fakeBoxd();
+    const { made, connect } = connector();
     let interruptedAt;
     let deletedAt;
     const { result, logged } = run(boxd, parseOptions(["usine-attempt"], env), controller.signal, {
-      cleanup,
+      connect,
       egressInForceMs: 1_000,
       onLog: (line) => {
         if (line === "boxd reports the temporary machine's egress unrestricted") {
@@ -728,7 +748,7 @@ test(
     assert.ok(deletedAt - interruptedAt < 500, `deleted ${deletedAt - interruptedAt} ms after`);
     assert.equal(names(boxd).includes("exec"), false);
     assert.equal(names(boxd).includes("delete"), false);
-    assert.deepEqual(cleanup.events, [["delete", "vm-1"]]);
+    assertClients(made, [[["delete", "vm-1"]]]);
     assert.ok(logged.includes("Interrupted; deleting the temporary machine"), logged.join("\n"));
   },
 );
@@ -737,16 +757,16 @@ test("an interrupt during the machine's creation logs at once and deletes the ma
   const controller = new AbortController();
   const { promise: creating, resolve: created } = Promise.withResolvers();
   const boxd = fakeBoxd({ creating });
-  const cleanup = fakeBoxd();
+  const { made, connect } = connector();
   const { result, logged } = run(boxd, parseOptions(["usine-attempt"], env), controller.signal, {
-    cleanup,
+    connect,
   });
   controller.abort(130);
   assert.deepEqual(logged, ["Interrupted; deleting the temporary machine"]);
   created();
   await assert.rejects(result, /^Error: Interrupted$/u);
   assert.deepEqual(names(boxd), ["create"]);
-  assert.deepEqual(cleanup.events, [["delete", "vm-1"]]);
+  assertClients(made, [[["delete", "vm-1"]]]);
   assert.match(logged.at(-1), /^Deleted temporary machine usine-snapshot-/u);
 });
 
@@ -818,17 +838,37 @@ test("refuses invalid options and a missing API key", () => {
     assert.throws(() => parseOptions(argv, environment), UsageError);
 });
 
-test("the command line deletes through a client of its own", async () => {
-  const { boxd, cleanup } = clients(
-    parseOptions(["--endpoint", "https://127.0.0.1:1", "usine-attempt"], env),
-  );
-  try {
-    assert.ok(boxd instanceof Boxd);
-    assert.ok(cleanup instanceof Boxd);
-    assert.notEqual(boxd, cleanup);
-  } finally {
-    await Promise.all([boxd.close(), cleanup.close()]);
-  }
+test("the command line deletes the machine through a client of its own", async () => {
+  const controller = new AbortController();
+  const { promise: creating, resolve: created } = Promise.withResolvers();
+  const made = [];
+  const connected = [];
+  const logged = [];
+  const printed = [];
+  const exitCode = main(["--endpoint", "https://127.0.0.1:1", "usine-attempt"], env, {
+    connect: (options) => {
+      connected.push(options);
+      const client = fakeBoxd({ creating });
+      made.push(client);
+      return client;
+    },
+    log: (line) => logged.push(line),
+    output: { write: () => {} },
+    print: (name) => printed.push(name),
+    signal: controller.signal,
+  });
+  controller.abort(130);
+  created();
+  assert.equal(await exitCode, 130);
+  assert.deepEqual(connected, [
+    { apiKey: "bxd_test", baseURL: "https://127.0.0.1:1" },
+    { apiKey: "bxd_test", baseURL: "https://127.0.0.1:1" },
+  ]);
+  assert.deepEqual(names(made[0]), ["create"]);
+  assertClients(made.slice(1), [[["delete", "vm-1"]]]);
+  assert.equal(made[0].state.closed, true);
+  assert.deepEqual(printed, []);
+  assert.equal(logged.at(-1), "Interrupted");
 });
 
 test("the command line exits 2 with its usage before it calls boxd", async () => {

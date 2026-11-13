@@ -174,15 +174,6 @@ export const clientOptions = ({ apiKey, endpoint, region }) => {
   return options;
 };
 
-/**
- * Returns the client that runs the build and `cleanup`, a second client for the deletion and the
- * egress reads, which `build` takes.
- */
-export const clients = (options) => ({
-  boxd: new Boxd(clientOptions(options)),
-  cleanup: new Boxd(clientOptions(options)),
-});
-
 /** Writes `bytes` to the stdin of `stream` in chunks of at most `STDIN_CHUNK_BYTES`, then closes it. */
 export const sendStdin = (stream, bytes) => {
   for (let start = 0; start < bytes.length; start += STDIN_CHUNK_BYTES)
@@ -303,10 +294,23 @@ const runSetup = async (
   }
 };
 
-/** Logs the egress allowlist that boxd reports for `machine`, or why it can't be read. */
-const logEgress = async (boxd, machine, log) => {
+/** Calls `use` with a new client from `connect` and closes the client when `use` settles. */
+const withNewClient = async (connect, use) => {
+  const client = connect();
   try {
-    const read = await boxd.machines.get(machine);
+    return await use(client);
+  } finally {
+    await client.close();
+  }
+};
+
+/**
+ * Logs the egress allowlist that boxd reports for `machine`, read through a new client from
+ * `connect`, or why it can't be read.
+ */
+const logEgress = async (connect, machine, log) => {
+  try {
+    const read = await withNewClient(connect, (client) => client.machines.get(machine));
     log(`boxd reports the temporary machine's egress as ${describeEgress(read.egressAllow)}`);
   } catch (error) {
     log(`Couldn't read the temporary machine's egress: ${error?.message ?? error}`);
@@ -346,11 +350,11 @@ const saveSnapshot = async (boxd, machine, name, { signal, pollMs, timeoutMs }) 
  * with the egress allowlist of `egress.mjs` in its spec, which the snapshot keeps. The setup runs
  * with egress unrestricted, because it downloads from hosts outside the allowlist. The machine is
  * deleted when the build ends, fails, or `signal` aborts; `log` names it if its deletion fails.
- * `cleanup` is a second client for the deletion and for the egress reads during and after the
- * setup. On a TLS endpoint, its calls open their own connection instead of sharing the one that
- * carried the setup, which a long setup without output can leave dead; on a plaintext endpoint,
- * grpc-js shares one connection between the two clients. `pollMs` sets how often the script reads the machine
- * and the snapshot. `egressTimeoutMs` and `snapshotTimeoutMs` set how long it waits for an egress
+ * `connect` returns a new client. The deletion and each egress read during and after the setup go
+ * through a client of their own from `connect`, which is closed afterward. On an `https://`
+ * endpoint, each such client opens a new connection; on a plaintext endpoint, grpc-js shares one
+ * connection between clients. `pollMs` sets how often the script reads the machine and the
+ * snapshot. `egressTimeoutMs` and `snapshotTimeoutMs` set how long it waits for an egress
  * edit and the snapshot, `egressInForceMs` how long it waits after boxd reports the allowlist
  * lifted before it reads it again, and `quietMs` how long the setup may run without output.
  */
@@ -358,7 +362,7 @@ export const build = async (
   boxd,
   options,
   {
-    cleanup,
+    connect,
     log,
     output,
     signal,
@@ -378,7 +382,7 @@ export const build = async (
   let removal;
   const remove = () => {
     if (machine === undefined) return Promise.resolve();
-    return (removal ??= cleanup.machines.delete(machine.id).then(
+    return (removal ??= withNewClient(connect, (client) => client.machines.delete(machine.id)).then(
       () => log(`Deleted temporary machine ${name}`),
       () => log(`Delete temporary machine ${name} in boxd`),
     ));
@@ -413,7 +417,7 @@ export const build = async (
       `boxd still reports the temporary machine's egress unrestricted ${egressInForceMs / 1000} seconds later`,
     );
     const reads = [];
-    const readEgress = () => reads.push(logEgress(cleanup, machine.id, log));
+    const readEgress = () => reads.push(logEgress(connect, machine.id, log));
     let code;
     try {
       code = await runSetup(boxd, machine.id, options, {
@@ -449,32 +453,42 @@ export const build = async (
   }
 };
 
-if (import.meta.main) {
-  const log = (message) => process.stderr.write(`${new Date().toISOString()} ${message}\n`);
+/**
+ * Runs the command line with `argv` and `env` and returns its exit code. `connect` returns a new
+ * client for the given client options. `log` takes each log line, `output` the setup's output, and
+ * `print` the snapshot name. An abort of `signal` with an exit code interrupts the build.
+ */
+export const main = async (argv, env, { connect, log, output, print, signal }) => {
   let options;
   try {
-    options = parseOptions(process.argv.slice(2), process.env);
+    options = parseOptions(argv, env);
   } catch (error) {
     if (!(error instanceof UsageError)) throw error;
-    process.stderr.write(`${error.message}\n${USAGE}\n`);
-    process.exit(2);
+    output.write(`${error.message}\n${USAGE}\n`);
+    return 2;
   }
+  const client = () => connect(clientOptions(options));
+  const boxd = client();
+  try {
+    print(await build(boxd, options, { connect: client, log, output, signal }));
+    return 0;
+  } catch (error) {
+    log(String(error?.message ?? error).replaceAll(options.apiKey, "[redacted]"));
+    return signal.aborted ? signal.reason : 1;
+  } finally {
+    await boxd.close();
+  }
+};
+
+if (import.meta.main) {
   const controller = new AbortController();
   process.once("SIGINT", () => controller.abort(130));
   process.once("SIGTERM", () => controller.abort(143));
-  const { boxd, cleanup } = clients(options);
-  try {
-    const name = await build(boxd, options, {
-      cleanup,
-      log,
-      output: process.stderr,
-      signal: controller.signal,
-    });
-    process.stdout.write(`${name}\n`);
-  } catch (error) {
-    log(String(error?.message ?? error).replaceAll(options.apiKey, "[redacted]"));
-    process.exitCode = controller.signal.aborted ? controller.signal.reason : 1;
-  } finally {
-    await Promise.all([boxd.close(), cleanup.close()]);
-  }
+  process.exitCode = await main(process.argv.slice(2), process.env, {
+    connect: (options) => new Boxd(options),
+    log: (message) => process.stderr.write(`${new Date().toISOString()} ${message}\n`),
+    output: process.stderr,
+    print: (name) => process.stdout.write(`${name}\n`),
+    signal: controller.signal,
+  });
 }
