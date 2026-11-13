@@ -248,6 +248,10 @@ describe("Pi usine tool sets", () => {
       const cwd = yield* fs.makeTempDirectoryScoped({ prefix: "usine-pi-host-" });
       yield* fs.makeDirectory(`${cwd}/acme/demo/docs`, { recursive: true });
       yield* fs.writeFileString(`${cwd}/acme/demo/README.md`, "The needle is here.\n");
+      yield* fs.writeFileString(
+        `${cwd}/acme/demo/docs/--version`,
+        'const args = ["--network", "none", "--read-only", "-e"];\n',
+      );
       yield* fs.makeDirectory(`${cwd}/acme/demo/src/lib`, { recursive: true });
       yield* fs.writeFileString(`${cwd}/acme/demo/src/lib/a.spec.ts`, "const port = 8080;\n");
       yield* fs.writeFileString(`${cwd}/acme/demo/src/b.ts`, "const port = 8080;\n");
@@ -310,12 +314,31 @@ describe("Pi usine tool sets", () => {
           await run("grep", { pattern: "port = \\d+", path: "acme/demo", glob: "**/*.spec.ts" });
           await run("grep", { pattern: "port = \\d+", path: "acme/demo", glob: "src/**/*.ts" });
           await run("grep", { pattern: "PORT", path: "acme/demo", ignoreCase: true, limit: 1 });
+          await run("grep", { pattern: "--network", path: "acme/demo/docs" });
+          await run("grep", { pattern: "--network", path: "acme/demo/docs", literal: true });
+          await run("grep", { pattern: "-e", path: "acme/demo/docs" });
+          await run("grep", { pattern: "-v", path: "acme/demo/docs" });
+          await run("find", { pattern: "--version", path: "acme/demo/docs" });
         },
         sandboxed,
       );
       assert.strictEqual(options.nativeTools, "read");
       assert(Option.isSome(options.host), "Pi gets the host's command runner");
-      const [read, ls, find, grep, anyTs, specs, underSrc, limited] = outputs;
+      const [
+        read,
+        ls,
+        find,
+        grep,
+        anyTs,
+        specs,
+        underSrc,
+        limited,
+        flag,
+        literalFlag,
+        shortFlag,
+        absentFlag,
+        flagFile,
+      ] = outputs;
       assert.include(read, "The needle is here.");
       assert.sameMembers(ls?.split("\n") ?? [], ["README.md", "bundle.min.js", "docs/", "src/"]);
       assert.include(find, "acme/demo/README.md");
@@ -339,6 +362,14 @@ describe("Pi usine tool sets", () => {
         limited,
         "src/b.ts:1: const port = 8080;\n\n[1 matches limit reached. Use limit=2 for more, or refine pattern]",
       );
+      assert.strictEqual(
+        flag,
+        '--version:1: const args = ["--network", "none", "--read-only", "-e"];',
+      );
+      assert.strictEqual(literalFlag, flag);
+      assert.strictEqual(shortFlag, flag);
+      assert.strictEqual(absentFlag, "No matches found");
+      assert.strictEqual(flagFile, "--version");
       assert.isNotEmpty(lines);
       for (const line of lines)
         assert.include(line, `cd '${cwd}'`, "each command runs in the session's directory");

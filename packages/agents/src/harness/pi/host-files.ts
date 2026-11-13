@@ -248,7 +248,14 @@ export const hostReadTools = (cwd: string, run: PiHostCommand): ReadonlyArray<To
       glob: async (pattern, searched, { limit }) =>
         decoder
           .decode(
-            await succeeded(run, "node", ["-e", GLOB_SCRIPT, pattern, searched, String(limit)]),
+            await succeeded(run, "node", [
+              "-e",
+              GLOB_SCRIPT,
+              "--",
+              pattern,
+              searched,
+              String(limit),
+            ]),
           )
           .split("\n")
           .filter((line) => line.length > 0),
@@ -270,6 +277,7 @@ export const hostReadTools = (cwd: string, run: PiHostCommand): ReadonlyArray<To
           [
             "-e",
             GREP_SCRIPT,
+            "--",
             input.pattern,
             input.path ?? ".",
             input.glob ?? "",

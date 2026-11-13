@@ -74,6 +74,8 @@ Each turn runs in its own container on the orchestrator host, which usine remove
 | Pi | `read`, `grep`, `find`, and `ls` only. Pi runs in the orchestrator process and runs these tools' file operations in the container. |
 | Codex | All of its own tools, including its shell and `apply_patch`, because Codex lists them in every thread. The container limits what they reach: they read the source, can't change it, and reach no network. |
 
+Pi's `grep` and `find` accept patterns that start with `-`, such as `--network`, so the supervisor can search for command-line flags and filenames that begin with a dash.
+
 **Configuration > Settings** and the settings form say when the selected harness keeps all its own tools, with the reason that its descriptor gives.
 
 ### Host requirements
