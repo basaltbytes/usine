@@ -29,7 +29,9 @@ import {
   Ref,
   Schema,
 } from "effect";
+import { SqlClient } from "effect/sql";
 import { TestClock } from "effect/testing";
+import { SqliteClient } from "@effect/sql-sqlite-node";
 import { AttemptRequest, ParentReported, ResultRecorded } from "../src/attempt-runtime.ts";
 import type { BrainSpec } from "@usine/core/agent/brain";
 import {
@@ -1064,6 +1066,56 @@ describe("event-driven coordinator restarts on SQLite", () => {
       );
       assert.strictEqual(sessions.at(-1), "child.SessionFinished");
     }).pipe(Effect.scoped),
+  );
+
+  it.live(
+    "fails as infrastructure when a stored state no longer decodes, and runs the next Attempt",
+    () =>
+      Effect.gen(function* () {
+        const database = yield* temporaryDatabase;
+        const request = coordinated("restart/older-shape");
+        const attemptId = request.spec.attemptId;
+        const first = yield* orchestrator(sqliteJournal(database).pipe(coordinator));
+        yield* first.execute(request, recordingSink().sink);
+        yield* first.nextChild;
+        yield* first.stop;
+        // As an upgrade that changed the state's shape leaves it.
+        yield* Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient;
+          yield* sql`UPDATE usine_attempt_coordination SET state = ${'{"_tag":"Delegating","child":"first"}'} WHERE attempt_id = ${attemptId}`;
+        }).pipe(Effect.provide(SqliteClient.layer({ filename: database })), Effect.orDie);
+
+        const logged: Array<unknown> = [];
+        const logger = Logger.layer([Logger.make(({ message }) => logged.push(message))]);
+        const second = yield* orchestrator(sqliteJournal(database).pipe(coordinator));
+        const failure = yield* second.attempts
+          .execute(request, recordingSink().sink)
+          .pipe(Effect.provide(logger), Effect.flip);
+        const next = coordinated("restart/after-older-shape");
+        const execution = yield* second.execute(next, recordingSink().sink);
+        yield* (yield* second.nextChild).reply("Opened #13.");
+        const report = yield* Fiber.join(execution);
+        yield* second.stop;
+
+        assert.strictEqual(failure._tag, "InfraFailure");
+        assert.include(failure.message, `The stored state of Attempt ${attemptId}`);
+        assert.isTrue(
+          logged.some(
+            (message) =>
+              Array.isArray(message) &&
+              message.some(
+                (part) =>
+                  typeof part === "object" &&
+                  part !== null &&
+                  "attemptId" in part &&
+                  part.attemptId === attemptId &&
+                  "record" in part &&
+                  part.record === "state",
+              ),
+          ),
+        );
+        assert.strictEqual(report.message, "Opened #13.");
+      }).pipe(Effect.scoped),
   );
 
   it.live(

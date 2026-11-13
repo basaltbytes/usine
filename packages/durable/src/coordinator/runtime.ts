@@ -47,7 +47,6 @@ import {
   clamp,
   CoordinatorEvent,
   type CoordinatorState,
-  CoordinatorState as CoordinatorStateSchema,
   type EffectIntent,
   FIRST_ASSIGNMENT,
   ReservedReport,
@@ -66,9 +65,6 @@ import {
   Delegate,
   Delegation,
   type DelegationRecord,
-  EncodedDecision,
-  EncodedEvent,
-  EncodedState,
   Failed,
   Finish,
   type Intent,
@@ -79,6 +75,15 @@ import {
 import { type Outbox, outboxFor, startedWithoutParent } from "./outbox.ts";
 import { type Interventions, interventionsFor } from "./interventions.ts";
 import { type Supervisor, supervisorFor } from "./supervision.ts";
+import {
+  decodeDecision,
+  decodeOutcome,
+  decodeState,
+  encodeDecision,
+  encodeEvent,
+  encodeState,
+  type UnreadableRecord,
+} from "./records.ts";
 import { RecordedDecision, WakeUp } from "./wake-up.ts";
 
 /** The in-process state of one Attempt that the event-driven coordinator runs. */
@@ -100,15 +105,15 @@ interface CoordinatorHub {
   sinkFailed: Deferred.Deferred<void>;
 }
 
-const codec = <S extends Schema.Top>(schema: S) => Schema.toCodecJson(schema);
-const encodeEvent = Schema.encodeEffect(codec(CoordinatorEvent));
-const decodeEvent = Schema.decodeUnknownEffect(codec(CoordinatorEvent));
-const encodeState = Schema.encodeEffect(codec(CoordinatorStateSchema));
-const decodeState = Schema.decodeUnknownEffect(codec(CoordinatorStateSchema));
-const encodeDecision = Schema.encodeEffect(codec(RecordedDecision));
-const decodeDecision = Schema.decodeUnknownEffect(codec(RecordedDecision));
-
 const infra = (error: JournalError) => InfraFailure.make({ message: error.message, cause: error });
+
+/** Logs a stored record that no longer decodes, and fails the Attempt with it. */
+const unreadable = (error: UnreadableRecord) =>
+  Effect.logError("A stored coordinator record no longer decodes; the Attempt fails", {
+    attemptId: error.attemptId,
+    record: error.record,
+    message: error.message,
+  }).pipe(Effect.andThen(Effect.fail(InfraFailure.make({ message: error.message, cause: error }))));
 
 const canceledFailure = () =>
   AgentFailure.make({ message: "The attempt was canceled, and its children stopped" });
@@ -273,8 +278,7 @@ const make = Effect.gen(function* () {
   const stateOf = (snapshot: CoordinatorSnapshot) =>
     Option.match(snapshot.state, {
       onNone: () => Effect.succeed<CoordinatorState>(AwaitingStart.make({})),
-      // The coordinator encoded every state it committed.
-      onSome: (state) => decodeState(state).pipe(Effect.orDie),
+      onSome: (state) => decodeState(snapshot.attemptId, state),
     });
 
   const delegationHub = (hub: CoordinatorHub): DelegationHub => ({
@@ -366,18 +370,14 @@ const make = Effect.gen(function* () {
         ),
       ),
     );
-    const encoded = yield* encodeEvent(outcome).pipe(Effect.orDie);
-    const recorded = yield* journal.settleDelegation(
-      attemptId,
-      record.number,
-      EncodedEvent.make(encoded),
-    );
+    const encoded = yield* encodeEvent(outcome);
+    const recorded = yield* journal.settleDelegation(attemptId, record.number, encoded);
     yield* Effect.logInfo("The coordinator's child ended", {
       attemptId,
       child: record.number,
       event: outcome._tag,
     });
-    return yield* decodeEvent(recorded).pipe(Effect.orDie);
+    return yield* decodeOutcome(attemptId, recorded);
   });
 
   /** Returns the next event of an open Attempt, running its latest delegation if it is open. */
@@ -406,7 +406,7 @@ const make = Effect.gen(function* () {
         Effect.logInfo("Handling the outcome the child recorded before a restart", {
           attemptId: hub.attemptId,
           child: record.number,
-        }).pipe(Effect.andThen(decodeEvent(outcome).pipe(Effect.orDie))),
+        }).pipe(Effect.andThen(decodeOutcome(hub.attemptId, outcome))),
     });
   });
 
@@ -455,11 +455,11 @@ const make = Effect.gen(function* () {
           const decision = Option.getOrElse(proposed, () =>
             RecordedDecision.make({ decision: ruleFor(event, context), handler: "rule" }),
           );
-          const encoded = yield* encodeDecision(decision).pipe(Effect.orDie);
-          return yield* journal.decide(attemptId, sequence, EncodedDecision.make(encoded));
+          const encoded = yield* encodeDecision(decision);
+          return yield* journal.decide(attemptId, sequence, encoded);
         }),
     });
-    const recorded = yield* decodeDecision(encodedDecision).pipe(Effect.orDie);
+    const recorded = yield* decodeDecision(attemptId, encodedDecision);
     const clamped = clamp(recorded.decision, context);
     const [next, effects] = apply(state, clamped);
     yield* Effect.logInfo("The coordinator decided the event", {
@@ -506,8 +506,8 @@ const make = Effect.gen(function* () {
         intents.push(Finish.make({ outcome }));
       }
     }
-    const encodedEvent = yield* encodeEvent(event).pipe(Effect.orDie);
-    const encodedState = yield* encodeState(next).pipe(Effect.orDie);
+    const encodedEvent = yield* encodeEvent(event);
+    const encodedState = yield* encodeState(next);
     // Under the routing permit, so an operator input's receipts don't straddle the transition.
     return yield* hub.interventions.routing.withPermits(1)(
       hub.outbox.commit(payloads, (outbound) =>
@@ -515,9 +515,9 @@ const make = Effect.gen(function* () {
           attemptId,
           snapshot.revision,
           Transition.make({
-            event: EncodedEvent.make(encodedEvent),
+            event: encodedEvent,
             decision: encodedDecision,
-            state: EncodedState.make(encodedState),
+            state: encodedState,
             intents,
             outbound,
           }),
@@ -584,7 +584,7 @@ const make = Effect.gen(function* () {
     hub: CoordinatorHub,
     request: AttemptRequest,
     io: AttemptChannel.Sink,
-  ): Effect.Effect<AttemptReport, AttemptFailure | JournalError> =>
+  ): Effect.Effect<AttemptReport, AttemptFailure | JournalError | UnreadableRecord> =>
     Effect.scoped(
       Effect.gen(function* () {
         const snapshot = yield* loaded(hub.attemptId);
@@ -690,7 +690,10 @@ const make = Effect.gen(function* () {
     },
     (effect, request) =>
       effect.pipe(
-        Effect.catchTag("JournalError", (error) => Effect.fail(infra(error))),
+        Effect.catchTags({
+          JournalError: (error) => Effect.fail(infra(error)),
+          UnreadableRecord: unreadable,
+        }),
         Effect.annotateLogs({ attemptId: request.spec.attemptId }),
       ),
   );
