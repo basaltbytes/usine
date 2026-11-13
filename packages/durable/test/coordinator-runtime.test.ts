@@ -654,15 +654,15 @@ describe("event-driven coordinator runtime", () => {
       const canceled = coordinated("coordinator/state-canceled");
       const logged: Array<unknown> = [];
       const logger = Logger.layer([Logger.make(({ message }) => logged.push(message))]);
+      const dropped = Schema.decodeUnknownOption(
+        Schema.Tuple([
+          Schema.Literal("Dropped the settled Attempt's in-process state"),
+          Schema.Struct({ hubs: Schema.Finite }),
+        ]),
+      );
       const remaining = () =>
         logged.flatMap((message) =>
-          Array.isArray(message) &&
-          message[0] === "Dropped the settled Attempt's in-process state" &&
-          typeof message[1] === "object" &&
-          message[1] !== null &&
-          "hubs" in message[1]
-            ? [message[1].hubs]
-            : [],
+          Option.match(dropped(message), { onNone: () => [], onSome: ([, { hubs }]) => [hubs] }),
         );
       const process = yield* orchestrator(sqliteJournal(database).pipe(coordinator));
       yield* Effect.gen(function* () {
@@ -1233,21 +1233,16 @@ describe("event-driven coordinator restarts on SQLite", () => {
 
         assert.strictEqual(failure._tag, "InfraFailure");
         assert.include(failure.message, `The stored state of Attempt ${attemptId}`);
-        assert.isTrue(
-          logged.some(
-            (message) =>
-              Array.isArray(message) &&
-              message.some(
-                (part) =>
-                  typeof part === "object" &&
-                  part !== null &&
-                  "attemptId" in part &&
-                  part.attemptId === attemptId &&
-                  "record" in part &&
-                  part.record === "state",
-              ),
-          ),
+        const unreadable = Schema.decodeUnknownOption(
+          Schema.Tuple([
+            Schema.String,
+            Schema.Struct({
+              attemptId: Schema.Literal(attemptId),
+              record: Schema.Literal("state"),
+            }),
+          ]),
         );
+        assert.isTrue(logged.some((message) => Option.isSome(unreadable(message))));
         assert.strictEqual(report.message, "Opened #13.");
       }).pipe(Effect.scoped),
   );

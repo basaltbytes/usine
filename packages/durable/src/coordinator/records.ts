@@ -6,8 +6,8 @@ import { EncodedDecision, EncodedEvent, EncodedState } from "./journal.ts";
 import { RecordedDecision } from "./wake-up.ts";
 
 /** A record that the coordinator stores encoded in the attempt journal. */
-export const StoredRecord = Schema.Literals(["state", "decision", "delegation outcome"]);
-export type StoredRecord = typeof StoredRecord.Type;
+const StoredRecord = Schema.Literals(["state", "decision", "delegation outcome"]);
+type StoredRecord = typeof StoredRecord.Type;
 
 /** A stored record that no longer decodes, as after an upgrade changed its shape. */
 export class UnreadableRecord extends Schema.TaggedError<

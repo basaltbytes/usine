@@ -5,7 +5,7 @@ import type { AttemptRequest } from "../attempt-runtime.ts";
 import type { AttachedCall, DelegationAttachment } from "../attempt/delegation/journal.ts";
 
 /** Why the attached `execute` call ends for good: a cancel, or a failure of its sink. */
-export type Ending = "canceled" | "sink failed";
+type Ending = "canceled" | "sink failed";
 
 /** The number that tells one `execute` call of an Attempt from the next. */
 type CallNumber = number;

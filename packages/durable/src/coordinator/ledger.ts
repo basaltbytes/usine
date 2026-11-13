@@ -289,7 +289,7 @@ const changed = (progress: ChildProgress, change: ProgressChange): ChildProgress
   });
 
 /** Dies because a progress change names delegation `number`, which hasn't started. */
-export const notStarted = (number: ChildSessionCount): Effect.Effect<never> =>
+const notStarted = (number: ChildSessionCount): Effect.Effect<never> =>
   invariant(`Progress saved for delegation ${number}, which hasn't started`);
 
 /** Returns the record with `change` applied, or dies if the delegation hasn't started. */

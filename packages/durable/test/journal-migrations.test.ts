@@ -70,11 +70,11 @@ it.effect("reads a journaled RunSpec.parent as its coordinator kind", () =>
 it.effect("reads a delegation's progress stored before launches were recorded as launched", () =>
   Effect.gen(function* () {
     const codec = Schema.toCodecJson(ChildProgress);
-    const encoded = yield* Schema.encodeEffect(codec)(ChildProgress.empty());
-    assert.isTrue(typeof encoded === "object" && encoded !== null && "launched" in encoded);
-    const older = Object.fromEntries(
-      Object.entries(encoded ?? {}).filter(([key]) => key !== "launched"),
+    const encoded = yield* Schema.encodeEffect(codec)(ChildProgress.empty()).pipe(
+      Effect.flatMap(Schema.decodeUnknownEffect(Schema.Record(Schema.String, Schema.Json))),
     );
+    assert.property(encoded, "launched");
+    const older = Object.fromEntries(Object.entries(encoded).filter(([key]) => key !== "launched"));
     const progress = yield* Schema.decodeEffect(codec)(older);
 
     assert.isFalse(ChildProgress.empty().launched);
