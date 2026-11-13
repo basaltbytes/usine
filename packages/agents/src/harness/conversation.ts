@@ -277,6 +277,18 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
 
   return {
     finish: (message: string) => mutex.withPermits(1)(finish(message)),
+    /**
+     * Runs `announce` and then finishes with `message` if the session is neither held nor paused.
+     * Returns `false` without doing either if the operator supervises the session.
+     */
+    finishUnsupervised: (message: string, announce: Effect.Effect<void>) =>
+      mutex.withPermits(1)(
+        Effect.suspend(() =>
+          held || paused
+            ? Effect.succeed(false)
+            : announce.pipe(Effect.andThen(finish(message)), Effect.as(true)),
+        ),
+      ),
     intervene,
     recover: Effect.fn("SessionConversation.recover")(function* (
       policy: ContinuationPolicy,

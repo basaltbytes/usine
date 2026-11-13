@@ -166,8 +166,9 @@ const LOGIN_WINDOW = Duration.seconds(60);
 
 /**
  * The maximum time an idle Claude child that has answered waits for its background work and the
- * notification turn that follows it. When the limit passes, the child returns the saved answer.
- * The limit is kept in memory, so a child reattached after an orchestrator restart has none.
+ * notification turn that follows it. When the limit passes, the child returns the saved answer
+ * unless the operator holds or pauses it. The limit is kept in memory, so a child reattached after
+ * an orchestrator restart has none.
  */
 const BACKGROUND_WAIT_LIMIT = Duration.minutes(2);
 
@@ -657,7 +658,10 @@ const makeClaudeSessions = Effect.gen(function* () {
     let retries = 0;
     let retrying = false;
 
-    /** Waits for background work after `answer`, then returns `answer` once the limit passes. */
+    /**
+     * Waits for background work after `answer`, then returns `answer` once the limit passes, unless
+     * the operator holds or pauses the session.
+     */
     const awaitBackgroundWork = Effect.fn("ClaudeRuntime.awaitBackgroundWork")(function* (
       answer: string,
     ) {
@@ -667,22 +671,34 @@ const makeClaudeSessions = Effect.gen(function* () {
         backgroundTaskIds: backgroundTasks,
         limit: Duration.format(BACKGROUND_WAIT_LIMIT),
       });
+      const outlasted = (log: typeof Effect.logInfo, message: string) =>
+        Effect.suspend(() =>
+          log(message, {
+            sessionId: session.id,
+            backgroundTaskIds: backgroundTasks,
+            limit: Duration.format(BACKGROUND_WAIT_LIMIT),
+          }),
+        );
       yield* FiberHandle.run(
         backgroundWait,
         Effect.sleep(BACKGROUND_WAIT_LIMIT).pipe(
           Effect.andThen(
-            Effect.suspend(() =>
-              Effect.logWarning(
+            conversation.finishUnsupervised(
+              answer,
+              outlasted(
+                Effect.logWarning,
                 "Claude child's background work outlasted the wait limit; returning its answer",
-                {
-                  sessionId: session.id,
-                  backgroundTaskIds: backgroundTasks,
-                  limit: Duration.format(BACKGROUND_WAIT_LIMIT),
-                },
               ),
             ),
           ),
-          Effect.andThen(conversation.finish(answer)),
+          Effect.flatMap((finished) =>
+            finished
+              ? Effect.void
+              : outlasted(
+                  Effect.logInfo,
+                  "Claude child's background work outlasted the wait limit; the operator's Hold or pause keeps it open",
+                ),
+          ),
         ),
       );
     });

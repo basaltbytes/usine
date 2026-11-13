@@ -2268,6 +2268,7 @@ describe("Claude child backend", () => {
           answered("CI passed"),
           { type: "system", subtype: "session_state_changed", state: "idle" },
         ],
+        answer: "CI passed",
       },
       {
         protocol: "legacy",
@@ -2277,10 +2278,21 @@ describe("Claude child backend", () => {
           { type: "assistant", message: { content: [{ type: "text", text: "CI finished" }] } },
         ],
         rest: [answered("CI passed")],
+        answer: "CI passed",
+      },
+      {
+        protocol: "legacy, result only",
+        messages: [gate, answered("Waiting for CI")],
+        notification: [
+          { type: "system", subtype: "background_tasks_changed", tasks: [] },
+          { type: "result", subtype: "success", result: "Folded", queued_turn_count: 1 },
+        ],
+        rest: [answered("Queued turn done")],
+        answer: "Queued turn done",
       },
     ])(
       "does not end a notification turn that starts within the limit ($protocol)",
-      ({ messages, notification, rest }) =>
+      ({ messages, notification, rest, answer }) =>
         Effect.gen(function* () {
           const { output, sdk } = yield* openOutput(messages);
           const logs = infoLines();
@@ -2294,7 +2306,7 @@ describe("Claude child backend", () => {
             yield* TestClock.adjust("5 minutes");
             assert.isUndefined(result.pollUnsafe(), "the running turn keeps the child open");
             yield* Queue.offerAll(output, rest);
-            assert.strictEqual((yield* Fiber.join(result)).message, "CI passed");
+            assert.strictEqual((yield* Fiber.join(result)).message, answer);
           }).pipe(
             Effect.provide(
               claudeChild.pipe(Layer.provideMerge(sdk), Layer.provideMerge(logs.layer)),
@@ -2302,6 +2314,56 @@ describe("Claude child backend", () => {
             Effect.scoped,
           );
         }),
+    );
+
+    it.effect("keeps a held child open past the limit until its notification turn answers", () =>
+      Effect.gen(function* () {
+        const { output, sdk } = yield* openOutput([
+          { type: "system", subtype: "session_state_changed", state: "running" },
+          gate,
+          answered("Waiting for CI"),
+          { type: "system", subtype: "session_state_changed", state: "idle" },
+        ]);
+        const logs = logLines(["Info", "Warn"]);
+        yield* Effect.gen(function* () {
+          const running = yield* (yield* ChildBackend).launch(
+            ChildRequest.make({ ...request(), held: true }),
+          );
+          const events: Array<string> = [];
+          yield* Effect.forkScoped(
+            running.events.pipe(
+              Stream.runForEach((event) => Effect.sync(() => events.push(event._tag))),
+            ),
+          );
+          const result = yield* Effect.forkChild(running.result);
+          while (!waiting(logs.lines)) yield* Effect.yieldNow;
+          yield* TestClock.adjust("2 minutes");
+          while (!logs.lines.some((line) => line.includes("outlasted the wait limit")))
+            yield* Effect.yieldNow;
+          const outlasted = logs.lines.findIndex((line) =>
+            line.includes("outlasted the wait limit"),
+          );
+          assert.include(logs.lines[outlasted], "the operator's Hold or pause keeps it open");
+          assert.strictEqual(logs.lineLevels[outlasted], "Info");
+          assert.notInclude(events, "SessionIdle", "the limit does not report a held child idle");
+          yield* Queue.offerAll(output, [
+            { type: "system", subtype: "background_tasks_changed", tasks: [] },
+            { type: "system", subtype: "session_state_changed", state: "running" },
+            { type: "assistant", message: { content: [{ type: "text", text: "CI finished" }] } },
+          ]);
+          yield* running.intervene(Release.make(), noDelivery);
+          yield* TestClock.adjust("5 minutes");
+          assert.isUndefined(result.pollUnsafe(), "a Release does not end the running turn");
+          yield* Queue.offerAll(output, [
+            answered("CI passed"),
+            { type: "system", subtype: "session_state_changed", state: "idle" },
+          ]);
+          assert.strictEqual((yield* Fiber.join(result)).message, "CI passed");
+        }).pipe(
+          Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk), Layer.provideMerge(logs.layer))),
+          Effect.scoped,
+        );
+      }),
     );
 
     it.effect("returns the continuation's answer after a process resume within the limit", () =>
