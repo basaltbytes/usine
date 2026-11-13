@@ -10,6 +10,7 @@ const Token = Schema.Struct({
   kind: Schema.String,
   scopes: Schema.Array(PermissionGrant).pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),
   operations: Schema.optionalKey(Schema.Array(Schema.String)),
+  unknownOperations: Schema.optionalKey(Schema.Array(Schema.String)),
   expiresAt: Schema.NullOr(Schema.Finite).pipe(Schema.withDecodingDefaultKey(Effect.succeed(null))),
 });
 export const tokensQuery = () =>

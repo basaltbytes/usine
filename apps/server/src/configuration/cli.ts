@@ -52,12 +52,17 @@ export const runConfigCommand = Effect.fn("Cli.config")(
     const path = yield* Path.Path;
     const store = yield* ConfigurationStore;
     const folder = yield* ConfigurationFolder;
-    const admitParents = Effect.fn("Cli.config.admitParents")(function* (loaded: LoadedInstance) {
-      const parents = yield* loadParents(loaded);
-      return yield* checkCoordinatorBrains(parentAdmissionProblems(loaded, parents), (problems) =>
-        ConfigurationInvalid.make({ problems }),
-      );
-    }, Effect.scoped);
+    // The time limit of the check covers loading the parent models.
+    const admitParents = Effect.fn("Cli.config.admitParents")(
+      (loaded: LoadedInstance) =>
+        checkCoordinatorBrains(
+          Effect.flatMap(loadParents(loaded), (parents) =>
+            parentAdmissionProblems(loaded, parents),
+          ),
+          (problems) => ConfigurationInvalid.make({ problems }),
+        ),
+      Effect.scoped,
+    );
     if (command._tag === "ConfigImportCommand") {
       const current = yield* store.read;
       if (Option.isNone(current.instance)) {

@@ -405,6 +405,7 @@ const configurationView = ConfigurationView.make({
     parentModel: null,
     parentEffort: null,
     coordinator: "session",
+    supervisor: null,
     operator: null,
     webhooks: "off",
     lastHintAt: null,

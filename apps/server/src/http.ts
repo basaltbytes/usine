@@ -34,7 +34,7 @@ import {
   OperatorHttpPolicy,
   operatorPermissions,
 } from "@usine/orchestrator/operator/http";
-import { Effect, Layer, Option, Path, Schema, type Types } from "effect";
+import { ByteSize, Effect, Layer, Option, Path, Schema, type Types } from "effect";
 import {
   Headers,
   HttpPlatform,
@@ -626,6 +626,19 @@ export const staticRoutes = (webRoot: string) =>
     }),
   );
 
+/** The largest request body that the server reads, in bytes. Webhook deliveries set their own. */
+const MAX_REQUEST_BODY_BYTES = 4 * 1024 * 1024;
+// A body over the limit fails to read, and each route answers as it does for an unreadable body.
+const requestBodyLimit = HttpRouter.middleware(
+  (handler) =>
+    Effect.provideService(
+      handler,
+      HttpServerRequest.MaxBodySize,
+      ByteSize.fromInputUnsafe(MAX_REQUEST_BODY_BYTES),
+    ),
+  { global: true },
+);
+
 /**
  * Installs the authenticated operator API and the UI on `listener`, replacing its startup
  * responses.
@@ -664,6 +677,7 @@ export const serverLayer = (
     authenticated.routes,
     webhooks,
     securityMiddleware(auth.authentication),
+    requestBodyLimit,
   ).pipe(HttpRouter.provideRequest(Layer.merge(backend, services)));
   return Layer.effectDiscard(
     Effect.gen(function* () {

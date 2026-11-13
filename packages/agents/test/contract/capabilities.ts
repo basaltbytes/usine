@@ -8,6 +8,7 @@ import { completionScenarios } from "../replay/completion.ts";
 import { piScenarios, type Provider, scenarios } from "../replay/fixture.ts";
 import type { Scenario } from "../replay/transcript.ts";
 import { toolProviders, toolScenariosOf } from "./host-tools.ts";
+import { supervisorProviders } from "./supervisor.ts";
 
 /** How the contract suite proves that a harness provides a capability. */
 export type Proof =
@@ -63,8 +64,9 @@ export const capabilityProofs = {
 /**
  * The scenarios that the replay suites run for `harness`. Claude Code and Codex replay `restart`
  * and `credential-changed` through the durable parent in `@usine/durable`, every harness replays
- * the completion scenarios in `completion.test.ts`, and the harnesses that serve usine tool sets
- * replay the tool scenarios in `host-tools.test.ts`.
+ * the completion scenarios in `completion.test.ts`, the harnesses that serve usine tool sets replay
+ * their tool scenarios in `host-tools.test.ts`, and the harnesses that admit the supervisor role
+ * replay the supervisor scenario in `supervisor.test.ts`.
  */
 export const replayedScenarios = (harness: Harness): ReadonlyArray<Scenario> => [
   ...(harness === "pi"
@@ -72,6 +74,9 @@ export const replayedScenarios = (harness: Harness): ReadonlyArray<Scenario> => 
     : [...scenarios, "restart" as const, "credential-changed" as const]),
   ...completionScenarios,
   ...toolProviders.flatMap((provider) => (provider === harness ? toolScenariosOf(provider) : [])),
+  ...supervisorProviders.flatMap((provider) =>
+    provider === harness ? ["supervisor" as const] : [],
+  ),
 ];
 
 /** The capabilities that `harness` declares for any placement and credential route. */

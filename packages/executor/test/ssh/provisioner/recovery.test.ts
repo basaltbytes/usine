@@ -94,8 +94,8 @@ for (const connection of ["unchanged", "replaced", "restarted", "unreadable"] as
         );
         assert.strictEqual(providers.hetzner.servers.size, 0, "the machine is deleted after");
         machine.state.cacheExists = false;
-        // An Attempt whose machine is gone has nothing to reconcile. A fixed address keeps its
-        // machine, which recovery still finds.
+        // An Attempt whose machine is gone has nothing to reconcile, and neither has one whose
+        // checkout is gone from a fixed address's machine.
         const second = yield* executor.recover(
           {
             ...attempt,
@@ -104,10 +104,7 @@ for (const connection of ["unchanged", "replaced", "restarted", "unreadable"] as
           sink,
           Effect.succeed(request.commitAuthor),
         );
-        assert.strictEqual(
-          second,
-          connection === "replaced" || connection === "restarted" ? "found" : "gone",
-        );
+        assert.strictEqual(second, "gone");
       }).pipe(
         Effect.scoped,
         Effect.provide(
@@ -143,3 +140,59 @@ for (const connection of ["unchanged", "replaced", "restarted", "unreadable"] as
     },
   );
 }
+
+it.live(
+  "keeps a machine created for an Attempt whose checkout is gone as a leftover until the machine is deleted",
+  () => {
+    const machine = fakeMachine();
+    machine.state.cacheExists = false;
+    const providers = fakeProviders();
+    return Effect.gen(function* () {
+      const executor = yield* Executor;
+      pinnedEarlier(machine, 21);
+      providers.hetzner.servers.set(21, {
+        id: 21,
+        name: "usine-eu-one-21",
+        status: "running",
+        created: DateTime.formatIso(DateTime.nowUnsafe()),
+        labels: {
+          "usine-instance": INSTANCE,
+          "usine-worker": WORKER,
+          "usine-run": RUN,
+          "usine-process": "earlier00000",
+          "usine-attempt": attemptTag(request.attemptId),
+        },
+        privateIp: undefined,
+        publicIp: "203.0.113.91",
+        startingReads: 0,
+      });
+      const attempt: AttemptRecovery = {
+        attemptId: request.attemptId,
+        worker: WORKER,
+        repository: request.repository,
+        ref: request.salvageRef,
+        permissions: "write",
+        succeeded: false,
+        open: false,
+        rejected: Option.none(),
+      };
+      const found = yield* executor.recover(attempt, sink, Effect.succeed(request.commitAuthor));
+      assert.strictEqual(found, "found");
+      assert.strictEqual(providers.hetzner.servers.size, 0, "the machine is deleted after");
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        runtimeOf(machine, providers, hetznerAddress, {
+          attemptConnections: {
+            read: (attemptId) =>
+              Effect.succeed(
+                attemptId === request.attemptId ? Option.some(hetznerAddress) : Option.none(),
+              ),
+            write: () => Effect.void,
+            remove: () => Effect.void,
+          },
+        }),
+      ),
+    );
+  },
+);

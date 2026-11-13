@@ -2,7 +2,7 @@ import { catalog } from "@usine/agents/harness";
 import { RoleBinding } from "@usine/core/access";
 import { UpgradeChannel, UpgradeMode } from "@usine/core/upgrade";
 import { CoordinatorKind, DEFAULT_COORDINATOR } from "@usine/core/agent";
-import { Effort, ModelId } from "@usine/core/agent/brain";
+import { BrainSpec, Effort, ModelId } from "@usine/core/agent/brain";
 import { ChildSessionBudget } from "@usine/core/agent/session";
 import { OperatorLogin } from "@usine/core/operator";
 import { canonicalRepositoryName, RepositoryName } from "@usine/core/repository";
@@ -698,6 +698,13 @@ export class Settings extends Schema.Class<Settings, Brand.Brand<"@usine/config/
   parentModel: Schema.OptionFromOptionalKey(ModelId),
   /** The parent reasoning effort for agents that set none, or `None` to use the child's effort. */
   parentEffort: Schema.OptionFromOptionalKey(Effort),
+  /**
+   * The harness, model, and effort of the supervisor role, or `None` when the instance runs no
+   * supervisor. Admission refuses a brain whose harness can't serve the role.
+   */
+  supervisor: Schema.OptionFromOptionalKey(BrainSpec).pipe(
+    Schema.withConstructorDefault(Effect.succeedNone),
+  ),
 }) {}
 
 /**

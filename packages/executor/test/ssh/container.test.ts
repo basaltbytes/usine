@@ -1089,6 +1089,123 @@ describe("SSH Worker with Docker", () => {
   );
 
   it.effect(
+    "finds nothing left of an ended Attempt whose checkout is gone at each later start, and finds a kept checkout",
+    () => {
+      const machine = dockerMachine();
+      const credentials = mintingProvider();
+      const storage = new StubStorage();
+      const recovery = {
+        attemptId: request.attemptId,
+        repository: request.repository,
+        worker: WORKER,
+        ref: request.salvageRef,
+        permissions: "write",
+        succeeded: true,
+        open: false,
+        rejected: Option.none(),
+      } as const;
+      // Each start builds a new executor on the same storage.
+      const recoverAtStart = Effect.gen(function* () {
+        const executor = yield* Executor;
+        return yield* executor.recover(
+          recovery,
+          { salvage: () => Effect.void, comments: () => Effect.void, windows: aloneOnItem() },
+          Effect.succeed(request.commitAuthor),
+        );
+      }).pipe(Effect.scoped, Effect.provide(runtime(machine, credentials, completes, storage)));
+      return Effect.gen(function* () {
+        yield* stopWhileRunning(machine, credentials, storage);
+        machine.state.salvage = "clean";
+        const kept = yield* recoverAtStart;
+        assert.strictEqual(kept, "found", "a start that finds the checkout reconciles it");
+        // The fake machine doesn't model the checkout's removal.
+        machine.state.cacheExists = false;
+        const first = yield* recoverAtStart;
+        const second = yield* recoverAtStart;
+        assert.deepStrictEqual([first, second], ["gone", "gone"]);
+        assert.strictEqual(machine.state.containers.size, 0);
+      });
+    },
+  );
+
+  it.effect(
+    "removes the connection record of an ended Attempt whose checkout is gone, and keeps the record of a found one, after a failed cleanup on the machine",
+    () => {
+      const machine = dockerMachine();
+      const credentials = mintingProvider();
+      const storage = new StubStorage();
+      const logs = capturedLogs();
+      const settled = AttemptId.make("settled/run/1");
+      const records = new Map<AttemptId, SshWorkerAddress>([
+        [request.attemptId, ADDRESS],
+        [settled, ADDRESS],
+      ]);
+      const recovery = (attemptId: AttemptId) =>
+        ({
+          attemptId,
+          repository: request.repository,
+          worker: WORKER,
+          ref: request.salvageRef,
+          permissions: "write",
+          succeeded: false,
+          open: false,
+          rejected: Option.none(),
+        }) as const;
+      const recordSink = {
+        salvage: () => Effect.void,
+        comments: () => Effect.void,
+        windows: aloneOnItem(),
+      };
+      return Effect.gen(function* () {
+        yield* stopWhileRunning(machine, credentials, storage);
+        machine.state.salvage = "dirty";
+        machine.state.containerRemovalFails = true;
+        const results = yield* Effect.gen(function* () {
+          const executor = yield* Executor;
+          const recover = (attemptId: AttemptId) =>
+            executor
+              .recover(recovery(attemptId), recordSink, Effect.succeed(request.commitAuthor))
+              .pipe(Effect.result);
+          const kept = yield* recover(request.attemptId);
+          const gone = yield* recover(settled);
+          return { kept, gone };
+        }).pipe(
+          Effect.scoped,
+          Effect.provide(
+            executorLayer(machine, credentials, ADDRESS, completes, storage, {
+              attemptConnections: {
+                read: (id) => Effect.sync(() => Option.fromNullishOr(records.get(id))),
+                write: (id, connection) => Effect.sync(() => void records.set(id, connection)),
+                remove: (id) => Effect.sync(() => void records.delete(id)),
+              },
+            }).pipe(Layer.provide(noGateway), Layer.provideMerge(logs.layer)),
+          ),
+        );
+        assert(results.kept._tag === "Success");
+        assert.strictEqual(results.kept.success, "found");
+        assert.strictEqual(machine.state.containers.size, 1, "the container removal failed");
+        assert(results.gone._tag === "Success");
+        assert.strictEqual(results.gone.success, "gone");
+        assert.isFalse(records.has(settled), "no later recovery would remove the record");
+        assert.isTrue(
+          records.has(request.attemptId),
+          "a later recovery reaches the leftover container through the record",
+        );
+        const kept = logs.infos.filter((line) =>
+          line.includes("Kept the attempt connection after incomplete resource cleanup"),
+        );
+        assert.lengthOf(kept, 1);
+        assert.include(kept[0], request.attemptId);
+        const removed = logs.infos.filter((line) =>
+          line.includes("Removed the attempt connection after incomplete resource cleanup"),
+        );
+        assert.lengthOf(removed, 1);
+        assert.include(removed[0], settled);
+      });
+    },
+  );
+
+  it.effect(
     "derives the limits for one Attempt, and logs them, when a container starts before any preflight on the Worker",
     () => {
       const machine = dockerMachine();
