@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest";
 import type { TaskId } from "@earendil-works/pi-durable";
-import { ChildBackend } from "@usine/agents/runtime";
+import { ChildBackend, type ChildRequest, ContinuationMismatchError } from "@usine/agents/runtime";
 import {
   AgentSessionId,
   ChildSessionBudget,
@@ -9,6 +9,7 @@ import {
   HarnessSessionId,
 } from "@usine/core/agent/session";
 import * as AttemptChannel from "@usine/core/attempt/channel";
+import { MachineId, WorkerName } from "@usine/core/worker";
 import { Deferred, Effect, Exit, Fiber, Option, Schema } from "effect";
 import { delegate } from "../src/attempt/delegation/delegation.ts";
 import { SavedChild } from "../src/attempt/delegation/journal.ts";
@@ -219,6 +220,81 @@ describe("delegate", () => {
       assert.strictEqual(memory.attempt.children, 1);
     }).pipe(Effect.provide(stubChildBackendLayer)),
   );
+
+  for (const changed of ["worker", "machine", "checkout", "home"] as const) {
+    it.effect(`interrupts an unfinished launch when its saved ${changed} changed`, () =>
+      Effect.gen(function* () {
+        const attemptId = `delegation/unfinished-changed-${changed}`;
+        const request = attemptRequest(attemptId);
+        const sessionId = childSessionId(request.spec.attemptId, 1);
+        const harnessSession = HarnessSession.make({
+          id: HarnessSessionId.make("native-1"),
+          cwd: changed === "checkout" ? "/workspace/previous" : request.cwd,
+        });
+        const memory = memoryJournal();
+        memory.attempt.children = 1;
+        memory.delegation.count = Option.some(1);
+        memory.delegation.launched = false;
+        memory.delegation.prompted = false;
+        memory.delegation.output = "Partial work\n";
+        const saved = yield* Schema.encodeEffect(SavedChild)(
+          SavedChild.make({
+            session: {
+              id: sessionId,
+              parentId: parentSessionId(request.spec.attemptId),
+              agent: request.spec.agent.name,
+              brain: request.spec.agent.brain,
+            },
+            usage: Option.none(),
+            harnessSession,
+            worker: changed === "worker" ? WorkerName.make("previous") : request.worker,
+            machine:
+              changed === "machine" ? Option.some(MachineId.make("previous")) : request.machine,
+          }),
+        );
+        memory.delegation.saved = Option.some(saved);
+        const mismatch = ContinuationMismatchError.make({
+          sessionId,
+          field: "home",
+          message: "Cannot resume claude: home mismatch",
+        });
+        const launches: Array<ChildRequest> = [];
+        const backend = yield* ChildBackend;
+        const { fiber } = yield* start(attemptId, memory).pipe(
+          Effect.provideService(
+            ChildBackend,
+            ChildBackend.of({
+              ...backend,
+              launch: (childRequest) =>
+                Effect.gen(function* () {
+                  launches.push(childRequest);
+                  return yield* mismatch;
+                }),
+            }),
+          ),
+        );
+        const outcome = yield* Fiber.join(fiber);
+
+        assert.deepStrictEqual(outcome, {
+          _tag: "Interrupted",
+          sessionId,
+          reason:
+            changed === "home"
+              ? mismatch.message
+              : "the original worker, machine, or checkout is unavailable",
+          output: "Partial work\n",
+        });
+        assert.deepStrictEqual(
+          launches.map((launch) => launch.resume),
+          changed === "home" ? [Option.some(harnessSession)] : [],
+        );
+        assert.strictEqual(memory.attempt.children, 1);
+        assert.deepStrictEqual(memory.delegation.count, Option.some(1));
+        assert.isFalse(memory.delegation.launched);
+        assert.deepStrictEqual(memory.attempt.reports, []);
+      }).pipe(Effect.provide(stubChildBackendLayer)),
+    );
+  }
 
   it.effect("returns BudgetExceeded without launching a child past the budget", () =>
     Effect.gen(function* () {
