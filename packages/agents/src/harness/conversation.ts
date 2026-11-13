@@ -80,6 +80,11 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
   let paused = options.paused;
   let idle = Option.none<string>();
   /**
+   * An answer whose wait limit passed while the operator supervised the session. A Release returns
+   * it unless a turn starts first.
+   */
+  let overdue = Option.none<string>();
+  /**
    * The session's tool-call count when it last read an operator message or steer, or `None` after
    * its own input, such as a continuation turn.
    */
@@ -215,6 +220,15 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
     if (action._tag === "Release") {
       held = false;
       if (Option.isSome(idle) && !paused) yield* finish(idle.value);
+      else if (Option.isSome(overdue) && !paused) {
+        const answer = overdue.value;
+        overdue = Option.none();
+        yield* Effect.logInfo(
+          "The operator released a session whose wait limit passed; returning its answer",
+          { sessionId: session.id },
+        );
+        yield* finish(answer);
+      }
     } else if (action._tag === "Interrupt") {
       if (!paused) {
         paused = true;
@@ -245,6 +259,12 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
       if (action._tag === "OperatorMessage") held = true;
       paused = false;
       idle = Option.none();
+      if (Option.isSome(overdue)) {
+        overdue = Option.none();
+        yield* Effect.logInfo("The operator's input starts a turn; dropping the overdue answer", {
+          sessionId: session.id,
+        });
+      }
       yield* Deferred.succeed(resume, undefined);
       resume = yield* Deferred.make<void>();
       if (taken === "queued")
@@ -278,17 +298,31 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
   return {
     finish: (message: string) => mutex.withPermits(1)(finish(message)),
     /**
-     * Runs `announce` and then finishes with `message` if the session is neither held nor paused.
-     * Returns `false` without doing either if the operator supervises the session.
+     * Runs `announce` and then finishes with `message`, an answer whose wait limit passed, if the
+     * session is neither held nor paused. Otherwise keeps `message`, without reporting the session
+     * idle, for a later Release, and returns `false`.
      */
-    finishUnsupervised: (message: string, announce: Effect.Effect<void>) =>
+    finishOverdue: (message: string, announce: Effect.Effect<void>) =>
       mutex.withPermits(1)(
-        Effect.suspend(() =>
-          held || paused
-            ? Effect.succeed(false)
-            : announce.pipe(Effect.andThen(finish(message)), Effect.as(true)),
-        ),
+        Effect.suspend(() => {
+          if (!held && !paused)
+            return announce.pipe(Effect.andThen(finish(message)), Effect.as(true));
+          overdue = Option.some(message);
+          return Effect.succeed(false);
+        }),
       ),
+    /** Drops the answer that `finishOverdue` kept, if any, and returns whether one was kept. */
+    dropOverdue: Effect.suspend(() =>
+      Option.isNone(overdue)
+        ? Effect.succeed(false)
+        : mutex.withPermits(1)(
+            Effect.sync(() => {
+              const kept = Option.isSome(overdue);
+              overdue = Option.none();
+              return kept;
+            }),
+          ),
+    ),
     intervene,
     recover: Effect.fn("SessionConversation.recover")(function* (
       policy: ContinuationPolicy,

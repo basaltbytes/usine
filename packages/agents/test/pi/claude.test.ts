@@ -2351,6 +2351,7 @@ describe("Claude child backend", () => {
             { type: "system", subtype: "session_state_changed", state: "running" },
             { type: "assistant", message: { content: [{ type: "text", text: "CI finished" }] } },
           ]);
+          while (!cancelled(logs.lines, "turn started")) yield* Effect.yieldNow;
           yield* running.intervene(Release.make(), noDelivery);
           yield* TestClock.adjust("5 minutes");
           assert.isUndefined(result.pollUnsafe(), "a Release does not end the running turn");
@@ -2359,6 +2360,159 @@ describe("Claude child backend", () => {
             { type: "system", subtype: "session_state_changed", state: "idle" },
           ]);
           assert.strictEqual((yield* Fiber.join(result)).message, "CI passed");
+        }).pipe(
+          Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk), Layer.provideMerge(logs.layer))),
+          Effect.scoped,
+        );
+      }),
+    );
+
+    const supervisedLimit = (lines: ReadonlyArray<string>) =>
+      lines.some((line) => line.includes("the operator's Hold or pause keeps it open"));
+
+    it.effect.each([
+      {
+        protocol: "session-state",
+        messages: [
+          { type: "system", subtype: "session_state_changed", state: "running" },
+          gate,
+          answered("Waiting for CI"),
+          { type: "system", subtype: "session_state_changed", state: "idle" },
+        ],
+      },
+      { protocol: "legacy", messages: [gate, answered("Waiting for CI")] },
+    ])("returns the answer on a Release after the limit passes ($protocol)", ({ messages }) =>
+      Effect.gen(function* () {
+        const { sdk } = yield* openOutput(messages);
+        const logs = infoLines();
+        yield* Effect.gen(function* () {
+          const running = yield* (yield* ChildBackend).launch(
+            ChildRequest.make({ ...request(), held: true }),
+          );
+          const result = yield* Effect.forkChild(running.result);
+          while (!waiting(logs.lines)) yield* Effect.yieldNow;
+          yield* TestClock.adjust("2 minutes");
+          while (!supervisedLimit(logs.lines)) yield* Effect.yieldNow;
+          yield* TestClock.adjust("5 minutes");
+          assert.isUndefined(result.pollUnsafe(), "the Hold keeps the child open");
+          yield* running.intervene(Release.make(), noDelivery);
+          assert.strictEqual((yield* Fiber.join(result)).message, "Waiting for CI");
+          assert.isTrue(
+            logs.lines.some((line) =>
+              line.includes(
+                "The operator released a session whose wait limit passed; returning its answer",
+              ),
+            ),
+          );
+        }).pipe(
+          Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk), Layer.provideMerge(logs.layer))),
+          Effect.scoped,
+        );
+      }),
+    );
+
+    it.effect("keeps a child interrupted during the wait open past the limit", () =>
+      Effect.gen(function* () {
+        const { sdk } = yield* openOutput([
+          { type: "system", subtype: "session_state_changed", state: "running" },
+          gate,
+          answered("Waiting for CI"),
+          { type: "system", subtype: "session_state_changed", state: "idle" },
+        ]);
+        const logs = logLines(["Info", "Warn"]);
+        yield* Effect.gen(function* () {
+          const running = yield* (yield* ChildBackend).launch(request());
+          const events: Array<string> = [];
+          yield* Effect.forkScoped(
+            running.events.pipe(
+              Stream.runForEach((event) => Effect.sync(() => events.push(event._tag))),
+            ),
+          );
+          const result = yield* Effect.forkChild(running.result);
+          while (!waiting(logs.lines)) yield* Effect.yieldNow;
+          yield* TestClock.adjust("1 minute");
+          yield* running.intervene(Interrupt.make(), noDelivery);
+          yield* TestClock.adjust("1 minute");
+          while (!supervisedLimit(logs.lines)) yield* Effect.yieldNow;
+          assert.isFalse(
+            logs.lines.some((line) => line.includes("returning its answer")),
+            "the pause keeps the answer",
+          );
+          assert.notInclude(events, "SessionIdle", "the limit does not report a paused child idle");
+          yield* running.intervene(Release.make(), noDelivery);
+          yield* TestClock.adjust("5 minutes");
+          assert.isUndefined(result.pollUnsafe(), "a Release does not end a paused child");
+        }).pipe(
+          Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk), Layer.provideMerge(logs.layer))),
+          Effect.scoped,
+        );
+      }),
+    );
+
+    it.effect("keeps a child held by an operator message during its turn until a Release", () =>
+      Effect.gen(function* () {
+        const { output, sdk } = yield* openOutput([
+          { type: "system", subtype: "session_state_changed", state: "running" },
+          gate,
+        ]);
+        const logs = logLines(["Info", "Warn"]);
+        yield* Effect.gen(function* () {
+          const running = yield* (yield* ChildBackend).launch(request());
+          const events: Array<string> = [];
+          yield* Effect.forkScoped(
+            running.events.pipe(
+              Stream.runForEach((event) => Effect.sync(() => events.push(event._tag))),
+            ),
+          );
+          const result = yield* Effect.forkChild(running.result);
+          const state = yield* running.intervene(
+            OperatorMessage.make({ message: "Wait for CI" }),
+            noDelivery,
+          );
+          assert.isTrue(state.held, "the operator message places a Hold");
+          yield* Queue.offerAll(output, [
+            answered("Waiting for CI"),
+            { type: "system", subtype: "session_state_changed", state: "idle" },
+          ]);
+          while (!waiting(logs.lines)) yield* Effect.yieldNow;
+          yield* TestClock.adjust("2 minutes");
+          while (!supervisedLimit(logs.lines)) yield* Effect.yieldNow;
+          assert.notInclude(events, "SessionIdle", "the limit does not report a held child idle");
+          assert.isUndefined(result.pollUnsafe(), "the Hold keeps the child open");
+          yield* running.intervene(Release.make(), noDelivery);
+          assert.strictEqual((yield* Fiber.join(result)).message, "Waiting for CI");
+        }).pipe(
+          Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk), Layer.provideMerge(logs.layer))),
+          Effect.scoped,
+        );
+      }),
+    );
+
+    it.effect("returns the answer at the limit after a Release within it", () =>
+      Effect.gen(function* () {
+        const { sdk } = yield* openOutput([
+          { type: "system", subtype: "session_state_changed", state: "running" },
+          gate,
+          answered("Waiting for CI"),
+          { type: "system", subtype: "session_state_changed", state: "idle" },
+        ]);
+        const logs = logLines(["Info", "Warn"]);
+        yield* Effect.gen(function* () {
+          const running = yield* (yield* ChildBackend).launch(
+            ChildRequest.make({ ...request(), held: true }),
+          );
+          const result = yield* Effect.forkChild(running.result);
+          while (!waiting(logs.lines)) yield* Effect.yieldNow;
+          yield* TestClock.adjust("1 minute");
+          yield* running.intervene(Release.make(), noDelivery);
+          assert.isUndefined(result.pollUnsafe(), "the Release waits for the limit");
+          yield* TestClock.adjust("1 minute");
+          assert.strictEqual((yield* Fiber.join(result)).message, "Waiting for CI");
+          const outlasted = logs.lines.findIndex((line) =>
+            line.includes("outlasted the wait limit"),
+          );
+          assert.include(logs.lines[outlasted], "returning its answer");
+          assert.strictEqual(logs.lineLevels[outlasted], "Warn");
         }).pipe(
           Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk), Layer.provideMerge(logs.layer))),
           Effect.scoped,

@@ -165,10 +165,10 @@ const LOGIN_RETRY_DELAYS: ReadonlyArray<Duration.Duration> = [
 const LOGIN_WINDOW = Duration.seconds(60);
 
 /**
- * The maximum time an idle Claude child that has answered waits for its background work and the
- * notification turn that follows it. When the limit passes, the child returns the saved answer
- * unless the operator holds or pauses it. The limit is kept in memory, so a child reattached after
- * an orchestrator restart has none.
+ * The maximum time an idle Claude child that has answered waits for its background work to start a
+ * turn. When the limit passes, the child returns the saved answer. If the operator holds or pauses
+ * the child, a Release returns the answer instead, unless a turn starts first. The limit is kept in
+ * memory, so a child that was already waiting when the orchestrator restarted has none.
  */
 const BACKGROUND_WAIT_LIMIT = Duration.minutes(2);
 
@@ -659,8 +659,8 @@ const makeClaudeSessions = Effect.gen(function* () {
     let retrying = false;
 
     /**
-     * Waits for background work after `answer`, then returns `answer` once the limit passes, unless
-     * the operator holds or pauses the session.
+     * Waits for background work after `answer`, then returns `answer` once the limit passes. If the
+     * operator holds or pauses the session, a Release returns `answer` instead.
      */
     const awaitBackgroundWork = Effect.fn("ClaudeRuntime.awaitBackgroundWork")(function* (
       answer: string,
@@ -683,7 +683,7 @@ const makeClaudeSessions = Effect.gen(function* () {
         backgroundWait,
         Effect.sleep(BACKGROUND_WAIT_LIMIT).pipe(
           Effect.andThen(
-            conversation.finishUnsupervised(
+            conversation.finishOverdue(
               answer,
               outlasted(
                 Effect.logWarning,
@@ -696,23 +696,28 @@ const makeClaudeSessions = Effect.gen(function* () {
               ? Effect.void
               : outlasted(
                   Effect.logInfo,
-                  "Claude child's background work outlasted the wait limit; the operator's Hold or pause keeps it open",
+                  "Claude child's background work outlasted the wait limit; the operator's Hold or pause keeps it open until a Release",
                 ),
           ),
         ),
       );
     });
-    /** Cancels the running wait limit, if any, and logs `reason`. */
+    /**
+     * Cancels the running wait limit, or drops the answer that a passed limit kept for a Release,
+     * and logs `reason` if either existed.
+     */
     const resumeTurn = Effect.fn("ClaudeRuntime.resumeTurn")(function* (
       reason: "turn started" | "process resumed",
     ) {
       const wait = yield* FiberHandle.get(backgroundWait);
-      if (Option.isNone(wait)) return;
+      if (Option.isSome(wait)) yield* FiberHandle.clear(backgroundWait);
+      const dropped = yield* conversation.dropOverdue;
+      if (Option.isNone(wait) && !dropped) return;
       yield* Effect.annotateCurrentSpan({ sessionId: session.id });
-      yield* FiberHandle.clear(backgroundWait);
       yield* Effect.logInfo("Claude child cancelled the wait limit for its background work", {
         sessionId: session.id,
         reason,
+        limitPassed: dropped,
         backgroundTaskIds: backgroundTasks,
       });
     });
