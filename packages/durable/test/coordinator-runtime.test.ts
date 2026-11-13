@@ -603,6 +603,38 @@ describe("event-driven coordinator runtime", () => {
     }).pipe(Effect.scoped),
   );
 
+  it.live("forgets committed Worker notices when an execute call resumes in the same process", () =>
+    Effect.gen(function* () {
+      const database = yield* temporaryDatabase;
+      const request = coordinated("coordinator/notice-after-committed-start");
+      const attemptId = request.spec.attemptId;
+      const process = yield* orchestrator(sqliteJournal(database).pipe(coordinator));
+      const first = recordingSink();
+      yield* process.attempts.notify(attemptId, unresponsive("before start"));
+      const execution = yield* process.execute(request, first.sink);
+      yield* process.nextChild;
+      yield* Fiber.interrupt(execution);
+      const live = yield* process.attempts.isLive(attemptId);
+
+      assert.isTrue(live);
+      assert.deepStrictEqual(trace(first.outbound()).slice(0, 2), [
+        "Started",
+        "WorkerUnresponsive",
+      ]);
+      assert.deepStrictEqual(unresponsiveReasons(first.outbound()), ["before start"]);
+
+      const second = recordingSink();
+      const resumed = yield* process.execute(request, second.sink);
+      yield* (yield* process.nextChild).reply("Done.");
+      yield* Fiber.join(resumed);
+      yield* process.stop;
+
+      assert.deepStrictEqual(unresponsiveReasons(second.outbound()), []);
+      assert.strictEqual(trace(second.outbound()).at(-1), "Final");
+      assertAdmitted(attemptId, [...first.outbound(), ...second.outbound()]);
+    }).pipe(Effect.scoped),
+  );
+
   it.live("hands WakeUp the end of the child's output and the ended delegation", () =>
     Effect.gen(function* () {
       const database = yield* temporaryDatabase;
