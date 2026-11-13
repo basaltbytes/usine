@@ -23,9 +23,6 @@ import { GitHubPolling } from "@usine/github/polling";
 import { configurationRepositories, configurationLabels } from "./configuration/catalog.ts";
 import { fromConfiguration, fromConfigurationRevision } from "./configuration/http.ts";
 import { type UpgradeError, ServerUpgrades } from "./upgrade/control.ts";
-// The Node server adapter requires native HTTP server and connection types.
-// @effect-diagnostics-next-line nodeBuiltinImport:off
-import { createServer } from "node:http";
 import { NodeHttpServer } from "@effect/platform-node";
 import { RepositoryName } from "@usine/core/repository";
 import { type ConfigurationEditor, BoardMove } from "@usine/orchestrator/operator";
@@ -47,7 +44,6 @@ import {
 } from "effect/http";
 import { HttpApiBuilder, HttpApiError } from "effect/http-api";
 import { FactoryBackend, type BackendError } from "./backend.ts";
-import { type Port, SERVER_HOST } from "./cli.ts";
 
 const operatorFailure = (error: BackendError) => {
   const message = (() => {
@@ -631,12 +627,13 @@ export const staticRoutes = (webRoot: string) =>
   );
 
 /**
- * Serves the authenticated operator API and the UI on `SERVER_HOST` at `port`.
+ * Installs the authenticated operator API and the UI on `listener`, replacing its startup
+ * responses.
  */
 export const serverLayer = (
   backend: Layer.Layer<FactoryBackend>,
   webRoot: string,
-  port: Port,
+  listener: StartupListener,
   auth: AuthServices,
   services:
     | Layer.Layer<
@@ -650,7 +647,6 @@ export const serverLayer = (
     | Layer.Layer<never> = Layer.empty,
   webhooks: Layer.Layer<never, never, HttpRouter.HttpRouter> = Layer.empty,
   setup?: Setup["Service"],
-  listener?: StartupListener,
 ) => {
   const authenticated = authenticatedRoutes(auth);
   const setupHttp =
@@ -669,17 +665,13 @@ export const serverLayer = (
     webhooks,
     securityMiddleware(auth.authentication),
   ).pipe(HttpRouter.provideRequest(Layer.merge(backend, services)));
-  if (listener !== undefined)
-    return Layer.effectDiscard(
-      Effect.gen(function* () {
-        const platform = yield* HttpPlatform.HttpPlatform;
-        const handler = yield* HttpRouter.toHttpEffect(routes);
-        yield* listener.install(
-          handler.pipe(Effect.provideService(HttpPlatform.HttpPlatform, platform)),
-        );
-      }),
-    ).pipe(Layer.provide(NodeHttpServer.layerHttpServices));
-  return HttpRouter.serve(routes).pipe(
-    Layer.provide(NodeHttpServer.layer(createServer, { host: SERVER_HOST, port })),
-  );
+  return Layer.effectDiscard(
+    Effect.gen(function* () {
+      const platform = yield* HttpPlatform.HttpPlatform;
+      const handler = yield* HttpRouter.toHttpEffect(routes);
+      yield* listener.install(
+        handler.pipe(Effect.provideService(HttpPlatform.HttpPlatform, platform)),
+      );
+    }),
+  ).pipe(Layer.provide(NodeHttpServer.layerHttpServices));
 };

@@ -15,17 +15,18 @@ import {
   Context,
   Deferred,
   Effect,
+  Exit,
   Fiber,
   FileSystem,
   Layer,
   Option,
   Result,
   Schema,
+  Scope,
 } from "effect";
 import { HttpClient } from "effect/http";
 import { serverLayer } from "../src/http.ts";
 import { FactoryBackend } from "../src/backend.ts";
-import { Port } from "../src/cli.ts";
 import { authFixture } from "./auth/fixture.ts";
 import { assert, it } from "@effect/vitest";
 import { committedBeforeCrash, submission } from "../../../packages/engine/test/support.ts";
@@ -161,12 +162,10 @@ it.live(
         serverLayer(
           Layer.mock(FactoryBackend)({}),
           directory,
-          Port.make(7331),
+          listener,
           auth,
           Layer.empty,
           Layer.empty,
-          undefined,
-          listener,
         ),
       );
       const readiness = yield* client.get("/api/ready");
@@ -185,4 +184,26 @@ it.live(
       Effect.provide(NodeHttpServer.layerTest.pipe(Layer.provideMerge(NodeServices.layer))),
     ),
   30_000,
+);
+
+it.live("restores the startup responses when the installed routes close", () =>
+  Effect.gen(function* () {
+    const listener = yield* startupListener("0.5.1-next.341");
+    const auth = yield* authFixture();
+    const client = yield* HttpClient.HttpClient;
+    const routes = yield* Scope.make();
+    yield* Layer.buildWithScope(
+      serverLayer(Layer.mock(FactoryBackend)({}), "", listener, auth, Layer.empty, Layer.empty),
+      routes,
+    );
+    const installed = yield* client.get("/api/overview");
+    assert.strictEqual(installed.status, 401);
+    yield* Scope.close(routes, Exit.void);
+    const restored = yield* client.get("/api/overview");
+    assert.strictEqual(restored.status, 503);
+    assert.strictEqual(restored.headers["retry-after"], "1");
+  }).pipe(
+    Effect.scoped,
+    Effect.provide(NodeHttpServer.layerTest.pipe(Layer.provideMerge(NodeServices.layer))),
+  ),
 );

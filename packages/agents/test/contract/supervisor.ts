@@ -62,14 +62,21 @@ export const supervisorMessages = [
     "Call no tools.",
 ] as const;
 
+/**
+ * The harnesses whose descriptors admit the supervisor role. Codex serves usine tool sets but
+ * lacks `closed-tools`, so admission refuses it.
+ */
+export const supervisorProviders = ["claude", "pi"] as const satisfies ReadonlyArray<ToolProvider>;
+export type SupervisorProvider = (typeof supervisorProviders)[number];
+
 /** The credential route that each harness's recorded supervisor traffic used. */
 const recordedRoutes = {
   claude: "gateway-subscription",
   pi: "gateway",
-} satisfies Record<ToolProvider, CredentialRoute>;
+} satisfies Record<SupervisorProvider, CredentialRoute>;
 
 /** The two turns of the supervisor scenario on `provider`, and the recorded traffic. */
-export const runSupervisorScenario = (provider: ToolProvider, mode: "record" | "replay") =>
+export const runSupervisorScenario = (provider: SupervisorProvider, mode: "record" | "replay") =>
   Effect.gen(function* () {
     const fixture = yield* toolFixture(provider, "supervisor", mode);
     const { host, worker, cwd, environment } = fixture.request;

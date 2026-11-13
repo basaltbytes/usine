@@ -56,7 +56,7 @@ settings:
     effort: medium
 ```
 
-Without `supervisor`, the instance starts and **Configuration > Settings** reports the supervisor as not configured. Saving refuses a harness that can't serve the role and names what it lacks: the harness must serve usine tool sets with its own tools off, reopen a saved conversation, take steering and interrupts, and report token usage. Claude Code and Pi serve the role. Codex is refused until it serves usine tool sets.
+Without `supervisor`, the instance starts and **Configuration > Settings** reports the supervisor as not configured. Saving refuses a harness that can't serve the role and names what it lacks: the harness must serve usine tool sets with its own tools off, reopen a saved conversation, take steering and interrupts, and report token usage. Claude Code and Pi serve the role. Codex is refused, because it lists its own tools in every thread.
 
 ## Instance metadata
 

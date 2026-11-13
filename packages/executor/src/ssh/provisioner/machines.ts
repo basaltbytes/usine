@@ -125,7 +125,8 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
 ) {
   const { catalog } = yield* Harnesses;
   const { instance, commands, settings } = options;
-  const tailnets = yield* provisionerTailnetsFor(commands);
+  const interval = Effect.sleep(settings.machinePollInterval ?? "3 seconds");
+  const tailnets = yield* provisionerTailnetsFor(commands, interval);
   const fs = yield* FileSystem.FileSystem;
   const connectionFor = yield* machineConnections;
   const path = yield* Path.Path;
@@ -145,7 +146,6 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
             : 600,
         ),
     );
-  const interval = Effect.sleep(settings.machinePollInterval ?? "3 seconds");
   const knownHostsDirectory =
     settings.knownHostsDirectory === undefined
       ? yield* fs.makeTempDirectoryScoped({ prefix: "usine-known-hosts-" })

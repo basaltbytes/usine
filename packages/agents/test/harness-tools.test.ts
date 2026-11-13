@@ -369,7 +369,7 @@ describe("usine tool sets", () => {
   );
 });
 
-const role = (hostTools: boolean) =>
+const role = (hostTools: boolean, nativeTools = false) =>
   RoleSpec.make({
     name: RoleName.make("tool-probe"),
     placement: RolePlacements.make({
@@ -377,14 +377,14 @@ const role = (hostTools: boolean) =>
       reason: "The tool probe runs on the orchestrator",
     }),
     credential: Option.none(),
-    nativeTools: false,
+    nativeTools,
     hostTools,
     persistence: "saved",
     interventions: false,
     output: "text",
   });
 
-const spec = (harness: string, hostTools: boolean) => {
+const spec = (harness: string, hostTools: boolean, nativeTools = false) => {
   const brain = BrainSpec.make({
     harness: Harness.make(harness),
     model: ModelId.make("probe"),
@@ -393,12 +393,12 @@ const spec = (harness: string, hostTools: boolean) => {
   return SessionSpec.make({
     session: RoleSession.make({
       id: AgentSessionId.make(`tools-${harness}`),
-      role: role(hostTools).name,
+      role: role(hostTools, nativeTools).name,
       agent: AgentName.make("developer"),
       brain,
     }),
     admitted: AdmittedBrain.make({
-      role: role(hostTools),
+      role: role(hostTools, nativeTools),
       brain,
       context: AdmissionContext.make({
         placement: "orchestrator",
@@ -455,11 +455,10 @@ describe("usine tool sets through the registry", () => {
         const extra = yield* open(spec(harness, false), true);
         assert.include(extra.message, "runs no usine tool set, but its session opened with one");
       }
-      const codex = yield* open(spec("codex", true), true);
-      assert.include(
-        codex.message,
-        "lacks usine-tools (The Codex adapter passes no usine tool set to a session until step 19",
-      );
+      const codex = yield* open(spec("codex", true, true), true);
+      assert.strictEqual(codex.message, "opened with [read_note,explode]");
+      const closed = yield* open(spec("codex", true), true);
+      assert.include(closed.message, "lacks closed-tools (Codex lists apply_patch");
     }).pipe(Effect.provide(Harnesses.layerFrom(catalog, catalog.ids.map(reporting)))),
   );
 });

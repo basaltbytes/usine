@@ -38,18 +38,20 @@ import {
 } from "../../src/runtime.ts";
 import { collectLogs } from "../logs.ts";
 import { assertProvenCapabilities } from "./capabilities.ts";
-import { listedTools, toolProviders } from "./host-tools.ts";
+import { listedTools } from "./host-tools.ts";
 import {
   operatorToolHandlers,
   operatorTools,
   RESUMED,
   runSupervisorScenario,
   supervisorMessages,
+  type SupervisorProvider,
+  supervisorProviders,
   WAITING_RUN,
 } from "./supervisor.ts";
 
 /** The names under which `provider` lists the toolkit's tools, sorted. */
-const operatorNames = (provider: (typeof toolProviders)[number]) =>
+const operatorNames = (provider: SupervisorProvider) =>
   Object.keys(operatorTools.tools)
     .map((name) => (provider === "claude" ? `mcp__usine__${name}` : name))
     .sort();
@@ -157,7 +159,7 @@ const finished = (events: ReadonlyArray<AgentSessionEvent>) =>
   );
 
 describe("the supervisor role", () => {
-  for (const provider of toolProviders)
+  for (const provider of supervisorProviders)
     it.live(
       `${provider}: lists only the operator tools, calls one, and resumes the session`,
       () =>
@@ -237,7 +239,7 @@ describe("the supervisor role", () => {
       30_000,
     );
 
-  it.effect("codex: the descriptor refuses the role until Codex serves usine tool sets", () =>
+  it.effect("codex: the descriptor refuses the role because Codex lists its own tools", () =>
     Effect.gen(function* () {
       const brain = BrainSpec.make({
         harness: Harness.make("codex"),
@@ -246,15 +248,15 @@ describe("the supervisor role", () => {
       });
       const refused = admitSupervisor(catalog, brain, "gateway");
       assert(Result.isFailure(refused));
-      const usineTools = codex.capabilities
+      const closedTools = codex.capabilities
         .flatMap(({ lacking }) => lacking)
-        .find(({ capability }) => capability === "usine-tools");
-      assert(usineTools !== undefined);
+        .find(({ capability }) => capability === "closed-tools");
+      assert(closedTools !== undefined);
       assert.deepStrictEqual(
         refused.failure.missing.map(({ capability }) => capability),
-        ["usine-tools", "closed-tools"],
+        ["closed-tools"],
       );
-      assert.include(refused.failure.message, `lacks usine-tools (${usineTools.reason})`);
+      assert.include(refused.failure.message, `lacks closed-tools (${closedTools.reason})`);
 
       // The same toolkit and turn as on the other harnesses: admission refuses it before any
       // session opens.

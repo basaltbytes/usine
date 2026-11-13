@@ -262,7 +262,7 @@ describe("configuration domain without layers", () => {
       expect(problem.file).toBe("usine.yaml");
       expect(problem.message).toContain("codex cannot run as supervisor at orchestrator");
       expect(problem.message).toContain(
-        "lacks usine-tools (The Codex adapter passes no usine tool set to a session",
+        "lacks closed-tools (Codex lists apply_patch, its code-mode exec and wait tools",
       );
       expect(problem.details?.map(({ path }) => path)).toEqual([
         ["settings", "supervisor", "harness"],

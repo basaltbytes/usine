@@ -9,13 +9,20 @@ import {
 } from "../../protocol/codex/codex.ts";
 import type { CodexConnection } from "./app-server.ts";
 
-/** Sends `initialize` and `initialized` to the app server; must run before account checks or creating a child. */
+/**
+ * Sends `initialize` and `initialized` to the app server; must run before account checks or
+ * creating a child. `experimentalApi` opts the connection into experimental request fields, which
+ * a thread that registers usine tools needs.
+ */
 export const initializeCodex = Effect.fn("Codex.initialize")(function* (
   connection: CodexConnection,
+  options: { readonly experimentalApi: boolean } = { experimentalApi: false },
 ) {
   const params = {
     clientInfo: { name: "usine", title: "usine", version: "0.0.1" },
-    capabilities: null,
+    capabilities: options.experimentalApi
+      ? { experimentalApi: true, requestAttestation: false }
+      : null,
   } satisfies InitializeParams;
   yield* connection.request("launch", "initialize", params).pipe(
     Effect.catchTag("SessionOperationError", (error) =>
