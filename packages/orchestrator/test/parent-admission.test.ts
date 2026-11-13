@@ -5,7 +5,7 @@ import { ConfigParser } from "@usine/config/parser";
 import { InstanceDirectory } from "@usine/core/instance";
 import { fauxParent } from "@usine/durable/testing";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
-import { Effect, FileSystem, Layer } from "effect";
+import { Effect, FileSystem, Layer, Option } from "effect";
 import { vi } from "vitest";
 import { parentAdmissionProblems } from "../src/parent-admission.ts";
 import { writeInstanceFiles } from "./support/instance-folder.ts";
@@ -151,6 +151,39 @@ it.effect("gives a failed login check to each agent on the provider", () =>
       `Agent "beta" cannot run as coordinator: Can't check the parent model's credential`,
     ]);
     expect(logins).toHaveBeenCalledTimes(1);
+  }).pipe(Effect.scoped, Effect.provide(testLayer)),
+);
+
+it.effect("asks the gateway's login once per provider when it selects the parent model", () =>
+  Effect.gen(function* () {
+    const directory = yield* (yield* FileSystem.FileSystem).makeTempDirectoryScoped();
+    const root = InstanceDirectory.make(directory);
+    yield* writeInstanceFiles(root, [
+      ["usine.yaml", "version: 2\noperator: operator\nrepos: [{ name: acme/project }]\n"],
+      ["agents/alpha.md", agentFile("high")],
+      ["agents/beta.md", agentFile("high", "parent_effort: medium\n")],
+      ["agents/gamma.md", agentFile("high", "parent_effort: low\n")],
+    ]);
+    const loaded = yield* (yield* ConfigurationFolder).load(root);
+    const parents = fauxParent([]);
+    const faux = parents.models.getModel("faux", "faux-1");
+    if (faux === undefined) return yield* Effect.die("The faux provider serves no faux-1");
+    vi.spyOn(parents.models, "getAvailable").mockResolvedValue([
+      { ...faux, provider: "other" },
+      faux,
+    ]);
+    const authentication = vi.fn((provider: string) =>
+      Effect.succeed(provider === "faux" ? ({ _tag: "ApiKey" } as const) : undefined),
+    );
+
+    const problems = yield* parentAdmissionProblems(loaded, {
+      models: parents.models,
+      defaultModel: Option.none(),
+      credentials: { route: "gateway", authentication },
+    });
+
+    expect(problems).toEqual([]);
+    expect(authentication.mock.calls.map(([provider]) => provider)).toEqual(["other", "faux"]);
   }).pipe(Effect.scoped, Effect.provide(testLayer)),
 );
 
