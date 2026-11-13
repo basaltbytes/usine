@@ -193,20 +193,25 @@ const subtractUsage = (total: SessionUsage, part: SessionUsage): SessionUsage =>
  *
  * Claude Code can restore a resumed session's totals, so the `modelUsage` of a new process's
  * results can count earlier processes' usage too. At the first result of a process that `seed`
- * doesn't retain, or that follows `restart`, the restored usage is `modelUsage` minus
- * `model_usage_since_last_result`; the meter counts it once and `read` reports it.
+ * doesn't retain, that follows `restart`, or that `seed` retains before its first result, the
+ * restored usage is `modelUsage` minus `model_usage_since_last_result`; the meter counts it once
+ * and `read` reports it. Until then, the process usage that `read` and `restart` return sets
+ * `awaitsFirstResult`, so that a meter reattached to the process from that checkpoint settles it.
  */
 export const claudeSessionMeter = (
   seed: SessionUsage & { readonly processUsage?: Option.Option<ProcessUsage> } = NO_USAGE,
   retained = false,
 ) => {
-  let current: ProcessUsage = retained
-    ? Option.getOrElse(seed.processUsage ?? Option.none(), () => seed)
-    : NO_USAGE;
+  const retainedUsage = retained ? (seed.processUsage ?? Option.none()) : Option.none();
+  let current: ProcessUsage = retained ? Option.getOrElse(retainedUsage, () => seed) : NO_USAGE;
   let earlier = subtractUsage(seed, current);
   let meter = claudeTokenMeter(current);
-  // Whether the current process is new and hasn't reported a result yet.
-  let unsettled = !retained;
+  // Whether the current process hasn't reported a result yet.
+  let unsettled =
+    !retained ||
+    Option.exists(retainedUsage, ({ awaitsFirstResult }) => awaitsFirstResult === true);
+  const checkpoint = (usage: ProcessUsage): ProcessUsage =>
+    unsettled ? { ...usage, awaitsFirstResult: true } : usage;
   const settle = (message: Schema.Json): Option.Option<RestoredUsage> => {
     if (!unsettled) return Option.none();
     const result = decodeResult(message);
@@ -234,7 +239,7 @@ export const claudeSessionMeter = (
       return Option.map(meter.read(message), (usage) => {
         current = usage;
         return {
-          usage: { ...addUsage(earlier, usage), processUsage: Option.some(usage) },
+          usage: { ...addUsage(earlier, usage), processUsage: Option.some(checkpoint(usage)) },
           restored,
         };
       });
@@ -244,7 +249,7 @@ export const claudeSessionMeter = (
       earlier = addUsage(earlier, current);
       current = NO_USAGE;
       meter = claudeTokenMeter();
-      return { ...earlier, processUsage: Option.some(current) };
+      return { ...earlier, processUsage: Option.some(checkpoint(current)) };
     },
     covered: () => meter.covered(),
   };

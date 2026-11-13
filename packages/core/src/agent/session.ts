@@ -295,6 +295,11 @@ export class SessionTokensUpdated extends Schema.TaggedClass<
        * A reattached process can replay these messages, and they are not counted again.
        */
       messages: Schema.optionalKey(Schema.Record(Schema.String, TokenCount)),
+      /**
+       * Whether the process hasn't reported a result yet, so its first result can count usage
+       * that Claude restored from the resumed session. Absent means it has reported one.
+       */
+      awaitsFirstResult: Schema.optionalKey(Schema.Boolean),
     }),
   ).pipe(Schema.withConstructorDefault(Effect.succeedNone)),
 }) {}

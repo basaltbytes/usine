@@ -125,6 +125,48 @@ describe("Claude query tokens", () => {
       );
     });
 
+    it("counts once the usage that a replacement restores when it is reattached before its first result", () => {
+      const { saved } = firstProcess();
+      const replacement = claudeSessionMeter(saved, false);
+      const checkpoint = sessionUsage(replacement.read(assistant("turn-2", 1466)));
+      assert.strictEqual(checkpoint.totalTokens, 5058);
+      assert.deepStrictEqual(
+        Option.map(checkpoint.processUsage, ({ awaitsFirstResult }) => awaitsFirstResult),
+        Option.some(true),
+      );
+      const reattached = claudeSessionMeter(checkpoint, true);
+      const reading = Option.getOrThrow(reattached.read(restoringTurn));
+      assert.strictEqual(reading.usage.totalTokens, 5133);
+      assert.deepStrictEqual(
+        Option.map(reading.restored, ({ restored }) => restored.totalTokens),
+        Option.some(TokenCount.make(3591)),
+      );
+      assert.deepStrictEqual(
+        Option.map(reading.usage.processUsage, ({ awaitsFirstResult }) => awaitsFirstResult),
+        Option.some(undefined),
+        "a settled process's checkpoint doesn't settle it again",
+      );
+    });
+
+    it("counts once the usage that a process restores after a restart when it is reattached", () => {
+      const fromRestart = firstProcess().meter.restart();
+      const reattached = claudeSessionMeter(fromRestart, true);
+      const reading = Option.getOrThrow(reattached.read(restoringTurn));
+      assert.strictEqual(reading.usage.totalTokens, 5133);
+      assert.deepStrictEqual(
+        Option.map(reading.restored, ({ restored }) => restored.totalTokens),
+        Option.some(TokenCount.make(3591)),
+      );
+
+      const { meter } = firstProcess();
+      meter.restart();
+      const streamed = claudeSessionMeter(
+        sessionUsage(meter.read(assistant("turn-2", 1466))),
+        true,
+      );
+      assert.strictEqual(sessionUsage(streamed.read(restoringTurn)).totalTokens, 5133);
+    });
+
     it("keeps a retained process's own usage when it more than doubles", () => {
       const { saved } = firstProcess();
       const retained = claudeSessionMeter(saved, true);
