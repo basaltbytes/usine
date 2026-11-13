@@ -10,6 +10,7 @@ import { InstanceDirectory } from "@usine/core/instance";
 import { OperatorLogin } from "@usine/core/operator";
 import { makeExpressionEngine, MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import {
+  Array as Arr,
   Context,
   DateTime,
   Effect,
@@ -23,6 +24,14 @@ import {
   Schema,
   Stream,
 } from "effect";
+import {
+  CapabilityProfile,
+  catalog,
+  HarnessCatalog,
+  HarnessDescriptor,
+  Lacking,
+} from "@usine/agents/harness";
+import { supervisorAdmissionProblems } from "../src/instance/admission.ts";
 import { LoadedInstance } from "../src/instance/instance.ts";
 import { Settings, UsineConfig } from "../src/factory.ts";
 import { ConfigParser, makeConfigParser } from "../src/parser.ts";
@@ -124,6 +133,30 @@ const initialize = Effect.gen(function* () {
   const changes = yield* initialChanges;
   return yield* store.commit({ expected: zero, changes, ...metadata });
 });
+
+const NO_RESUME = "This test's harness reopens no saved session";
+
+/** The harness catalog, with every profile of `harness` lacking `resume-session`. */
+const withoutResume = (harness: string) =>
+  HarnessCatalog.make({
+    descriptors: catalog.descriptors.map((descriptor) =>
+      descriptor.id === harness
+        ? HarnessDescriptor.make({
+            ...descriptor,
+            capabilities: Arr.map(descriptor.capabilities, (profile) =>
+              CapabilityProfile.make({
+                ...profile,
+                supported: profile.supported.filter((supported) => supported !== "resume-session"),
+                lacking: [
+                  ...profile.lacking,
+                  Lacking.make({ capability: "resume-session", reason: NO_RESUME }),
+                ],
+              }),
+            ),
+          })
+        : descriptor,
+    ),
+  });
 
 describe("configuration domain without layers", () => {
   it.effect("refuses a Pi coding agent on an SSH worker before storing configuration", () =>
@@ -232,6 +265,26 @@ describe("configuration domain without layers", () => {
         "lacks usine-tools (The Codex adapter passes no usine tool set to a session",
       );
       expect(problem.details?.map(({ path }) => path)).toEqual([
+        ["settings", "supervisor", "harness"],
+      ]);
+
+      // Every turn after the first reopens the saved session, so a harness that can't reopen one
+      // is refused even when it serves every other requirement.
+      const unresumable = withoutResume("claude");
+      const [refused] = supervisorAdmissionProblems(
+        UsineConfig.make({
+          ...instance.config,
+          settings: Settings.make({
+            ...instance.config.settings,
+            supervisor: Option.some(brain("claude", "claude-sonnet-5-5")),
+          }),
+        }),
+        unresumable,
+      );
+      assert(refused !== undefined);
+      expect(refused.message).toContain("claude cannot run as supervisor at orchestrator");
+      expect(refused.message).toContain(`lacks resume-session (${NO_RESUME})`);
+      expect(refused.details?.map(({ path }) => path)).toEqual([
         ["settings", "supervisor", "harness"],
       ]);
     }),

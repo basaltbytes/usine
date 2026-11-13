@@ -4,14 +4,19 @@ import {
   type AgentSessionEvent,
   HarnessSession,
   RoleSession,
-  type SessionTokensUpdated,
+  SessionTokensUpdated,
   ToolFinished,
 } from "@usine/core/agent/session";
 import { WorkerName } from "@usine/core/worker";
 import { Array as Arr, type Brand, Effect, Fiber, Option, Result, Schema, Stream } from "effect";
 import type { Tool, Toolkit } from "effect/ai";
 import { ChildHost } from "../../child-host/child-host.ts";
-import { AgentResultError, RestartState, WorkingDirectory } from "../../runtime.ts";
+import {
+  AgentResultError,
+  AgentSessionError,
+  RestartState,
+  WorkingDirectory,
+} from "../../runtime.ts";
 import { CredentialRoute } from "../capability.ts";
 import { type ContinuationPolicy, continuationPolicy } from "../continuation.ts";
 import { SessionSpec, StartPrompt, StartResume } from "../contract.ts";
@@ -44,6 +49,27 @@ export class SupervisorTurn extends Schema.Class<
   seat: SupervisorSeat,
   /** The session that the previous turn saved, or `None` for the conversation's first turn. */
   saved: Schema.Option(HarnessSession),
+  /**
+   * The session's usage that the previous turn returned or failed with, which this turn's usage
+   * continues, or `None` for the conversation's first turn.
+   */
+  usage: Schema.Option(SessionTokensUpdated),
+  message: Schema.NonEmptyString,
+}) {}
+
+/** A supervisor turn that returned no answer, with the usage that the session had spent. */
+export class SupervisorTurnError extends Schema.TaggedError<
+  SupervisorTurnError,
+  Brand.Brand<"@usine/agents/harness/supervisor/SupervisorTurnError">
+>("@usine/agents/SupervisorTurnError")("SupervisorTurnError", {
+  sessionId: AgentSessionId,
+  reason: AgentSessionError,
+  /**
+   * The session's cumulative usage when the turn failed: the turn's last report, or the turn's
+   * starting usage when it reported none.
+   */
+  usage: Schema.Option(SessionTokensUpdated),
+  /** The message of `reason`. */
   message: Schema.NonEmptyString,
 }) {}
 
@@ -53,8 +79,9 @@ export interface SupervisorReply {
   /** The saved session that the conversation's next turn reopens. */
   readonly saved: HarnessSession;
   /**
-   * The session's cumulative tokens and cost, reported as for any session, with the brain that
-   * ran and the billing pool that paid; `None` when the harness reported no usage.
+   * The session's cumulative tokens and cost across the conversation's turns, reported as for any
+   * session, with the brain that ran and the billing pool that paid; `None` when no turn reported
+   * usage.
    */
   readonly usage: Option.Option<SessionTokensUpdated>;
   /** The turn's session events, in order. */
@@ -89,17 +116,32 @@ const nextTurnPolicy = (
   }),
 });
 
+/** The last usage report among `events`. */
+const lastUsage = (events: ReadonlyArray<AgentSessionEvent>) =>
+  Arr.findLast(
+    events,
+    (event): event is SessionTokensUpdated => event._tag === "SessionTokensUpdated",
+  );
+
 /**
  * Runs one turn of a supervisor conversation through `Harnesses`: admits the brain as the
  * supervisor, opens a session that serves `tools` with the handlers of the calling context, or
  * reopens the saved session and sends the message, and returns the answer once the turn ends.
- * The session closes when the turn ends.
+ * The turn's usage continues `turn.usage`. The session closes when the turn ends.
  */
 export const runSupervisorTurn = Effect.fn("Supervisor.turn")(function* <
   Tools extends Record<string, Tool.Any>,
 >(turn: SupervisorTurn, tools: Toolkit.Toolkit<Tools>) {
   const { brain, seat } = turn;
   const resume = Option.isSome(turn.saved);
+  const events: Array<AgentSessionEvent> = [];
+  const failed = (reason: AgentSessionError) =>
+    SupervisorTurnError.make({
+      sessionId: turn.session,
+      reason,
+      usage: Option.orElse(lastUsage(events), () => turn.usage),
+      message: reason.message,
+    });
   yield* Effect.annotateCurrentSpan({
     sessionId: turn.session,
     harness: brain.harness,
@@ -114,10 +156,12 @@ export const runSupervisorTurn = Effect.fn("Supervisor.turn")(function* <
       harness: brain.harness,
       missing: admitted.failure.missing,
     });
-    return yield* AgentResultError.make({
-      sessionId: Option.some(turn.session),
-      message: admitted.failure.message,
-    });
+    return yield* failed(
+      AgentResultError.make({
+        sessionId: Option.some(turn.session),
+        message: admitted.failure.message,
+      }),
+    );
   }
   const spec = SessionSpec.make({
     session: RoleSession.make({
@@ -134,8 +178,15 @@ export const runSupervisorTurn = Effect.fn("Supervisor.turn")(function* <
     environment: seat.environment,
   });
   const runtime = yield* harnesses.runtime(brain.harness);
-  const base = yield* continuationPolicy(spec, turn.message, RestartState.make({}));
-  const reply = yield* Effect.gen(function* () {
+  const restart = RestartState.make({
+    usage: Option.map(turn.usage, ({ totalTokens, costUsd, processUsage }) => ({
+      totalTokens,
+      costUsd,
+      processUsage,
+    })),
+  });
+  const base = yield* continuationPolicy(spec, turn.message, restart);
+  const message = yield* Effect.gen(function* () {
     const native = yield* Option.match(turn.saved, {
       onNone: () => runtime.open(spec, StartPrompt.make({ text: turn.message }), base, tools),
       onSome: (reference) =>
@@ -146,38 +197,44 @@ export const runSupervisorTurn = Effect.fn("Supervisor.turn")(function* <
           tools,
         ),
     });
-    const collected = yield* Effect.forkScoped(Stream.runCollect(native.running.events));
+    const collected = yield* Effect.forkScoped(
+      Stream.runForEach(native.running.events, (event) => Effect.sync(() => events.push(event))),
+    );
     if (resume) {
-      if (native.active)
+      if (native.active) {
+        const harnessSessionId = Option.map(turn.saved, ({ id }) => id).pipe(Option.getOrUndefined);
+        yield* Effect.logWarning("Supervisor turn refused: the saved session is still running", {
+          sessionId: turn.session,
+          harnessSessionId,
+        });
         return yield* AgentResultError.make({
           sessionId: Option.some(turn.session),
           message: "The supervisor's saved session is still running a turn",
         });
+      }
       yield* native.recover([]);
     }
-    const result = yield* native.running.result;
-    const events = [...(yield* Fiber.join(collected))];
-    return { message: result.message, events };
-  }).pipe(Effect.scoped);
+    // A failed session ends its events after the last report, so the failure keeps its usage.
+    const result = yield* native.running.result.pipe(Effect.tapError(() => Fiber.await(collected)));
+    yield* Fiber.join(collected);
+    return result.message;
+  }).pipe(Effect.scoped, Effect.mapError(failed));
   const saved = Option.firstSomeOf(
-    reply.events.map((event) =>
-      event._tag === "SessionStarted" ? event.harnessSession : Option.none(),
-    ),
+    events.map((event) => (event._tag === "SessionStarted" ? event.harnessSession : Option.none())),
   );
   if (Option.isNone(saved)) {
     yield* Effect.logError("Supervisor session saved no conversation", {
       sessionId: turn.session,
       harness: brain.harness,
     });
-    return yield* AgentResultError.make({
-      sessionId: Option.some(turn.session),
-      message: `${brain.harness} saved no conversation for the supervisor's next turn`,
-    });
+    return yield* failed(
+      AgentResultError.make({
+        sessionId: Option.some(turn.session),
+        message: `${brain.harness} saved no conversation for the supervisor's next turn`,
+      }),
+    );
   }
-  const usage = Arr.findLast(
-    reply.events,
-    (event): event is SessionTokensUpdated => event._tag === "SessionTokensUpdated",
-  );
+  const usage = Option.orElse(lastUsage(events), () => turn.usage);
   yield* Effect.logInfo("Supervisor turn finished", {
     sessionId: turn.session,
     harness: brain.harness,
@@ -192,9 +249,9 @@ export const runSupervisorTurn = Effect.fn("Supervisor.turn")(function* <
     }),
   });
   return {
-    message: reply.message,
+    message,
     saved: saved.value,
     usage,
-    events: reply.events,
+    events,
   } satisfies SupervisorReply;
 });

@@ -7,7 +7,7 @@ import { operatorPermissions } from "@usine/orchestrator/operator/http";
 import { Context, Effect, Layer, Option, Redacted, Result, Schema, Stream } from "effect";
 import { HttpRouter } from "effect/http";
 import { authenticatedRoutes } from "../../src/auth/http.ts";
-import { TokenName } from "../../src/auth/model.ts";
+import { OperationId, TokenName } from "../../src/auth/model.ts";
 import { FactoryBackend } from "../../src/backend.ts";
 import { apiRoutes } from "../../src/http.ts";
 import { routedOperatorCall } from "../../src/mcp/http.ts";
@@ -38,11 +38,14 @@ const fixture = Effect.gen(function* () {
     new URLSearchParams(link.hash.slice(1)).get("link") ?? "",
   );
   const session = Redacted.value(browser.secret);
-  const token = Effect.fn(function* (scopes: ReadonlyArray<Grant>) {
+  const token = Effect.fn(function* (
+    scopes: ReadonlyArray<Grant>,
+    operations: Option.Option<ReadonlyArray<OperationId>> = Option.none(),
+  ) {
     const issued = yield* services.authentication.createToken(session, {
       name: TokenName.make("Supervisor"),
       scopes,
-      operations: Option.none(),
+      operations,
       expiresAt: Option.none(),
     });
     return issued.secret;
@@ -104,6 +107,37 @@ describe("the supervisor's operator toolkit", () => {
         Object.keys(operator.toolkit.tools),
         permitted(["public", "read", "operate"]),
       );
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("lists only the operator tools within the token's operation ceiling", () =>
+    Effect.gen(function* () {
+      const { approvals, router, services, token, tools } = yield* fixture;
+      const grants = [grant("read"), grant("operate")];
+      const overviewToken = yield* token(
+        grants,
+        Option.some([OperationId.make("operator.overview")]),
+      );
+      const overview = yield* memberOperatorToolkit(
+        overviewToken,
+        tools,
+        router,
+        services.authentication,
+      );
+      assert.sameMembers(Object.keys(overview.toolkit.tools), ["overview"]);
+      const noneToken = yield* token(grants, Option.some([]));
+      const none = yield* memberOperatorToolkit(noneToken, tools, router, services.authentication);
+      assert.isEmpty(Object.keys(none.toolkit.tools));
+
+      // The ceiling still binds a toolkit that lists every operator tool.
+      const unfiltered = operatorToolkit(
+        tools,
+        routedOperatorCall(router, { authorization: `Bearer ${Redacted.value(overviewToken)}` }),
+      );
+      const refused = yield* call(unfiltered, "approve", { runId: "run-3" });
+      assert.isTrue(refused.isFailure);
+      assert.match(refused.text, /^HTTP 403\n/u);
+      assert.isEmpty(approvals, "the ceiling token approved nothing");
     }).pipe(Effect.scoped),
   );
 

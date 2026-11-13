@@ -40,6 +40,38 @@ describe("Claude query tokens", () => {
     assert.strictEqual(Option.getOrThrow(legacy.read(result(110, 1.1))).totalTokens, 110);
   });
 
+  it("counts once the usage that a replacement process restores from the replaced one", () => {
+    const result = (input: number, cost: number) => ({
+      type: "result",
+      modelUsage: {
+        model: { inputTokens: input, outputTokens: 0, cacheCreationInputTokens: 0, costUSD: cost },
+      },
+    });
+    const assistant = (id: string, input: number) => ({
+      type: "assistant",
+      message: { id, usage: { input_tokens: input, output_tokens: 0 } },
+    });
+    const first = claudeSessionMeter();
+    first.read(result(100, 1));
+    first.restart();
+    const saved = Option.getOrThrow(first.read(result(20, 0.2)));
+
+    // The replacement restored the replaced process's 20 tokens and counts its own 5 on top.
+    const restoring = claudeSessionMeter(saved, false);
+    assert.strictEqual(Option.getOrThrow(restoring.read(assistant("next", 5))).totalTokens, 125);
+    const restored = Option.getOrThrow(restoring.read(result(25, 0.25)));
+    assert.strictEqual(restored.totalTokens, 125);
+    assert.deepStrictEqual(restored.costUsd, Option.some(1.25));
+    assert.strictEqual(Option.getOrThrow(restoring.read(result(30, 0.3))).totalTokens, 130);
+
+    // A replacement that restored nothing reports only its own usage.
+    const fresh = claudeSessionMeter(saved, false);
+    fresh.read(assistant("next", 5));
+    const own = Option.getOrThrow(fresh.read(result(6, 0.06)));
+    assert.strictEqual(own.totalTokens, 126);
+    assert.deepStrictEqual(own.costUsd, Option.some(1.26));
+  });
+
   it("does not count a retained process's replayed assistant messages again", () => {
     const assistant = (id: string, output: number) => ({
       type: "assistant",

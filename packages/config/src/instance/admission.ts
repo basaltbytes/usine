@@ -4,6 +4,7 @@ import {
   admitSupervisor,
   catalog,
   codingAgent,
+  type HarnessCatalog,
 } from "@usine/agents/harness";
 import { Option, Result } from "effect";
 import type { AgentFile } from "../agent.ts";
@@ -58,15 +59,18 @@ export const brainAdmissionProblems = (
   );
 
 /**
- * Returns the refusal of the instance's `supervisor` brain, if it has one. The supervisor runs on
- * the orchestrator with the instance's gateway credential, whose kind is checked when a turn
- * starts, so the check admits the brain on a gateway route of unreported kind.
+ * Returns the refusal of the instance's `supervisor` brain by `harnesses`, if it has one. The
+ * supervisor runs on the orchestrator with the instance's gateway credential, whose kind is checked
+ * when a turn starts, so the check admits the brain on a gateway route of unreported kind.
  */
-export const supervisorAdmissionProblems = (config: UsineConfig): Array<ConfigFileError> =>
+export const supervisorAdmissionProblems = (
+  config: UsineConfig,
+  harnesses: HarnessCatalog = catalog,
+): Array<ConfigFileError> =>
   Option.match(config.settings.supervisor, {
     onNone: () => [],
     onSome: (brain) => {
-      const admitted = admitSupervisor(catalog, brain, "gateway");
+      const admitted = admitSupervisor(harnesses, brain, "gateway");
       if (Result.isSuccess(admitted)) return [];
       const message = `settings.supervisor: ${admitted.failure.message}`;
       return [

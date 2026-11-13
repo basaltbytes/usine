@@ -1,6 +1,10 @@
 import { assert } from "@effect/vitest";
 import { type BrainSpec } from "@usine/core/agent/brain";
-import { AgentSessionId, type HarnessSession } from "@usine/core/agent/session";
+import {
+  AgentSessionId,
+  type HarnessSession,
+  type SessionTokensUpdated,
+} from "@usine/core/agent/session";
 import { type Brand, Effect, Layer, Option, Schema } from "effect";
 import { Tool, Toolkit } from "effect/ai";
 import type { CredentialRoute } from "../../src/harness/capability.ts";
@@ -79,14 +83,18 @@ export const runSupervisorScenario = (provider: ToolProvider, mode: "record" | "
     });
     // The recorded traffic names the session in process and pid file paths.
     const session = AgentSessionId.make("replay-parent:child:1");
-    const turn = (message: string, saved: Option.Option<HarnessSession>) =>
+    const turn = (
+      message: string,
+      saved: Option.Option<HarnessSession>,
+      usage: Option.Option<SessionTokensUpdated>,
+    ) =>
       runSupervisorTurn(
-        SupervisorTurn.make({ session, brain, seat, saved, message }),
+        SupervisorTurn.make({ session, brain, seat, saved, usage, message }),
         operatorTools,
       );
     const replies = yield* Effect.gen(function* () {
-      const first = yield* turn(supervisorMessages[0], Option.none());
-      const second = yield* turn(supervisorMessages[1], Option.some(first.saved));
+      const first = yield* turn(supervisorMessages[0], Option.none(), Option.none());
+      const second = yield* turn(supervisorMessages[1], Option.some(first.saved), first.usage);
       return [first, second] as const;
     }).pipe(
       Effect.provide(Layer.merge(operatorToolHandlers, fixture.harnesses)),
