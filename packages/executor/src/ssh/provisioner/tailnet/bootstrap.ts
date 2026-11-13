@@ -1,4 +1,5 @@
-import { Effect, Option } from "effect";
+import { Effect, Option, Result } from "effect";
+import type { GatewayDomain } from "@usine/core/worker";
 import { HttpClient } from "effect/http";
 import { WorkerCapabilityError } from "../../../executor.ts";
 import type { RemoteCommands } from "../../../remote/commands.ts";
@@ -12,9 +13,22 @@ const restrictsEgress = (address: SshWorkerAddress): boolean =>
   address.machine.provisioner.provider === "boxd" &&
   Option.isSome(address.machine.provisioner.egress);
 
-/** Configures provisioned machines before checkout and removes their ephemeral nodes at cleanup. */
+/**
+ * The tries of the gateway check after a join. A machine that reaches the gateway only through
+ * Tailscale's relays can miss the first request while the relay path comes up.
+ */
+const GATEWAY_TRIES = 3;
+
+/** The limit of one gateway check, in seconds: three tries and two default pauses fit in 45. */
+const GATEWAY_TRY_SECONDS = 13;
+
+/**
+ * Configures provisioned machines before checkout and removes their ephemeral nodes at cleanup.
+ * `pause` runs between two tries of a joined machine's gateway check.
+ */
 export const provisionerTailnetsFor = Effect.fn("SshExecutor.provisionerTailnetsFor")(function* (
   commands: RemoteCommands,
+  pause: Effect.Effect<void>,
 ) {
   const http = yield* HttpClient.HttpClient;
   const clientFor = (address: SshWorkerAddress) =>
@@ -50,6 +64,49 @@ export const provisionerTailnetsFor = Effect.fn("SshExecutor.provisionerTailnets
       Effect.ignore,
     );
   });
+  /** Returns the gateway's response headers, after up to `GATEWAY_TRIES` tries. */
+  const reachGateway = Effect.fn("SshExecutor.reachTailnetGateway")(function* (
+    machine: SshMachine,
+    domain: GatewayDomain,
+  ) {
+    const worker = machine.address.name;
+    const probe = commands.run("prepare", machine.shell, "curl", [
+      "--silent",
+      "--show-error",
+      "--noproxy",
+      "*",
+      "--max-time",
+      String(GATEWAY_TRY_SECONDS),
+      "-o",
+      "/dev/null",
+      "-D",
+      "-",
+      `http://git.${domain}/`,
+    ]);
+    for (let attempt = 1; ; attempt += 1) {
+      const result = yield* Effect.result(probe);
+      if (Result.isSuccess(result)) {
+        if (attempt > 1)
+          yield* Effect.logInfo("The machine reached the gateway over the tailnet after a retry", {
+            worker,
+            attempt,
+          });
+        return result.success;
+      }
+      if (attempt >= GATEWAY_TRIES) {
+        yield* Effect.logWarning(
+          "The machine could not reach the gateway over the tailnet; usine discards the machine",
+          { worker, tries: GATEWAY_TRIES, message: result.failure.message },
+        );
+        return yield* result.failure;
+      }
+      yield* Effect.logWarning(
+        "The machine could not reach the gateway over the tailnet yet; checking again",
+        { worker, attempt, tries: GATEWAY_TRIES, message: result.failure.message },
+      );
+      yield* pause;
+    }
+  });
   const join = Effect.fn("SshExecutor.joinProvisionerTailnet")(function* (machine: SshMachine) {
     const settings = provisionerTailnetOf(machine.address);
     if (Option.isNone(settings) || Option.isNone(machine.gateway)) return;
@@ -82,19 +139,7 @@ export const provisionerTailnetsFor = Effect.fn("SshExecutor.provisionerTailnets
         ),
       );
       yield* configureTailnetGateway(commands, "prepare", machine, settings.value, domain);
-      const response = yield* commands.run("prepare", machine.shell, "curl", [
-        "--silent",
-        "--show-error",
-        "--noproxy",
-        "*",
-        "--max-time",
-        "15",
-        "-o",
-        "/dev/null",
-        "-D",
-        "-",
-        `http://git.${domain}/`,
-      ]);
+      const response = yield* reachGateway(machine, domain);
       if (!/^x-usine-gateway-refusal:\s*missing-caller-token\s*$/imu.test(response))
         return yield* WorkerCapabilityError.make({
           worker,
