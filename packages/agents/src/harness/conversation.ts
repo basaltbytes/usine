@@ -281,35 +281,49 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
     recover: Effect.fn("SessionConversation.recover")(function* (
       policy: ContinuationPolicy,
       tools: ReadonlyArray<InterruptedTool>,
-      send: (message: string, id?: OperatorMessageId) => Effect.Effect<void, AgentSessionError>,
-      empty = false,
+      send: (
+        message: string,
+        id?: OperatorMessageId,
+      ) => Effect.Effect<MessageTaken, AgentSessionError>,
+      empty: boolean = false,
     ) {
       yield* Effect.annotateCurrentSpan({ sessionId: session.id });
       if (yield* channel.isTerminal)
         return yield* Effect.logDebug("Skipping continuation of a terminal child", {
           sessionId: session.id,
         });
-      if ((held || paused) && Option.isNone(idle))
+      // A child without its task gets it under supervision, so it doesn't stop first.
+      if ((held || paused) && Option.isNone(idle) && !empty)
         yield* finish("Session interrupted before its turn returned");
       for (const { id } of queued) unsent.add(id);
+      /** Records the harness's own input: it resumes an idle session and doesn't reply to the operator. */
+      const ownInput = Effect.suspend(() => {
+        const resumed = Option.isSome(idle);
+        const replied = Option.isSome(operatorInput);
+        idle = Option.none();
+        operatorInput = Option.none();
+        return (resumed ? channel.emit(SessionResumed.make({ session })) : Effect.void).pipe(
+          Effect.andThen(
+            replied
+              ? Effect.logInfo(
+                  "The harness sent its own continuation input; the next answer no longer replies to the operator",
+                  { sessionId: session.id },
+                )
+              : Effect.void,
+          ),
+        );
+      });
       yield* policy.recover(
         { held, paused, idle: Option.isSome(idle), empty },
         tools,
-        queued,
+        queued.slice(),
         channel.emit,
         (message, id) =>
           send(message, id).pipe(
-            Effect.andThen(
+            Effect.flatMap((taken) =>
               id === undefined
-                ? Effect.suspend(() => {
-                    if (Option.isNone(operatorInput)) return Effect.void;
-                    operatorInput = Option.none();
-                    return Effect.logInfo(
-                      "The harness sent its own continuation input; the next answer no longer replies to the operator",
-                      { sessionId: session.id },
-                    );
-                  })
-                : sent(id),
+                ? ownInput
+                : sent(id).pipe(Effect.andThen(taken === "read" ? deliver([id]) : Effect.void)),
             ),
           ),
       );

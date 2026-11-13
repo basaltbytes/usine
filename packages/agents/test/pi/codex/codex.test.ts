@@ -596,7 +596,10 @@ describe("Codex child backend", () => {
           const responses = new Map(
             Object.entries({
               ...successfulResponses([{ id: "gpt-5.6-terra", model: "gpt-5.6-terra" }]),
-              "thread/resume": { modelProvider: "openai", thread: { id: saved.id, turns: [] } },
+              "thread/resume": {
+                modelProvider: "openai",
+                thread: { id: saved.id, turns: [{ id: "turn-0", status: "completed", items: [] }] },
+              },
             }),
           );
           const server = Layer.succeed(CodexAppServer)({
@@ -651,7 +654,10 @@ describe("Codex child backend", () => {
         const responses = new Map(
           Object.entries({
             ...successfulResponses([{ id: "gpt-5.6-terra", model: "gpt-5.6-terra" }]),
-            "thread/resume": { modelProvider: "openai", thread: { id: saved.id, turns: [] } },
+            "thread/resume": {
+              modelProvider: "openai",
+              thread: { id: saved.id, turns: [{ id: "turn-0", status: "completed", items: [] }] },
+            },
           }),
         );
         const server = Layer.succeed(CodexAppServer)({
@@ -730,6 +736,64 @@ describe("Codex child backend", () => {
           assert.strictEqual((yield* running.result).message, "Corrected.");
         }).pipe(Effect.provide(codexChildLayer.pipe(Layer.provide(server))));
       }).pipe(Effect.scoped),
+    );
+  }
+
+  for (const supervision of ["held", "paused"] as const) {
+    it.effect(
+      `sends a ${supervision} Codex child with an empty thread its task after a restart`,
+      () =>
+        Effect.gen(function* () {
+          const notifications = yield* Queue.make<CodexNotification, Cause.Done>();
+          const turns: Array<string> = [];
+          const saved = HarnessSession.make({
+            id: HarnessSessionId.make("unprompted-codex"),
+            cwd: request().cwd,
+          });
+          const responses = new Map(
+            Object.entries({
+              ...successfulResponses([{ id: "gpt-5.6-terra", model: "gpt-5.6-terra" }]),
+              "thread/resume": { modelProvider: "openai", thread: { id: saved.id, turns: [] } },
+            }),
+          );
+          const server = Layer.succeed(CodexAppServer)({
+            stop: () => Effect.void,
+            open: () =>
+              Effect.succeed({
+                notifications: Stream.fromQueue(notifications),
+                notify: () => Effect.void,
+                close: Queue.end(notifications).pipe(Effect.asVoid),
+                request: (_operation, method, params) =>
+                  Effect.sync(() => {
+                    if (method === "turn/start") turns.push(jsonKey(params));
+                    return responses.get(method) ?? {};
+                  }),
+              }),
+          });
+          yield* Effect.gen(function* () {
+            const running = yield* (yield* ChildBackend).launch(
+              ChildRequest.make({
+                ...request(),
+                resume: Option.some(saved),
+                held: supervision === "held",
+                paused: supervision === "paused",
+              }),
+            );
+            assert.lengthOf(turns, 1);
+            assert.include(turns[0], request().prompt);
+            assert.notInclude(turns[0], CONTINUATION_MESSAGE);
+            const seen = yield* running.events.pipe(
+              Stream.take(supervision === "paused" ? 3 : 1),
+              Stream.runCollect,
+            );
+            assert.deepStrictEqual(
+              seen.map((event) => event._tag),
+              supervision === "paused"
+                ? ["SessionStarted", "SessionIdle", "SessionResumed"]
+                : ["SessionStarted"],
+            );
+          }).pipe(Effect.provide(codexChildLayer.pipe(Layer.provide(server))));
+        }).pipe(Effect.scoped),
     );
   }
 
@@ -1039,6 +1103,149 @@ describe("Codex child backend", () => {
       }).pipe(Effect.scoped),
     );
   }
+
+  it.effect("doesn't resend a restored message that the finished Codex turn read", () =>
+    Effect.gen(function* () {
+      const notifications = yield* Queue.make<CodexNotification, Cause.Done>();
+      const read = OperatorMessage.make({ message: "Check the diff" });
+      const unread = OperatorMessage.make({ message: "Check the tests" });
+      const inputs: Array<{ method: string; params: Schema.Json }> = [];
+      const deliveries: Array<string> = [];
+      const saved = HarnessSession.make({
+        id: HarnessSessionId.make("thread-1"),
+        cwd: request().cwd,
+      });
+      const userMessage = (id: string, text: string) => ({
+        type: "userMessage",
+        id,
+        content: [{ type: "text", text, text_elements: [] }],
+      });
+      const responses = new Map(
+        Object.entries({
+          ...successfulResponses([{ id: "gpt-5.6-terra", model: "gpt-5.6-terra" }]),
+          "thread/resume": {
+            modelProvider: "openai",
+            thread: {
+              id: saved.id,
+              turns: [
+                {
+                  id: "turn-1",
+                  status: "completed",
+                  items: [
+                    userMessage("task", request().prompt),
+                    userMessage("guidance", read.message),
+                  ],
+                },
+              ],
+            },
+          },
+        }),
+      );
+      const server = Layer.succeed(CodexAppServer)({
+        stop: () => Effect.void,
+        open: () =>
+          Effect.succeed({
+            notifications: Stream.fromQueue(notifications),
+            notify: () => Effect.void,
+            close: Queue.end(notifications).pipe(Effect.asVoid),
+            request: (_operation, method, params) =>
+              Effect.sync(() => {
+                if (method === "turn/start" || method === "turn/steer")
+                  inputs.push({ method, params });
+                return responses.get(method) ?? {};
+              }),
+          }),
+      });
+      yield* Effect.gen(function* () {
+        yield* (yield* ChildBackend).launch(
+          ChildRequest.make({
+            ...request(),
+            resume: Option.some(saved),
+            unread: [
+              { id: read.id, message: read.message },
+              { id: unread.id, message: unread.message },
+            ],
+          }),
+        );
+        assert.deepStrictEqual(deliveries, [`read ${read.id}`]);
+        assert.deepStrictEqual(
+          inputs.map(({ method }) => method),
+          ["turn/start", "turn/steer"],
+        );
+        assert.include(jsonKey(inputs[0]?.params), CONTINUATION_MESSAGE);
+        assert.include(jsonKey(inputs[1]?.params), unread.message);
+      }).pipe(
+        Effect.provide(codexChildLayer.pipe(Layer.provide(server))),
+        Effect.provideService(ChildSessionJournal, {
+          started: () => Effect.void,
+          prompted: Effect.void,
+          continued: () => Effect.void,
+          delivered: (id, state) =>
+            Effect.sync(() => {
+              deliveries.push(`${Option.isSome(state) ? "read" : "unread"} ${id}`);
+            }),
+        }),
+      );
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("starts one Codex turn when guidance arrives while a turn starts", () =>
+    Effect.gen(function* () {
+      const notifications = yield* Queue.make<CodexNotification, Cause.Done>();
+      const starting = yield* Deferred.make<void>();
+      const gate = yield* Deferred.make<void>();
+      const inputs: Array<{ method: string; params: Schema.Json }> = [];
+      let starts = 0;
+      const responses: Readonly<Record<string, Schema.Json>> = successfulResponses([
+        { id: "gpt-5.6-terra", model: "gpt-5.6-terra" },
+      ]);
+      const server = Layer.succeed(CodexAppServer)({
+        stop: () => Effect.void,
+        open: () =>
+          Effect.succeed({
+            notifications: Stream.fromQueue(notifications),
+            notify: () => Effect.void,
+            close: Queue.end(notifications).pipe(Effect.asVoid),
+            request: (_operation, method, params) =>
+              Effect.gen(function* () {
+                if (method === "turn/start" || method === "turn/steer")
+                  inputs.push({ method, params });
+                if (method !== "turn/start") return responses[method] ?? {};
+                starts += 1;
+                const turn = starts;
+                if (turn === 2) {
+                  yield* Deferred.succeed(starting, undefined);
+                  yield* Deferred.await(gate);
+                }
+                return { turn: { id: `turn-${turn}` } };
+              }),
+          }),
+      });
+      yield* Effect.gen(function* () {
+        const running = yield* (yield* ChildBackend).launch(request());
+        yield* running.intervene(Interrupt.make(), noDelivery);
+        yield* running.intervene(Steer.make({ message: "Check the diff" }), noDelivery);
+        yield* Queue.offer(notifications, {
+          method: "turn/completed",
+          params: { turn: { id: "turn-1", status: "interrupted", error: null } },
+        });
+        yield* Deferred.await(starting);
+        const guidance = yield* Effect.forkScoped(
+          running.intervene(OperatorMessage.make({ message: "Check the tests" }), noDelivery),
+        );
+        for (let spin = 0; spin < 100; spin += 1) yield* Effect.yieldNow;
+        yield* Deferred.succeed(gate, undefined);
+        yield* Fiber.join(guidance);
+        assert.deepStrictEqual(
+          inputs.map(({ method }) => method),
+          ["turn/start", "turn/start", "turn/steer"],
+        );
+        assert.include(jsonKey(inputs[1]?.params), "Check the diff");
+        assert.include(jsonKey(inputs[2]?.params), "Check the tests");
+        assert.include(jsonKey(inputs[2]?.params), "turn-2");
+      }).pipe(Effect.provide(codexChildLayer.pipe(Layer.provide(server))));
+    }).pipe(Effect.scoped),
+  );
 
   for (const state of ["working", "queued", "paused", "interrupting", "idle"] as const) {
     it.effect(`preserves unread guidance and ${state} state after app-server recovery`, () =>

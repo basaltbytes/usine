@@ -35,6 +35,7 @@ import {
   AgentCapacityError,
   ChildRequest,
   ChildBackend,
+  ChildSessionJournal,
   ChildSessionLifecycle,
   PoolUnavailableError,
   SessionOperationError,
@@ -916,6 +917,53 @@ describe("Pi child backend", () => {
         assert.strictEqual(error._tag, "SessionInterruptedError");
       }),
     ).pipe(Effect.provide(piChildLayer.pipe(Layer.provide(sdk))));
+  });
+
+  it.effect("reports a restored message that a Pi recovery steer handles as read", () => {
+    const restored = AttemptChannel.OperatorMessage.make({ message: "Run the tests too." });
+    const deliveries: Array<string> = [];
+    const sdk = Layer.succeed(PiSdk)({
+      complete: noCompletion,
+      start: () =>
+        Promise.resolve({
+          _tag: "Started",
+          harnessSession: Option.none(),
+          model: childRequest.session.brain.model,
+          pool: "apiKeys",
+          tools: childTools,
+          session: {
+            messages: [],
+            dispose: () => {},
+            abort: () => Promise.resolve(),
+            subscribe: () => () => {},
+            steer: () => Promise.resolve("handled" as const),
+            prompt: () => new Promise<void>(() => {}),
+          },
+        }),
+    });
+    return Effect.gen(function* () {
+      yield* Effect.scoped(
+        (yield* ChildBackend).launch(
+          ChildRequest.make({
+            ...childRequest,
+            resume: Option.some(HarnessSession.make({ cwd: childRequest.cwd })),
+            unread: [{ id: restored.id, message: restored.message }],
+          }),
+        ),
+      );
+      assert.deepStrictEqual(deliveries, [`read ${restored.id}`]);
+    }).pipe(
+      Effect.provide(piChildLayer.pipe(Layer.provide(sdk))),
+      Effect.provideService(ChildSessionJournal, {
+        started: () => Effect.void,
+        prompted: Effect.void,
+        continued: () => Effect.void,
+        delivered: (id, state) =>
+          Effect.sync(() => {
+            deliveries.push(`${Option.isSome(state) ? "read" : "unread"} ${id}`);
+          }),
+      }),
+    );
   });
 
   it.effect("maps Pi SDK trouble to a session operation failure", () => {

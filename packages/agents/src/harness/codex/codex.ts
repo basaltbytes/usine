@@ -33,7 +33,7 @@ import {
   ToolFinished,
   ToolStarted,
 } from "@usine/core/agent/session";
-import { Array as Arr, Deferred, Effect, Layer, Option, Schema, Stream } from "effect";
+import { Array as Arr, Deferred, Effect, Layer, Option, Schema, Semaphore, Stream } from "effect";
 import {
   AccountUpdated,
   AgentMessageItem,
@@ -107,6 +107,8 @@ export { CodexAppServer, codexAppServerLive, type CodexConnection } from "./app-
 
 const isTurnActivity = Schema.is(TurnActivity);
 
+type RestoredTurn = (typeof ThreadResumeResponse.Type.thread.turns)[number];
+
 const resumeThread = Effect.fn("CodexRuntime.resumeThread")(function* (
   connection: CodexConnection,
   client: CodexClient,
@@ -158,6 +160,7 @@ const resumeThread = Effect.fn("CodexRuntime.resumeThread")(function* (
     activeTurn: Option.fromUndefinedOr(
       restored.thread.turns.find((turn) => isTurnStatus(turn.status, "inProgress")),
     ),
+    lastTurn: Option.fromUndefinedOr(restored.thread.turns.at(-1)),
   };
 });
 
@@ -234,7 +237,8 @@ const makeCodexSessions = Effect.gen(function* () {
             empty: true,
             model: started.model,
             endpoint: Option.some(started.modelProvider),
-            activeTurn: Option.none<(typeof ThreadResumeResponse.Type.thread.turns)[number]>(),
+            activeTurn: Option.none<RestoredTurn>(),
+            lastTurn: Option.none<RestoredTurn>(),
           };
         }),
       onSome: (saved) => resumeThread(connection, client, spec, saved),
@@ -407,10 +411,10 @@ const makeCodexSessions = Effect.gen(function* () {
         ),
       );
     });
-    const steer: (
+    const submit: (
       message: string,
       id?: OperatorMessageId,
-    ) => Effect.Effect<MessageTaken, AgentSessionError> = Effect.fn("CodexRuntime.steer")(
+    ) => Effect.Effect<MessageTaken, AgentSessionError> = Effect.fn("CodexRuntime.submit")(
       function* (message, id) {
         yield* Effect.annotateCurrentSpan({ sessionId: session.id });
         if (interrupting) {
@@ -421,7 +425,7 @@ const makeCodexSessions = Effect.gen(function* () {
           const messages = [...pendingMessages.splice(0), { message, id }];
           for (const input of messages) {
             if (!turnActive) yield* startTurn(input.message, input.id);
-            else yield* steer(input.message, input.id);
+            else yield* submit(input.message, input.id);
           }
           return "queued" as const;
         }
@@ -441,6 +445,10 @@ const makeCodexSessions = Effect.gen(function* () {
         return "queued" as const;
       },
     );
+    // A turn is active only once `turn/start` answers, so a concurrent input waits for that answer.
+    const inputs = yield* Semaphore.make(1);
+    const steer = (message: string, id?: OperatorMessageId) =>
+      inputs.withPermits(1)(submit(message, id));
     const conversation = yield* sessionConversation({
       session,
       channel,
@@ -453,6 +461,48 @@ const makeCodexSessions = Effect.gen(function* () {
       send: (message, _activity, id) => steer(message, id),
       pause: Effect.suspend(() => (toolsInFlight.size === 0 ? interruptTurn() : Effect.void)),
       beforeFinish: Effect.suspend(() => connection.close),
+    });
+
+    /** Acknowledges the input of `inputs` that a user message item of `turn` records, once per item. */
+    const receive = Effect.fn("CodexRuntime.receive")(function* (
+      item: Schema.Json & { readonly type: string },
+      turn: string,
+      inputs: Array<(typeof submitted)[number]>,
+    ) {
+      const message = yield* decodeItem(UserMessageItem, "user message", session.id, item);
+      if (Option.isNone(message) || observedItems.has(message.value.id)) return;
+      observedItems.add(message.value.id);
+      const text = userMessageText(message.value);
+      const index = inputs.findIndex(
+        (input) => (input.turnId === undefined || input.turnId === turn) && input.message === text,
+      );
+      if (index < 0) return;
+      const [input] = inputs.splice(index, 1);
+      if (input?.id !== undefined) yield* conversation.read([input.id]);
+    });
+    /**
+     * Acknowledges the unread messages that the restored thread's last turn records, so recovery
+     * doesn't send them again.
+     */
+    const readRestored = Effect.fn("CodexRuntime.readRestored")(function* (
+      lastTurn: Option.Option<RestoredTurn>,
+    ) {
+      if (Option.isNone(lastTurn)) return;
+      const turn = lastTurn.value;
+      const unread = (yield* conversation.unread).map((message) => ({
+        ...message,
+        turnId: turn.id,
+      }));
+      const count = unread.length;
+      for (const item of turn.items)
+        if (Schema.is(UserMessageKindItem)(item)) yield* receive(item, turn.id, unread);
+      const read = count - unread.length;
+      if (read > 0)
+        yield* Effect.logInfo("The restored Codex thread already read unread operator messages", {
+          sessionId: session.id,
+          turnId: turn.id,
+          read,
+        });
     });
 
     const fail = Effect.fn("CodexRuntime.fail")(function* (error: AgentSessionError) {
@@ -501,12 +551,8 @@ const makeCodexSessions = Effect.gen(function* () {
       submitted.length = 0;
       turnActive = false;
       interrupting = false;
-      yield* conversation.recover(
-        policy,
-        interruptedTools,
-        (message, id) => steer(message, id).pipe(Effect.asVoid),
-        restored.empty,
-      );
+      yield* readRestored(restored.lastTurn);
+      yield* conversation.recover(policy, interruptedTools, steer, restored.empty);
     });
     if (turnActive) {
       yield* Effect.logInfo("Reattached the active Codex turn", {
@@ -559,22 +605,8 @@ const makeCodexSessions = Effect.gen(function* () {
             if (Option.isNone(notification)) return;
             const item = notification.value.item;
             if (notification.value.threadId !== thread.id) return;
-            if (Schema.is(UserMessageKindItem)(item)) {
-              const message = yield* decodeItem(UserMessageItem, "user message", session.id, item);
-              if (Option.isNone(message)) return;
-              const text = userMessageText(message.value);
-              if (observedItems.has(message.value.id)) return;
-              observedItems.add(message.value.id);
-              const index = submitted.findIndex(
-                (input) =>
-                  (input.turnId === undefined || input.turnId === notification.value.turnId) &&
-                  input.message === text,
-              );
-              if (index < 0) return;
-              const [input] = submitted.splice(index, 1);
-              if (input?.id !== undefined) yield* conversation.read([input.id]);
-              return;
-            }
+            if (Schema.is(UserMessageKindItem)(item))
+              return yield* receive(item, notification.value.turnId, submitted);
             if (notification.value.turnId !== turnId) {
               return yield* Effect.logDebug("Skipping a Codex item from another turn", {
                 sessionId: session.id,
@@ -782,7 +814,9 @@ const makeCodexSessions = Effect.gen(function* () {
       running,
       active: turnActive,
       recover: (tools: ReadonlyArray<InterruptedTool>) =>
-        conversation.recover(policy, tools, running.steer, thread.empty),
+        readRestored(thread.lastTurn).pipe(
+          Effect.andThen(conversation.recover(policy, tools, steer, thread.empty)),
+        ),
     };
   });
   const stop = Effect.fn("CodexRuntime.stop")((spec: SessionSpec) =>

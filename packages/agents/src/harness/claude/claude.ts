@@ -38,6 +38,7 @@ import {
   Layer,
   Option,
   Queue,
+  Ref,
   Result,
   Schema,
   Scope,
@@ -176,6 +177,8 @@ interface ClaudeLaunch {
    */
   readonly login: Exclude<LoginCheck, "waiting"> | "undecided";
   readonly retained: boolean;
+  /** Whether the process owner acknowledged a user message of this launch. */
+  readonly prompted: Effect.Effect<boolean>;
   /** Checkpoints a handled message. */
   readonly acknowledge: (message: Schema.Json) => Effect.Effect<void>;
   /** Whether the checkpoint covers every acknowledged message and the output read before it. */
@@ -271,8 +274,10 @@ const makeClaudeSessions = Effect.gen(function* () {
     const journal = yield* ChildSessionJournal.current;
     return yield* Effect.gen(function* () {
       const input = new AsyncInput();
+      const prompted = yield* Ref.make(false);
       const recordPrompt = yield* Effect.cached(
-        journal.prompted.pipe(
+        Ref.set(prompted, true).pipe(
+          Effect.andThen(journal.prompted),
           Effect.tap(() =>
             Effect.logDebug("The Claude process owner acknowledged the first user message", {
               sessionId: spec.session.id,
@@ -358,6 +363,7 @@ const makeClaudeSessions = Effect.gen(function* () {
         output,
         login,
         retained,
+        prompted: Ref.get(prompted),
         acknowledge: (message: Schema.Json) =>
           checkpoint.handled(message).pipe(Effect.flatMap(owner.acknowledge)),
         covered: checkpoint.covered,
@@ -560,6 +566,8 @@ const makeClaudeSessions = Effect.gen(function* () {
         sessionId: session.id,
         harnessSessionId: reference.id,
       });
+    /** Whether the saved conversation holds the task, so recovery sends the continuation instead. */
+    const taskSaved = yield* Ref.make(start._tag === "StartResume" && !unprompted);
     const submitted =
       current.retained && !unprompted ? policy.restored.unread.map(({ id }) => id) : [];
     /**
@@ -592,6 +600,9 @@ const makeClaudeSessions = Effect.gen(function* () {
         toolCalls: calls,
       });
     });
+    // A message sent during a turn is queued until a tool call returns or the turn ends.
+    const queueMessage = (message: string, id?: OperatorMessageId) =>
+      send(message, id).pipe(Effect.as("queued" as const));
     const conversation = yield* sessionConversation({
       session,
       channel,
@@ -601,8 +612,7 @@ const makeClaudeSessions = Effect.gen(function* () {
       idleAnsweredOperator: policy.restored.idleAnsweredOperator,
       unread: policy.restored.unread,
       submitted,
-      // A message sent during a turn is queued until a tool call returns or the turn ends.
-      send: (message, _activity, id) => send(message, id).pipe(Effect.as("queued" as const)),
+      send: (message, _activity, id) => queueMessage(message, id),
       pause: Effect.void,
       beforeFinish: Effect.void,
     });
@@ -896,8 +906,10 @@ const makeClaudeSessions = Effect.gen(function* () {
         harnessSessionId: reference.id,
         exitCode: error.cause.exitCode,
       });
+      const prompted = yield* current.prompted;
       yield* Scope.close(current.scope, Exit.void);
       if ((yield* lifecycle.isStopping) || (yield* channel.isTerminal)) return;
+      const empty = !(yield* Ref.updateAndGet(taskSaved, (saved) => saved || prompted));
       yield* channel.emit(SessionTokensUpdated.make({ session, ...usage.restart() }));
       backgroundTasks = [];
       completedTurn = Option.none();
@@ -923,7 +935,8 @@ const makeClaudeSessions = Effect.gen(function* () {
       yield* conversation.recover(
         policy,
         [...tools].map(([callId, tool]) => ({ callId, tool })),
-        send,
+        queueMessage,
+        empty,
       );
       tools.clear();
       yield* Effect.logInfo("Resumed the Claude child's session", {
@@ -978,7 +991,7 @@ const makeClaudeSessions = Effect.gen(function* () {
       running,
       active: current.retained && !unprompted,
       recover: (tools: ReadonlyArray<InterruptedTool>) =>
-        conversation.recover(policy, tools, steer, unprompted),
+        conversation.recover(policy, tools, queueMessage, unprompted),
     };
   });
   const stop = Effect.fn("ClaudeRuntime.stop")(function* (spec: SessionSpec) {

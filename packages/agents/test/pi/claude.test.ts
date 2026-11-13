@@ -1491,8 +1491,56 @@ describe("Claude child backend", () => {
           }).pipe(Effect.scoped),
       );
 
-  // After a lost remote process, recovery resends the unread steer with its continuation, and the
+  it.effect(
+    "sends the task again to a remote Claude child that lost its process before the task",
+    () =>
+      Effect.gen(function* () {
+        const inputs = yield* Queue.make<ClaudeUserMessage>();
+        const outputs: Array<Queue.Queue<Schema.Json, Cause.Done>> = [];
+        const lost = { type: "test_process_lost" };
+        const context = yield* Effect.context<never>();
+        // The process owner of this SDK never acknowledges an input line.
+        const sdk = Layer.succeed(ClaudeSdk)({
+          open: (input) => {
+            const output = Effect.runSyncWith(context)(Queue.make<Schema.Json, Cause.Done>());
+            outputs.push(output);
+            void (async () => {
+              for await (const message of input) {
+                Queue.offerUnsafe(inputs, message);
+                Queue.offerUnsafe(output, rateLimitEvent);
+              }
+            })();
+            return {
+              ...scripted([]),
+              close: () => Queue.endUnsafe(output),
+              async *[Symbol.asyncIterator]() {
+                for (;;) {
+                  const next = await Effect.runPromiseWith(context)(
+                    Effect.option(Queue.take(output)),
+                  );
+                  if (Option.isNone(next)) return;
+                  if (next.value === lost)
+                    throw ChildProcessLost.make({ exitCode: 255, stderrTail: "" });
+                  yield next.value;
+                }
+              },
+            };
+          },
+        });
+        yield* Effect.gen(function* () {
+          yield* (yield* ChildBackend).launch(request(undefined, undefined, exitingHost(0)));
+          assert.strictEqual((yield* Queue.take(inputs)).message.content, request().prompt);
+          yield* Queue.offer(outputs[0]!, lost);
+          const resent = yield* Queue.take(inputs);
+          assert.lengthOf(outputs, 2);
+          assert.strictEqual(resent.message.content, request().prompt);
+        }).pipe(Effect.scoped, Effect.provide(claudeChild.pipe(Layer.provide(sdk))));
+      }).pipe(Effect.scoped),
+  );
+
+  // After a lost remote process, recovery resends the unread steer after its first input, and the
   // resumed process runs them as a new turn that reads the steer before its tool calls.
+
   for (const tool of [true, false])
     it.effect(
       `${tool ? "doesn't count" : "counts"} a steer resent after a resume when the resumed turn ${tool ? "calls a tool" : "calls no tool"}`,
@@ -1799,6 +1847,23 @@ describe("Claude child backend", () => {
       assert.isTrue(result.answeredOperator);
     }).pipe(Effect.scoped),
   );
+
+  for (const supervision of ["held", "paused"] as const)
+    it.live(`sends its task to a ${supervision} reattached process that never got it`, () =>
+      Effect.gen(function* () {
+        const { inputs, layer } = yield* retainedSdk;
+        yield* Effect.gen(function* () {
+          yield* (yield* ChildBackend).launch(
+            reattach({
+              prompted: false,
+              held: supervision === "held",
+              paused: supervision === "paused",
+            }),
+          );
+          assert.strictEqual((yield* Queue.take(inputs)).message.content, request().prompt);
+        }).pipe(Effect.scoped, Effect.provide(layer));
+      }).pipe(Effect.scoped),
+    );
 
   // A reattached process that never got its task, or that waits idle under a Hold, runs no turn, so
   // the next message starts one and Claude reads it before the turn's tool calls.
