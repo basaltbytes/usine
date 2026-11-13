@@ -5,6 +5,7 @@ import {
   Duration,
   Effect,
   Fiber,
+  FiberSet,
   Layer,
   Option,
   Queue,
@@ -129,6 +130,8 @@ const makeCodexAppServer = Effect.gen(function* () {
       const nextId = yield* Ref.make(1);
       const closing = yield* Ref.make(false);
       const failure = yield* Ref.make(Option.none<SessionOperationError>());
+      // Created before the process starts, so its fibers stop after the shutdown in `close`.
+      const answers = yield* FiberSet.make();
       const handle = yield* startChildProcess(
         request,
         {
@@ -232,6 +235,24 @@ const makeCodexAppServer = Effect.gen(function* () {
             });
           }
           if (decoded.id !== undefined) {
+            const id = decoded.id;
+            const answer = Option.flatMap(Option.fromUndefinedOr(request.serve), (serve) =>
+              serve({ method: decoded.method, params: decoded.params ?? null }),
+            );
+            if (Option.isSome(answer))
+              return yield* FiberSet.run(
+                answers,
+                answer.value.pipe(
+                  Effect.flatMap((result) => write({ id, result }, "stream")),
+                  Effect.catch((cause) =>
+                    Effect.logWarning("Can't answer a Codex app-server request", {
+                      cause,
+                      method: decoded.method,
+                      sessionId: Option.getOrUndefined(request.sessionId),
+                    }),
+                  ),
+                ),
+              );
             yield* Effect.logWarning("Codex app-server requested unsupported client input", {
               method: decoded.method,
               sessionId: Option.getOrUndefined(request.sessionId),
