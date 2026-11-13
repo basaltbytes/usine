@@ -37,7 +37,12 @@ it.live.each(["completion", "restart", "closed"] as const)(
       Effect.gen(function* () {
         const store = yield* RunStore;
         yield* store.recordAndClaim(lifecycleSubmission, runId);
-        const started = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
+        const started = yield* store.beginAttempt(
+          runId,
+          WorkerName.make("local"),
+          "local",
+          Option.none(),
+        );
         assert(started._tag === "AttemptStarted");
         const attempt = started.execution.attempt;
         if (phase === "closed")
@@ -56,6 +61,7 @@ it.live.each(["completion", "restart", "closed"] as const)(
           const decision = yield* store.beginAttempt(
             runId,
             WorkerName.make("local"),
+            "local",
             Option.none(),
           );
           assert.strictEqual(decision._tag, "AttemptRecoveryFailed");
@@ -98,7 +104,12 @@ it.live("keeps an operator cancellation when its salvage push is refused", () =>
     Effect.gen(function* () {
       const store = yield* RunStore;
       yield* store.recordAndClaim(lifecycleSubmission, runId);
-      const started = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
+      const started = yield* store.beginAttempt(
+        runId,
+        WorkerName.make("local"),
+        "local",
+        Option.none(),
+      );
       assert(started._tag === "AttemptStarted");
       yield* store.cancel(runId);
       yield* store.recordSalvage(started.execution.attempt.id, retained);
@@ -123,7 +134,12 @@ for (const stop of [
         Effect.gen(function* () {
           const store = yield* RunStore;
           yield* store.recordAndClaim(lifecycleSubmission, runId);
-          const started = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
+          const started = yield* store.beginAttempt(
+            runId,
+            WorkerName.make("local"),
+            "local",
+            Option.none(),
+          );
           assert(started._tag === "AttemptStarted");
           const attempt = started.execution.attempt;
           if (phase === "before") yield* store.recordSalvage(attempt.id, retained);

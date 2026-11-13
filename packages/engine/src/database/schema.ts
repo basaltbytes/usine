@@ -21,7 +21,7 @@ import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
 import { APPROVAL_CHANNELS, type ApprovalChannel } from "@usine/core/run/approval";
 import { StepName } from "@usine/core/step";
-import { WorkerName } from "@usine/core/worker";
+import { WorkerKind, WorkerName } from "@usine/core/worker";
 import { sql } from "drizzle-orm";
 import {
   blob,
@@ -274,6 +274,8 @@ export const attempts = snakeCase.table(
     runId: text().$type<RunId>().notNull(),
     stepName: text().$type<StepName>().notNull(),
     workerName: text().$type<WorkerName>().notNull(),
+    /** The Worker's kind when the Attempt started; `null` for older Attempts. */
+    workerKind: text().$type<WorkerKind>(),
     attemptNumber: integer({ mode: "number" }).$type<AttemptNumber>().notNull(),
     brainJson: text({ mode: "json" }).$type<unknown>().notNull(),
     task: text().$type<AttemptTask>().notNull(),

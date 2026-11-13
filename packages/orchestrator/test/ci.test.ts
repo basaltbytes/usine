@@ -209,10 +209,11 @@ const scenario = Effect.fn("test.ciScenario")(function* (
     recover: () => Effect.succeed("found" as const),
     intervene: () => Effect.void,
     interrupt: () => Effect.void,
-    occupy: (worker) => Effect.succeed({ worker, release: Effect.void }),
+    occupy: (worker) => Effect.succeed({ worker, kind: "local", release: Effect.void }),
     sweep: Effect.void,
     discard: () => Effect.void,
-    reserve: () => Effect.succeed({ worker: WorkerName.make("local"), release: Effect.void }),
+    reserve: () =>
+      Effect.succeed({ worker: WorkerName.make("local"), kind: "local", release: Effect.void }),
     execute: (execution) =>
       Ref.updateAndGet(tasks, (all) => [...all, execution.task]).pipe(
         Effect.flatMap((all) => (all.length === 1 ? Effect.succeed(result) : fixCompletion)),

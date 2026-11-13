@@ -27,7 +27,12 @@ export const cycleBudgetContract = (adapter: PersistenceAdapter) => {
           });
           const runId = RunId.make("budget-first");
           yield* store.recordAndClaim(first, runId);
-          const started = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
+          const started = yield* store.beginAttempt(
+            runId,
+            WorkerName.make("local"),
+            "local",
+            Option.none(),
+          );
           assert(started._tag === "AttemptStarted");
           yield* store.finishAttempt(
             started.execution.attempt,

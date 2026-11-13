@@ -28,7 +28,7 @@ import type { OperatorActor } from "@usine/core/operator";
 import { RunId, Run } from "@usine/core/run";
 import { RunAgain } from "@usine/core/run/again";
 import { ApprovalSource } from "@usine/core/run/approval";
-import { WorkerName } from "@usine/core/worker";
+import { type WorkerKind, WorkerName } from "@usine/core/worker";
 import * as RunState from "@usine/core/run/state";
 import { type Comment, StepResult } from "@usine/core/step/result";
 import {
@@ -519,9 +519,10 @@ const makeRunStore = Effect.gen(function* () {
   const beginAttempt = Effect.fn("RunStore.beginAttempt")(function* (
     runId: RunId,
     worker: WorkerName,
+    kind: WorkerKind,
     live: Option.Option<AttemptId>,
   ) {
-    yield* Effect.annotateCurrentSpan({ runId, worker });
+    yield* Effect.annotateCurrentSpan({ runId, worker, workerKind: kind });
     return yield* transact((transaction, record) =>
       Effect.gen(function* () {
         const tx = queriesFor(transaction, codec, record);
@@ -589,6 +590,7 @@ const makeRunStore = Effect.gen(function* () {
           runId,
           stepName: current.step.name,
           worker,
+          workerKind: Option.some(kind),
           number: decision.number,
           brain: current.agent.brain,
           task: current.task,
@@ -609,6 +611,7 @@ const makeRunStore = Effect.gen(function* () {
           attemptId,
           number: decision.number,
           worker,
+          workerKind: kind,
           start: decision.start._tag,
           resumesFrom: Option.map(decision.resume, ({ ref }) => ref),
         });
@@ -1239,12 +1242,13 @@ export class RunStore extends Context.Service<
       envelope: AttemptChannel.Envelope,
     ) => Effect.Effect<void, RunStoreError>;
     /**
-     * Starts the Run's next Attempt on `worker`. If `live` is the open Attempt, reattaches it;
-     * otherwise fails any open Attempt first.
+     * Starts the Run's next Attempt on `worker`, of kind `kind`. If `live` is the open Attempt,
+     * reattaches it and keeps its recorded kind; otherwise fails any open Attempt first.
      */
     readonly beginAttempt: (
       runId: RunId,
       worker: WorkerName,
+      kind: WorkerKind,
       live: Option.Option<AttemptId>,
     ) => Effect.Effect<AttemptStarted | AttemptRecoveryFailed | RunClosed, RunStoreError>;
     readonly cancel: (runId: RunId) => Effect.Effect<CancelOutcome, RunStoreError>;

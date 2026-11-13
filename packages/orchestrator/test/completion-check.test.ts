@@ -213,10 +213,10 @@ const reviewingExecutor = (executions: { count: number }) => {
     recover: () => Effect.succeed("found" as const),
     intervene: () => Effect.void,
     interrupt: () => Effect.void,
-    occupy: () => Effect.succeed({ worker, release: Effect.void }),
+    occupy: () => Effect.succeed({ worker, kind: "local", release: Effect.void }),
     sweep: Effect.void,
     discard: () => Effect.void,
-    reserve: () => Effect.succeed({ worker, release: Effect.void }),
+    reserve: () => Effect.succeed({ worker, kind: "local", release: Effect.void }),
     execute: () =>
       Effect.sync(() => {
         executions.count += 1;

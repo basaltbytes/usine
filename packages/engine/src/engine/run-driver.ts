@@ -6,7 +6,6 @@ import * as AttemptChannel from "@usine/core/attempt/channel";
 import { type AttemptFailure, DefectFailure, InfraFailure } from "@usine/core/attempt/failure";
 import type { RunId } from "@usine/core/run";
 import type { StepCompletion } from "@usine/core/step/result";
-import type { WorkerName } from "@usine/core/worker";
 import {
   Cause,
   Context,
@@ -565,9 +564,10 @@ export class RunDriver extends Context.Service<
       const executeAttempt = Effect.fn("RunDriver.attempt")(function* (
         runId: RunId,
         submission: Submission,
-        worker: WorkerName,
+        lease: WorkerLease,
         current: Effect.Effect<Option.Option<OpenAttempt>, RunStoreError>,
       ) {
+        const { worker } = lease;
         yield* Effect.annotateCurrentSpan({ runId, worker });
         const open = yield* current;
         if (Option.isNone(reattaching(open))) {
@@ -596,6 +596,7 @@ export class RunDriver extends Context.Service<
           .beginAttempt(
             runId,
             worker,
+            lease.kind,
             Option.map(reattaching(open), ({ id }) => id),
           )
           .pipe(retryingStore(runId, "begin the attempt"));
@@ -775,7 +776,7 @@ export class RunDriver extends Context.Service<
                 ({ lease }) => releaseSlot(runId, lease),
               ),
             ),
-            ({ lease, open: current }) => executeAttempt(runId, submission, lease.worker, current),
+            ({ lease, open: current }) => executeAttempt(runId, submission, lease, current),
           );
         } while (outcome === "RetryAttempt");
 

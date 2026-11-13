@@ -147,7 +147,7 @@ it.effect.each(["success", "restart", "cancel", "cap", "ordinary"] as const)(
             recover: () => Effect.succeed("found" as const),
             intervene: () => Effect.void,
             interrupt: () => Effect.void,
-            occupy: () => Effect.succeed({ worker, release: Effect.void }),
+            occupy: () => Effect.succeed({ worker, kind: "local", release: Effect.void }),
             sweep: Effect.void,
             discard: () => Effect.void,
             reserve: () =>
@@ -156,6 +156,7 @@ it.effect.each(["success", "restart", "cancel", "cap", "ordinary"] as const)(
                 leased = true;
                 return {
                   worker,
+                  kind: "local",
                   release: Effect.sync(() => {
                     leased = false;
                   }),

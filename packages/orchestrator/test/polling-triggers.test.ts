@@ -216,7 +216,7 @@ const gatedExecutor = Layer.succeed(StepExecutor)({
   recover: () => Effect.succeed("found" as const),
   intervene: () => Effect.void,
   interrupt: () => Effect.void,
-  occupy: (worker) => Effect.succeed({ worker, release: Effect.void }),
+  occupy: (worker) => Effect.succeed({ worker, kind: "local", release: Effect.void }),
   sweep: Effect.void,
   discard: () => Effect.void,
   reserve: () => Effect.die("an approval-gated test run must not reserve a worker"),
@@ -670,10 +670,11 @@ describe("PollingTriggers", () => {
         recover: () => Effect.succeed("found" as const),
         intervene: () => Effect.void,
         interrupt: () => Effect.void,
-        occupy: (worker) => Effect.succeed({ worker, release: Effect.void }),
+        occupy: (worker) => Effect.succeed({ worker, kind: "local", release: Effect.void }),
         sweep: Effect.void,
         discard: () => Effect.void,
-        reserve: () => Effect.succeed({ worker: WorkerName.make("local"), release: Effect.void }),
+        reserve: () =>
+          Effect.succeed({ worker: WorkerName.make("local"), kind: "local", release: Effect.void }),
         execute: () =>
           Effect.gen(function* () {
             executions += 1;
@@ -1893,10 +1894,15 @@ describe("PollingTriggers", () => {
           recover: () => Effect.succeed("found" as const),
           intervene: () => Effect.void,
           interrupt: () => Effect.void,
-          occupy: (worker) => Effect.succeed({ worker, release: Effect.void }),
+          occupy: (worker) => Effect.succeed({ worker, kind: "local", release: Effect.void }),
           sweep: Effect.void,
           discard: () => Effect.void,
-          reserve: () => Effect.succeed({ worker: WorkerName.make("local"), release: Effect.void }),
+          reserve: () =>
+            Effect.succeed({
+              worker: WorkerName.make("local"),
+              kind: "local",
+              release: Effect.void,
+            }),
           execute: (execution) =>
             Effect.sync(() => {
               models.push(execution.agent.brain.model);

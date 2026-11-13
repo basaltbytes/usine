@@ -238,7 +238,12 @@ it.live("checks saved outcome labels before accepting a completion recovered aft
       yield* committedBeforeCrash(directory, (store) =>
         Effect.gen(function* () {
           yield* store.recordAndClaim(requiringLabels, runId);
-          const started = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
+          const started = yield* store.beginAttempt(
+            runId,
+            WorkerName.make("local"),
+            "local",
+            Option.none(),
+          );
           assert.strictEqual(started._tag, "AttemptStarted");
         }),
       );
@@ -339,7 +344,7 @@ it.live("names why the Run would not record a success", () =>
       const store = yield* RunStore;
       const worker = WorkerName.make("local");
       const begin = Effect.fn("test.begin")(function* (runId: RunId) {
-        const started = yield* store.beginAttempt(runId, worker, Option.none());
+        const started = yield* store.beginAttempt(runId, worker, "local", Option.none());
         assert(started._tag === "AttemptStarted");
         return started.execution.attempt;
       });

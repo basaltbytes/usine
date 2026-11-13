@@ -104,11 +104,15 @@ describe("durable run engine", () => {
             recover: () => Effect.succeed("found" as const),
             intervene: () => Effect.void,
             interrupt: () => Effect.void,
-            occupy: (worker) => Effect.succeed({ worker, release: Effect.void }),
+            occupy: (worker) => Effect.succeed({ worker, kind: "local", release: Effect.void }),
             sweep: Effect.void,
             discard: () => Effect.void,
             reserve: () =>
-              Effect.succeed({ worker: WorkerName.make("local"), release: Effect.void }),
+              Effect.succeed({
+                worker: WorkerName.make("local"),
+                kind: "local",
+                release: Effect.void,
+              }),
             execute: (execution) =>
               Effect.gen(function* () {
                 executed.push({
@@ -191,10 +195,15 @@ describe("durable run engine", () => {
           isLive: () => Effect.succeed(false),
           outcome: () => Effect.succeedNone,
           recover: () => Effect.succeed("found" as const),
-          occupy: (worker) => Effect.succeed({ worker, release: Effect.void }),
+          occupy: (worker) => Effect.succeed({ worker, kind: "local", release: Effect.void }),
           sweep: Effect.void,
           discard: () => Effect.void,
-          reserve: () => Effect.succeed({ worker: WorkerName.make("local"), release: Effect.void }),
+          reserve: () =>
+            Effect.succeed({
+              worker: WorkerName.make("local"),
+              kind: "local",
+              release: Effect.void,
+            }),
           execute: () => Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never)),
           interrupt: () => Effect.void,
           intervene: (id) =>
@@ -935,7 +944,11 @@ describe("durable run engine", () => {
                   yield* TxRef.update(leased, (count) => count + 1);
                 }),
               ).pipe(
-                Effect.as({ worker: local, release: TxRef.update(leased, (count) => count - 1) }),
+                Effect.as({
+                  worker: local,
+                  kind: "local",
+                  release: TxRef.update(leased, (count) => count - 1),
+                }),
               ),
             execute: (execution, io) =>
               Effect.gen(function* () {
@@ -1237,7 +1250,7 @@ describe("durable run engine", () => {
           recover: () => Effect.succeed("found" as const),
           intervene: () => Effect.void,
           interrupt: () => Effect.void,
-          occupy: (worker) => Effect.succeed({ worker, release: Effect.void }),
+          occupy: (worker) => Effect.succeed({ worker, kind: "local", release: Effect.void }),
           sweep: Effect.void,
           discard: () => Effect.void,
           reserve: () =>

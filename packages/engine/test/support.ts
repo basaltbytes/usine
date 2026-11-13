@@ -20,7 +20,7 @@ import { layer, localSqliteLayer } from "../src/database/local-sqlite.ts";
 import type { RunEngine } from "../src/engine/engine.ts";
 import { Submission } from "../src/engine/submission.ts";
 import { CompletionCheck } from "../src/completion-check.ts";
-import { StepExecutor } from "../src/step-executor.ts";
+import { StepExecutor, type WorkerLease } from "../src/step-executor.ts";
 import { RunStore } from "../src/store/store.ts";
 import { savedSettings, TriggerCondition, TriggerRecheck } from "../src/trigger-condition.ts";
 
@@ -68,10 +68,11 @@ export const executorLayer = (plans: Ref.Ref<ReadonlyArray<AttemptPlan>>) =>
     recover: () => Effect.succeed("found" as const),
     intervene: () => Effect.void,
     interrupt: () => Effect.void,
-    occupy: (worker) => Effect.succeed({ worker, release: Effect.void }),
+    occupy: (worker) => Effect.succeed({ worker, kind: "local", release: Effect.void }),
     sweep: Effect.void,
     discard: () => Effect.void,
-    reserve: () => Effect.succeed({ worker: WorkerName.make("local"), release: Effect.void }),
+    reserve: () =>
+      Effect.succeed({ worker: WorkerName.make("local"), kind: "local", release: Effect.void }),
     execute: () =>
       Ref.modify(plans, (remaining) => {
         const [next, ...rest] = remaining;
@@ -100,7 +101,11 @@ export const slottedExecutor = Effect.fn("test.slottedExecutor")(function* (
   const unstoppable = yield* Ref.make(false);
   const stops = yield* Ref.make<ReadonlyArray<readonly [AttemptId, StopReason]>>([]);
   const remaining = yield* Ref.make(plans);
-  const lease = () => ({ worker: local, release: TxRef.update(leased, (count) => count - 1) });
+  const lease = (): WorkerLease => ({
+    worker: local,
+    kind: "local",
+    release: TxRef.update(leased, (count) => count - 1),
+  });
   const executor = Layer.succeed(StepExecutor)({
     workers: Effect.succeed([local]),
     isLive: () => Effect.succeed(false),

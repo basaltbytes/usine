@@ -135,6 +135,7 @@ export const checkoutRecoveryFor = Effect.fn("CheckoutRecovery.for")(function* (
         Effect.cached(lease.release).pipe(
           Effect.map((release): Occupied => ({
             worker: lease.worker,
+            kind: lease.kind,
             release,
             checkoutKept: true,
           })),
@@ -267,6 +268,7 @@ export const checkoutRecoveryFor = Effect.fn("CheckoutRecovery.for")(function* (
     );
     return Option.map(occupied, (entry): WorkerLease => ({
       worker: entry.worker,
+      kind: entry.kind,
       release: Ref.get(kept).pipe(
         Effect.flatMap((leases) =>
           leases.get(attemptId) === entry
@@ -316,6 +318,7 @@ export const checkoutRecoveryFor = Effect.fn("CheckoutRecovery.for")(function* (
             true,
             new Map(leases).set(attemptId, {
               worker: lease.worker,
+              kind: lease.kind,
               release,
               checkoutKept: false,
             }),

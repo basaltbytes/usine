@@ -48,7 +48,7 @@ export const runReaderContract = (adapter: PersistenceAdapter) => {
           };
           const begin = (runId: RunId) =>
             store
-              .beginAttempt(runId, WorkerName.make("local"), Option.none())
+              .beginAttempt(runId, WorkerName.make("local"), "local", Option.none())
               .pipe(
                 Effect.flatMap((started) =>
                   started._tag === "AttemptStarted"
@@ -173,6 +173,7 @@ export const runReaderContract = (adapter: PersistenceAdapter) => {
               const started = yield* store.beginAttempt(
                 id,
                 WorkerName.make("local"),
+                "local",
                 Option.none(),
               );
               assert(started._tag === "AttemptStarted");

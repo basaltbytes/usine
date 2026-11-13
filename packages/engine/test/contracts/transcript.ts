@@ -54,7 +54,12 @@ export const transcriptContract = (adapter: PersistenceAdapter) => {
             }),
             runId,
           );
-          const started = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
+          const started = yield* store.beginAttempt(
+            runId,
+            WorkerName.make("local"),
+            "local",
+            Option.none(),
+          );
           assert(started._tag === "AttemptStarted");
           const attemptId = started.execution.attempt.id;
           assert.isTrue(Option.isSome(started.execution.attempt.parentModel));
@@ -83,7 +88,12 @@ export const transcriptContract = (adapter: PersistenceAdapter) => {
           const effectiveParentModel = ModelId.make("openai/gpt-5.6-sol");
           const store = yield* RunStore;
           yield* store.recordAndClaim(submission, runId);
-          const started = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
+          const started = yield* store.beginAttempt(
+            runId,
+            WorkerName.make("local"),
+            "local",
+            Option.none(),
+          );
           assert.strictEqual(started._tag, "AttemptStarted");
           if (started._tag !== "AttemptStarted") return;
           const attemptId = started.execution.attempt.id;
@@ -242,6 +252,7 @@ export const transcriptContract = (adapter: PersistenceAdapter) => {
               const started = yield* store.beginAttempt(
                 runId,
                 WorkerName.make("local"),
+                "local",
                 Option.none(),
               );
               assert(started._tag === "AttemptStarted");
@@ -339,7 +350,12 @@ export const transcriptContract = (adapter: PersistenceAdapter) => {
           const reader = yield* RunReader;
           const runId = RunId.make("interleaved-pool-run");
           yield* store.recordAndClaim(lifecycleSubmission, runId);
-          const started = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
+          const started = yield* store.beginAttempt(
+            runId,
+            WorkerName.make("local"),
+            "local",
+            Option.none(),
+          );
           assert(started._tag === "AttemptStarted");
           const attemptId = started.execution.attempt.id;
           const expected = [
@@ -396,6 +412,7 @@ export const transcriptContract = (adapter: PersistenceAdapter) => {
             const started = yield* store.beginAttempt(
               runId,
               WorkerName.make("remote"),
+              "local",
               Option.none(),
             );
             assert(started._tag === "AttemptStarted");
@@ -457,7 +474,12 @@ export const transcriptContract = (adapter: PersistenceAdapter) => {
         yield* Effect.gen(function* () {
           const store = yield* RunStore;
           yield* store.recordAndClaim(lifecycleSubmission, runId);
-          const started = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
+          const started = yield* store.beginAttempt(
+            runId,
+            WorkerName.make("local"),
+            "local",
+            Option.none(),
+          );
           assert(started._tag === "AttemptStarted");
           const attemptId = started.execution.attempt.id;
           const parent = ParentSession.make({
@@ -532,6 +554,7 @@ export const transcriptContract = (adapter: PersistenceAdapter) => {
             const started = yield* store.beginAttempt(
               runId,
               WorkerName.make("local"),
+              "local",
               Option.none(),
             );
             assert(started._tag === "AttemptStarted");
