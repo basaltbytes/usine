@@ -456,6 +456,7 @@ describe("Worker scheduler on a provisioned Worker", () => {
     it.effect("records the check of a machine creation that got one instead of restoring", () => {
       const logs = machineCheckLogs();
       return Effect.gen(function* () {
+        const bus = yield* ChangeBus;
         const fake = yield* fakeMachines();
         const limits = ContainerLimits.make({
           cpus: ContainerCpus.make(3.5),
@@ -477,9 +478,20 @@ describe("Worker scheduler on a provisioned Worker", () => {
         const { lease, waiting } = yield* execute(steps, "run-1");
         yield* assertGatewayFailed(status);
 
+        const gate = yield* Deferred.make<void>();
+        yield* Ref.set(fake.gate, Option.some(gate));
         yield* TestClock.adjust("30 seconds");
         yield* settle;
+        const before = (yield* bus.open).revision;
+        yield* Deferred.succeed(gate, undefined);
+        yield* settle;
         yield* Fiber.join(waiting);
+        const { history } = yield* bus.open;
+        assert.strictEqual(
+          workerNotices(history, before),
+          2,
+          "the creation's success and the recorded check each publish a Worker change",
+        );
         const checked = yield* recordOf(status);
         assert.notDeepEqual(checked, startup);
         const prerequisites = checked?.prerequisites.pipe(Option.getOrUndefined);
@@ -495,6 +507,79 @@ describe("Worker scheduler on a provisioned Worker", () => {
           ["Info", REPLACED],
         ]);
         yield* lease.release;
+      }).pipe(Effect.scoped, Effect.provide(Layer.merge(changeBusLayer, logs.layer)));
+    });
+
+    it.effect("restores once: a later machine creation restores nothing", () => {
+      const logs = machineCheckLogs();
+      return Effect.gen(function* () {
+        const bus = yield* ChangeBus;
+        const fake = yield* fakeMachines();
+        fake.failures.push(gatewayFailure());
+        const context = yield* scheduler(fake.machines);
+        const steps = Context.get(context, StepExecutor);
+        const status = Context.get(context, WorkerStatus);
+        const startup = yield* recordOf(status);
+        const first = yield* execute(steps, "run-1");
+        yield* assertGatewayFailed(status);
+        yield* TestClock.adjust("30 seconds");
+        yield* settle;
+        yield* Fiber.join(first.waiting);
+        yield* first.lease.release;
+        const restored = yield* recordOf(status);
+        assert.deepStrictEqual(restored, startup, "the startup record is back");
+
+        const gate = yield* Deferred.make<void>();
+        yield* Ref.set(fake.gate, Option.some(gate));
+        const second = yield* execute(steps, "run-2");
+        const before = (yield* bus.open).revision;
+        yield* Deferred.succeed(gate, undefined);
+        yield* settle;
+        yield* Fiber.join(second.waiting);
+        const { history } = yield* bus.open;
+        assert.strictEqual(
+          workerNotices(history, before),
+          0,
+          "the later creation has no failure to clear, so it publishes no Worker change",
+        );
+        const kept = yield* recordOf(status);
+        assert.deepStrictEqual(kept, startup, "the later creation leaves the record as it is");
+        assert.deepStrictEqual(
+          logs.entries,
+          [
+            ["Info", FAILED],
+            ["Info", RESTORED],
+          ],
+          "the later creation logs no second restore",
+        );
+        yield* second.lease.release;
+      }).pipe(Effect.scoped, Effect.provide(Layer.merge(changeBusLayer, logs.layer)));
+    });
+
+    it.effect("logs no dropped record when a check or a preflight finds nothing saved", () => {
+      const logs = machineCheckLogs();
+      return Effect.gen(function* () {
+        const fake = yield* fakeMachines();
+        fake.checks.push(
+          MachineCheck.make({
+            brains: [testAgent.brain],
+            containerLimits: Option.none(),
+            findings: ["The SSH user can't read the kernel journal"],
+          }),
+        );
+        const context = yield* scheduler(fake.machines);
+        const steps = Context.get(context, StepExecutor);
+        const status = Context.get(context, WorkerStatus);
+        const { lease, waiting } = yield* execute(steps, "run-1");
+        yield* Fiber.join(waiting);
+        const checked = yield* recordOf(status);
+        assert.deepStrictEqual(checked?.findings, ["The SSH user can't read the kernel journal"]);
+        yield* lease.release;
+
+        yield* TestClock.adjust("10 seconds");
+        const preflight = yield* status.runPreflight(POOL);
+        assert.strictEqual(preflight.prerequisites.pipe(Option.getOrUndefined)?._tag, "Passed");
+        assert.deepStrictEqual(logs.entries, [], "nothing was saved, so nothing is dropped");
       }).pipe(Effect.scoped, Effect.provide(logs.layer));
     });
 

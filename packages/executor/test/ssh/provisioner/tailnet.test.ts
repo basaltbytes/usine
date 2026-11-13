@@ -546,6 +546,24 @@ describe("boxd tailnet gateway check", () => {
     for (const call of gatewayChecks(machine)) assert.include(call.line, "'--max-time' '13'");
   };
 
+  it.live("logs nothing about the gateway when the first check answers", () => {
+    const { machine, boat, logs, layer } = setup(0);
+    return Effect.gen(function* () {
+      const machines = yield* WorkerMachines;
+      const grant = yield* machines.create(
+        WORKER,
+        MACHINE_RUN,
+        AttemptId.make("remote-run/execute/1"),
+        [TEST_AGENT.brain],
+      );
+      assert.lengthOf(gatewayChecks(machine), 1);
+      assertLimits(machine);
+      assert.strictEqual(boat.boxd.machines.size, 1);
+      assert.deepStrictEqual(logs.entries, [], "a first-try success logs no retry");
+      yield* machines.release(grant.hold);
+    }).pipe(Effect.scoped, Effect.provide(layer));
+  });
+
   it.live("keeps the machine when the gateway answers a later check", () => {
     const { machine, boat, api, logs, layer } = setup(2);
     return Effect.gen(function* () {
