@@ -1487,7 +1487,7 @@ describe("engine restart", () => {
   );
 
   it.live(
-    "counts live, unstopped, untracked, and not untracked Attempts in the startup summary",
+    "counts live, crashed, unstopped, untracked, and not untracked Attempts in the startup summary",
     () =>
       withInstance((directory) =>
         Effect.gen(function* () {
@@ -1495,19 +1495,26 @@ describe("engine restart", () => {
             [48, 49, 50],
             (number) => deliverOneAttempt(directory, number),
           )).flatMap(({ attempts }) => attempts.map(({ id }) => id));
-          const [live] = (yield* stopDuringAttempts(directory, [
+          const [live, crashedFound, crashedGone] = (yield* stopDuringAttempts(directory, [
             submission({ number: 51, item: "live" }),
+            submission({ number: 52, item: "crashed-found" }),
+            submission({ number: 53, item: "crashed-gone" }),
           ])).map(({ id }) => id);
           assert(
             notUntracked !== undefined &&
               alreadyUntracked !== undefined &&
               unstopped !== undefined &&
-              live !== undefined,
+              live !== undefined &&
+              crashedFound !== undefined &&
+              crashedGone !== undefined,
           );
           const summaries: Array<string> = [];
+          const stayTracked: Array<string> = [];
           const logger = Logger.make<unknown, void>(({ logLevel, message }) => {
             const line = jsonKey(message);
-            if (logLevel === "Info" && line.includes("finished on a Worker")) summaries.push(line);
+            if (logLevel !== "Info") return;
+            if (line.includes("finished on a Worker")) summaries.push(line);
+            if (line.includes("stays tracked")) stayTracked.push(line);
           });
           const recovered = yield* Ref.make<ReadonlyArray<AttemptId>>([]);
           const executor = StepExecutor.of({
@@ -1516,7 +1523,7 @@ describe("engine restart", () => {
             outcome: () => Effect.succeedNone,
             recover: (attempt) =>
               Ref.update(recovered, (ids) => [...ids, attempt.attemptId]).pipe(
-                Effect.as("gone" as const),
+                Effect.as(attempt.attemptId === crashedFound ? "found" : "gone"),
               ),
             intervene: () => Effect.void,
             interrupt: (attemptId) =>
@@ -1565,21 +1572,33 @@ describe("engine restart", () => {
           }).pipe(Effect.provide(RunStore.layer.pipe(Layer.provide(localSqliteLayer(directory)))));
 
           const recoveredState = yield* Ref.get(recovered);
-          assert.sameMembers([...recoveredState], [notUntracked, alreadyUntracked]);
+          assert.sameMembers(
+            [...recoveredState],
+            [notUntracked, alreadyUntracked, crashedFound, crashedGone],
+          );
           assert.deepStrictEqual(
             returned.map(({ attemptId }) => attemptId),
             [unstopped],
           );
           assert.sameMembers(
             tracked.map(({ attemptId }) => attemptId),
-            [notUntracked, unstopped, live],
+            [notUntracked, unstopped, live, crashedFound, crashedGone],
           );
           assert.deepStrictEqual(summaries, [
             jsonKey([
               "Startup checkout reconciliation finished on a Worker",
-              { worker: "local", visited: 4, kept: 2, failed: 0, empty: 1, discarded: 1 },
+              { worker: "local", visited: 6, kept: 3, failed: 0, empty: 2, discarded: 1 },
             ]),
           ]);
+          assert.strictEqual(stayTracked.length, 2);
+          assert.match(
+            stayTracked.find((line) => line.includes(crashedFound)) ?? "",
+            /Reconciled/u,
+          );
+          assert.match(
+            stayTracked.find((line) => line.includes(crashedGone)) ?? "",
+            /left nothing/u,
+          );
         }),
       ),
   );

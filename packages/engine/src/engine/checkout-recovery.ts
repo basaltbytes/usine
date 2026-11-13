@@ -89,12 +89,19 @@ export const checkoutRecoveryFor = Effect.fn("CheckoutRecovery.for")(function* (
       });
       return StartupVisit.Failed();
     }
-    if (recovered.success === "found" || attempt.open) {
-      yield* Effect.logDebug("The Attempt stays tracked for the next startup", {
-        ...fields,
-        leftovers: recovered.success,
-      });
-      return recovered.success === "found" ? StartupVisit.Kept() : StartupVisit.Empty();
+    if (recovered.success === "found") {
+      yield* Effect.logInfo(
+        "Reconciled the Attempt's leftovers on its Worker; it stays tracked for the next startup",
+        fields,
+      );
+      return StartupVisit.Kept();
+    }
+    if (attempt.open) {
+      yield* Effect.logInfo(
+        "The open Attempt left nothing on its Worker; it stays tracked until its Run closes it",
+        fields,
+      );
+      return StartupVisit.Empty();
     }
     const discarded = yield* store.discardClosedAttempt(attempt.attemptId).pipe(Effect.result);
     if (Result.isFailure(discarded)) {

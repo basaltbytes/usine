@@ -308,12 +308,14 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
       released: Effect.fn("SshExecutor.releaseConnection")(function* (
         attemptId: AttemptId,
         machine: SshMachine,
+        gone = false,
       ) {
-        yield* Effect.annotateCurrentSpan({ attemptId, worker: machine.address.name });
+        yield* Effect.annotateCurrentSpan({ attemptId, worker: machine.address.name, gone });
         if (checkoutStates.get(attemptId) !== "removed") return;
         checkoutStates.delete(attemptId);
         if (Option.isSome(machine.provisioned)) return;
-        if (reset.cleanupSucceeded(machine.shell)) return yield* forgetConnection(attemptId);
+        if (gone || reset.cleanupSucceeded(machine.shell))
+          return yield* forgetConnection(attemptId);
         yield* Effect.logInfo("Kept the attempt connection after incomplete resource cleanup", {
           attemptId,
           worker: machine.address.name,

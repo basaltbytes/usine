@@ -507,7 +507,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
       yield* session.stopForRecovery(attempt);
       const located = yield* leftoversOf(attempt);
       if (Option.isNone(located)) {
-        yield* Effect.logDebug("The Attempt's machine is gone; nothing is left to reconcile", {
+        yield* Effect.logInfo("The Attempt's machine is gone; nothing is left to reconcile", {
           attemptId: attempt.attemptId,
           worker: attempt.worker,
         });
@@ -517,7 +517,12 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
       const { machine, checkouts } = located.value;
       const worktree = `${machine.workerDirectory}/attempts/${safeSegment(attempt.attemptId)}`;
       yield* Effect.addFinalizer(
-        () => worker.released?.(attempt.attemptId, machine) ?? Effect.void,
+        (exit) =>
+          worker.released?.(
+            attempt.attemptId,
+            machine,
+            Exit.isSuccess(exit) && exit.value === "gone",
+          ) ?? Effect.void,
       );
       yield* Effect.addFinalizer((exit) => recovered(attempt, Exit.isSuccess(exit)));
       // Checks the cached listing first to avoid an SSH round trip per persisted Attempt.

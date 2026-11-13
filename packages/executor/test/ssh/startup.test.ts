@@ -202,3 +202,44 @@ it.effect("recovers a checkout created after the startup listing in the same exe
     ),
   );
 });
+
+it.effect(
+  "fails the recovery of a listed checkout whose inspection loses the connection, instead of finding it gone",
+  () => {
+    const machine = fakeMachine();
+    machine.state.cacheExists = true;
+    const sink = {
+      salvage: () => Effect.die("no salvage without the checkout"),
+      comments: () => Effect.void,
+      windows: aloneOnItem(),
+    };
+    return Effect.gen(function* () {
+      const executor = yield* Executor;
+      // Lists the machine's checkouts, including the Attempt's.
+      yield* executor.recover(
+        {
+          ...keptCheckoutRecovery(request),
+          attemptId: AttemptId.make("finished/before-the-drop"),
+          succeeded: true,
+          open: false,
+        },
+        sink,
+        Effect.die("no salvage author needed"),
+      );
+      machine.state.reachable = false;
+      const result = yield* executor
+        .recover(
+          { ...keptCheckoutRecovery(request), succeeded: true, open: false },
+          sink,
+          Effect.succeed(COMMIT_AUTHOR),
+        )
+        .pipe(Effect.result);
+      assert.strictEqual(result._tag, "Failure");
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        executorLayer(machine, mintingProvider(), ADDRESS).pipe(Layer.provide(noGateway)),
+      ),
+    );
+  },
+);
