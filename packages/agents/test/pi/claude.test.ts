@@ -1,4 +1,5 @@
 import type { ClaudeUserMessage } from "../../src/harness/claude/sdk.ts";
+import { CONTINUATION_MESSAGE } from "../../src/harness/continuation.ts";
 import { jsonKey } from "@usine/core/json-key";
 // SDK streams and hooks require native Promises, including the test implementations.
 // @effect-diagnostics newPromise:off
@@ -796,6 +797,7 @@ describe("Claude child backend", () => {
               }),
             prompted: Effect.void,
             continued: () => Effect.void,
+            received: () => Effect.void,
             delivered: () => Effect.void,
           }),
         );
@@ -1491,52 +1493,64 @@ describe("Claude child backend", () => {
           }).pipe(Effect.scoped),
       );
 
-  it.effect(
-    "sends the task again to a remote Claude child that lost its process before the task",
-    () =>
-      Effect.gen(function* () {
-        const inputs = yield* Queue.make<ClaudeUserMessage>();
-        const outputs: Array<Queue.Queue<Schema.Json, Cause.Done>> = [];
-        const lost = { type: "test_process_lost" };
-        const context = yield* Effect.context<never>();
-        // The process owner of this SDK never acknowledges an input line.
-        const sdk = Layer.succeed(ClaudeSdk)({
-          open: (input) => {
-            const output = Effect.runSyncWith(context)(Queue.make<Schema.Json, Cause.Done>());
-            outputs.push(output);
-            void (async () => {
-              for await (const message of input) {
-                Queue.offerUnsafe(inputs, message);
-                Queue.offerUnsafe(output, rateLimitEvent);
-              }
-            })();
-            return {
-              ...scripted([]),
-              close: () => Queue.endUnsafe(output),
-              async *[Symbol.asyncIterator]() {
-                for (;;) {
-                  const next = await Effect.runPromiseWith(context)(
-                    Effect.option(Queue.take(output)),
-                  );
-                  if (Option.isNone(next)) return;
-                  if (next.value === lost)
-                    throw ChildProcessLost.make({ exitCode: 255, stderrTail: "" });
-                  yield next.value;
+  for (const resumed of [false, true])
+    it.effect(
+      resumed
+        ? "sends the continuation again to a resumed remote Claude child that lost its new process"
+        : "sends the task again to a remote Claude child that lost its process before the task",
+      () =>
+        Effect.gen(function* () {
+          const inputs = yield* Queue.make<ClaudeUserMessage>();
+          const outputs: Array<Queue.Queue<Schema.Json, Cause.Done>> = [];
+          const lost = { type: "test_process_lost" };
+          const context = yield* Effect.context<never>();
+          // The process owner of this SDK never acknowledges an input line.
+          const sdk = Layer.succeed(ClaudeSdk)({
+            open: (input) => {
+              const output = Effect.runSyncWith(context)(Queue.make<Schema.Json, Cause.Done>());
+              outputs.push(output);
+              void (async () => {
+                for await (const message of input) {
+                  Queue.offerUnsafe(inputs, message);
+                  Queue.offerUnsafe(output, rateLimitEvent);
                 }
-              },
-            };
-          },
-        });
-        yield* Effect.gen(function* () {
-          yield* (yield* ChildBackend).launch(request(undefined, undefined, exitingHost(0)));
-          assert.strictEqual((yield* Queue.take(inputs)).message.content, request().prompt);
-          yield* Queue.offer(outputs[0]!, lost);
-          const resent = yield* Queue.take(inputs);
-          assert.lengthOf(outputs, 2);
-          assert.strictEqual(resent.message.content, request().prompt);
-        }).pipe(Effect.scoped, Effect.provide(claudeChild.pipe(Layer.provide(sdk))));
-      }).pipe(Effect.scoped),
-  );
+              })();
+              return {
+                ...scripted([]),
+                close: () => Queue.endUnsafe(output),
+                async *[Symbol.asyncIterator]() {
+                  for (;;) {
+                    const next = await Effect.runPromiseWith(context)(
+                      Effect.option(Queue.take(output)),
+                    );
+                    if (Option.isNone(next)) return;
+                    if (next.value === lost)
+                      throw ChildProcessLost.make({ exitCode: 255, stderrTail: "" });
+                    yield next.value;
+                  }
+                },
+              };
+            },
+          });
+          // A resumed child's saved conversation holds its task, so it gets the continuation.
+          const first = resumed ? CONTINUATION_MESSAGE : request().prompt;
+          yield* Effect.gen(function* () {
+            yield* (yield* ChildBackend).launch(
+              ChildRequest.make({
+                ...request(undefined, undefined, exitingHost(0)),
+                resume: resumed
+                  ? Option.some(HarnessSession.make({ cwd: request().cwd }))
+                  : Option.none(),
+              }),
+            );
+            assert.strictEqual((yield* Queue.take(inputs)).message.content, first);
+            yield* Queue.offer(outputs[0]!, lost);
+            const resent = yield* Queue.take(inputs);
+            assert.lengthOf(outputs, 2);
+            assert.strictEqual(resent.message.content, first);
+          }).pipe(Effect.scoped, Effect.provide(claudeChild.pipe(Layer.provide(sdk))));
+        }).pipe(Effect.scoped),
+    );
 
   // After a lost remote process, recovery resends the unread steer after its first input, and the
   // resumed process runs them as a new turn that reads the steer before its tool calls.

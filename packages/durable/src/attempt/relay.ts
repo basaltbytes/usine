@@ -375,14 +375,14 @@ export const relayDeliveries = Effect.fn("AttemptRelay.deliveries")(function* (
   for (const input of queued) {
     if ("child" in input) {
       if (attempt === "live" && hub.childInputs.has(input.inputSequence)) {
-        yield* Effect.logDebug("A queued operator input still waits for its child", {
+        yield* Effect.logInfo("A queued operator input still waits for its child", {
           inputSequence: input.inputSequence,
           sessionId: input.child,
         });
         continue;
       }
       if (attempt === "live" && (yield* unfinished).has(input.child)) {
-        yield* Effect.logDebug("A queued operator input waits for its child's replayed call", {
+        yield* Effect.logInfo("A queued operator input waits for its child's replayed call", {
           inputSequence: input.inputSequence,
           sessionId: input.child,
         });

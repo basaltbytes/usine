@@ -803,6 +803,7 @@ it.live.skipIf(process.platform !== "linux")(
           started: (reference) => Ref.update(references, (saved) => [...saved, reference]),
           prompted: Ref.update(prompted, (count) => count + 1),
           continued: () => Effect.void,
+          received: () => Effect.void,
           delivered: () => Effect.void,
         });
         yield* fs.writeFileString(`${fixture.cwd}/hold-control`, "ready");

@@ -104,6 +104,7 @@ describe("shared continuation policy", () => {
         started: () => Effect.void,
         prompted: Effect.void,
         continued: () => Effect.void,
+        received: () => Effect.void,
         delivered: () => Effect.void,
       }),
       Effect.scoped,
@@ -266,6 +267,7 @@ describe("shared continuation policy", () => {
             Effect.sync(() => {
               history.push(timestamps);
             }),
+          received: () => Effect.void,
           delivered: () => Effect.void,
         }),
         Effect.scoped,

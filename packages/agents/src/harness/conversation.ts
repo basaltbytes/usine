@@ -289,7 +289,7 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
     ) {
       yield* Effect.annotateCurrentSpan({ sessionId: session.id });
       if (yield* channel.isTerminal)
-        return yield* Effect.logDebug("Skipping continuation of a terminal child", {
+        return yield* Effect.logInfo("Skipping continuation of a terminal child", {
           sessionId: session.id,
         });
       // A child without its task gets it under supervision, so it doesn't stop first.

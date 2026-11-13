@@ -36,6 +36,7 @@ export interface MemoryDelegation {
   idle: Option.Option<string>;
   idleAnsweredOperator: boolean;
   continuations: Array<number>;
+  receipts: Array<string>;
   inFlight: Array<{ readonly callId: string; readonly tool: string }>;
   prompted: boolean;
 }
@@ -56,6 +57,7 @@ const emptyDelegation = (): MemoryDelegation => ({
   idle: Option.none(),
   idleAnsweredOperator: false,
   continuations: [],
+  receipts: [],
   inFlight: [],
   prompted: true,
 });
@@ -97,6 +99,7 @@ export const memoryJournal = (
     idle: delegation.idle,
     idleAnsweredOperator: delegation.idleAnsweredOperator,
     continuations: [...delegation.continuations],
+    receipts: [...delegation.receipts],
     inFlight: [...delegation.inFlight],
     prompted: delegation.prompted,
   });
@@ -153,6 +156,10 @@ export const memoryJournal = (
       Effect.sync(() => {
         delegation.continuations = [...timestamps];
       }).pipe(guarded("saveContinuations")),
+    saveReceipts: (items) =>
+      Effect.sync(() => {
+        delegation.receipts = [...items];
+      }).pipe(guarded("saveReceipts")),
     saveUsage: (usage) =>
       Effect.sync(() => {
         delegation.saved = Option.map(delegation.saved, (saved) => ({ ...saved, usage }));

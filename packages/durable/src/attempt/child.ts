@@ -10,6 +10,8 @@ type SubagentRecord = {
   /** Absent on older delegations; their idle report didn't answer the operator. */
   idleAnsweredOperator?: boolean;
   continuations?: Array<number>;
+  /** Absent on older delegations, which recorded no native user-message items. */
+  receipts?: Array<string>;
   inFlight?: Array<{ callId: string; tool: string }>;
   /** Absent on older delegations, which saved the conversation only after the prompt. */
   prompted?: boolean;

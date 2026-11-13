@@ -919,9 +919,13 @@ describe("Pi child backend", () => {
     ).pipe(Effect.provide(piChildLayer.pipe(Layer.provide(sdk))));
   });
 
-  it.effect("reports a restored message that a Pi recovery steer handles as read", () => {
-    const restored = AttemptChannel.OperatorMessage.make({ message: "Run the tests too." });
+  it.effect("reports each restored message that a Pi recovery steer handles as read", () => {
+    const restored = [
+      AttemptChannel.OperatorMessage.make({ message: "Run the tests too." }),
+      AttemptChannel.OperatorMessage.make({ message: "Check the lint." }),
+    ];
     const deliveries: Array<string> = [];
+    const steered: Array<string> = [];
     const sdk = Layer.succeed(PiSdk)({
       complete: noCompletion,
       start: () =>
@@ -936,7 +940,10 @@ describe("Pi child backend", () => {
             dispose: () => {},
             abort: () => Promise.resolve(),
             subscribe: () => () => {},
-            steer: () => Promise.resolve("handled" as const),
+            steer: (message: string) => {
+              steered.push(message);
+              return Promise.resolve("handled" as const);
+            },
             prompt: () => new Promise<void>(() => {}),
           },
         }),
@@ -947,17 +954,26 @@ describe("Pi child backend", () => {
           ChildRequest.make({
             ...childRequest,
             resume: Option.some(HarnessSession.make({ cwd: childRequest.cwd })),
-            unread: [{ id: restored.id, message: restored.message }],
+            unread: restored.map(({ id, message }) => ({ id, message })),
           }),
         ),
       );
-      assert.deepStrictEqual(deliveries, [`read ${restored.id}`]);
+      // Reading a message removes it from the queue that recovery sends from.
+      assert.deepStrictEqual(
+        steered.filter((message) => restored.some((input) => input.message === message)),
+        restored.map(({ message }) => message),
+      );
+      assert.deepStrictEqual(
+        deliveries,
+        restored.map(({ id }) => `read ${id}`),
+      );
     }).pipe(
       Effect.provide(piChildLayer.pipe(Layer.provide(sdk))),
       Effect.provideService(ChildSessionJournal, {
         started: () => Effect.void,
         prompted: Effect.void,
         continued: () => Effect.void,
+        received: () => Effect.void,
         delivered: (id, state) =>
           Effect.sync(() => {
             deliveries.push(`${Option.isSome(state) ? "read" : "unread"} ${id}`);

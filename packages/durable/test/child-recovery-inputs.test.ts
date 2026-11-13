@@ -141,12 +141,18 @@ for (const failure of ["harness-mismatch", "native-reopen", "spawn-count"] as co
       );
       yield* Effect.scoped(
         Effect.gen(function* () {
+          const returned = yield* Deferred.make<void>();
+          const context = yield* Effect.context<never>();
           const services = yield* Layer.build(
             runtimeLayer.pipe(
               Layer.provideMerge(
                 harnessLayer({
                   ...fauxParent([
-                    answer("The earlier work is done."),
+                    // Only the pass that the replayed call's tool result starts can return the steer.
+                    () =>
+                      Effect.runPromiseWith(context)(Deferred.await(returned)).then(() =>
+                        answer("The earlier work is done."),
+                      ),
                     (context) => {
                       assert.include(jsonKey(context.messages.at(-1)), "Fix the third finding.");
                       return answer("Handled the returned steer.");
@@ -161,10 +167,20 @@ for (const failure of ["harness-mismatch", "native-reopen", "spawn-count"] as co
               Layer.provideMerge(failedReopen(restored)),
             ),
           );
-          const result = yield* Context.get(services, AttemptRuntime).execute(
-            request,
-            recording.sink,
-          );
+          const result = yield* Context.get(services, AttemptRuntime).execute(request, {
+            ...recording.sink,
+            append: (direction, envelope) =>
+              recording.sink
+                .append(direction, envelope)
+                .pipe(
+                  Effect.andThen(
+                    envelope._tag === "OutboundEnvelope" &&
+                      envelope.payload._tag === "InterventionApplied"
+                      ? Deferred.succeed(returned, undefined).pipe(Effect.asVoid)
+                      : Effect.void,
+                  ),
+                ),
+          });
           assert.strictEqual(result.message, "Handled the returned steer.");
           const receipts = recording
             .outbound()

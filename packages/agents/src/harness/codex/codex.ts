@@ -307,7 +307,13 @@ const makeCodexSessions = Effect.gen(function* () {
         const index = submitted.indexOf(input);
         if (index >= 0) submitted.splice(index, 1);
       });
-    const observedItems = new Set<string>();
+    // The user-message items observed before a restart already acknowledged their input.
+    const observedItems = new Set<string>(policy.restored.receipts);
+    /** The observed user-message items of the last turn, which `journal.received` saves. */
+    let receipts = {
+      turnId: Option.map(thread.lastTurn, (turn) => turn.id),
+      items: [...policy.restored.receipts],
+    };
     const savedMessages = yield* Effect.forEach(
       Option.match(thread.activeTurn, { onNone: () => [], onSome: (turn) => turn.items }),
       (item) =>
@@ -472,6 +478,15 @@ const makeCodexSessions = Effect.gen(function* () {
       const message = yield* decodeItem(UserMessageItem, "user message", session.id, item);
       if (Option.isNone(message) || observedItems.has(message.value.id)) return;
       observedItems.add(message.value.id);
+      receipts = {
+        turnId: Option.some(turn),
+        items: [
+          ...(Option.contains(receipts.turnId, turn) ? receipts.items : []),
+          message.value.id,
+        ],
+      };
+      // Saved before the read, so a restart never matches this item to another unread message.
+      yield* journal.received(receipts.items);
       const text = userMessageText(message.value);
       const index = inputs.findIndex(
         (input) => (input.turnId === undefined || input.turnId === turn) && input.message === text,

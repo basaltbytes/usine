@@ -223,6 +223,7 @@ export const childRestart = (request: ChildRequest): RestartState =>
     Struct.pick(request, [
       "prompted",
       "continuations",
+      "receipts",
       "inFlight",
       "unread",
       "usage",
