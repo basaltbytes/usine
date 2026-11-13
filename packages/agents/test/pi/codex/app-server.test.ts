@@ -821,6 +821,82 @@ describe("Codex app-server transport", () => {
     }),
   );
 
+  it.effect("answers served requests in their own fiber and refuses the others", () =>
+    Effect.gen(function* () {
+      const process = yield* fakeProcess;
+      const release = yield* Deferred.make<void>();
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const server = yield* CodexAppServer;
+          const connection = yield* server.open({
+            cwd: request.cwd,
+            sessionId: Option.some(request.session.id),
+            environment: request.environment,
+            host: request.host,
+            serve: ({ method, params }) =>
+              method === "item/tool/call"
+                ? Option.some(Deferred.await(release).pipe(Effect.as({ answered: params })))
+                : Option.none(),
+          });
+          const notifications = yield* Effect.forkChild(Stream.runHead(connection.notifications));
+          yield* Queue.offer(process.stdout, line({ id: 3, method: "item/tool/call", params: 1 }));
+          yield* Queue.offer(process.stdout, line({ id: 4, method: "item/approval" }));
+          yield* Queue.offer(process.stdout, line({ method: "turn/started", params: {} }));
+          // The pending answer holds back neither the notification nor the refusal.
+          const first = yield* Fiber.join(notifications);
+          assert.deepStrictEqual(first, Option.some({ method: "turn/started", params: {} }));
+          yield* awaitStdinLines(process, 1);
+          yield* Deferred.succeed(release, undefined);
+          yield* awaitStdinLines(process, 2);
+          const written = yield* Effect.forEach(process.stdinLines, (written) =>
+            Schema.decodeEffect(Schema.fromJsonString(Schema.Json))(written).pipe(Effect.orDie),
+          );
+          assert.deepStrictEqual(written, [
+            { id: 4, error: { code: -32601, message: "usine runs Codex headlessly" } },
+            { id: 3, result: { answered: 1 } },
+          ]);
+        }),
+      ).pipe(Effect.provide(codexAppServerLive.pipe(Layer.provideMerge(spawnerFor(process)))));
+    }),
+  );
+
+  it.effect("interrupts a served answer when the connection closes", () =>
+    Effect.gen(function* () {
+      const process = yield* fakeProcess;
+      const started = yield* Deferred.make<void>();
+      const release = yield* Deferred.make<void>();
+      const interrupted = yield* Deferred.make<void>();
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const server = yield* CodexAppServer;
+          yield* server.open({
+            cwd: request.cwd,
+            sessionId: Option.some(request.session.id),
+            environment: request.environment,
+            host: request.host,
+            serve: () =>
+              Option.some(
+                Deferred.succeed(started, undefined).pipe(
+                  Effect.andThen(Deferred.await(release)),
+                  Effect.as({ answered: true }),
+                  Effect.onInterrupt(() => Deferred.succeed(interrupted, undefined)),
+                ),
+              ),
+          });
+          yield* Queue.offer(process.stdout, line({ id: 3, method: "item/tool/call", params: 1 }));
+          yield* Deferred.await(started);
+        }),
+      ).pipe(Effect.provide(codexAppServerLive.pipe(Layer.provideMerge(spawnerFor(process)))));
+      const stopped = yield* Deferred.isDone(interrupted);
+      assert.isTrue(stopped, "closing the connection interrupts the pending answer");
+      yield* Deferred.succeed(release, undefined);
+      yield* Effect.yieldNow;
+      const closed = yield* Deferred.isDone(process.stdinClosed);
+      assert.isTrue(closed);
+      assert.deepStrictEqual(process.stdinLines, [], "nothing answers after the close");
+    }),
+  );
+
   for (const exitCode of [0, 1]) {
     it.effect(`delivers buffered thread replies before reporting process exit ${exitCode}`, () =>
       Effect.gen(function* () {

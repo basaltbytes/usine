@@ -6,6 +6,8 @@
  */
 import type { InitializeParams, ServerNotification } from "@pwrdrvr/codex-app-server-protocol";
 import type {
+  DynamicToolCallParams,
+  DynamicToolCallResponse,
   GetAccountParams,
   GetAccountResponse,
   ModelListParams,
@@ -75,10 +77,20 @@ export type TurnSteerParamsConform = Assert<
 export type TurnInterruptParamsConform = Assert<
   Extends<Mutable<Ours.TurnInterruptParams>, TurnInterruptParams>
 >;
+export type DynamicToolCallResponseConform = Assert<
+  Extends<Mutable<Ours.DynamicToolCallResponse>, DynamicToolCallResponse>
+>;
 export type GetAccountParamsConform = Assert<
   Extends<Mutable<Ours.GetAccountParams>, GetAccountParams>
 >;
 
+// `arguments` decodes as any JSON value, like `ItemNotification.item` below.
+export type DynamicToolCallParamsConform = Assert<
+  Extends<
+    Omit<DynamicToolCallParams, "arguments">,
+    Omit<typeof Ours.DynamicToolCallParams.Encoded, "arguments">
+  >
+>;
 export type AccountResponseConform = Assert<
   Decodes<typeof Ours.AccountResponse, GetAccountResponse>
 >;

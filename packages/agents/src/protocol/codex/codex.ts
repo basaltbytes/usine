@@ -95,7 +95,11 @@ export interface InitializeParams {
     readonly title: string | null;
     readonly version: string;
   };
-  readonly capabilities: null;
+  /** `experimentalApi` admits experimental request fields, such as `thread/start` `dynamicTools`. */
+  readonly capabilities: {
+    readonly experimentalApi: boolean;
+    readonly requestAttestation: boolean;
+  } | null;
 }
 
 export const ModelListParams = Schema.Struct({
@@ -116,6 +120,27 @@ const Sandbox = Schema.optionalKey(
   Schema.NullOr(Schema.Literals(["read-only", "workspace-write", "danger-full-access"])),
 );
 
+/** A tool that the client serves, which Codex calls with `item/tool/call`. */
+const DynamicToolFunction = Schema.Struct({
+  type: Schema.Literal("function"),
+  name: Schema.String,
+  description: Schema.String,
+  /** The JSON Schema of the arguments. */
+  inputSchema: Schema.Json,
+});
+
+/**
+ * Client-served tools under one namespace. Calls of these tools carry the namespace, and their
+ * names can't collide with Codex's own tools.
+ */
+export const DynamicToolNamespace = Schema.Struct({
+  type: Schema.Literal("namespace"),
+  name: Schema.String,
+  description: Schema.String,
+  tools: Schema.Array(DynamicToolFunction),
+});
+export type DynamicToolNamespace = typeof DynamicToolNamespace.Type;
+
 export const ThreadStartParams = Schema.Struct({
   model: Schema.optionalKey(Schema.NullOr(Schema.String)),
   allowProviderModelFallback: Schema.optionalKey(Schema.Boolean),
@@ -124,6 +149,8 @@ export const ThreadStartParams = Schema.Struct({
   sandbox: Sandbox,
   serviceName: Schema.optionalKey(Schema.NullOr(Schema.String)),
   ephemeral: Schema.optionalKey(Schema.NullOr(Schema.Boolean)),
+  /** Experimental: requires `experimentalApi`. A resumed thread restores the tools it started with. */
+  dynamicTools: Schema.optionalKey(Schema.Array(DynamicToolNamespace)),
 });
 export type ThreadStartParams = typeof ThreadStartParams.Type;
 
@@ -169,6 +196,25 @@ export const TurnInterruptParams = Schema.Struct({
   turnId: Schema.String,
 });
 export type TurnInterruptParams = typeof TurnInterruptParams.Type;
+
+/** The `item/tool/call` request, which the app server sends to run a client-served tool. */
+export const DynamicToolCallParams = Schema.Struct({
+  threadId: Schema.String,
+  turnId: Schema.String,
+  callId: Schema.String,
+  namespace: Schema.NullOr(Schema.String),
+  tool: Schema.String,
+  arguments: Schema.Json,
+});
+
+/** The answer to `item/tool/call`; a failed call reaches the model as a tool error. */
+export const DynamicToolCallResponse = Schema.Struct({
+  contentItems: Schema.Array(
+    Schema.Struct({ type: Schema.Literal("inputText"), text: Schema.String }),
+  ),
+  success: Schema.Boolean,
+});
+export type DynamicToolCallResponse = typeof DynamicToolCallResponse.Type;
 
 export const AccountResponse = GetAccountResponse.mapFields(({ requiresOpenaiAuth, account }) => ({
   requiresOpenaiAuth,
@@ -256,6 +302,10 @@ export const ToolItem = Schema.Struct({
   ),
   status: Schema.optionalKey(CommandExecutionThreadItem.fields.status),
   success: Schema.optionalKey(DynamicToolCallThreadItem.fields.success),
+  /** The name of a dynamic or MCP tool. */
+  tool: Schema.optionalKey(DynamicToolCallThreadItem.fields.tool),
+  /** The namespace of a dynamic tool. */
+  namespace: DynamicToolCallThreadItem.fields.namespace,
 });
 export const ThreadResumeResponse = GeneratedThreadResumeResponse.mapFields(
   ({ modelProvider, thread }) => ({

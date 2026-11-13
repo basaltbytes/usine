@@ -18,6 +18,19 @@ export interface CodexClient {
   readonly host: ChildHost;
   /** Reattach the retained process, or confirm its termination before replacement. */
   readonly transport?: "replace" | "resume";
+  /**
+   * Answers a request that the app server sends to the client, or returns `None` for a method it
+   * doesn't serve, which the connection refuses. Each answer runs in its own fiber, so a slow
+   * answer doesn't hold back notifications; closing the connection interrupts it.
+   */
+  readonly serve?: (request: CodexServerRequest) => Option.Option<Effect.Effect<Schema.Json>>;
+}
+
+/** A request that the app server sends to the client, such as `item/tool/call`. */
+export interface CodexServerRequest {
+  readonly method: string;
+  /** The protocol payload, decoded by the handler for the named method. */
+  readonly params: Schema.Json;
 }
 
 /** A server event received without a client request ID. */

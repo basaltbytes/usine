@@ -15,11 +15,11 @@ import {
   packageVersion,
   openBrowser,
   parseCli,
-  refuseTakenPort,
   serverStartError,
   volatileRoot,
   volatileRoots,
 } from "../src/cli.ts";
+import { listenForStartup } from "../src/listener.ts";
 
 const noEnvironment = {
   port: Option.none<string>(),
@@ -396,7 +396,7 @@ describe("usine CLI", () => {
     assert.strictEqual(error.port, port);
   });
 
-  it.live("refuses a port another process listens on before startup and names that process", () =>
+  it.live("refuses a port another process listens on and names that process", () =>
     Effect.gen(function* () {
       const listener = createServer();
       yield* Effect.callback<void>((resume) => {
@@ -407,8 +407,9 @@ describe("usine CLI", () => {
         listener.address(),
       );
 
-      const refused = yield* refuseTakenPort(port).pipe(
+      const refused = yield* listenForStartup(port, "test").pipe(
         Effect.flip,
+        Effect.scoped,
         Effect.provide(NodeServices.layer),
       );
       const matchesRefused = Schema.is(PortInUseError)(refused);
@@ -419,7 +420,7 @@ describe("usine CLI", () => {
         const resolve = () => resume(Effect.void);
         listener.close(resolve);
       });
-      yield* refuseTakenPort(port).pipe(Effect.provide(NodeServices.layer));
+      yield* listenForStartup(port, "test").pipe(Effect.scoped, Effect.provide(NodeServices.layer));
     }),
   );
 

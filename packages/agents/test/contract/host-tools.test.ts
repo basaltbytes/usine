@@ -6,15 +6,16 @@ import { assertProvenCapabilities } from "./capabilities.ts";
 import {
   listedName,
   listedTools,
+  listsOwnTools,
   NOTE,
   runToolScenario,
   toolProviders,
-  toolScenarios,
+  toolScenariosOf,
 } from "./host-tools.ts";
 
 describe("usine tool sets", () => {
   for (const provider of toolProviders)
-    for (const scenario of toolScenarios)
+    for (const scenario of toolScenariosOf(provider))
       it.live(
         `${provider}: ${scenario}`,
         () =>
@@ -53,7 +54,7 @@ describe("usine tool sets", () => {
               if (scenario === "closed-tools")
                 assert.deepStrictEqual(tools, [listedName[provider]], "only the given tools");
               else assert.include(tools, listedName[provider]);
-              if (scenario === "host-tool")
+              if (scenario === "host-tool" && listsOwnTools.has(provider))
                 assert.isAbove(tools.length, 1, "the harness's own tools stay on");
             }
             assertProvenCapabilities(Harness.make(provider), scenario, events);

@@ -11,6 +11,7 @@ import { Tool, Toolkit } from "effect/ai";
 import { admitBrain, AdmissionContext } from "../../src/harness/admission.ts";
 import { catalog } from "../../src/harness/catalog.ts";
 import { claudeRuntime } from "../../src/harness/claude/claude.ts";
+import { codexRuntime } from "../../src/harness/codex/codex.ts";
 import { continuationPolicy } from "../../src/harness/continuation.ts";
 import { SessionSpec, StartPrompt } from "../../src/harness/contract.ts";
 import { HarnessCatalog } from "../../src/harness/harness.ts";
@@ -23,12 +24,19 @@ import { openFixture, openPiFixture } from "../replay/fixture.ts";
 import type { Transcript } from "../replay/transcript.ts";
 
 /** The harnesses whose adapters serve a usine tool set. */
-export const toolProviders = ["claude", "pi"] as const;
+export const toolProviders = ["claude", "pi", "codex"] as const;
 export type ToolProvider = (typeof toolProviders)[number];
 
 /** The scenarios that prove `usine-tools` and `closed-tools`. */
 export const toolScenarios = ["host-tool", "closed-tools"] as const;
 export type ToolScenario = (typeof toolScenarios)[number];
+
+/**
+ * The tool scenarios that `provider`'s adapter passes. Codex lists its own tools in every thread,
+ * so its descriptor lacks `closed-tools`.
+ */
+export const toolScenariosOf = (provider: ToolProvider): ReadonlyArray<ToolScenario> =>
+  provider === "codex" ? ["host-tool"] : toolScenarios;
 
 /** The note that `read_note` returns, which the session's answer repeats. */
 export const NOTE = "REPLAY_NOTE_7431";
@@ -92,10 +100,19 @@ const ClaudeInit = Schema.Struct({
   subtype: Schema.Literal("init"),
   tools: Schema.Array(Schema.String),
 });
+/** A `thread/start` request that registers client-served tools in namespaces. */
+const CodexThreadStart = Schema.Struct({
+  method: Schema.Literal("thread/start"),
+  params: Schema.Struct({
+    dynamicTools: Schema.Array(Schema.Struct({ name: Schema.String, tools: ToolNames })),
+  }),
+});
 
 /**
  * The tool lists that the recorded traffic shows the session offering to the model: the tools
- * that Pi declares in each provider request, or the tools of Claude Code's `init` messages.
+ * that Pi declares in each provider request, the tools of Claude Code's `init` messages, or the
+ * namespaced tools that Codex's `thread/start` registers. Codex's own tools appear only in its
+ * model requests, which the app-server traffic doesn't carry.
  */
 export const listedTools = (
   provider: ToolProvider,
@@ -121,14 +138,29 @@ export const listedTools = (
       Schema.is(ClaudeInit)(entry.payload)
     )
       return [entry.payload.tools];
+    if (
+      provider === "codex" &&
+      entry.type === "expect_outbound" &&
+      entry.port.endsWith("/stdin") &&
+      Schema.is(CodexThreadStart)(entry.payload)
+    )
+      return [
+        entry.payload.params.dynamicTools.flatMap((namespace) =>
+          namespace.tools.map(({ name }) => `${namespace.name}.${name}`),
+        ),
+      ];
     return [];
   });
 
 /** The name under which each harness lists the contract tool. */
-export const listedName = { claude: "mcp__usine__read_note", pi: "read_note" } satisfies Record<
-  ToolProvider,
-  string
->;
+export const listedName = {
+  claude: "mcp__usine__read_note",
+  pi: "read_note",
+  codex: "usine.read_note",
+} satisfies Record<ToolProvider, string>;
+
+/** The harnesses whose recorded tool lists include the harness's own tools. */
+export const listsOwnTools: ReadonlySet<ToolProvider> = new Set(["claude", "pi"]);
 
 /** Registers `runtime` alone, with `provider`'s descriptor, so the registry admits each session. */
 const registered = <R>(
@@ -158,7 +190,10 @@ const toolFixture = (provider: ToolProvider, scenario: ToolScenario, mode: "reco
     assert("harness" in fixture, `${scenario} replays through the runtime layers`);
     return {
       ...fixture,
-      harnesses: registered("claude", claudeRuntime).pipe(Layer.provide(fixture.harness)),
+      harnesses:
+        provider === "claude"
+          ? registered("claude", claudeRuntime).pipe(Layer.provide(fixture.harness))
+          : registered("codex", codexRuntime).pipe(Layer.provide(fixture.harness)),
     };
   });
 
