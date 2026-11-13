@@ -56,6 +56,7 @@ import {
 } from "../attempt/coordinator/rules.ts";
 import { delegate, type DelegationOutcome } from "../attempt/delegation/delegation.ts";
 import type { DelegationHub } from "../attempt/delegation/journal.ts";
+import type { JournalError } from "../attempt/journal-error.ts";
 import { childSessionId } from "../attempt/sessions.ts";
 import { buildAttemptContext } from "./context.ts";
 import { coordinatorCall, journalDelegation } from "./delegation.ts";
@@ -72,7 +73,6 @@ import {
   Failed,
   Finish,
   type Intent,
-  type JournalError,
   Reported,
   type StaleRevision,
   Transition,

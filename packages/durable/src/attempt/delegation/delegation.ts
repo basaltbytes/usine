@@ -36,7 +36,7 @@ import {
   Schema,
   Stream,
 } from "effect";
-import type { JournalError } from "../../coordinator/journal.ts";
+import type { JournalError } from "../journal-error.ts";
 import { childSessionId, parentSessionId } from "../sessions.ts";
 import {
   type DelegationCall,

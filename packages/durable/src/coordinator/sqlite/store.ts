@@ -7,6 +7,7 @@ import { Duration, Effect, Layer, Option, Schema } from "effect";
 import { Migrator, SqlClient } from "effect/sql";
 
 import { StoredRequest } from "../../attempt-runtime.ts";
+import { JournalError } from "../../attempt/journal-error.ts";
 import {
   AttemptJournal,
   ChildProgress,
@@ -19,7 +20,6 @@ import {
   EncodedIntervention,
   EncodedState,
   EventSequence,
-  JournalError,
   JournalRevision,
   LedgerEntry,
   QueuedInput,

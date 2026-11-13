@@ -18,7 +18,7 @@ import {
   type Semaphore,
 } from "effect";
 import type { AttemptRequest } from "../../attempt-runtime.ts";
-import type { JournalError } from "../../coordinator/journal.ts";
+import type { JournalError } from "../journal-error.ts";
 
 /** The saved conversation and worker that belong to one durable delegation. */
 export class SavedChild extends Schema.Class<

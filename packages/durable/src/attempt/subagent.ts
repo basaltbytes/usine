@@ -15,7 +15,7 @@ import { ChildSessionBudget, ChildSessionCount } from "@usine/core/agent/session
 import type { AttemptId } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { Effect, Match, Option, Schema } from "effect";
-import { JournalError } from "../coordinator/journal.ts";
+import { JournalError } from "./journal-error.ts";
 import { durableError } from "../harness.ts";
 import { SubagentDoc } from "./child.ts";
 import { delegate, type DelegationOutcome } from "./delegation/delegation.ts";

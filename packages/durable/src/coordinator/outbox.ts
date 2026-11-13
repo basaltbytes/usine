@@ -4,7 +4,8 @@ import { AgentFailure, type AttemptFailure } from "@usine/core/attempt/failure";
 import { DateTime, Deferred, Effect, Option, type Scope, Semaphore } from "effect";
 
 import { keepNotice } from "../attempt/notices.ts";
-import type { AttemptJournal, CoordinatorSnapshot, JournalError } from "./journal.ts";
+import type { JournalError } from "../attempt/journal-error.ts";
+import type { AttemptJournal, CoordinatorSnapshot } from "./journal.ts";
 
 /** The sink of the `execute` call relaying the Attempt, with the envelopes it hasn't confirmed. */
 interface Channel {

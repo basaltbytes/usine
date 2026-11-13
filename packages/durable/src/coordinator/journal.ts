@@ -6,6 +6,10 @@ import { StepCompletion } from "@usine/core/step/result";
 import { type Brand, Context, type Duration, Effect, Option, Schema } from "effect";
 
 import { AttemptReport, StoredRequest } from "../attempt-runtime.ts";
+import { JournalError } from "../attempt/journal-error.ts";
+
+// Part of the journal's public surface: every operation fails with it.
+export { JournalError };
 
 /** The number of transitions applied to an Attempt's journal, plus one if it was settled. */
 export const JournalRevision = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)).pipe(
@@ -312,22 +316,6 @@ export class CoordinatorSnapshot extends Schema.Class<
   /** The sequence that the next event and its decision take. */
   get nextEvent(): EventSequence {
     return EventSequence.make(this.events.length + 1);
-  }
-}
-
-/** A storage failure, with the operation that failed. */
-export class JournalError extends Schema.TaggedError<
-  JournalError,
-  Brand.Brand<"@usine/durable/coordinator/journal/JournalError">
->("@usine/durable/JournalError")("JournalError", {
-  /** What failed, as a verb phrase such as "save the child's conversation". */
-  operation: Schema.String,
-  attemptId: AttemptId,
-  cause: Schema.Defect(),
-}) {
-  override get message(): string {
-    const cause = this.cause instanceof Error ? this.cause.message : String(this.cause);
-    return `Could not ${this.operation}: ${cause}`;
   }
 }
 
