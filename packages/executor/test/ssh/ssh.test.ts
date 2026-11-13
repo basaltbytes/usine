@@ -2,7 +2,11 @@ import { jsonKey } from "@usine/core/json-key";
 import { assert, describe, it } from "@effect/vitest";
 import { RemoteShell } from "@usine/agents/child-host";
 import { AttemptId } from "@usine/core/attempt";
-import type * as AttemptChannel from "@usine/core/attempt/channel";
+import { AgentName } from "@usine/core/agent";
+import { BrainSpec, Harness, ModelId } from "@usine/core/agent/brain";
+import { AgentSessionId, ChildSession, SessionFinished } from "@usine/core/agent/session";
+import * as AttemptChannel from "@usine/core/attempt/channel";
+import { InfraFailure } from "@usine/core/attempt/failure";
 import { type AttemptSalvage, SalvageRef } from "@usine/core/attempt/salvage";
 import { LoopName } from "@usine/core/loop";
 import { WorkerName } from "@usine/core/worker";
@@ -302,6 +306,80 @@ describe("SSH Worker", () => {
       assert(lines.indexOf(`exec 'rm' '-rf' '${CREDENTIALS}'`) > push);
     }).pipe(Effect.scoped, Effect.provide(runtime(machine, credentials, fails)));
   });
+
+  it.effect.each([
+    { case: "a child answered at the wait limit", limit: Option.some(10), passed: true, kept: 1 },
+    {
+      case: "its transcript can't be read with a wait limit",
+      limit: Option.some(10),
+      passed: false,
+      kept: 1,
+      unreadable: true,
+    },
+    { case: "no child answered at the wait limit", limit: Option.some(10), passed: false, kept: 0 },
+    { case: "no wait limit is configured", limit: Option.none<number>(), passed: true, kept: 0 },
+  ])(
+    "salvages a successful Attempt's checkout only if $case",
+    ({ limit, passed, kept, unreadable }) => {
+      const machine = fakeMachine();
+      const credentials = mintingProvider();
+      return Effect.gen(function* () {
+        const executor = yield* Executor;
+        machine.state.salvage = "dirty";
+        const prepared = yield* executor.prepare(
+          CheckoutRequest.make({ ...request, maxBackgroundWaitMinutes: limit }),
+        );
+        const finished = AttemptChannel.OutboundEnvelope.make({
+          version: AttemptChannel.PROTOCOL_VERSION,
+          attemptId: request.attemptId,
+          sequence: AttemptChannel.Sequence.make(1),
+          sentAt: yield* DateTime.now,
+          payload: AttemptChannel.SessionEvent.make({
+            event: SessionFinished.make({
+              session: ChildSession.make({
+                id: AgentSessionId.make("child"),
+                parentId: AgentSessionId.make("parent"),
+                agent: AgentName.make("developer"),
+                brain: BrainSpec.make({
+                  harness: Harness.make("claude"),
+                  model: ModelId.make("claude-sonnet-4-6"),
+                  effort: "high",
+                }),
+              }),
+              backgroundWaitLimitPassed: passed,
+            }),
+          }),
+        });
+        const recorded: Array<AttemptSalvage> = [];
+        yield* prepared.launch({
+          append: () => Effect.void,
+          comments: () => Effect.void,
+          outOfMemory: () => Effect.void,
+          transcript:
+            unreadable === true
+              ? Effect.fail(
+                  InfraFailure.make({
+                    message: "The transcript store is unavailable",
+                    cause: new Error("unavailable"),
+                  }),
+                )
+              : Effect.succeed([finished]),
+          windows: aloneOnItem(),
+          salvage: (salvage) => Effect.sync(() => void recorded.push(salvage)),
+        });
+        assert.deepStrictEqual(
+          recorded.map(({ _tag }) => _tag),
+          kept === 1 ? ["Pushed"] : [],
+        );
+        const lines = machine.state.calls.map(({ line }) => line);
+        assert.strictEqual(
+          lines.filter((line) => line.includes("'push' '--force'")).length,
+          kept,
+          "only a salvage pushes the checkout's work",
+        );
+      }).pipe(Effect.scoped, Effect.provide(runtime(machine, credentials)));
+    },
+  );
 
   // A salvage command that timed out crashed the release, so the Run failed with a step executor
   // defect instead of the Attempt's failure, and the machine kept the checkout (#602).

@@ -51859,6 +51859,9 @@
                 "$ref": "#/components/schemas/Agent_RoleSessionEncoded"
               }
             ]
+          },
+          "backgroundWaitLimitPassed": {
+            "type": "boolean"
           }
         },
         "required": [

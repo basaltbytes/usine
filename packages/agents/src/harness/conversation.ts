@@ -79,6 +79,8 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
   let held = options.held;
   let paused = options.paused;
   let idle = Option.none<string>();
+  // Whether `idle` is an answer whose wait limit passed.
+  let idleLimitPassed = false;
   /**
    * An answer whose wait limit passed while the operator supervised the session. A Release returns
    * it unless a turn starts first.
@@ -179,7 +181,14 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
     }),
   );
 
-  const finish = Effect.fn("SessionConversation.finish")(function* (message: string) {
+  /**
+   * Returns `message`, or keeps it as the idle report under operator supervision.
+   * `limitPassed` marks an answer whose wait limit passed.
+   */
+  const finish = Effect.fn("SessionConversation.finish")(function* (
+    message: string,
+    limitPassed = false,
+  ) {
     yield* Effect.annotateCurrentSpan({ sessionId: session.id });
     if (yield* channel.isTerminal) return;
     // The answer replies to the operator if no tool call started after the last operator input.
@@ -187,6 +196,7 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
     const answeredOperator = Option.exists(operatorInput, (at) => at === calls);
     if (held || paused) {
       idle = Option.some(message);
+      idleLimitPassed = limitPassed;
       yield* channel.emit(
         SessionIdle.make({ session, message: Option.some(message), answeredOperator }),
       );
@@ -200,7 +210,7 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
     }
     closing = true;
     yield* options.beforeFinish.pipe(Effect.tapError(channel.fail));
-    yield* channel.finish(session, message, answeredOperator);
+    yield* channel.finish(session, message, answeredOperator, limitPassed);
   });
 
   const intervene = Effect.fn("SessionConversation.intervene")(function* (
@@ -219,7 +229,7 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
     let taken: MessageTaken = "read";
     if (action._tag === "Release") {
       held = false;
-      if (Option.isSome(idle) && !paused) yield* finish(idle.value);
+      if (Option.isSome(idle) && !paused) yield* finish(idle.value, idleLimitPassed);
       else if (Option.isSome(overdue) && !paused) {
         const answer = overdue.value;
         overdue = Option.none();
@@ -227,7 +237,7 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
           "The operator released a session whose wait limit passed; returning its answer",
           { sessionId: session.id },
         );
-        yield* finish(answer);
+        yield* finish(answer, true);
       }
     } else if (action._tag === "Interrupt") {
       if (!paused) {
@@ -259,6 +269,7 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
       if (action._tag === "OperatorMessage") held = true;
       paused = false;
       idle = Option.none();
+      idleLimitPassed = false;
       if (Option.isSome(overdue)) {
         overdue = Option.none();
         yield* Effect.logInfo("The operator's input starts a turn; dropping the overdue answer", {
@@ -306,7 +317,7 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
       mutex.withPermits(1)(
         Effect.suspend(() => {
           if (!held && !paused)
-            return announce.pipe(Effect.andThen(finish(message)), Effect.as(true));
+            return announce.pipe(Effect.andThen(finish(message, true)), Effect.as(true));
           overdue = Option.some(message);
           return Effect.succeed(false);
         }),
@@ -343,7 +354,7 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
             "The recovered session reports the answer whose wait limit passed",
             { sessionId: session.id, held, paused },
           );
-          yield* finish(answer);
+          yield* finish(answer, true);
         } else yield* finish("Session interrupted before its turn returned");
       }
       for (const { id } of queued) unsent.add(id);

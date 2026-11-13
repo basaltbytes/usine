@@ -8,6 +8,7 @@ import { assert, describe, it } from "@effect/vitest";
 import { NodeCrypto } from "@effect/platform-node";
 import { BrainSpec, Effort, Harness, ModelId } from "@usine/core/agent/brain";
 import {
+  type AgentSessionEvent,
   AgentSessionId,
   ChildSession,
   HarnessSession,
@@ -2208,6 +2209,26 @@ describe("Claude child backend", () => {
         maxBackgroundWaitMinutes: Option.some(2),
       });
 
+    /** The number of background task snapshots that the child logged. */
+    const snapshots = (lines: ReadonlyArray<string>) =>
+      lines.filter((line) => line.includes("Claude background work changed")).length;
+    /**
+     * Frames that Claude Code sends while the child waits, none of which starts a turn: the end of
+     * its background task, a rate-limit event, and, with session state, another `idle` report. The
+     * last snapshot shows that the child read every frame.
+     */
+    const quietFrames = (sessionState: boolean): ReadonlyArray<Schema.Json> => [
+      { type: "system", subtype: "background_tasks_changed", tasks: [] },
+      rateLimitEvent,
+      ...(sessionState
+        ? [{ type: "system", subtype: "session_state_changed", state: "idle" }]
+        : []),
+      { type: "system", subtype: "background_tasks_changed", tasks: [] },
+    ];
+
+    const isTaskSnapshot = (frame: Schema.Json) =>
+      Predicate.hasProperty(frame, "subtype") && frame.subtype === "background_tasks_changed";
+
     const cancelled = (lines: ReadonlyArray<string>, reason: string) =>
       lines.some(
         (line) =>
@@ -2249,6 +2270,7 @@ describe("Claude child backend", () => {
           yield* Effect.gen(function* () {
             const session = yield* (yield* ChildBackend).launch(request());
             const result = yield* Effect.forkChild(session.result);
+            const events = yield* Effect.forkChild(Stream.runCollect(session.events));
             while (!waiting(logs.lines)) yield* Effect.yieldNow;
             assert.isTrue(
               logs.lines.some((line) => waiting([line]) && line.includes('"limit":"none"')),
@@ -2265,6 +2287,13 @@ describe("Claude child backend", () => {
                 line.includes("Claude child cancelled the wait limit for its background work"),
               ),
               "no limit ran, so none is cancelled",
+            );
+            assert.deepStrictEqual(
+              [...(yield* Fiber.join(events))].flatMap((event) =>
+                event._tag === "SessionFinished" ? [event.backgroundWaitLimitPassed] : [],
+              ),
+              [false],
+              "the follow-up turn's answer did not return at a limit",
             );
           }).pipe(
             Effect.provide(
@@ -2284,21 +2313,42 @@ describe("Claude child backend", () => {
           answered("Review posted"),
           { type: "system", subtype: "session_state_changed", state: "idle" },
         ],
+        quiet: [],
       },
-      { protocol: "legacy", messages: [gate, answered("Review posted")] },
-    ])("returns the answer once the wait limit passes ($protocol)", ({ messages }) =>
+      {
+        protocol: "session-state, with frames that start no turn",
+        messages: [
+          { type: "system", subtype: "session_state_changed", state: "running" },
+          gate,
+          answered("Review posted"),
+          { type: "system", subtype: "session_state_changed", state: "idle" },
+        ],
+        quiet: quietFrames(true),
+      },
+      { protocol: "legacy", messages: [gate, answered("Review posted")], quiet: [] },
+      {
+        protocol: "legacy, with frames that start no turn",
+        messages: [gate, answered("Review posted")],
+        quiet: quietFrames(false),
+      },
+    ])("returns the answer once the wait limit passes ($protocol)", ({ messages, quiet }) =>
       Effect.gen(function* () {
-        const { query, sdk } = yield* openOutput(messages);
+        const { output, query, sdk } = yield* openOutput(messages);
         const logs = logLines(["Info", "Warn"]);
         yield* Effect.gen(function* () {
           const session = yield* (yield* ChildBackend).launch(limited());
           const result = yield* Effect.forkChild(session.result);
+          const events = yield* Effect.forkChild(Stream.runCollect(session.events));
           while (!waiting(logs.lines)) yield* Effect.yieldNow;
           assert.isTrue(
             logs.lines.some((line) => waiting([line]) && line.includes('"limit":"2m"')),
             "the waiting log names the limit",
           );
-          yield* TestClock.adjust("119 seconds");
+          yield* TestClock.adjust("1 minute");
+          const read = snapshots(logs.lines) + quiet.filter(isTaskSnapshot).length;
+          yield* Queue.offerAll(output, quiet);
+          while (snapshots(logs.lines) < read) yield* Effect.yieldNow;
+          yield* TestClock.adjust("59 seconds");
           assert.isUndefined(result.pollUnsafe(), "the child waits until the limit");
           yield* TestClock.adjust("1 second");
           assert.strictEqual((yield* Fiber.join(result)).message, "Review posted");
@@ -2306,8 +2356,23 @@ describe("Claude child backend", () => {
             line.includes("outlasted the wait limit"),
           );
           assert.strictEqual(logs.lineLevels[outlasted], "Warn", "the limit logs a warning");
-          assert.include(logs.lines[outlasted], '"backgroundTaskIds":["ci-watch"]');
+          assert.include(
+            logs.lines[outlasted],
+            quiet.length === 0 ? '"backgroundTaskIds":["ci-watch"]' : '"backgroundTaskIds":[]',
+          );
           assert.include(logs.lines[outlasted], '"limit":"2m"');
+          assert.isFalse(
+            cancelled(logs.lines, "turn started"),
+            "frames that start no turn leave the limit running",
+          );
+          const finished = [...(yield* Fiber.join(events))].filter(
+            (event) => event._tag === "SessionFinished",
+          );
+          assert.deepStrictEqual(
+            finished.map((event) => event.backgroundWaitLimitPassed),
+            [true],
+            "the finish reports that the limit returned the answer",
+          );
           assert.isFalse(query.closed, "the answer alone does not close the Claude process");
         }).pipe(
           Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk), Layer.provideMerge(logs.layer))),
@@ -2445,36 +2510,59 @@ describe("Claude child backend", () => {
           answered("Waiting for CI"),
           { type: "system", subtype: "session_state_changed", state: "idle" },
         ],
+        quiet: quietFrames(true),
       },
-      { protocol: "legacy", messages: [gate, answered("Waiting for CI")] },
-    ])("returns the answer on a Release after the limit passes ($protocol)", ({ messages }) =>
-      Effect.gen(function* () {
-        const { sdk } = yield* openOutput(messages);
-        const logs = infoLines();
-        yield* Effect.gen(function* () {
-          const running = yield* (yield* ChildBackend).launch(
-            ChildRequest.make({ ...limited(), held: true }),
-          );
-          const result = yield* Effect.forkChild(running.result);
-          while (!waiting(logs.lines)) yield* Effect.yieldNow;
-          yield* TestClock.adjust("2 minutes");
-          while (!supervisedLimit(logs.lines)) yield* Effect.yieldNow;
-          yield* TestClock.adjust("5 minutes");
-          assert.isUndefined(result.pollUnsafe(), "the Hold keeps the child open");
-          yield* running.intervene(Release.make(), noDelivery);
-          assert.strictEqual((yield* Fiber.join(result)).message, "Waiting for CI");
-          assert.isTrue(
-            logs.lines.some((line) =>
-              line.includes(
-                "The operator released a session whose wait limit passed; returning its answer",
+      {
+        protocol: "legacy",
+        messages: [gate, answered("Waiting for CI")],
+        quiet: quietFrames(false),
+      },
+    ])(
+      "returns the answer on a Release after the limit passes ($protocol)",
+      ({ messages, quiet }) =>
+        Effect.gen(function* () {
+          const { output, sdk } = yield* openOutput(messages);
+          const logs = infoLines();
+          yield* Effect.gen(function* () {
+            const running = yield* (yield* ChildBackend).launch(
+              ChildRequest.make({ ...limited(), held: true }),
+            );
+            const result = yield* Effect.forkChild(running.result);
+            const events = yield* Effect.forkChild(Stream.runCollect(running.events));
+            while (!waiting(logs.lines)) yield* Effect.yieldNow;
+            yield* TestClock.adjust("2 minutes");
+            while (!supervisedLimit(logs.lines)) yield* Effect.yieldNow;
+            // Frames that start no turn keep the answer for the Release.
+            const read = snapshots(logs.lines) + quiet.filter(isTaskSnapshot).length;
+            yield* Queue.offerAll(output, quiet);
+            while (snapshots(logs.lines) < read) yield* Effect.yieldNow;
+            yield* TestClock.adjust("5 minutes");
+            assert.isUndefined(result.pollUnsafe(), "the Hold keeps the child open");
+            yield* running.intervene(Release.make(), noDelivery);
+            assert.strictEqual((yield* Fiber.join(result)).message, "Waiting for CI");
+            assert.isTrue(
+              logs.lines.some((line) =>
+                line.includes(
+                  "The operator released a session whose wait limit passed; returning its answer",
+                ),
               ),
+            );
+            assert.isFalse(cancelled(logs.lines, "turn started"), "no turn started");
+            const finished = [...(yield* Fiber.join(events))].filter(
+              (event) => event._tag === "SessionFinished",
+            );
+            assert.deepStrictEqual(
+              finished.map((event) => event.backgroundWaitLimitPassed),
+              [true],
+              "the finish reports that the limit returned the answer",
+            );
+          }).pipe(
+            Effect.provide(
+              claudeChild.pipe(Layer.provideMerge(sdk), Layer.provideMerge(logs.layer)),
             ),
+            Effect.scoped,
           );
-        }).pipe(
-          Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk), Layer.provideMerge(logs.layer))),
-          Effect.scoped,
-        );
-      }),
+        }),
     );
 
     it.effect("keeps a child interrupted during the wait open past the limit", () =>
@@ -2703,10 +2791,10 @@ describe("Claude child backend", () => {
           const running = yield* (yield* ChildBackend).launch(
             ChildRequest.make({ ...limited(exitingHost(0)), held: true }),
           );
-          const events: Array<string> = [];
+          const events: Array<AgentSessionEvent> = [];
           yield* Effect.forkScoped(
             running.events.pipe(
-              Stream.runForEach((event) => Effect.sync(() => events.push(event._tag))),
+              Stream.runForEach((event) => Effect.sync(() => events.push(event))),
             ),
           );
           const result = yield* Effect.forkChild(running.result);
@@ -2723,11 +2811,19 @@ describe("Claude child backend", () => {
             ),
           );
           // The recovery reports the kept answer.
-          while (!events.includes("SessionIdle")) yield* Effect.yieldNow;
+          while (!events.some((event) => event._tag === "SessionIdle")) yield* Effect.yieldNow;
           yield* TestClock.adjust("5 minutes");
           assert.isUndefined(result.pollUnsafe(), "the Hold keeps the child open");
           yield* running.intervene(Release.make(), noDelivery);
           assert.strictEqual((yield* Fiber.join(result)).message, "Waiting for CI");
+          while (!events.some((event) => event._tag === "SessionFinished")) yield* Effect.yieldNow;
+          assert.deepStrictEqual(
+            events.flatMap((event) =>
+              event._tag === "SessionFinished" ? [event.backgroundWaitLimitPassed] : [],
+            ),
+            [true],
+            "the finish of the kept answer reports that the limit returned it",
+          );
         }).pipe(
           Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk), Layer.provideMerge(logs.layer))),
           Effect.scoped,

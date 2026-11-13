@@ -160,10 +160,16 @@ export interface ProvisionOptions<E> {
 
 export interface ProvisionedWorktree {
   readonly workspace: AttemptWorkspace;
-  /** Waits for the workspace scope to close and returns the salvage, or `None` after a successful Attempt or a clean worktree. */
+  /**
+   * Waits for the workspace scope to close and returns the salvage, or `None` after a successful
+   * Attempt that no background wait limit ended, or a clean worktree.
+   */
   readonly salvaged: Effect.Effect<Option.Option<AttemptSalvage>, AttemptFailure>;
-  /** Sets the salvage sink; call before launch. If salvage isn't recorded, cleanup keeps the worktree on disk. */
-  readonly recordSalvage: (record: AttemptChannel.Sink["salvage"]) => Effect.Effect<void>;
+  /**
+   * Sets the sink that cleanup records salvage in and reads the transcript from; call before
+   * launch. If salvage isn't recorded, cleanup keeps the worktree on disk.
+   */
+  readonly recordSalvage: (sink: SalvageSink) => Effect.Effect<void>;
   /**
    * Skips checkout removal when the scope closes, so a restart can reattach the parent task or
    * repeat a harvest whose result was not stored.
@@ -180,6 +186,16 @@ export interface ProvisionedWorktree {
    */
   readonly gitHooks: Option.Option<string>;
 }
+
+/** The part of an Attempt's sink that its checkout's cleanup uses. */
+export type SalvageSink = Pick<AttemptChannel.Sink, "salvage" | "transcript">;
+
+/** Whether `envelope` reports a session whose answer returned at its background wait limit. */
+const finishedAtWaitLimit = (envelope: AttemptChannel.Envelope) =>
+  envelope._tag === "OutboundEnvelope" &&
+  envelope.payload._tag === "SessionEvent" &&
+  envelope.payload.event._tag === "SessionFinished" &&
+  envelope.payload.event.backgroundWaitLimitPassed;
 
 interface ReleaseOptions<E> {
   readonly request: CheckoutRequest;
@@ -213,9 +229,10 @@ const cleanupFor =
     );
 
 /**
- * Registers the checkout's finalizer. On a non-success exit, salvages a checked-out worktree
- * before removing it; a worktree with unpreserved work stays on disk. `checkedOut` contains the
- * base commit once a worktree exists.
+ * Registers the checkout's finalizer. On a non-success exit, or a success where a session's answer
+ * returned at its background wait limit, salvages a checked-out worktree before removing it; a
+ * worktree with unpreserved work stays on disk. `checkedOut` contains the base commit once a
+ * worktree exists.
  */
 const registerRelease = Effect.fn("Executor.registerRelease")(function* <E extends Error>(
   options: ReleaseOptions<E>,
@@ -224,9 +241,39 @@ const registerRelease = Effect.fn("Executor.registerRelease")(function* <E exten
   const { layout, ops, request } = options;
   const checkedOut = yield* Ref.make(Option.none<CommitSha>());
   const salvaged = yield* Deferred.make<Option.Option<AttemptSalvage>, AttemptFailure>();
-  const recorder = yield* Ref.make(Option.none<AttemptChannel.Sink["salvage"]>());
+  const recorder = yield* Ref.make(Option.none<SalvageSink>());
   const cleanup = cleanupFor(options);
   const kept = yield* Ref.make(Option.none<KeptFor>());
+  /**
+   * Returns whether the transcript reports a session whose answer returned at its background wait
+   * limit. The child's background work then ended before the Attempt's work was pushed. Returns
+   * `true` if the transcript can't be read, so that cleanup keeps the work.
+   */
+  const waitLimitPassed = Effect.fn("Executor.waitLimitPassed")(function* () {
+    const fields = {
+      attemptId: request.attemptId,
+      worker: request.worker,
+      host: options.host,
+      worktree: layout.worktree,
+    };
+    yield* Effect.annotateCurrentSpan(fields);
+    const sink = yield* Ref.get(recorder);
+    if (Option.isNone(request.maxBackgroundWaitMinutes) || Option.isNone(sink)) return false;
+    const transcript = yield* Effect.result(sink.value.transcript);
+    if (Result.isFailure(transcript)) {
+      yield* Effect.logWarning(
+        "Could not read the transcript of a successful Attempt with a background wait limit; salvaging its checkout",
+        { ...fields, errorTag: transcript.failure._tag },
+      );
+      return true;
+    }
+    if (!transcript.success.some(finishedAtWaitLimit)) return false;
+    yield* Effect.logInfo(
+      "A session's answer returned at its background wait limit; salvaging the checkout of the successful Attempt",
+      fields,
+    );
+    return true;
+  });
   // `kept` is checked even after a successful launch: a failed result write keeps the checkout.
   yield* Effect.addFinalizer(
     Effect.fn("Executor.releaseWorktree")(function* (exit) {
@@ -266,31 +313,32 @@ const registerRelease = Effect.fn("Executor.registerRelease")(function* <E exten
         return;
       }
       const baseCommit = yield* Ref.get(checkedOut);
-      const salvage =
-        Option.isSome(baseCommit) && !Exit.isSuccess(exit)
-          ? request.permissions === "read"
-            ? yield* Effect.logInfo(
-                "The Attempt's Loop has read permissions, so its checkout is removed without salvage",
-                {
-                  attemptId: request.attemptId,
-                  worker: request.worker,
-                  loop: request.loop,
-                  host: options.host,
-                  worktree: layout.worktree,
-                },
-              ).pipe(Effect.as(Option.none<AttemptSalvage>()))
-            : yield* salvageWorktree({
+      const salvages =
+        Option.isSome(baseCommit) && (!Exit.isSuccess(exit) || (yield* waitLimitPassed()));
+      const salvage = salvages
+        ? request.permissions === "read"
+          ? yield* Effect.logInfo(
+              "The Attempt's Loop has read permissions, so its checkout is removed without salvage",
+              {
                 attemptId: request.attemptId,
-                repository: request.repository,
                 worker: request.worker,
+                loop: request.loop,
                 host: options.host,
                 worktree: layout.worktree,
-                baseCommit,
-                ref: request.salvageRef,
-                rejected: Option.none(),
-                git: (args) => ops.checkout.git("cleanup", args),
-              })
-          : Option.none<AttemptSalvage>();
+              },
+            ).pipe(Effect.as(Option.none<AttemptSalvage>()))
+          : yield* salvageWorktree({
+              attemptId: request.attemptId,
+              repository: request.repository,
+              worker: request.worker,
+              host: options.host,
+              worktree: layout.worktree,
+              baseCommit,
+              ref: request.salvageRef,
+              rejected: Option.none(),
+              git: (args) => ops.checkout.git("cleanup", args),
+            })
+        : Option.none<AttemptSalvage>();
       if (Option.isSome(salvage)) {
         const record = yield* Ref.get(recorder);
         if (Option.isNone(record)) {
@@ -301,7 +349,7 @@ const registerRelease = Effect.fn("Executor.registerRelease")(function* <E exten
           });
           return;
         }
-        const recorded = yield* Effect.result(record.value(salvage.value));
+        const recorded = yield* Effect.result(record.value.salvage(salvage.value));
         if (Result.isFailure(recorded)) {
           yield* Deferred.fail(salvaged, recorded.failure);
           yield* Effect.logError("Attempt salvage could not be recorded; checkout retained", {
@@ -334,8 +382,7 @@ const registerRelease = Effect.fn("Executor.registerRelease")(function* <E exten
   return {
     checkedOut,
     salvaged: Deferred.await(salvaged),
-    recordSalvage: (record: AttemptChannel.Sink["salvage"]) =>
-      Ref.set(recorder, Option.some(record)),
+    recordSalvage: (sink: SalvageSink) => Ref.set(recorder, Option.some(sink)),
     keepForReattach: Ref.set(kept, Option.some<KeptFor>("reattach")),
     keepUntilStopped: Ref.set(kept, Option.some<KeptFor>("unconfirmed-stop")),
   };

@@ -209,6 +209,14 @@ export class SessionFinished extends Schema.TaggedClass<
 >("Agent/SessionFinished")("SessionFinished", {
   /** The session whose activity ended; the attempt's outcome is separate. */
   session: AgentSession,
+  /**
+   * Whether the session returned its answer because its wait for background work passed the
+   * configured limit. Cleanup then salvages the Attempt's checkout even after a success.
+   */
+  backgroundWaitLimitPassed: Schema.Boolean.pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed(false)),
+    Schema.withConstructorDefault(Effect.succeed(false)),
+  ),
 }) {}
 
 /** A supervised session that finished a turn and accepts more operator messages. */
