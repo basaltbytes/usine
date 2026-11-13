@@ -28,16 +28,23 @@ export type SessionAdmission = Data.TaggedEnum<{
 }>;
 export const SessionAdmission = Data.taggedEnum<SessionAdmission>();
 
-/** What a tool server's answer to the `DELETE` of an ending session means. */
+/** What a tool server's answer to the `DELETE` of a session means. */
 export type SessionEnd = Data.TaggedEnum<{
   /** The tool server ended the session. */
   Ended: {};
   /** The tool server no longer had the session. */
   Gone: {};
-  /** The tool server refused; the next `takeStale` returns the session. */
+  /**
+   * The tool server refused. An ending session comes back from the next `takeStale`; a session
+   * that its client asked to end stays open.
+   */
   Refused: {};
 }>;
 export const SessionEnd = Data.taggedEnum<SessionEnd>();
+
+/** Reads the HTTP status of a tool server's answer to a session's `DELETE`. */
+const endOf = (status: number): SessionEnd =>
+  status === 204 ? SessionEnd.Ended() : status === 404 ? SessionEnd.Gone() : SessionEnd.Refused();
 
 /** The open MCP sessions, by session ID. A session ends after `idleMillis` without a request. */
 export const sessionTable = (idleMillis: number) => {
@@ -51,8 +58,14 @@ export const sessionTable = (idleMillis: number) => {
     open: (id: string, session: McpSession) => {
       sessions.set(id, session);
     },
-    close: (id: string) => {
-      sessions.delete(id);
+    /**
+     * Settles the `DELETE` that a session's client sent, from its tool server's HTTP status. The
+     * table forgets the session unless the tool server refused.
+     */
+    close: (id: string, status: number): SessionEnd => {
+      const end = endOf(status);
+      if (end._tag !== "Refused") sessions.delete(id);
+      return end;
     },
     /** Admits a request from `credential` with the tool list `tools`, and records its use. */
     admit: (id: string, credential: CredentialId, tools: string, now: number) => {
@@ -86,10 +99,9 @@ export const sessionTable = (idleMillis: number) => {
      * status other than 204 or 404 keeps the session for the next `takeStale`.
      */
     settle: (ending: EndingSession, status: number): SessionEnd => {
-      if (status === 204) return SessionEnd.Ended();
-      if (status === 404) return SessionEnd.Gone();
-      retry(ending);
-      return SessionEnd.Refused();
+      const end = endOf(status);
+      if (end._tag === "Refused") retry(ending);
+      return end;
     },
     /** Keeps a session that its tool server didn't end, so the next `takeStale` returns it. */
     retry,

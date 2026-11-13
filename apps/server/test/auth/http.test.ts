@@ -764,11 +764,27 @@ it.live("warns once about a stored ceiling's unknown operation IDs and lists the
         ]),
       }),
     );
-    const bearer = { authorization: "Bearer stale-secret" };
-    for (let count = 0; count < 2; count++)
+    // A ceiling whose operations all exist gives no warning and no `unknownOperations`.
+    yield* services.store.issue(
+      InstanceToken.make({
+        id: TokenId.make("current"),
+        memberId: alice.id,
+        name: TokenName.make("Current"),
+        hash: secretHash("current-secret"),
+        kind: "device",
+        createdAt: now,
+        lastUsedAt: now,
+        expiresAt: now + 3_600_000,
+        operations: Option.some([OperationId.make("operator.detail")]),
+      }),
+    );
+    for (const secret of ["stale-secret", "stale-secret", "current-secret"])
       assert.equal(
-        (yield* Effect.promise(() => request(app, "/api/auth/session", "GET", undefined, bearer)))
-          .status,
+        (yield* Effect.promise(() =>
+          request(app, "/api/auth/session", "GET", undefined, {
+            authorization: `Bearer ${secret}`,
+          }),
+        )).status,
         200,
       );
     assert.deepEqual(warnings, [
@@ -785,6 +801,9 @@ it.live("warns once about a stored ceiling's unknown operation IDs and lists the
     assert.deepEqual(stale?.operations, ["operator.detail", "operator.renamed"]);
     assert.deepEqual(stale?.unknownOperations, ["operator.renamed"]);
     assert.isUndefined(tokens.find(({ kind }) => kind === "session")?.unknownOperations);
+    const current = tokens.find(({ id }) => id === "current");
+    assert.deepEqual(current?.operations, ["operator.detail"]);
+    assert.notProperty(current, "unknownOperations");
   }).pipe(Effect.scoped),
 );
 

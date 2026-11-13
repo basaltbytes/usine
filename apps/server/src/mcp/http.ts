@@ -190,8 +190,17 @@ export const mcpRoutes = (allowedOrigins: ReadonlyArray<string>) =>
           );
         }).pipe(
           Effect.onExit(() =>
-            Effect.sync(() => {
-              for (const ending of unsettled) sessions.retry(ending);
+            Effect.suspend(() => {
+              if (unsettled.size === 0) return Effect.void;
+              const reasons = new Set<EndingSession["reason"]>();
+              for (const ending of unsettled) {
+                sessions.retry(ending);
+                reasons.add(ending.reason);
+              }
+              return Effect.logInfo("MCP sweep handed sessions back for the next sweep", {
+                sessions: unsettled.size,
+                reasons: [...reasons].join(", "),
+              });
             }),
           ),
         );
@@ -230,10 +239,19 @@ export const mcpRoutes = (allowedOrigins: ReadonlyArray<string>) =>
         }
         const server = yield* RcMap.get(servers, key);
         const response = yield* server;
-        if (id !== undefined && request.method === "DELETE" && response.status === 204) {
-          sessions.close(id);
-          yield* Effect.logInfo("MCP session ended", { reason: "client" });
-        }
+        if (id !== undefined && request.method === "DELETE")
+          yield* SessionEnd.$match(sessions.close(id, response.status), {
+            Ended: () => Effect.logInfo("MCP session ended", { reason: "client" }),
+            Gone: () =>
+              Effect.logInfo("MCP session already ended on its tool server", { reason: "client" }),
+            Refused: () =>
+              Effect.logInfo(
+                "MCP tool server refused the client's DELETE; the session stays open",
+                {
+                  status: response.status,
+                },
+              ),
+          });
         // The MCP server sets the header of a new session just before the response is sent.
         if (id === undefined)
           yield* HttpEffect.appendPreResponseHandler((_, sent) => {

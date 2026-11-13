@@ -634,6 +634,10 @@ describe("operator MCP endpoint", () => {
       yield* Effect.promise(() => aborted);
       yield* Deferred.succeed(release, undefined);
       assert.equal(idleEnds(logs), 0);
+      assert.deepInclude(logs, {
+        message: "MCP sweep handed sessions back for the next sweep",
+        fields: { sessions: 3, reasons: "idle" },
+      });
       const owned = yield* owner.status("tools/list");
       assert.equal(owned, 404);
       assert.equal(idleEnds(logs), 3);
@@ -670,6 +674,10 @@ describe("operator MCP endpoint", () => {
       yield* Effect.promise(() => aborted);
       yield* Deferred.succeed(release, undefined);
       assert.equal(idleEnds(logs), 1);
+      assert.deepInclude(logs, {
+        message: "MCP sweep handed sessions back for the next sweep",
+        fields: { sessions: 2, reasons: "idle" },
+      });
       const owned = yield* owner.status("tools/list");
       assert.equal(owned, 404);
       assert.equal(idleEnds(logs), 3);
@@ -703,6 +711,10 @@ describe("operator MCP endpoint", () => {
         "MCP tool server did not end the session; the next sweep retries",
       );
       assert.equal(idleEnds(logs), 1);
+      assert.deepInclude(logs, {
+        message: "MCP sweep handed sessions back for the next sweep",
+        fields: { sessions: 1, reasons: "idle" },
+      });
       const owned = yield* owner.status("tools/list");
       assert.equal(owned, 404);
       assert.equal(idleEnds(logs), 2);
@@ -772,6 +784,27 @@ describe("operator MCP endpoint", () => {
       const token = yield* device([grant("read")]);
       const client = mcpClient(inProcess(app), token);
       yield* client.initialize;
+      // The tool server refuses a DELETE with an unsupported protocol version and keeps the session.
+      const refused = yield* Effect.promise(() =>
+        app.handler(
+          new Request(`https://usine.example${MCP_PATH}`, {
+            method: "DELETE",
+            headers: {
+              authorization: `Bearer ${token}`,
+              "mcp-session-id": client.session() ?? "",
+              "mcp-protocol-version": "1999-01-01",
+            },
+          }),
+        ),
+      );
+      assert.equal(refused.status, 400);
+      const kept = yield* client.status("tools/list");
+      assert.equal(kept, 200);
+      assert.notDeepInclude(logs, { message: "MCP session ended", fields: { reason: "client" } });
+      assert.deepInclude(logs, {
+        message: "MCP tool server refused the client's DELETE; the session stays open",
+        fields: { status: 400 },
+      });
       const ended = yield* client.end;
       assert.equal(ended, 204);
       yield* advance(MCP_SESSION_IDLE);
