@@ -261,6 +261,27 @@ it.effect("refuses an import whose coordinator brain check doesn't finish in tim
   }).pipe(Effect.provide(NodeServices.layer)),
 );
 
+it.effect("refuses an import whose parent models don't load in time", () =>
+  Effect.gen(function* () {
+    const folder = yield* directoryFixture;
+    const directory = InstanceDirectory.make(folder);
+    const context = yield* Layer.build(
+      configurationLayer.pipe(Layer.provide(localSqliteLayer(directory))),
+    );
+    const loading = yield* Deferred.make<void>();
+    const command = yield* parseConfigCommand(["import", directory]);
+    const importing = yield* runConfigCommand(directory, command, () =>
+      Deferred.succeed(loading, undefined).pipe(Effect.andThen(Effect.never)),
+    ).pipe(Effect.provideContext(context), Effect.flip, Effect.forkChild);
+    yield* Deferred.await(loading);
+    yield* TestClock.adjust(coordinatorBrainTimeout);
+    const failure = yield* Fiber.join(importing);
+
+    expect(failure._tag).toBe("ValidationTimeoutError");
+    expect((yield* Context.get(context, ConfigurationStore).read).number).toBe(0);
+  }).pipe(Effect.provide(NodeServices.layer)),
+);
+
 it.live(
   "round-trips all entity kinds and records only an added or removed worker",
   () =>
