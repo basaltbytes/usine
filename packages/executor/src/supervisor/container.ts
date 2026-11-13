@@ -178,6 +178,11 @@ interface ConversationPaths {
   readonly workspace: string;
 }
 
+/** A turn's hold on its conversation's directory, with what became of the turn's container. */
+interface ConversationHold {
+  container: "not started" | "removed" | "not removed";
+}
+
 /** The arguments of `<runtime> run` that start one turn's sandbox in the background. */
 export const sandboxRunArguments = (options: {
   readonly name: string;
@@ -413,22 +418,25 @@ const makeContainerSandbox = Effect.fn("SupervisorSandbox.make")(function* (
     yield* Effect.logInfo("Started a supervisor sandbox", { container: name });
   });
 
-  const removeContainer = (name: string) =>
+  /** Removes the container `name`, and says whether the runtime removed it. */
+  const removeContainer = (name: string): Effect.Effect<boolean> =>
     runtimeCommand(["rm", "--force", name]).pipe(
       Effect.flatMap(({ exitCode, stderr }) =>
         exitCode === 0
-          ? Effect.logInfo("Removed a supervisor sandbox", { container: name })
+          ? Effect.logInfo("Removed a supervisor sandbox", { container: name }).pipe(
+              Effect.as(true),
+            )
           : Effect.logWarning("Could not remove a supervisor sandbox", {
               container: name,
               exitCode,
               stderr: stderr.trim().split("\n")[0],
-            }),
+            }).pipe(Effect.as(false)),
       ),
       Effect.catch((error) =>
         Effect.logWarning("Could not remove a supervisor sandbox", {
           container: name,
           message: error.message,
-        }),
+        }).pipe(Effect.as(false)),
       ),
     );
 
@@ -493,7 +501,10 @@ const makeContainerSandbox = Effect.fn("SupervisorSandbox.make")(function* (
    * whose IDs map to one directory share it, so the hold is on the directory.
    */
   const running = new Set<string>();
-  /** Holds `directory` for the scope, or fails if another turn holds it. */
+  /**
+   * Holds `directory` for the scope, or fails if another turn holds it. The turn records its
+   * container in the returned hold, whose release says whether that container was removed.
+   */
   const holdConversation = (conversation: string, directory: string) =>
     Effect.acquireRelease(
       Effect.suspend(() => {
@@ -511,9 +522,23 @@ const makeContainerSandbox = Effect.fn("SupervisorSandbox.make")(function* (
             ),
           );
         running.add(directory);
-        return Effect.void;
+        return Effect.succeed<ConversationHold>({ container: "not started" });
       }),
-      () => Effect.sync(() => running.delete(directory)),
+      (hold) =>
+        Effect.sync(() => running.delete(directory)).pipe(
+          Effect.andThen(
+            hold.container === "not removed"
+              ? Effect.logWarning(
+                  "Released a supervisor conversation while its sandbox may still be running",
+                  { conversation, directory, container: hold.container },
+                )
+              : Effect.logInfo("Released a supervisor conversation", {
+                  conversation,
+                  directory,
+                  container: hold.container,
+                }),
+          ),
+        ),
     );
 
   return Effect.fn("SupervisorSandbox.open")(function* (request: SandboxRequest) {
@@ -536,9 +561,11 @@ const makeContainerSandbox = Effect.fn("SupervisorSandbox.make")(function* (
     }
     const root = `${options.root}/conversations/${segment}`;
     // No sandbox of the conversation writes to its directory while this turn prepares it.
-    yield* holdConversation(request.conversation, root);
+    const hold = yield* holdConversation(request.conversation, root);
     const paths: ConversationPaths = { root, home: `${root}/home`, workspace: `${root}/workspace` };
-    // The mount points of the sources exist before the read-only workspace is mounted.
+    // The workspace, and the mount points of the sources in it, exist before they're mounted, even
+    // for a turn without sources: Podman refuses a missing mount source, and Docker creates it as
+    // its daemon's user.
     yield* fs
       .makeDirectory(root, { recursive: true })
       .pipe(
@@ -546,6 +573,7 @@ const makeContainerSandbox = Effect.fn("SupervisorSandbox.make")(function* (
           Effect.forEach(
             [
               paths.home,
+              paths.workspace,
               ...request.sources.map(({ repository }) => `${paths.workspace}/${repository}`),
             ],
             (directory) => confinedDirectory(root, directory),
@@ -587,7 +615,14 @@ const makeContainerSandbox = Effect.fn("SupervisorSandbox.make")(function* (
           relayDirectory,
         }),
       ),
-      () => removeContainer(name),
+      () =>
+        removeContainer(name).pipe(
+          Effect.tap((removed) =>
+            Effect.sync(() => {
+              hold.container = removed ? "removed" : "not removed";
+            }),
+          ),
+        ),
     );
     yield* awaitRelay(name);
     return SupervisorSeat.make({

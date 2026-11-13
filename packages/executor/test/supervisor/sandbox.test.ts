@@ -1,9 +1,12 @@
+// A fake runtime's answer is synchronous, so it checks a mount source with the synchronous call.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
+import { existsSync } from "node:fs";
 import { NodeFileSystem, NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
-import { SandboxRequest, SupervisorSandbox } from "@usine/agents/supervisor";
+import { SandboxRequest, SupervisorSandbox, SupervisorSource } from "@usine/agents/supervisor";
 import { Harness } from "@usine/core/agent/brain";
 import { AgentSessionId } from "@usine/core/agent/session";
-import { RepositoryName, safeSegment } from "@usine/core/repository";
+import { CommitSha, RepositoryName, safeSegment } from "@usine/core/repository";
 import { ContainerImage, type GatewayLlmProtocol } from "@usine/core/worker";
 import {
   Clock,
@@ -243,19 +246,34 @@ describe("the supervisor sandbox's container runtime", () => {
 
 describe("a supervisor sandbox on a container runtime", () => {
   /**
-   * A Podman that runs every command, and lists `left` as the containers that it still runs.
-   * `relay.starts` says whether the sandbox's model relay accepts connections.
+   * A Podman that runs every command, and lists `left` as the containers that it still runs. As
+   * Podman does, `run` refuses a `--volume` whose host path doesn't exist. `relay.starts` says
+   * whether the sandbox's model relay accepts connections, and `removes` whether `rm` succeeds.
    */
   const podman = (
     calls: Array<ReadonlyArray<string>>,
     left: ReadonlyArray<string> = [],
     relay: { starts: boolean } = { starts: true },
+    removes = true,
   ) =>
     spawning((command, args) => {
       if (command !== "podman") return undefined;
       if (args[0] === "info") return { stdout: "true", exitCode: 0 };
       if (args[0] === "ps") return { stdout: left.map((id) => `${id}\n`).join(""), exitCode: 0 };
       if (args[0] === "exec") return { stdout: "", exitCode: relay.starts ? 0 : 1 };
+      if (args[0] === "rm" && !removes)
+        return { stdout: "", stderr: "Error: cannot remove container", exitCode: 125 };
+      if (args[0] === "run") {
+        const missing = args
+          .flatMap((arg, index) => (args[index - 1] === "--volume" ? [arg.split(":")[0]!] : []))
+          .find((source) => !existsSync(source));
+        if (missing !== undefined)
+          return {
+            stdout: "",
+            stderr: `Error: statfs ${missing}: no such file or directory`,
+            exitCode: 125,
+          };
+      }
       return { stdout: "", exitCode: 0 };
     }, calls);
 
@@ -440,6 +458,89 @@ describe("a supervisor sandbox on a container runtime", () => {
         calls.filter(([, command]) => command === "run"),
         2,
       );
+    }).pipe(Effect.scoped, Effect.provide(NodeFileSystem.layer)),
+  );
+
+  it.live("mounts an existing workspace for a turn without sources, and with them after", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "usine-supervisor-" });
+      const tree = yield* fs.makeTempDirectoryScoped({ prefix: "usine-tree-" });
+      const workspace = `${root}/conversations/${safeSegment("supervisor:c1")}/workspace`;
+      const calls: Array<ReadonlyArray<string>> = [];
+      yield* Effect.gen(function* () {
+        const sandbox = yield* sandboxAt(root);
+        const seat = yield* sandbox.open(codexTurn("supervisor:c1")).pipe(Effect.scoped);
+        assert.strictEqual(seat.cwd, workspace);
+        const created = yield* fs.lstat(workspace);
+        assert.strictEqual(created.type, "Directory");
+        // The conversation's next turn mounts a source in the same workspace.
+        yield* sandbox
+          .open(
+            SandboxRequest.make({
+              conversation: AgentSessionId.make("supervisor:c1"),
+              harness: Harness.make("codex"),
+              sources: [
+                SupervisorSource.make({
+                  repository: RepositoryName.make("acme/demo"),
+                  revision: CommitSha.make("a".repeat(40)),
+                  directory: tree,
+                }),
+              ],
+            }),
+          )
+          .pipe(Effect.scoped);
+      }).pipe(Effect.provide(podman(calls)));
+      const started = calls.filter(([, command]) => command === "run");
+      assert.lengthOf(started, 2);
+      for (const args of started) {
+        assert.strictEqual(args[args.indexOf("--workdir") + 1], workspace);
+        assert.include(args, `${workspace}:${workspace}:ro`);
+      }
+      const withSource = started[1] ?? [];
+      assert.strictEqual(
+        withSource[withSource.indexOf(`${tree}:${workspace}/acme/demo:ro`) - 1],
+        "--volume",
+      );
+    }).pipe(Effect.scoped, Effect.provide(NodeFileSystem.layer)),
+  );
+
+  it.live("logs each release of a conversation, and whether its container was removed", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "usine-supervisor-" });
+      const directory = `${root}/conversations/${safeSegment("supervisor:c1")}`;
+      const released: Array<readonly [string, unknown]> = [];
+      const recording = Logger.layer([
+        Logger.make<unknown, void>(({ logLevel, message }) => {
+          if (!Array.isArray(message)) return;
+          const [text, fields] = message;
+          if (String(text).startsWith("Released a supervisor conversation"))
+            released.push([logLevel, [text, fields]]);
+        }),
+      ]);
+      const turns = (removes: boolean) =>
+        Effect.gen(function* () {
+          const sandbox = yield* sandboxAt(root);
+          yield* sandbox.open(codexTurn("supervisor:c1")).pipe(Effect.scoped);
+        }).pipe(Effect.provide([podman([], [], { starts: true }, removes), recording]));
+      yield* turns(true);
+      yield* turns(false);
+      const fields = (container: string) => ({
+        conversation: "supervisor:c1",
+        directory,
+        container,
+      });
+      assert.deepStrictEqual(released, [
+        ["Info", ["Released a supervisor conversation", fields("removed")]],
+        [
+          "Warn",
+          [
+            "Released a supervisor conversation while its sandbox may still be running",
+            fields("not removed"),
+          ],
+        ],
+      ]);
     }).pipe(Effect.scoped, Effect.provide(NodeFileSystem.layer)),
   );
 
