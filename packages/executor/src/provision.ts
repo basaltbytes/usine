@@ -231,11 +231,13 @@ const cleanupFor =
 /**
  * Registers the checkout's finalizer. On a non-success exit, or a success where a session's answer
  * returned at its background wait limit, salvages a checked-out worktree before removing it; a
- * worktree with unpreserved work stays on disk. `checkedOut` contains the base commit once a
+ * worktree with unpreserved work stays on disk. `waitLimit` is the background wait limit, in
+ * minutes, that the Attempt's children ran with. `checkedOut` contains the base commit once a
  * worktree exists.
  */
 const registerRelease = Effect.fn("Executor.registerRelease")(function* <E extends Error>(
   options: ReleaseOptions<E>,
+  waitLimit: Option.Option<number>,
   confirmStop: Effect.Effect<void, E> = Effect.void,
 ) {
   const { layout, ops, request } = options;
@@ -257,8 +259,15 @@ const registerRelease = Effect.fn("Executor.registerRelease")(function* <E exten
       worktree: layout.worktree,
     };
     yield* Effect.annotateCurrentSpan(fields);
+    if (Option.isNone(waitLimit)) {
+      yield* Effect.logInfo(
+        "The successful Attempt ran without a background wait limit; its checkout is removed without salvage",
+        fields,
+      );
+      return false;
+    }
     const sink = yield* Ref.get(recorder);
-    if (Option.isNone(request.maxBackgroundWaitMinutes) || Option.isNone(sink)) return false;
+    if (Option.isNone(sink)) return false;
     const transcript = yield* Effect.result(sink.value.transcript);
     if (Result.isFailure(transcript)) {
       yield* Effect.logWarning(
@@ -553,7 +562,7 @@ export const provisionWorktree = Effect.fn("Executor.provisionWorktree")(functio
   });
   // Registered first so a failed worktree creation, which can leave a directory and a
   // bare-cache registration, is also cleaned up.
-  const release = yield* registerRelease(options);
+  const release = yield* registerRelease(options, request.maxBackgroundWaitMinutes);
   const cleanup = cleanupFor(options);
   yield* ops.ensureRoots;
   yield* ops.removePath("prepare", layout.worktree);
@@ -676,7 +685,12 @@ export const reattachWorktree = Effect.fn("Executor.reattachWorktree")(function*
     host: options.host,
     repository: request.repository,
   });
-  const release = yield* registerRelease(options, options.confirmStop);
+  // The spec carries the limit that the Attempt ran with; the request has the current setting.
+  const release = yield* registerRelease(
+    options,
+    spec.maxBackgroundWaitMinutes,
+    options.confirmStop,
+  );
   yield* Ref.set(release.checkedOut, Option.some(spec.baseCommit));
   yield* options.ops.checkout.git("prepare", [
     "-C",

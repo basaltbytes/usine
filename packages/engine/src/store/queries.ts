@@ -351,7 +351,10 @@ export const queriesFor = (
       return decoded.map(({ number, outcome, salvage, ...attempt }) => ({
         ...attempt,
         ref: salvageRefFor(attempt.runId, number),
-        succeeded: outcome === "Succeeded" || outcome === "AwaitingCi" || outcome === "HandedOff",
+        // A success whose salvage didn't push all its work keeps its checkout for recovery to salvage.
+        succeeded:
+          (outcome === "Succeeded" || outcome === "AwaitingCi" || outcome === "HandedOff") &&
+          (salvage === null || salvage._tag === "Pushed"),
         open: outcome === "",
         rejected: salvage?._tag === "Rejected" ? Option.some(salvage) : Option.none(),
       }));

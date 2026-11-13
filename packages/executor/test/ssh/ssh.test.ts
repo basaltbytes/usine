@@ -318,16 +318,27 @@ describe("SSH Worker", () => {
     },
     { case: "no child answered at the wait limit", limit: Option.some(10), passed: false, kept: 0 },
     { case: "no wait limit is configured", limit: Option.none<number>(), passed: true, kept: 0 },
+    {
+      case: "its Loop has read permissions",
+      limit: Option.some(10),
+      passed: true,
+      kept: 0,
+      permissions: "read" as const,
+    },
   ])(
     "salvages a successful Attempt's checkout only if $case",
-    ({ limit, passed, kept, unreadable }) => {
+    ({ limit, passed, kept, unreadable, permissions }) => {
       const machine = fakeMachine();
       const credentials = mintingProvider();
       return Effect.gen(function* () {
         const executor = yield* Executor;
         machine.state.salvage = "dirty";
         const prepared = yield* executor.prepare(
-          CheckoutRequest.make({ ...request, maxBackgroundWaitMinutes: limit }),
+          CheckoutRequest.make({
+            ...request,
+            maxBackgroundWaitMinutes: limit,
+            permissions: permissions ?? request.permissions,
+          }),
         );
         const finished = AttemptChannel.OutboundEnvelope.make({
           version: AttemptChannel.PROTOCOL_VERSION,
@@ -376,6 +387,10 @@ describe("SSH Worker", () => {
           lines.filter((line) => line.includes("'push' '--force'")).length,
           kept,
           "only a salvage pushes the checkout's work",
+        );
+        assert(
+          lines.some((line) => line.includes("'worktree' 'remove'")),
+          "the checkout is removed",
         );
       }).pipe(Effect.scoped, Effect.provide(runtime(machine, credentials)));
     },

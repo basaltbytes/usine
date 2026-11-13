@@ -6,6 +6,7 @@ import {
 } from "@usine/core/attempt";
 import { AgentFailure } from "@usine/core/attempt/failure";
 import {
+  type AttemptSalvage,
   SalvagePartlyPushed,
   SalvagePushed,
   SalvageRef,
@@ -194,6 +195,63 @@ export const attemptRecordsContract = (adapter: PersistenceAdapter) => {
                 [fresh.execution.attempt.id]: { succeeded: false, rejected: Option.none() },
                 [afterPartial.execution.attempt.id]: { succeeded: true, rejected: Option.none() },
               },
+            );
+          }),
+        ),
+    );
+    // A success at the background wait limit salvages its checkout. If the salvage keeps work
+    // only in the checkout, startup recovery salvages it again instead of removing it.
+    it.live.each([
+      { salvage: "no", succeeded: true },
+      { salvage: "Pushed", succeeded: true },
+      { salvage: "Retained", succeeded: false },
+      { salvage: "PartlyPushed", succeeded: false },
+      { salvage: "Rejected", succeeded: false },
+    ] as const)(
+      "lists a succeeded Attempt with $salvage salvage as succeeded for recovery: $succeeded",
+      ({ salvage, succeeded }) =>
+        withPersistence(
+          adapter,
+          Effect.gen(function* () {
+            const store = yield* RunStore;
+            const runId = RunId.make("succeeded-at-limit");
+            yield* store.recordAndClaim(lifecycleSubmission, runId);
+            const started = yield* store.beginAttempt(
+              runId,
+              WorkerName.make("local"),
+              Option.none(),
+            );
+            assert(started._tag === "AttemptStarted");
+            const ref = SalvageRef.make("usine/salvage/succeeded-at-limit/1");
+            const commit = CommitSha.make("e".repeat(40));
+            const path = "/workers/local/attempts/succeeded-at-limit";
+            const recorded: Option.Option<AttemptSalvage> = {
+              no: Option.none(),
+              Pushed: Option.some(SalvagePushed.make({ ref, commit })),
+              Retained: Option.some(
+                SalvageRetained.make({
+                  path,
+                  commit: Option.some(commit),
+                  message: "Could not resolve host",
+                }),
+              ),
+              PartlyPushed: Option.some(
+                SalvagePartlyPushed.make({ ref, commit, path, message: "dataset.csv" }),
+              ),
+              Rejected: Option.some(
+                SalvageRejected.make({ path, commit, message: "GH001: Large files detected." }),
+              ),
+            }[salvage];
+            if (Option.isSome(recorded))
+              yield* store.recordSalvage(started.execution.attempt.id, recorded.value);
+            yield* store.finishAttempt(
+              started.execution.attempt,
+              Result.succeed(StepResult.make({ message: "Review posted", facts: [] })),
+            );
+            const candidates = yield* store.salvageCandidates;
+            assert.deepStrictEqual(
+              candidates.map((candidate) => [candidate.attemptId, candidate.succeeded]),
+              [[started.execution.attempt.id, succeeded]],
             );
           }),
         ),
