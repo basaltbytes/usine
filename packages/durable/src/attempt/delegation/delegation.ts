@@ -116,8 +116,8 @@ const reservedReports = [
  * child's supervision and unread operator inputs, forwards the child's events to the Attempt's
  * hub, and reports reserved reports and infrastructure failures to `call`.
  *
- * A replayed delegation whose earlier launch never returned and saved nothing launches again in
- * the same slot, as a new one.
+ * A replayed delegation whose earlier launch never returned launches again in the same slot if
+ * it saved no conversation or the harness cannot reopen that conversation.
  *
  * Fails with `JournalError` when the journal fails outside a progress checkpoint, and with
  * `AgentSessionError` when a new delegation's child fails to launch or ends without a report; a
@@ -160,7 +160,7 @@ export const delegate = Effect.fn("Delegation.delegate")(function* (
       attemptId: spec.attemptId,
       sessionId,
     });
-  const resumed = start.resumed && !neverLaunched;
+  let resumed = start.resumed && !neverLaunched;
   /** Runs `effect` until the delegation aborts. On abort, runs `onAbort` and interrupts. */
   const untilAborted = <A, E, R>(effect: Effect.Effect<A, E, R>, onAbort: Effect.Effect<void, E>) =>
     Effect.raceFirst(
@@ -465,14 +465,37 @@ export const delegate = Effect.fn("Delegation.delegate")(function* (
     // Annotate logs with the Attempt because a delegation runs outside the Attempt's fiber. An
     // abort interrupts a launch that is still waiting through retry delays.
     const child = yield* untilAborted(
-      backend
-        .launch(childRequest)
-        .pipe(
-          Effect.provideService(ChildSessionLifecycle, lifecycle),
-          Effect.provideService(ChildSessionJournal, sessionJournal),
-          Effect.tapError(recordInfrastructureFailure),
-          Effect.annotateLogs({ attemptId: spec.attemptId, worker: request.worker }),
+      backend.launch(childRequest).pipe(
+        Effect.catchTag("SessionInterruptedError", (error) =>
+          Effect.gen(function* () {
+            if (previous.launched || Option.isNone(childRequest.resume)) return yield* error;
+            yield* Effect.logInfo(
+              "The unfinished launch's saved conversation is unavailable; launching again in its slot",
+              {
+                attemptId: spec.attemptId,
+                sessionId,
+                reason: error.message,
+              },
+            );
+            resumed = false;
+            return yield* backend.launch(
+              ChildRequest.make({
+                ...childRequest,
+                resume: Option.none(),
+                prompted: false,
+                continuations: [],
+                inFlight: [],
+                idle: Option.none(),
+                idleAnsweredOperator: false,
+              }),
+            );
+          }),
         ),
+        Effect.provideService(ChildSessionLifecycle, lifecycle),
+        Effect.provideService(ChildSessionJournal, sessionJournal),
+        Effect.tapError(recordInfrastructureFailure),
+        Effect.annotateLogs({ attemptId: spec.attemptId, worker: request.worker }),
+      ),
       Effect.logInfo("Abandoning the child launch of an aborted tool call", {
         sessionId: session.id,
       }),
@@ -605,9 +628,12 @@ export const delegate = Effect.fn("Delegation.delegate")(function* (
         ),
     });
   }).pipe(Effect.scoped);
-  return yield* resumed
-    ? runChild.pipe(
-        Effect.catchIf(Schema.is(AgentSessionError), (error) => interrupted(error.message)),
-      )
-    : runChild;
+  return yield* runChild.pipe(
+    Effect.catchIf(Schema.is(AgentSessionError), (error) =>
+      Effect.gen(function* () {
+        if (!resumed) return yield* error;
+        return yield* interrupted(error.message);
+      }),
+    ),
+  );
 }, Effect.scoped);

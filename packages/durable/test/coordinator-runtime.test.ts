@@ -32,7 +32,7 @@ import {
 } from "effect";
 import { SqlClient } from "effect/sql";
 import { TestClock } from "effect/testing";
-import { ChildBackend } from "@usine/agents/runtime";
+import { ChildBackend, ChildSessionJournal, SessionInterruptedError } from "@usine/agents/runtime";
 import { childSessionId } from "../src/attempt/sessions.ts";
 import { CoordinatorRuntime } from "../src/coordinator/runtime.ts";
 import { stubChildBackendLayer, StubChildren } from "../src/testing.ts";
@@ -92,10 +92,9 @@ const holdingStartDelegation =
     ).pipe(Layer.provide(journal));
 
 /**
- * Stub children whose launches hang after completing `reached`, before they save a session, as a
- * launch does when the process stops during it.
+ * Stops a launch before it returns, optionally after the harness saves its session reference.
  */
-const hangingLaunches = (reached: Deferred.Deferred<void>) =>
+const hangingLaunches = (reached: Deferred.Deferred<void>, stage: "before-save" | "after-save") =>
   Layer.effectContext(
     Effect.gen(function* () {
       const backend = yield* ChildBackend;
@@ -104,11 +103,47 @@ const hangingLaunches = (reached: Deferred.Deferred<void>) =>
         ChildBackend,
         ChildBackend.of({
           ...backend,
-          launch: () => Deferred.succeed(reached, undefined).pipe(Effect.andThen(Effect.never)),
+          launch: (request) =>
+            Effect.gen(function* () {
+              if (stage === "after-save") {
+                const journal = yield* ChildSessionJournal.current;
+                yield* journal.started(
+                  HarnessSession.make({
+                    id: HarnessSessionId.make("not-created-yet"),
+                    cwd: request.cwd,
+                  }),
+                );
+              }
+              yield* Deferred.succeed(reached, undefined);
+              return yield* Effect.never;
+            }),
         }),
       ).pipe(Context.add(StubChildren, children));
     }),
   ).pipe(Layer.provide(stubChildBackendLayer));
+
+/** Models a harness that cannot reopen the saved native conversation. */
+const unavailableConversations = Layer.effectContext(
+  Effect.gen(function* () {
+    const backend = yield* ChildBackend;
+    const children = yield* StubChildren;
+    return Context.make(
+      ChildBackend,
+      ChildBackend.of({
+        ...backend,
+        launch: (request) =>
+          Option.isSome(request.resume)
+            ? Effect.fail(
+                SessionInterruptedError.make({
+                  sessionId: request.session.id,
+                  message: "The saved native conversation is unavailable",
+                }),
+              )
+            : backend.launch(request),
+      }),
+    ).pipe(Context.add(StubChildren, children));
+  }),
+).pipe(Layer.provide(stubChildBackendLayer));
 
 /** Fails the first transition whose event has tag `tag` with `JournalError`. */
 const failingTransitionOnce = (tag: string) => (journal: Layer.Layer<AttemptJournal>) =>
@@ -1702,75 +1737,114 @@ describe("event-driven coordinator restarts on SQLite", () => {
       }).pipe(Effect.scoped),
     );
 
-  it.live(
-    "fails as infrastructure when an interrupted child's replacement is over the budget",
-    () =>
-      Effect.gen(function* () {
-        const database = yield* temporaryDatabase;
-        const request = coordinated("restart/over-budget", 1);
-        const first = yield* orchestrator(sqliteJournal(database).pipe(coordinator));
-        yield* first.execute(request, recordingSink().sink);
-        yield* first.nextChild;
-        yield* first.stop;
-
-        const second = yield* orchestrator(sqliteJournal(database).pipe(coordinator));
-        const failure = yield* second.attempts
-          .execute(request, recordingSink().sink)
-          .pipe(Effect.flip);
-        yield* second.stop;
-
-        assert.strictEqual(failure._tag, "InfraFailure");
-        assert.include(failure.message, "1-child budget has no room");
-      }).pipe(Effect.scoped),
-  );
-
-  it.live("launches a child again in its slot after a stop during its launch", () =>
+  it.live("fails over budget when a launched child's saved conversation is unavailable", () =>
     Effect.gen(function* () {
       const database = yield* temporaryDatabase;
-      const request = coordinated("restart/during-launch", 1);
-      const attemptId = request.spec.attemptId;
+      const request = coordinated("restart/over-budget", 1);
+      const first = yield* orchestrator(sqliteJournal(database).pipe(coordinator));
       const recording = recordingSink();
-      const launching = yield* Deferred.make<void>();
-      const first = yield* orchestrator(
-        CoordinatorRuntime.layer.pipe(
-          Layer.provide(Layer.mergeAll(sqliteJournal(database), WakeUp.rules)),
-          Layer.provideMerge(hangingLaunches(launching)),
-        ),
-      );
       yield* first.execute(request, recording.sink);
-      yield* Deferred.await(launching);
+      const working = yield* first.nextChild;
+      yield* working.emit(
+        SessionStarted.make({
+          session: working.request.session,
+          harnessSession: Option.some(
+            HarnessSession.make({
+              id: HarnessSessionId.make("lost-conversation"),
+              cwd: request.cwd,
+            }),
+          ),
+        }),
+      );
+      yield* until(
+        () =>
+          trace(recording.outbound()).filter((entry) => entry === "child.SessionStarted").length ===
+          2,
+      );
       yield* first.stop;
 
-      const second = yield* orchestrator(sqliteJournal(database).pipe(coordinator));
-      const execution = yield* second.execute(request, recording.sink);
-      const relaunched = yield* second.nextChild;
-      yield* relaunched.reply("Opened #12.");
-      const report = yield* Fiber.join(execution);
-      yield* second.stop;
-      const snapshot = yield* stored(database, attemptId);
-
-      assert.strictEqual(report.message, "Opened #12.");
-      assert.strictEqual(relaunched.request.session.id, childSessionId(attemptId, 1));
-      assert.include(relaunched.request.prompt, FIRST_ASSIGNMENT);
-      assert.isTrue(Option.isNone(relaunched.request.resume));
-      assert.deepStrictEqual(trace(recording.outbound()), [
-        "Started",
-        "child.SessionStarted",
-        "child.TextOutput",
-        "child.SessionFinished",
-        "Final",
-      ]);
-      assert.deepStrictEqual(
-        Option.map(snapshot, ({ events, delegations }) => ({
-          events: events.map(({ event }) =>
-            Option.match(tagOf(event), { onNone: () => "untagged", onSome: ({ _tag }) => _tag }),
-          ),
-          delegations: delegations.map(({ number }) => number),
-        })),
-        Option.some({ events: ["AttemptStarted", "ChildReported"], delegations: [1] }),
+      const second = yield* orchestrator(
+        CoordinatorRuntime.layer.pipe(
+          Layer.provide(Layer.mergeAll(sqliteJournal(database), WakeUp.rules)),
+          Layer.provideMerge(unavailableConversations),
+        ),
       );
+      const failure = yield* second.attempts
+        .execute(request, recordingSink().sink)
+        .pipe(Effect.flip);
+      yield* second.stop;
+
+      assert.strictEqual(failure._tag, "InfraFailure");
+      assert.include(failure.message, "1-child budget has no room");
     }).pipe(Effect.scoped),
   );
+
+  for (const stage of ["before-save", "after-save"] as const)
+    it.live(`launches a child again in its slot after a stop during launch (${stage})`, () =>
+      Effect.gen(function* () {
+        const database = yield* temporaryDatabase;
+        const request = coordinated(`restart/during-launch/${stage}`, 1);
+        const attemptId = request.spec.attemptId;
+        const recording = recordingSink();
+        const launching = yield* Deferred.make<void>();
+        const first = yield* orchestrator(
+          CoordinatorRuntime.layer.pipe(
+            Layer.provide(Layer.mergeAll(sqliteJournal(database), WakeUp.rules)),
+            Layer.provideMerge(hangingLaunches(launching, stage)),
+          ),
+        );
+        yield* first.execute(request, recording.sink);
+        yield* Deferred.await(launching);
+        yield* first.stop;
+
+        const stoppedSnapshot = yield* stored(database, attemptId);
+        const progress = Option.flatMap(stoppedSnapshot, ({ delegations }) =>
+          Option.flatMap(Option.fromUndefinedOr(delegations[0]), ({ progress }) => progress),
+        );
+        assert.isTrue(Option.isSome(progress));
+        if (Option.isSome(progress)) {
+          assert.isFalse(progress.value.launched);
+          assert.strictEqual(progress.value.prompted, stage === "before-save");
+          assert.strictEqual(Option.isSome(progress.value.saved), stage === "after-save");
+        }
+        const second = yield* orchestrator(
+          CoordinatorRuntime.layer.pipe(
+            Layer.provide(Layer.mergeAll(sqliteJournal(database), WakeUp.rules)),
+            Layer.provideMerge(unavailableConversations),
+          ),
+        );
+        const execution = yield* second.execute(request, recording.sink);
+        const relaunched = yield* Effect.raceFirst(
+          second.nextChild,
+          Fiber.join(execution).pipe(Effect.andThen(Effect.never)),
+        );
+        yield* relaunched.reply("Opened #12.");
+        const report = yield* Fiber.join(execution);
+        yield* second.stop;
+        const snapshot = yield* stored(database, attemptId);
+
+        assert.strictEqual(report.message, "Opened #12.");
+        assert.strictEqual(relaunched.request.session.id, childSessionId(attemptId, 1));
+        assert.include(relaunched.request.prompt, FIRST_ASSIGNMENT);
+        assert.isTrue(Option.isNone(relaunched.request.resume));
+        assert.deepStrictEqual(trace(recording.outbound()), [
+          "Started",
+          "child.SessionStarted",
+          "child.TextOutput",
+          "child.SessionFinished",
+          "Final",
+        ]);
+        assert.deepStrictEqual(
+          Option.map(snapshot, ({ events, delegations }) => ({
+            events: events.map(({ event }) =>
+              Option.match(tagOf(event), { onNone: () => "untagged", onSome: ({ _tag }) => _tag }),
+            ),
+            delegations: delegations.map(({ number }) => number),
+          })),
+          Option.some({ events: ["AttemptStarted", "ChildReported"], delegations: [1] }),
+        );
+      }).pipe(Effect.scoped),
+    );
 
   it.live("resumes a child that saved its session, with the same child ID", () =>
     Effect.gen(function* () {
