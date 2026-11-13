@@ -247,6 +247,11 @@ describe("the supervisor role", () => {
             assert(session._tag === "RoleSession");
             assert.strictEqual(session.role, supervisor.name);
             assert.strictEqual(session.id, "replay-parent:child:1");
+            assert.strictEqual(
+              session.agent,
+              "supervisor",
+              "the role runs the instance brain under the agent name supervisor",
+            );
             assert.deepStrictEqual(session.brain, brain, "the session records the brain that ran");
             assert.deepStrictEqual(
               session.pool,
@@ -254,8 +259,14 @@ describe("the supervisor role", () => {
               "the seat's credential route sets the pool that pays",
             );
             assert.isAbove(totalTokens, 0);
-            for (const event of reply.events)
+            for (const event of reply.events) {
               assert(event.session._tag === "RoleSession", `${event._tag} keeps the role session`);
+              assert.strictEqual(
+                event.session.agent,
+                "supervisor",
+                `${event._tag} carries the agent name supervisor`,
+              );
+            }
             assertProvenCapabilities(Harness.make(provider), "supervisor", reply.events);
           }
         }).pipe(Effect.provide(NodeServices.layer), Effect.timeout("20 seconds")),
