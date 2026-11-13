@@ -237,6 +237,7 @@ describe("durable AttemptRuntime", () => {
         const execution = yield* Effect.forkChild(runtime.execute(request, recordingSink().sink));
         const child = yield* (yield* StubChildren).next;
         assert.strictEqual(child.request.session.brain.harness, id);
+        assert(Option.isNone(child.request.maxBackgroundWaitMinutes));
         yield* child.reply("Extension result");
         assert.strictEqual((yield* Fiber.join(execution)).message, "Extension completed");
       }).pipe(Effect.provide(services));
@@ -255,7 +256,11 @@ describe("durable AttemptRuntime", () => {
         );
         const request = AttemptRequest.make({
           ...initial,
-          spec: AttemptChannel.RunSpec.make({ ...initial.spec, task }),
+          spec: AttemptChannel.RunSpec.make({
+            ...initial.spec,
+            task,
+            maxBackgroundWaitMinutes: Option.some(4),
+          }),
         });
         const recording = recordingSink();
         const lastAnsweredAt = DateTime.makeUnsafe("2026-10-15T19:42:00Z");
@@ -273,6 +278,7 @@ describe("durable AttemptRuntime", () => {
         assert.deepStrictEqual(child.request.environment, workerEnvironment);
         assert.strictEqual(child.request.cwd, "/workspace/usine");
         assert.deepStrictEqual(child.request.host, LocalProcess.make());
+        assert.deepStrictEqual(child.request.maxBackgroundWaitMinutes, Option.some(4));
         assert.include(child.request.prompt, `# Delegated task\n\n${task}\n`);
         assert.include(child.request.prompt, `"commit": "${request.spec.baseCommit}"`);
         assert.include(

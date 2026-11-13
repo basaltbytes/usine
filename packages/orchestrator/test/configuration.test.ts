@@ -327,10 +327,19 @@ const readConfigurationOf = Effect.fn("test.readConfigurationOf")(
 
 const readConfiguration = readConfigurationOf(files);
 
-/** The instance files with `settings.coordinator: events` in place of `settings.parent_model`. */
+/**
+ * The instance files with `settings.coordinator: events` in place of `settings.parent_model`, and
+ * with both time limits set.
+ */
 const eventsFiles = files.map(([path, content]) =>
   path === "usine.yaml"
-    ? ([path, content.replace("  parent_model: gpt-5.6-sol\n", "  coordinator: events\n")] as const)
+    ? ([
+        path,
+        content.replace(
+          "  parent_model: gpt-5.6-sol\n",
+          "  coordinator: events\n  max_attempt_minutes: 600\n  max_background_wait_minutes: 5\n",
+        ),
+      ] as const)
     : ([path, content] as const),
 );
 
@@ -574,6 +583,9 @@ describe("Configuration view", () => {
     Effect.gen(function* () {
       const view = yield* readConfigurationOf(eventsFiles);
       assert.strictEqual(view.settings.coordinator, "events");
+      // Each limit shows its own setting.
+      assert.strictEqual(view.settings.maxAttemptMinutes, 600);
+      assert.strictEqual(view.settings.maxBackgroundWaitMinutes, 5);
       assert.isNull(view.settings.parentModel);
       const developer = view.agents.find(({ name }) => name === "developer");
       assert(developer !== undefined, "developer loads");

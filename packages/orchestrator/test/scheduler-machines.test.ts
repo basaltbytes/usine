@@ -22,6 +22,7 @@ import {
 } from "@usine/core/worker";
 import { StepExecution, StepExecutor } from "@usine/engine/step-executor";
 import {
+  type CheckoutRequest,
   Executor,
   ExecutorOperationError,
   fullPreflight,
@@ -55,10 +56,15 @@ import { submission, testAgent } from "./local-worker/support.ts";
 const POOL = WorkerName.make("pool");
 const unused = () => Effect.die("unused");
 
-const configWithTimings = (timings: Record<string, number>, slots = 1) =>
+const configWithTimings = (
+  timings: Record<string, number>,
+  slots = 1,
+  settings: Record<string, number> = {},
+) =>
   Schema.decodeEffect(UsineConfig)({
     version: 1,
     repos: [{ name: "acme/demo" }],
+    settings,
     workers: [
       {
         name: "pool",
@@ -134,6 +140,7 @@ const fakeMachines = () =>
   });
 
 const prepared: Array<AttemptId> = [];
+const checkouts: Array<CheckoutRequest> = [];
 let executorSweeps = 0;
 const discarded: Array<string> = [];
 
@@ -144,7 +151,10 @@ const executor = Layer.succeed(Executor)({
   outcome: unused,
   preflight: () => Effect.succeed(fullPreflight),
   prepare: (request) =>
-    Effect.sync(() => prepared.push(request.attemptId)).pipe(
+    Effect.sync(() => {
+      prepared.push(request.attemptId);
+      checkouts.push(request);
+    }).pipe(
       Effect.andThen(
         Effect.fail(
           ExecutorOperationError.make({
@@ -289,6 +299,27 @@ describe("Worker scheduler on a provisioned Worker", () => {
         yield* steps.discard(WorkerName.make("retired"), [attempt]);
         assert.deepStrictEqual(discarded, [`retired ${attempt}`]);
       }).pipe(Effect.scoped),
+  );
+
+  it.effect("copies each time limit from the instance settings to its own checkout field", () =>
+    Effect.gen(function* () {
+      const fake = yield* fakeMachines();
+      const config = yield* configWithTimings({}, 1, {
+        max_attempt_minutes: 600,
+        max_background_wait_minutes: 5,
+      });
+      const context = yield* scheduler(fake.machines, config);
+      const steps = Context.get(context, StepExecutor);
+      const run = RunId.make("run-limits");
+      const lease = yield* steps.reserve(run, submission(1), Option.none());
+      const attempt = AttemptId.make("run-limits/execute/1");
+      yield* steps.execute(executionOf(run, attempt), sink).pipe(Effect.flip);
+      const checkout = checkouts.find(({ attemptId }) => attemptId === attempt);
+      assert(checkout !== undefined, "the scheduler prepares the checkout");
+      assert.deepStrictEqual(checkout.maxAttemptMinutes, Option.some(600));
+      assert.deepStrictEqual(checkout.maxBackgroundWaitMinutes, Option.some(5));
+      yield* lease.release;
+    }).pipe(Effect.scoped),
   );
 
   for (const reason of ["capacity", "unreachable", "provider"] as const) {
