@@ -51,7 +51,7 @@ import { OperationCeilingChange, OperationId, TokenName } from "../../src/auth/m
 import type { AuthStore } from "../../src/auth/store.ts";
 import { FactoryBackend } from "../../src/backend.ts";
 import { Port } from "../../src/cli.ts";
-import { apiRoutes, MAX_REQUEST_BODY_BYTES, serverLayer } from "../../src/http.ts";
+import { apiRoutes, serverLayer } from "../../src/http.ts";
 import { operatorOpenApi } from "../../src/openapi.ts";
 import { startupListener } from "../../src/listener.ts";
 import { MCP_PATH, MCP_SESSION_IDLE, mcpRoutes } from "../../src/mcp/http.ts";
@@ -564,14 +564,14 @@ describe("operator MCP endpoint", () => {
       const token = yield* device([grant("read")]);
       const client = mcpClient(inProcess(app), token);
       yield* client.initialize;
-      // Each request restarts the idle time, so a session in use outlives it.
-      const half = Duration.toMillis(MCP_SESSION_IDLE) / 2;
-      yield* advance(half + 1);
+      // The documented idle time is one hour. Each request restarts it, so a session in use
+      // outlives it.
+      yield* advance("59 minutes");
       const midway = yield* client.status("tools/list");
-      yield* advance(half + 1);
+      yield* advance("59 minutes");
       const pastOpening = yield* client.status("tools/list");
       assert.deepEqual([midway, pastOpening], [200, 200]);
-      yield* advance(MCP_SESSION_IDLE);
+      yield* advance("1 hour");
       const expired = yield* client.status("tools/list");
       assert.equal(expired, 404);
       assert.deepInclude(logs, { message: "MCP session ended", fields: { reason: "idle" } });
@@ -927,24 +927,29 @@ describe("operator MCP endpoint", () => {
             params: { ...initializeParams, padding: "x".repeat(padding) },
           }),
         }).pipe(Effect.flatMap((response) => Effect.promise(() => response.json())));
-      const underLimit = yield* initializeWith(MAX_REQUEST_BODY_BYTES - 1024);
+      // The documented limit is 4 MiB.
+      const mebibyte = 1024 * 1024;
+      const underLimit = yield* initializeWith(4 * mebibyte - 1024);
       assert.property(underLimit, "result");
-      const tooLarge = yield* initializeWith(MAX_REQUEST_BODY_BYTES).pipe(
+      const tooLarge = yield* initializeWith(4 * mebibyte).pipe(
         Effect.flatMap(Schema.decodeUnknownEffect(RpcError)),
       );
       assert.equal(tooLarge.error.message, "Parse error");
-      const dismissed = yield* webRequest(`${origin}/api/attention/dismiss`, {
-        method: "POST",
-        headers: {
-          cookie: `usine_session=${browser.session}`,
-          "x-usine-csrf": browser.csrf,
-          "content-type": "application/json",
-        },
-        body: "x".repeat(MAX_REQUEST_BODY_BYTES + 1),
-      }).pipe(Effect.tap((response) => Effect.promise(() => response.arrayBuffer())));
-      assert.equal(dismissed.status, 413);
-      // A GitHub webhook delivery keeps its own, larger limit.
-      const delivery = jsonKey({ padding: "x".repeat(MAX_REQUEST_BODY_BYTES) });
+      const dismiss = (size: number) =>
+        webRequest(`${origin}/api/attention/dismiss`, {
+          method: "POST",
+          headers: {
+            cookie: `usine_session=${browser.session}`,
+            "x-usine-csrf": browser.csrf,
+            "content-type": "application/json",
+          },
+          body: "x".repeat(size),
+        }).pipe(Effect.tap((response) => Effect.promise(() => response.arrayBuffer())));
+      // A body of exactly the limit is read, and fails only as invalid JSON.
+      assert.equal((yield* dismiss(4 * mebibyte)).status, 400);
+      assert.equal((yield* dismiss(4 * mebibyte + 1)).status, 413);
+      // A GitHub webhook delivery keeps its own 25 MiB limit.
+      const delivery = jsonKey({ padding: "x".repeat(24 * mebibyte) });
       const delivered = yield* webRequest(`${origin}/webhooks/github`, {
         method: "POST",
         headers: {

@@ -746,43 +746,32 @@ it.live("warns once about a stored ceiling's unknown operation IDs and lists the
     const app = HttpRouter.toWebHandler(Layer.merge(routes, logged), { disableLogger: true });
     yield* Effect.addFinalizer(() => Effect.promise(() => app.dispose()));
     const { headers } = yield* signInWithLink(services, app);
-    // A release renamed `operator.renamed` after the ceiling was stored.
     const now = yield* Clock.currentTimeMillis;
-    yield* services.store.issue(
-      InstanceToken.make({
-        id: TokenId.make("stale"),
-        memberId: alice.id,
-        name: TokenName.make("Stale"),
-        hash: secretHash("stale-secret"),
-        kind: "device",
-        createdAt: now,
-        lastUsedAt: now,
-        expiresAt: now + 3_600_000,
-        operations: Option.some([
-          OperationId.make("operator.detail"),
-          OperationId.make("operator.renamed"),
-        ]),
-      }),
-    );
+    const issue = (id: string, operations: ReadonlyArray<string>) =>
+      services.store.issue(
+        InstanceToken.make({
+          id: TokenId.make(id),
+          memberId: alice.id,
+          name: TokenName.make(id),
+          hash: secretHash(`${id}-secret`),
+          kind: "device",
+          createdAt: now,
+          lastUsedAt: now,
+          expiresAt: now + 3_600_000,
+          operations: Option.some(operations.map((operation) => OperationId.make(operation))),
+        }),
+      );
+    // A release renamed `operator.renamed` and removed `operator.removed` after the ceilings
+    // were stored. Both stale tokens belong to alice, so each warns only if the log is per token.
+    yield* issue("stale", ["operator.detail", "operator.renamed"]);
+    yield* issue("removed", ["operator.removed"]);
     // A ceiling whose operations all exist gives no warning and no `unknownOperations`.
-    yield* services.store.issue(
-      InstanceToken.make({
-        id: TokenId.make("current"),
-        memberId: alice.id,
-        name: TokenName.make("Current"),
-        hash: secretHash("current-secret"),
-        kind: "device",
-        createdAt: now,
-        lastUsedAt: now,
-        expiresAt: now + 3_600_000,
-        operations: Option.some([OperationId.make("operator.detail")]),
-      }),
-    );
-    for (const secret of ["stale-secret", "stale-secret", "current-secret"])
+    yield* issue("current", ["operator.detail"]);
+    for (const id of ["stale", "stale", "removed", "removed", "current"])
       assert.equal(
         (yield* Effect.promise(() =>
           request(app, "/api/auth/session", "GET", undefined, {
-            authorization: `Bearer ${secret}`,
+            authorization: `Bearer ${id}-secret`,
           }),
         )).status,
         200,
@@ -791,6 +780,10 @@ it.live("warns once about a stored ceiling's unknown operation IDs and lists the
       {
         message: "Token operation ceiling names operations that don't exist",
         fields: { tokenId: "stale", unknown: "operator.renamed" },
+      },
+      {
+        message: "Token operation ceiling names operations that don't exist",
+        fields: { tokenId: "removed", unknown: "operator.removed" },
       },
     ]);
     const listed = yield* Effect.promise(() =>

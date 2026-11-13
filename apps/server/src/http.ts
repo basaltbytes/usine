@@ -627,7 +627,7 @@ export const staticRoutes = (webRoot: string) =>
   );
 
 /** The largest request body that the server reads, in bytes. Webhook deliveries set their own. */
-export const MAX_REQUEST_BODY_BYTES = 4 * 1024 * 1024;
+const MAX_REQUEST_BODY_BYTES = 4 * 1024 * 1024;
 // A body over the limit fails to read, and each route answers as it does for an unreadable body.
 const requestBodyLimit = HttpRouter.middleware(
   (handler) =>
