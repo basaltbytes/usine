@@ -1,5 +1,5 @@
 import { canonicalLabelName } from "@usine/core/label";
-import { type Attempt, AttemptWindow, windowHolds, windowOf } from "@usine/core/attempt";
+import { type Attempt, type AttemptWindow, windowHolds, windowOf } from "@usine/core/attempt";
 import { AgentFailure } from "@usine/core/attempt/failure";
 import { GitHubItemKey, type ItemNumber } from "@usine/core/item";
 import type { RepositoryName } from "@usine/core/repository";
@@ -46,6 +46,22 @@ const logFields = (attempt: Attempt, submission: Submission) => ({
 });
 type LogFields = ReturnType<typeof logFields>;
 
+/** Returns whether a retry of the failed read can succeed. */
+const isTransient = (
+  error: GitHubAppError | GitHubItemNotFoundError | UnknownWriterError | Cause.TimeoutError,
+): boolean => {
+  switch (error._tag) {
+    case "TimeoutError":
+      return true;
+    case "GitHubItemNotFoundError":
+    case "InvalidGitHubResponseError":
+    case "UnknownWriterError":
+      return false;
+    default:
+      return !isRefusal(error);
+  }
+};
+
 /**
  * Bounds `read` and retries it twice, after one and two seconds, after a timeout, a transport
  * failure, a server error, or a rate limit. A refusal, a missing Item, and an invalid response,
@@ -76,21 +92,6 @@ const transientlyRetried =
         ),
       ),
     );
-
-const isTransient = (
-  error: GitHubAppError | GitHubItemNotFoundError | UnknownWriterError | Cause.TimeoutError,
-): boolean => {
-  switch (error._tag) {
-    case "TimeoutError":
-      return true;
-    case "GitHubItemNotFoundError":
-    case "InvalidGitHubResponseError":
-    case "UnknownWriterError":
-      return false;
-    default:
-      return !isRefusal(error);
-  }
-};
 
 const matching = (submission: Submission, names: ReadonlyArray<string>) => {
   const wanted = new Set(submission.outcomeLabels.map(canonicalLabelName));
@@ -146,29 +147,29 @@ export const completionCheckLayer: Layer.Layer<
       runAttempts: ReadonlyArray<Attempt>,
     ) {
       const { config } = yield* instances.get;
-      const earlier = runAttempts.filter((previous) => previous.number < attempt.number);
-      const unbounded = earlier.filter((previous) => Option.isNone(windowOf(previous)));
-      if (unbounded.length > 0)
+      const attempts = [
+        ...runAttempts.filter((previous) => previous.number < attempt.number),
+        attempt,
+      ];
+      // The open Attempt's window has no end; an earlier one without a recorded end has none.
+      const windowed = attempts.flatMap((counted) =>
+        Option.toArray(Option.map(windowOf(counted), (window) => ({ counted, window }))),
+      );
+      if (windowed.length < attempts.length)
         yield* Effect.logInfo(
           "Earlier Attempts have no recorded end, so their label events don't count",
-          { ...fields, attempts: unbounded.map(({ id }) => id) },
+          {
+            ...fields,
+            attempts: attempts
+              .filter((unended) => Option.isNone(windowOf(unended)))
+              .map(({ id }) => id),
+          },
         );
-      const own = AttemptWindow.make({
-        attemptId: attempt.id,
-        startedAt: attempt.startedAt,
-        endedAt: Option.none(),
-      });
-      const attempts = [
-        ...earlier.flatMap((previous) =>
-          Option.toArray(Option.map(windowOf(previous), (window) => ({ previous, window }))),
-        ),
-        { previous: attempt, window: own },
-      ];
       return yield* Effect.gen(function* () {
         const { login } = yield* app.botAccount;
         const windows = new Map<BotLogin, Array<AttemptWindow>>();
-        for (const { previous, window } of attempts) {
-          const writer = yield* writerOf(previous, config.workers, login);
+        for (const { counted, window } of windowed) {
+          const writer = yield* writerOf(counted, config.workers, login);
           windows.set(writer, [...(windows.get(writer) ?? []), window]);
         }
         // At most two writers exist, the App's bot and the exe.dev integration's bot, so the
