@@ -1229,93 +1229,114 @@ describe("Codex child backend", () => {
     );
   }
 
-  it.effect("doesn't resend a restored message that the last finished Codex turn read", () =>
-    Effect.gen(function* () {
-      const notifications = yield* Queue.make<CodexNotification, Cause.Done>();
-      const read = OperatorMessage.make({ message: "Check the diff" });
-      const unread = OperatorMessage.make({ message: "Check the tests" });
-      const inputs: Array<{ method: string; params: Schema.Json }> = [];
-      const deliveries: Array<string> = [];
-      const saved = HarnessSession.make({
-        id: HarnessSessionId.make("thread-1"),
-        cwd: request().cwd,
-      });
-      const userMessage = (id: string, text: string) => ({
-        type: "userMessage",
-        id,
-        content: [{ type: "text", text, text_elements: [] }],
-      });
-      const responses = new Map(
-        Object.entries({
-          ...successfulResponses([{ id: "gpt-5.6-terra", model: "gpt-5.6-terra" }]),
-          "thread/resume": {
-            modelProvider: "openai",
-            thread: {
-              id: saved.id,
-              turns: [
-                {
-                  id: "turn-1",
-                  status: "completed",
-                  items: [userMessage("task", request().prompt)],
+  for (const commit of ["synchronous", "received", "delivered"] as const)
+    it.effect(
+      `doesn't resend a restored message that the last finished Codex turn read (${commit} commit)`,
+      () =>
+        Effect.gen(function* () {
+          const notifications = yield* Queue.make<CodexNotification, Cause.Done>();
+          const read = OperatorMessage.make({ message: "Check the diff" });
+          const alsoRead = OperatorMessage.make({ message: "Check the tests" });
+          const unread = OperatorMessage.make({ message: "Run the linter" });
+          const inputs: Array<{ method: string; params: Schema.Json }> = [];
+          const deliveries: Array<string> = [];
+          const saved = HarnessSession.make({
+            id: HarnessSessionId.make("thread-1"),
+            cwd: request().cwd,
+          });
+          const userMessage = (id: string, text: string) => ({
+            type: "userMessage",
+            id,
+            content: [{ type: "text", text, text_elements: [] }],
+          });
+          const items = [
+            userMessage("guidance-1", read.message),
+            userMessage("guidance-2", alsoRead.message),
+          ];
+          if (commit !== "synchronous") {
+            yield* Queue.offerAll(notifications, [
+              ...items.map((item) => ({
+                method: "item/started",
+                params: { threadId: saved.id, turnId: "turn-2", item },
+              })),
+              {
+                method: "turn/completed",
+                params: { threadId: saved.id, turn: { id: "turn-2", status: "completed", items } },
+              },
+            ]);
+          }
+          const responses = new Map(
+            Object.entries({
+              ...successfulResponses([{ id: "gpt-5.6-terra", model: "gpt-5.6-terra" }]),
+              "thread/resume": {
+                modelProvider: "openai",
+                thread: {
+                  id: saved.id,
+                  turns: [
+                    {
+                      id: "turn-1",
+                      status: "completed",
+                      items: [userMessage("task", request().prompt)],
+                    },
+                    {
+                      id: "turn-2",
+                      status: "completed",
+                      items,
+                    },
+                  ],
                 },
-                {
-                  id: "turn-2",
-                  status: "completed",
-                  items: [userMessage("guidance", read.message)],
-                },
-              ],
-            },
-          },
-        }),
-      );
-      const server = Layer.succeed(CodexAppServer)({
-        stop: () => Effect.void,
-        open: () =>
-          Effect.succeed({
-            notifications: Stream.fromQueue(notifications),
-            notify: () => Effect.void,
-            close: Queue.end(notifications).pipe(Effect.asVoid),
-            request: (_operation, method, params) =>
-              Effect.sync(() => {
-                if (method === "turn/start" || method === "turn/steer")
-                  inputs.push({ method, params });
-                return responses.get(method) ?? {};
-              }),
-          }),
-      });
-      yield* Effect.gen(function* () {
-        yield* (yield* ChildBackend).launch(
-          ChildRequest.make({
-            ...request(),
-            resume: Option.some(saved),
-            unread: [
-              { id: read.id, message: read.message },
-              { id: unread.id, message: unread.message },
-            ],
-          }),
-        );
-        assert.deepStrictEqual(deliveries, [`read ${read.id}`]);
-        assert.deepStrictEqual(
-          inputs.map(({ method }) => method),
-          ["turn/start", "turn/steer"],
-        );
-        assert.include(jsonKey(inputs[0]?.params), CONTINUATION_MESSAGE);
-        assert.include(jsonKey(inputs[1]?.params), unread.message);
-      }).pipe(
-        Effect.provide(codexChildLayer.pipe(Layer.provide(server))),
-        Effect.provideService(ChildSessionJournal, {
-          started: () => Effect.void,
-          prompted: Effect.void,
-          continued: () => Effect.void,
-          received: () => Effect.void,
-          delivered: (id, state) =>
-            Effect.sync(() => {
-              deliveries.push(`${Option.isSome(state) ? "read" : "unread"} ${id}`);
+              },
             }),
-        }),
-      );
-    }).pipe(Effect.scoped),
-  );
+          );
+          const server = Layer.succeed(CodexAppServer)({
+            stop: () => Effect.void,
+            open: () =>
+              Effect.succeed({
+                notifications: Stream.fromQueue(notifications),
+                notify: () => Effect.void,
+                close: Queue.end(notifications).pipe(Effect.asVoid),
+                request: (_operation, method, params) =>
+                  Effect.sync(() => {
+                    if (method === "turn/start" || method === "turn/steer")
+                      inputs.push({ method, params });
+                    return responses.get(method) ?? {};
+                  }),
+              }),
+          });
+          yield* Effect.gen(function* () {
+            yield* (yield* ChildBackend).launch(
+              ChildRequest.make({
+                ...request(),
+                resume: Option.some(saved),
+                unread: [
+                  { id: read.id, message: read.message },
+                  { id: alsoRead.id, message: alsoRead.message },
+                  { id: unread.id, message: unread.message },
+                ],
+              }),
+            );
+            assert.deepStrictEqual(deliveries, [`read ${read.id}`, `read ${alsoRead.id}`]);
+            assert.deepStrictEqual(
+              inputs.map(({ method }) => method),
+              ["turn/start", "turn/steer"],
+            );
+            assert.include(jsonKey(inputs[0]?.params), CONTINUATION_MESSAGE);
+            assert.include(jsonKey(inputs[1]?.params), unread.message);
+          }).pipe(
+            Effect.provide(codexChildLayer.pipe(Layer.provide(server))),
+            Effect.provideService(ChildSessionJournal, {
+              started: () => Effect.void,
+              prompted: Effect.void,
+              continued: () => Effect.void,
+              received: () => (commit === "received" ? Effect.yieldNow : Effect.void),
+              delivered: (id, state) =>
+                Effect.sync(() => {
+                  deliveries.push(`${Option.isSome(state) ? "read" : "unread"} ${id}`);
+                }).pipe(Effect.andThen(commit === "delivered" ? Effect.yieldNow : Effect.void)),
+            }),
+          );
+        }).pipe(Effect.scoped),
+    );
 
   it.effect("sends a restored message whose text a saved receipt already acknowledged", () =>
     Effect.gen(function* () {

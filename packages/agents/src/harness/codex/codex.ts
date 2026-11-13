@@ -820,6 +820,8 @@ const makeCodexSessions = Effect.gen(function* () {
         yield* resume(consumed.failure);
       }
     }).pipe(Effect.catch(fail));
+    // Replayed notifications must not save these receipts before restored guidance is matched.
+    if (!turnActive) yield* readRestored(thread.lastTurn);
     yield* Effect.forkScoped(consume);
 
     const interrupt = interruptTurn();
@@ -835,9 +837,7 @@ const makeCodexSessions = Effect.gen(function* () {
       running,
       active: turnActive,
       recover: (tools: ReadonlyArray<InterruptedTool>) =>
-        readRestored(thread.lastTurn).pipe(
-          Effect.andThen(conversation.recover(policy, tools, steer, thread.empty)),
-        ),
+        conversation.recover(policy, tools, steer, thread.empty),
     };
   });
   const stop = Effect.fn("CodexRuntime.stop")((spec: SessionSpec) =>
