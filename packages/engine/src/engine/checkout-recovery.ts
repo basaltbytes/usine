@@ -22,7 +22,9 @@ class ParentStopUnconfirmedError extends Schema.TaggedError<
 type StartupVisit = Data.TaggedEnum<{
   /**
    * Recovery found the Attempt's leftovers and reconciled them, or kept them for its Run. A closed
-   * Attempt's reconciled checkout is removed; the next startup visits the Attempt again.
+   * Attempt's checkout is removed once its salvage is pushed or it has nothing to salvage; a
+   * retained, partly pushed, or rejected salvage keeps it on the Worker. Either way, the next
+   * startup visits the Attempt again.
    */
   Kept: {};
   /** Reconciliation failed and left the work on the Worker; the next startup visits it again. */
