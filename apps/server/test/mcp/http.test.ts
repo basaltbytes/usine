@@ -1,4 +1,6 @@
 import { NodeHttpServer, NodeServices } from "@effect/platform-node";
+import { UsineConfig } from "@usine/config/factory";
+import { LoadedInstance } from "@usine/config/instance";
 import { assert, describe, it } from "@effect/vitest";
 import {
   administratorPermissions,
@@ -11,6 +13,10 @@ import { ActingMember, localActor } from "@usine/core/operator";
 import { ProjectId } from "@usine/core/project";
 import { type RunId } from "@usine/core/run";
 import { OperatorApi, operatorPermissions, UpgradeView } from "@usine/orchestrator/operator/http";
+import { WebhookHealth } from "@usine/orchestrator/webhooks";
+// This synchronous Node crypto boundary signs the test's webhook delivery.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
+import { createHmac } from "node:crypto";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
@@ -18,6 +24,7 @@ import { webRequest } from "../../../../tooling/test/http.mts";
 import {
   type Cause,
   Clock,
+  ConfigProvider,
   Context,
   DateTime,
   Deferred,
@@ -56,6 +63,7 @@ import {
 } from "../../src/mcp/stdio.ts";
 import { MAX_RESULT_BYTES } from "../../src/mcp/tools.ts";
 import { ServerUpgrades } from "../../src/upgrade/control.ts";
+import { webhookEndpoint } from "../../src/webhooks.ts";
 import {
   InstanceLaunch,
   InstanceRecord,
@@ -527,10 +535,19 @@ describe("operator MCP endpoint", () => {
       other.useSession(owner.session());
       const borrowed = yield* other.status("tools/list");
       const borrowedEnd = yield* other.end;
+      // Other grants give another tool list, which must not end the owner's session.
+      const narrowToken = yield* device([grant("read")]);
+      const narrow = mcpClient(inProcess(app), narrowToken);
+      narrow.useSession(owner.session());
+      const narrowed = yield* narrow.status("tools/list");
+      const narrowedEnd = yield* narrow.end;
       const ownerTools = yield* owner.listTools;
       const ended = yield* owner.end;
       const afterEnd = yield* owner.status("tools/list");
-      assert.deepEqual([borrowed, borrowedEnd, ended, afterEnd], [404, 404, 204, 404]);
+      assert.deepEqual(
+        [borrowed, borrowedEnd, narrowed, narrowedEnd, ended, afterEnd],
+        [404, 404, 404, 404, 204, 404],
+      );
       assert.sameMembers(ownerTools, expectedTools(["public", "read", "operate"]));
     }).pipe(Effect.scoped),
   );
@@ -620,6 +637,75 @@ describe("operator MCP endpoint", () => {
       const owned = yield* owner.status("tools/list");
       assert.equal(owned, 404);
       assert.equal(idleEnds(logs), 3);
+    }).pipe(Effect.scoped),
+  );
+
+  it.live("hands back only the sessions that an aborted sweep didn't end", () =>
+    Effect.gen(function* () {
+      const { app, device, browser, logs, advance, intercept } = yield* fixture;
+      const token = yield* device([grant("read")]);
+      const owner = mcpClient(inProcess(app), token);
+      yield* owner.initialize;
+      for (const _ of [1, 2]) yield* mcpClient(inProcess(app), token).initialize;
+      yield* advance(MCP_SESSION_IDLE);
+      // The browser's GET and the sweep's first DELETE authenticate; the second DELETE waits.
+      const held = yield* Deferred.make<void>();
+      const release = yield* Deferred.make<void>();
+      yield* intercept(2, (original) =>
+        Deferred.succeed(held, undefined).pipe(
+          Effect.andThen(Deferred.await(release)),
+          Effect.andThen(original),
+        ),
+      );
+      const connection = yield* Scope.make();
+      const signal = yield* Effect.abortSignal.pipe(Scope.provide(connection));
+      const aborted = app.handler(
+        new Request(`https://usine.example${MCP_PATH}`, {
+          headers: { cookie: `usine_session=${browser.session}` },
+          signal,
+        }),
+      );
+      yield* Deferred.await(held);
+      yield* Scope.close(connection, Exit.void);
+      yield* Effect.promise(() => aborted);
+      yield* Deferred.succeed(release, undefined);
+      assert.equal(idleEnds(logs), 1);
+      const owned = yield* owner.status("tools/list");
+      assert.equal(owned, 404);
+      assert.equal(idleEnds(logs), 3);
+      assert.notInclude(
+        logs.map(({ message }) => message),
+        "MCP session already ended on its tool server",
+      );
+    }).pipe(Effect.scoped),
+  );
+
+  it.live("ends the other sessions of a sweep when one session's end fails", () =>
+    Effect.gen(function* () {
+      const { app, device, browser, logs, advance, intercept } = yield* fixture;
+      const token = yield* device([grant("read")]);
+      const owner = mcpClient(inProcess(app), token);
+      yield* owner.initialize;
+      yield* mcpClient(inProcess(app), token).initialize;
+      yield* advance(MCP_SESSION_IDLE);
+      // The browser's GET authenticates once; the auth store then dies on the sweep's first DELETE.
+      yield* intercept(1, () => Effect.die("The auth store failed."));
+      const opened = yield* Effect.promise(() =>
+        app.handler(
+          new Request(`https://usine.example${MCP_PATH}`, {
+            headers: { cookie: `usine_session=${browser.session}` },
+          }),
+        ),
+      );
+      assert.equal(opened.status, 405);
+      assert.include(
+        logs.map(({ message }) => message),
+        "MCP tool server did not end the session; the next sweep retries",
+      );
+      assert.equal(idleEnds(logs), 1);
+      const owned = yield* owner.status("tools/list");
+      assert.equal(owned, 404);
+      assert.equal(idleEnds(logs), 2);
     }).pipe(Effect.scoped),
   );
 
@@ -723,6 +809,35 @@ describe("operator MCP endpoint", () => {
       const listener = yield* startupListener("test").pipe(Effect.provideContext(context));
       const fileSystem = yield* FileSystem.FileSystem;
       const webRoot = yield* fileSystem.makeTempDirectoryScoped();
+      const webhookSecret = "webhook-test-secret";
+      const loaded = LoadedInstance.make({
+        config: yield* Schema.decodeEffect(UsineConfig)({
+          version: 1,
+          repos: [],
+          webhooks: { mode: "endpoint", public_url: "https://usine.example/webhooks/github" },
+        }),
+        agents: [],
+        loops: [],
+        invalidAgents: [],
+        quarantinedLoops: [],
+        warnings: [],
+      });
+      const webhooks = yield* webhookEndpoint(
+        { get: Effect.succeed(loaded), changes: Stream.never },
+        { hint: () => Effect.void },
+        WebhookHealth.of({
+          startedAt: yield* DateTime.now,
+          reset: Effect.void,
+          received: Effect.void,
+          silent: Effect.succeed(false),
+        }),
+        { configureWebhook: () => Effect.void },
+      ).pipe(
+        Effect.provideService(
+          ConfigProvider.ConfigProvider,
+          ConfigProvider.fromUnknown({ USINE_GITHUB_WEBHOOK_SECRET: webhookSecret }),
+        ),
+      );
       yield* Layer.build(
         serverLayer(
           backend,
@@ -730,7 +845,7 @@ describe("operator MCP endpoint", () => {
           Port.make(Number(new URL(origin).port)),
           services,
           upgrades,
-          Layer.empty,
+          webhooks,
           undefined,
           listener,
         ),
@@ -793,6 +908,17 @@ describe("operator MCP endpoint", () => {
         body: "x".repeat(MAX_REQUEST_BODY_BYTES + 1),
       }).pipe(Effect.tap((response) => Effect.promise(() => response.arrayBuffer())));
       assert.equal(dismissed.status, 413);
+      // A GitHub webhook delivery keeps its own, larger limit.
+      const delivery = jsonKey({ padding: "x".repeat(MAX_REQUEST_BODY_BYTES) });
+      const delivered = yield* webRequest(`${origin}/webhooks/github`, {
+        method: "POST",
+        headers: {
+          "x-hub-signature-256": `sha256=${createHmac("sha256", webhookSecret).update(delivery).digest("hex")}`,
+          "x-github-event": "ping",
+        },
+        body: delivery,
+      }).pipe(Effect.tap((response) => Effect.promise(() => response.arrayBuffer())));
+      assert.equal(delivered.status, 204);
     }).pipe(Effect.provide([NodeServices.layer, FetchHttpClient.layer]), Effect.scoped),
   );
 
