@@ -11,7 +11,7 @@ const DEFAULT_MIN_FREE_DISK_GIB = 10;
 
 /**
  * A script that prints `df -Pk` for the directory `$1`, then the line of the image storage of
- * the container runtime `$2`, if any. Leaves the storage out if the runtime doesn't report it.
+ * the container runtime `$2`, if any. Reports skipped storage checks on stderr.
  */
 const FREE_DISK_SCRIPT = String.raw`
 set -eu
@@ -19,10 +19,14 @@ df -Pk "$1"
 case "$2" in
   docker) store=$(docker info --format '{{.DockerRootDir}}' 2>/dev/null) || store= ;;
   podman) store=$(podman info --format '{{.Store.GraphRoot}}' 2>/dev/null) || store= ;;
-  *) store= ;;
+  *) exit 0 ;;
 esac
-if [ -n "$store" ]; then
-  df -Pk "$store" 2>/dev/null | tail -n +2 || true
+if [ -z "$store" ]; then
+  printf 'usine-disk-storage-skipped: %s did not report its image storage path\n' "$2" >&2
+elif storage_df=$(df -Pk "$store" 2>/dev/null); then
+  printf '%s\n' "$storage_df" | tail -n +2
+else
+  printf 'usine-disk-storage-skipped: df could not read %s image storage at %s\n' "$2" "$store" >&2
 fi
 `.trim();
 
@@ -67,6 +71,10 @@ export const verifyFreeDisk = Effect.fn("SshExecutor.verifyFreeDisk")(function* 
   const thresholdGib = machine.address.minFreeDiskGib ?? DEFAULT_MIN_FREE_DISK_GIB;
   const fields = { worker, host, operation, thresholdGib };
   yield* Effect.annotateCurrentSpan(fields);
+  if (thresholdGib === 0) {
+    yield* Effect.logInfo("SSH Worker free disk space check is disabled", fields);
+    return;
+  }
   const read = yield* commands.inspect(operation, machine.shell, "sh", [
     "-c",
     FREE_DISK_SCRIPT,
@@ -74,6 +82,14 @@ export const verifyFreeDisk = Effect.fn("SshExecutor.verifyFreeDisk")(function* 
     machine.address.root,
     Option.getOrElse(runtime, () => ""),
   ]);
+  for (const line of read.stderr.split("\n")) {
+    const prefix = "usine-disk-storage-skipped: ";
+    if (line.startsWith(prefix))
+      yield* Effect.logInfo("Skipped SSH Worker image storage disk check", {
+        ...fields,
+        reason: line.slice(prefix.length),
+      });
+  }
   const filesystems = freeSpaceFromDf(read.stdout);
   const lowest = filesystems.reduce<FreeSpace | undefined>(
     (current, filesystem) =>

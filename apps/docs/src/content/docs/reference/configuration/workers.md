@@ -99,6 +99,8 @@ Shared `usine-pnpm-store` and `usine-turbo-cache` volumes survive containers on 
 
 Preflight and each attempt, before its checkout starts, check the free disk space on the filesystem of `root` and on the container runtime's image storage. If either has less than `min_free_disk_gib` GiB free, the check fails with a `disk` error that states the free space and the threshold. **Needs attention** shows the error, and no attempt starts on the worker until a preflight passes. Preflight runs again after 1, 2, 5, and then every 10 minutes. When the check fails before a checkout, the attempt fails with an infrastructure failure, which usine retries.
 
+A threshold of `0` skips disk probes and logs that the check is disabled. When the container runtime cannot report its image storage path, or `df` cannot read that path, usine logs the skipped storage check at Info and checks the worker root. Cleanup also logs at Info when there are no older worker images to remove.
+
 To change the threshold, set `min_free_disk_gib` on the worker, for example with `usine config edit worker worker-one`:
 
 ```yaml

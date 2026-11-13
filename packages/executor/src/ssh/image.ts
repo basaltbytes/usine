@@ -193,7 +193,7 @@ const removeOldWorkerImages = Effect.fn("SshExecutor.removeOldWorkerImages")(
       inUse: selection.inUse.join(","),
     };
     if (selection.remove.length === 0) {
-      yield* Effect.logDebug("No older worker image to remove", selectionFields);
+      yield* Effect.logInfo("No older worker image to remove", selectionFields);
       return;
     }
     const removed = yield* commands.inspect(operation, machine.shell, runtime, [

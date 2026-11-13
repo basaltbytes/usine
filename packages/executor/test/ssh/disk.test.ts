@@ -1,6 +1,7 @@
 import { assert, describe, it } from "@effect/vitest";
 import { MinFreeDiskGib } from "@usine/core/worker";
-import { Effect, Layer, Option } from "effect";
+import { Effect, Fiber, Layer, Option } from "effect";
+import { TestClock } from "effect/testing";
 import { reportsDiskFull } from "../../src/disk-full.ts";
 import { Executor, ExecutorOperationError, WorkerCapabilityError } from "../../src/executor.ts";
 import { freeSpaceFromDf } from "../../src/ssh/disk.ts";
@@ -38,7 +39,10 @@ describe("free disk space of an SSH Worker", () => {
       const error = yield* executor.preflight(WORKER, [], 1).pipe(Effect.flip);
       assert(error._tag === "WorkerCapabilityError");
       assert.strictEqual(error.capability, "disk");
-      assert.include(error.message, "has 3.5 GiB free on /, below its threshold of 10 GiB");
+      assert.include(
+        error.message,
+        "has 3.5 GiB free on /srv/usine, below its threshold of 10 GiB",
+      );
       assert.include(error.message, "min_free_disk_gib");
     }).pipe(Effect.provide(runtime(machine, mintingProvider())));
   });
@@ -74,9 +78,90 @@ describe("free disk space of an SSH Worker", () => {
       const error = yield* executor.prepare(request).pipe(Effect.scoped, Effect.flip);
       assert(error._tag === "WorkerCapabilityError");
       assert.strictEqual(error.capability, "disk");
-      assert.include(error.message, "has 1.0 GiB free on /, below its threshold of 10 GiB");
+      assert.include(
+        error.message,
+        "has 1.0 GiB free on /srv/usine, below its threshold of 10 GiB",
+      );
       assert.isFalse(linesOf(machine).some((line) => line.includes("'git' 'clone'")));
     }).pipe(Effect.provide(runtime(machine, mintingProvider())));
+  });
+
+  it.effect("checks Docker image storage before preparing a checkout", () => {
+    const machine = fakeMachine();
+    machine.state.docker = "running";
+    machine.state.storageFreeDiskGib = 1;
+    return Effect.gen(function* () {
+      const executor = yield* Executor;
+      const error = yield* executor.prepare(request).pipe(Effect.scoped, Effect.flip);
+      assert(error._tag === "WorkerCapabilityError");
+      assert.strictEqual(error.capability, "disk");
+      assert.include(error.message, "has 1.0 GiB free on /var/lib/docker");
+      assert.isFalse(linesOf(machine).some((line) => line.includes("'git' 'clone'")));
+    }).pipe(Effect.provide(runtime(machine, mintingProvider())));
+  });
+
+  it.effect.each(["preflight", "prepare"] as const)(
+    "disables disk probes during %s when min_free_disk_gib is zero",
+    (operation) => {
+      const machine = fakeMachine();
+      machine.state.docker = "running";
+      machine.state.diskReadError = "df: cannot read filesystem";
+      machine.state.storageFreeDiskGib = 0;
+      const logs = capturedLogs();
+      return Effect.gen(function* () {
+        const executor = yield* Executor;
+        if (operation === "preflight") yield* executor.preflight(WORKER, [], 1);
+        else yield* executor.prepare(request);
+        assert.isFalse(linesOf(machine).some((line) => line.includes("df -Pk")));
+        assert.isTrue(
+          logs.infos.some((line) => line.includes("free disk space check is disabled")),
+        );
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(withThreshold(machine, 0).pipe(Layer.provideMerge(logs.layer))),
+      );
+    },
+  );
+
+  it.effect.each(["info-fails", "info-empty", "df-fails"] as const)(
+    "logs skipped image storage checks at Info when %s",
+    (failure) => {
+      const machine = fakeMachine();
+      machine.state.docker = "running";
+      machine.state.storageProbe = failure;
+      const logs = capturedLogs();
+      return Effect.gen(function* () {
+        const executor = yield* Executor;
+        yield* executor.preflight(WORKER, [], 1);
+        const skipped = logs.infos.find((line) =>
+          line.includes("Skipped SSH Worker image storage disk check"),
+        );
+        assert.isDefined(skipped);
+        assert.include(
+          skipped ?? "",
+          failure === "df-fails" ? "/var/lib/docker" : "docker did not report",
+        );
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(runtime(machine, mintingProvider()).pipe(Layer.provideMerge(logs.layer))),
+      );
+    },
+  );
+
+  it.effect("reports an image pull that runs out of disk space during preflight", () => {
+    const machine = fakeMachine();
+    machine.state.docker = "running";
+    machine.state.imageOnMachine = false;
+    machine.state.pullError = "write /var/lib/docker/tmp/image: no space left on device";
+    return Effect.gen(function* () {
+      const executor = yield* Executor;
+      const checking = yield* executor.preflight(WORKER, [], 1).pipe(Effect.flip, Effect.forkChild);
+      yield* TestClock.adjust("20 seconds");
+      const error = yield* Fiber.join(checking);
+      assert(error._tag === "WorkerCapabilityError");
+      assert.strictEqual(error.capability, "disk");
+      assert.include(error.message, `Worker "${WORKER}" ran out of disk space`);
+    }).pipe(Effect.scoped, Effect.provide(runtime(machine, mintingProvider())));
   });
 
   it.effect("reports a checkout that runs out of disk space as a disk capability error", () => {
@@ -186,6 +271,64 @@ describe("older worker images on an SSH Worker", () => {
           "ghcr.io/acme/worker:b",
         ],
       },
+    );
+  });
+
+  it.effect.each(["imageListError", "containerListError", "imageRemovalError"] as const)(
+    "logs %s without failing preflight or deleting images",
+    (failure) => {
+      const machine = fakeMachine();
+      machine.state.docker = "running";
+      machine.state.pulledImageId = "sha256:c0";
+      machine.state.workerImages = [
+        `sha256:c0 ${REPOSITORY} current 2026-11-13 08:00:00 +0000 UTC`,
+        `sha256:b0 ${REPOSITORY} previous 2026-11-12 08:00:00 +0000 UTC`,
+        `sha256:a0 ${REPOSITORY} older 2026-11-11 08:00:00 +0000 UTC`,
+      ];
+      const images = [...machine.state.workerImages];
+      machine.state[failure] =
+        failure === "imageRemovalError"
+          ? "conflict: image is being used by a running container"
+          : "runtime refused listing";
+      const logs = capturedLogs();
+      return Effect.gen(function* () {
+        const executor = yield* Executor;
+        yield* executor.preflight(WORKER, [], 1);
+        assert.deepStrictEqual(machine.state.workerImages, images);
+        assert.isTrue(
+          logs.warnings.some((line) =>
+            line.includes(
+              failure === "imageRemovalError"
+                ? "Could not remove some older worker images"
+                : "Could not remove older worker images",
+            ),
+          ),
+        );
+        assert.lengthOf(machine.state.imageRemovals, failure === "imageRemovalError" ? 1 : 0);
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(runtime(machine, mintingProvider()).pipe(Layer.provideMerge(logs.layer))),
+      );
+    },
+  );
+
+  it.effect("logs at Info when the runtime lists no matching worker images", () => {
+    const machine = fakeMachine();
+    machine.state.docker = "running";
+    machine.state.workerImages = [
+      "sha256:a0 ghcr.io/acme/other latest 2026-11-11 08:00:00 +0000 UTC",
+    ];
+    const logs = capturedLogs();
+    return Effect.gen(function* () {
+      const executor = yield* Executor;
+      yield* executor.preflight(WORKER, [], 1);
+      const skipped = logs.infos.find((line) => line.includes("No older worker image to remove"));
+      assert.isDefined(skipped);
+      assert.include(skipped ?? "", '"images":0');
+      assert.lengthOf(machine.state.imageRemovals, 0);
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(runtime(machine, mintingProvider()).pipe(Layer.provideMerge(logs.layer))),
     );
   });
 
