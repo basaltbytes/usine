@@ -111,7 +111,7 @@ root: /home/usine/.usine
 min_free_disk_gib: 20
 ```
 
-If one of usine's own commands on the worker, such as an image pull or a checkout, reports `ENOSPC` or `No space left on device`, usine reports the same `disk` error. A report from the attempt's agent keeps its own outcome.
+If one of usine's own commands on the worker, such as an image pull or a checkout, reports `ENOSPC` or `No space left on device` during preflight or attempt preparation, usine reports the same `disk` error. A report from the attempt's agent keeps its own outcome.
 
 After each image pull, usine removes the older images of the attempt image's repository, such as the worker images of earlier releases. It keeps the current image, the newest older image so that a rollback doesn't download it again, and every image that a container uses. The server logs the images it removes; a failed removal is logged and doesn't fail preflight.
 
