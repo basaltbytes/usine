@@ -1,14 +1,21 @@
 // Durable storage transactions use Promise callbacks.
 // @effect-diagnostics asyncFunction:off
 import { assert, it } from "@effect/vitest";
+import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { ChildBackend, ChildSessionJournal, SessionInterruptedError } from "@usine/agents/runtime";
-import { HarnessSession, SessionStarted, TextOutput } from "@usine/core/agent/session";
+import {
+  type AgentSessionId,
+  HarnessSession,
+  SessionStarted,
+  TextOutput,
+} from "@usine/core/agent/session";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { jsonKey } from "@usine/core/json-key";
 import { Context, Deferred, Effect, Fiber, Layer, Option } from "effect";
 import { AttemptRuntime } from "../src/attempt-runtime.ts";
 import { SubagentDoc } from "../src/attempt/child.ts";
+import { SUBAGENT_TOOL } from "../src/attempt/subagent.ts";
 import { routedRuntimeLayer as runtimeLayer } from "../src/testing.ts";
 import { DurableHarness, durableError, layer as harnessLayer } from "../src/harness.ts";
 import {
@@ -43,6 +50,25 @@ const failedReopen = (restored: Array<ReadonlyArray<string>>) =>
       });
     }),
   ).pipe(Layer.provide(stubChildBackendLayer));
+
+/** Stub children that read their restored operator messages as soon as they start. */
+const readOnReopen = Layer.effectContext(
+  Effect.gen(function* () {
+    const services = yield* Effect.context<ChildBackend | StubChildren>();
+    const backend = Context.get(services, ChildBackend);
+    return Context.add(services, ChildBackend, {
+      ...backend,
+      launch: (child) =>
+        Effect.gen(function* () {
+          const running = yield* backend.launch(child);
+          const journal = yield* ChildSessionJournal.current;
+          const state = AttemptChannel.InterventionState.make({ held: false, paused: false });
+          for (const { id } of child.unread) yield* journal.delivered(id, Option.some(state));
+          return running;
+        }),
+    });
+  }),
+).pipe(Layer.provide(stubChildBackendLayer));
 
 for (const failure of ["harness-mismatch", "native-reopen"] as const) {
   it.live(`returns a restored forwarded steer to the parent after ${failure}`, () =>
@@ -272,24 +298,6 @@ it.live("reports a restored forwarded steer read by the resumed child", () =>
       }),
     );
     const beforeRestart = recording.outbound().length;
-    // The resumed child reads its restored message as soon as it starts.
-    const readOnReopen = Layer.effectContext(
-      Effect.gen(function* () {
-        const services = yield* Effect.context<ChildBackend | StubChildren>();
-        const backend = Context.get(services, ChildBackend);
-        return Context.add(services, ChildBackend, {
-          ...backend,
-          launch: (child) =>
-            Effect.gen(function* () {
-              const running = yield* backend.launch(child);
-              const journal = yield* ChildSessionJournal.current;
-              const state = AttemptChannel.InterventionState.make({ held: false, paused: false });
-              for (const { id } of child.unread) yield* journal.delivered(id, Option.some(state));
-              return running;
-            }),
-        });
-      }),
-    ).pipe(Layer.provide(stubChildBackendLayer));
     yield* Effect.scoped(
       Effect.gen(function* () {
         const services = yield* Layer.build(
@@ -334,6 +342,123 @@ it.live("reports a restored forwarded steer read by the resumed child", () =>
         );
         assert.lengthOf(started, 1);
         assert.deepStrictEqual(started[0]?.prompt, Option.none());
+      }),
+    );
+  }).pipe(Effect.scoped, Effect.timeout("10 seconds")),
+);
+
+it.live("restores a child's queued operator input to that child alone after a restart", () =>
+  Effect.gen(function* () {
+    const database = yield* temporaryDatabase;
+    const request = attemptRequest("steering/recovery/sibling");
+    const recording = recordingSink();
+    let target: AgentSessionId | undefined;
+    yield* Effect.scoped(
+      Effect.gen(function* () {
+        const services = yield* Layer.build(
+          layer({
+            database,
+            parent: [
+              fauxAssistantMessage(
+                [
+                  fauxToolCall(SUBAGENT_TOOL, { task: "Fix the docs." }),
+                  fauxToolCall(SUBAGENT_TOOL, { task: "Fix the tests." }),
+                ],
+                { stopReason: "toolUse" },
+              ),
+            ],
+          }),
+        );
+        const runtime = Context.get(services, AttemptRuntime);
+        const committed = yield* Deferred.make<void>();
+        let outputs = 0;
+        const execution = yield* Effect.forkChild(
+          runtime.execute(request, {
+            ...recording.sink,
+            append: (direction, envelope) =>
+              recording.sink.append(direction, envelope).pipe(
+                Effect.andThen(() => {
+                  if (
+                    envelope._tag !== "OutboundEnvelope" ||
+                    envelope.payload._tag !== "SessionEvent" ||
+                    envelope.payload.event._tag !== "TextOutput" ||
+                    envelope.payload.event.session._tag !== "ChildSession"
+                  )
+                    return Effect.void;
+                  outputs += 1;
+                  return outputs === 2
+                    ? Deferred.succeed(committed, undefined).pipe(Effect.asVoid)
+                    : Effect.void;
+                }),
+              ),
+          }),
+        );
+        const children = Context.get(services, StubChildren);
+        const launched = [yield* children.next, yield* children.next] as const;
+        const sessionId = launched[0].request.session.id;
+        target = sessionId;
+        for (const child of launched) {
+          yield* child.emit(
+            SessionStarted.make({
+              session: child.request.session,
+              harnessSession: Option.some(HarnessSession.make({ cwd: request.cwd })),
+            }),
+          );
+          yield* child.emit(
+            TextOutput.make({ session: child.request.session, text: "Partial progress" }),
+          );
+        }
+        yield* Deferred.await(committed);
+        yield* runtime.intervene(
+          request.spec.attemptId,
+          AttemptChannel.Intervention.make({
+            operator: "PhilDL",
+            target: AttemptChannel.ChildTarget.make({ sessionId }),
+            action: AttemptChannel.Steer.make({ message: "Fix the third finding." }),
+          }),
+        );
+        yield* Fiber.interrupt(execution);
+      }),
+    );
+    const beforeRestart = recording.outbound().length;
+    yield* Effect.scoped(
+      Effect.gen(function* () {
+        const services = yield* Layer.build(
+          runtimeLayer.pipe(
+            Layer.provideMerge(
+              harnessLayer({
+                ...fauxParent([answer("Handled both.")]),
+                openStorage: Effect.tryPromise({
+                  try: () => openNodeSqliteStorage(database),
+                  catch: (cause) => durableError("open recovery storage", cause),
+                }),
+              }),
+            ),
+            Layer.provideMerge(readOnReopen),
+          ),
+        );
+        const execution = yield* Effect.forkChild(
+          Context.get(services, AttemptRuntime).execute(request, recording.sink),
+        );
+        const children = Context.get(services, StubChildren);
+        const resumed = [yield* children.next, yield* children.next];
+        const unread = Object.fromEntries(
+          resumed.map(({ request: { session, unread } }) => [
+            session.id === target ? "target" : "sibling",
+            unread.map(({ message }) => message),
+          ]),
+        );
+        assert.deepStrictEqual(unread, { target: ["Fix the third finding."], sibling: [] });
+        for (const child of resumed) yield* child.reply("Fixed.");
+        const result = yield* Fiber.join(execution);
+        assert.strictEqual(result.message, "Handled both.");
+        const receipts = recording
+          .outbound()
+          .slice(beforeRestart)
+          .flatMap(({ payload }) =>
+            payload._tag === "InterventionApplied" ? [payload.state.queued] : [],
+          );
+        assert.deepStrictEqual(receipts, [false]);
       }),
     );
   }).pipe(Effect.scoped, Effect.timeout("10 seconds")),

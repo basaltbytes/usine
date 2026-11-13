@@ -205,6 +205,10 @@ export const AuthApi = HttpApiGroup.make("authentication")
             "scopes",
           ]),
           operations: Schema.optionalKey(operations),
+          unknownOperations: Schema.optionalKey(operations).annotate({
+            description:
+              "The operation IDs of the ceiling that match no operation, such as an ID that a release renamed. The token cannot call them.",
+          }),
           expiresAt: Schema.NullOr(Schema.Finite).annotate({
             description: "Epoch milliseconds of expiry, or null for a device token without one.",
           }),
