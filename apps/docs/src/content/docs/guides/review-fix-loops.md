@@ -25,6 +25,8 @@ Instance admin access, a project, `reviewer` and `developer` agents, repository 
    | Findings | `agent-review-findings` | `review-passed`, `ready-for-review` |
    | Clean review | `review-passed` | `agent-review-findings`, `ready-for-review` |
 
+   Require the agent to remove both verdict labels before it adds the one for its result. GitHub records no event when a label is added to a pull request that already has it, so a verdict left from an earlier review would fail the outcome label check.
+
    The App identity is shared, so an agent review does not provide an independent GitHub approval. Require the reviewer to report merge conflicts as findings and leave resolution to a writer.
 
 3. Create an `act-on-findings` loop with stream `pr`, agent `developer`, and permissions `write`. Its condition selects open, non-draft pull requests labeled `agent-review-findings`. Require its task to check out `{{ item.headRefName }}`, fix each finding, check live mergeability, merge the base branch if needed, run local checks, and push. A conflict requiring an operator decision becomes `[usine:question]` on the pull request.
@@ -44,7 +46,7 @@ Set the review loop's `outcome_labels` in its text editor to its two verdict lab
 outcome_labels: [review-passed, agent-review-findings]
 ```
 
-Replace `review-passed` with `ready-to-merge` if that is your loop's success label. usine verifies that the review attempt added one of the configured labels to the pull request. The label counts even after the fix loop removes `agent-review-findings` to start its run; a verdict label left from an earlier review doesn't count. If the attempt added neither label, the attempt and run fail in **Needs attention** with a missing-outcome diagnostic. A success message alone cannot satisfy this requirement. Existing loops use an empty list until you configure their verdict labels.
+Replace `review-passed` with `ready-to-merge` if that is your loop's success label. usine verifies that the review attempt added one of the configured labels to the pull request. The label counts even after the fix loop removes `agent-review-findings` to start its run; a verdict label left from an earlier review, or added between two attempts of the run, doesn't count. If the attempt added neither label, the attempt and run fail in **Needs attention** with a missing-outcome diagnostic. A success message alone cannot satisfy this requirement. Existing loops use an empty list until you configure their verdict labels.
 
 If your review task restores `ready-for-review` and stops without a verdict when the head changes during the review, list the trigger label too. Otherwise that run fails in **Needs attention**, even though the next review picks up the new head:
 
