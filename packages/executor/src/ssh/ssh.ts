@@ -314,8 +314,15 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
         if (checkoutStates.get(attemptId) !== "removed") return;
         checkoutStates.delete(attemptId);
         if (Option.isSome(machine.provisioned)) return;
-        if (gone || reset.cleanupSucceeded(machine.shell))
+        if (reset.cleanupSucceeded(machine.shell)) return yield* forgetConnection(attemptId);
+        if (gone) {
+          // A failed cleanup keeps other records, but nothing of this Attempt is left to reclaim.
+          yield* Effect.logInfo(
+            "Removed the attempt connection after incomplete resource cleanup because nothing of the Attempt is left",
+            { attemptId, worker: machine.address.name },
+          );
           return yield* forgetConnection(attemptId);
+        }
         yield* Effect.logInfo("Kept the attempt connection after incomplete resource cleanup", {
           attemptId,
           worker: machine.address.name,

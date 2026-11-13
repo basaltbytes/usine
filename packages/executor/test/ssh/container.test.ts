@@ -1129,13 +1129,17 @@ describe("SSH Worker with Docker", () => {
   );
 
   it.effect(
-    "removes the connection record of an ended Attempt whose checkout is gone, even after another Attempt's cleanup failed on the machine",
+    "removes the connection record of an ended Attempt whose checkout is gone, and keeps the record of a found one, after a failed cleanup on the machine",
     () => {
       const machine = dockerMachine();
       const credentials = mintingProvider();
       const storage = new StubStorage();
+      const logs = capturedLogs();
       const settled = AttemptId.make("settled/run/1");
-      const records = new Map<AttemptId, SshWorkerAddress>([[settled, ADDRESS]]);
+      const records = new Map<AttemptId, SshWorkerAddress>([
+        [request.attemptId, ADDRESS],
+        [settled, ADDRESS],
+      ]);
       const recovery = (attemptId: AttemptId) =>
         ({
           attemptId,
@@ -1174,7 +1178,7 @@ describe("SSH Worker with Docker", () => {
                 write: (id, connection) => Effect.sync(() => void records.set(id, connection)),
                 remove: (id) => Effect.sync(() => void records.delete(id)),
               },
-            }).pipe(Layer.provide(noGateway)),
+            }).pipe(Layer.provide(noGateway), Layer.provideMerge(logs.layer)),
           ),
         );
         assert(results.kept._tag === "Success");
@@ -1183,6 +1187,20 @@ describe("SSH Worker with Docker", () => {
         assert(results.gone._tag === "Success");
         assert.strictEqual(results.gone.success, "gone");
         assert.isFalse(records.has(settled), "no later recovery would remove the record");
+        assert.isTrue(
+          records.has(request.attemptId),
+          "a later recovery reaches the leftover container through the record",
+        );
+        const kept = logs.infos.filter((line) =>
+          line.includes("Kept the attempt connection after incomplete resource cleanup"),
+        );
+        assert.lengthOf(kept, 1);
+        assert.include(kept[0], request.attemptId);
+        const removed = logs.infos.filter((line) =>
+          line.includes("Removed the attempt connection after incomplete resource cleanup"),
+        );
+        assert.lengthOf(removed, 1);
+        assert.include(removed[0], settled);
       });
     },
   );
