@@ -2,13 +2,13 @@ import type { LoadedInstance } from "@usine/config/instance";
 import { ConfigFileError, InstancePath } from "@usine/config/file";
 import { resolveCoordinator, resolveParentEffort, resolveParentModel } from "@usine/core/agent";
 import type { DurableHarness } from "@usine/durable/harness";
-import { resolveParent, sharedParentLogin } from "@usine/durable/parent";
+import { resolveParent, sharedParentAnswers } from "@usine/durable/parent";
 import { Effect, Option, Result } from "effect";
 
 /**
  * Checks resolved coordinator brains without writing configuration or opening durable storage.
- * Looks up each agent's parent model and effort in the catalog, and asks the credential's login
- * once per provider. Agents that resolve to `coordinator: events` run no parent session and need no
+ * Looks up each agent's parent model and effort in the catalog. Asks the credential for its
+ * models at most once, and for its login once per provider. Agents that resolve to `coordinator: events` run no parent session and need no
  * check.
  */
 export const parentAdmissionProblems: (
@@ -22,7 +22,7 @@ export const parentAdmissionProblems: (
   const parented = loaded.agents.filter(
     ({ agent }) => resolveCoordinator(agent, settings.coordinator) === "session",
   );
-  const login = sharedParentLogin(parents);
+  const answers = sharedParentAnswers(parents);
   const problems: Array<ConfigFileError> = [];
   for (const { name, agent } of parented) {
     const admitted = yield* resolveParent(
@@ -32,7 +32,7 @@ export const parentAdmissionProblems: (
         parentEffort: resolveParentEffort(agent, settings.parentEffort),
       },
       Option.none(),
-      login,
+      answers,
     ).pipe(
       Effect.result,
       Effect.withSpan("Configuration.admitParent", { attributes: { agent: name } }),

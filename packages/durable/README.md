@@ -9,7 +9,7 @@ Coordinator startup and `subagent` use the shared harness admission check. `/liv
 ## Entry points
 
 - `/attempt-runtime`: the `AttemptRuntime` contract that the executor calls, with `AttemptRequest`, `StoredRequest`, and `AttemptReport`.
-- `/parent`: `resolveParent(parents, options, sessionId, login)`, which validates coordinator admission, model availability, reasoning effort, and credentials, and `sharedParentLogin(parents)`, a `login` that checks the credential once per provider for callers that resolve several parents.
+- `/parent`: `resolveParent(parents, options, sessionId, answers)`, which validates coordinator admission, model availability, reasoning effort, and credentials, and `sharedParentAnswers(parents)`, `answers` that list the credential's models once and check its login once per provider, for callers that resolve several parents.
 - `/harness`: the `DurableHarness` service, which manages the open pi-durable harness, and its platform-free `layer(options)`.
 - `/backup`: `backup(instanceDirectory, destination)`, an online copy of `.usine/durable.sqlite` through SQLite's backup API, hard-linked into place so it never overwrites a file. `usine backup` writes it next to the runtime database copy.
 - `/gateway`: `gatewayModelAccess(transport)` returns an Effect that builds Pi model access from a gateway transport. Parent admission checks the configured coordinator providers. It uses no local provider login.

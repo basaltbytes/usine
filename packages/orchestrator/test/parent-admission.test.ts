@@ -187,6 +187,49 @@ it.effect("asks the gateway's login once per provider when it selects the parent
   }).pipe(Effect.scoped, Effect.provide(testLayer)),
 );
 
+it.effect.each([
+  { case: "one effort", efforts: ["high", "high", "high"] },
+  { case: "several efforts", efforts: ["high", "medium", "low"] },
+])("lists the host login's models once when it selects the parent model ($case)", ({ efforts }) =>
+  Effect.gen(function* () {
+    const directory = yield* (yield* FileSystem.FileSystem).makeTempDirectoryScoped();
+    const root = InstanceDirectory.make(directory);
+    yield* writeInstanceFiles(root, [
+      ["usine.yaml", "version: 2\noperator: operator\nrepos: [{ name: acme/project }]\n"],
+      ...efforts.map(
+        (effort, index) =>
+          [`agents/agent-${index}.md`, agentFile("high", `parent_effort: ${effort}\n`)] as const,
+      ),
+    ]);
+    const loaded = yield* (yield* ConfigurationFolder).load(root);
+    const parents = fauxParent([]);
+    const logins = withOtherProvider(parents);
+    const faux = parents.models.getModel("faux", "faux-1");
+    if (faux === undefined) return yield* Effect.die("The faux provider serves no faux-1");
+    // Like Pi's ModelRuntime, listing the available models checks every provider's login.
+    const providers = ["other", "faux"];
+    const listings = vi
+      .spyOn(parents.models, "getAvailable")
+      .mockImplementation((_provider, options) =>
+        Promise.all(providers.map((provider) => parents.models.checkAuth(provider, options))).then(
+          (answers) =>
+            providers
+              .filter((_, index) => answers[index] !== undefined)
+              .map((provider) => ({ ...faux, provider })),
+        ),
+      );
+
+    const problems = yield* parentAdmissionProblems(loaded, {
+      ...parents,
+      defaultModel: Option.none(),
+    });
+
+    expect(problems).toEqual([]);
+    expect(listings).toHaveBeenCalledTimes(1);
+    expect(logins.mock.calls.map(([provider]) => provider)).toEqual(["other", "faux", "faux"]);
+  }).pipe(Effect.scoped, Effect.provide(testLayer)),
+);
+
 it.effect("resolves each agent's parent effort against the instance default", () =>
   Effect.gen(function* () {
     const directory = yield* (yield* FileSystem.FileSystem).makeTempDirectoryScoped();

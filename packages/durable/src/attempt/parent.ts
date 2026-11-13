@@ -110,39 +110,82 @@ const checkAuthentication = Effect.fn("ParentModel.authentication")(function* (
       );
 });
 
-/** Answers whether the parent credential is logged in to `provider`, and how. */
-export type ParentLogin = (
-  provider: string,
-) => Effect.Effect<PiAuthentication | undefined, SessionOperationError>;
+type AvailableModels = Awaited<ReturnType<ParentModels["models"]["getAvailable"]>>;
+
+const listAvailable = (
+  { models }: ParentModels,
+  sessionId: Option.Option<AgentSessionId>,
+): Effect.Effect<AvailableModels, SessionOperationError> =>
+  Effect.tryPromise({
+    try: (signal) => models.getAvailable(undefined, { signal }),
+    catch: (cause) =>
+      launchError(sessionId, "Can't list the models that have a configured credential", cause),
+  });
 
 /**
- * Returns a login check that asks the parent credential once per provider and answers later
- * checks of that provider, failures included, with the first answer. Run its checks one at a
- * time: overlapping checks of one provider each ask the credential.
+ * Answers the parent credential's questions: which models it has a credential for, and whether it
+ * is logged in to a provider, and how.
  */
-export const sharedParentLogin = (parents: ParentModels): ParentLogin => {
-  const answers = new Map<string, Exit.Exit<PiAuthentication | undefined, SessionOperationError>>();
-  return (provider) =>
-    Effect.suspend(() => {
-      const known = answers.get(provider);
-      if (known !== undefined)
-        return Effect.logInfo("Parent login reused for provider", {
-          provider,
-          failed: Exit.isFailure(known),
-        }).pipe(Effect.andThen(known));
-      return checkAuthentication(parents, provider, Option.none()).pipe(
-        Effect.exit,
-        Effect.tap((answer) => Effect.sync(() => answers.set(provider, answer))),
-        Effect.flatten,
+export interface ParentAnswers {
+  readonly available: Effect.Effect<AvailableModels, SessionOperationError>;
+  readonly login: (
+    provider: string,
+  ) => Effect.Effect<PiAuthentication | undefined, SessionOperationError>;
+}
+
+/** Runs `check` the first time and replays its answer, failures included, afterwards. */
+const firstAnswer = <A, E>(
+  check: Effect.Effect<A, E>,
+  reused: (failed: boolean) => Effect.Effect<void>,
+) => {
+  let answer: Exit.Exit<A, E> | undefined;
+  return Effect.suspend(() => {
+    if (answer !== undefined) {
+      const known = answer;
+      return reused(Exit.isFailure(known)).pipe(Effect.andThen(known));
+    }
+    return check.pipe(
+      Effect.exit,
+      Effect.tap((exit) =>
+        Effect.sync(() => {
+          answer = exit;
+        }),
+      ),
+      Effect.flatten,
+    );
+  });
+};
+
+/**
+ * Returns answers that ask the parent credential once: one model list, and one login check per
+ * provider. Later questions get the first answer, failures included. Ask one question at a time:
+ * overlapping questions each ask the credential.
+ */
+export const sharedParentAnswers = (parents: ParentModels): ParentAnswers => {
+  const logins = new Map<
+    string,
+    Effect.Effect<PiAuthentication | undefined, SessionOperationError>
+  >();
+  return {
+    available: firstAnswer(listAvailable(parents, Option.none()), (failed) =>
+      Effect.logInfo("Parent model list reused", { failed }),
+    ),
+    login: (provider) => {
+      const known = logins.get(provider);
+      if (known !== undefined) return known;
+      const login = firstAnswer(checkAuthentication(parents, provider, Option.none()), (failed) =>
+        Effect.logInfo("Parent login reused for provider", { provider, failed }),
       );
-    });
+      logins.set(provider, login);
+      return login;
+    },
+  };
 };
 
 const selectModel = Effect.fn("ParentModel.select")(function* (
   parents: ParentModels,
   spec: ParentBrainOptions,
-  sessionId: Option.Option<AgentSessionId>,
-  login: ParentLogin,
+  answers: ParentAnswers,
 ) {
   const { models, defaultModel, credentials } = parents;
   if (Option.isSome(spec.parentModel)) {
@@ -167,16 +210,12 @@ const selectModel = Effect.fn("ParentModel.select")(function* (
     yield* Effect.logDebug("Pi parent uses the configured default model");
     return configured.value;
   }
-  const available = yield* Effect.tryPromise({
-    try: (signal) => models.getAvailable(undefined, { signal }),
-    catch: (cause) =>
-      launchError(sessionId, "Can't list the models that have a configured credential", cause),
-  });
+  const available = yield* answers.available;
   let first = available[0];
   if (credentials.route === "gateway") {
     first = undefined;
     for (const provider of new Set(available.map((model) => model.provider))) {
-      const authentication = yield* login(provider);
+      const authentication = yield* answers.login(provider);
       if (resolvePiPool(provider, authentication) === undefined) continue;
       first = available.find((model) => model.provider === provider);
       break;
@@ -198,14 +237,17 @@ const selectModel = Effect.fn("ParentModel.select")(function* (
 /**
  * Resolves the parent's model, effort, and billing pool. Fails before the conversation is created
  * if the model is unknown, doesn't support the effort, or the credential is outside the provider's
- * pool. `login` answers the credential's login for a provider; by default, each call asks the
+ * pool. `answers` answers the credential's model list and logins; by default, each call asks the
  * credential.
  */
 export const resolveParent = Effect.fn("ParentModel.resolve")(function* (
   parents: ParentModels,
   spec: ParentBrainOptions,
   sessionId: Option.Option<AgentSessionId> = Option.none(),
-  login: ParentLogin = (provider) => checkAuthentication(parents, provider, sessionId),
+  answers: ParentAnswers = {
+    available: listAvailable(parents, sessionId),
+    login: (provider) => checkAuthentication(parents, provider, sessionId),
+  },
 ) {
   yield* Effect.annotateCurrentSpan({
     sessionId: Option.getOrUndefined(sessionId),
@@ -213,7 +255,7 @@ export const resolveParent = Effect.fn("ParentModel.resolve")(function* (
     parentModel: Option.getOrUndefined(spec.parentModel),
   });
   const { credentials } = parents;
-  const selected = yield* selectModel(parents, spec, sessionId, login);
+  const selected = yield* selectModel(parents, spec, answers);
   const model = ModelId.make(`${selected.provider}/${selected.id}`);
   yield* Effect.fromResult(
     admitBrain(
@@ -253,7 +295,7 @@ export const resolveParent = Effect.fn("ParentModel.resolve")(function* (
       message: `Pi model "${model}" doesn't support effort ${spec.parentEffort}. Supported efforts: ${supported.join(", ")}`,
     });
   }
-  const authentication = yield* login(selected.provider);
+  const authentication = yield* answers.login(selected.provider);
   const required = requiredPiPool(selected.provider);
   const pool = resolvePiPool(selected.provider, authentication);
   if (pool === undefined) {
