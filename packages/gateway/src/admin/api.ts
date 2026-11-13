@@ -31,7 +31,7 @@ import {
 } from "../llm/llm.ts";
 
 export { AttachmentId, InstallationCredential } from "../attachment/attachment.ts";
-export { CallerToken, GATEWAY_TOKEN_HEADER } from "../caller/caller.ts";
+export { CALLER_CREDENTIAL_HEADERS, CallerToken, GATEWAY_TOKEN_HEADER } from "../caller/caller.ts";
 
 /** A request to attach one attempt's credential for one worker and repository until it expires. */
 export class AttachRequest extends Schema.Class<

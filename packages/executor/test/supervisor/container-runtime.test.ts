@@ -6,7 +6,7 @@ import { Harness } from "@usine/core/agent/brain";
 import { AgentSessionId } from "@usine/core/agent/session";
 import { CommitSha, RepositoryName } from "@usine/core/repository";
 import { ContainerImage } from "@usine/core/worker";
-import { Effect, FileSystem, Option, Schema, Stream } from "effect";
+import { Effect, FileSystem, Option, Schedule, Schema, Stream } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import { homedir } from "node:os";
 import { env } from "node:process";
@@ -119,6 +119,17 @@ describe.skipIf(Option.isNone(runtime))(
               assert.notStrictEqual(written.exitCode, 0, `${write} fails`);
               assert.include(written.stderr, "Read-only file system", write);
             }
+            const rootMount = yield* sh(
+              'while read -r device point type options rest; do [ "$point" = / ] && echo "$options"; done < /proc/mounts',
+            );
+            assert.match(rootMount.stdout.trim(), /^ro(,|$)/u, "the root file system is read-only");
+            // The container's main process holds no capability and can't gain privileges.
+            const status = yield* sh("grep -E '^(CapEff|CapBnd|NoNewPrivs):' /proc/1/status");
+            assert.strictEqual(status.exitCode, 0, status.stderr);
+            assert.match(status.stdout, /^CapEff:\s+0+$/mu);
+            assert.match(status.stdout, /^CapBnd:\s+0+$/mu);
+            assert.match(status.stdout, /^NoNewPrivs:\s+1$/mu);
+
             const unchanged = yield* fs.readFileString(`${tree}/README.md`);
             assert.strictEqual(unchanged, "The code word is HERON-2207.\n");
 
@@ -148,6 +159,11 @@ describe.skipIf(Option.isNone(runtime))(
             assert.deepStrictEqual([model.exitCode, model.stdout.trim()], [0, "200 relayed hello"]);
             assert.strictEqual(relayed[0]?.headers["anthropic-version"], "2023-06-01");
             assert.notProperty(relayed[0]?.headers, "authorization");
+            const token = yield* sh(
+              `node -e 'fetch("http://127.0.0.1:${MODEL_RELAY_PORT}/anthropic-messages/v1/messages", { method: "POST", body: "again", headers: { "x-usine-gateway-token": "ugw1.chosen.by-the-session" } }).then((response) => console.log(response.status))'`,
+            );
+            assert.strictEqual(token.stdout.trim(), "200");
+            assert.notProperty(relayed[1]?.headers, "x-usine-gateway-token");
 
             const home = yield* sh('touch "$HOME/saved-session" && echo "$HOME"');
             assert.strictEqual(home.exitCode, 0);
@@ -175,6 +191,68 @@ describe.skipIf(Option.isNone(runtime))(
             ]),
           );
           assert.strictEqual(left.trim(), "", "closing the turn removes its sandbox");
+        }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+      180_000,
+    );
+
+    it.live(
+      "ends a sandbox whose orchestrator no longer serves its model relay",
+      () =>
+        Effect.gen(function* () {
+          const fs = yield* FileSystem.FileSystem;
+          const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+          const instance = yield* fs.makeTempDirectoryScoped({
+            directory: homedir(),
+            prefix: "usine-instance-",
+          });
+          const route: GatewayModelRoute = {
+            credential: () => Effect.succeedNone,
+            request: () => Effect.die("the test calls no model"),
+          };
+          const running = (name: string) =>
+            spawner
+              .string(
+                ChildProcess.make(selected, ["ps", "--all", "--quiet", "--filter", `name=${name}`]),
+              )
+              .pipe(Effect.map((listed) => listed.trim() !== ""));
+          yield* Effect.gen(function* () {
+            const sandbox = yield* SupervisorSandbox;
+            const seat = yield* sandbox.open(
+              SandboxRequest.make({
+                conversation: AgentSessionId.make("supervisor:conversation-2"),
+                harness: Harness.make("claude"),
+                sources: [],
+              }),
+            );
+            const host = seat.host;
+            assert(host._tag === "ExecShell" && host.container !== undefined);
+            const name = host.container.name;
+            const relayDirectory = yield* spawner.string(
+              ChildProcess.make(selected, [
+                "inspect",
+                "--format",
+                '{{range .Mounts}}{{if eq .Destination "/run/usine"}}{{.Source}}{{end}}{{end}}',
+                name,
+              ]),
+            );
+            // As after the orchestrator stops: the relay's socket no longer accepts connections.
+            yield* fs.remove(`${relayDirectory.trim()}/model.sock`);
+            const stillRunning = yield* running(name).pipe(
+              Effect.repeat({ while: (alive) => alive, schedule: Schedule.spaced("1 second") }),
+              Effect.timeout("30 seconds"),
+            );
+            assert.isFalse(stillRunning, "the sandbox ends and removes itself");
+          }).pipe(
+            Effect.scoped,
+            Effect.provide(
+              containerSandboxLayer({
+                root: `${instance}/supervisor`,
+                image,
+                runtime,
+                route: Option.some(Effect.succeed(route)),
+              }),
+            ),
+          );
         }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
       180_000,
     );

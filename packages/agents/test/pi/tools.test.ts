@@ -248,6 +248,13 @@ describe("Pi usine tool sets", () => {
       const cwd = yield* fs.makeTempDirectoryScoped({ prefix: "usine-pi-host-" });
       yield* fs.makeDirectory(`${cwd}/acme/demo/docs`, { recursive: true });
       yield* fs.writeFileString(`${cwd}/acme/demo/README.md`, "The needle is here.\n");
+      yield* fs.makeDirectory(`${cwd}/acme/demo/src/lib`, { recursive: true });
+      yield* fs.writeFileString(`${cwd}/acme/demo/src/lib/a.spec.ts`, "const port = 8080;\n");
+      yield* fs.writeFileString(`${cwd}/acme/demo/src/b.ts`, "const port = 8080;\n");
+      yield* fs.writeFileString(
+        `${cwd}/acme/demo/bundle.min.js`,
+        `var needle=1;${"x".repeat(2_000)}\n`,
+      );
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
       const lines: Array<string> = [];
       // Runs each command line with the local shell, as a sandbox's transport runs it in its container.
@@ -284,7 +291,10 @@ describe("Pi usine tool sets", () => {
             [],
             options.host,
           );
-          const run = async (name: string, input: Readonly<Record<string, string>>) => {
+          const run = async (
+            name: string,
+            input: Readonly<Record<string, string | number | boolean>>,
+          ) => {
             const tool = listed.customTools?.find((definition) => definition.name === name);
             assert(tool !== undefined, name);
             const result = await tool.execute(name, input, undefined, undefined, toolContext);
@@ -296,16 +306,39 @@ describe("Pi usine tool sets", () => {
           await run("ls", { path: "acme/demo" });
           await run("find", { pattern: "**/*.md" });
           await run("grep", { pattern: "needle" });
+          await run("grep", { pattern: "port = \\d+", path: "acme/demo", glob: "*.ts" });
+          await run("grep", { pattern: "port = \\d+", path: "acme/demo", glob: "**/*.spec.ts" });
+          await run("grep", { pattern: "port = \\d+", path: "acme/demo", glob: "src/**/*.ts" });
+          await run("grep", { pattern: "PORT", path: "acme/demo", ignoreCase: true, limit: 1 });
         },
         sandboxed,
       );
       assert.strictEqual(options.nativeTools, "read");
       assert(Option.isSome(options.host), "Pi gets the host's command runner");
-      const [read, ls, find, grep] = outputs;
+      const [read, ls, find, grep, anyTs, specs, underSrc, limited] = outputs;
       assert.include(read, "The needle is here.");
-      assert.sameMembers(ls?.split("\n") ?? [], ["README.md", "docs/"]);
+      assert.sameMembers(ls?.split("\n") ?? [], ["README.md", "bundle.min.js", "docs/", "src/"]);
       assert.include(find, "acme/demo/README.md");
-      assert.include(grep, "acme/demo/README.md:1:The needle is here.");
+      assert.strictEqual(
+        grep,
+        [
+          `acme/demo/README.md:1: The needle is here.`,
+          `acme/demo/bundle.min.js:1: var needle=1;${"x".repeat(487)}... [truncated]`,
+          "",
+          "[Some lines truncated to 500 chars. Use read tool to see full lines]",
+        ].join("\n"),
+        "a match in a minified file shows 500 characters",
+      );
+      assert.strictEqual(
+        anyTs,
+        "src/b.ts:1: const port = 8080;\nsrc/lib/a.spec.ts:1: const port = 8080;",
+      );
+      assert.strictEqual(specs, "src/lib/a.spec.ts:1: const port = 8080;");
+      assert.strictEqual(underSrc, anyTs);
+      assert.strictEqual(
+        limited,
+        "src/b.ts:1: const port = 8080;\n\n[1 matches limit reached. Use limit=2 for more, or refine pattern]",
+      );
       assert.isNotEmpty(lines);
       for (const line of lines)
         assert.include(line, `cd '${cwd}'`, "each command runs in the session's directory");

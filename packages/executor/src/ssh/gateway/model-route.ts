@@ -2,7 +2,7 @@ import type { GatewayCredentialKind, GatewayLlmProtocol, WorkerName } from "@usi
 import { GatewayAdminPort } from "@usine/core/worker";
 import type { RepositoryName } from "@usine/core/repository";
 import { AnonymousCredential } from "@usine/gateway";
-import { AttachRequest } from "@usine/gateway/admin";
+import { AttachRequest, CALLER_CREDENTIAL_HEADERS } from "@usine/gateway/admin";
 import { Context, DateTime, Effect, Option, Schema, Semaphore, Stream } from "effect";
 import { HttpClient, HttpClientRequest } from "effect/http";
 import { ChildProcessSpawner } from "effect/process";
@@ -146,7 +146,12 @@ export const gatewayModelRouteFor = Effect.fn("GatewayModelRoute.open")(
       const response = yield* http.execute(
         HttpClientRequest.post(new URL(`/${protocol}/v1/${path}`, forward.url)).pipe(
           HttpClientRequest.setHeaders(headers),
-          HttpClientRequest.removeHeader("x-api-key"),
+          // The gateway reads its own token header before Authorization, so no caller header stays.
+          (request) =>
+            CALLER_CREDENTIAL_HEADERS.reduce(
+              (remaining, name) => HttpClientRequest.removeHeader(remaining, name),
+              request,
+            ),
           HttpClientRequest.removeHeader("chatgpt-account-id"),
           HttpClientRequest.setHeader("host", `llm.${gateway.domain}`),
           HttpClientRequest.bearerToken(attached.callerToken),

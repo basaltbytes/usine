@@ -1,4 +1,5 @@
 import type { GatewayLlmProtocol } from "@usine/core/worker";
+import { CALLER_CREDENTIAL_HEADERS } from "@usine/gateway/admin";
 import { Effect } from "effect";
 import { HttpServerRequest, HttpServerResponse } from "effect/http";
 import type { GatewayModelRoute } from "../ssh/gateway/model-route.ts";
@@ -10,13 +11,11 @@ const relayedPaths: ReadonlyMap<string, GatewayLlmProtocol> = new Map([
 ]);
 
 /**
- * Request headers that the route replaces, such as the caller's credential, and headers that
- * describe one connection rather than the request.
+ * Request headers that the route replaces, which are every header that the gateway reads a caller
+ * credential from, and headers that describe one connection rather than the request.
  */
-const requestOnlyHeaders = new Set([
-  "authorization",
-  "proxy-authorization",
-  "x-api-key",
+const requestOnlyHeaders: ReadonlySet<string> = new Set([
+  ...CALLER_CREDENTIAL_HEADERS,
   "host",
   "connection",
   "keep-alive",

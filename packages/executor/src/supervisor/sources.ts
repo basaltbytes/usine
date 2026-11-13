@@ -1,6 +1,6 @@
 import { SupervisorSource, SupervisorUnavailable } from "@usine/agents/supervisor";
 import { CommitSha, type RepositoryName, safeSegment } from "@usine/core/repository";
-import { Clock, Duration, Effect, FileSystem, Option, Redacted, Schema } from "effect";
+import { Effect, FileSystem, Option, Redacted, Schema, type Scope, Semaphore } from "effect";
 import { Base64 } from "effect/encoding";
 import { ChildProcessSpawner } from "effect/process";
 import { collectCommand } from "../child-command.ts";
@@ -14,9 +14,6 @@ export interface SourceOrigin {
     repository: RepositoryName,
   ) => Effect.Effect<Option.Option<Redacted.Redacted<string>>, SupervisorUnavailable>;
 }
-
-/** How long an exported tree that is no longer the head stays, for a turn that still reads it. */
-const STALE_TREE_AGE = Duration.days(1);
 
 const decodeCommit = Schema.decodeUnknownEffect(CommitSha);
 
@@ -32,20 +29,43 @@ const fetchEnvironment = (url: string, token: Option.Option<Redacted.Redacted<st
     }),
   });
 
+/** The source that supervisor turns read, prepared on the orchestrator. */
+export interface SupervisorSources {
+  /**
+   * Returns the source of `repositories`: the head of each repository's default branch now. The
+   * turn holds each tree until the scope closes, so no other turn's preparation removes it.
+   * Fails with `SupervisorUnavailable` if a repository can't be fetched or exported.
+   */
+  readonly prepare: (
+    repositories: ReadonlyArray<RepositoryName>,
+  ) => Effect.Effect<ReadonlyArray<SupervisorSource>, SupervisorUnavailable, Scope.Scope>;
+}
+
 /**
- * Returns the source of `repositories` that supervisor sessions read: the head of each
- * repository's default branch when the turn starts. Each repository has a shallow bare cache in
- * `<root>/repos`, which this fetches; each head's tree is exported once, without git history,
- * to `<root>/trees/<repository>/<commit>`. Trees that are no longer a head are removed after a
- * day. Fails with `SupervisorUnavailable` if a repository can't be fetched or exported.
+ * Makes the supervisor's source under `root`, fetched from `origin`. Each repository has a shallow
+ * bare cache in `<root>/repos`, and each head's tree is exported once, without git history, to
+ * `<root>/trees/<repository>/<commit>`. A tree is removed once it is no longer the head and no
+ * turn holds it. Preparations of one repository run one at a time; make one per `root`.
  */
-export const prepareSupervisorSources = Effect.fn("SupervisorSources.prepare")(function* (
+export const makeSupervisorSources = Effect.fn("SupervisorSources.make")(function* (
   root: string,
-  repositories: ReadonlyArray<RepositoryName>,
   origin: SourceOrigin,
 ) {
   const fs = yield* FileSystem.FileSystem;
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+  /** The number of turns that hold each tree, by its directory. */
+  const holds = new Map<string, number>();
+  /** The head that each repository's latest preparation exported. */
+  const heads = new Map<RepositoryName, CommitSha>();
+  /** One preparation of each repository at a time, since they share its cache and trees. */
+  const locks = new Map<RepositoryName, Semaphore.Semaphore>();
+  const lockOf = (repository: RepositoryName) => {
+    const existing = locks.get(repository);
+    if (existing !== undefined) return existing;
+    const lock = Semaphore.makeUnsafe(1);
+    locks.set(repository, lock);
+    return lock;
+  };
   const run = (
     repository: RepositoryName,
     command: string,
@@ -73,11 +93,49 @@ export const prepareSupervisorSources = Effect.fn("SupervisorSources.prepare")(f
       SupervisorUnavailable.make({
         message: `Can't ${action} for the source of ${repository}: ${error.message}`,
       });
-  const prepare = Effect.fn("SupervisorSources.repository")(function* (repository: RepositoryName) {
+  const treesOf = (repository: RepositoryName) => `${root}/trees/${safeSegment(repository)}`;
+
+  /** Removes the trees of `repository` that are neither its head nor held by a turn. */
+  const removeUnused = Effect.fn("SupervisorSources.removeUnused")(function* (
+    repository: RepositoryName,
+  ) {
+    const trees = treesOf(repository);
+    const head = heads.get(repository);
+    for (const entry of yield* fs.readDirectory(trees)) {
+      const tree = `${trees}/${entry}`;
+      if (entry === head) continue;
+      if ((holds.get(tree) ?? 0) > 0) {
+        yield* Effect.logInfo("Kept a supervisor source tree that a turn reads", {
+          repository,
+          tree: entry,
+          turns: holds.get(tree),
+        });
+        continue;
+      }
+      yield* fs.remove(tree, { recursive: true });
+      yield* Effect.logInfo("Removed a supervisor source tree that is no longer the head", {
+        repository,
+        tree: entry,
+      });
+    }
+  });
+  const removeUnusedLogged = (repository: RepositoryName) =>
+    removeUnused(repository).pipe(
+      Effect.catch((error) =>
+        Effect.logWarning("Could not remove unused supervisor source trees", {
+          repository,
+          message: error.message,
+        }),
+      ),
+    );
+
+  /** Fetches `repository` and exports its head if it is new. */
+  const exportHead = Effect.fn("SupervisorSources.repository")(function* (
+    repository: RepositoryName,
+  ) {
     yield* Effect.annotateCurrentSpan({ repository });
-    const segment = safeSegment(repository);
-    const cache = `${root}/repos/${segment}.git`;
-    const trees = `${root}/trees/${segment}`;
+    const cache = `${root}/repos/${safeSegment(repository)}.git`;
+    const trees = treesOf(repository);
     if (!(yield* fs.exists(`${cache}/HEAD`).pipe(Effect.orElseSucceed(() => false)))) {
       yield* fs
         .makeDirectory(cache, { recursive: true })
@@ -98,7 +156,10 @@ export const prepareSupervisorSources = Effect.fn("SupervisorSources.prepare")(f
     );
     const tree = `${trees}/${revision}`;
     if (yield* fs.exists(tree).pipe(Effect.orElseSucceed(() => false))) {
-      yield* Effect.logDebug("The supervisor source is current", { repository, revision });
+      yield* Effect.logInfo("Skipped exporting the supervisor source: the head's tree exists", {
+        repository,
+        revision,
+      });
     } else {
       yield* fs
         .makeDirectory(trees, { recursive: true })
@@ -122,30 +183,39 @@ export const prepareSupervisorSources = Effect.fn("SupervisorSources.prepare")(f
         revision,
       });
     }
-    yield* removeStaleTrees(trees, revision).pipe(
-      Effect.tapError((error) =>
-        Effect.logWarning("Could not remove stale supervisor source trees", {
-          repository,
-          message: error.message,
-        }),
-      ),
-      Effect.ignore,
-    );
+    heads.set(repository, revision);
     return SupervisorSource.make({ repository, revision, directory: tree });
   });
-  const removeStaleTrees = Effect.fn("SupervisorSources.removeStale")(function* (
-    trees: string,
-    current: CommitSha,
-  ) {
-    const now = yield* Clock.currentTimeMillis;
-    for (const entry of yield* fs.readDirectory(trees)) {
-      if (entry === current) continue;
-      const { mtime } = yield* fs.stat(`${trees}/${entry}`);
-      if (Option.isNone(mtime) || now - mtime.value.getTime() < Duration.toMillis(STALE_TREE_AGE))
-        continue;
-      yield* fs.remove(`${trees}/${entry}`, { recursive: true });
-      yield* Effect.logInfo("Removed a stale supervisor source tree", { tree: entry });
-    }
+
+  /** Releases a turn's hold on `source`, and removes its tree if it is now unused. */
+  const release = Effect.fn("SupervisorSources.release")(function* (source: SupervisorSource) {
+    const remaining = (holds.get(source.directory) ?? 1) - 1;
+    if (remaining > 0) holds.set(source.directory, remaining);
+    else holds.delete(source.directory);
+    yield* removeUnusedLogged(source.repository);
   });
-  return yield* Effect.forEach(repositories, prepare);
+
+  /** Prepares `repository` and holds its head's tree for the scope. */
+  const prepareOne = (repository: RepositoryName) => {
+    const lock = lockOf(repository);
+    return lock.withPermit(
+      Effect.gen(function* () {
+        const source = yield* exportHead(repository);
+        yield* Effect.acquireRelease(
+          Effect.sync(() => holds.set(source.directory, (holds.get(source.directory) ?? 0) + 1)),
+          () => lock.withPermit(release(source)),
+        );
+        yield* removeUnusedLogged(repository);
+        return source;
+      }),
+    );
+  };
+
+  return {
+    prepare: Effect.fn("SupervisorSources.prepare")(function* (
+      repositories: ReadonlyArray<RepositoryName>,
+    ) {
+      return yield* Effect.forEach(repositories, prepareOne);
+    }),
+  } satisfies SupervisorSources;
 });

@@ -36,6 +36,7 @@ import { gitHubCredentialLayer } from "./credentials.ts";
 import { parentAdmissionLayer } from "./current-instance/parents.ts";
 import { CurrentInstance } from "./current-instance/current-instance.ts";
 import { externalHttpClientLayer } from "./http-client.ts";
+import { reportSupervisorAvailability } from "./supervisor-sandbox.ts";
 import { idleTriggersLayer } from "./idle-triggers.ts";
 import { LabelReconciler } from "./label-reconciler.ts";
 import { OperatorConfiguration } from "./operator/configuration/view.ts";
@@ -189,14 +190,12 @@ export const runtimeLayer = (
         runtime: Option.none(),
         route,
       }).pipe(
-        Layer.tap((context) => {
-          const { unavailable } = Context.get(context, SupervisorSandbox);
-          return Option.isSome(startup.config.settings.supervisor) && Option.isSome(unavailable)
-            ? Effect.logWarning("The configured supervisor is unavailable on this orchestrator", {
-                reason: unavailable.value.message,
-              })
-            : Effect.void;
-        }),
+        Layer.tap((context) =>
+          reportSupervisorAvailability(
+            Option.isSome(startup.config.settings.supervisor),
+            Context.get(context, SupervisorSandbox),
+          ),
+        ),
       );
     }),
   ).pipe(Layer.provide(NodeServices.layer));

@@ -5,4 +5,4 @@ export {
   MODEL_RELAY_PORT,
   type SandboxRuntime,
 } from "./container.ts";
-export { prepareSupervisorSources, type SourceOrigin } from "./sources.ts";
+export { makeSupervisorSources, type SourceOrigin, type SupervisorSources } from "./sources.ts";
