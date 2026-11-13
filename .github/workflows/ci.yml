@@ -165,6 +165,10 @@ jobs:
           key: ${{ steps.server-tools.outputs.cache-primary-key }}
       - name: Run tests
         shell: bash
+        env:
+          # The rest leg runs on the runner itself, whose Docker runs the supervisor sandbox's
+          # tests on a real container runtime.
+          USINE_SANDBOX_TEST_RUNTIME: ${{ matrix.leg == 'rest' && 'docker' || '' }}
         run: |
           if [ "${{ matrix.leg }}" = server ]; then
             chown -R pwuser:pwuser "$GITHUB_WORKSPACE"

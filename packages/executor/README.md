@@ -14,6 +14,16 @@ Worker preflight checks each coding-agent brain with the shared `admitBrain` pol
 
 `@usine/executor/gateway` exports `gatewayModelRouteFor(worker, repository, gateway)` for model runtimes on the orchestrator, including the coordinator and supervisor. It opens SSH forwards to the admin API and model proxy, checks the proxy's caller-token requirement, and registers an anonymous attachment. `credential(protocol)` reports the gateway's credential kind; `request(protocol, body, headers, signal)` streams a model response with the caller token. Provider credentials remain on the gateway. The attachment renews every two minutes, restores missing gateway state under the same ID, and detaches on scope closure.
 
+## Supervisor sandbox
+
+`@usine/executor/supervisor` provides the supervisor sandbox of `@usine/agents/supervisor` on the orchestrator host. `containerSandboxLayer({ root, image, runtime, route })` finds Podman, then Docker, unless `runtime` names one, and runs one container per supervisor turn. The container has no network, a read-only root file system, no capabilities, and no new privileges, and runs as the orchestrator's user. Its main process is a Node.js relay that listens on `127.0.0.1:8787` and forwards each connection over a Unix socket to the orchestrator, which sends `POST /anthropic-messages/v1/messages` and `POST /openai-responses/v1/responses` through `route`, the instance's gateway model route, without the session's credential headers, and refuses every other request. The harness's gateway wiring points at the relay, with a token variable that holds no credential.
+
+A conversation's directory, `<root>/conversations/<conversation>`, is mounted read-write at the same path, and its `workspace` directory, the session's working directory, read-only. Each `SupervisorSource` is mounted read-only at `workspace/<owner>/<repo>`. The harness's home, with its saved sessions, is the conversation's `home` directory, so the next turn's container reopens them. The returned seat is an `ExecShell` whose commands enter the container with `<runtime> exec`; closing the turn's scope removes the container. Without a container runtime or a model route, the layer still builds, and `unavailable` says why; a runtime that doesn't answer `info` within 15 seconds counts as missing.
+
+`prepareSupervisorSources(root, repositories, origin)` fetches each repository's default branch head into a shallow bare cache in `<root>/repos`, with the origin's token as git's HTTP authorization, and exports the head's tree once to `<root>/trees/<repository>/<commit>`, without its history. Trees that are no longer a head are removed after a day.
+
+The `test/supervisor/container-runtime.test.ts` suite runs a real sandbox on the runtime that `USINE_SANDBOX_TEST_RUNTIME` names, with the image in `USINE_SANDBOX_TEST_IMAGE` (default `docker.io/library/node:22-slim`); CI runs it on Docker.
+
 ## Attempt lifetime
 
 Call `Executor.prepare(request)` inside `Effect.scoped`, then `prepared.launch(io)` once. The `PreparedAttempt` owns the checkout and repo access. Its `workspace`, an `AttemptWorkspace` with the worker, run spec, and worktree path, serializes without credentials or live handles.

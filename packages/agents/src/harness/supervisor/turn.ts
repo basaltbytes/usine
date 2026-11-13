@@ -7,36 +7,23 @@ import {
   SessionTokensUpdated,
   ToolFinished,
 } from "@usine/core/agent/session";
-import { WorkerName } from "@usine/core/worker";
 import { Array as Arr, type Brand, Effect, Fiber, Option, Result, Schema, Stream } from "effect";
 import type { Tool, Toolkit } from "effect/ai";
-import { ChildHost } from "../../child-host/child-host.ts";
-import {
-  AgentResultError,
-  AgentSessionError,
-  RestartState,
-  WorkingDirectory,
-} from "../../runtime.ts";
-import { CredentialRoute } from "../capability.ts";
+import { AgentResultError, AgentSessionError, RestartState } from "../../runtime.ts";
 import { type ContinuationPolicy, continuationPolicy } from "../continuation.ts";
 import { SessionSpec, StartPrompt, StartResume } from "../contract.ts";
 import { Harnesses } from "../registry.ts";
 import { admitSupervisor, supervisor, supervisorAgent } from "./role.ts";
+import { SupervisorSeat } from "./sandbox.ts";
 
-/** Where supervisor sessions run on the orchestrator, and the credential route they use. */
-export class SupervisorSeat extends Schema.Class<
+export {
+  SandboxRequest,
+  SupervisorSandbox,
+  type SupervisorSandboxService,
   SupervisorSeat,
-  Brand.Brand<"@usine/agents/harness/supervisor/SupervisorSeat">
->("@usine/agents/SupervisorSeat")({
-  host: ChildHost,
-  /** The worker name that the session's process and logs carry. */
-  worker: WorkerName,
-  /** The directory that the conversation's harness process starts in. */
-  cwd: WorkingDirectory,
-  /** The complete environment of the harness process, with the gateway credential (ADR 0011). */
-  environment: Schema.Record(Schema.String, Schema.String),
-  credential: CredentialRoute,
-}) {}
+  SupervisorSource,
+  SupervisorUnavailable,
+} from "./sandbox.ts";
 
 /** One member message to a supervisor conversation. */
 export class SupervisorTurn extends Schema.Class<
