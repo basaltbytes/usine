@@ -282,6 +282,42 @@ it.effect("refuses an import whose parent models don't load in time", () =>
   }).pipe(Effect.provide(NodeServices.layer)),
 );
 
+it.effect("counts loading the parent models in the coordinator brain check's 10 seconds", () =>
+  Effect.gen(function* () {
+    const folder = yield* directoryFixture;
+    const directory = InstanceDirectory.make(folder);
+    const context = yield* Layer.build(
+      configurationLayer.pipe(Layer.provide(localSqliteLayer(directory))),
+    );
+    const loading = yield* Deferred.make<void>();
+    const checking = yield* Deferred.make<void>();
+    const parents = {
+      ...fauxParent([]),
+      credentials: {
+        route: "gateway",
+        authentication: () =>
+          Deferred.succeed(checking, undefined).pipe(Effect.andThen(Effect.never)),
+      },
+    } as const;
+    const command = yield* parseConfigCommand(["import", directory]);
+    const importing = yield* runConfigCommand(directory, command, () =>
+      Deferred.succeed(loading, undefined).pipe(
+        Effect.andThen(Effect.sleep("6 seconds")),
+        Effect.as(parents),
+      ),
+    ).pipe(Effect.provideContext(context), Effect.flip, Effect.forkChild);
+    yield* Deferred.await(loading);
+    yield* TestClock.adjust("6 seconds");
+    yield* Deferred.await(checking);
+    yield* TestClock.adjust("4 seconds");
+
+    expect(importing.pollUnsafe()).toBeDefined();
+    const failure = yield* Fiber.join(importing);
+    expect(failure._tag).toBe("ValidationTimeoutError");
+    expect((yield* Context.get(context, ConfigurationStore).read).number).toBe(0);
+  }).pipe(Effect.provide(NodeServices.layer)),
+);
+
 it.live(
   "round-trips all entity kinds and records only an added or removed worker",
   () =>

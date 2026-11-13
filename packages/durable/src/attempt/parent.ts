@@ -24,7 +24,7 @@ import {
 import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { AgentSessionId, EndpointName, ParentSession, RoleName } from "@usine/core/agent/session";
 import type { RunSpec } from "@usine/core/attempt/channel";
-import { Effect, type Exit, Option } from "effect";
+import { Effect, Exit, Option } from "effect";
 import type { DurableHarness } from "../harness.ts";
 import type { AttemptRecord } from "./documents.ts";
 import { parentSessionId } from "./sessions.ts";
@@ -126,9 +126,10 @@ export const sharedParentLogin = (parents: ParentModels): ParentLogin => {
     Effect.suspend(() => {
       const known = answers.get(provider);
       if (known !== undefined)
-        return Effect.logDebug("Parent login reused for provider", { provider }).pipe(
-          Effect.andThen(known),
-        );
+        return Effect.logInfo("Parent login reused for provider", {
+          provider,
+          failed: Exit.isFailure(known),
+        }).pipe(Effect.andThen(known));
       return checkAuthentication(parents, provider, Option.none()).pipe(
         Effect.exit,
         Effect.tap((answer) => Effect.sync(() => answers.set(provider, answer))),

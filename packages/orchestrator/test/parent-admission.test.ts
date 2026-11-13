@@ -18,6 +18,11 @@ const testLayer = ConfigurationFolder.layer.pipe(
 const withId = <A extends { readonly id: string }>(model: A | undefined, id: string) =>
   model === undefined ? undefined : { ...model, id };
 
+const withProvider = <A extends { readonly provider: string }>(
+  model: A | undefined,
+  provider: string,
+) => (model === undefined ? undefined : { ...model, provider });
+
 const agentFile = (effort: string, frontmatter = "") =>
   `---\nharness: codex\nmodel: gpt-6.1-sol\neffort: ${effort}\n${frontmatter}---\nReview the pull request.\n`;
 
@@ -68,6 +73,82 @@ it.effect("names each agent that a refused login affects", () =>
     expect(problems.map(({ message }) => message)).toEqual([
       expect.stringMatching(/^Agent "alpha" cannot run as coordinator: .*requires a credential/u),
       expect.stringMatching(/^Agent "beta" cannot run as coordinator: .*requires a credential/u),
+    ]);
+    expect(logins).toHaveBeenCalledTimes(1);
+  }).pipe(Effect.scoped, Effect.provide(testLayer)),
+);
+
+/** Serves `faux-1` under a second provider, `other`, whose credential has no login. */
+const withOtherProvider = (parents: ReturnType<typeof fauxParent>) => {
+  const served = parents.models.getModel.bind(parents.models);
+  const answer = parents.models.checkAuth.bind(parents.models);
+  vi.spyOn(parents.models, "getModel").mockImplementation((provider, id) =>
+    provider === "other" ? withProvider(served("faux", id), provider) : served(provider, id),
+  );
+  return vi
+    .spyOn(parents.models, "checkAuth")
+    .mockImplementation((provider, options) =>
+      provider === "other" ? Promise.resolve(undefined) : answer(provider, options),
+    );
+};
+
+it.effect.each([
+  { first: "other", second: "faux" },
+  { first: "faux", second: "other" },
+])("keeps each provider's login answer apart ($first first)", ({ first, second }) =>
+  Effect.gen(function* () {
+    const directory = yield* (yield* FileSystem.FileSystem).makeTempDirectoryScoped();
+    const root = InstanceDirectory.make(directory);
+    yield* writeInstanceFiles(root, [
+      ["usine.yaml", "version: 2\noperator: operator\nrepos: [{ name: acme/project }]\n"],
+      ["agents/alpha.md", agentFile("high", `parent_model: ${first}/faux-1\n`)],
+      ["agents/beta.md", agentFile("high", `parent_model: ${second}/faux-1\n`)],
+      ["agents/gamma.md", agentFile("high", `parent_model: ${first}/faux-1\nparent_effort: low\n`)],
+      [
+        "agents/delta.md",
+        agentFile("high", `parent_model: ${second}/faux-1\nparent_effort: low\n`),
+      ],
+    ]);
+    const loaded = yield* (yield* ConfigurationFolder).load(root);
+    const parents = fauxParent([]);
+    const logins = withOtherProvider(parents);
+
+    const problems = yield* parentAdmissionProblems(loaded, parents);
+
+    const refused = first === "other" ? ["alpha", "gamma"] : ["beta", "delta"];
+    expect(problems.map(({ file }) => file)).toEqual(refused.map((agent) => `agents/${agent}.md`));
+    expect(problems.map(({ message }) => message)).toEqual(
+      refused.map((agent) =>
+        expect.stringMatching(
+          new RegExp(`^Agent "${agent}" cannot run as coordinator: .*requires a credential`, "u"),
+        ),
+      ),
+    );
+    expect(logins.mock.calls.map(([provider]) => provider)).toEqual([first, second]);
+  }).pipe(Effect.scoped, Effect.provide(testLayer)),
+);
+
+it.effect("gives a failed login check to each agent on the provider", () =>
+  Effect.gen(function* () {
+    const directory = yield* (yield* FileSystem.FileSystem).makeTempDirectoryScoped();
+    const root = InstanceDirectory.make(directory);
+    yield* writeInstanceFiles(root, [
+      ["usine.yaml", "version: 2\noperator: operator\nrepos: [{ name: acme/project }]\n"],
+      ["agents/alpha.md", agentFile("high")],
+      ["agents/beta.md", agentFile("high", "parent_effort: low\n")],
+    ]);
+    const loaded = yield* (yield* ConfigurationFolder).load(root);
+    const parents = fauxParent([]);
+    const logins = vi
+      .spyOn(parents.models, "checkAuth")
+      .mockRejectedValue(new Error("credential store unreachable"));
+
+    const problems = yield* parentAdmissionProblems(loaded, parents);
+
+    expect(problems.map(({ file }) => file)).toEqual(["agents/alpha.md", "agents/beta.md"]);
+    expect(problems.map(({ message }) => message)).toEqual([
+      `Agent "alpha" cannot run as coordinator: Can't check the parent model's credential`,
+      `Agent "beta" cannot run as coordinator: Can't check the parent model's credential`,
     ]);
     expect(logins).toHaveBeenCalledTimes(1);
   }).pipe(Effect.scoped, Effect.provide(testLayer)),
