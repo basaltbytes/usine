@@ -99,7 +99,7 @@ These settings require a restart:
 
 For example, after changing browser origins with the CLI, run `usine restart` when no attempt is running.
 
-Before storing a revision, CLI commands and the operator API check the coordinator brain of each agent: the parent model, effort, and credential. Agents that share a parent model and effort share one check. If the check doesn't finish within 10 seconds, the write is refused with `ValidationTimeoutError` (HTTP 503 from the operator API), and no revision is stored. The orchestrator repeats the check, with the same limit, before it applies a reload or a revision stored by the CLI; a check that runs out of time keeps the running configuration.
+Before storing a revision, CLI commands and the operator API check the coordinator brain of each agent: the parent model, effort, and credential. The check looks up each agent's parent model and effort, and checks the credential's login once per provider, however many agents, models, and efforts use that provider. The 10-second limit covers the whole check: every agent, every login, and, for CLI commands, loading the parent models. If the check doesn't finish within 10 seconds, the write is refused with `ValidationTimeoutError` (HTTP 503 from the operator API), and no revision is stored. The orchestrator repeats the check, with the same limit, before it applies a reload or a revision stored by the CLI; a check that runs out of time keeps the running configuration.
 
 When the orchestrator saves a revision through the operator API or reloads the store, each step logs `Configuration step finished` with its `step`, `durationMillis`, and `outcome` (`passed`, `failed`, or `interrupted`). A refused coordinator brain logs `coordinator-brains` as `failed`. A reload skips `parse` and `store`. At startup, the orchestrator checks the coordinator brains of the stored configuration before it starts runs and logs that check as the `coordinator-brains` step. The startup check has no time limit; until it finishes, the API returns HTTP 503. Agents whose brain is refused stay out of the running configuration:
 
@@ -109,7 +109,7 @@ When the orchestrator saves a revision through the operator API or reloads the s
 | `read` | step | none | Reads the configuration store. |
 | `parse` | step | none | Parses and validates the changed entities. |
 | `restart` | step | none | Checks for changes that require a restart. |
-| `coordinator-brains` | step | 10-second limit | Checks each agent's coordinator brain. |
+| `coordinator-brains` | step | 10-second limit for the whole step | Checks each agent's coordinator brain. |
 | `worker-preflight` | step | none | Runs preflight for added workers, added capacity, and new brains. |
 | `store` | step | none | Stores the revision. |
 | `apply` | step | none | Applies the revision to new work. |
