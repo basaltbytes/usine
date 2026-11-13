@@ -8,9 +8,9 @@ The goal is a quickstart that requires no subscription from a specific model pro
 
 ## Status
 
-Built: the delegation core (#1179), the rules and the `Decision` contract (#1169), the relay without a parent session (#1171), the attempt journal with memory and SQLite adapters (#1181), the coordinator runtime and router with rules-only wake-up (#1197), the widened wake-up seam (#1244), the restart replays (#1245), operator input to the coordinator (#1163), and configuration as `coordinator: session | events`, with an optional agent `decision: { model, effort }` (#1158). The router sends an attempt to the coordinator when its `RunSpec.coordinator` is `events`.
+Built: the delegation core (#1179), the rules and the `Decision` contract (#1169), the relay without a parent session (#1171), the attempt journal with memory and SQLite adapters (#1181), the coordinator runtime and router with rules-only wake-up (#1197), the widened wake-up seam (#1244), the restart replays (#1245), operator input to the coordinator (#1163), configuration as `coordinator: session | events`, with an optional agent `decision: { model, effort }` (#1158), and the structured completion (#1165). The router sends an attempt to the coordinator when its `RunSpec.coordinator` is `events`.
 
-Decided, not built: the quickstart (#1160); the decision session (#1164); the structured completion (#1165); removing the Pi parent (#1166); and the design-review follow-ups (#1237).
+Decided, not built: the quickstart (#1160); the decision session (#1164); removing the Pi parent (#1166); and the design-review follow-ups (#1237).
 
 ## Recommendation
 

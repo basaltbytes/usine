@@ -323,6 +323,10 @@ const reservedDecision = {
   failed: (message) => Failed.make({ message }),
 } satisfies { readonly [Kind in ReservedKind]: (message: string) => Decision };
 
+/** Whether the child-session budget has a slot for a child that replaces `child`. */
+const hasReplacementSlot = (child: ChildSessionCount, context: AttemptContext): boolean =>
+  child < context.maxChildren;
+
 /** Returns the rule's decision for `event`. */
 export const ruleFor = (event: CoordinatorEvent, context: AttemptContext): Decision =>
   Match.valueTags(event, {
@@ -333,7 +337,7 @@ export const ruleFor = (event: CoordinatorEvent, context: AttemptContext): Decis
         onSome: ({ kind, message }) => reservedDecision[kind](message),
       }),
     ChildInterrupted: ({ child, reason }): Decision =>
-      child < context.maxChildren
+      hasReplacementSlot(child, context)
         ? RetryChild.make({})
         : InfraFailed.make({
             message: `Child ${child} was interrupted and couldn't resume, and the ${context.maxChildren}-child budget has no room for a replacement: ${reason}`,
@@ -353,7 +357,7 @@ export const ruleFor = (event: CoordinatorEvent, context: AttemptContext): Decis
  * Whether a model may answer `event`: only a report without a reserved marker. Every other event
  * takes its rule, so typed facts win, and an interrupted child that left no report can't complete.
  */
-const modelEligible = (event: ChildEvent): boolean =>
+export const modelEligible = (event: CoordinatorEvent): boolean =>
   event._tag === "ChildReported" && Option.isNone(event.reserved);
 
 const reportText = (event: ChildReported): string =>
@@ -395,7 +399,7 @@ const resolve = (
           )
         : byRule(),
     RetryChild: ({ assignment }): ClampedDecision =>
-      event.child < context.maxChildren
+      hasReplacementSlot(event.child, context)
         ? Replace.make({
             replaces: event.child,
             assignment: assignment ?? defaultAssignment(event),
@@ -434,6 +438,25 @@ export const clamp = (decision: Decision, context: AttemptContext): ClampedDecis
   const { event } = context;
   if (event._tag === "AttemptStarted") return Start.make({});
   return resolve(modelEligible(event) ? decision : ruleFor(event, context), event, context);
+};
+
+/**
+ * Returns why `clamp` would replace a model's `decision` about `context.event` instead of applying
+ * it as given, or `None` if it applies it: the event takes its rule, or a replacement has no room
+ * in the child-session budget.
+ */
+export const clampRejection = (
+  decision: ModelDecision,
+  context: AttemptContext,
+): Option.Option<string> => {
+  const { event } = context;
+  if (event._tag !== "ChildReported") return Option.some(`${event._tag} takes its rule`);
+  if (!modelEligible(event)) return Option.some("A report with a reserved marker takes its rule");
+  if (decision._tag === "RetryChild" && !hasReplacementSlot(event.child, context))
+    return Option.some(
+      `Child ${event.child} can't be replaced: the Attempt has used its ${context.maxChildren}-child budget`,
+    );
+  return Option.none();
 };
 
 type Transition = readonly [CoordinatorState, ReadonlyArray<EffectIntent>];
