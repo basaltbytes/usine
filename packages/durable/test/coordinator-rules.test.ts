@@ -13,7 +13,6 @@ import {
   AwaitingStart,
   BLANK_REPORT_MESSAGE,
   Blocked,
-  BudgetExceeded,
   ChildAtCapacity,
   ChildFailed,
   ChildInterrupted,
@@ -171,42 +170,36 @@ describe("coordinator rules", () => {
     }),
   );
 
-  it.effect(
-    "ChildAtCapacity, ChildFailed, and BudgetExceeded fail with their failures, keeping resetsAt",
-    () =>
-      Effect.gen(function* () {
-        const cases: ReadonlyArray<readonly [CoordinatorEvent, EncodedFailure]> = [
-          [
-            ChildAtCapacity.make({ child: child(1), message: "HTTP 529", resetsAt: Option.none() }),
-            { _tag: "ProviderCapacityFailure", message: "HTTP 529" },
-          ],
-          [
-            ChildAtCapacity.make({
-              child: child(1),
-              message: "Usage limit reached",
-              resetsAt: Option.some(DateTime.makeUnsafe("2026-11-11T18:00:00Z")),
-            }),
-            {
-              _tag: "ProviderCapacityFailure",
-              message: "Usage limit reached",
-              resetsAt: "2026-11-11T18:00:00.000Z",
-            },
-          ],
-          [
-            ChildFailed.make({ child: child(1), message: "ssh: closed" }),
-            { _tag: "InfraFailure", message: "ssh: closed", cause: "ssh: closed" },
-          ],
-          [
-            BudgetExceeded.make({ child: child(1), attempted: child(3) }),
-            { _tag: "ChildSessionBudgetFailure", maxChildren: 2, attemptedChildren: 3 },
-          ],
-        ];
-        for (const [event, failure] of cases) {
-          const [, intents] = handle(startedState(), event, { maxChildren: 2 });
-          const intent = yield* intentOf(intents);
-          assert.deepStrictEqual(intent, { failed: failure }, event._tag);
-        }
-      }),
+  it.effect("ChildAtCapacity and ChildFailed fail with their failures, keeping resetsAt", () =>
+    Effect.gen(function* () {
+      const cases: ReadonlyArray<readonly [CoordinatorEvent, EncodedFailure]> = [
+        [
+          ChildAtCapacity.make({ child: child(1), message: "HTTP 529", resetsAt: Option.none() }),
+          { _tag: "ProviderCapacityFailure", message: "HTTP 529" },
+        ],
+        [
+          ChildAtCapacity.make({
+            child: child(1),
+            message: "Usage limit reached",
+            resetsAt: Option.some(DateTime.makeUnsafe("2026-11-11T18:00:00Z")),
+          }),
+          {
+            _tag: "ProviderCapacityFailure",
+            message: "Usage limit reached",
+            resetsAt: "2026-11-11T18:00:00.000Z",
+          },
+        ],
+        [
+          ChildFailed.make({ child: child(1), message: "ssh: closed" }),
+          { _tag: "InfraFailure", message: "ssh: closed", cause: "ssh: closed" },
+        ],
+      ];
+      for (const [event, failure] of cases) {
+        const [, intents] = handle(startedState(), event, { maxChildren: 2 });
+        const intent = yield* intentOf(intents);
+        assert.deepStrictEqual(intent, { failed: failure }, event._tag);
+      }
+    }),
   );
 
   it("clamp keeps every typed fact's rule over a model's decision", () => {
@@ -215,7 +208,6 @@ describe("coordinator rules", () => {
       reported(`${AWAITING_CI_MARKER}\n{"pull_request":12}`),
       ChildAtCapacity.make({ child: child(1), message: "HTTP 529", resetsAt: Option.none() }),
       ChildFailed.make({ child: child(1), message: "ssh: closed" }),
-      BudgetExceeded.make({ child: child(1), attempted: child(4) }),
     ];
     for (const event of events) {
       const context = contextFor(event);
@@ -312,16 +304,10 @@ describe("coordinator rules", () => {
   );
 
   it("clamp applies the event's rule to a rule-only tag about a child", () => {
-    const ruleOnly = [
-      ruleFor(AttemptStarted.make({}), contextFor(AttemptStarted.make({}))),
-      ruleFor(
-        BudgetExceeded.make({ child: child(1), attempted: child(7) }),
-        contextFor(AttemptStarted.make({})),
-      ),
-    ];
+    const ruleOnly = [ruleFor(AttemptStarted.make({}), contextFor(AttemptStarted.make({})))];
     assert.deepStrictEqual(
       ruleOnly.map((decision) => decision._tag),
-      ["StartChild", "OverBudget"],
+      ["StartChild"],
     );
     const events = [
       reported("Opened #12"),
@@ -339,7 +325,7 @@ describe("coordinator rules", () => {
   });
 
   it("ModelDecision rejects the tags only a rule makes", () => {
-    for (const answer of [{ _tag: "StartChild" }, { _tag: "OverBudget", attempted: 7 }])
+    for (const answer of [{ _tag: "StartChild" }])
       assert.isTrue(Exit.isFailure(Schema.decodeUnknownExit(ModelDecision)(answer)), answer._tag);
   });
 

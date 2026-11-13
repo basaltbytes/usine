@@ -40,7 +40,6 @@ import {
   apply,
   AwaitingStart,
   BLANK_REPORT_MESSAGE,
-  BudgetExceeded,
   ChildAtCapacity,
   ChildFailed,
   ChildInterrupted,
@@ -119,26 +118,47 @@ const CHILD_STOP_GRACE = Duration.seconds(10);
 
 const nonEmpty = (text: string, fallback: string) => (text.trim() === "" ? fallback : text);
 
-/** Returns the event that ends delegation `child` with `outcome`. */
-const eventOf = (child: ChildSessionCount, outcome: DelegationOutcome): CoordinatorEvent =>
+/**
+ * Returns the event that ends delegation `child` with `outcome`. Dies on `BudgetExceeded`: the
+ * transition that decided the delegation numbered it within the child-session budget, so its
+ * journal never refuses it.
+ */
+const eventOf = (
+  child: ChildSessionCount,
+  outcome: DelegationOutcome,
+): Effect.Effect<CoordinatorEvent> =>
   Match.valueTags(outcome, {
-    Reported: ({ report, answeredOperator }): CoordinatorEvent =>
-      ChildReported.make({ child, report, answeredOperator, reserved: Option.none() }),
-    Reserved: ({ report }): CoordinatorEvent =>
-      Match.valueTags(report, {
-        AgentCapacityError: ({ message, resetsAt }): CoordinatorEvent =>
-          ChildAtCapacity.make({
-            child,
-            message: nonEmpty(message, "The model provider refused the child for lack of capacity"),
-            resetsAt,
-          }),
-        AgentBlockedError: (blocked) => reservedEvent(child, "blocked", blocked),
-        AgentQuestionError: (question) => reservedEvent(child, "question", question),
-        AgentResultError: (failed) => reservedEvent(child, "failed", failed),
-      }),
-    Interrupted: ({ reason }): CoordinatorEvent =>
-      ChildInterrupted.make({ child, reason: nonEmpty(reason, "the child stopped") }),
-    BudgetExceeded: ({ attempted }): CoordinatorEvent => BudgetExceeded.make({ child, attempted }),
+    Reported: ({ report, answeredOperator }) =>
+      Effect.succeed<CoordinatorEvent>(
+        ChildReported.make({ child, report, answeredOperator, reserved: Option.none() }),
+      ),
+    Reserved: ({ report }) =>
+      Effect.succeed(
+        Match.valueTags(report, {
+          AgentCapacityError: ({ message, resetsAt }): CoordinatorEvent =>
+            ChildAtCapacity.make({
+              child,
+              message: nonEmpty(
+                message,
+                "The model provider refused the child for lack of capacity",
+              ),
+              resetsAt,
+            }),
+          AgentBlockedError: (blocked) => reservedEvent(child, "blocked", blocked),
+          AgentQuestionError: (question) => reservedEvent(child, "question", question),
+          AgentResultError: (failed) => reservedEvent(child, "failed", failed),
+        }),
+      ),
+    Interrupted: ({ reason }) =>
+      Effect.succeed<CoordinatorEvent>(
+        ChildInterrupted.make({ child, reason: nonEmpty(reason, "the child stopped") }),
+      ),
+    BudgetExceeded: ({ attempted }) =>
+      Effect.die(
+        new Error(
+          `The coordinator's delegation ${child} was refused as child ${attempted} over the budget`,
+        ),
+      ),
   });
 
 const reservedEvent = (
@@ -336,7 +356,7 @@ const make = Effect.gen(function* () {
       Effect.onInterrupt(() => stopDelegation(hub, record.number, stopping, running)),
     );
     const outcome = yield* ended.pipe(
-      Effect.map((delegation) => eventOf(record.number, delegation)),
+      Effect.flatMap((delegation) => eventOf(record.number, delegation)),
       Effect.catchIf(Schema.is(AgentSessionError), (error) =>
         Effect.succeed<CoordinatorEvent>(
           ChildFailed.make({

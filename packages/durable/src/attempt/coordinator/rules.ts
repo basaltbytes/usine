@@ -4,7 +4,6 @@ import {
   AgentFailure,
   AttemptFailure,
   BlockedFailure,
-  ChildSessionBudgetFailure,
   InfraFailure,
   ProviderCapacityFailure,
   QuestionFailure,
@@ -94,16 +93,6 @@ export class ChildFailed extends Schema.TaggedClass<
   message: Schema.NonEmptyString,
 }) {}
 
-/** Admission refused child `child` because the Attempt's child-session budget is spent. */
-export class BudgetExceeded extends Schema.TaggedClass<
-  BudgetExceeded,
-  Brand.Brand<"@usine/durable/attempt/coordinator/rules/BudgetExceeded">
->("@usine/durable/coordinator/BudgetExceeded")("BudgetExceeded", {
-  child: ChildSessionCount,
-  /** Admission's count of child requests, including the refused one. */
-  attempted: ChildSessionCount,
-}) {}
-
 /** A lifecycle event of an Attempt that the coordinator handles. */
 export const CoordinatorEvent = Schema.Union([
   AttemptStarted,
@@ -111,7 +100,6 @@ export const CoordinatorEvent = Schema.Union([
   ChildInterrupted,
   ChildAtCapacity,
   ChildFailed,
-  BudgetExceeded,
 ]);
 export type CoordinatorEvent = typeof CoordinatorEvent.Type;
 
@@ -126,7 +114,6 @@ export const DelegationEnd = Schema.Literals([
   "interrupted",
   "capacity",
   "infrastructure",
-  "over-budget",
 ]);
 export type DelegationEnd = typeof DelegationEnd.Type;
 
@@ -209,9 +196,6 @@ export const AtCapacity = Schema.TaggedStruct("AtCapacity", {
   resetsAt: Schema.optionalKey(Schema.DateTimeUtcFromString),
 });
 
-/** Fails the Attempt because admission refused a child over the budget. */
-const OverBudget = Schema.TaggedStruct("OverBudget", { attempted: ChildSessionCount });
-
 /**
  * A model handler's answer to one event. `clamp` checks it against the event, so free text is
  * optional wherever the event supplies it.
@@ -227,8 +211,8 @@ export const ModelDecision = Schema.Union([
 ]);
 export type ModelDecision = typeof ModelDecision.Type;
 
-/** A rule's answer to one event: a `ModelDecision`, or a start or budget refusal only a rule makes. */
-export const Decision = Schema.Union([StartChild, ...ModelDecision.members, OverBudget]);
+/** A rule's answer to one event: a `ModelDecision`, or a start only a rule makes. */
+export const Decision = Schema.Union([StartChild, ...ModelDecision.members]);
 export type Decision = typeof Decision.Type;
 
 const AttemptCompleted = Schema.TaggedStruct("AttemptCompleted", {
@@ -351,7 +335,6 @@ export const ruleFor = (event: CoordinatorEvent, context: AttemptContext): Decis
         }),
       ),
     ChildFailed: ({ message }): Decision => InfraFailed.make({ message }),
-    BudgetExceeded: ({ attempted }): Decision => OverBudget.make({ attempted }),
   });
 
 /**
@@ -369,8 +352,6 @@ const defaultMessage = (event: ChildEvent): string => {
   if (event._tag === "ChildReported") return reportText(event);
   if (event._tag === "ChildInterrupted")
     return `Child ${event.child} was interrupted: ${event.reason}`;
-  if (event._tag === "BudgetExceeded")
-    return `Admission refused child ${event.child} over the child-session budget`;
   return event.message;
 };
 
@@ -389,17 +370,8 @@ const resolve = (
   const fail = (failure: AttemptFailure) => settle(AttemptFailed.make({ failure }));
   const byRule = () => resolve(ruleFor(event, context), event, context);
   return Match.valueTags(decision, {
-    // Only a rule starts an Attempt or reports admission's count.
+    // Only a rule starts an Attempt.
     StartChild: byRule,
-    OverBudget: ({ attempted }) =>
-      event._tag === "BudgetExceeded"
-        ? fail(
-            ChildSessionBudgetFailure.make({
-              maxChildren: context.maxChildren,
-              attemptedChildren: attempted,
-            }),
-          )
-        : byRule(),
     RetryChild: ({ assignment }): ClampedDecision =>
       hasReplacementSlot(event.child, context)
         ? Replace.make({

@@ -37,8 +37,6 @@ const endOf = (event: CoordinatorEvent): Option.Option<readonly [DelegationEnd, 
     ChildInterrupted: ({ reason }) => Option.some(["interrupted", reason] as const),
     ChildAtCapacity: ({ message }) => Option.some(["capacity", message] as const),
     ChildFailed: ({ message }) => Option.some(["infrastructure", message] as const),
-    BudgetExceeded: ({ attempted }) =>
-      Option.some(["over-budget", `Admission refused child ${attempted}`] as const),
   });
 
 /** The child that `event` is about, or `None` for the Attempt's start. */

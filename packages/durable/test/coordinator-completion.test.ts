@@ -51,7 +51,6 @@ import {
   AttemptContext,
   AttemptStarted,
   Blocked,
-  BudgetExceeded,
   ChildAtCapacity,
   ChildFailed,
   ChildInterrupted,
@@ -624,7 +623,6 @@ describe("structured completion wake-up", () => {
         ChildFailed.make({ child, message: "The worker lost its transport." }),
         ChildInterrupted.make({ child, reason: "The checkout is gone." }),
         ChildAtCapacity.make({ child, message: "Usage limit.", resetsAt: Option.none() }),
-        BudgetExceeded.make({ child, attempted: ChildSessionCount.make(4) }),
       ];
 
       for (const event of events) {

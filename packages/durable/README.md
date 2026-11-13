@@ -59,7 +59,7 @@ Every child receives the stored rendered loop task unchanged. The parent supplie
 
 The `subagent` tool and the event-driven coordinator both run children through the delegation core in `src/attempt/delegation/`. `delegate` runs one child from launch or resume to a `DelegationOutcome`: `Reported`, `Reserved`, `Interrupted`, or `BudgetExceeded`. It takes three ports, none of which loads a Pi package:
 
-- `DelegationJournal` stores the delegation: its start, holds, pauses, queued operator input, the saved child session, and the retained output. Its operations fail with `JournalError`. The journal's owner numbers each delegation and applies the child-session budget in `start`, which returns `Admitted` or `Refused`: the `subagent` tool counts each call, and the coordinator numbers each child in the transition that decided it.
+- `DelegationJournal` stores the delegation: its start, holds, pauses, queued operator input, the saved child session, and the retained output. Its operations fail with `JournalError`. The journal's owner numbers each delegation and applies the child-session budget in `start`, which returns `Admitted` or `Refused`: the `subagent` tool counts each call, and the coordinator numbers each child in the transition that decided it, so its `start` never refuses and the coordinator has no budget event.
 - `DelegationCall` is the call that owns the delegation: the running output, the published details, the abort, and what a reserved report or infrastructure failure means for the attempt. The `subagent` tool records them as the attempt's child blocker; the coordinator turns the delegation's outcome into its next event.
 - `DelegationHub` is the attempt's in-process state that delegations share.
 
@@ -105,7 +105,7 @@ pi-durable has no cross-process locking: tasks and documents from a second write
 - `clamp(decision, context)` checks a decision from a rule or a model against the event and resolves its defaults.
 - `apply(state, decision)` returns the next `CoordinatorState` and the effect intents: `Delegate` starts a child, `Finish` ends the Attempt, and `Ignored` gives the reason a decision changed nothing.
 
-`ModelDecision` is the contract that a model handler answers with. `Schema.toJsonSchemaDocument(ModelDecision)` has one branch per tag, and its free-text fields are optional wherever the event supplies the text. A `RetryChild` without an assignment tells the replacement to continue from the checkout, with the previous child's report when it answers a report. A `Complete` without a message completes with the report. A rule's `Decision` adds two tags that a model can't choose: `StartChild` and `OverBudget`.
+`ModelDecision` is the contract that a model handler answers with. `Schema.toJsonSchemaDocument(ModelDecision)` has one branch per tag, and its free-text fields are optional wherever the event supplies the text. A `RetryChild` without an assignment tells the replacement to continue from the checkout, with the previous child's report when it answers a report. A `Complete` without a message completes with the report. A rule's `Decision` adds one tag that a model can't choose: `StartChild`.
 
 The rules handle each lifecycle event as follows:
 
