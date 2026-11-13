@@ -56,7 +56,7 @@ export interface DelegationProgress {
   /** The times of the continuation turns, in epoch milliseconds. */
   readonly continuations: ReadonlyArray<number>;
   /** The native user-message items that the child observed in its last turn. */
-  readonly receipts: ReadonlyArray<string>;
+  readonly receipts: Option.Option<ReadonlyArray<string>>;
   /** The child's tool calls that started and did not finish. */
   readonly inFlight: ReadonlyArray<{ readonly callId: string; readonly tool: string }>;
   /** Whether the child received its prompt. */

@@ -105,7 +105,7 @@ const toolJournal = (
         idle: Option.fromNullishOr(saved.idle),
         idleAnsweredOperator: saved.idleAnsweredOperator ?? false,
         continuations: [...(saved.continuations ?? [])],
-        receipts: [...(saved.receipts ?? [])],
+        receipts: Option.map(Option.fromUndefinedOr(saved.receipts), (items) => [...items]),
         inFlight: (saved.inFlight ?? []).map(({ callId, tool }) => ({ callId, tool })),
         prompted: saved.prompted ?? true,
       };

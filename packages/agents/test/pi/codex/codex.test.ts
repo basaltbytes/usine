@@ -84,6 +84,7 @@ const request = (
     }),
     cwd: WorkingDirectory.make("/workspace/repo"),
     prompt: "Implement the focused task.",
+    receipts: Option.some([]),
   });
 
 const connectionLayer = (
@@ -748,6 +749,8 @@ describe("Codex child backend", () => {
         Effect.gen(function* () {
           const notifications = yield* Queue.make<CodexNotification, Cause.Done>();
           const turns: Array<string> = [];
+          const guidance = OperatorMessage.make({ message: "Check the tests" });
+          const interrupts: Array<string> = [];
           const saved = HarnessSession.make({
             id: HarnessSessionId.make("unprompted-codex"),
             cwd: request().cwd,
@@ -768,6 +771,7 @@ describe("Codex child backend", () => {
                 request: (_operation, method, params) =>
                   Effect.sync(() => {
                     if (method === "turn/start") turns.push(jsonKey(params));
+                    if (method === "turn/interrupt") interrupts.push(jsonKey(params));
                     return responses.get(method) ?? {};
                   }),
               }),
@@ -779,37 +783,59 @@ describe("Codex child backend", () => {
                 resume: Option.some(saved),
                 held: supervision === "held",
                 paused: supervision === "paused",
+                unread:
+                  supervision === "paused" ? [{ id: guidance.id, message: guidance.message }] : [],
               }),
             );
             assert.lengthOf(turns, 1);
             assert.include(turns[0], request().prompt);
             assert.notInclude(turns[0], CONTINUATION_MESSAGE);
-            yield* Queue.offerAll(notifications, [
-              {
-                method: "item/completed",
-                params: {
-                  threadId: saved.id,
-                  turnId: "turn-1",
-                  item: { type: "agentMessage", id: "answer", text: "Task done" },
-                },
-              },
-              {
-                method: "turn/completed",
-                params: { turn: { id: "turn-1", status: "completed", error: null } },
-              },
-            ]);
-            const lifecycle = new Set(["SessionStarted", "SessionIdle", "SessionResumed"]);
+            assert.lengthOf(interrupts, supervision === "paused" ? 1 : 0);
+            const answer = supervision === "paused" ? "Codex turn paused" : "Task done";
+            yield* Queue.offerAll(
+              notifications,
+              supervision === "paused"
+                ? [
+                    {
+                      method: "turn/completed",
+                      params: { turn: { id: "turn-1", status: "interrupted", error: null } },
+                    },
+                  ]
+                : [
+                    {
+                      method: "item/completed",
+                      params: {
+                        threadId: saved.id,
+                        turnId: "turn-1",
+                        item: { type: "agentMessage", id: "answer", text: "Task done" },
+                      },
+                    },
+                    {
+                      method: "turn/completed",
+                      params: { turn: { id: "turn-1", status: "completed", error: null } },
+                    },
+                  ],
+            );
+
             const seen = yield* running.events.pipe(
-              Stream.filter((event) => lifecycle.has(event._tag)),
               Stream.takeUntil(
-                (event) =>
-                  event._tag === "SessionIdle" && Option.contains(event.message, "Task done"),
+                (event) => event._tag === "SessionIdle" && Option.contains(event.message, answer),
               ),
               Stream.runCollect,
             );
+            assert.isFalse(seen.some((event) => event._tag === "ToolStarted"));
+            assert.lengthOf(turns, 1, "restored guidance cannot start another paused turn");
+            if (supervision === "paused") {
+              yield* running.intervene(OperatorMessage.make({ message: "Continue" }), noDelivery);
+              assert.lengthOf(turns, 2);
+              assert.include(turns[1], guidance.message);
+              assert.lengthOf(interrupts, 1, "new operator input resumes the paused child");
+            }
             // A held child gets its task without reporting the interrupted turn idle first.
             assert.deepStrictEqual(
-              seen.map((event) => event._tag),
+              seen
+                .map((event) => event._tag)
+                .filter((tag) => ["SessionStarted", "SessionIdle", "SessionResumed"].includes(tag)),
               supervision === "paused"
                 ? ["SessionStarted", "SessionIdle", "SessionResumed", "SessionIdle"]
                 : ["SessionStarted", "SessionIdle"],
@@ -1229,6 +1255,95 @@ describe("Codex child backend", () => {
     );
   }
 
+  it.effect("reads a replayed steer of an active reattached turn without sending it again", () =>
+    Effect.gen(function* () {
+      const notifications = yield* Queue.make<CodexNotification, Cause.Done>();
+      const guidance = Steer.make({ message: "Check the diff" });
+      const next = OperatorMessage.make({ message: "Run the linter" });
+      const item = {
+        type: "userMessage",
+        id: "guidance",
+        clientId: null,
+        content: [{ type: "text", text: guidance.message, text_elements: [] }],
+      };
+      const inputs: Array<{ method: string; params: Schema.Json }> = [];
+      const reads: Array<string> = [];
+      const idle = yield* Deferred.make<void>();
+      const responses: Readonly<Record<string, Schema.Json>> = successfulResponses([
+        { id: "gpt-5.6-terra", model: "gpt-5.6-terra" },
+      ]);
+      const server = Layer.succeed(CodexAppServer)({
+        stop: () => Effect.void,
+        open: () =>
+          Effect.succeed({
+            notifications: Stream.fromQueue(notifications),
+            notify: () => Effect.void,
+            close: Queue.end(notifications),
+            request: (_operation, method, params) =>
+              Effect.sync(() => {
+                if (method === "thread/resume")
+                  return {
+                    modelProvider: "openai",
+                    thread: {
+                      id: "thread-1",
+                      turns: [{ id: "turn-2", status: "inProgress", items: [item] }],
+                    },
+                  };
+                if (method === "turn/start" || method === "turn/steer")
+                  inputs.push({ method, params });
+                return responses[method] ?? {};
+              }),
+          }),
+      });
+      yield* Queue.offerAll(notifications, [
+        { method: "item/started", params: { threadId: "thread-1", turnId: "turn-2", item } },
+        {
+          method: "turn/completed",
+          params: { turn: { id: "turn-2", status: "completed", error: null } },
+        },
+      ]);
+      yield* Effect.gen(function* () {
+        const running = yield* (yield* ChildBackend).launch(
+          ChildRequest.make({
+            ...request(),
+            held: true,
+            resume: Option.some(
+              HarnessSession.make({ id: HarnessSessionId.make("thread-1"), cwd: request().cwd }),
+            ),
+            unread: [{ id: guidance.id, message: guidance.message }],
+          }),
+        );
+        yield* Effect.forkScoped(
+          running.events.pipe(
+            Stream.runForEach((event) =>
+              event._tag === "SessionIdle" ? Deferred.succeed(idle, undefined) : Effect.void,
+            ),
+          ),
+        );
+        yield* Deferred.await(idle);
+        yield* running.intervene(next, noDelivery);
+        assert.deepStrictEqual(reads, [guidance.id]);
+        assert.deepStrictEqual(
+          inputs.map(({ method }) => method),
+          ["turn/start"],
+        );
+        assert.include(jsonKey(inputs[0]?.params), next.message);
+      }).pipe(
+        Effect.provide(codexChildLayer.pipe(Layer.provide(server))),
+        Effect.provideService(ChildSessionJournal, {
+          started: () => Effect.void,
+          prompted: Effect.void,
+          continued: () => Effect.void,
+          received: () => Effect.void,
+          delivered: (id, state) =>
+            Effect.sync(() => {
+              if (Option.isSome(state)) reads.push(id);
+            }),
+        }),
+      );
+    }).pipe(Effect.scoped),
+  );
+
   for (const commit of ["synchronous", "received", "delivered"] as const)
     it.effect(
       `doesn't resend a restored message that the last finished Codex turn read (${commit} commit)`,
@@ -1398,7 +1513,7 @@ describe("Codex child backend", () => {
           ChildRequest.make({
             ...request(),
             resume: Option.some(saved),
-            receipts: ["task", "guidance"],
+            receipts: Option.some(["task", "guidance"]),
             unread: [
               { id: repeated.id, message: repeated.message },
               { id: task.id, message: task.message },
@@ -1514,6 +1629,91 @@ describe("Codex child backend", () => {
           }),
       });
 
+    it.effect("resends repeated guidance when the delegation predates saved receipts", () =>
+      Effect.gen(function* () {
+        const repeated = OperatorMessage.make({ message: "Check the tests" });
+        const items = [
+          userMessage("task", request().prompt),
+          userMessage("guidance", repeated.message),
+        ];
+        const received: Array<ReadonlyArray<string>> = [];
+        for (const receipts of [
+          Option.none<ReadonlyArray<string>>(),
+          Option.some(["task", "guidance"]),
+        ]) {
+          const notifications = yield* Queue.make<CodexNotification, Cause.Done>();
+          const reads: Array<string> = [];
+          const inputs: Array<{ method: string; params: Schema.Json }> = [];
+          yield* Effect.gen(function* () {
+            yield* (yield* ChildBackend).launch(
+              ChildRequest.make({
+                ...request(),
+                resume: Option.some(saved),
+                receipts,
+                unread: [{ id: repeated.id, message: repeated.message }],
+              }),
+            );
+            assert.deepStrictEqual(reads, []);
+            assert.deepStrictEqual(
+              inputs.map(({ method }) => method),
+              ["turn/start", "turn/steer"],
+            );
+            assert.include(jsonKey(inputs[1]?.params), repeated.message);
+          }).pipe(
+            Effect.scoped,
+            Effect.provide(
+              codexChildLayer.pipe(Layer.provide(appServer(notifications, items, inputs))),
+            ),
+            recording(received, reads),
+          );
+        }
+        assert.deepStrictEqual(received, [["task", "guidance"]]);
+      }).pipe(Effect.scoped),
+    );
+
+    it.effect(
+      "does not count restored reads as an operator answer in the held placeholder report",
+      () =>
+        Effect.gen(function* () {
+          const notifications = yield* Queue.make<CodexNotification, Cause.Done>();
+          const guidance = OperatorMessage.make({ message: "Check the diff" });
+          const items = [
+            userMessage("guidance", guidance.message),
+            { type: "commandExecution", id: "command", command: "git diff", status: "completed" },
+            { type: "agentMessage", id: "answer", text: "Checked the diff" },
+          ];
+          const inputs: Array<{ method: string; params: Schema.Json }> = [];
+          const reads: Array<string> = [];
+          yield* Effect.gen(function* () {
+            const running = yield* (yield* ChildBackend).launch(
+              ChildRequest.make({
+                ...request(),
+                resume: Option.some(saved),
+                held: true,
+                unread: [{ id: guidance.id, message: guidance.message }],
+              }),
+            );
+            const idle = yield* running.events.pipe(
+              Stream.filter((event) => event._tag === "SessionIdle"),
+              Stream.take(1),
+              Stream.runCollect,
+            );
+            assert.deepStrictEqual(reads, [guidance.id]);
+            assert.strictEqual(idle[0]?.answeredOperator, false);
+            assert.deepStrictEqual(inputs, []);
+            yield* running.intervene(Release.make(), noDelivery);
+            const result = yield* running.result;
+            assert.strictEqual(result.message, "Session interrupted before its turn returned");
+            assert.isFalse(result.answeredOperator);
+          }).pipe(
+            Effect.provide(
+              codexChildLayer.pipe(Layer.provide(appServer(notifications, items, inputs))),
+            ),
+            recording([], reads),
+          );
+        }).pipe(Effect.scoped),
+    );
+
     it.effect("saves every user-message item that one Codex turn observed", () =>
       Effect.gen(function* () {
         const notifications = yield* Queue.make<CodexNotification, Cause.Done>();
@@ -1550,7 +1750,7 @@ describe("Codex child backend", () => {
             ChildRequest.make({
               ...request(),
               resume: Option.some(saved),
-              receipts: received.at(-1) ?? [],
+              receipts: Option.some(received.at(-1) ?? []),
               unread: [{ id: repeated.id, message: repeated.message }],
             }),
           );
@@ -1589,7 +1789,7 @@ describe("Codex child backend", () => {
                   resume: Option.some(saved),
                   held: true,
                   idle: Option.some("Saved final report."),
-                  receipts,
+                  receipts: Option.some(receipts),
                   unread: unread.map(({ id, message }) => ({ id, message })),
                 }),
               );

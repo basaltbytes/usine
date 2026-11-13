@@ -10,7 +10,7 @@ type SubagentRecord = {
   /** Absent on older delegations; their idle report didn't answer the operator. */
   idleAnsweredOperator?: boolean;
   continuations?: Array<number>;
-  /** Absent on older delegations, which recorded no native user-message items. */
+  /** Absent on older delegations, whose observed native user-message items are unknown. */
   receipts?: Array<string>;
   inFlight?: Array<{ callId: string; tool: string }>;
   /** Absent on older delegations, which saved the conversation only after the prompt. */
@@ -23,5 +23,5 @@ export const SubagentDoc = defineDoc<SubagentRecord>({
   version: 1,
   scope: "task",
   checkpointWhen: () => false,
-  initial: () => ({ count: null, saved: null, output: "", idle: null }),
+  initial: () => ({ count: null, saved: null, output: "", idle: null, receipts: [] }),
 });

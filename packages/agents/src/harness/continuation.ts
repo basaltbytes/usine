@@ -94,7 +94,7 @@ export interface ContinuationState {
 
 /**
  * Decides whether recovery needs a turn, without spending a child-session budget slot. A child
- * whose native history holds no task gets its task even under Hold or pause.
+ * whose native history holds no task gets its task even under Hold, pause, or an idle report.
  */
 export const continuationPlan = (
   session: AgentSession,
@@ -205,6 +205,13 @@ export const continuationPolicy = Effect.fn("HarnessContinuation.make")(function
         unread: unread.length,
       });
       yield* send(state.empty === true ? task : CONTINUATION_MESSAGE);
+      if (state.paused) {
+        yield* Effect.logInfo("Recovered paused child keeps unread guidance queued", {
+          sessionId: session.id,
+          unread: unread.length,
+        });
+        return;
+      }
       for (const message of unread) yield* send(message.message, message.id);
     }),
   } satisfies ContinuationPolicy;

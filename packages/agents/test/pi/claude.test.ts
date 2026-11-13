@@ -1533,11 +1533,13 @@ describe("Claude child backend", () => {
         Effect.gen(function* () {
           const inputs = yield* Queue.make<ClaudeUserMessage>();
           const outputs: Array<Queue.Queue<Schema.Json, Cause.Done>> = [];
+          const launches: Array<ClaudeQueryOptions> = [];
           const lost = { type: "test_process_lost" };
           const context = yield* Effect.context<never>();
           // The process owner of this SDK never acknowledges an input line.
           const sdk = Layer.succeed(ClaudeSdk)({
-            open: (input) => {
+            open: (input, options) => {
+              launches.push(options);
               const output = Effect.runSyncWith(context)(Queue.make<Schema.Json, Cause.Done>());
               outputs.push(output);
               void (async () => {
@@ -1578,6 +1580,11 @@ describe("Claude child backend", () => {
             yield* Queue.offer(outputs[0]!, lost);
             const resent = yield* Queue.take(inputs);
             assert.lengthOf(outputs, 2);
+            assert.strictEqual(launches[1]?.resume, resumed ? launches[0]?.resume : undefined);
+            assert.strictEqual(
+              launches[1]?.sessionId,
+              resumed ? undefined : launches[0]?.sessionId,
+            );
             assert.strictEqual(resent.message.content, first);
           }).pipe(Effect.scoped, Effect.provide(claudeChild.pipe(Layer.provide(sdk))));
         }).pipe(Effect.scoped),
@@ -1626,7 +1633,10 @@ describe("Claude child backend", () => {
           });
           const result = yield* Effect.gen(function* () {
             const running = yield* (yield* ChildBackend).launch(
-              request(undefined, undefined, exitingHost(0)),
+              ChildRequest.make({
+                ...request(undefined, undefined, exitingHost(0)),
+                resume: Option.some(HarnessSession.make({ cwd: request().cwd })),
+              }),
             );
             const output = () => outputs.at(-1)!;
             const { toolRound } = yield* turnDriver(running, output);
@@ -1803,6 +1813,7 @@ describe("Claude child backend", () => {
     const inputs = yield* Queue.make<ClaudeUserMessage>();
     const output = yield* Queue.make<Schema.Json, Cause.Done>();
     const outputs: Array<Queue.Queue<Schema.Json, Cause.Done>> = [];
+    const launches: Array<ClaudeQueryOptions> = [];
     const lost = { type: "test_process_lost" };
     const context = yield* Effect.context<never>();
     const init = yield* jsonLine({ type: "system", subtype: "init", session_id: "saved-claude" });
@@ -1815,6 +1826,7 @@ describe("Claude child backend", () => {
     );
     const sdk = Layer.succeed(ClaudeSdk)({
       open: (input, options) => {
+        launches.push(options);
         const current =
           outputs.length === 0
             ? output
@@ -1865,7 +1877,7 @@ describe("Claude child backend", () => {
     const layer = claudeChildWith(
       Layer.succeed(ChildProcessSpawner.ChildProcessSpawner)(owner),
     ).pipe(Layer.provideMerge(sdk));
-    return { inputs, output, outputs, lost, layer };
+    return { inputs, output, outputs, launches, lost, layer };
   });
 
   /** A request that reattaches the retained process of the saved session `saved-claude`. */
@@ -1922,15 +1934,51 @@ describe("Claude child backend", () => {
       }).pipe(Effect.scoped),
     );
 
+  it.live(
+    "replaces an idle report with the task when the retained Claude process has no prompt receipt",
+    () =>
+      Effect.gen(function* () {
+        const { inputs, output, layer } = yield* retainedSdk;
+        yield* Effect.gen(function* () {
+          const running = yield* (yield* ChildBackend).launch(
+            reattach({
+              prompted: false,
+              held: true,
+              idle: Option.some("Saved answer"),
+            }),
+          );
+          assert.strictEqual((yield* Queue.take(inputs)).message.content, request().prompt);
+          const lifecycle = yield* running.events.pipe(
+            Stream.filter((event) => ["SessionIdle", "SessionResumed"].includes(event._tag)),
+            Stream.take(2),
+            Stream.runCollect,
+          );
+          assert.deepStrictEqual(
+            lifecycle.map((event) => event._tag),
+            ["SessionIdle", "SessionResumed"],
+          );
+          yield* running.intervene(Release.make(), noDelivery);
+          yield* Queue.offer(output, {
+            type: "result",
+            subtype: "success",
+            result: "Task finished again",
+          });
+          assert.strictEqual((yield* running.result).message, "Task finished again");
+        }).pipe(Effect.scoped, Effect.provide(layer));
+      }).pipe(Effect.scoped),
+  );
+
   it.live("sends the task again when an unprompted reattached Claude process is lost", () =>
     Effect.gen(function* () {
-      const { inputs, output, outputs, lost, layer } = yield* retainedSdk;
+      const { inputs, output, outputs, launches, lost, layer } = yield* retainedSdk;
       yield* Effect.gen(function* () {
         yield* (yield* ChildBackend).launch(reattach({ prompted: false }));
         assert.strictEqual((yield* Queue.take(inputs)).message.content, request().prompt);
         yield* Queue.offer(output, lost);
         assert.strictEqual((yield* Queue.take(inputs)).message.content, request().prompt);
         assert.lengthOf(outputs, 2);
+        assert.strictEqual(launches[1]?.sessionId, "saved-claude");
+        assert.isUndefined(launches[1]?.resume);
       }).pipe(Effect.scoped, Effect.provide(layer));
     }).pipe(Effect.scoped),
   );

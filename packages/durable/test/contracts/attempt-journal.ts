@@ -1141,7 +1141,7 @@ export const attemptJournalContract = (adapter: JournalAdapter) =>
               idle: Option.some("Waiting for the operator."),
               idleAnsweredOperator: true,
               continuations: [1_000, 2_000],
-              receipts: ["item-1", "item-2"],
+              receipts: Option.some(["item-1", "item-2"]),
               inFlight: [{ callId: "call-2", tool: "read" }],
               output: "Working\n",
             }),

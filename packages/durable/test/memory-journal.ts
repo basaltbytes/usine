@@ -99,7 +99,7 @@ export const memoryJournal = (
     idle: delegation.idle,
     idleAnsweredOperator: delegation.idleAnsweredOperator,
     continuations: [...delegation.continuations],
-    receipts: [...delegation.receipts],
+    receipts: Option.some([...delegation.receipts]),
     inFlight: [...delegation.inFlight],
     prompted: delegation.prompted,
   });

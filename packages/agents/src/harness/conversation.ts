@@ -26,9 +26,10 @@ export type MessageTaken = "read" | "queued";
  * When the harness read the messages it acknowledges: `now` at the acknowledgment, a tool-call
  * count that the harness captured at the read, or `turn` when the acknowledgment ends a turn that
  * folded each message in at its first tool result after the message was queued, or at the turn's
- * end if no tool call finished since.
+ * end if no tool call finished since. `restored` acknowledges a past read without attributing the
+ * current turn's answer to it.
  */
-export type ReadPoint = "now" | "turn" | number;
+export type ReadPoint = "now" | "turn" | "restored" | number;
 
 interface ConversationOptions {
   readonly session: AgentSession;
@@ -148,7 +149,9 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
             ? Effect.forEach(read, ({ queuedAfter }) => foldedAt(queuedAfter)).pipe(
                 Effect.flatMap((points) => readOperatorInputAt(Math.max(...points))),
               )
-            : readOperatorInputAt(at);
+            : at === "restored"
+              ? Effect.void
+              : readOperatorInputAt(at);
       return Effect.logInfo("The session read queued operator messages", {
         sessionId: session.id,
         read: read.length,

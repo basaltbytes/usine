@@ -580,6 +580,10 @@ for (const receipt of ["unacknowledged", "acknowledged", "absent"] as const)
               Effect.gen(function* () {
                 if (Option.isSome(child.resume)) {
                   restored.push(child.prompted);
+                  assert.deepStrictEqual(
+                    child.receipts,
+                    receipt === "absent" ? Option.none() : Option.some([]),
+                  );
                   return yield* SessionInterruptedError.make({
                     sessionId: child.session.id,
                     message: "Native reopen failed",
@@ -624,6 +628,7 @@ for (const receipt of ["unacknowledged", "acknowledged", "absent"] as const)
                   const record = await tx.doc(SubagentDoc, task.id);
                   assert.isTrue(record.prompted);
                   delete record.prompted;
+                  delete record.receipts;
                 }, context),
             );
           yield* Fiber.interrupt(execution);
@@ -647,7 +652,7 @@ it.live("restores the native user-message items that the saved child observed", 
   Effect.gen(function* () {
     const database = yield* temporaryDatabase;
     const request = attemptRequest("recovery/receipts");
-    const restored: Array<ReadonlyArray<string>> = [];
+    const restored: Array<Option.Option<ReadonlyArray<string>>> = [];
     const backend = Layer.effectContext(
       Effect.gen(function* () {
         const services = yield* Effect.context<ChildBackend | StubChildren>();
@@ -704,7 +709,7 @@ it.live("restores the native user-message items that the saved child observed", 
         assert.strictEqual(result.message, "Recovered.");
       }),
     );
-    assert.deepStrictEqual(restored, [["task", "guidance"]]);
+    assert.deepStrictEqual(restored, [Option.some(["task", "guidance"])]);
   }).pipe(Effect.scoped, Effect.timeout("10 seconds")),
 );
 

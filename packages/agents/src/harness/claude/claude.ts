@@ -996,11 +996,11 @@ const makeClaudeSessions = Effect.gen(function* () {
       provider.clear();
       retries = 0;
       retrying = false;
-      const { sessionId: _assignedId, ...resumeOptions } = options;
+      const { sessionId: _assignedId, resume: _resumedId, ...resumeOptions } = options;
       current = yield* policy.reopen(
         launchWithRetries(
           spec,
-          { ...resumeOptions, resume: reference.id },
+          { ...resumeOptions, ...(empty ? { sessionId: reference.id } : { resume: reference.id }) },
           server,
           [],
           scope,

@@ -922,8 +922,8 @@ describe("event-driven coordinator operator input across restarts", () => {
       yield* Fiber.join(execution);
       yield* second.stop;
 
-      assert.deepStrictEqual(working.request.receipts, []);
-      assert.deepStrictEqual(resumed.request.receipts, ["task", "guidance"]);
+      assert.deepStrictEqual(working.request.receipts, Option.some([]));
+      assert.deepStrictEqual(resumed.request.receipts, Option.some(["task", "guidance"]));
     }).pipe(Effect.scoped),
   );
 

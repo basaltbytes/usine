@@ -119,7 +119,10 @@ it.effect("restores delegation progress written before native receipts were reco
       const attempts = yield* AttemptJournal;
       return yield* attempts.startDelegation(attemptId, number);
     }).pipe(Effect.provide(journal()));
-    assert.deepStrictEqual(restored.progress, ChildProgress.empty());
-    assert.deepStrictEqual(restored.progress.receipts, []);
+    assert.deepStrictEqual(
+      restored.progress,
+      ChildProgress.make({ ...ChildProgress.empty(), receipts: Option.none() }),
+    );
+    assert.deepStrictEqual(restored.progress.receipts, Option.none());
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 );

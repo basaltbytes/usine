@@ -70,10 +70,9 @@ export class ChildProgress extends Schema.Class<
   ),
   /** The times of the continuation turns, in epoch milliseconds. */
   continuations: Schema.Array(Schema.Finite),
-  /** The native user-message items that the child observed in its last turn. */
-  receipts: Schema.Array(Schema.String).pipe(
-    Schema.withDecodingDefaultKey(Effect.succeed([])),
-    Schema.withConstructorDefault(Effect.succeed([])),
+  /** The native user-message items that the child observed in its last turn; None on older records. */
+  receipts: Schema.OptionFromOptionalKey(Schema.Array(Schema.String)).pipe(
+    Schema.withConstructorDefault(Effect.succeedNone),
   ),
   /** The child's tool calls that started and did not finish. */
   inFlight: Schema.Array(Schema.Struct({ callId: Schema.String, tool: Schema.String })),
@@ -86,6 +85,7 @@ export class ChildProgress extends Schema.Class<
       prompted: true,
       idle: Option.none(),
       continuations: [],
+      receipts: Option.some([]),
       inFlight: [],
       output: "",
     });

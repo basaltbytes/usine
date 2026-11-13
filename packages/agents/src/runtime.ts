@@ -108,11 +108,11 @@ const restartFields = {
   /**
    * The IDs of the native user-message items that the session observed in its last turn before the
    * restart. Only Codex records them, so recovery doesn't take an item that acknowledged an earlier
-   * message as the receipt of an unread message with the same text.
+   * message as the receipt of an unread message with the same text. None means the delegation
+   * predates receipt tracking.
    */
-  receipts: Schema.Array(Schema.String).pipe(
-    Schema.withDecodingDefaultKey(Effect.succeed([])),
-    Schema.withConstructorDefault(Effect.succeed([])),
+  receipts: Schema.OptionFromOptionalKey(Schema.Array(Schema.String)).pipe(
+    Schema.withConstructorDefault(Effect.succeedNone),
   ),
   /** Tool calls without a committed result at restart. */
   inFlight: Schema.Array(InterruptedTool).pipe(Schema.withConstructorDefault(Effect.succeed([]))),
