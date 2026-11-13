@@ -14,6 +14,7 @@ import {
   decodeIntervention,
   Supervision,
   IdleSaved,
+  Launched,
   OutputSaved,
   type ProgressChange,
   Prompted,
@@ -89,6 +90,7 @@ export const journalDelegation = (
     toolFinished: (callId) => save(ToolFinished.make({ callId })),
     saveIdle: (report, answeredOperator) => save(IdleSaved.make({ report, answeredOperator })),
     saveOutput: (output) => save(OutputSaved.make({ output })),
+    saveLaunched: save(Launched.make({})),
   };
 };
 

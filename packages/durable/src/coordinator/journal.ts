@@ -78,6 +78,11 @@ export class ChildProgress extends Schema.Class<
   inFlight: Schema.Array(Schema.Struct({ callId: Schema.String, tool: Schema.String })),
   /** The child's retained output. */
   output: Schema.String,
+  /**
+   * Whether a run's launch returned the child. Progress stored before this field counts as
+   * launched.
+   */
+  launched: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(Effect.succeed(true))),
 }) {
   static readonly empty = (): ChildProgress =>
     ChildProgress.make({
@@ -87,6 +92,7 @@ export class ChildProgress extends Schema.Class<
       continuations: [],
       inFlight: [],
       output: "",
+      launched: false,
     });
 }
 
@@ -176,6 +182,9 @@ export const IdleSaved = Schema.TaggedStruct("IdleSaved", {
 
 export const OutputSaved = Schema.TaggedStruct("OutputSaved", { output: Schema.String });
 
+/** The child's launch returned. */
+export const Launched = Schema.TaggedStruct("Launched", {});
+
 /** One change to a delegation's `ChildProgress`. */
 export const ProgressChange = Schema.Union([
   SessionSaved,
@@ -186,6 +195,7 @@ export const ProgressChange = Schema.Union([
   ToolFinished,
   IdleSaved,
   OutputSaved,
+  Launched,
 ]);
 export type ProgressChange = typeof ProgressChange.Type;
 

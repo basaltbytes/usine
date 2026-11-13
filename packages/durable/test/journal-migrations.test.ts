@@ -3,12 +3,12 @@ import { SqliteClient } from "@effect/sql-sqlite-node";
 import { assert, it } from "@effect/vitest";
 import { AttemptId } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
-import { Effect, FileSystem, Layer, Option } from "effect";
+import { Effect, FileSystem, Layer, Option, Schema } from "effect";
 import { SqlClient } from "effect/sql";
 
 import { sqliteTempDirectory } from "../../../tooling/test/sqlite.mts";
 import { StoredRequest } from "../src/attempt-runtime.ts";
-import { AttemptJournal } from "../src/coordinator/journal.ts";
+import { AttemptJournal, ChildProgress } from "../src/coordinator/journal.ts";
 import { sqliteAttemptJournalLayer } from "../src/coordinator/sqlite/store.ts";
 import { attemptRequest } from "./support.ts";
 
@@ -65,4 +65,19 @@ it.effect("reads a journaled RunSpec.parent as its coordinator kind", () =>
     );
     assert.deepStrictEqual(legacy, [{ count: 0 }]);
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
+it.effect("reads a delegation's progress stored before launches were recorded as launched", () =>
+  Effect.gen(function* () {
+    const codec = Schema.toCodecJson(ChildProgress);
+    const encoded = yield* Schema.encodeEffect(codec)(ChildProgress.empty());
+    assert.isTrue(typeof encoded === "object" && encoded !== null && "launched" in encoded);
+    const older = Object.fromEntries(
+      Object.entries(encoded ?? {}).filter(([key]) => key !== "launched"),
+    );
+    const progress = yield* Schema.decodeEffect(codec)(older);
+
+    assert.isFalse(ChildProgress.empty().launched);
+    assert.isTrue(progress.launched);
+  }),
 );

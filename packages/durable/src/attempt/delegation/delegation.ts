@@ -127,6 +127,9 @@ const reservedReports = [
  * child's supervision and unread operator inputs, forwards the child's events to the Attempt's
  * hub, and reports reserved reports and infrastructure failures to `call`.
  *
+ * A replayed delegation whose earlier launch never returned and saved nothing launches again in
+ * the same slot, as a new one.
+ *
  * Fails with `JournalError` when the journal fails outside a progress checkpoint, and with
  * `AgentSessionError` when a new delegation's child fails to launch or ends without a report; a
  * resumed delegation returns `Interrupted` instead.
@@ -152,7 +155,7 @@ export const delegate = Effect.fn("Delegation.delegate")(function* (
     });
     return BudgetExceeded.make({ attempted: start.attempted, max: start.max });
   }
-  const { resumed, progress: previous, count: attemptedChildren } = start;
+  const { progress: previous, count: attemptedChildren } = start;
   yield* Effect.annotateCurrentSpan({
     attemptId: spec.attemptId,
     attemptedChildren,
@@ -160,6 +163,15 @@ export const delegate = Effect.fn("Delegation.delegate")(function* (
     parentSessionId: parentId,
   });
   const sessionId = childSessionId(spec.attemptId, attemptedChildren);
+  // A run that stopped before its launch returned and saved nothing left no child to resume, so
+  // the delegation launches again in its slot instead of ending as interrupted.
+  const neverLaunched = start.resumed && !previous.launched && Option.isNone(previous.saved);
+  if (neverLaunched)
+    yield* Effect.logInfo("The child's earlier launch didn't return; launching it again", {
+      attemptId: spec.attemptId,
+      sessionId,
+    });
+  const resumed = start.resumed && !neverLaunched;
   /** Runs `effect` until the delegation aborts. On abort, runs `onAbort` and interrupts. */
   const untilAborted = <A, E, R>(effect: Effect.Effect<A, E, R>, onAbort: Effect.Effect<void, E>) =>
     Effect.raceFirst(
@@ -478,6 +490,7 @@ export const delegate = Effect.fn("Delegation.delegate")(function* (
         sessionId: session.id,
       }),
     );
+    yield* journal.saveLaunched;
     yield* register(hub, child);
     yield* Effect.addFinalizer((exit) =>
       Exit.isFailure(exit)

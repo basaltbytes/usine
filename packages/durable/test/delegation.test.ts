@@ -129,6 +129,7 @@ describe("delegate", () => {
       memory.attempt.children = 1;
       memory.attempt.held = [sessionId];
       memory.delegation.count = Option.some(1);
+      memory.delegation.launched = true;
       memory.delegation.output = "Partial work\n";
       const { fiber, hub } = yield* start("delegation/interrupted", memory);
       const outcome = yield* Fiber.join(fiber);
@@ -142,6 +143,31 @@ describe("delegate", () => {
       assert.deepStrictEqual(memory.attempt.held, []);
       assert.strictEqual(memory.attempt.children, 1);
       assert.strictEqual(hub.childSpawns.size, 0);
+    }).pipe(Effect.provide(stubChildBackendLayer)),
+  );
+
+  it.effect("launches a resumed delegation whose earlier launch never returned in its slot", () =>
+    Effect.gen(function* () {
+      const sessionId = AgentSessionId.make("parent:delegation/never-launched:child:1");
+      const memory = memoryJournal();
+      memory.attempt.children = 1;
+      memory.delegation.count = Option.some(1);
+      const { fiber, hub } = yield* start("delegation/never-launched", memory);
+      const child = yield* (yield* StubChildren).next;
+      yield* child.reply("Finished.");
+      const outcome = yield* Fiber.join(fiber);
+
+      assert.strictEqual(child.request.session.id, sessionId);
+      assert.isTrue(Option.isNone(child.request.resume));
+      assert.deepStrictEqual(outcome, {
+        _tag: "Reported",
+        sessionId,
+        report: "Finished.",
+        answeredOperator: false,
+      });
+      assert.strictEqual(memory.attempt.children, 1);
+      assert.isTrue(memory.delegation.launched);
+      assert.isTrue(hub.childSpawns.has(sessionId));
     }).pipe(Effect.provide(stubChildBackendLayer)),
   );
 

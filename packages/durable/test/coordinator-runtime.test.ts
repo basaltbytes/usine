@@ -18,6 +18,7 @@ import {
 import { StepCompletion, StepResult } from "@usine/core/step/result";
 import { WorkerName } from "@usine/core/worker";
 import {
+  Context,
   DateTime,
   Deferred,
   Effect,
@@ -31,6 +32,10 @@ import {
 } from "effect";
 import { SqlClient } from "effect/sql";
 import { TestClock } from "effect/testing";
+import { ChildBackend } from "@usine/agents/runtime";
+import { childSessionId } from "../src/attempt/sessions.ts";
+import { CoordinatorRuntime } from "../src/coordinator/runtime.ts";
+import { stubChildBackendLayer, StubChildren } from "../src/testing.ts";
 import { SqliteClient } from "@effect/sql-sqlite-node";
 import { AttemptRequest, ParentReported, ResultRecorded } from "../src/attempt-runtime.ts";
 import type { BrainSpec } from "@usine/core/agent/brain";
@@ -80,6 +85,25 @@ const holdingStartDelegation =
         });
       }),
     ).pipe(Layer.provide(journal));
+
+/**
+ * Stub children whose launches hang after completing `reached`, before they save a session, as a
+ * launch does when the process stops during it.
+ */
+const hangingLaunches = (reached: Deferred.Deferred<void>) =>
+  Layer.effectContext(
+    Effect.gen(function* () {
+      const backend = yield* ChildBackend;
+      const children = yield* StubChildren;
+      return Context.make(
+        ChildBackend,
+        ChildBackend.of({
+          ...backend,
+          launch: () => Deferred.succeed(reached, undefined).pipe(Effect.andThen(Effect.never)),
+        }),
+      ).pipe(Context.add(StubChildren, children));
+    }),
+  ).pipe(Layer.provide(stubChildBackendLayer));
 
 /** Holds the `decide` call for event `sequence` after completing `reached`, until `release` completes. */
 const holdingDecide =
@@ -191,6 +215,8 @@ const unresponsiveReasons = (envelopes: ReadonlyArray<AttemptChannel.OutboundEnv
   envelopes.flatMap(({ payload }) =>
     payload._tag === "WorkerUnresponsive" ? [payload.reason] : [],
   );
+
+const tagOf = Schema.decodeUnknownOption(Schema.Struct({ _tag: Schema.String }));
 
 /** A model handler's decision to complete the Attempt with `message`. */
 const decides = (message: string, handler: Exclude<RecordedDecision["handler"], "rule">) =>
@@ -1138,6 +1164,54 @@ describe("event-driven coordinator restarts on SQLite", () => {
         assert.strictEqual(failure._tag, "InfraFailure");
         assert.include(failure.message, "1-child budget has no room");
       }).pipe(Effect.scoped),
+  );
+
+  it.live("launches a child again in its slot after a stop during its launch", () =>
+    Effect.gen(function* () {
+      const database = yield* temporaryDatabase;
+      const request = coordinated("restart/during-launch", 1);
+      const attemptId = request.spec.attemptId;
+      const recording = recordingSink();
+      const launching = yield* Deferred.make<void>();
+      const first = yield* orchestrator(
+        CoordinatorRuntime.layer.pipe(
+          Layer.provide(Layer.mergeAll(sqliteJournal(database), WakeUp.rules)),
+          Layer.provideMerge(hangingLaunches(launching)),
+        ),
+      );
+      yield* first.execute(request, recording.sink);
+      yield* Deferred.await(launching);
+      yield* first.stop;
+
+      const second = yield* orchestrator(sqliteJournal(database).pipe(coordinator));
+      const execution = yield* second.execute(request, recording.sink);
+      const relaunched = yield* second.nextChild;
+      yield* relaunched.reply("Opened #12.");
+      const report = yield* Fiber.join(execution);
+      yield* second.stop;
+      const snapshot = yield* stored(database, attemptId);
+
+      assert.strictEqual(report.message, "Opened #12.");
+      assert.strictEqual(relaunched.request.session.id, childSessionId(attemptId, 1));
+      assert.include(relaunched.request.prompt, FIRST_ASSIGNMENT);
+      assert.isTrue(Option.isNone(relaunched.request.resume));
+      assert.deepStrictEqual(trace(recording.outbound()), [
+        "Started",
+        "child.SessionStarted",
+        "child.TextOutput",
+        "child.SessionFinished",
+        "Final",
+      ]);
+      assert.deepStrictEqual(
+        Option.map(snapshot, ({ events, delegations }) => ({
+          events: events.map(({ event }) =>
+            Option.match(tagOf(event), { onNone: () => "untagged", onSome: ({ _tag }) => _tag }),
+          ),
+          delegations: delegations.map(({ number }) => number),
+        })),
+        Option.some({ events: ["AttemptStarted", "ChildReported"], delegations: [1] }),
+      );
+    }).pipe(Effect.scoped),
   );
 
   it.live("resumes a child that saved its session, with the same child ID", () =>

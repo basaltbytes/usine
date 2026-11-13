@@ -45,16 +45,11 @@ export const encodeState = (state: CoordinatorState) =>
 
 /** Encodes `decision` for the journal. */
 export const encodeDecision = (decision: RecordedDecision) =>
-  Schema.encodeEffect(DecisionCodec)(decision).pipe(
-    Effect.orDie,
-    Effect.map(EncodedDecision.make),
-  );
+  Schema.encodeEffect(DecisionCodec)(decision).pipe(Effect.orDie, Effect.map(EncodedDecision.make));
 
 /** Decodes the event that ended a delegation of Attempt `attemptId`. */
 export const decodeOutcome = (attemptId: AttemptId, encoded: EncodedEvent) =>
-  Schema.decodeEffect(EventCodec)(encoded).pipe(
-    unreadable(attemptId, "delegation outcome"),
-  );
+  Schema.decodeEffect(EventCodec)(encoded).pipe(unreadable(attemptId, "delegation outcome"));
 
 /** Decodes the coordinator state of Attempt `attemptId`. */
 export const decodeState = (attemptId: AttemptId, encoded: EncodedState) =>

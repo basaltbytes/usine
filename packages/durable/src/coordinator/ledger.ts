@@ -269,6 +269,7 @@ const changed = (progress: ChildProgress, change: ProgressChange): ChildProgress
         idleAnsweredOperator: Option.isSome(report) && answeredOperator,
       }),
       OutputSaved: ({ output }) => ({ output }),
+      Launched: () => ({ launched: true }),
     }),
   });
 

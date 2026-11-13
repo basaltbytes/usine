@@ -38,6 +38,7 @@ import {
   JournalRevision,
   LedgerEntry,
   Open,
+  Launched,
   OutputSaved,
   type ProgressChange,
   Prompted,
@@ -1100,6 +1101,7 @@ export const attemptJournalContract = (adapter: JournalAdapter) =>
                   answeredOperator: true,
                 }),
                 OutputSaved.make({ output: "Working\n" }),
+                Launched.make({}),
               ];
               for (const change of changes) yield* store.saveProgress(attemptId, first, change);
               return { fresh, again };
@@ -1141,6 +1143,7 @@ export const attemptJournalContract = (adapter: JournalAdapter) =>
               continuations: [1_000, 2_000],
               inFlight: [{ callId: "call-2", tool: "read" }],
               output: "Working\n",
+              launched: true,
             }),
           );
           assert.deepStrictEqual(kept, reported);

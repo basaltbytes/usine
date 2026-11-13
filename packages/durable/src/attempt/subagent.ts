@@ -107,6 +107,9 @@ const toolJournal = (
         continuations: [...(saved.continuations ?? [])],
         inFlight: (saved.inFlight ?? []).map(({ callId, tool }) => ({ callId, tool })),
         prompted: saved.prompted ?? true,
+        // The tool records no launch, so a replayed call without a saved conversation ends as
+        // interrupted, and its parent decides what to do next.
+        launched: true,
       };
       if (saved.count !== null)
         return {
@@ -241,6 +244,7 @@ const toolJournal = (
         const record = await delegation(tx);
         record.output = output;
       }),
+    saveLaunched: Effect.void,
   };
 };
 

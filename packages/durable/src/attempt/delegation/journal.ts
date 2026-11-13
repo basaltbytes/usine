@@ -59,6 +59,8 @@ export interface DelegationProgress {
   readonly inFlight: ReadonlyArray<{ readonly callId: string; readonly tool: string }>;
   /** Whether the child received its prompt. */
   readonly prompted: boolean;
+  /** Whether an earlier run's launch returned the child. */
+  readonly launched: boolean;
 }
 
 /** A delegation that its owner numbered and admitted within the child-session budget. */
@@ -147,6 +149,11 @@ export interface DelegationJournal {
   ) => Effect.Effect<void, JournalError>;
   /** Saves the running output retained so far, which a resumed delegation restores. */
   readonly saveOutput: (output: string) => Effect.Effect<void, JournalError>;
+  /**
+   * Records that the child's launch returned, so a later run tells a child that stopped from one
+   * that never launched.
+   */
+  readonly saveLaunched: Effect.Effect<void, JournalError>;
 }
 
 /** A blocker, question, harness failure, or capacity refusal that a child ended with. */
