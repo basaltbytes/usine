@@ -14,6 +14,7 @@ import {
   sessionPool,
   type SessionTokensUpdated,
 } from "@usine/core/agent/session";
+import { handsOffCi } from "@usine/core/ci";
 import { Effect, Layer, Match, Option, Result, Schema } from "effect";
 
 import {
@@ -24,7 +25,6 @@ import {
   Complete,
   type CoordinatorEvent,
   Failed,
-  handsOffCi,
   InfraFailed,
   type ModelDecision,
   modelEligible,
@@ -175,7 +175,7 @@ const make = Effect.gen(function* () {
     const { attemptId, sequence } = attempt;
     yield* Effect.annotateCurrentSpan({ attemptId, sequence, event: event._tag });
     if (event._tag !== "ChildReported") return Option.none();
-    if (handsOffCi(event)) {
+    if (handsOffCi(event.report)) {
       yield* Effect.logInfo("The child's report hands CI off; the event's rule relays it", {
         attemptId,
         sequence,
@@ -283,9 +283,9 @@ const make = Effect.gen(function* () {
 });
 
 /**
- * Decides a report without a reserved marker with a structured completion from the agent's
- * `decision` brain, on the agent's harness, placement, and credential route. Every other event, an
- * agent without a `decision` brain, a completion that fails, and a decision that the rules reject
- * take the event's rule.
+ * Decides a report without a reserved marker or a CI handoff with a structured completion from the
+ * agent's `decision` brain, on the agent's harness, placement, and credential route. Every other
+ * event, an agent without a `decision` brain, a completion that fails, and a decision that the rules
+ * reject take the event's rule.
  */
 export const completionWakeUp: Layer.Layer<WakeUp, never, Harnesses> = Layer.effect(WakeUp, make);

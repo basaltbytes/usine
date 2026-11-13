@@ -9,7 +9,7 @@ import {
   ProviderCapacityFailure,
   QuestionFailure,
 } from "@usine/core/attempt/failure";
-import { AWAITING_CI_MARKER } from "@usine/core/ci";
+import { handsOffCi } from "@usine/core/ci";
 import { OutcomeLabels } from "@usine/core/loop";
 import { RepositoryName } from "@usine/core/repository";
 import { type Brand, Match, Option, Schema } from "effect";
@@ -355,19 +355,12 @@ export const ruleFor = (event: CoordinatorEvent, context: AttemptContext): Decis
   });
 
 /**
- * Whether `event`'s report hands CI off to usine. Its rule relays the report unchanged, because the
- * engine reads the handoff only from the Attempt's message.
- */
-export const handsOffCi = (event: ChildReported): boolean =>
-  event.report.trim().startsWith(AWAITING_CI_MARKER);
-
-/**
  * Whether a model may answer `event`: only a report without a reserved marker or a CI handoff.
  * Every other event takes its rule, so typed facts win, a handoff reaches the engine unchanged, and
  * an interrupted child that left no report can't complete.
  */
 export const modelEligible = (event: CoordinatorEvent): boolean =>
-  event._tag === "ChildReported" && Option.isNone(event.reserved) && !handsOffCi(event);
+  event._tag === "ChildReported" && Option.isNone(event.reserved) && !handsOffCi(event.report);
 
 const reportText = (event: ChildReported): string =>
   event.report.trim() === "" ? BLANK_REPORT_MESSAGE : event.report;
@@ -462,7 +455,7 @@ export const clampRejection = (
   if (event._tag !== "ChildReported") return Option.some(`${event._tag} takes its rule`);
   if (Option.isSome(event.reserved))
     return Option.some("A report with a reserved marker takes its rule");
-  if (handsOffCi(event)) return Option.some("A report with a CI handoff takes its rule");
+  if (handsOffCi(event.report)) return Option.some("A report with a CI handoff takes its rule");
   if (decision._tag === "RetryChild" && !hasReplacementSlot(event.child, context))
     return Option.some(
       `Child ${event.child} can't be replaced: the Attempt has used its ${context.maxChildren}-child budget`,

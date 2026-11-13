@@ -93,8 +93,8 @@ export const childBackendLayer: Layer.Layer<ChildBackend, never, Harnesses> = ch
 
 /**
  * Provides the event-driven coordinator and its attempt journal, which migrates and uses the
- * runtime database's `SqlClient`. The coordinator decides a report without a reserved marker with
- * a structured completion when the agent has a `decision` brain.
+ * runtime database's `SqlClient`. The coordinator decides a report without a reserved marker or a
+ * CI handoff with a structured completion when the agent has a `decision` brain.
  */
 export const coordinatorLayer = CoordinatorRuntime.layer.pipe(
   Layer.provide(completionWakeUp),

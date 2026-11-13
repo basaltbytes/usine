@@ -830,11 +830,12 @@ describe("structured completion wake-up", () => {
 
   it.effect("leaves a report that hands CI off to the rule without a model call", () =>
     Effect.gen(function* () {
+      const complete = {
+        decision: { _tag: "Complete", message: "Opened #12 and handed CI off to usine." },
+        reason: "The pull request is open.",
+      };
       const { decision, calls, recorded, logged } = yield* wake(
-        answering({
-          decision: { _tag: "Complete", message: "Opened #12 and handed CI off to usine." },
-          reason: "The pull request is open.",
-        }),
+        answering(complete),
         requestFor("completion/handoff"),
         reported(`\n${handoff}`),
       );
@@ -845,6 +846,22 @@ describe("structured completion wake-up", () => {
       assert.isTrue(
         logged.some(({ level, entry }) => level === "Info" && entry.includes("hands CI off")),
       );
+
+      const sameLine = yield* wake(
+        answering(complete),
+        requestFor("completion/handoff-same-line"),
+        reported(handoff.replace("\n", " ")),
+      );
+      assert.isTrue(Option.isNone(sameLine.decision));
+      assert.strictEqual(sameLine.calls.length, 0);
+
+      const quoted = yield* wake(
+        answering(complete),
+        requestFor("completion/handoff-quoted"),
+        reported(`The task configures no CI, so I didn't return ${AWAITING_CI_MARKER}.`),
+      );
+      assert.isTrue(Option.isSome(quoted.decision));
+      assert.strictEqual(quoted.calls.length, 1);
     }),
   );
 
