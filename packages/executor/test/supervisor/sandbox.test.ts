@@ -13,6 +13,7 @@ import {
   Fiber,
   FileSystem,
   Layer,
+  Logger,
   Option,
   PlatformError,
   Redacted,
@@ -231,6 +232,8 @@ describe("the supervisor sandbox's container runtime", () => {
       "--label usine.supervisor.root=/instance/.usine/supervisor",
       "--label usine.supervisor.conversation=supervisor:c1",
       "--volume /instance/.usine/supervisor/conversations/c1/workspace:/instance/.usine/supervisor/conversations/c1/workspace:ro",
+      // A writable relay directory would let a shell replace the socket that ends the container.
+      "--volume /tmp/usine-supervisor-1:/run/usine:ro",
     ])
       assert.include(pairs, pair);
     assert.include(args, "--read-only");
@@ -295,12 +298,45 @@ describe("a supervisor sandbox on a container runtime", () => {
       yield* fs.makeDirectory(other, { recursive: true });
       yield* fs.symlink(instance, `${other}/home`);
 
+      // And a third conversation's settings file with a directory.
+      const third = `${root}/conversations/${safeSegment("supervisor:c3")}`;
+      yield* fs.makeDirectory(`${third}/home/.codex/config.toml/keep`, { recursive: true });
+      yield* fs.writeFileString(`${third}/home/.codex/config.toml/keep/notes`, "notes");
+
       const calls: Array<ReadonlyArray<string>> = [];
+      const warnings: Array<unknown> = [];
       yield* Effect.gen(function* () {
         const sandbox = yield* sandboxAt(root);
         yield* sandbox.open(codexTurn("supervisor:c1")).pipe(Effect.scoped);
         yield* sandbox.open(codexTurn("supervisor:c2")).pipe(Effect.scoped);
-      }).pipe(Effect.provide(podman(calls)));
+        yield* sandbox.open(codexTurn("supervisor:c3")).pipe(Effect.scoped);
+      }).pipe(
+        Effect.provide([
+          podman(calls),
+          Logger.layer([
+            Logger.make<unknown, void>(({ logLevel, message }) => {
+              if (logLevel === "Warn") warnings.push(message);
+            }),
+          ]),
+        ]),
+      );
+      // Each replacement is logged with its path and the entry it replaced.
+      assert.deepStrictEqual(warnings, [
+        [
+          "Replaced an entry in a supervisor conversation with a settings file",
+          { path: `${conversation}/home/.codex/config.toml`, type: "SymbolicLink" },
+        ],
+        [
+          "Replaced a file in a supervisor conversation with a directory",
+          { path: `${other}/home`, type: "SymbolicLink" },
+        ],
+        [
+          "Replaced an entry in a supervisor conversation with a settings file",
+          { path: `${third}/home/.codex/config.toml`, type: "Directory" },
+        ],
+      ]);
+      const thirdSettings = yield* fs.readFileString(`${third}/home/.codex/config.toml`);
+      assert.include(thirdSettings, 'model_provider = "usine-gateway"');
 
       const database = yield* fs.readFileString(`${instance}/usine.db`);
       assert.strictEqual(database, "instance database");
@@ -366,15 +402,35 @@ describe("a supervisor sandbox on a container runtime", () => {
       const fs = yield* FileSystem.FileSystem;
       const root = yield* fs.makeTempDirectoryScoped({ prefix: "usine-supervisor-" });
       const calls: Array<ReadonlyArray<string>> = [];
+      const settings = `${root}/conversations/${safeSegment("supervisor:c1")}/home/.codex/config.toml`;
       yield* Effect.gen(function* () {
         const sandbox = yield* sandboxAt(root);
         yield* sandbox.open(codexTurn("supervisor:c1"));
-        for (const sharing of ["supervisor/c1", "supervisor_c1"]) {
+        // The running turn's shell edits its settings, as it can.
+        yield* fs.remove(settings);
+        yield* fs.writeFileString(settings, "edited by the running turn\n");
+        const edited = yield* fs.stat(settings);
+        for (const sharing of ["supervisor:c1", "supervisor/c1", "supervisor_c1"]) {
           assert.strictEqual(safeSegment(sharing), safeSegment("supervisor:c1"));
           const refused = yield* sandbox.open(codexTurn(sharing)).pipe(Effect.scoped, Effect.flip);
           assert.strictEqual(
             refused.message,
             "Another turn of this supervisor conversation is running",
+          );
+        }
+        // A refused turn leaves the running turn's directory alone.
+        const kept = yield* fs.readFileString(settings);
+        assert.strictEqual(kept, "edited by the running turn\n");
+        const after = yield* fs.stat(settings);
+        assert.deepStrictEqual(after.ino, edited.ino, "the settings file isn't replaced");
+        // `.` and `..` would name the directory that holds every conversation's directory.
+        for (const enclosing of [".", ".."]) {
+          const refused = yield* sandbox
+            .open(codexTurn(enclosing))
+            .pipe(Effect.scoped, Effect.flip);
+          assert.strictEqual(
+            refused.message,
+            "This supervisor conversation's ID doesn't name a directory of its own",
           );
         }
         // A conversation with its own directory still opens.

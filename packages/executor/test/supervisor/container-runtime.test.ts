@@ -114,6 +114,8 @@ describe.skipIf(Option.isNone(runtime))(
               "echo changed > acme/demo/README.md",
               "touch acme/demo/new-file",
               "touch new-repository",
+              // The relay's socket stays the orchestrator's, so the container ends without it.
+              "touch /run/usine/model.sock.new",
             ]) {
               const written = yield* sh(write);
               assert.notStrictEqual(written.exitCode, 0, `${write} fails`);

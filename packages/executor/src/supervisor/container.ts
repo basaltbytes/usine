@@ -350,8 +350,17 @@ const makeContainerSandbox = Effect.fn("SupervisorSandbox.make")(function* (
         () => Effect.succeedNone,
       ),
     );
-    if (Option.isSome(existing) && existing.value.type === "Directory")
-      yield* fs.remove(path, { recursive: true });
+    if (Option.isSome(existing) && existing.value.type !== "File") {
+      // A turn's shell left a directory, link, or other entry where the settings file belongs.
+      yield* Effect.logWarning(
+        "Replaced an entry in a supervisor conversation with a settings file",
+        {
+          path,
+          type: existing.value.type,
+        },
+      );
+      if (existing.value.type === "Directory") yield* fs.remove(path, { recursive: true });
+    }
     const suffix = (yield* Random.nextIntBetween(0, 0xffffffff)).toString(16);
     const staged = `${path}.usine-${suffix}`;
     // `wx` creates the file and fails on any existing entry, including a symbolic link.
@@ -513,7 +522,19 @@ const makeContainerSandbox = Effect.fn("SupervisorSandbox.make")(function* (
       harness: request.harness,
       sources: request.sources.length,
     });
-    const root = `${options.root}/conversations/${safeSegment(request.conversation)}`;
+    const segment = safeSegment(request.conversation);
+    // `.`, `..`, or an empty segment would name the conversations directory or the sandbox root,
+    // which hold every other conversation's directory.
+    if (segment === "" || segment === "." || segment === "..") {
+      yield* Effect.logWarning(
+        "Refused a supervisor turn: the conversation's ID doesn't name a directory of its own",
+        { conversation: request.conversation },
+      );
+      return yield* SupervisorUnavailable.make({
+        message: "This supervisor conversation's ID doesn't name a directory of its own",
+      });
+    }
+    const root = `${options.root}/conversations/${segment}`;
     // No sandbox of the conversation writes to its directory while this turn prepares it.
     yield* holdConversation(request.conversation, root);
     const paths: ConversationPaths = { root, home: `${root}/home`, workspace: `${root}/workspace` };
@@ -551,7 +572,7 @@ const makeContainerSandbox = Effect.fn("SupervisorSandbox.make")(function* (
       Effect.mapError(unavailableBecause("serve the model relay")),
     );
     const suffix = (yield* Random.nextIntBetween(0, 0xffffffff)).toString(16);
-    const name = `usine-supervisor-${safeSegment(request.conversation).slice(0, 40)}-${suffix}`;
+    const name = `usine-supervisor-${segment.slice(0, 40)}-${suffix}`;
     yield* Effect.acquireRelease(
       startContainer(
         name,
