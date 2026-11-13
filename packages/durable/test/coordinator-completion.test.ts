@@ -31,7 +31,7 @@ import {
   UsdAmount,
 } from "@usine/core/agent/session";
 import * as AttemptChannel from "@usine/core/attempt/channel";
-import type { GatewayCredentialKind } from "@usine/core/worker";
+import { type GatewayCredentialKind, MachineId } from "@usine/core/worker";
 import {
   Array as Arr,
   DateTime,
@@ -247,7 +247,10 @@ const retry = {
 describe("structured completion wake-up", () => {
   it.effect("records a valid decision with the completion's brain, route, pool, and usage", () =>
     Effect.gen(function* () {
-      const request = requestFor("completion/valid");
+      const request = AttemptRequest.make({
+        ...requestFor("completion/valid"),
+        machine: Option.some(MachineId.make("provider-machine-1")),
+      });
       const { decision, recorded, calls, logged } = yield* wake(
         answering(retry),
         request,
@@ -293,6 +296,7 @@ describe("structured completion wake-up", () => {
           placement: spec.admitted.context.placement,
           credential: spec.admitted.context.credential,
           worker: spec.worker,
+          machine: spec.machine,
           cwd: spec.cwd,
           environment: spec.environment,
         },
@@ -305,6 +309,7 @@ describe("structured completion wake-up", () => {
           placement: "local",
           credential: "host-login",
           worker: request.worker,
+          machine: Option.some(MachineId.make("provider-machine-1")),
           cwd: request.cwd,
           environment: request.environment,
         },
@@ -525,6 +530,9 @@ describe("structured completion wake-up", () => {
     ["Complete", { _tag: "Complete", message: "" }, Complete.make({})],
     ["RetryChild", { _tag: "RetryChild", assignment: "" }, RetryChild.make({})],
     ["Blocked", { _tag: "Blocked", message: "" }, Blocked.make({})],
+    ["whitespace-only Complete", { _tag: "Complete", message: "\n" }, Complete.make({})],
+    ["whitespace-only RetryChild", { _tag: "RetryChild", assignment: " " }, RetryChild.make({})],
+    ["whitespace-only Blocked", { _tag: "Blocked", message: " \t " }, Blocked.make({})],
   ];
 
   for (const [tag, answer, expected] of emptyOptional) {
@@ -545,18 +553,39 @@ describe("structured completion wake-up", () => {
     );
   }
 
-  const empty: ReadonlyArray<readonly [Schema.Json, string]> = [
-    [{ _tag: "Question", question: "" }, "The answer's Question has an empty question"],
-    [{ _tag: "Failed", message: "" }, "The answer's Failed has an empty message"],
-    [{ _tag: "InfraFailed", message: "" }, "The answer's InfraFailed has an empty message"],
+  const empty: ReadonlyArray<readonly [string, Schema.Json, string]> = [
+    ["", { _tag: "Question", question: "" }, "The answer's Question has an empty question"],
+    ["", { _tag: "Failed", message: "" }, "The answer's Failed has an empty message"],
+    ["", { _tag: "InfraFailed", message: "" }, "The answer's InfraFailed has an empty message"],
     [
+      "",
       { _tag: "AtCapacity", message: "", resetsAt: null },
+      "The answer's AtCapacity has an empty message",
+    ],
+    [
+      " (whitespace-only)",
+      { _tag: "Question", question: "   " },
+      "The answer's Question has an empty question",
+    ],
+    [
+      " (whitespace-only)",
+      { _tag: "Failed", message: "\n" },
+      "The answer's Failed has an empty message",
+    ],
+    [
+      " (whitespace-only)",
+      { _tag: "InfraFailed", message: "\t" },
+      "The answer's InfraFailed has an empty message",
+    ],
+    [
+      " (whitespace-only)",
+      { _tag: "AtCapacity", message: " ", resetsAt: null },
       "The answer's AtCapacity has an empty message",
     ],
   ];
 
-  for (const [answer, reason] of empty) {
-    it.effect(`falls back to the rule on an empty required text: ${reason}`, () =>
+  for (const [variant, answer, reason] of empty) {
+    it.effect(`falls back to the rule on an empty required text: ${reason}${variant}`, () =>
       Effect.gen(function* () {
         const { decision, recorded, fellBack } = yield* wake(
           answering({ decision: answer, reason: "The report says so." }),

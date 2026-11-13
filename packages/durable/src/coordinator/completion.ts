@@ -86,16 +86,19 @@ export const CompletionAnswer = Schema.Struct({
 });
 type CompletionAnswer = typeof CompletionAnswer.Type;
 
-/** Whether the answer gave `text`, rather than leaving it `null` or empty. */
-const given = (text: string | null): text is string => text !== null && text !== "";
+/** Whether `text` is empty or holds only whitespace. */
+const blank = (text: string): boolean => text.trim() === "";
+
+/** Whether the answer gave `text`, rather than leaving it `null` or blank. */
+const given = (text: string | null): text is string => text !== null && !blank(text);
 
 /** `text` as a required field of `tag`, or why the answer can't state it. */
 const required = (tag: string, field: string, text: string): Result.Result<string, string> =>
-  text === "" ? Result.fail(`The answer's ${tag} has an empty ${field}`) : Result.succeed(text);
+  blank(text) ? Result.fail(`The answer's ${tag} has an empty ${field}`) : Result.succeed(text);
 
 /**
- * Returns the `ModelDecision` that `answer` states, without the keys it left `null` or empty, or
- * why it states none: a required text is empty.
+ * Returns the `ModelDecision` that `answer` states, without the keys it left `null` or blank, or
+ * why it states none: a required text is blank.
  */
 const decisionOf = (answer: CompletionAnswer["decision"]): Result.Result<ModelDecision, string> =>
   Match.valueTags(answer, {
