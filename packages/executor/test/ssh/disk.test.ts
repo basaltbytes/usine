@@ -499,8 +499,9 @@ describe("older worker images on an SSH Worker", () => {
         `sha256:a1 ${REPOSITORY} older 2026-11-11 08:00:00 +0000 UTC`,
         `sha256:a2 ${REPOSITORY} used 2026-11-10 08:00:00 +0000 UTC`,
         `sha256:a3 ${REPOSITORY} <none> 2026-11-09 08:00:00 +0000 UTC`,
+        `sha256:a4 ${REPOSITORY} also-used 2026-11-08 08:00:00 +0000 UTC`,
       ];
-      machine.state.containerImageIds = ["sha256:a2"];
+      machine.state.containerImageIds = ["sha256:a2", "sha256:a4"];
       const logs = capturedLogs();
       return Effect.gen(function* () {
         const executor = yield* Executor;
@@ -508,7 +509,7 @@ describe("older worker images on an SSH Worker", () => {
         assert.deepStrictEqual(machine.state.imageRemovals, [[`${REPOSITORY}:older`, "a3"]]);
         assert.deepStrictEqual(
           machine.state.workerImages.map((line) => line.split(" ")[0]),
-          ["sha256:c0", "sha256:b0", "sha256:a2"],
+          ["sha256:c0", "sha256:b0", "sha256:a2", "sha256:a4"],
         );
         assert.isTrue(logs.lines.some((line) => line.includes("Removed older worker images")));
       }).pipe(

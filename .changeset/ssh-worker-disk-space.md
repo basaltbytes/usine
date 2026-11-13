@@ -6,7 +6,7 @@
 "@usine/server": minor
 ---
 
-SSH workers keep their disks from filling up with worker images. After each image pull, usine removes the older images of the attempt image's repository. It keeps the current image, the newest older image for a rollback, and every image that a container uses. Cleanup recognizes Docker Hub name aliases and tracks images replaced by mutable tags such as `latest`.
+SSH workers keep their disks from filling up with worker images. After each image pull, usine removes the other images of the attempt image's repository. It keeps the current image, the most recently built other image, and every image that a container uses. After a rollback, the retained image can be newer than the current image. Cleanup recognizes Docker Hub name aliases and tracks images replaced by mutable tags such as `latest`.
 
 Preflight and each new attempt, before its checkout starts, check the free disk space on the filesystem of the worker's `root` and on the container runtime's image storage. Below the threshold, the check fails with a `disk` capability error that states the free space and the threshold. **Needs attention** shows the error, and attempts wait until a preflight passes. The threshold defaults to 10 GiB; set `min_free_disk_gib` on the worker to change it, or to `0` to turn the check off. An attempt whose check fails before its checkout fails with an infrastructure failure, which usine retries.
 

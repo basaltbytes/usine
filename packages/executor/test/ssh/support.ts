@@ -54,7 +54,7 @@ import {
   Schema,
 } from "effect";
 import { HttpClient } from "effect/http";
-// The synchronous SSH fake runs the actual disk probe with stub shell commands.
+// The synchronous SSH fake runs the disk and container-image probes with stub commands.
 // @effect-diagnostics-next-line nodeBuiltinImport:off
 import { spawnSync } from "node:child_process";
 
@@ -516,10 +516,52 @@ podman() { [ "$1" = info ] && [ "$2" = --format ] && [ "$3" = '{{.Store.GraphRoo
             0,
           )
         : oneShotHandle("", 1, state.imageListError);
-    if (line.includes("ps --all --quiet"))
-      return state.containerListError === undefined
-        ? oneShotHandle(state.containerImageIds.map((id) => `${id}\n`).join(""), 0)
-        : oneShotHandle("", 1, state.containerListError);
+    if (line.includes("ps --all --quiet")) {
+      const containers = state.containerImageIds.map((image, index) => ({
+        id: `container-${index}`,
+        image,
+      }));
+      const stub = `#!/bin/sh
+set -eu
+case "$*" in
+  'ps --all --quiet --no-trunc')
+    ${state.containerListError === undefined ? containers.map(({ id }) => `printf '%s\\n' ${quote(id)}`).join("\n    ") : `printf '%s\\n' ${quote(state.containerListError)} >&2; exit 1`}
+    ;;
+  'container inspect --format '* )
+    format=$4
+    shift 4
+    [ "$#" -gt 0 ] || { printf 'container inspect requires at least one container\\n' >&2; exit 1; }
+    for id do
+      case "$id" in
+        ${containers.map(({ id, image }) => `${quote(id)}) image=${quote(image)} ;;`).join("\n        ")}
+        *) exit 1 ;;
+      esac
+      case "$format" in
+        '{{.Image}}') printf '%s\\n' "$image" ;;
+        '{{.Config.Image}}') printf 'example.com/worker:configured\\n' ;;
+        *) exit 1 ;;
+      esac
+    done
+    ;;
+  *) exit 1 ;;
+esac`;
+      // Executable stubs let the production script use exec, which cannot invoke shell functions.
+      const probe = `
+set -eu
+probe_dir=$(mktemp -d)
+trap 'rm -rf "$probe_dir"' EXIT
+printf '%s\\n' ${quote(stub)} > "$probe_dir/docker"
+chmod +x "$probe_dir/docker"
+ln -s docker "$probe_dir/podman"
+PATH="$probe_dir:$PATH" sh -c "$1" sh "$2"
+`;
+      const read = spawnSync("sh", ["-c", probe, "sh", words[2] ?? "", words.at(-1) ?? ""], {
+        encoding: "utf8",
+        timeout: 5_000,
+      });
+      if (read.error !== undefined) throw read.error;
+      return oneShotHandle(read.stdout, read.status ?? 1, read.stderr);
+    }
     if (line.startsWith("exec 'docker' 'image' 'rm' ")) {
       const removed = words.slice(3);
       state.imageRemovals.push(removed);
