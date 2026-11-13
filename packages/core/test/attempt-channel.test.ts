@@ -51,6 +51,7 @@ const spec = AttemptChannel.RunSpec.make({
   agent,
   parentModel: Option.some(parentModel),
   maxChildren: ChildSessionBudget.make(4),
+  maxBackgroundWaitMinutes: Option.some(7),
   parentEffort: "high",
   resume: Option.none(),
   preparedAt: Option.some(DateTime.makeUnsafe("2026-08-30T11:59:00Z")),
@@ -371,12 +372,28 @@ describe("attempt channel", () => {
       const storedSpec = yield* Schema.decodeUnknownEffect(AttemptChannel.RunSpec)(
         Object.fromEntries(
           Object.entries(decodedValue2).filter(
-            ([key]) => !["preparedAt", "botLogin", "coordinator", "outcomeLabels"].includes(key),
+            ([key]) =>
+              ![
+                "preparedAt",
+                "botLogin",
+                "coordinator",
+                "outcomeLabels",
+                "maxBackgroundWaitMinutes",
+              ].includes(key),
           ),
         ),
       );
       assert(Option.isNone(storedSpec.preparedAt));
       assert(Option.isNone(storedSpec.botLogin));
+      // An Attempt stored before the background wait limit waits for background work without one.
+      assert(Option.isNone(storedSpec.maxBackgroundWaitMinutes));
+      const limited = yield* Schema.decodeEffect(AttemptChannel.RunSpec)(decodedValue2);
+      assert.deepStrictEqual(limited.maxBackgroundWaitMinutes, Option.some(7));
+      const unlimited = yield* Schema.decodeEffect(AttemptChannel.RunSpec)({
+        ...decodedValue2,
+        maxBackgroundWaitMinutes: null,
+      });
+      assert(Option.isNone(unlimited.maxBackgroundWaitMinutes));
       // An Attempt stored before the event-driven coordinator reattaches to its parent session.
       assert.strictEqual(storedSpec.coordinator, "session");
       assert.deepStrictEqual(storedSpec.outcomeLabels, []);

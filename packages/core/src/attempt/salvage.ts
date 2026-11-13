@@ -101,7 +101,10 @@ export interface AttemptRecovery {
   readonly ref: SalvageRef;
   /** The Loop permissions; a leftover checkout of a `read` Attempt is removed, not salvaged. */
   readonly permissions: LoopPermissions;
-  /** Whether the Attempt succeeded, in which case a leftover checkout is removed, not salvaged. */
+  /**
+   * Whether the Attempt succeeded without a recorded salvage that kept work only in its checkout.
+   * If `true`, a leftover checkout is removed, not salvaged.
+   */
   readonly succeeded: boolean;
   /** Whether the Attempt has no outcome yet, so a restart can reattach it if its parent task runs. */
   readonly open: boolean;

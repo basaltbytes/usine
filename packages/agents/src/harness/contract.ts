@@ -5,7 +5,7 @@ import {
   SessionTokensUpdated,
 } from "@usine/core/agent/session";
 import { MachineId, WorkerName } from "@usine/core/worker";
-import { type Brand, type Effect, Schema } from "effect";
+import { type Brand, Effect, Option, Schema } from "effect";
 import { ChildHost } from "../child-host/child-host.ts";
 import {
   AgentCapacityError,
@@ -42,6 +42,14 @@ export class SessionSpec extends Schema.Class<
    * the launching process (ADR 0011).
    */
   environment: Schema.Record(Schema.String, Schema.String),
+  /**
+   * The minutes an idle child that answered waits for its background work to start a turn, or
+   * `None` for no limit. When the limit passes, the child returns its answer, and closing it stops
+   * its background tasks.
+   */
+  maxBackgroundWaitMinutes: Schema.OptionFromOptionalKey(
+    Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
+  ).pipe(Schema.withConstructorDefault(Effect.succeed(Option.none<number>()))),
 }) {}
 
 /** Starts a new conversation with `text` as its first message. */
