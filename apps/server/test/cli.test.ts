@@ -1,4 +1,4 @@
-import { HttpServerError } from "effect/http";
+import { FetchHttpClient, HttpServerError, HttpServerResponse } from "effect/http";
 import { createServer } from "node:net";
 import { NodeServices } from "@effect/platform-node";
 import { Duration, Effect, Layer, Option, Schema } from "effect";
@@ -20,6 +20,7 @@ import {
   volatileRoots,
 } from "../src/cli.ts";
 import { listenForStartup } from "../src/listener.ts";
+import { servesRoutes } from "../src/instance/operator-api.ts";
 
 const noEnvironment = {
   port: Option.none<string>(),
@@ -422,6 +423,37 @@ describe("usine CLI", () => {
       });
       yield* listenForStartup(port, "test").pipe(Effect.scoped, Effect.provide(NodeServices.layer));
     }),
+  );
+
+  it.live("counts a startup listener as serving only once it serves other routes", () =>
+    Effect.gen(function* () {
+      const probe = createServer();
+      yield* Effect.callback<void>((resume) => {
+        const resolve = (value: void) => resume(Effect.succeed(value));
+        probe.listen({ host: SERVER_HOST, port: 0 }, resolve);
+      });
+      const { port } = yield* Schema.decodeUnknownEffect(Schema.Struct({ port: Port }))(
+        probe.address(),
+      );
+      yield* Effect.callback<void>((resume) => {
+        const resolve = () => resume(Effect.void);
+        probe.close(resolve);
+      });
+      const beforeListening = yield* servesRoutes(port);
+      assert.isFalse(beforeListening);
+
+      const listener = yield* listenForStartup(port, "test");
+      const whileStarting = yield* servesRoutes(port);
+      assert.isFalse(whileStarting);
+      yield* listener.install(
+        Effect.succeed(HttpServerResponse.jsonUnsafe({ error: "Unavailable" }, { status: 503 })),
+      );
+      const unavailable = yield* servesRoutes(port);
+      assert.isTrue(unavailable);
+      yield* listener.install(Effect.succeed(HttpServerResponse.empty({ status: 401 })));
+      const unauthorized = yield* servesRoutes(port);
+      assert.isTrue(unauthorized);
+    }).pipe(Effect.scoped, Effect.provide(Layer.merge(NodeServices.layer, FetchHttpClient.layer))),
   );
 
   it.live("bounds a browser opener that never exits and configures forced cleanup", () =>

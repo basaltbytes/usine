@@ -19,7 +19,7 @@ import {
 import { DEFAULT_LIFECYCLE_TIMEOUT_SECONDS, Port, SERVER_HOST, type UpCommand } from "./cli.ts";
 import { InstanceInUseError } from "./instance/lock.ts";
 import { type InstanceLaunch, ProcessId, currentLaunch, instanceFiles } from "./instance/record.ts";
-import { answers } from "./instance/operator-api.ts";
+import { servesRoutes } from "./instance/operator-api.ts";
 import { probeInstance } from "./instance/state.ts";
 import { configuredLaunchdService } from "./instance/launchd.ts";
 import {
@@ -137,10 +137,10 @@ type StartOutcome =
 
 /**
  * Starts `usine up` in the background with `launch`, in its own session and with its output
- * appended to `.usine/usine.log`. Waits until the new process holds the instance and answers HTTP
- * requests. A usine version that writes only `.usine/instance.pid` also counts. Fails with
- * `DetachedStartError` if the process exits first, or if it neither answers nor writes to the log
- * for `timeout`.
+ * appended to `.usine/usine.log`. Waits until the new process holds the instance and serves its
+ * setup or runtime routes, not the startup responses. A usine version that writes only
+ * `.usine/instance.pid` also counts. Fails with `DetachedStartError` if the process exits first,
+ * or if it neither answers nor writes to the log for `timeout`.
  */
 export const startDetached = Effect.fn("Cli.startDetached")(function* (
   directory: InstanceDirectory,
@@ -199,7 +199,7 @@ export const startDetached = Effect.fn("Cli.startDetached")(function* (
   // process has held the instance lock for a while.
   const listening = Effect.gen(function* () {
     while (true) {
-      if (yield* answers(launch.port)) {
+      if (yield* servesRoutes(launch.port)) {
         const state = yield* probeInstance(directory);
         const holder =
           state._tag === "Running"
@@ -364,7 +364,7 @@ export const startUnit = Effect.fn("Cli.startUnit")(function* (
       if (
         state._tag === "Running" &&
         state.record.pid !== previous &&
-        (yield* answers(state.record.launch.port))
+        (yield* servesRoutes(state.record.launch.port))
       ) {
         return StartedInstance.make({
           pid: state.record.pid,

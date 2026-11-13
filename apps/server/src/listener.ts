@@ -1,4 +1,4 @@
-import { Context, Effect, Layer, Ref, type Scope, type PlatformError } from "effect";
+import { Context, Effect, Layer, Ref, Schema, type Scope, type PlatformError } from "effect";
 import {
   HttpMiddleware,
   HttpServer,
@@ -18,6 +18,13 @@ type HttpHandler = Effect.Effect<
   HttpServerRequest.HttpServerRequest | Scope.Scope
 >;
 
+/** The body of a startup response with HTTP 503, which every request but the version gets. */
+export const StartingResponse = Schema.Struct({
+  error: Schema.Literal("Starting"),
+  message: Schema.String,
+});
+type StartingResponse = typeof StartingResponse.Type;
+
 /**
  * Serves the version during startup. `install` serves the runtime routes on the same listener
  * until its scope closes, then restores the startup responses.
@@ -29,7 +36,7 @@ export const startupListener = Effect.fnUntraced(function* (version: string) {
     if (request.method === "GET" && request.url.split("?")[0] === "/api/version")
       return HttpServerResponse.jsonUnsafe(version);
     return HttpServerResponse.jsonUnsafe(
-      { error: "Starting", message: "Startup recovery is in progress." },
+      { error: "Starting", message: "Startup recovery is in progress." } satisfies StartingResponse,
       {
         status: 503,
         headers: { "retry-after": "1" },
