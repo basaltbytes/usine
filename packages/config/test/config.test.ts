@@ -247,6 +247,7 @@ describe("ConfigParser", () => {
         "    kind: ssh",
         "    destination: eu-two",
         "    root: /srv/usine",
+        "    min_free_disk_gib: 20",
         "    gateway:",
         "      domain: gw.internal",
         "      destination: usine-gateway",
@@ -273,6 +274,8 @@ describe("ConfigParser", () => {
       expect(first.maxConcurrentAttempts).toBe(2);
       expect(Option.isNone(first.gateway)).toBe(true);
       expect(Option.isNone(second.identityFile) && Option.isNone(second.port)).toBe(true);
+      expect(Option.isNone(first.minFreeDiskGib)).toBe(true);
+      expect(Option.getOrNull(second.minFreeDiskGib)).toBe(20);
       const gateway = Option.getOrNull(second.gateway);
       expect(gateway?.domain).toBe("gw.internal");
       expect(gateway?.destination).toBe("usine-gateway");
@@ -398,6 +401,13 @@ describe("ConfigParser", () => {
         ["  - name: eu", "    kind: ssh", "    destination: eu", "    root: /srv/usine/"],
         ["  - name: eu", "    kind: ssh", "    destination: eu", "    root: /srv", "    port: 0"],
         ["  - name: eu", "    kind: ssh", "    destination: eu", "    root: /srv", "    user: x"],
+        ...["min_free_disk_gib: -1", "min_free_disk_gib: 1.5", "minFreeDiskGib: 20"].map((line) => [
+          "  - name: eu",
+          "    kind: ssh",
+          "    destination: eu",
+          "    root: /srv",
+          `    ${line}`,
+        ]),
         ...[
           "image: --privileged",
           "image: ghcr.io/usine/worker latest",

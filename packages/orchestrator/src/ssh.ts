@@ -217,6 +217,7 @@ const sshWorkerAddressOf = (worker: SshWorker, missing: MissingSecret) =>
       identityFile: worker.identityFile,
       port: worker.port,
       root: worker.root,
+      minFreeDiskGib: Option.getOrUndefined(worker.minFreeDiskGib),
       gateway,
       container: {
         image: worker.container.image,

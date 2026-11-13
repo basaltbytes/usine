@@ -29,6 +29,7 @@ import type {
   HetznerResourceName,
   HetznerServerType,
   MachineProvider,
+  MinFreeDiskGib,
   SshDestination,
   SshIdentityFile,
   SshPort,
@@ -192,6 +193,11 @@ export interface SshWorkerAddress {
   readonly port: Option.Option<SshPort>;
   /** The machine directory that contains `workers/<name>`. */
   readonly root: WorkerRoot;
+  /**
+   * The least free disk space in GiB that the machine keeps before an Attempt starts. Defaults
+   * to 10.
+   */
+  readonly minFreeDiskGib?: MinFreeDiskGib | undefined;
   /** The Gateway in front of the machine. If `None`, each Attempt's token is written on the machine (ADR 0011). */
   readonly gateway: Option.Option<SshWorkerGateway>;
   /** Each Attempt's container. Used only if the machine has Docker. */
