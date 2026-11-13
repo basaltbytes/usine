@@ -12,6 +12,9 @@ import { ConfigParser } from "@usine/config/parser";
 import { sqliteConfigurationLayer } from "@usine/config/sqlite";
 import { localSqliteLayer } from "@usine/engine/local-sqlite";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
+// Startup probes need fresh connections and a socket idle limit, which the fetch client lacks.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
+import { get } from "node:http";
 import { createServer } from "node:net";
 import { ConfigurationEntityView, UpgradeView } from "@usine/orchestrator/operator/http";
 import { UsineConfig } from "@usine/config/factory";
@@ -489,6 +492,66 @@ writeFileSync(process.argv[2], readFileSync(process.argv[2], "utf8").replace("ha
   { timeout: 90_000 },
 );
 
+/** Returns a port on 127.0.0.1 that was free when its reservation closed. */
+const reservePort = Effect.gen(function* () {
+  const reservation = createServer();
+  yield* Effect.callback<void>((resume) => {
+    const resolve = (value: void) => resume(Effect.succeed(value));
+    reservation.listen(0, "127.0.0.1", resolve);
+  });
+  const { port } = yield* Schema.decodeUnknownEffect(Schema.Struct({ port: Schema.Int }))(
+    reservation.address(),
+  );
+  yield* Effect.callback<void>((resume) => {
+    const resolve = (value: void) => resume(Effect.succeed(value));
+    const reject = (error: Error) => resume(Effect.die(error));
+    reservation.close((error) => (error !== undefined ? reject(error) : resolve()));
+  });
+  return port;
+});
+
+/**
+ * Spawns `usine up` on `port` in `directory`. `output` returns the combined output so far. `stop`
+ * sends `SIGTERM`, sends `SIGKILL` if the process is still running 5 seconds later, and waits for
+ * the exit.
+ */
+const spawnUp = (directory: string, port: number) =>
+  Effect.sync(() => {
+    const child = spawn(
+      process.execPath,
+      [cli, "up", "--port", String(port), "--allow-volatile-instance"],
+      {
+        cwd: directory,
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+    let output = "";
+    child.stdout.on("data", (chunk) => {
+      output += String(chunk);
+    });
+    child.stderr.on("data", (chunk) => {
+      output += String(chunk);
+    });
+    const exited = (() => {
+      const completion = Deferred.makeUnsafe<void>();
+      const resolve = (value: void) => {
+        Deferred.doneUnsafe(completion, Effect.succeed(value));
+      };
+      child.once("exit", () => resolve());
+      return Deferred.await(completion);
+    })();
+    const stop = Effect.gen(function* () {
+      child.kill("SIGTERM");
+      const kill = yield* Effect.sleep(5000).pipe(
+        Effect.andThen(Effect.sync(() => child.kill("SIGKILL"))),
+        Effect.forkScoped,
+      );
+      yield* exited;
+      yield* Fiber.interrupt(kill);
+    });
+    return { output: () => output, stop };
+  });
+
 const AgentView = Schema.Struct({
   agents: Schema.Array(Schema.Struct({ harness: Schema.String })),
 });
@@ -510,42 +573,8 @@ it.live(
             authorization: `Bearer ${(yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) => fileSystem.readFileString(join(directory, ".usine/admin-token")))).trim()}`,
           };
         });
-      const reservation = createServer();
-      yield* Effect.callback<void>((resume) => {
-        const resolve = (value: void) => resume(Effect.succeed(value));
-        reservation.listen(0, "127.0.0.1", resolve);
-      });
-      const { port } = yield* Schema.decodeUnknownEffect(Schema.Struct({ port: Schema.Int }))(
-        reservation.address(),
-      );
-      yield* Effect.callback<void>((resume) => {
-        const resolve = (value: void) => resume(Effect.succeed(value));
-        const reject = (error: Error) => resume(Effect.die(error));
-        reservation.close((error) => (error !== undefined ? reject(error) : resolve()));
-      });
-      const child = spawn(
-        process.execPath,
-        [cli, "up", "--port", String(port), "--allow-volatile-instance"],
-        {
-          cwd: directory,
-          stdio: ["ignore", "pipe", "pipe"],
-        },
-      );
-      let output = "";
-      child.stdout.on("data", (chunk) => {
-        output += String(chunk);
-      });
-      child.stderr.on("data", (chunk) => {
-        output += String(chunk);
-      });
-      const exited = (() => {
-        const completion = Deferred.makeUnsafe<void>();
-        const resolve = (value: void) => {
-          Deferred.doneUnsafe(completion, Effect.succeed(value));
-        };
-        child.once("exit", () => resolve());
-        return Deferred.await(completion);
-      })();
+      const port = yield* reservePort;
+      const server = yield* spawnUp(directory, port);
       const origin = `http://127.0.0.1:${port}`;
       const harness = () =>
         Effect.gen(function* () {
@@ -556,13 +585,17 @@ it.live(
           return configuration.agents[0]?.harness;
         });
       const pollContext = yield* Effect.context<FileSystem.FileSystem | HttpClient.HttpClient>();
-      const pollHarness = () => Effect.runPromiseWith(pollContext)(harness());
+      // Bounds each request so a request that never gets a response can't use up the whole poll.
+      const pollHarness = () =>
+        Effect.runPromiseWith(pollContext)(harness().pipe(Effect.timeout("2 seconds")));
       try {
         yield* Effect.promise(() =>
-          expect.poll(() => pollHarness().catch(() => output), { timeout: 20_000 }).toBe("codex"),
+          expect
+            .poll(() => pollHarness().catch(() => server.output()), { timeout: 20_000 })
+            .toBe("codex"),
         );
-        expect(output).not.toContain("/sign-in#link=");
-        expect(output).toContain("Run usine sign-in-link");
+        expect(server.output()).not.toContain("/sign-in#link=");
+        expect(server.output()).toContain("Run usine sign-in-link");
         expect(run(directory, ["log"]).stdout).toContain("Imported from the instance folder");
         expect(
           (yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
@@ -670,15 +703,78 @@ writeFileSync(file, readFileSync(file, "utf8").replace("harness: codex", "harnes
         const actual5 = yield* harness();
         expect(actual5).toBe("codex");
       } finally {
-        child.kill("SIGTERM");
-        const kill = yield* Effect.sleep(5000).pipe(
-          Effect.andThen(Effect.sync(() => child.kill("SIGKILL"))),
-          Effect.forkScoped,
-        );
-        yield* exited;
-        yield* Fiber.interrupt(kill);
+        yield* server.stop;
       }
     }).pipe(Effect.provide(Layer.provideMerge(NodeFileSystem.layer, FetchHttpClient.layer))),
+  { timeout: 60_000 },
+);
+
+/**
+ * Sends `GET path` to `port` on a new connection and describes the answer as `path status
+ * retry-after`. A refused connection is `refused`; a request without a response within 10 seconds
+ * is `path timed out`.
+ */
+const probe = (port: number, path: string) =>
+  Effect.callback<string>((resume) => {
+    const answer = (description: string) => resume(Effect.succeed(description));
+    const request = get(
+      { host: "127.0.0.1", port, path, agent: false, timeout: 10_000 },
+      (response) => {
+        response.resume();
+        answer(`${path} ${response.statusCode} ${response.headers["retry-after"] ?? "-"}`);
+      },
+    );
+    request.on("timeout", () => {
+      answer(`${path} timed out`);
+      request.destroy();
+    });
+    request.on("error", (error: Error & { readonly code?: string }) =>
+      answer(error.code === "ECONNREFUSED" ? "refused" : `${path} ${error.code ?? error.message}`),
+    );
+  });
+
+it.live(
+  "answers every request in setup mode from the moment the port accepts connections",
+  () =>
+    Effect.gen(function* () {
+      const directory = yield* directoryFixture;
+      const port = yield* reservePort;
+      const server = yield* spawnUp(directory, port);
+      try {
+        const probes: Array<Fiber.Fiber<string>> = [];
+        let ready = false;
+        yield* Effect.gen(function* () {
+          while (!ready) {
+            for (const path of ["/api/version", "/api/configuration"]) {
+              const probing = probe(port, path).pipe(
+                Effect.tap((answer) =>
+                  Effect.sync(() => {
+                    ready ||= answer === "/api/configuration 401 -";
+                  }),
+                ),
+              );
+              const fiber = yield* Effect.forkScoped(probing);
+              probes.push(fiber);
+            }
+            yield* Effect.sleep("2 millis");
+          }
+        }).pipe(
+          Effect.timeoutOrElse({
+            duration: "30 seconds",
+            orElse: () => Effect.die(new Error(`Setup mode didn't start:\n${server.output()}`)),
+          }),
+        );
+        const answers = yield* Fiber.joinAll(probes).pipe(Effect.map((all) => new Set(all)));
+        expect(answers).toContain("/api/configuration 401 -");
+        const startup = new Set(["/api/version 200 -", "/api/configuration 503 1"]);
+        const unexpected = [...answers].filter(
+          (answer) => answer !== "refused" && !startup.has(answer) && !answer.endsWith(" 401 -"),
+        );
+        expect(unexpected, server.output()).toEqual([]);
+      } finally {
+        yield* server.stop;
+      }
+    }).pipe(Effect.provide(NodeFileSystem.layer)),
   { timeout: 60_000 },
 );
 

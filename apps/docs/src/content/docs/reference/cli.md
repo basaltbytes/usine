@@ -22,6 +22,8 @@ usine up --detach --origin https://usine.example.com
 
 Startup takes the instance lock, checks the listener, applies runtime database migrations, loads stored configuration, reads App and worker credentials, checks workers, and recovers attempts. Recovery visits every attempt that still has tracked leftovers on a configured worker and logs one summary per worker with the attempts visited, kept, and discarded. A finished attempt whose machine and checkout are both gone is discarded, so later starts skip it. Open attempts and attempts whose recovery failed stay tracked. On SSH workers, the first preparation after a start logs one warning with the number of unrecognized paths under `attempts/`, excluding the checkouts of attempts being reattached; the paths are logged at debug level. Empty configuration tables accept a bootstrap import or initialize empty setup configuration. [Import and export format](/reference/configuration/import-export/) describes bootstrap input. Later starts read the database.
 
+The listener answers from the moment it accepts connections, in setup mode too. Until startup finishes, `GET /api/version` returns the running release and every other request returns HTTP 503 with `Retry-After: 1`.
+
 Missing or invalid App credentials start setup mode. Polling and schedules stay idle until setup completes. Worker preflight failure stops runtime startup. The App secrets file, `.usine/github-app.json`, must be a regular file with mode `0600`; environment values override corresponding file fields.
 
 A second process cannot run the same instance folder. Temporary paths are refused by default because runtime state needs persistent storage. On macOS, startup warns if system sleep can interrupt remote sessions. Logs use ISO 8601 UTC timestamps.
@@ -64,7 +66,7 @@ Local preflight and attempt children use the same credential directories. If one
 
 Local preflight and children accept subscription credentials and API keys. Claude setup tokens count as subscription credentials. Children report API-key usage in the API keys pool and subscription usage in the matching plan pool.
 
-Without a gateway, usine checks each provider separately using the `PATH` of the user running `usine up`. A missing `claude` or `codex` command makes its provider unavailable and displays an installation instruction in that provider's row. `usine login` reports the same instruction before starting authorization. The other provider remains available when its harness is installed, as in the Codex-only quickstart. Local provider availability changes log once at Info; repeated polls with the same error produce no additional log entries.
+Without a gateway, usine checks each provider separately using the `PATH` of the user running `usine up`. A missing `claude` or `codex` command makes its provider unavailable and displays an installation instruction in that provider's row. `usine login` reports the same instruction before starting authorization. The other provider remains available when its harness is installed, so an instance can install only one harness, as the quickstart does. Local provider availability changes log once at Info; repeated polls with the same error produce no additional log entries.
 
 Local Claude status uses `claude auth status --json`, including macOS Keychain logins. Disconnect runs `claude auth logout`, removes usine's settings overrides and file credentials, and verifies that Claude reports signed out. It clears the native login for the configured Claude directory, including an older login that a replacement credential overrides.
 
@@ -74,7 +76,7 @@ Subscription sign-in uses the installed Claude Code `setup-token` command or Cod
 
 Gateway transfers use its authenticated admin API over SSH and require `curl` on the gateway. Managed credentials persist in its state directory with mode `0600`, take precedence over environment credentials, and apply without reloading the service. ChatGPT refreshes use the gateway’s existing token refresh and atomic auth-file replacement. Worker routing changes are configuration revisions. Logout disables the managed provider and removes its routing from workers.
 
-Instance admins can use the same controls in setup and **Configuration > Settings > Provider connections**. Expiry and last refresh show the provider’s reported values as local dates and times; opaque Claude setup tokens report neither. Pi parent authentication remains a separate Pi login.
+Instance admins can use the same controls in setup and **Configuration > Settings > Provider connections**. Expiry and last refresh show the provider’s reported values as local dates and times; opaque Claude setup tokens report neither. Pi children, and the Pi parent of `coordinator: session` agents, authenticate with a separate Pi login.
 
 ## usine status
 
@@ -222,7 +224,7 @@ The command serves the operator API as MCP tools over standard input and output,
 | `USINE_GITHUB_CLIENT_ID` | string | App secrets file | App client ID for member sign-in. |
 | `USINE_GITHUB_CLIENT_SECRET` | secret string | App secrets file | App client secret for member sign-in. |
 | `USINE_GITHUB_WEBHOOK_SECRET` | secret string | App secrets file | Signature secret for endpoint webhook hints. |
-| `PI_CODING_AGENT_DIR` | path | `~/.pi/agent` | Pi parent configuration and credential directory. |
+| `PI_CODING_AGENT_DIR` | path | `~/.pi/agent` | Configuration and credential directory of Pi children and of the Pi parent of `coordinator: session` agents. |
 | Worker credential variable names | secret strings | required when configured | Provider tokens, API keys, gateway admin tokens, and Access credentials referenced by worker records. |
 | `OTEL_RESOURCE_ATTRIBUTES` | percent-encoded `key=value` list | empty | Additional span resource attributes when tracing is enabled. |
 

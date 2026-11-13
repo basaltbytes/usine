@@ -38,7 +38,13 @@ import { tmpdir } from "node:os";
 // Synchronous Node path callbacks retain the host platform’s path semantics.
 // @effect-diagnostics-next-line nodeBuiltinImport:off
 import { join, dirname, basename } from "node:path";
-import { NodeHttpPlatform, NodeHttpServer, NodeFileSystem, NodePath } from "@effect/platform-node";
+import {
+  NodeHttpPlatform,
+  NodeHttpServer,
+  NodeFileSystem,
+  NodePath,
+  NodeServices,
+} from "@effect/platform-node";
 import { LoadedInstance } from "@usine/config/instance";
 import { GitHubLabelName } from "@usine/core/label";
 import { LaneName, StateLaneSource } from "@usine/config/board";
@@ -129,6 +135,7 @@ import { beforeAll, afterAll, assert, describe, it } from "@effect/vitest";
 import { BackendUnavailableError, FactoryBackend, needsSetupBackendLayer } from "../src/backend.ts";
 import { Port, SERVER_HOST } from "../src/cli.ts";
 import { apiRoutes, serverLayer, staticRoutes } from "../src/http.ts";
+import { listenForStartup } from "../src/listener.ts";
 
 const runId = RunId.make("run-1");
 const loopName = LoopName.make("review-issue");
@@ -1650,7 +1657,8 @@ describe("operator HTTP API", () => {
             const fixtureBackend = backend;
             const authentication = yield* authFixture();
 
-            yield* Layer.build(serverLayer(fixtureBackend, webRoot, port, authentication));
+            const listener = yield* listenForStartup(port, "test");
+            yield* Layer.build(serverLayer(fixtureBackend, webRoot, listener, authentication));
             return yield* Effect.all([overview("127.0.0.1"), overview("127.0.0.2")]);
           }).pipe(Effect.scoped);
           assert.deepStrictEqual(statuses, [401, "unreachable"]);
@@ -1659,7 +1667,7 @@ describe("operator HTTP API", () => {
             fileSystem.remove(webRoot, { recursive: true }),
           );
         }
-      }).pipe(Effect.provide(Layer.provideMerge(NodeFileSystem.layer, FetchHttpClient.layer))),
+      }).pipe(Effect.provide(Layer.provideMerge(NodeServices.layer, FetchHttpClient.layer))),
   );
 });
 
