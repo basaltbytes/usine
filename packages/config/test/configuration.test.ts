@@ -1,5 +1,5 @@
 import { AgentFile } from "../src/agent.ts";
-import { Harness } from "@usine/core/agent/brain";
+import { BrainSpec, Harness, ModelId } from "@usine/core/agent/brain";
 import { sqliteTempDirectory } from "../../../tooling/test/sqlite.mts";
 import { migrateProjects } from "../src/project/operations.ts";
 import { NodeServices } from "@effect/platform-node";
@@ -10,6 +10,7 @@ import { InstanceDirectory } from "@usine/core/instance";
 import { OperatorLogin } from "@usine/core/operator";
 import { makeExpressionEngine, MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import {
+  Array as Arr,
   Context,
   DateTime,
   Effect,
@@ -23,7 +24,16 @@ import {
   Schema,
   Stream,
 } from "effect";
+import {
+  CapabilityProfile,
+  catalog,
+  HarnessCatalog,
+  HarnessDescriptor,
+  Lacking,
+} from "@usine/agents/harness";
+import { supervisorAdmissionProblems } from "../src/instance/admission.ts";
 import { LoadedInstance } from "../src/instance/instance.ts";
+import { Settings, UsineConfig } from "../src/factory.ts";
 import { ConfigParser, makeConfigParser } from "../src/parser.ts";
 import { InstancePath } from "../src/file.ts";
 import {
@@ -124,6 +134,30 @@ const initialize = Effect.gen(function* () {
   return yield* store.commit({ expected: zero, changes, ...metadata });
 });
 
+const NO_RESUME = "This test's harness reopens no saved session";
+
+/** The harness catalog, with every profile of `harness` lacking `resume-session`. */
+const withoutResume = (harness: string) =>
+  HarnessCatalog.make({
+    descriptors: catalog.descriptors.map((descriptor) =>
+      descriptor.id === harness
+        ? HarnessDescriptor.make({
+            ...descriptor,
+            capabilities: Arr.map(descriptor.capabilities, (profile) =>
+              CapabilityProfile.make({
+                ...profile,
+                supported: profile.supported.filter((supported) => supported !== "resume-session"),
+                lacking: [
+                  ...profile.lacking,
+                  Lacking.make({ capability: "resume-session", reason: NO_RESUME }),
+                ],
+              }),
+            ),
+          })
+        : descriptor,
+    ),
+  });
+
 describe("configuration domain without layers", () => {
   it.effect("refuses a Pi coding agent on an SSH worker before storing configuration", () =>
     Effect.gen(function* () {
@@ -167,6 +201,92 @@ describe("configuration domain without layers", () => {
           }
         }
       }
+    }),
+  );
+
+  it.effect("admits a supervisor brain only on a harness that can serve the role", () =>
+    Effect.gen(function* () {
+      const instance = yield* fixture;
+      const withSupervisor = (supervisor: Option.Option<BrainSpec>) =>
+        configurationEntities(
+          LoadedInstance.make({
+            ...instance,
+            config: UsineConfig.make({
+              ...instance.config,
+              settings: Settings.make({ ...instance.config.settings, supervisor }),
+            }),
+          }),
+        );
+      const brain = (harness: string, model: string) =>
+        BrainSpec.make({
+          harness: Harness.make(harness),
+          model: ModelId.make(model),
+          effort: "low",
+        });
+      const committed = (entities: ReadonlyArray<ConfigurationEntity>) =>
+        commit(parser, Configuration.empty, zero, configurationDiff([], entities), metadata).pipe(
+          Effect.result,
+        );
+
+      const unset = yield* Option.none<BrainSpec>().pipe(withSupervisor, committed);
+      assert(Result.isSuccess(unset), "an instance without a supervisor brain is valid");
+      expect(
+        Option.flatMap(
+          unset.success.configuration.instance,
+          ({ config }) => config.settings.supervisor,
+        ),
+      ).toEqual(Option.none());
+
+      const claude = yield* Option.some(brain("claude", "claude-sonnet-5-5")).pipe(
+        withSupervisor,
+        committed,
+      );
+      assert(Result.isSuccess(claude), "Claude Code serves the supervisor role");
+      expect(
+        Option.map(
+          Option.flatMap(
+            claude.success.configuration.instance,
+            ({ config }) => config.settings.supervisor,
+          ),
+          ({ harness }) => harness,
+        ),
+      ).toEqual(Option.some("claude"));
+
+      const codex = yield* Option.some(brain("codex", "gpt-5.6-terra")).pipe(
+        withSupervisor,
+        committed,
+      );
+      assert(Result.isFailure(codex) && codex.failure._tag === "ConfigurationInvalid");
+      const [problem] = codex.failure.problems;
+      assert(problem !== undefined);
+      expect(problem.file).toBe("usine.yaml");
+      expect(problem.message).toContain("codex cannot run as supervisor at orchestrator");
+      expect(problem.message).toContain(
+        "lacks closed-tools (Codex lists apply_patch, its code-mode exec and wait tools",
+      );
+      expect(problem.details?.map(({ path }) => path)).toEqual([
+        ["settings", "supervisor", "harness"],
+      ]);
+
+      // Every turn after the first reopens the saved session, so a harness that can't reopen one
+      // is refused even when it serves every other requirement.
+      const unresumable = withoutResume("claude");
+      const [refused] = supervisorAdmissionProblems(
+        UsineConfig.make({
+          ...instance.config,
+          settings: Settings.make({
+            ...instance.config.settings,
+            supervisor: Option.some(brain("claude", "claude-sonnet-5-5")),
+          }),
+        }),
+        unresumable,
+      );
+      assert(refused !== undefined);
+      expect(refused.message).toContain("claude cannot run as supervisor at orchestrator");
+      expect(refused.message).toContain(`lacks resume-session (${NO_RESUME})`);
+      expect(refused.details?.map(({ path }) => path)).toEqual([
+        ["settings", "supervisor", "harness"],
+      ]);
     }),
   );
 

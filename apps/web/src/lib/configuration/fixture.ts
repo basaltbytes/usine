@@ -456,6 +456,7 @@ export const configurationJson = {
     parentModel: "openai-codex/gpt-5.6-terra",
     parentEffort: null,
     coordinator: "session",
+    supervisor: null,
     operator: "PhilDL",
     webhooks: "off",
     lastHintAt: null,

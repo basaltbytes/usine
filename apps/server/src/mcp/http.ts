@@ -18,7 +18,14 @@ import {
   registerOperatorTools,
 } from "./server.ts";
 import { type EndingSession, SessionAdmission, SessionEnd, sessionTable } from "./sessions.ts";
-import { loadOperatorTools, type OperatorTool, PublishedApi, visibleTools } from "./tools.ts";
+import {
+  loadOperatorTools,
+  type OperatorRequest,
+  type OperatorResponse,
+  type OperatorTool,
+  PublishedApi,
+  visibleTools,
+} from "./tools.ts";
 
 /** The path of the Streamable HTTP MCP endpoint. */
 export const MCP_PATH = "/api/mcp";
@@ -37,6 +44,46 @@ const SESSION_HEADER = "mcp-session-id";
 /** How long an MCP session can go unused before the server ends it. */
 export const MCP_SESSION_IDLE = Duration.hours(1);
 const SESSION_RETRY = "MCP tool server did not end the session; the next sweep retries";
+
+/**
+ * Sends each operator request through `router` in this process, with the `credential` headers, so
+ * the route policy, the auth guard, and audit apply to it as to an HTTP request.
+ */
+export const routedOperatorCall = (
+  router: HttpRouter.HttpRouter,
+  credential: Readonly<Record<string, string>>,
+) =>
+  Effect.fn("Operator.routedRequest")(function* (request: OperatorRequest) {
+    yield* Effect.annotateCurrentSpan({ method: request.method, url: request.url });
+    const headers = new Headers(credential);
+    const body = yield* Effect.transposeOption(
+      Option.map(request.body, (value) => Schema.encodeEffect(JsonBody)(value)),
+    ).pipe(Effect.orDie);
+    if (Option.isSome(body)) headers.set("content-type", "application/json");
+    const inner = HttpServerRequest.fromWeb(
+      new Request(new URL(request.url, "http://localhost"), {
+        method: request.method,
+        headers,
+        ...Option.match(body, { onNone: () => ({}), onSome: (text) => ({ body: text }) }),
+      }),
+    );
+    const sent = yield* Deferred.make<OperatorResponse>();
+    // The router erases its routes' error types; causeResponse maps each to its response.
+    // @effect-diagnostics-next-line anyUnknownInErrorContext:off
+    const routed = router
+      .asHttpEffect()
+      .pipe(
+        Effect.catchCause((cause) =>
+          Effect.map(HttpServerError.causeResponse(cause), ([response]) => response),
+        ),
+      );
+    yield* HttpEffect.toHandled(routed, (_, response) =>
+      Effect.promise(() => HttpServerResponse.toWeb(response).text()).pipe(
+        Effect.flatMap((text) => Deferred.succeed(sent, { status: response.status, text })),
+      ),
+    ).pipe(Effect.provideService(HttpServerRequest.HttpServerRequest, inner));
+    return yield* Deferred.await(sent);
+  });
 
 /**
  * Serves the operator tools at `POST /api/mcp`. Each tool call goes through the same router as an
@@ -62,40 +109,15 @@ export const mcpRoutes = (allowedOrigins: ReadonlyArray<string>) =>
       const tools = yield* loadOperatorTools(document);
       const byName = new Map(tools.map((tool) => [tool.name, tool]));
       const call: OperatorCall = Effect.fn("Mcp.operatorRequest")(function* (request) {
-        yield* Effect.annotateCurrentSpan({ method: request.method, url: request.url });
         const caller = yield* Effect.serviceOption(HttpServerRequest.HttpServerRequest);
         if (Option.isNone(caller))
           return yield* OperatorUnavailableError.make({
             message: "The MCP request has no HTTP request to take the credential from.",
           });
-        const headers = credentialHeaders(caller.value);
-        const body = yield* Effect.transposeOption(
-          Option.map(request.body, (value) => Schema.encodeEffect(JsonBody)(value)),
-        ).pipe(Effect.orDie);
-        if (Option.isSome(body)) headers.set("content-type", "application/json");
-        const inner = HttpServerRequest.fromWeb(
-          new Request(new URL(request.url, "http://localhost"), {
-            method: request.method,
-            headers,
-            ...Option.match(body, { onNone: () => ({}), onSome: (text) => ({ body: text }) }),
-          }),
-        );
-        const sent = yield* Deferred.make<{ readonly status: number; readonly text: string }>();
-        // The router erases its routes' error types; causeResponse maps each to its response.
-        // @effect-diagnostics-next-line anyUnknownInErrorContext:off
-        const routed = router
-          .asHttpEffect()
-          .pipe(
-            Effect.catchCause((cause) =>
-              Effect.map(HttpServerError.causeResponse(cause), ([response]) => response),
-            ),
-          );
-        yield* HttpEffect.toHandled(routed, (_, response) =>
-          Effect.promise(() => HttpServerResponse.toWeb(response).text()).pipe(
-            Effect.flatMap((text) => Deferred.succeed(sent, { status: response.status, text })),
-          ),
-        ).pipe(Effect.provideService(HttpServerRequest.HttpServerRequest, inner));
-        return yield* Deferred.await(sent);
+        return yield* routedOperatorCall(
+          router,
+          Object.fromEntries(credentialHeaders(caller.value)),
+        )(request);
       });
       // One MCP server per set of visible tools: the protocol lists one set per server, and a
       // client's session stays on the server of its token's grants.

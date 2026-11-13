@@ -177,7 +177,11 @@ const registered = <R>(
 };
 
 /** `provider`'s fixture for `scenario`, with its runtime registered on the recorded traffic. */
-const toolFixture = (provider: ToolProvider, scenario: ToolScenario, mode: "record" | "replay") =>
+export const toolFixture = (
+  provider: ToolProvider,
+  scenario: ToolScenario | "supervisor",
+  mode: "record" | "replay",
+) =>
   Effect.gen(function* () {
     if (provider === "pi") {
       const fixture = yield* openPiFixture(scenario, mode);

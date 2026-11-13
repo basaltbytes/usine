@@ -1,4 +1,8 @@
-import { coordinatorCopy, webhookStatusCopy } from "~/features/configuration/strings";
+import {
+  coordinatorCopy,
+  supervisorCopy,
+  webhookStatusCopy,
+} from "~/features/configuration/strings";
 import { entityKey } from "~/features/configuration/lib/entities";
 import type { ConfigurationView, SettingsView } from "@usine/orchestrator/operator";
 import type { ReactNode } from "react";
@@ -79,6 +83,21 @@ const groups = (
           settings.parentEffort === null
             ? "parent_effort from the agent file, or effort if it is not set."
             : "Parent effort when the agent file sets no parent_effort.",
+      },
+    ],
+  ],
+  [
+    "Supervisor",
+    [
+      {
+        key: "settings.supervisor",
+        value:
+          settings.supervisor === null
+            ? unset(supervisorCopy.notConfigured)
+            : mono(
+                `${settings.supervisor.harness} ${settings.supervisor.model} ${settings.supervisor.effort}`,
+              ),
+        effect: settings.supervisor === null ? supervisorCopy.unsetEffect : supervisorCopy.effect,
       },
     ],
   ],

@@ -334,6 +334,18 @@ const eventsFiles = files.map(([path, content]) =>
     : ([path, content] as const),
 );
 
+const supervisorFiles = files.map(([path, content]) =>
+  path === "usine.yaml"
+    ? ([
+        path,
+        content.replace(
+          "  parent_model: gpt-5.6-sol\n",
+          "  parent_model: gpt-5.6-sol\n  supervisor:\n    harness: claude\n    model: claude-sonnet-5-5\n    effort: medium\n",
+        ),
+      ] as const)
+    : ([path, content] as const),
+);
+
 describe("Configuration view", () => {
   it.effect("shows each Loop as parsed, with its pause, its repositories, and its file", () =>
     Effect.gen(function* () {
@@ -560,11 +572,25 @@ describe("Configuration view", () => {
         parentModel: "gpt-5.6-sol",
         parentEffort: null,
         coordinator: "session",
+        supervisor: null,
         operator: "PhilDL",
         webhooks: "endpoint",
         lastHintAt: "2026-10-29T12:00:00.000Z",
         webhooksPublicUrl: "https://factory.example/webhooks",
         tracing: { otlpUrl: "http://localhost:4318/v1/traces", serviceName: "usine" },
+      });
+    }),
+  );
+
+  it.effect("shows the supervisor's brain, and null when the role is not configured", () =>
+    Effect.gen(function* () {
+      const unset = yield* readConfiguration;
+      assert.isNull(unset.settings.supervisor);
+      const view = yield* readConfigurationOf(supervisorFiles);
+      assert.deepStrictEqual(view.settings.supervisor, {
+        harness: "claude",
+        model: "claude-sonnet-5-5",
+        effort: "medium",
       });
     }),
   );

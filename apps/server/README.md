@@ -236,6 +236,8 @@ Route definitions and schema annotations generate the contract. Authentication h
 
 `src/mcp/` serves each operator operation as an MCP tool named by its endpoint identifier, such as `approve`, generated from the OpenAPI document. `POST /api/mcp` serves the tools over Streamable HTTP with the request's bearer token, and `usine mcp` serves them over stdio. A caller lists only the tools that its grants and operation ceiling permit. Each call goes through the operator API with the caller's credential, so the route permissions and audit apply. Results are JSON text cut at 100 KB, with a hint that names a narrower operation. See the [MCP guide](https://docs.usine.dev/guides/connect-an-mcp-client/).
 
+`src/supervisor/` builds the supervisor's operator toolkit from the same tools. `memberOperatorToolkit` authenticates the member's credential, keeps the tools that its grants and operation ceiling permit, and answers each call through the operator API with that credential, so the route policy checks every call again and the supervisor can do no more than the member. A refused operation, invalid arguments, or an unreachable API reach the model as an error result.
+
 Apps created through `/setup` already have the web callback and client credentials. Enable the device flow in the App settings before using CLI device sign-in.
 
 `POST /api/configuration/loops/check` validates conditional approval as a boolean

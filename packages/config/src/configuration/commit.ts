@@ -1,4 +1,4 @@
-import { brainAdmissionProblems } from "../instance/admission.ts";
+import { brainAdmissionProblems, supervisorAdmissionProblems } from "../instance/admission.ts";
 import { Array as Arr, Effect, Equal, Option, Result, Schema } from "effect";
 import { exeDevWorkerRefusal, type UsineConfig } from "../factory.ts";
 import { AgentFile } from "../agent.ts";
@@ -148,7 +148,11 @@ export const validateConfiguration = (
       if (Result.isFailure(parsed)) problems.push(parsed.failure);
       else agents.push(parsed.success);
     }
-    if (Result.isSuccess(config)) problems.push(...brainAdmissionProblems(config.success, agents));
+    if (Result.isSuccess(config))
+      problems.push(
+        ...brainAdmissionProblems(config.success, agents),
+        ...supervisorAdmissionProblems(config.success),
+      );
     const references = Result.isSuccess(config)
       ? Option.some(referenceIndex(config.success, agents))
       : Option.none();

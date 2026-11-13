@@ -46022,6 +46022,44 @@
               "events"
             ]
           },
+          "supervisor": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "harness": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+                  },
+                  "model": {
+                    "type": "string",
+                    "pattern": "\\S"
+                  },
+                  "effort": {
+                    "type": "string",
+                    "enum": [
+                      "off",
+                      "minimal",
+                      "low",
+                      "medium",
+                      "high",
+                      "xhigh",
+                      "max"
+                    ]
+                  }
+                },
+                "required": [
+                  "harness",
+                  "model",
+                  "effort"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "operator": {
             "anyOf": [
               {
@@ -46093,6 +46131,7 @@
           "parentModel",
           "parentEffort",
           "coordinator",
+          "supervisor",
           "operator",
           "webhooks",
           "webhooksPublicUrl",
@@ -51752,6 +51791,9 @@
                   "minimum": 0,
                   "maximum": 9007199254740991
                 }
+              },
+              "awaitsFirstResult": {
+                "type": "boolean"
               }
             },
             "required": [

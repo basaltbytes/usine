@@ -282,6 +282,13 @@ export const editorCopy = {
   revision: (number: number) => `Revision ${number}`,
 };
 
+export const supervisorCopy = {
+  notConfigured: "Not configured",
+  unsetEffect: "The instance runs no supervisor. Set settings.supervisor to start one.",
+  effect:
+    "The harness, model, and effort of the supervisor, which observes and operates the factory with the operator tools that a member's token allows.",
+};
+
 export const coordinatorCopy = {
   effect: {
     session:
@@ -425,6 +432,12 @@ export const settingsFormFields = [
 ] as const;
 
 export const settingsExtraCopy = {
+  supervisor: "Run a supervisor",
+  supervisorHarness: "Supervisor harness",
+  supervisorHarnessHint:
+    "Runs the supervisor on the orchestrator with the instance's gateway credential. The harness must serve usine tool sets.",
+  supervisorModel: "Supervisor model",
+  supervisorEffort: "Supervisor effort",
   publicUrl: "Public webhook URL",
   publicUrlHint: "The full public webhook URL, including /webhooks/github.",
   tracing: "Export traces",

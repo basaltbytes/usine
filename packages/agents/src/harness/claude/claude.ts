@@ -59,7 +59,7 @@ import { ChildProcessLost, stopChildProcess } from "../../child-host/process.ts"
 import { sdkProcessSpawner } from "../../child-host/sdk.ts";
 import { sessionChannel } from "../session.ts";
 import { sessionConversation } from "../conversation.ts";
-import { claudeSessionMeter, claudeTokenMeter } from "../usage.ts";
+import { claudeSessionMeter, claudeTokenMeter, type RestoredUsage } from "../usage.ts";
 import { structuredCompletion } from "../completion.ts";
 import { claudeCompletion } from "./completion.ts";
 import { brainOptions } from "./options.ts";
@@ -686,6 +686,29 @@ const makeClaudeSessions = Effect.gen(function* () {
 
     const provider = claudeProviderFailures(session.id);
 
+    /** Logs how a new process's first result settled the usage that Claude restored. */
+    const logRestored = ({ resultTokens, processTokens, restored }: RestoredUsage) =>
+      Option.match(processTokens, {
+        onNone: () =>
+          Effect.logInfo(
+            "Claude result reports no usage of this process alone; counting all of it",
+            { sessionId: session.id, resultTokens },
+          ),
+        onSome: (processTokens) =>
+          restored.totalTokens > 0
+            ? Effect.logInfo("Claude restored the resumed session's usage; counting it once", {
+                sessionId: session.id,
+                resultTokens,
+                processTokens,
+                restoredTokens: restored.totalTokens,
+              })
+            : Effect.logInfo("Claude restored no usage of the resumed session", {
+                sessionId: session.id,
+                resultTokens,
+                processTokens,
+              }),
+      });
+
     /** Applies one message from Claude to the session. */
     const handle = (message: Schema.Json) =>
       Effect.gen(function* () {
@@ -749,8 +772,10 @@ const makeClaudeSessions = Effect.gen(function* () {
           return;
         }
         const used = usage.read(message);
-        if (Option.isSome(used))
-          yield* channel.emit(SessionTokensUpdated.make({ session, ...used.value }));
+        if (Option.isSome(used)) {
+          if (Option.isSome(used.value.restored)) yield* logRestored(used.value.restored.value);
+          yield* channel.emit(SessionTokensUpdated.make({ session, ...used.value.usage }));
+        }
         for (const event of sessionEventsFrom(message, session, tools, toolName)) {
           yield* channel.emit(event);
         }
