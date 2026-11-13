@@ -1,12 +1,12 @@
-// A fake runtime's answer is synchronous, so it checks a mount source with the synchronous call.
-// @effect-diagnostics-next-line nodeBuiltinImport:off
-import { existsSync } from "node:fs";
+import { spawning, podman, type Answer } from "./runtime-fixture.ts";
+import { directoryName } from "../../src/supervisor/names.ts";
+import { bindMount } from "../../src/bind-mount.ts";
 import { NodeFileSystem, NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import { SandboxRequest, SupervisorSandbox, SupervisorSource } from "@usine/agents/supervisor";
-import { Harness } from "@usine/core/agent/brain";
+import { Harness, ModelId } from "@usine/core/agent/brain";
 import { AgentSessionId } from "@usine/core/agent/session";
-import { CommitSha, RepositoryName, safeSegment } from "@usine/core/repository";
+import { CommitSha, RepositoryName } from "@usine/core/repository";
 import { ContainerImage, type GatewayLlmProtocol } from "@usine/core/worker";
 import {
   Clock,
@@ -15,15 +15,11 @@ import {
   Exit,
   Fiber,
   FileSystem,
-  Layer,
   Logger,
   Option,
-  PlatformError,
   Redacted,
   Result,
   Scope,
-  Sink,
-  Stream,
 } from "effect";
 import { HttpServerRequest } from "effect/http";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
@@ -36,55 +32,6 @@ import {
 } from "../../src/supervisor/container.ts";
 import { relayModelRequest } from "../../src/supervisor/model-relay.ts";
 import { makeSupervisorSources, type SourceOrigin } from "../../src/supervisor/sources.ts";
-
-const encoder = new TextEncoder();
-
-/** What a fake command prints and its exit code, or `hang` for one that never exits. */
-type Answer =
-  | { readonly stdout: string; readonly stderr?: string; readonly exitCode: number }
-  | "hang";
-
-/**
- * A spawner that answers each command with `answer`, and on which a command that `answer` leaves
- * `undefined` is missing, as on a host without it. Records every command line in `calls`.
- */
-const spawning = (
-  answer: (command: string, args: ReadonlyArray<string>) => Answer | undefined,
-  calls: Array<ReadonlyArray<string>> = [],
-) =>
-  Layer.succeed(ChildProcessSpawner.ChildProcessSpawner)(
-    ChildProcessSpawner.make((command) =>
-      Effect.gen(function* () {
-        if (command._tag !== "StandardCommand") return yield* Effect.die("unexpected pipeline");
-        calls.push([command.command, ...command.args]);
-        const answered = answer(command.command, command.args);
-        if (answered === undefined)
-          return yield* PlatformError.systemError({
-            _tag: "NotFound",
-            module: "ChildProcess",
-            method: "spawn",
-            description: `spawn ${command.command} ENOENT`,
-          });
-        return ChildProcessSpawner.makeHandle({
-          pid: ChildProcessSpawner.ProcessId(1),
-          exitCode:
-            answered === "hang"
-              ? Effect.never
-              : Effect.succeed(ChildProcessSpawner.ExitCode(answered.exitCode)),
-          isRunning: Effect.succeed(answered === "hang"),
-          kill: () => Effect.void,
-          stdin: Sink.drain,
-          stdout: answered === "hang" ? Stream.never : Stream.make(encoder.encode(answered.stdout)),
-          stderr:
-            answered === "hang" ? Stream.never : Stream.make(encoder.encode(answered.stderr ?? "")),
-          all: Stream.empty,
-          getInputFd: () => Sink.drain,
-          getOutputFd: () => Stream.empty,
-          unref: Effect.succeed(Effect.void),
-        });
-      }),
-    ),
-  );
 
 /**
  * A spawner on which `installed` runtimes answer `info` with their output, and every other
@@ -127,6 +74,7 @@ describe("the supervisor sandbox's container runtime", () => {
       const refused = yield* sandbox
         .open(
           SandboxRequest.make({
+            model: ModelId.make("m"),
             conversation: AgentSessionId.make("supervisor:1"),
             harness: Harness.make("claude"),
             sources: [],
@@ -224,7 +172,13 @@ describe("the supervisor sandbox's container runtime", () => {
         home: "/instance/.usine/supervisor/conversations/c1/home",
         workspace: "/instance/.usine/supervisor/conversations/c1/workspace",
       },
-      sources: [],
+      sources: ["acme/one", "acme/two"].map((repository) =>
+        SupervisorSource.make({
+          repository: RepositoryName.make(repository),
+          revision: CommitSha.make("a".repeat(40)),
+          directory: `/source:${repository},tree`,
+        }),
+      ),
       relayDirectory: "/tmp/usine-supervisor-1",
     });
     const pairs = args.slice(0, -1).map((arg, index) => `${arg} ${args[index + 1]}`);
@@ -234,49 +188,32 @@ describe("the supervisor sandbox's container runtime", () => {
       "--security-opt no-new-privileges",
       "--label usine.supervisor.root=/instance/.usine/supervisor",
       "--label usine.supervisor.conversation=supervisor:c1",
-      "--volume /instance/.usine/supervisor/conversations/c1/workspace:/instance/.usine/supervisor/conversations/c1/workspace:ro",
+      '--mount type=bind,"source=/instance/.usine/supervisor/conversations/c1/workspace","destination=/instance/.usine/supervisor/conversations/c1/workspace",readonly',
       // A writable relay directory would let a shell replace the socket that ends the container.
-      "--volume /tmp/usine-supervisor-1:/run/usine:ro",
+      '--mount type=bind,"source=/tmp/usine-supervisor-1","destination=/run/usine",readonly',
     ])
       assert.include(pairs, pair);
     assert.include(args, "--read-only");
+    assert.include(args, "--user");
+    for (const flag of [
+      "--pids-limit",
+      "--memory",
+      "--memory-swap",
+      "--cpus",
+      "--pull",
+      "--log-driver",
+    ])
+      assert.include(args, flag);
+    assert.include(args, "/tmp:rw,nosuid,nodev,size=64m");
     assert.include(args, "--rm");
+    const sourceMounts = args.filter((arg) => arg.includes('"source=/source:'));
+    assert.lengthOf(sourceMounts, 2);
+    assert.isTrue(sourceMounts.every((mount) => mount.endsWith(",readonly")));
+    assert.include(sourceMounts[0]!, '"source=/source:acme/one,tree"');
   });
 });
 
 describe("a supervisor sandbox on a container runtime", () => {
-  /**
-   * A Podman that runs every command, and lists `left` as the containers that it still runs. As
-   * Podman does, `run` refuses a `--volume` whose host path doesn't exist. `relay.starts` says
-   * whether the sandbox's model relay accepts connections, and `removes` whether `rm` succeeds.
-   */
-  const podman = (
-    calls: Array<ReadonlyArray<string>>,
-    left: ReadonlyArray<string> = [],
-    relay: { starts: boolean } = { starts: true },
-    removes = true,
-  ) =>
-    spawning((command, args) => {
-      if (command !== "podman") return undefined;
-      if (args[0] === "info") return { stdout: "true", exitCode: 0 };
-      if (args[0] === "ps") return { stdout: left.map((id) => `${id}\n`).join(""), exitCode: 0 };
-      if (args[0] === "exec") return { stdout: "", exitCode: relay.starts ? 0 : 1 };
-      if (args[0] === "rm" && !removes)
-        return { stdout: "", stderr: "Error: cannot remove container", exitCode: 125 };
-      if (args[0] === "run") {
-        const missing = args
-          .flatMap((arg, index) => (args[index - 1] === "--volume" ? [arg.split(":")[0]!] : []))
-          .find((source) => !existsSync(source));
-        if (missing !== undefined)
-          return {
-            stdout: "",
-            stderr: `Error: statfs ${missing}: no such file or directory`,
-            exitCode: 125,
-          };
-      }
-      return { stdout: "", exitCode: 0 };
-    }, calls);
-
   const route: GatewayModelRoute = {
     credential: () => Effect.succeedNone,
     request: () => Effect.die("the test calls no model"),
@@ -296,6 +233,7 @@ describe("a supervisor sandbox on a container runtime", () => {
 
   const codexTurn = (conversation: string) =>
     SandboxRequest.make({
+      model: ModelId.make("m"),
       conversation: AgentSessionId.make(conversation),
       harness: Harness.make("codex"),
       sources: [],
@@ -307,17 +245,17 @@ describe("a supervisor sandbox on a container runtime", () => {
       const instance = yield* fs.makeTempDirectoryScoped({ prefix: "usine-instance-" });
       yield* fs.writeFileString(`${instance}/usine.db`, "instance database");
       const root = `${instance}/.usine/supervisor`;
-      const conversation = `${root}/conversations/${safeSegment("supervisor:c1")}`;
+      const conversation = `${root}/conversations/${directoryName("supervisor:c1")}`;
       // A Codex shell in an earlier turn replaced the settings file with a link to the database.
       yield* fs.makeDirectory(`${conversation}/home/.codex`, { recursive: true });
       yield* fs.symlink(`${instance}/usine.db`, `${conversation}/home/.codex/config.toml`);
       // And another conversation's home with a link to the instance folder.
-      const other = `${root}/conversations/${safeSegment("supervisor:c2")}`;
+      const other = `${root}/conversations/${directoryName("supervisor:c2")}`;
       yield* fs.makeDirectory(other, { recursive: true });
       yield* fs.symlink(instance, `${other}/home`);
 
       // And a third conversation's settings file with a directory.
-      const third = `${root}/conversations/${safeSegment("supervisor:c3")}`;
+      const third = `${root}/conversations/${directoryName("supervisor:c3")}`;
       yield* fs.makeDirectory(`${third}/home/.codex/config.toml/keep`, { recursive: true });
       yield* fs.writeFileString(`${third}/home/.codex/config.toml/keep/notes`, "notes");
 
@@ -381,7 +319,7 @@ describe("a supervisor sandbox on a container runtime", () => {
         yield* Effect.gen(function* () {
           const sandbox = yield* sandboxAt(root);
           assert.deepStrictEqual(
-            calls.filter(([, command]) => command === "ps" || command === "rm"),
+            calls.filter(([, command]) => command === "ps" || command === "rm").slice(0, 3),
             [
               [
                 "podman",
@@ -415,48 +353,33 @@ describe("a supervisor sandbox on a container runtime", () => {
         );
       }).pipe(Effect.scoped, Effect.provide(NodeFileSystem.layer)),
   );
-  it.live("runs one turn at a time for conversations that share a directory", () =>
+  it.live("gives colliding legacy conversation IDs distinct directories", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const root = yield* fs.makeTempDirectoryScoped({ prefix: "usine-supervisor-" });
       const calls: Array<ReadonlyArray<string>> = [];
-      const settings = `${root}/conversations/${safeSegment("supervisor:c1")}/home/.codex/config.toml`;
+      const settings = `${root}/conversations/${directoryName("supervisor:c1")}/home/.codex/config.toml`;
       yield* Effect.gen(function* () {
         const sandbox = yield* sandboxAt(root);
         yield* sandbox.open(codexTurn("supervisor:c1"));
         // The running turn's shell edits its settings, as it can.
         yield* fs.remove(settings);
         yield* fs.writeFileString(settings, "edited by the running turn\n");
-        const edited = yield* fs.stat(settings);
-        for (const sharing of ["supervisor:c1", "supervisor/c1", "supervisor_c1"]) {
-          assert.strictEqual(safeSegment(sharing), safeSegment("supervisor:c1"));
-          const refused = yield* sandbox.open(codexTurn(sharing)).pipe(Effect.scoped, Effect.flip);
-          assert.strictEqual(
-            refused.message,
-            "Another turn of this supervisor conversation is running",
-          );
+        const repeated = yield* sandbox
+          .open(codexTurn("supervisor:c1"))
+          .pipe(Effect.scoped, Effect.flip);
+        assert.include(repeated.message, "Another turn");
+        for (const distinct of ["supervisor/c1", "supervisor_c1", ".", "..", "/"]) {
+          assert.notStrictEqual(directoryName(distinct), directoryName("supervisor:c1"));
+          yield* sandbox.open(codexTurn(distinct)).pipe(Effect.scoped);
         }
-        // A refused turn leaves the running turn's directory alone.
-        const kept = yield* fs.readFileString(settings);
-        assert.strictEqual(kept, "edited by the running turn\n");
-        const after = yield* fs.stat(settings);
-        assert.deepStrictEqual(after.ino, edited.ino, "the settings file isn't replaced");
-        // `.` and `..` would name the directory that holds every conversation's directory.
-        for (const enclosing of [".", ".."]) {
-          const refused = yield* sandbox
-            .open(codexTurn(enclosing))
-            .pipe(Effect.scoped, Effect.flip);
-          assert.strictEqual(
-            refused.message,
-            "This supervisor conversation's ID doesn't name a directory of its own",
-          );
-        }
-        // A conversation with its own directory still opens.
+        const retained = yield* fs.readFileString(settings);
+        assert.strictEqual(retained, "edited by the running turn\n");
         yield* sandbox.open(codexTurn("supervisor:c2")).pipe(Effect.scoped);
       }).pipe(Effect.scoped, Effect.provide(podman(calls)));
       assert.lengthOf(
         calls.filter(([, command]) => command === "run"),
-        2,
+        7,
       );
     }).pipe(Effect.scoped, Effect.provide(NodeFileSystem.layer)),
   );
@@ -466,7 +389,7 @@ describe("a supervisor sandbox on a container runtime", () => {
       const fs = yield* FileSystem.FileSystem;
       const root = yield* fs.makeTempDirectoryScoped({ prefix: "usine-supervisor-" });
       const tree = yield* fs.makeTempDirectoryScoped({ prefix: "usine-tree-" });
-      const workspace = `${root}/conversations/${safeSegment("supervisor:c1")}/workspace`;
+      const workspace = `${root}/conversations/${directoryName("supervisor:c1")}/workspace`;
       const calls: Array<ReadonlyArray<string>> = [];
       yield* Effect.gen(function* () {
         const sandbox = yield* sandboxAt(root);
@@ -478,6 +401,7 @@ describe("a supervisor sandbox on a container runtime", () => {
         yield* sandbox
           .open(
             SandboxRequest.make({
+              model: ModelId.make("m"),
               conversation: AgentSessionId.make("supervisor:c1"),
               harness: Harness.make("codex"),
               sources: [
@@ -495,12 +419,12 @@ describe("a supervisor sandbox on a container runtime", () => {
       assert.lengthOf(started, 2);
       for (const args of started) {
         assert.strictEqual(args[args.indexOf("--workdir") + 1], workspace);
-        assert.include(args, `${workspace}:${workspace}:ro`);
+        assert.include(args, bindMount(workspace, workspace, "readonly"));
       }
       const withSource = started[1] ?? [];
       assert.strictEqual(
-        withSource[withSource.indexOf(`${tree}:${workspace}/acme/demo:ro`) - 1],
-        "--volume",
+        withSource[withSource.indexOf(bindMount(tree, `${workspace}/acme/demo`, "readonly")) - 1],
+        "--mount",
       );
     }).pipe(Effect.scoped, Effect.provide(NodeFileSystem.layer)),
   );
@@ -509,13 +433,16 @@ describe("a supervisor sandbox on a container runtime", () => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const root = yield* fs.makeTempDirectoryScoped({ prefix: "usine-supervisor-" });
-      const directory = `${root}/conversations/${safeSegment("supervisor:c1")}`;
+      const directory = `${root}/conversations/${directoryName("supervisor:c1")}`;
       const released: Array<readonly [string, unknown]> = [];
       const recording = Logger.layer([
         Logger.make<unknown, void>(({ logLevel, message }) => {
           if (!Array.isArray(message)) return;
           const [text, fields] = message;
-          if (String(text).startsWith("Released a supervisor conversation"))
+          if (
+            String(text).startsWith("Released a supervisor conversation") ||
+            String(text).startsWith("Kept the hold")
+          )
             released.push([logLevel, [text, fields]]);
         }),
       ]);
@@ -523,6 +450,12 @@ describe("a supervisor sandbox on a container runtime", () => {
         Effect.gen(function* () {
           const sandbox = yield* sandboxAt(root);
           yield* sandbox.open(codexTurn("supervisor:c1")).pipe(Effect.scoped);
+          if (!removes) {
+            const refused = yield* sandbox
+              .open(codexTurn("supervisor:c1"))
+              .pipe(Effect.scoped, Effect.flip);
+            assert.include(refused.message, "container remains");
+          }
         }).pipe(Effect.provide([podman([], [], { starts: true }, removes), recording]));
       yield* turns(true);
       yield* turns(false);
@@ -531,16 +464,57 @@ describe("a supervisor sandbox on a container runtime", () => {
         directory,
         container,
       });
-      assert.deepStrictEqual(released, [
-        ["Info", ["Released a supervisor conversation", fields("removed")]],
-        [
-          "Warn",
-          [
-            "Released a supervisor conversation while its sandbox may still be running",
-            fields("not removed"),
-          ],
-        ],
+      assert.deepStrictEqual(released[0], [
+        "Info",
+        ["Released a supervisor conversation", fields("removed")],
       ]);
+      assert.isTrue(released.slice(1).every(([level]) => level === "Error"));
+      assert.lengthOf(released, 3);
+    }).pipe(Effect.scoped, Effect.provide(NodeFileSystem.layer)),
+  );
+
+  it.effect("bounds container startup and removes a container created before the timeout", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "usine-start-timeout-" });
+      const calls: Array<ReadonlyArray<string>> = [];
+      const runtime = { starts: true, hangStart: true };
+      yield* Effect.gen(function* () {
+        const sandbox = yield* sandboxAt(root);
+        const pending = yield* sandbox
+          .open(codexTurn("hung"))
+          .pipe(Effect.scoped, Effect.flip, Effect.forkChild);
+        yield* TestClock.withLive(
+          Effect.sleep("10 millis").pipe(
+            Effect.repeat({ until: () => calls.some(([, command]) => command === "run") }),
+          ),
+        );
+        yield* TestClock.adjust("30 seconds");
+        const failure = yield* Fiber.join(pending);
+        assert.include(failure.message, "start the supervisor sandbox");
+        assert.isTrue(calls.some(([, command]) => command === "rm"));
+        const pull = calls.findIndex(([, command]) => command === "pull");
+        assert.isBelow(
+          pull,
+          calls.findIndex(([, command]) => command === "run"),
+        );
+        runtime.hangStart = false;
+        yield* sandbox.open(codexTurn("hung")).pipe(Effect.scoped);
+      }).pipe(Effect.provide(podman(calls, [], runtime)));
+    }).pipe(Effect.scoped, Effect.provide(NodeFileSystem.layer)),
+  );
+
+  it.live("refuses a runtime that ignores resource limits", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "usine-unlimited-" });
+      yield* Effect.gen(function* () {
+        const sandbox = yield* sandboxAt(root);
+        const failure = yield* sandbox
+          .open(codexTurn("unlimited"))
+          .pipe(Effect.scoped, Effect.flip);
+        assert.include(failure.message, "did not enforce");
+      }).pipe(Effect.provide(podman([], [], { starts: true, rejectLimits: true })));
     }).pipe(Effect.scoped, Effect.provide(NodeFileSystem.layer)),
   );
 
@@ -590,7 +564,7 @@ describe("a supervisor sandbox on a container runtime", () => {
 
 describe("the supervisor model relay", () => {
   const relay = (request: Request, route: GatewayModelRoute) =>
-    relayModelRequest(route).pipe(
+    relayModelRequest(route, ModelId.make("m")).pipe(
       Effect.provideService(
         HttpServerRequest.HttpServerRequest,
         HttpServerRequest.fromWeb(request),
@@ -643,7 +617,7 @@ describe("the supervisor model relay", () => {
       yield* relay(
         new Request("http://127.0.0.1:8787/openai-responses/v1/responses", {
           method: "POST",
-          body: "{}",
+          body: '{"model":"m"}',
         }),
         route,
       );
@@ -664,12 +638,15 @@ describe("the supervisor model relay", () => {
           new Request("http://127.0.0.1:8787/anthropic-messages/v1/messages"),
           new Request("http://127.0.0.1:8787/openai-responses/v1/responses", {
             method: "PUT",
-            body: "{}",
+            body: '{"model":"m"}',
           }),
-          new Request("http://127.0.0.1:8787/v1/messages", { method: "POST", body: "{}" }),
+          new Request("http://127.0.0.1:8787/v1/messages", {
+            method: "POST",
+            body: '{"model":"m"}',
+          }),
           new Request("http://127.0.0.1:8787/anthropic-messages/v1/messages", {
             method: "POST",
-            body: "{}",
+            body: '{"model":"m"}',
           }),
         ],
         (request) => relay(request, failing),
@@ -719,6 +696,52 @@ describe("the supervisor's source", () => {
   });
 
   const repository = RepositoryName.make("acme/demo");
+
+  it.live(
+    "separates repository identities, checks fetched objects and removes absolute links",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const native = yield* ChildProcessSpawner.ChildProcessSpawner;
+        const root = yield* fs.makeTempDirectoryScoped({ prefix: "usine-source-safety-" });
+        const origin = yield* originRepository();
+        yield* fs.symlink("/etc/passwd", `${origin.directory}/absolute`);
+        yield* fs.symlink("README.md", `${origin.directory}/relative`);
+        yield* git(origin.directory, "add", ".");
+        yield* git(origin.directory, "commit", "-qm", "links");
+        const commands: Array<ReadonlyArray<string>> = [];
+        const audited = ChildProcessSpawner.make((command) => {
+          assert(command._tag === "StandardCommand");
+          commands.push(command.args);
+          return native.spawn(command);
+        });
+        const sources = yield* makeSupervisorSources(root, origin.origin).pipe(
+          Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, audited),
+        );
+        const trees = yield* sources.prepare([
+          RepositoryName.make("a/b_c"),
+          RepositoryName.make("a_b/c"),
+        ]);
+        assert.strictEqual(new Set(trees.map((tree) => tree.directory)).size, 2);
+        for (const tree of trees) {
+          const absolute = yield* fs.exists(`${tree.directory}/absolute`);
+          const relative = yield* fs.readLink(`${tree.directory}/relative`);
+          assert.isFalse(absolute);
+          assert.strictEqual(relative, "README.md");
+        }
+        assert.isTrue(
+          commands
+            .filter((args) => args.includes("fetch"))
+            .every((args) => args.includes("transfer.fsckObjects=true")),
+        );
+        for (const repository of ["a/.", "a/.."]) {
+          const failed = yield* sources
+            .prepare([RepositoryName.make(repository)])
+            .pipe(Effect.flip);
+          assert.include(failed.message, "path segment");
+        }
+      }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
 
   it.live("exports each repository's default branch head without its history", () =>
     Effect.gen(function* () {

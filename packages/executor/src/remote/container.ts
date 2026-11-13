@@ -1,3 +1,4 @@
+import { bindMount } from "../bind-mount.ts";
 import { catalog } from "@usine/agents/harness";
 import {
   CHILD_KILL_SCRIPT,
@@ -257,17 +258,6 @@ export const loginFiles = (
     ...worker.login.seeded.map((file) => ({ file, mounted: false })),
   ]);
 
-/** Returns a CSV field of a `--mount` option, quoted so a comma in a path is kept. */
-const field = (key: string, value: string): string => `"${key}=${value.replaceAll('"', '""')}"`;
-
-const bindMount = (source: string, destination: string, access: "readonly" | "writable") =>
-  [
-    "type=bind",
-    field("source", source),
-    field("destination", destination),
-    ...(access === "readonly" ? ["readonly"] : []),
-  ].join(",");
-
 /** Returns the `--env-file` content for `variables`. Fails on a value the file format can't hold. */
 const environmentFile = (
   operation: ExecutorOperation,
@@ -465,7 +455,9 @@ export const containersFor = (commands: RemoteCommands) => {
       ...Option.match(spec.checkout, {
         onNone: () => [],
         onSome: ({ path, parent }) => [
-          ["type=tmpfs", field("destination", parent), "tmpfs-mode=1777"].join(","),
+          ["type=tmpfs", `"destination=${parent.replaceAll('"', '""')}"`, "tmpfs-mode=1777"].join(
+            ",",
+          ),
           bindMount(path, path, "writable"),
         ],
       }),

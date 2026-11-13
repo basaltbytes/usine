@@ -163,6 +163,12 @@ jobs:
         with:
           path: /var/cache/server-test-tools
           key: ${{ steps.server-tools.outputs.cache-primary-key }}
+      - name: Install supervisor filesystem tools
+        if: matrix.leg == 'rest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fuse fuse2fs e2fsprogs
+          echo user_allow_other | sudo tee -a /etc/fuse.conf
       - name: Run tests
         shell: bash
         env:

@@ -67,11 +67,11 @@ Without `supervisor`, the instance starts and **Configuration > Settings** repor
 
 ### Where the supervisor runs
 
-Each turn runs in its own container on the orchestrator host, which usine removes when the turn ends. A container whose orchestrator stops ends itself within seconds, and the next start removes any that remain. A conversation runs one turn at a time.
+Each turn runs in its own container on the orchestrator host, which usine removes when the turn ends. Shutdown and the next startup remove containers by their instance and conversation labels. After a crash, containers can remain until startup cleanup. A conversation runs one turn at a time; if cleanup cannot remove an earlier container, usine refuses another turn.
 
 - **Source.** Each repository that the turn reads is mounted read-only at `<owner>/<repo>` in the session's working directory, at the head of its default branch when the turn starts, without the git history. A turn keeps reading the head that it started on after a push. In this release, no interface opens a turn, so the orchestrator doesn't choose or prepare these repositories.
-- **Files.** No other instance file is in the container: not the database, the GitHub App key, or a provider login. Only the conversation's own directory, which keeps the harness's saved session, is writable.
-- **Network.** The container has no network. The harness reaches the model through a relay to the orchestrator, which sends each model request through the instance's gateway with the instance's credential. The session reaches usine only through the operator tools that its harness serves over the session's own connection.
+- **Files.** No other instance file is in the container: not the database, the GitHub App key, or a provider login. The conversation's own directory keeps the harness's saved session and writable home. Its fixed-size filesystem bounds these writes, including Pi's session files written by the orchestrator. Temporary writes use bounded `/tmp` and shared memory.
+- **Network.** The container has no network. The harness reaches the model through a relay to the orchestrator, which sends each model request through the instance's gateway with the instance's credential. The relay accepts only the configured supervisor model, limits each request body to 2 MiB and accepts at most eight simultaneous connections. Oversized requests receive HTTP 413. The session reaches usine only through the operator tools that its harness serves over the session's own connection.
 
 ### Tools per harness
 
@@ -79,7 +79,9 @@ Each turn runs in its own container on the orchestrator host, which usine remove
 | --- | --- |
 | Claude Code | `Read`, `Grep`, and `Glob` only. |
 | Pi | `read`, `grep`, `find`, and `ls` only. Pi runs in the orchestrator process and runs these tools' file operations in the container. |
-| Codex | All of its own tools, including its shell and `apply_patch`, because Codex lists them in every thread. The container limits what they reach: they read the source, can't change it, and reach no network. |
+| Codex | All of its own tools, including its shell and `apply_patch`, because Codex lists them in every thread. Its shell runs inside the container. It can write files in its home that the next turn loads; it can read the source but cannot change it or reach the network. |
+
+Pi's `read` accepts regular files of at most 2 MiB. Each host command limits combined stdout and stderr to 4 MiB. Pi refuses read-only tools without a host runner.
 
 Pi's `grep` and `find` accept patterns that start with `-`, such as `--network`, so the supervisor can search for command-line flags and filenames that begin with a dash.
 
@@ -87,9 +89,37 @@ Pi's `grep` and `find` accept patterns that start with `-`, such as `--network`,
 
 ### Host requirements
 
-The orchestrator host needs Podman or Docker. usine uses Podman when both are installed, and rootless Podman is the recommended runtime. The host needs no hardware virtualization, so a cloud VM works. Each container runs the attempt image, `ghcr.io/basaltbytes/usine-worker`, which the runtime pulls on the first turn. The supervisor reaches the model through the gateway of the instance's first SSH worker that has one.
+The orchestrator host needs Linux, Docker or Podman, and cgroup v2 with CPU, memory, swap and PID controls. usine uses Podman when both runtimes are installed. CI tests Docker. No hardware virtualization is required. Each container runs `ghcr.io/basaltbytes/usine-worker` with the content-derived tag pinned by the installed usine version. Startup pulls that image before admitting turns; a turn never pulls an image. Container startup times out after 30 seconds. The supervisor reaches the model through the gateway of the instance's first SSH worker that has one.
 
-On a host without a container runtime, or an instance without a gateway, the instance still starts. It logs `The configured supervisor is unavailable on this orchestrator` with the reason, and **Configuration > Settings** shows the supervisor container as unavailable, with the reason.
+Conversation storage requires `fuse2fs`, `fusermount`, `mkfs.ext4`, `e2fsck`, `fallocate` and `mountpoint`, access to `/dev/fuse`, and `user_allow_other` in `/etc/fuse.conf`. On Debian or Ubuntu, install `fuse`, `fuse2fs`, `e2fsprogs` and `util-linux`. The orchestrator user must be allowed to mount FUSE filesystems. Both runtimes bind-mount the same bounded filesystem; Docker volume options and Podman storage quotas are not required.
+
+Without the runtime, storage prerequisites, enforced cgroup limits or a gateway, the supervisor refuses turns. The instance still starts and logs the reason; **Configuration > Settings** reports when preparation makes the supervisor unavailable.
+
+### Host limits
+
+Limits are always enabled, including when `supervisor_limits` is omitted. All values must be positive. Changes take effect after restarting the orchestrator.
+
+| Field in `settings.supervisor_limits` | Default | Description |
+| --- | --- | --- |
+| `cpus` | `1` | CPU quota in cores. Fractional values are accepted. |
+| `memory_mib` | `1024` | Container memory limit in MiB. Swap is disabled. |
+| `pids` | `256` | Maximum processes and threads in the container. |
+| `tmpfs_size_mib` | `64` | Size of `/tmp` in MiB. Shared memory is separately capped at 16 MiB. |
+| `conversation_size_mib` | `512` | Preallocated filesystem size per conversation, including filesystem metadata, in MiB. |
+
+```yaml
+settings:
+  supervisor_limits:
+    cpus: 1
+    memory_mib: 1024
+    pids: 256
+    tmpfs_size_mib: 64
+    conversation_size_mib: 512
+```
+
+Each conversation has a preallocated ext4 image under `.usine/supervisor/disks/<sha256>.ext4`, mounted through FUSE at `.usine/supervisor/conversations/<sha256>`. Filling the filesystem returns a no-space error without growing the image. The hash is derived from the complete conversation ID. Source caches and exported trees also use hashes of their repository names. Fetches verify received objects, and source exports remove absolute symbolic links.
+
+Plan disk capacity for the number of saved conversations. A filesystem that cannot be allocated or mounted prevents that turn from starting. Changing `conversation_size_mib` for an existing conversation requires an offline filesystem migration: usine refuses to open an image whose size differs from the setting.
 
 ## Instance metadata
 

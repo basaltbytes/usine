@@ -1,9 +1,9 @@
-import { Harness } from "@usine/core/agent/brain";
+import { Harness, ModelId } from "@usine/core/agent/brain";
 import { AgentSessionId } from "@usine/core/agent/session";
 import { CommitSha, RepositoryName } from "@usine/core/repository";
 import { WorkerName } from "@usine/core/worker";
 import { type Brand, Context, Effect, Option, Schema, type Scope } from "effect";
-import { ChildHost } from "../../child-host/child-host.ts";
+import { ExecShell, type ShellContainer } from "../../child-host/child-host.ts";
 import { WorkingDirectory } from "../../runtime.ts";
 import { CredentialRoute } from "../capability.ts";
 
@@ -12,7 +12,13 @@ export class SupervisorSeat extends Schema.Class<
   SupervisorSeat,
   Brand.Brand<"@usine/agents/harness/supervisor/SupervisorSeat">
 >("@usine/agents/SupervisorSeat")({
-  host: ChildHost,
+  host: ExecShell.pipe(
+    Schema.refine(
+      (host): host is ExecShell & { readonly container: ShellContainer } =>
+        host.container !== undefined,
+      { message: "A supervisor seat requires an exec-shell host with a container" },
+    ),
+  ),
   /** The worker name that the session's process and logs carry. */
   worker: WorkerName,
   /** The directory that the conversation's harness process starts in. */
@@ -30,7 +36,12 @@ export class SupervisorSource extends Schema.Class<
   SupervisorSource,
   Brand.Brand<"@usine/agents/harness/supervisor/SupervisorSource">
 >("@usine/agents/SupervisorSource")({
-  repository: RepositoryName,
+  repository: RepositoryName.check(
+    Schema.makeFilter(
+      (repository) => repository.split("/").every((part) => part !== "." && part !== ".."),
+      { message: "A source repository cannot contain a . or .. path segment" },
+    ),
+  ),
   revision: CommitSha,
   directory: Schema.NonEmptyString,
 }) {}
@@ -52,6 +63,8 @@ export class SandboxRequest extends Schema.Class<
   conversation: AgentSessionId,
   /** The harness that runs the turn, whose credential wiring the sandbox applies. */
   harness: Harness,
+  /** The only model the sandbox may request through its relay. */
+  model: ModelId,
   /** The repositories that the session reads, each in its own directory under the seat's `cwd`. */
   sources: Schema.Array(SupervisorSource),
 }) {}

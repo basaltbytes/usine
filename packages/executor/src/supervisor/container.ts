@@ -1,6 +1,4 @@
-// The model relay serves HTTP on a Unix socket, which needs Node's server.
-// @effect-diagnostics-next-line nodeBuiltinImport:off
-import { createServer } from "node:http";
+import { CONTAINER_LIMITS_SCRIPT } from "../container-limits.ts";
 import { NodeHttpServer } from "@effect/platform-node";
 import { ExecShell, type ExecTransport } from "@usine/agents/child-host";
 import { catalog, type CredentialRoute } from "@usine/agents/harness";
@@ -12,15 +10,28 @@ import {
   SupervisorSeat,
   SupervisorUnavailable,
 } from "@usine/agents/supervisor";
-import type { Harness } from "@usine/core/agent/brain";
-import { safeSegment } from "@usine/core/repository";
-import { type ContainerImage, WorkerName } from "@usine/core/worker";
-import { Cause, Effect, FileSystem, Layer, Option, Random, Result, Schedule, Stream } from "effect";
+import type { Harness, ModelId } from "@usine/core/agent/brain";
+import { directoryName } from "./names.ts";
+import { bindMount } from "../bind-mount.ts";
+import { checkConversationStorage, mountConversation } from "./storage.ts";
+import { type ContainerImage, SupervisorLimits, WorkerName } from "@usine/core/worker";
+import {
+  Cause,
+  Effect,
+  FileSystem,
+  Layer,
+  Option,
+  Random,
+  Result,
+  Schedule,
+  Schema,
+  Stream,
+} from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import { collectCommand } from "../child-command.ts";
 import { type ContainerRuntime, runtimeOptions } from "../remote/runtime.ts";
 import type { GatewayModelError, GatewayModelRoute } from "../ssh/gateway/model-route.ts";
-import { relayModelRequest } from "./model-relay.ts";
+import { modelRelayServer, relayModelRequest } from "./model-relay.ts";
 
 /** The port inside the sandbox on which the model relay listens, on the loopback address. */
 export const MODEL_RELAY_PORT = 8787;
@@ -36,9 +47,8 @@ const RELAY_CHECK_INTERVAL_MILLIS = 5_000;
 
 /**
  * The sandbox's main process: forwards each connection to the model relay port to the relay's
- * socket, which the orchestrator serves. The container has no other network. It exits once the
- * socket refuses a connection, as after the orchestrator stops, which stops and removes the
- * container with every process in it.
+ * socket, which the orchestrator serves. The container has no other network. The heartbeat is
+ * best effort; label-based cleanup owns container removal even if a session stops this process.
  */
 const RELAY_SCRIPT = String.raw`
 const net = require("node:net");
@@ -112,7 +122,8 @@ export const detectSandboxRuntime = Effect.fn("SupervisorSandbox.detectRuntime")
       "preflight",
       runtime,
       ["info", "--format", rootlessFormat[runtime]],
-      {},
+      { forceKillAfter: "2 seconds" },
+      65536,
     ).pipe(Effect.timeout(DETECTION_TIMEOUT), Effect.result);
     if (Result.isFailure(info)) {
       if (Cause.isTimeoutError(info.failure)) {
@@ -178,11 +189,6 @@ interface ConversationPaths {
   readonly workspace: string;
 }
 
-/** A turn's hold on its conversation's directory, with what became of the turn's container. */
-interface ConversationHold {
-  container: "not started" | "removed" | "not removed";
-}
-
 /** The arguments of `<runtime> run` that start one turn's sandbox in the background. */
 export const sandboxRunArguments = (options: {
   readonly name: string;
@@ -194,11 +200,15 @@ export const sandboxRunArguments = (options: {
   readonly paths: ConversationPaths;
   readonly sources: SandboxRequest["sources"];
   readonly relayDirectory: string;
+  readonly limits?: SupervisorLimits;
 }): ReadonlyArray<string> => {
   const { paths } = options;
+  const limits = options.limits ?? SupervisorLimits.make({});
   return [
     "run",
     "--detach",
+    "--pull",
+    "never",
     "--rm",
     "--name",
     options.name,
@@ -211,7 +221,19 @@ export const sandboxRunArguments = (options: {
     "none",
     "--read-only",
     "--tmpfs",
-    "/tmp:rw,nosuid,nodev",
+    `/tmp:rw,nosuid,nodev,size=${limits.tmpfsSizeMib}m`,
+    "--pids-limit",
+    String(limits.pids),
+    "--memory",
+    `${limits.memoryMib}m`,
+    "--memory-swap",
+    `${limits.memoryMib}m`,
+    "--cpus",
+    String(limits.cpus),
+    "--shm-size",
+    "16m",
+    "--log-driver",
+    "none",
     "--cap-drop",
     "ALL",
     "--security-opt",
@@ -221,16 +243,16 @@ export const sandboxRunArguments = (options: {
     `HOME=${paths.home}`,
     "--workdir",
     paths.workspace,
-    "--volume",
-    `${paths.root}:${paths.root}:rw`,
-    "--volume",
-    `${paths.workspace}:${paths.workspace}:ro`,
+    "--mount",
+    bindMount(paths.root, paths.root, "writable"),
+    "--mount",
+    bindMount(paths.workspace, paths.workspace, "readonly"),
     ...options.sources.flatMap(({ repository, directory }) => [
-      "--volume",
-      `${directory}:${paths.workspace}/${repository}:ro`,
+      "--mount",
+      bindMount(directory, `${paths.workspace}/${repository}`, "readonly"),
     ]),
-    "--volume",
-    `${options.relayDirectory}:${RELAY_DIRECTORY}:ro`,
+    "--mount",
+    bindMount(options.relayDirectory, RELAY_DIRECTORY, "readonly"),
     "--entrypoint",
     "node",
     options.image,
@@ -247,14 +269,22 @@ const localTransport = (
   spawner: ChildProcessSpawner.ChildProcessSpawner["Service"],
 ): ExecTransport => ({
   run: (line, stdin) =>
-    spawner.spawn(ChildProcess.make("sh", ["-c", line], { stdin, detached: true })).pipe(
-      Effect.map((handle) => ({
-        stdout: handle.stdout.pipe(Stream.orDie),
-        stderr: handle.stderr.pipe(Stream.orDie),
-        exitCode: handle.exitCode.pipe(Effect.map(Number), Effect.orDie),
-      })),
-      Effect.orDie,
-    ),
+    spawner
+      .spawn(
+        ChildProcess.make("sh", ["-c", line], {
+          stdin,
+          detached: true,
+          forceKillAfter: "2 seconds",
+        }),
+      )
+      .pipe(
+        Effect.map((handle) => ({
+          stdout: handle.stdout.pipe(Stream.orDie),
+          stderr: handle.stderr.pipe(Stream.orDie),
+          exitCode: handle.exitCode.pipe(Effect.map(Number), Effect.orDie),
+        })),
+        Effect.orDie,
+      ),
 });
 
 /** Where the supervisor sandbox keeps conversations, what it runs, and how it reaches the model. */
@@ -263,6 +293,7 @@ export interface ContainerSandboxOptions {
   readonly root: string;
   /** The image of each sandbox, with Node.js, a POSIX shell, and the harness CLIs. */
   readonly image: ContainerImage;
+  readonly limits?: SupervisorLimits;
   /** The container runtime; detected when `None`. */
   readonly runtime: Option.Option<ContainerRuntime>;
   /** The instance's model route, or `None` when the instance has no gateway. */
@@ -292,15 +323,23 @@ const unavailableBecause = (action: string) => (error: { readonly message: strin
  * through `openRoute`.
  */
 const makeContainerSandbox = Effect.fn("SupervisorSandbox.make")(function* (
-  options: Pick<ContainerSandboxOptions, "root" | "image">,
+  options: Pick<ContainerSandboxOptions, "root" | "image" | "limits">,
   runtime: SandboxRuntime,
   openRoute: Effect.Effect<GatewayModelRoute, GatewayModelError>,
 ) {
   const fs = yield* FileSystem.FileSystem;
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const transport = localTransport(spawner);
+  const limits = options.limits ?? SupervisorLimits.make({});
   const runtimeCommand = (args: ReadonlyArray<string>) =>
-    collectCommand(spawner, "prepare", runtime.runtime, args, {});
+    collectCommand(
+      spawner,
+      "prepare",
+      runtime.runtime,
+      args,
+      { forceKillAfter: "2 seconds" },
+      65536,
+    ).pipe(Effect.timeout("30 seconds"));
 
   /** Whether `path` exists as a directory, without following a symbolic link at `path`. */
   const realDirectory = Effect.fn("SupervisorSandbox.realDirectory")(function* (path: string) {
@@ -396,12 +435,11 @@ const makeContainerSandbox = Effect.fn("SupervisorSandbox.make")(function* (
   const serveRelay = Effect.fn("SupervisorSandbox.serveRelay")(function* (
     socket: string,
     route: GatewayModelRoute,
+    model: ModelId,
   ) {
     // A model response streams for as long as the turn's longest answer.
-    const server = yield* NodeHttpServer.make(() => createServer({ requestTimeout: 0 }), {
-      path: socket,
-    });
-    yield* server.serve(relayModelRequest(route));
+    const server = yield* NodeHttpServer.make(modelRelayServer, { path: socket });
+    yield* server.serve(relayModelRequest(route, model));
   });
 
   const startContainer = Effect.fn("SupervisorSandbox.startContainer")(function* (
@@ -457,87 +495,94 @@ const makeContainerSandbox = Effect.fn("SupervisorSandbox.make")(function* (
       ),
     );
 
-  /** Removes the sandboxes that an earlier orchestrator process on this root left running. */
-  const removeLeftovers = Effect.fn("SupervisorSandbox.removeLeftovers")(function* () {
-    const listed = yield* runtimeCommand([
+  const listContainers = (conversation?: string) =>
+    runtimeCommand([
       "ps",
       "--all",
       "--quiet",
       "--filter",
       `label=${ROOT_LABEL}=${options.root}`,
-    ]);
-    if (listed.exitCode !== 0) {
-      yield* Effect.logWarning(
-        "Could not list the supervisor sandboxes that an earlier process left",
-        {
-          exitCode: listed.exitCode,
-          stderr: listed.stderr.trim().split("\n")[0],
-        },
-      );
-      return;
-    }
-    const left = listed.stdout.split("\n").filter((line) => line.trim() !== "");
-    if (left.length === 0) {
-      yield* Effect.logInfo("No supervisor sandbox was left by an earlier process");
-      return;
-    }
-    yield* Effect.logInfo("Removing the supervisor sandboxes that an earlier process left", {
-      containers: left.length,
-    });
-    yield* Effect.forEach(left, (container) => removeContainer(container.trim()), {
-      discard: true,
-    });
+      ...(conversation === undefined
+        ? []
+        : ["--filter", `label=${CONVERSATION_LABEL}=${conversation}`]),
+    ]).pipe(
+      Effect.flatMap(({ exitCode, stdout }) =>
+        exitCode === 0
+          ? Effect.succeed(
+              stdout
+                .split("\n")
+                .map((line) => line.trim())
+                .filter(Boolean),
+            )
+          : Effect.fail(
+              SupervisorUnavailable.make({ message: "Cannot list supervisor containers" }),
+            ),
+      ),
+      Effect.mapError(unavailableBecause("list supervisor containers")),
+    );
+  const removeLabeled = Effect.fn("SupervisorSandbox.removeLabeled")(function* (
+    conversation?: string,
+  ) {
+    const containers = yield* listContainers(conversation);
+    yield* Effect.forEach(containers, removeContainer, { discard: true });
+    return (yield* listContainers(conversation)).length === 0;
   });
-  yield* removeLeftovers().pipe(
-    Effect.catch((error) =>
-      Effect.logWarning("Could not list the supervisor sandboxes that an earlier process left", {
-        message: error.message,
-      }),
-    ),
+  const cleanup = (conversation?: string) =>
+    removeLabeled(conversation).pipe(
+      Effect.catch((error) =>
+        Effect.logError("Could not remove labeled supervisor containers", {
+          conversation,
+          message: error.message,
+        }).pipe(Effect.as(false)),
+      ),
+    );
+  yield* Effect.addFinalizer(() => cleanup().pipe(Effect.asVoid));
+  if (!(yield* cleanup()))
+    return yield* SupervisorUnavailable.make({
+      message: "Supervisor containers from an earlier process remain; refusing new turns",
+    });
+  yield* checkConversationStorage(options.root);
+  const image = yield* collectCommand(
+    spawner,
+    "preflight",
+    runtime.runtime,
+    ["pull", options.image],
+    { forceKillAfter: "2 seconds" },
+    65536,
+  ).pipe(
+    Effect.timeout("5 minutes"),
+    Effect.mapError(unavailableBecause("pull the supervisor image")),
   );
-
-  /**
-   * The conversation directories that a turn's sandbox has open in this process. Conversations
-   * whose IDs map to one directory share it, so the hold is on the directory.
-   */
-  const running = new Set<string>();
-  /**
-   * Holds `directory` for the scope, or fails if another turn holds it. The turn records its
-   * container in the returned hold, whose release says whether that container was removed.
-   */
+  if (image.exitCode !== 0)
+    return yield* SupervisorUnavailable.make({
+      message: `Cannot pull the supervisor image: ${image.stderr.trim().split("\n")[0]}`,
+    });
+  const running = new Map<string, "active" | "cleanup failed">();
   const holdConversation = (conversation: string, directory: string) =>
     Effect.acquireRelease(
-      Effect.suspend(() => {
-        if (running.has(directory))
-          return Effect.logWarning(
-            "Refused a supervisor turn: another turn of the conversation is running",
-            { conversation, directory },
-          ).pipe(
-            Effect.andThen(
-              Effect.fail(
-                SupervisorUnavailable.make({
-                  message: "Another turn of this supervisor conversation is running",
-                }),
-              ),
-            ),
-          );
-        running.add(directory);
-        return Effect.succeed<ConversationHold>({ container: "not started" });
+      Effect.gen(function* () {
+        if (running.get(directory) === "active")
+          return yield* SupervisorUnavailable.make({
+            message: "Another turn of this supervisor conversation is running",
+          });
+        running.set(directory, "active");
       }),
-      (hold) =>
-        Effect.sync(() => running.delete(directory)).pipe(
-          Effect.andThen(
-            hold.container === "not removed"
-              ? Effect.logWarning(
-                  "Released a supervisor conversation while its sandbox may still be running",
-                  { conversation, directory, container: hold.container },
-                )
-              : Effect.logInfo("Released a supervisor conversation", {
+      () =>
+        cleanup(conversation).pipe(
+          Effect.flatMap((removed) => {
+            if (removed) running.delete(directory);
+            else running.set(directory, "cleanup failed");
+            return removed
+              ? Effect.logInfo("Released a supervisor conversation", {
                   conversation,
                   directory,
-                  container: hold.container,
-                }),
-          ),
+                  container: "removed",
+                })
+              : Effect.logError("Kept the hold on a supervisor conversation: containers remain", {
+                  conversation,
+                  directory,
+                });
+          }),
         ),
     );
 
@@ -547,21 +592,15 @@ const makeContainerSandbox = Effect.fn("SupervisorSandbox.make")(function* (
       harness: request.harness,
       sources: request.sources.length,
     });
-    const segment = safeSegment(request.conversation);
-    // `.`, `..`, or an empty segment would name the conversations directory or the sandbox root,
-    // which hold every other conversation's directory.
-    if (segment === "" || segment === "." || segment === "..") {
-      yield* Effect.logWarning(
-        "Refused a supervisor turn: the conversation's ID doesn't name a directory of its own",
-        { conversation: request.conversation },
-      );
-      return yield* SupervisorUnavailable.make({
-        message: "This supervisor conversation's ID doesn't name a directory of its own",
-      });
-    }
+    const segment = directoryName(request.conversation);
     const root = `${options.root}/conversations/${segment}`;
     // No sandbox of the conversation writes to its directory while this turn prepares it.
-    const hold = yield* holdConversation(request.conversation, root);
+    yield* holdConversation(request.conversation, root);
+    if ((yield* listContainers(request.conversation)).length !== 0)
+      return yield* SupervisorUnavailable.make({
+        message: "A supervisor container remains for this conversation; refusing a new turn",
+      });
+    yield* mountConversation(fs, spawner, options.root, segment, limits);
     const paths: ConversationPaths = { root, home: `${root}/home`, workspace: `${root}/workspace` };
     // The workspace, and the mount points of the sources in it, exist before they're mounted, even
     // for a turn without sources: Podman refuses a missing mount source, and Docker creates it as
@@ -596,41 +635,51 @@ const makeContainerSandbox = Effect.fn("SupervisorSandbox.make")(function* (
     const relayDirectory = yield* fs
       .makeTempDirectoryScoped({ prefix: "usine-supervisor-" })
       .pipe(Effect.mapError(unavailableBecause("create the model relay's directory")));
-    yield* serveRelay(`${relayDirectory}/model.sock`, route).pipe(
+    yield* serveRelay(`${relayDirectory}/model.sock`, route, request.model).pipe(
       Effect.mapError(unavailableBecause("serve the model relay")),
     );
     const suffix = (yield* Random.nextIntBetween(0, 0xffffffff)).toString(16);
     const name = `usine-supervisor-${segment.slice(0, 40)}-${suffix}`;
-    yield* Effect.acquireRelease(
-      startContainer(
+    yield* Effect.addFinalizer(() => cleanup(request.conversation).pipe(Effect.asVoid));
+    yield* startContainer(
+      name,
+      sandboxRunArguments({
         name,
-        sandboxRunArguments({
-          name,
-          root: options.root,
-          conversation: request.conversation,
-          runtime,
-          image: options.image,
-          paths,
-          sources: request.sources,
-          relayDirectory,
-        }),
-      ),
-      () =>
-        removeContainer(name).pipe(
-          Effect.tap((removed) =>
-            Effect.sync(() => {
-              hold.container = removed ? "removed" : "not removed";
-            }),
-          ),
-        ),
+        root: options.root,
+        conversation: request.conversation,
+        runtime,
+        image: options.image,
+        paths,
+        sources: request.sources,
+        relayDirectory,
+        limits,
+      }),
     );
     yield* awaitRelay(name);
+    const enforced = yield* runtimeCommand([
+      "exec",
+      name,
+      "sh",
+      "-ec",
+      CONTAINER_LIMITS_SCRIPT,
+      "sh",
+      String(limits.cpus),
+      String(limits.memoryMib * 1024 ** 2),
+      String(limits.pids),
+    ]).pipe(Effect.mapError(unavailableBecause("verify supervisor resource limits")));
+    if (enforced.exitCode !== 0)
+      return yield* SupervisorUnavailable.make({
+        message:
+          "The runtime did not enforce supervisor CPU, memory, zero-swap and PID limits; check cgroup v2 delegation",
+      });
     return SupervisorSeat.make({
-      host: ExecShell.make({
-        transport,
-        destination: name,
-        container: { runtime: runtime.runtime, name },
-      }),
+      host: yield* Schema.decodeEffect(SupervisorSeat.fields.host)(
+        ExecShell.make({
+          transport,
+          destination: name,
+          container: { runtime: runtime.runtime, name },
+        }),
+      ).pipe(Effect.mapError(unavailableBecause("construct the supervisor seat"))),
       worker: WorkerName.make("supervisor"),
       cwd: WorkingDirectory.make(paths.workspace),
       environment: Option.match(wiring, {
@@ -679,7 +728,19 @@ export const containerSandboxLayer = (options: ContainerSandboxOptions) =>
         } satisfies SupervisorSandboxService;
       }
       const { runtime, route } = available.success;
-      const open = yield* makeContainerSandbox(options, runtime, route);
-      return { unavailable: Option.none(), open } satisfies SupervisorSandboxService;
+      const prepared = yield* makeContainerSandbox(options, runtime, route).pipe(Effect.result);
+      if (Result.isFailure(prepared)) {
+        yield* Effect.logWarning("Supervisor sandbox preparation failed", {
+          message: prepared.failure.message,
+        });
+        return {
+          unavailable: Option.some(prepared.failure),
+          open: () => Effect.fail(prepared.failure),
+        } satisfies SupervisorSandboxService;
+      }
+      return {
+        unavailable: Option.none(),
+        open: prepared.success,
+      } satisfies SupervisorSandboxService;
     }),
   );

@@ -1,8 +1,9 @@
 import { SupervisorSource, SupervisorUnavailable } from "@usine/agents/supervisor";
-import { CommitSha, type RepositoryName, safeSegment } from "@usine/core/repository";
+import { CommitSha, type RepositoryName } from "@usine/core/repository";
 import { Effect, FileSystem, Option, Redacted, Schema, type Scope, Semaphore } from "effect";
 import { Base64 } from "effect/encoding";
 import { ChildProcessSpawner } from "effect/process";
+import { directoryName } from "./names.ts";
 import { collectCommand } from "../child-command.ts";
 
 /** Where the orchestrator fetches each repository's source from. */
@@ -93,7 +94,7 @@ export const makeSupervisorSources = Effect.fn("SupervisorSources.make")(functio
       SupervisorUnavailable.make({
         message: `Can't ${action} for the source of ${repository}: ${error.message}`,
       });
-  const treesOf = (repository: RepositoryName) => `${root}/trees/${safeSegment(repository)}`;
+  const treesOf = (repository: RepositoryName) => `${root}/trees/${directoryName(repository)}`;
 
   /** Removes the trees of `repository` that are neither its head nor held by a turn. */
   const removeUnused = Effect.fn("SupervisorSources.removeUnused")(function* (
@@ -134,7 +135,10 @@ export const makeSupervisorSources = Effect.fn("SupervisorSources.make")(functio
     repository: RepositoryName,
   ) {
     yield* Effect.annotateCurrentSpan({ repository });
-    const cache = `${root}/repos/${safeSegment(repository)}.git`;
+    yield* Schema.decodeEffect(SupervisorSource.fields.repository)(repository).pipe(
+      Effect.mapError(unavailable(repository, "validate the repository name")),
+    );
+    const cache = `${root}/repos/${directoryName(repository)}.git`;
     const trees = treesOf(repository);
     if (!(yield* fs.exists(`${cache}/HEAD`).pipe(Effect.orElseSucceed(() => false)))) {
       yield* fs
@@ -147,7 +151,18 @@ export const makeSupervisorSources = Effect.fn("SupervisorSources.make")(functio
     yield* run(
       repository,
       "git",
-      ["--git-dir", cache, "fetch", "--quiet", "--depth=1", "--no-tags", url, "HEAD"],
+      [
+        "-c",
+        "transfer.fsckObjects=true",
+        "--git-dir",
+        cache,
+        "fetch",
+        "--quiet",
+        "--depth=1",
+        "--no-tags",
+        url,
+        "HEAD",
+      ],
       fetchEnvironment(url, token),
     );
     const head = yield* run(repository, "git", ["--git-dir", cache, "rev-parse", "FETCH_HEAD"]);
@@ -175,6 +190,7 @@ export const makeSupervisorSources = Effect.fn("SupervisorSources.make")(functio
         revision,
         staging,
       ]);
+      yield* run(repository, "find", [staging, "-type", "l", "-lname", "/*", "-delete"]);
       yield* fs
         .rename(staging, tree)
         .pipe(Effect.mapError(unavailable(repository, "publish the tree")));

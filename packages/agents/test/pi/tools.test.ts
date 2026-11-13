@@ -1,3 +1,4 @@
+import { rejects } from "node:assert/strict";
 // The fake Pi session runs its tools through the SDK's Promise callbacks.
 // @effect-diagnostics asyncFunction:off
 // @effect-diagnostics newPromise:off
@@ -138,6 +139,29 @@ const toolContext = {} as ExtensionToolContext;
 const CANCELLED = "Usine tool call was cancelled";
 
 describe("Pi usine tool sets", () => {
+  it.effect("refuses a read-only role without a host runner", () =>
+    Effect.gen(function* () {
+      const opened = SessionSpec.make({
+        ...spec,
+        admitted: AdmittedBrain.make({
+          ...spec.admitted,
+          role: RoleSpec.make({ ...role, nativeTools: "read" }),
+        }),
+      });
+      const refused = yield* runPi(
+        Toolkit.empty,
+        Layer.empty,
+        () => Promise.reject(new Error("must not start")),
+        opened,
+      ).pipe(Effect.flip);
+      assert.include(refused.message, "host runner");
+      assert.throws(
+        () => piSessionTools("/tmp", Option.none(), "read", [], Option.none()),
+        "host runner",
+      );
+    }),
+  );
+
   it.effect("list only the toolkit's tools and report them under the toolkit's names", () =>
     Effect.gen(function* () {
       const { options, events } = yield* runPi(tools, handlers, async (options, publish) => {
@@ -319,6 +343,18 @@ describe("Pi usine tool sets", () => {
           await run("grep", { pattern: "-e", path: "acme/demo/docs" });
           await run("grep", { pattern: "-v", path: "acme/demo/docs" });
           await run("find", { pattern: "--version", path: "acme/demo/docs" });
+          await rejects(() => run("read", { path: "/dev/zero" }), /regular file/);
+          assert(Option.isSome(options.host));
+          const host = options.host.value;
+          await host("node", [
+            "-e",
+            "require('node:fs').writeFileSync('large', Buffer.alloc(3 * 1024 ** 2))",
+          ]);
+          await rejects(() => run("read", { path: "large" }), /at most 2 MiB/);
+          await rejects(
+            () => host("node", ["-e", "process.stdout.write(Buffer.alloc(5 * 1024 ** 2))"]),
+            /exceeds 4 MiB/,
+          );
         },
         sandboxed,
       );

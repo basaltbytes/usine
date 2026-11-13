@@ -1,6 +1,6 @@
 import { SupervisorSandbox, type SupervisorSandboxService } from "@usine/agents/supervisor";
 import type { InstanceDirectory, InstanceId } from "@usine/core/instance";
-import { WorkerName } from "@usine/core/worker";
+import { SupervisorLimits, WorkerName } from "@usine/core/worker";
 import { ATTEMPT_IMAGE } from "@usine/executor/ssh";
 import { containerSandboxLayer } from "@usine/executor/supervisor";
 import { Context, Effect, Layer, Option } from "effect";
@@ -37,6 +37,9 @@ export const supervisorSandboxLayer = (
       return containerSandboxLayer({
         root: `${instanceDirectory}/.usine/supervisor`,
         image: ATTEMPT_IMAGE,
+        limits: Option.getOrElse(startup.config.settings.supervisorLimits, () =>
+          SupervisorLimits.make({}),
+        ),
         runtime: Option.none(),
         route,
       }).pipe(

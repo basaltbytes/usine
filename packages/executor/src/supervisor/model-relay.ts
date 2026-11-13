@@ -1,19 +1,29 @@
+// @effect-diagnostics-next-line nodeBuiltinImport:off
+import { createServer } from "node:http";
+import type { ModelId } from "@usine/core/agent/brain";
 import type { GatewayLlmProtocol } from "@usine/core/worker";
 import { CALLER_CREDENTIAL_HEADERS } from "@usine/gateway/admin";
-import { Effect } from "effect";
+import { Effect, Result, Schema, Stream } from "effect";
 import { HttpServerRequest, HttpServerResponse } from "effect/http";
 import type { GatewayModelRoute } from "../ssh/gateway/model-route.ts";
 
-/** The model requests that the relay forwards, by request path, as the gateway serves them. */
+export const MAX_RELAY_BODY_BYTES = 2 * 1024 ** 2;
+export const MAX_RELAY_CONNECTIONS = 8;
+
+export const modelRelayServer = () => {
+  const server = createServer({
+    requestTimeout: 30_000,
+    headersTimeout: 10_000,
+    maxHeaderSize: 16_384,
+  });
+  server.maxConnections = MAX_RELAY_CONNECTIONS;
+  return server;
+};
+
 const relayedPaths: ReadonlyMap<string, GatewayLlmProtocol> = new Map([
   ["/anthropic-messages/v1/messages", "anthropic-messages"],
   ["/openai-responses/v1/responses", "openai-responses"],
 ]);
-
-/**
- * Request headers that the route replaces, which are every header that the gateway reads a caller
- * credential from, and headers that describe one connection rather than the request.
- */
 const requestOnlyHeaders: ReadonlySet<string> = new Set([
   ...CALLER_CREDENTIAL_HEADERS,
   "host",
@@ -22,40 +32,45 @@ const requestOnlyHeaders: ReadonlySet<string> = new Set([
   "content-length",
   "transfer-encoding",
 ]);
-
-/** Response headers that describe the route's connection, which the relay's own response sets. */
 const connectionHeaders = new Set(["connection", "keep-alive", "transfer-encoding"]);
-
 const refusal = (status: number, message: string) =>
   HttpServerResponse.jsonUnsafe({ error: { type: "usine_model_relay", message } }, { status });
+const decodeModel = Schema.decodeUnknownResult(
+  Schema.fromJsonString(Schema.Struct({ model: Schema.String })),
+);
 
-/**
- * Answers a model request from a supervisor session through `route`, the model route that the
- * instance already uses. It forwards only the model calls that the gateway serves, without the
- * session's credential headers: the route adds the instance's credential, which never enters the
- * sandbox. Any other request is refused with 404.
- */
+/** Forwards bounded requests for the configured model without caller credentials. */
 export const relayModelRequest = Effect.fn("SupervisorModelRelay.request")(
-  function* (route: GatewayModelRoute) {
+  function* (route: GatewayModelRoute, model: ModelId) {
     const request = yield* HttpServerRequest.HttpServerRequest;
     const path = new URL(request.url, "http://model-relay").pathname;
     const protocol = request.method === "POST" ? relayedPaths.get(path) : undefined;
-    if (protocol === undefined) {
-      yield* Effect.logWarning("The supervisor model relay refused a request", {
-        method: request.method,
-        path,
-      });
-      return refusal(404, `The model relay serves POST ${[...relayedPaths.keys()].join(", ")}`);
+    if (protocol === undefined) return refusal(404, "The model relay serves model requests only");
+    let bytes = 0;
+    const chunks: Array<Uint8Array> = [];
+    yield* request.stream.pipe(
+      Stream.runForEachWhile((chunk) => {
+        bytes += chunk.byteLength;
+        if (bytes > MAX_RELAY_BODY_BYTES) return Effect.succeed(false);
+        chunks.push(chunk);
+        return Effect.succeed(true);
+      }),
+    );
+    if (bytes > MAX_RELAY_BODY_BYTES) {
+      yield* Effect.logWarning("The supervisor model relay refused an oversized body");
+      return refusal(413, "The model request exceeds 2 MiB");
     }
-    const body = yield* request.text;
+    const body = Buffer.concat(chunks).toString("utf8");
+    const parsed = decodeModel(body);
+    if (Result.isFailure(parsed)) return refusal(400, "Expected a JSON model request");
+    if (parsed.success.model !== model) {
+      yield* Effect.logWarning("The supervisor model relay refused another model");
+      return refusal(403, "The model relay serves the configured supervisor model only");
+    }
     const headers = Object.fromEntries(
       Object.entries(request.headers).filter(([name]) => !requestOnlyHeaders.has(name)),
     );
     const response = yield* route.request(protocol, body, headers);
-    yield* Effect.logDebug("The supervisor model relay forwarded a request", {
-      protocol,
-      status: response.status,
-    });
     const kept = new Headers();
     response.headers.forEach((value, name) => {
       if (!connectionHeaders.has(name)) kept.append(name, value);
@@ -68,13 +83,11 @@ export const relayModelRequest = Effect.fn("SupervisorModelRelay.request")(
     effect.pipe(
       Effect.catchTags({
         GatewayModelError: (error) =>
-          Effect.logWarning("The supervisor model relay could not reach the model route", {
+          Effect.logWarning("The supervisor model route failed", {
             message: error.message,
-          }).pipe(Effect.as(refusal(502, error.message))),
-        HttpServerError: (error) =>
-          Effect.logWarning("The supervisor model relay could not read a request", {
-            message: error.message,
-          }).pipe(Effect.as(refusal(400, "The model relay could not read the request body"))),
+          }).pipe(Effect.as(refusal(502, "The model route is unavailable"))),
+        HttpServerError: () =>
+          Effect.succeed(refusal(400, "The model relay could not read the request body")),
       }),
     ),
 );

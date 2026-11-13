@@ -20,6 +20,8 @@ Startup resolves each rostered agent's parent model and effort from agent overri
 
 `runtimeLayer` also provides the supervisor sandbox through `supervisorSandboxLayer`: one container per supervisor turn on this host, from `@usine/executor/supervisor`, with conversations under `.usine/supervisor/` in the instance folder, the attempt image, and the same gateway's model route attached as `supervisor-<instance>`. A host without Podman or Docker, or an instance without a gateway, still starts: the sandbox reports why it is unavailable, the orchestrator logs `The configured supervisor is unavailable on this orchestrator` when `settings.supervisor` is set, and the configuration view's `settings.supervisor` carries the reason in `unavailable`. Its `ownTools` carries the descriptor's reason when the supervisor's harness keeps all its own tools.
 
+`supervisorSandboxLayer` supplies `settings.supervisorLimits`, or `SupervisorLimits` defaults, at startup. Restart after changing limits. Storage prerequisites and cgroup enforcement must succeed before a turn receives a seat; failures report supervisor unavailability without stopping the instance.
+
 ## Conditional approval
 
 Loop approval accepts `required`, `none`, or a boolean CEL condition over the event

@@ -14,8 +14,8 @@ import {
 } from "@usine/core/agent/session";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { WorkerName } from "@usine/core/worker";
-import { Array as Arr, Effect, Layer, Option, Result, Stream } from "effect";
-import { LocalProcess } from "../../src/child-host/child-host.ts";
+import { Array as Arr, Effect, Layer, Option, Result, Schema, Stream } from "effect";
+import { ExecShell, LocalProcess } from "../../src/child-host/child-host.ts";
 import { AdmissionContext, admitBrain } from "../../src/harness/admission.ts";
 import {
   type Capability,
@@ -27,7 +27,8 @@ import {
 import { catalog } from "../../src/harness/catalog.ts";
 import { claude } from "../../src/harness/claude/descriptor.ts";
 import { codex } from "../../src/harness/codex/descriptor.ts";
-import type { NativeSession } from "../../src/harness/contract.ts";
+import { type NativeSession, SessionSpec, StartPrompt } from "../../src/harness/contract.ts";
+import { admitSession } from "../../src/harness/launch.ts";
 import { HarnessCatalog, HarnessDescriptor } from "../../src/harness/harness.ts";
 import { Harnesses } from "../../src/harness/registry.ts";
 import type { HarnessRuntime } from "../../src/harness/runtime.ts";
@@ -82,8 +83,16 @@ const sourceReads = {
   codex: "command",
 } satisfies Record<SupervisorProvider, string>;
 
+const container = { runtime: "docker", name: "test-container" };
 const seat = SupervisorSeat.make({
-  host: LocalProcess.make(),
+  host: Object.assign(
+    ExecShell.make({
+      destination: "test-container",
+      container,
+      transport: { run: () => Effect.die("The fake harness does not execute commands") },
+    }),
+    { container },
+  ),
   worker: WorkerName.make("orchestrator"),
   cwd: WorkingDirectory.make("/tmp"),
   environment: {},
@@ -320,6 +329,43 @@ describe("the supervisor role", () => {
       ["codex", Option.some(closedTools.reason)],
     ]);
   });
+
+  it.effect("refuses own-tool admission on an actual host without a container", () =>
+    Effect.gen(function* () {
+      const brain = BrainSpec.make({ ...claudeBrain, harness: Harness.make("codex") });
+      const admitted = admitSupervisor(catalog, brain, "gateway-subscription");
+      assert(Result.isSuccess(admitted));
+      for (const host of [
+        LocalProcess.make({}),
+        ExecShell.make({
+          destination: "host",
+          transport: { run: () => Effect.die("refused hosts never run commands") },
+        }),
+      ]) {
+        const spec = SessionSpec.make({
+          session: RoleSession.make({
+            id: conversation,
+            role: supervisor.name,
+            agent: supervisorAgent,
+            brain,
+          }),
+          admitted: admitted.success,
+          host,
+          worker: seat.worker,
+          machine: Option.none(),
+          cwd: seat.cwd,
+          environment: {},
+        });
+        const error = yield* admitSession(
+          catalog,
+          spec,
+          StartPrompt.make({ text: "read" }),
+          true,
+        ).pipe(Effect.flip);
+        assert.include(error.message, "requires a container");
+      }
+    }),
+  );
 
   it("refuses a harness that can't reopen the saved session", () => {
     assert(Result.isSuccess(admitSupervisor(catalog, claudeBrain, "gateway")));
@@ -561,3 +607,18 @@ describe("the supervisor role", () => {
     }),
   );
 });
+
+for (const harness of supervisorProviders) {
+  it(`refuses ${harness} supervisor seats without a container`, () => {
+    for (const host of [
+      LocalProcess.make(),
+      ExecShell.make({
+        destination: "host",
+        transport: { run: () => Effect.die("must not execute") },
+      }),
+    ]) {
+      const decoded = Schema.decodeUnknownResult(SupervisorSeat)({ ...seat, host });
+      assert.isTrue(Result.isFailure(decoded));
+    }
+  });
+}

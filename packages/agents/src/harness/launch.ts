@@ -161,19 +161,9 @@ export const admitSession = Effect.fn("HarnessAdmission.session")(function* (
         ? `The ${role.name} role runs a usine tool set, but its session opened without one`
         : `The ${role.name} role runs no usine tool set, but its session opened with one`,
     );
-  return yield* Effect.fromResult(
+  const admitted = yield* Effect.fromResult(
     admitBrain(catalog, role, spec.session.brain, context, { reopens: resume }),
   ).pipe(
-    Effect.tap(() =>
-      Effect.logInfo("Harness session admitted", {
-        sessionId: spec.session.id,
-        role: role.name,
-        harness: spec.session.brain.harness,
-        credentialRoute: context.credential,
-        placement: context.placement,
-        resume,
-      }),
-    ),
     Effect.tapError((error) =>
       Effect.logWarning("Harness session refused", {
         sessionId: spec.session.id,
@@ -187,6 +177,19 @@ export const admitSession = Effect.fn("HarnessAdmission.session")(function* (
       AgentResultError.make({ sessionId: Option.some(spec.session.id), message: error.message }),
     ),
   );
+  if (Option.isSome(admitted.ownToolsKept) && hostPlacement(spec.host) !== "container")
+    return yield* refuse(
+      "A harness that keeps all its own tools for a read-only role requires a container",
+    );
+  yield* Effect.logInfo("Harness session admitted", {
+    sessionId: spec.session.id,
+    role: role.name,
+    harness: spec.session.brain.harness,
+    credentialRoute: context.credential,
+    placement: context.placement,
+    resume,
+  });
+  return admitted;
 });
 
 /**
