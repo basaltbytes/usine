@@ -647,6 +647,57 @@ describe("event-driven coordinator runtime", () => {
     }).pipe(Effect.scoped),
   );
 
+  it.live("drops each Attempt's in-process state once it settles", () =>
+    Effect.gen(function* () {
+      const database = yield* temporaryDatabase;
+      const completed = coordinated("coordinator/state-completed");
+      const canceled = coordinated("coordinator/state-canceled");
+      const logged: Array<unknown> = [];
+      const logger = Logger.layer([Logger.make(({ message }) => logged.push(message))]);
+      const remaining = () =>
+        logged.flatMap((message) =>
+          Array.isArray(message) &&
+          message[0] === "Dropped the settled Attempt's in-process state" &&
+          typeof message[1] === "object" &&
+          message[1] !== null &&
+          "hubs" in message[1]
+            ? [message[1].hubs]
+            : [],
+        );
+      const process = yield* orchestrator(sqliteJournal(database).pipe(coordinator));
+      yield* Effect.gen(function* () {
+        // Notices before the start keep the Attempt's state until it settles.
+        yield* process.attempts.notify(completed.spec.attemptId, unresponsive("before start"));
+        const execution = yield* process.execute(completed, recordingSink().sink);
+        yield* (yield* process.nextChild).reply("Opened #12.");
+        yield* Fiber.join(execution);
+        yield* process.attempts.settle(completed.spec.attemptId);
+
+        const running = yield* process.execute(canceled, recordingSink().sink);
+        yield* process.nextChild;
+        yield* process.attempts.cancel(canceled.spec.attemptId);
+        yield* Fiber.await(running);
+
+        // A late notice or input doesn't bring the settled Attempt's state back.
+        yield* process.attempts.notify(completed.spec.attemptId, unresponsive("after settle"));
+      }).pipe(Effect.provide(logger));
+      const refused = yield* process.attempts
+        .intervene(
+          completed.spec.attemptId,
+          AttemptChannel.Intervention.make({
+            target: AttemptChannel.ParentTarget.make(),
+            operator: "octocat",
+            action: AttemptChannel.Release.make(),
+          }),
+        )
+        .pipe(Effect.flip);
+      yield* process.stop;
+
+      assert.deepStrictEqual(remaining(), [0, 0]);
+      assert.strictEqual(refused.message, "This attempt has no live channel");
+    }).pipe(Effect.scoped),
+  );
+
   it.live("cancels an Attempt whose execute call already returned, without waiting", () =>
     Effect.gen(function* () {
       const database = yield* temporaryDatabase;

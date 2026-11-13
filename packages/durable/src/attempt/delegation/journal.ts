@@ -9,14 +9,7 @@ import {
 } from "@usine/core/agent/session";
 import type * as AttemptChannel from "@usine/core/attempt/channel";
 import { MachineId, WorkerName } from "@usine/core/worker";
-import {
-  type Brand,
-  type Deferred,
-  type Effect,
-  type Option,
-  Schema,
-  type Semaphore,
-} from "effect";
+import { type Brand, type Effect, type Option, Schema, type Semaphore } from "effect";
 import type { AttemptRequest } from "../../attempt-runtime.ts";
 import type { JournalError } from "../journal-error.ts";
 
@@ -203,6 +196,22 @@ export interface ChildDelivery {
   readonly delivered: Option.Option<AttemptChannel.InterventionState>;
 }
 
+/** An `execute` call that relays the Attempt, as a delegation sees it. */
+export interface AttachedCall {
+  /** The call's request, which supplies the child host and environment. */
+  readonly request: AttemptRequest;
+  /** Whether the call has stopped relaying the Attempt since, as on a process stop. */
+  readonly stopped: Effect.Effect<boolean>;
+}
+
+/** The `execute` call that relays an Attempt, as its delegations see it. */
+export interface DelegationAttachment {
+  /** Whether an `execute` call relays the Attempt and its children run. */
+  readonly isAttached: Effect.Effect<boolean>;
+  /** Waits for an `execute` call that relays the Attempt, and returns it. */
+  readonly next: Effect.Effect<AttachedCall>;
+}
+
 /** The in-process state of an Attempt that its delegations share. */
 export interface DelegationHub {
   /** The live children by session ID. */
@@ -216,11 +225,8 @@ export interface DelegationHub {
   readonly childInputs: Set<number>;
   /** Serializes operator interventions. */
   readonly routing: Semaphore.Semaphore;
-  /**
-   * Completes with the request of the `execute` call relaying the Attempt. Replaced when that call
-   * detaches, so read it at each use.
-   */
-  readonly attached: Deferred.Deferred<AttemptRequest>;
+  /** The `execute` call relaying the Attempt. */
+  readonly attachment: DelegationAttachment;
   /** Relays a session event of a child. */
   readonly event: (event: AgentSessionEvent) => Effect.Effect<void>;
   /** Relays whether a child read a queued operator input. */

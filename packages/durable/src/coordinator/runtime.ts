@@ -22,6 +22,7 @@ import {
   Match,
   Option,
   Schema,
+  Scope,
   Semaphore,
 } from "effect";
 
@@ -56,6 +57,7 @@ import { delegate, type DelegationOutcome } from "../attempt/delegation/delegati
 import type { DelegationHub } from "../attempt/delegation/journal.ts";
 import type { JournalError } from "../attempt/journal-error.ts";
 import { childSessionId } from "../attempt/sessions.ts";
+import { type Attachment, attachmentFor } from "./attachment.ts";
 import { buildAttemptContext } from "./context.ts";
 import { coordinatorCall, journalDelegation } from "./delegation.ts";
 import {
@@ -95,15 +97,15 @@ interface CoordinatorHub {
   readonly childInputs: Set<number>;
   readonly supervisor: Supervisor;
   readonly interventions: Interventions;
-  /** Completes with the request of the attached `execute` call; replaced when it detaches. */
-  attached: Deferred.Deferred<AttemptRequest>;
-  /** Completes when the attached `execute` call detaches; replaced when it does. */
-  detached: Deferred.Deferred<void>;
-  /** Completes when `cancel` stops the attached `execute` call; replaced when it detaches. */
-  canceled: Deferred.Deferred<void>;
-  /** Completes when the attached call's sink fails, which ends the call; replaced when it detaches. */
-  sinkFailed: Deferred.Deferred<void>;
+  /** The `execute` call relaying the Attempt. */
+  readonly attachment: Attachment;
+  /** Owns the hub's fibers until the settled Attempt leaves the runtime. */
+  readonly scope: Scope.Closeable;
 }
+
+/** Whether `cancel` ended the `execute` call relaying the Attempt. */
+const isCanceled = (hub: CoordinatorHub) =>
+  Effect.map(hub.attachment.ending, (ending) => Option.contains(ending, "canceled"));
 
 const infra = (error: JournalError) => InfraFailure.make({ message: error.message, cause: error });
 
@@ -216,15 +218,6 @@ const outcomeOf = (snapshot: CoordinatorSnapshot) =>
     Settled: ({ outcome }) => outcome,
   });
 
-/**
- * Replaces the completed `attached` of `hub`, so its children see the `execute` call detach. Does
- * nothing if a stopped delegation already released it.
- */
-const releaseAttachment = (hub: CoordinatorHub) =>
-  Effect.gen(function* () {
-    if (yield* Deferred.isDone(hub.attached)) hub.attached = yield* Deferred.make<AttemptRequest>();
-  });
-
 const make = Effect.gen(function* () {
   const journal = yield* AttemptJournal;
   const backend = yield* ChildBackend;
@@ -234,36 +227,101 @@ const make = Effect.gen(function* () {
   const creation = yield* Semaphore.make(1);
   const hubs = new Map<AttemptId, CoordinatorHub>();
 
+  /** Creates the hub of `attemptId`. The caller holds the creation permit. */
+  const created = Effect.fn("CoordinatorRuntime.hub")(function* (attemptId: AttemptId) {
+    const hubScope = yield* Scope.fork(scope);
+    const outbox = yield* outboxFor(journal, attemptId);
+    const children = new Map<AgentSessionId, RunningSession>();
+    const childInputs = new Set<number>();
+    const supervisor = supervisorFor(journal, attemptId);
+    const hub: CoordinatorHub = {
+      attemptId,
+      outbox,
+      children,
+      childSpawns: new Set(),
+      childInputs,
+      supervisor,
+      interventions: yield* interventionsFor(
+        journal,
+        { attemptId, outbox, children, childInputs, supervisor },
+        hubScope,
+      ),
+      attachment: yield* attachmentFor(attemptId),
+      scope: hubScope,
+    };
+    hubs.set(attemptId, hub);
+    return hub;
+  });
+
+  /** Returns the hub of `attemptId`, creating it if it has none. */
   const hubFor = (attemptId: AttemptId) =>
+    creation.withPermits(1)(
+      Effect.suspend(() => {
+        const existing = hubs.get(attemptId);
+        return existing === undefined ? created(attemptId) : Effect.succeed(existing);
+      }),
+    );
+
+  /**
+   * Returns the hub of `attemptId`, or `None` for a settled Attempt without one, so that a late
+   * caller doesn't bring back the state that `retire` dropped.
+   */
+  const unsettledHubFor = (attemptId: AttemptId) =>
     creation.withPermits(1)(
       Effect.gen(function* () {
         const existing = hubs.get(attemptId);
-        if (existing !== undefined) return existing;
-        const outbox = yield* outboxFor(journal, attemptId);
-        const children = new Map<AgentSessionId, RunningSession>();
-        const childInputs = new Set<number>();
-        const supervisor = supervisorFor(journal, attemptId);
-        const created: CoordinatorHub = {
-          attemptId,
-          outbox,
-          children,
-          childSpawns: new Set(),
-          childInputs,
-          supervisor,
-          interventions: yield* interventionsFor(
-            journal,
-            { attemptId, outbox, children, childInputs, supervisor },
-            scope,
+        if (existing !== undefined) return Option.some(existing);
+        const settled = yield* isSettled(attemptId).pipe(
+          Effect.catchTag("JournalError", (error) =>
+            Effect.logWarning("Could not read whether the Attempt is settled; keeping its state", {
+              attemptId,
+              message: error.message,
+            }).pipe(Effect.as(false)),
           ),
-          attached: yield* Deferred.make<AttemptRequest>(),
-          detached: yield* Deferred.make<void>(),
-          canceled: yield* Deferred.make<void>(),
-          sinkFailed: yield* Deferred.make<void>(),
-        };
-        hubs.set(attemptId, created);
-        return created;
+        );
+        if (settled) return Option.none<CoordinatorHub>();
+        const hub = yield* created(attemptId);
+        return Option.some(hub);
       }),
     );
+
+  const isSettled = (attemptId: AttemptId) =>
+    journal
+      .load(attemptId)
+      .pipe(Effect.map(Option.exists(({ status }) => status._tag === "Settled")));
+
+  /**
+   * Drops the in-process state of `attemptId` once `settled` holds and no `execute` call relays
+   * it. A later `execute` call creates it again.
+   */
+  const retire = Effect.fn("CoordinatorRuntime.retire")(
+    function* (attemptId: AttemptId, settled: Effect.Effect<boolean, JournalError>) {
+      yield* creation.withPermits(1)(
+        Effect.gen(function* () {
+          const hub = hubs.get(attemptId);
+          if (hub === undefined) return;
+          if (!(yield* hub.attachment.isDetached))
+            return yield* Effect.logDebug(
+              "An execute call relays the Attempt; it keeps its in-process state",
+              { attemptId },
+            );
+          if (!(yield* settled)) return;
+          hubs.delete(attemptId);
+          yield* Scope.close(hub.scope, Exit.void);
+          yield* Effect.logInfo("Dropped the settled Attempt's in-process state", {
+            attemptId,
+            hubs: hubs.size,
+          });
+        }),
+      );
+    },
+    Effect.catchTag("JournalError", (error) =>
+      Effect.logWarning("Could not read whether the Attempt is settled; keeping its state", {
+        attemptId: error.attemptId,
+        message: error.message,
+      }),
+    ),
+  );
 
   const loaded = (attemptId: AttemptId) =>
     journal.load(attemptId).pipe(
@@ -286,9 +344,7 @@ const make = Effect.gen(function* () {
     childSpawns: hub.childSpawns,
     childInputs: hub.childInputs,
     routing: hub.interventions.routing,
-    get attached() {
-      return hub.attached;
-    },
+    attachment: hub.attachment.delegation,
     event: (event) => hub.outbox.relay([AttemptChannel.SessionEvent.make({ event })]),
     delivery: hub.interventions.delivery,
   });
@@ -309,11 +365,7 @@ const make = Effect.gen(function* () {
   ) =>
     Effect.gen(function* () {
       const annotations = { attemptId: hub.attemptId, child };
-      const ended = (yield* Deferred.isDone(hub.canceled))
-        ? Option.some("canceled")
-        : (yield* Deferred.isDone(hub.sinkFailed))
-          ? Option.some("sink failed")
-          : Option.none<string>();
+      const ended = yield* hub.attachment.ending;
       if (Option.isSome(ended)) {
         yield* Effect.logInfo("The execute call ended for good; its child stops without a resume", {
           ...annotations,
@@ -322,7 +374,7 @@ const make = Effect.gen(function* () {
         yield* Fiber.interrupt(running);
         return;
       }
-      yield* releaseAttachment(hub);
+      yield* hub.attachment.release;
       if (!hub.children.has(childSessionId(hub.attemptId, child))) {
         yield* Effect.logInfo("The execute call stopped before its child ran", annotations);
         return;
@@ -351,7 +403,7 @@ const make = Effect.gen(function* () {
       hub: delegationHub(hub),
       journal: journalDelegation(journal, hub.supervisor, attemptId, record.number),
       call: coordinatorCall(
-        Effect.raceFirst(Deferred.await(hub.canceled), Deferred.await(stopping)),
+        Effect.raceFirst(hub.attachment.canceled, Deferred.await(stopping)),
         hub.interventions.childChanged,
       ),
       assignment: Option.getOrElse(record.assignment, () => FIRST_ASSIGNMENT),
@@ -434,13 +486,13 @@ const make = Effect.gen(function* () {
               attemptId,
               sequence,
               spec: snapshot.request.spec,
-              request: Effect.suspend(() => Deferred.await(hub.attached)),
+              request: hub.attachment.request,
               recordUsage: (usage) =>
                 hub.outbox.relay([AttemptChannel.SessionEvent.make({ event: usage })]),
             })
             .pipe(
               Effect.raceFirst(
-                Deferred.await(hub.canceled).pipe(
+                hub.attachment.canceled.pipe(
                   Effect.andThen(
                     Effect.logInfo("The cancel interrupted the event's handler", {
                       attemptId,
@@ -528,7 +580,7 @@ const make = Effect.gen(function* () {
   /** Handles events until the Attempt has an outcome, and returns the final snapshot. */
   const drive = Effect.fn("CoordinatorRuntime.drive")(function* (hub: CoordinatorHub) {
     while (true) {
-      if (yield* Deferred.isDone(hub.canceled)) return yield* Effect.interrupt;
+      if (yield* isCanceled(hub)) return yield* Effect.interrupt;
       const snapshot = yield* loaded(hub.attemptId);
       if (snapshot.status._tag !== "Open") return snapshot;
       const state = yield* stateOf(snapshot);
@@ -559,7 +611,7 @@ const make = Effect.gen(function* () {
   const staleTransition = (hub: CoordinatorHub, stale: StaleRevision) =>
     Effect.gen(function* () {
       const found = { expected: stale.expected, actual: stale.actual };
-      if (yield* Deferred.isDone(hub.canceled)) {
+      if (yield* isCanceled(hub)) {
         yield* Effect.logInfo(
           "The cancel settled the journal before this transition; it stops",
           found,
@@ -586,32 +638,16 @@ const make = Effect.gen(function* () {
   ): Effect.Effect<AttemptReport, AttemptFailure | JournalError | UnreadableRecord> =>
     Effect.scoped(
       Effect.gen(function* () {
+        // Runs after the call detaches, so the coordinator's waiters see the change.
+        yield* Effect.addFinalizer(() => hub.interventions.childChanged);
+        // Released after the outbox detaches, so the next call finds the outbox free.
+        const call = yield* hub.attachment.hold;
         const snapshot = yield* loaded(hub.attemptId);
-        let attachedHere = false;
-        // Registered before the outbox attaches, so it runs after the outbox detaches: a call
-        // waiting for `detached` then finds the outbox free.
-        yield* Effect.addFinalizer(() =>
-          attachedHere
-            ? Effect.gen(function* () {
-                const detached = hub.detached;
-                yield* releaseAttachment(hub);
-                hub.detached = yield* Deferred.make<void>();
-                hub.canceled = yield* Deferred.make<void>();
-                hub.sinkFailed = yield* Deferred.make<void>();
-                yield* Deferred.succeed(detached, undefined);
-                yield* hub.interventions.childChanged;
-              })
-            : Effect.void,
-        );
-        if (!(yield* hub.outbox.attach(io, snapshot))) {
-          yield* Effect.logWarning(
-            "Another execute call is relaying this Attempt; waiting for it to detach",
+        if (!(yield* hub.outbox.attach(io, snapshot)))
+          return yield* Effect.die(
+            new Error(`Attempt ${hub.attemptId} has an attached outbox without an execute call`),
           );
-          yield* Deferred.await(hub.detached);
-          return yield* relay(hub, request, io);
-        }
-        attachedHere = true;
-        yield* Deferred.succeed(hub.attached, request);
+        yield* hub.attachment.publish(call, request);
         yield* Effect.logInfo("Relaying the Attempt's channel", {
           nextSequence: snapshot.nextOutbound,
           status: snapshot.status._tag,
@@ -624,8 +660,8 @@ const make = Effect.gen(function* () {
         const ended = yield* drive(hub).pipe(
           Effect.raceFirst(
             hub.outbox.failed.pipe(
-              // Signaled before the race interrupts `drive`, so its delegation sees why.
-              Effect.tap(() => Deferred.succeed(hub.sinkFailed, undefined)),
+              // Recorded before the race interrupts `drive`, so its delegation sees why.
+              Effect.tap(() => hub.attachment.end("sink failed")),
               Effect.flatMap(Effect.fail),
             ),
           ),
@@ -636,7 +672,7 @@ const make = Effect.gen(function* () {
           Exit.isSuccess(ended) &&
           ended.value.status._tag === "Settled" &&
           Option.isNone(outcomeOf(ended.value));
-        if (settledByCancel || (yield* Deferred.isDone(hub.canceled))) {
+        if (settledByCancel || (yield* isCanceled(hub))) {
           if (Exit.isFailure(ended) && !Cause.hasInterruptsOnly(ended.cause))
             yield* Effect.logWarning(
               "The canceled Attempt's coordinator failed while it stopped; the cancel still applies",
@@ -684,6 +720,10 @@ const make = Effect.gen(function* () {
         Effect.tap(() => Effect.logInfo("The Attempt completed")),
         Effect.tapError((failure) =>
           Effect.logInfo("The Attempt ended without success", { failure: failure._tag }),
+        ),
+        // A stop leaves the state for the call that resumes the Attempt.
+        Effect.onExit((exit) =>
+          Exit.hasInterrupts(exit) ? Effect.void : retire(attemptId, isSettled(attemptId)),
         ),
       );
     },
@@ -802,8 +842,12 @@ const make = Effect.gen(function* () {
 
   const attachedTo = Effect.fn("CoordinatorRuntime.attached")(function* (attemptId: AttemptId) {
     yield* Effect.annotateCurrentSpan({ attemptId });
-    const hub = yield* hubFor(attemptId);
-    yield* Effect.suspend(() => Deferred.await(hub.attached));
+    const hub = yield* unsettledHubFor(attemptId);
+    if (Option.isNone(hub))
+      return yield* Effect.logInfo("The Attempt is settled; no execute call relays it again", {
+        attemptId,
+      }).pipe(Effect.andThen(Effect.never));
+    yield* hub.value.attachment.request;
   });
 
   const cancel = Effect.fn("CoordinatorRuntime.cancel")(
@@ -825,13 +869,13 @@ const make = Effect.gen(function* () {
           { status },
         );
       const hub = hubs.get(attemptId);
-      // Read before `attached`: an execute call that detaches after the check still completes it.
-      const detached = hub?.detached;
-      if (hub !== undefined && detached !== undefined && (yield* hub.outbox.attached)) {
+      const call =
+        hub === undefined ? Option.none<number>() : yield* hub.attachment.end("canceled");
+      if (hub !== undefined && Option.isSome(call)) {
         yield* Effect.logInfo("Canceling the coordinated Attempt; its children stop");
-        yield* Deferred.succeed(hub.canceled, undefined);
-        yield* Deferred.await(detached);
+        yield* hub.attachment.detached(call.value);
       } else yield* Effect.logInfo("No execute call relays the Attempt; nothing to stop");
+      yield* retire(attemptId, Effect.succeed(status !== "Terminal"));
     },
     (effect, attemptId) =>
       effect.pipe(
@@ -845,6 +889,7 @@ const make = Effect.gen(function* () {
       yield* Effect.annotateCurrentSpan({ attemptId });
       yield* journal.settle(attemptId);
       yield* Effect.logInfo("The attempt is settled; no relay will resume it", { attemptId });
+      yield* retire(attemptId, Effect.succeed(true));
     },
     Effect.catchTag("JournalError", (error) => Effect.fail(infra(error))),
   );
@@ -852,8 +897,13 @@ const make = Effect.gen(function* () {
   const notify = Effect.fn("CoordinatorRuntime.notify")(
     function* (attemptId: AttemptId, notice: AttemptChannel.WorkerNotice) {
       yield* Effect.annotateCurrentSpan({ attemptId, notice: notice._tag });
-      const hub = yield* hubFor(attemptId);
-      const routed = yield* hub.outbox.notice(notice);
+      const hub = yield* unsettledHubFor(attemptId);
+      if (Option.isNone(hub))
+        return yield* Effect.logInfo("Dropped a Worker notice for a settled Attempt", {
+          notice: notice._tag,
+          worker: notice.worker,
+        });
+      const routed = yield* hub.value.outbox.notice(notice);
       if (routed._tag === "Kept")
         yield* Effect.logInfo("Kept a Worker notice until the Attempt is relayed after Started", {
           notice: notice._tag,

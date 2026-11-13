@@ -27,7 +27,7 @@ import type {
   DelegationStart,
 } from "./delegation/journal.ts";
 import { type AttemptRecord, AttemptRecordDoc, HoldDoc } from "./documents.ts";
-import type { AttemptHub, AttemptHubs } from "./hubs.ts";
+import { type AttemptHub, type AttemptHubs, delegationAttachment } from "./hubs.ts";
 import { storedRequestOf } from "./request.ts";
 import type { ExtensionServices } from "./services.ts";
 import { firstAccepted } from "./watch.ts";
@@ -352,9 +352,7 @@ const delegationHub = (hubs: AttemptHubs, hub: AttemptHub): DelegationHub => ({
   childSpawns: hub.childSpawns,
   childInputs: hub.childInputs,
   routing: hub.routing,
-  get attached() {
-    return hub.attached;
-  },
+  attachment: delegationAttachment(hub),
   event: (event) => hubs.event(hub, event),
   delivery: (delivery) => hubs.delivery(hub, delivery),
 });

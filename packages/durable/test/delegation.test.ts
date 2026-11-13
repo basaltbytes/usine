@@ -5,7 +5,7 @@ import { AgentSessionId, ChildSessionBudget, ChildSessionCount } from "@usine/co
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { Deferred, Effect, Exit, Fiber, Option } from "effect";
 import { delegate } from "../src/attempt/delegation/delegation.ts";
-import { attemptHubs } from "../src/attempt/hubs.ts";
+import { attemptHubs, delegationAttachment } from "../src/attempt/hubs.ts";
 import { stubChildBackendLayer, StubChildren } from "../src/testing.ts";
 import { memoryJournal } from "./memory-journal.ts";
 import { attemptRequest } from "./support.ts";
@@ -32,7 +32,7 @@ const start = (attemptId: string, memory: ReturnType<typeof memoryJournal>, atta
           childSpawns: hub.childSpawns,
           childInputs: hub.childInputs,
           routing: hub.routing,
-          attached: hub.attached,
+          attachment: delegationAttachment(hub),
           event: (event) => hubs.event(hub, event),
           delivery: (delivery) => hubs.delivery(hub, delivery),
         },

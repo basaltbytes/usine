@@ -24,18 +24,7 @@ import {
   SessionStarted,
 } from "@usine/core/agent/session";
 import * as AttemptChannel from "@usine/core/attempt/channel";
-import {
-  DateTime,
-  Deferred,
-  Effect,
-  Exit,
-  Fiber,
-  Match,
-  Option,
-  Result,
-  Schema,
-  Stream,
-} from "effect";
+import { DateTime, Effect, Exit, Fiber, Match, Option, Result, Schema, Stream } from "effect";
 import type { JournalError } from "../journal-error.ts";
 import { childSessionId, parentSessionId } from "../sessions.ts";
 import {
@@ -241,7 +230,7 @@ export const delegate = Effect.fn("Delegation.delegate")(function* (
     Effect.gen(function* () {
       for (const inputSequence of unsettled.keys()) hub.childInputs.delete(inputSequence);
       if (unsettled.size === 0) return;
-      if (!(yield* Deferred.isDone(hub.attached))) {
+      if (!(yield* hub.attachment.isAttached)) {
         yield* Effect.logInfo("Leaving restored operator inputs for the next relay", {
           attemptId: spec.attemptId,
           sessionId,
@@ -277,7 +266,7 @@ export const delegate = Effect.fn("Delegation.delegate")(function* (
   if (resumed && Option.isNone(saved))
     return yield* interrupted("the child did not commit a saved conversation");
   hub.childSpawns.add(sessionId);
-  if (!(yield* Deferred.isDone(hub.attached))) {
+  if (!(yield* hub.attachment.isAttached)) {
     yield* Effect.logInfo(
       "Waiting for execute to supply the Attempt's child host and environment before spawning a child",
       {
@@ -286,17 +275,15 @@ export const delegate = Effect.fn("Delegation.delegate")(function* (
     );
   }
   // An abort, such as the harness closing at shutdown, ends a wait for a released Attempt.
-  const attachment = hub.attached;
-  const lifecycle = ChildSessionLifecycle.of({
-    isStopping: Effect.sync(() => hub.attached !== attachment),
-  });
-  const request = yield* untilAborted(
-    Deferred.await(attachment),
+  const attached = yield* untilAborted(
+    hub.attachment.next,
     Effect.logInfo(
       "Abandoning the child spawn of an aborted tool call; no execute call supplied the child host",
       { attemptId: spec.attemptId, sessionId },
     ),
   );
+  const request = attached.request;
+  const lifecycle = ChildSessionLifecycle.of({ isStopping: attached.stopped });
   if (
     Option.isSome(saved) &&
     (saved.value.worker !== request.worker ||
