@@ -246,6 +246,45 @@ const unresponsiveReasons = (envelopes: ReadonlyArray<AttemptChannel.OutboundEnv
     payload._tag === "WorkerUnresponsive" ? [payload.reason] : [],
   );
 
+/** One creation or drop of an Attempt's in-process state, with the hubs left afterwards. */
+interface HubChange {
+  readonly change: "created" | "dropped";
+  readonly attemptId: string;
+  readonly hubs: number;
+}
+
+const decodeHubChange = Schema.decodeUnknownOption(
+  Schema.Tuple([
+    Schema.Literals([
+      "Created the Attempt's in-process state",
+      "Dropped the Attempt's in-process state",
+    ]),
+    Schema.Struct({ attemptId: Schema.String, hubs: Schema.Finite }),
+  ]),
+);
+
+const tagged = Schema.decodeUnknownOption(Schema.Tuple([Schema.String, Schema.Unknown]));
+
+/** Records the creations and drops of in-process state that the runtime logs, in order. */
+const hubChanges = () => {
+  const changes: Array<HubChange> = [];
+  const logger = Logger.layer([
+    Logger.make(({ message }) =>
+      Option.match(decodeHubChange(message), {
+        onNone: () => undefined,
+        onSome: ([text, { attemptId, hubs }]) => {
+          changes.push({
+            change: text.startsWith("Created") ? "created" : "dropped",
+            attemptId,
+            hubs,
+          });
+        },
+      }),
+    ),
+  ]);
+  return { changes, logger };
+};
+
 const tagOf = Schema.decodeUnknownOption(Schema.Struct({ _tag: Schema.String }));
 
 /** A model handler's decision to complete the Attempt with `message`. */
@@ -647,54 +686,153 @@ describe("event-driven coordinator runtime", () => {
     }).pipe(Effect.scoped),
   );
 
-  it.live("drops each Attempt's in-process state once it settles", () =>
+  it.live("drops each Attempt's in-process state once it finishes, without a settle", () =>
     Effect.gen(function* () {
       const database = yield* temporaryDatabase;
       const completed = coordinated("coordinator/state-completed");
+      const blocked = coordinated("coordinator/state-blocked");
       const canceled = coordinated("coordinator/state-canceled");
-      const logged: Array<unknown> = [];
-      const logger = Logger.layer([Logger.make(({ message }) => logged.push(message))]);
-      const dropped = Schema.decodeUnknownOption(
-        Schema.Tuple([
-          Schema.Literal("Dropped the settled Attempt's in-process state"),
-          Schema.Struct({ hubs: Schema.Finite }),
-        ]),
-      );
-      const remaining = () =>
-        logged.flatMap((message) =>
-          Option.match(dropped(message), { onNone: () => [], onSome: ([, { hubs }]) => [hubs] }),
-        );
+      const { changes, logger } = hubChanges();
       const process = yield* orchestrator(sqliteJournal(database).pipe(coordinator));
-      yield* Effect.gen(function* () {
-        // Notices before the start keep the Attempt's state until it settles.
+      const { liveAfterBlock, refused } = yield* Effect.gen(function* () {
+        // Notices before the start keep the Attempt's state until it finishes.
         yield* process.attempts.notify(completed.spec.attemptId, unresponsive("before start"));
         const execution = yield* process.execute(completed, recordingSink().sink);
         yield* (yield* process.nextChild).reply("Opened #12.");
-        yield* Fiber.join(execution);
-        yield* process.attempts.settle(completed.spec.attemptId);
+        const report = yield* Fiber.join(execution);
+        // The executor records the harvested result and calls neither cancel nor settle.
+        yield* process.attempts.recordResult(
+          completed.spec.attemptId,
+          StepCompletion.fromResult(StepResult.make({ message: report.message, facts: [] })),
+        );
+
+        const failing = yield* process.execute(blocked, recordingSink().sink);
+        yield* (yield* process.nextChild).block("The repository is archived.");
+        yield* Fiber.await(failing);
+        // The executor stops here: an Attempt that isn't live gets no settle.
+        const liveAfterBlock = yield* process.attempts.isLive(blocked.spec.attemptId);
 
         const running = yield* process.execute(canceled, recordingSink().sink);
         yield* process.nextChild;
         yield* process.attempts.cancel(canceled.spec.attemptId);
         yield* Fiber.await(running);
 
-        // A late notice or input doesn't bring the settled Attempt's state back.
-        yield* process.attempts.notify(completed.spec.attemptId, unresponsive("after settle"));
+        // A late notice, wait, or input doesn't bring a finished Attempt's state back.
+        for (const { spec } of [completed, blocked, canceled]) {
+          yield* process.attempts.notify(spec.attemptId, unresponsive("after the end"));
+          yield* process.attempts.attached(spec.attemptId).pipe(Effect.timeoutOption("50 millis"));
+        }
+        const refused = yield* process.attempts
+          .intervene(
+            completed.spec.attemptId,
+            AttemptChannel.Intervention.make({
+              target: AttemptChannel.ParentTarget.make(),
+              operator: "octocat",
+              action: AttemptChannel.Release.make(),
+            }),
+          )
+          .pipe(Effect.flip);
+        return { liveAfterBlock, refused };
       }).pipe(Effect.provide(logger));
-      const refused = yield* process.attempts
-        .intervene(
-          completed.spec.attemptId,
-          AttemptChannel.Intervention.make({
-            target: AttemptChannel.ParentTarget.make(),
-            operator: "octocat",
-            action: AttemptChannel.Release.make(),
-          }),
-        )
-        .pipe(Effect.flip);
       yield* process.stop;
 
-      assert.deepStrictEqual(remaining(), [0, 0]);
+      assert.isFalse(liveAfterBlock);
+      assert.deepStrictEqual(
+        changes,
+        [completed, blocked, canceled].flatMap(({ spec }) => [
+          { change: "created", attemptId: spec.attemptId, hubs: 1 },
+          { change: "dropped", attemptId: spec.attemptId, hubs: 0 },
+        ]),
+      );
       assert.strictEqual(refused.message, "This attempt has no live channel");
+    }).pipe(Effect.scoped),
+  );
+
+  it.live("keeps an Attempt's in-process state while an execute call relays it", () =>
+    Effect.gen(function* () {
+      const database = yield* temporaryDatabase;
+      const request = coordinated("coordinator/state-relayed");
+      const attemptId = request.spec.attemptId;
+      const reached = yield* Deferred.make<void>();
+      const release = yield* Deferred.make<void>();
+      const { changes, logger } = hubChanges();
+      const process = yield* orchestrator(
+        sqliteJournal(database).pipe(holdingTerminalLoad(reached, release), coordinator),
+      );
+      const whileRelayed = yield* Effect.gen(function* () {
+        const execution = yield* process.execute(request, recordingSink().sink);
+        yield* (yield* process.nextChild).reply("Done.");
+        // `Final` is delivered, and the `execute` call is still attached.
+        yield* Deferred.await(reached);
+        yield* process.attempts.settle(attemptId);
+        const whileRelayed = [...changes];
+        yield* Deferred.succeed(release, undefined);
+        yield* Fiber.join(execution);
+        return whileRelayed;
+      }).pipe(Effect.provide(logger));
+      yield* process.stop;
+
+      assert.deepStrictEqual(whileRelayed, [{ change: "created", attemptId, hubs: 1 }]);
+      assert.deepStrictEqual(changes, [
+        { change: "created", attemptId, hubs: 1 },
+        { change: "dropped", attemptId, hubs: 0 },
+      ]);
+    }).pipe(Effect.scoped),
+  );
+
+  it.live("relays a second execute call once the first detaches, with the same report", () =>
+    Effect.gen(function* () {
+      const database = yield* temporaryDatabase;
+      const request = coordinated("coordinator/second-execute");
+      const first = recordingSink();
+      const second = recordingSink();
+      const logged: Array<string> = [];
+      const logger = Logger.layer([
+        Logger.make(({ message }) =>
+          Option.match(tagged(message), {
+            onNone: () => undefined,
+            onSome: ([text]) => {
+              logged.push(text);
+            },
+          }),
+        ),
+      ]);
+      const process = yield* orchestrator(sqliteJournal(database).pipe(coordinator));
+      const { firstReport, secondReport, waiting } = yield* Effect.gen(function* () {
+        const firstCall = yield* process.execute(request, first.sink);
+        const child = yield* process.nextChild;
+        const secondCall = yield* process.execute(request, second.sink);
+        const waiting = yield* Fiber.join(secondCall).pipe(Effect.timeoutOption("200 millis"));
+        yield* child.reply("Done.");
+        return {
+          firstReport: yield* Fiber.join(firstCall),
+          secondReport: yield* Fiber.join(secondCall),
+          waiting,
+        };
+      }).pipe(Effect.provide(logger));
+      yield* process.stop;
+
+      assert.isTrue(Option.isNone(waiting));
+      assert.strictEqual(firstReport.message, "Done.");
+      assert.deepStrictEqual(secondReport, firstReport);
+      assert.strictEqual(trace(first.outbound()).at(-1), "Final");
+      assert.deepStrictEqual(second.outbound(), []);
+      // The hub stays while the second call waits, and the second call relays it before the drop.
+      assert.deepStrictEqual(
+        logged.filter((text) =>
+          [
+            "Created the Attempt's in-process state",
+            "Relaying the Attempt's channel",
+            "Dropped the Attempt's in-process state",
+          ].includes(text),
+        ),
+        [
+          "Created the Attempt's in-process state",
+          "Relaying the Attempt's channel",
+          "Relaying the Attempt's channel",
+          "Dropped the Attempt's in-process state",
+        ],
+      );
     }).pipe(Effect.scoped),
   );
 
@@ -1247,6 +1385,61 @@ describe("event-driven coordinator restarts on SQLite", () => {
       }).pipe(Effect.scoped),
   );
 
+  /** The record of `attemptId` that each case rewrites in an older shape. */
+  const outdatedRecords = {
+    "delegation outcome": (sql: SqlClient.SqlClient, attemptId: AttemptId) =>
+      sql`UPDATE usine_attempt_delegations SET outcome = ${'{"_tag":"ChildReported","child":1}'} WHERE attempt_id = ${attemptId}`,
+    decision: (sql: SqlClient.SqlClient, attemptId: AttemptId) =>
+      sql`UPDATE usine_attempt_events SET decision = ${'{"decision":{"_tag":"Finish"},"handler":"rule"}'} WHERE attempt_id = ${attemptId} AND event IS NULL`,
+  } as const;
+
+  for (const record of ["delegation outcome", "decision"] as const)
+    it.live(`fails as infrastructure when a stored ${record} no longer decodes`, () =>
+      Effect.gen(function* () {
+        const database = yield* temporaryDatabase;
+        const request = coordinated(`restart/older-${record.replace(" ", "-")}`);
+        const attemptId = request.spec.attemptId;
+        // The child's outcome and the decision on it are stored; their transition isn't.
+        const first = yield* orchestrator(
+          sqliteJournal(database).pipe(interruptingTransition("ChildReported"), coordinator),
+        );
+        const stopped = yield* first.execute(request, recordingSink().sink);
+        yield* (yield* first.nextChild).reply("Opened #12.");
+        yield* Fiber.await(stopped);
+        yield* first.stop;
+        // As an upgrade that changed the record's shape leaves it.
+        const rewritten = yield* Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient;
+          yield* outdatedRecords[record](sql, attemptId);
+          return yield* sql<{
+            readonly count: number;
+          }>`SELECT changes() AS count`;
+        }).pipe(Effect.provide(SqliteClient.layer({ filename: database })), Effect.orDie);
+
+        const logged: Array<unknown> = [];
+        const logger = Logger.layer([Logger.make(({ message }) => logged.push(message))]);
+        const second = yield* orchestrator(sqliteJournal(database).pipe(coordinator));
+        const failure = yield* second.attempts
+          .execute(request, recordingSink().sink)
+          .pipe(Effect.provide(logger), Effect.flip);
+        yield* second.stop;
+
+        assert.deepStrictEqual(rewritten, [{ count: 1 }]);
+        assert.strictEqual(failure._tag, "InfraFailure");
+        assert.include(failure.message, `The stored ${record} of Attempt ${attemptId}`);
+        const unreadable = Schema.decodeUnknownOption(
+          Schema.Tuple([
+            Schema.String,
+            Schema.Struct({
+              attemptId: Schema.Literal(attemptId),
+              record: Schema.Literal(record),
+            }),
+          ]),
+        );
+        assert.isTrue(logged.some((message) => Option.isSome(unreadable(message))));
+      }).pipe(Effect.scoped),
+    );
+
   it.live(
     "fails as infrastructure when an interrupted child's replacement is over the budget",
     () =>
@@ -1602,19 +1795,28 @@ describe("event-driven coordinator restarts on SQLite", () => {
       yield* first.nextChild;
       yield* first.stop;
 
+      const { changes, logger } = hubChanges();
       const second = yield* orchestrator(sqliteJournal(database).pipe(coordinator));
-      // The notice opens the Attempt's hub in the new process before the run fiber reattaches.
-      yield* second.attempts.notify(attemptId, unresponsive("before the reattach"));
-      const liveBeforeCancel = yield* second.attempts.isLive(attemptId);
-      const canceled = yield* second.attempts
-        .cancel(attemptId)
-        .pipe(Effect.timeoutOption("3 seconds"));
+      const { liveBeforeCancel, canceled } = yield* Effect.gen(function* () {
+        // The notice opens the Attempt's hub in the new process before the run fiber reattaches.
+        yield* second.attempts.notify(attemptId, unresponsive("before the reattach"));
+        const liveBeforeCancel = yield* second.attempts.isLive(attemptId);
+        const canceled = yield* second.attempts
+          .cancel(attemptId)
+          .pipe(Effect.timeoutOption("3 seconds"));
+        return { liveBeforeCancel, canceled };
+      }).pipe(Effect.provide(logger));
       const liveAfterCancel = yield* second.attempts.isLive(attemptId);
       yield* second.stop;
 
       assert.isTrue(liveBeforeCancel);
       assert.isTrue(Option.isSome(canceled));
       assert.isFalse(liveAfterCancel);
+      // The cancel drops the hub that no execute call relays.
+      assert.deepStrictEqual(changes, [
+        { change: "created", attemptId, hubs: 1 },
+        { change: "dropped", attemptId, hubs: 0 },
+      ]);
     }).pipe(Effect.scoped),
   );
 

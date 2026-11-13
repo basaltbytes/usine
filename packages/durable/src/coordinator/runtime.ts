@@ -99,7 +99,7 @@ interface CoordinatorHub {
   readonly interventions: Interventions;
   /** The `execute` call relaying the Attempt. */
   readonly attachment: Attachment;
-  /** Owns the hub's fibers until the settled Attempt leaves the runtime. */
+  /** Owns the hub's fibers until the finished Attempt leaves the runtime. */
   readonly scope: Scope.Closeable;
 }
 
@@ -218,6 +218,17 @@ const outcomeOf = (snapshot: CoordinatorSnapshot) =>
     Settled: ({ outcome }) => outcome,
   });
 
+/**
+ * Whether the Attempt of `snapshot` has an outcome and no envelope waits for its sink, so that no
+ * `execute` call relays it again.
+ */
+const finished = ({ status, outbox }: CoordinatorSnapshot) =>
+  Match.valueTags(status, {
+    Open: () => false,
+    Terminal: () => outbox.length === 0,
+    Settled: () => true,
+  });
+
 const make = Effect.gen(function* () {
   const journal = yield* AttemptJournal;
   const backend = yield* ChildBackend;
@@ -250,6 +261,21 @@ const make = Effect.gen(function* () {
       scope: hubScope,
     };
     hubs.set(attemptId, hub);
+    // Closing the scope is the only way the hub leaves the runtime, at `retire` or a process stop.
+    yield* Scope.addFinalizer(
+      hubScope,
+      Effect.suspend(() => {
+        hubs.delete(attemptId);
+        return Effect.logInfo("Dropped the Attempt's in-process state", {
+          attemptId,
+          hubs: hubs.size,
+        });
+      }),
+    );
+    yield* Effect.logInfo("Created the Attempt's in-process state", {
+      attemptId,
+      hubs: hubs.size,
+    });
     return hub;
   });
 
@@ -263,60 +289,58 @@ const make = Effect.gen(function* () {
     );
 
   /**
-   * Returns the hub of `attemptId`, or `None` for a settled Attempt without one, so that a late
+   * Returns the hub of `attemptId`, or `None` for a finished Attempt without one, so that a late
    * caller doesn't bring back the state that `retire` dropped.
    */
-  const unsettledHubFor = (attemptId: AttemptId) =>
+  const unfinishedHubFor = (attemptId: AttemptId) =>
     creation.withPermits(1)(
       Effect.gen(function* () {
         const existing = hubs.get(attemptId);
         if (existing !== undefined) return Option.some(existing);
-        const settled = yield* isSettled(attemptId).pipe(
+        const finished = yield* isFinished(attemptId).pipe(
           Effect.catchTag("JournalError", (error) =>
-            Effect.logWarning("Could not read whether the Attempt is settled; keeping its state", {
+            Effect.logWarning("Could not read whether the Attempt is finished; keeping its state", {
               attemptId,
               message: error.message,
             }).pipe(Effect.as(false)),
           ),
         );
-        if (settled) return Option.none<CoordinatorHub>();
+        if (finished) return Option.none<CoordinatorHub>();
         const hub = yield* created(attemptId);
         return Option.some(hub);
       }),
     );
 
-  const isSettled = (attemptId: AttemptId) =>
-    journal
-      .load(attemptId)
-      .pipe(Effect.map(Option.exists(({ status }) => status._tag === "Settled")));
+  /** Whether the journal of `attemptId` has an outcome that its sink received or that is settled. */
+  const isFinished = (attemptId: AttemptId) =>
+    journal.load(attemptId).pipe(Effect.map(Option.exists(finished)));
 
   /**
-   * Drops the in-process state of `attemptId` once `settled` holds and no `execute` call relays
-   * it. A later `execute` call creates it again.
+   * Drops the in-process state of `attemptId` once `done` holds and no `execute` call relays it or
+   * waits to. A later `execute` call creates it again.
    */
   const retire = Effect.fn("CoordinatorRuntime.retire")(
-    function* (attemptId: AttemptId, settled: Effect.Effect<boolean, JournalError>) {
+    function* (attemptId: AttemptId, done: Effect.Effect<boolean, JournalError>) {
       yield* creation.withPermits(1)(
         Effect.gen(function* () {
           const hub = hubs.get(attemptId);
           if (hub === undefined) return;
-          if (!(yield* hub.attachment.isDetached))
-            return yield* Effect.logDebug(
-              "An execute call relays the Attempt; it keeps its in-process state",
+          if (!(yield* hub.attachment.isIdle))
+            return yield* Effect.logInfo(
+              "An execute call relays the Attempt or waits to; it keeps its in-process state",
               { attemptId },
             );
-          if (!(yield* settled)) return;
-          hubs.delete(attemptId);
+          if (!(yield* done))
+            return yield* Effect.logInfo(
+              "The Attempt isn't finished; it keeps its in-process state for the next execute call",
+              { attemptId },
+            );
           yield* Scope.close(hub.scope, Exit.void);
-          yield* Effect.logInfo("Dropped the settled Attempt's in-process state", {
-            attemptId,
-            hubs: hubs.size,
-          });
         }),
       );
     },
     Effect.catchTag("JournalError", (error) =>
-      Effect.logWarning("Could not read whether the Attempt is settled; keeping its state", {
+      Effect.logWarning("Could not read whether the Attempt is finished; keeping its state", {
         attemptId: error.attemptId,
         message: error.message,
       }),
@@ -723,7 +747,7 @@ const make = Effect.gen(function* () {
         ),
         // A stop leaves the state for the call that resumes the Attempt.
         Effect.onExit((exit) =>
-          Exit.hasInterrupts(exit) ? Effect.void : retire(attemptId, isSettled(attemptId)),
+          Exit.hasInterrupts(exit) ? Effect.void : retire(attemptId, isFinished(attemptId)),
         ),
       );
     },
@@ -741,14 +765,7 @@ const make = Effect.gen(function* () {
     function* (attemptId: AttemptId) {
       yield* Effect.annotateCurrentSpan({ attemptId });
       const snapshot = yield* journal.load(attemptId);
-      const live = Option.exists(snapshot, ({ status, outbox }) =>
-        Match.valueTags(status, {
-          Open: () => true,
-          // The terminal envelope still waits for the sink.
-          Terminal: () => outbox.length > 0,
-          Settled: () => false,
-        }),
-      );
+      const live = Option.exists(snapshot, (found) => !finished(found));
       yield* Effect.logDebug("Checked whether the coordinated Attempt is live", {
         attemptId,
         status: Option.match(snapshot, {
@@ -842,9 +859,9 @@ const make = Effect.gen(function* () {
 
   const attachedTo = Effect.fn("CoordinatorRuntime.attached")(function* (attemptId: AttemptId) {
     yield* Effect.annotateCurrentSpan({ attemptId });
-    const hub = yield* unsettledHubFor(attemptId);
+    const hub = yield* unfinishedHubFor(attemptId);
     if (Option.isNone(hub))
-      return yield* Effect.logInfo("The Attempt is settled; no execute call relays it again", {
+      return yield* Effect.logInfo("The Attempt is finished; no execute call relays it again", {
         attemptId,
       }).pipe(Effect.andThen(Effect.never));
     yield* hub.value.attachment.request;
@@ -875,7 +892,7 @@ const make = Effect.gen(function* () {
         yield* Effect.logInfo("Canceling the coordinated Attempt; its children stop");
         yield* hub.attachment.detached(call.value);
       } else yield* Effect.logInfo("No execute call relays the Attempt; nothing to stop");
-      yield* retire(attemptId, Effect.succeed(status !== "Terminal"));
+      yield* retire(attemptId, isFinished(attemptId));
     },
     (effect, attemptId) =>
       effect.pipe(
@@ -897,9 +914,9 @@ const make = Effect.gen(function* () {
   const notify = Effect.fn("CoordinatorRuntime.notify")(
     function* (attemptId: AttemptId, notice: AttemptChannel.WorkerNotice) {
       yield* Effect.annotateCurrentSpan({ attemptId, notice: notice._tag });
-      const hub = yield* unsettledHubFor(attemptId);
+      const hub = yield* unfinishedHubFor(attemptId);
       if (Option.isNone(hub))
-        return yield* Effect.logInfo("Dropped a Worker notice for a settled Attempt", {
+        return yield* Effect.logInfo("Dropped a Worker notice for a finished Attempt", {
           notice: notice._tag,
           worker: notice.worker,
         });

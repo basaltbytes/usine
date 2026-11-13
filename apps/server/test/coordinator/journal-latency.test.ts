@@ -39,9 +39,13 @@ const CHILDREN = 30;
 const OUTPUT = "x".repeat(50_000);
 const SAVED_SESSION = { harnessSession: { id: "native-session", cwd: "/workspace/usine" } };
 const ROUNDS = 200;
-// The median of one child event's writes, in milliseconds: about 0.7 ms locally with targeted
-// statements, and about 6 ms when each write loads the journal.
-const BUDGET_MILLIS = 5;
+// The median of each of one child event's writes, in milliseconds: about 0.25 ms locally with
+// targeted statements, and about 2.3 ms for a write that loads the journal.
+const BUDGET_MILLIS = 1;
+
+/** The writes of one child event, in the order the coordinator makes them. */
+const WRITES = ["reserve", "output save", "acknowledge"] as const;
+type Write = (typeof WRITES)[number];
 
 const attemptId = AttemptId.make("latency/coordinator-journal");
 const request = StoredRequest.make({
@@ -123,56 +127,77 @@ const seeded = Effect.gen(function* () {
   }
 });
 
-/** Writes one child event as the coordinator does: reserve its envelope, save the output, and acknowledge. */
+/** Times `write`, in milliseconds. */
+const timed = <A, E, R>(write: Effect.Effect<A, E, R>) =>
+  Effect.gen(function* () {
+    const started = yield* Clock.currentTimeNanos;
+    yield* write;
+    const ended = yield* Clock.currentTimeNanos;
+    return Number(ended - started) / 1_000_000;
+  });
+
+/**
+ * Writes one child event as the coordinator does: reserve its envelope, save the output, and
+ * acknowledge. Returns the duration of each write.
+ */
 const childEvent = (sequence: AttemptChannel.Sequence) =>
   Effect.gen(function* () {
     const journal = yield* AttemptJournal;
-    yield* journal.reserve(attemptId, [
-      AttemptChannel.OutboundEnvelope.make({
-        version: AttemptChannel.PROTOCOL_VERSION,
-        attemptId,
-        sequence,
-        sentAt: yield* DateTime.now,
-        payload: AttemptChannel.SessionEvent.make({
-          event: TextOutput.make({ session: childSession, text: "Working" }),
-        }),
-      }),
-    ]);
-    yield* journal.saveProgress(
+    const envelope = AttemptChannel.OutboundEnvelope.make({
+      version: AttemptChannel.PROTOCOL_VERSION,
       attemptId,
-      ChildSessionCount.make(CHILDREN),
-      OutputSaved.make({ output: `${OUTPUT.slice(sequence)}Working\n` }),
+      sequence,
+      sentAt: yield* DateTime.now,
+      payload: AttemptChannel.SessionEvent.make({
+        event: TextOutput.make({ session: childSession, text: "Working" }),
+      }),
+    });
+    const reserve = yield* timed(journal.reserve(attemptId, [envelope]));
+    const output = yield* timed(
+      journal.saveProgress(
+        attemptId,
+        ChildSessionCount.make(CHILDREN),
+        OutputSaved.make({ output: `${OUTPUT.slice(sequence)}Working\n` }),
+      ),
     );
-    yield* journal.acknowledge(attemptId, sequence);
+    const acknowledge = yield* timed(journal.acknowledge(attemptId, sequence));
+    return { reserve, "output save": output, acknowledge } satisfies Record<Write, number>;
   });
 
+const median = (durations: ReadonlyArray<number>) => {
+  const sorted = [...durations].sort((left, right) => left - right);
+  return {
+    median: sorted[Math.floor(sorted.length / 2)] ?? Number.POSITIVE_INFINITY,
+    slowest: sorted.at(-1) ?? Number.POSITIVE_INFINITY,
+  };
+};
+
 it.live(
-  `writes a coordinator's child event to SQLite in a median below ${BUDGET_MILLIS} ms`,
+  `keeps each SQLite write of a coordinator's child event in a median below ${BUDGET_MILLIS} ms`,
   () =>
     Effect.gen(function* () {
       const directory = yield* instanceDirectory;
-      const durations = yield* Effect.gen(function* () {
+      const events = yield* Effect.gen(function* () {
         yield* seeded;
-        const durations: Array<number> = [];
+        const events: Array<Record<Write, number>> = [];
         for (let round = 1; round <= ROUNDS; round += 1) {
-          const started = yield* Clock.currentTimeNanos;
-          yield* childEvent(AttemptChannel.Sequence.make(round));
-          const ended = yield* Clock.currentTimeNanos;
-          durations.push(Number(ended - started) / 1_000_000);
+          const event = yield* childEvent(AttemptChannel.Sequence.make(round));
+          events.push(event);
         }
-        return durations;
+        return events;
       }).pipe(
         Effect.provide(
           sqliteAttemptJournalLayer.pipe(Layer.provide(localSqliteLayer(directory)), Layer.orDie),
         ),
       );
-      const sorted = [...durations].sort((left, right) => left - right);
-      const median = sorted[Math.floor(sorted.length / 2)] ?? Number.POSITIVE_INFINITY;
-      assert.isBelow(
-        median,
-        BUDGET_MILLIS,
-        `median of ${ROUNDS} child events, in milliseconds; slowest ${sorted.at(-1)?.toFixed(1)}`,
-      );
+      for (const write of WRITES) {
+        const measured = median(events.map((event) => event[write]));
+        assert.isBelow(
+          measured.median,
+          BUDGET_MILLIS,
+          `median ${write} of ${ROUNDS} child events, in milliseconds; slowest ${measured.slowest.toFixed(1)}`,
+        );
+      }
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   120_000,
 );

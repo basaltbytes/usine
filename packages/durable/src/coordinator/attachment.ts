@@ -69,8 +69,8 @@ export interface Attachment {
   readonly request: Effect.Effect<AttemptRequest>;
   /** Completes once call `call` detached. */
   readonly detached: (call: CallNumber) => Effect.Effect<void>;
-  /** Whether no call relays the Attempt. */
-  readonly isDetached: Effect.Effect<boolean>;
+  /** Whether no call relays the Attempt or waits in `hold` to. */
+  readonly isIdle: Effect.Effect<boolean>;
   /** The attachment as the Attempt's delegations see it. */
   readonly delegation: DelegationAttachment;
 }
@@ -79,6 +79,8 @@ export interface Attachment {
 export const attachmentFor = Effect.fn("Attachment.make")(function* (attemptId: AttemptId) {
   const state = yield* SubscriptionRef.make<State>(detached);
   let calls = 0;
+  /** The calls that wait in `hold` for the Attempt. */
+  let waiting = 0;
 
   /** Waits until the state satisfies `matches`, and returns it. */
   const awaitState = <S extends State>(matches: (current: State) => current is S) =>
@@ -100,6 +102,7 @@ export const attachmentFor = Effect.fn("Attachment.make")(function* (attemptId: 
   const hold = Effect.uninterruptibleMask((restore) =>
     Effect.gen(function* () {
       const call = ++calls;
+      waiting += 1;
       while (true) {
         const held = yield* SubscriptionRef.modify(state, (current): [boolean, State] =>
           current._tag === "Detached"
@@ -107,6 +110,7 @@ export const attachmentFor = Effect.fn("Attachment.make")(function* (attemptId: 
             : [false, current],
         );
         if (held) {
+          waiting -= 1;
           yield* Effect.addFinalizer(() => detach(call));
           return call;
         }
@@ -114,7 +118,13 @@ export const attachmentFor = Effect.fn("Attachment.make")(function* (attemptId: 
           "Another execute call is relaying this Attempt; waiting for it to detach",
           { attemptId },
         );
-        yield* restore(awaitState(isDetached));
+        yield* restore(awaitState(isDetached)).pipe(
+          Effect.onInterrupt(() =>
+            Effect.sync(() => {
+              waiting -= 1;
+            }),
+          ),
+        );
       }
     }),
   );
@@ -157,7 +167,9 @@ export const attachmentFor = Effect.fn("Attachment.make")(function* (attemptId: 
       awaitState((current): current is State => isDetached(current) || current.call !== call).pipe(
         Effect.asVoid,
       ),
-    isDetached: SubscriptionRef.get(state).pipe(Effect.map(isDetached)),
+    isIdle: SubscriptionRef.get(state).pipe(
+      Effect.map((current) => isDetached(current) && waiting === 0),
+    ),
     delegation: {
       isAttached: SubscriptionRef.get(state).pipe(Effect.map(isAttached)),
       next: nextAttached.pipe(
