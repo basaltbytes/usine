@@ -22,7 +22,7 @@ import { dirname, join, basename } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { Effect, Schema, Deferred, Config, Option, FileSystem, Layer } from "effect";
+import { Effect, Schema, Deferred, Config, Option, FileSystem, Layer, Schedule } from "effect";
 import { assert, it } from "@effect/vitest";
 
 // Scaffold assertions synchronously read package manifest fields.
@@ -378,9 +378,17 @@ it.live(
       const token = (yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
         fileSystem.readFileString(join(f.folder, ".usine/admin-token")),
       )).trim();
+      // `up --detach` returns once the port answers. The startup listener answers 503 with
+      // `retry-after` until the setup routes are installed.
       const response = yield* webRequest(`http://127.0.0.1:${port}/api/setup`, {
         headers: { authorization: `Bearer ${token}` },
-      });
+      }).pipe(
+        Effect.repeat({
+          while: (answer) => answer.status === 503,
+          schedule: Schedule.spaced("250 millis"),
+          times: 120,
+        }),
+      );
       assert.equal(response.status, 200);
       const actual10 = yield* Effect.promise(() => response.json());
       assert.deepEqual(actual10, { _tag: "NoApp" });

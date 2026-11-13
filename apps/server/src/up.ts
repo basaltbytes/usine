@@ -356,6 +356,9 @@ export const up = (command: UpCommand) =>
         // Acquired before any store opens and released after every store closes.
         yield* holdInstance(directory, record);
         const instanceId = yield* instanceIdOf(instanceFiles(directory));
+        // Written before the listener opens: `usine up --detach` returns once the port answers, and
+        // the CLI commands that follow it read this token.
+        const localToken = yield* writeAdminToken(directory);
         const listener = yield* listenForStartup(port, record.version);
         if (process.platform === "darwin") yield* warnIfSystemSleeps();
         const databaseContext = yield* Layer.build(localSqliteLayer(directory));
@@ -404,7 +407,6 @@ export const up = (command: UpCommand) =>
             Context.merge(Context.merge(authStoreContext, githubContext), accessContext),
           ),
         );
-        const localToken = yield* writeAdminToken(directory);
         const authContext = yield* Layer.build(
           authenticationLayer({
             origin: Option.getOrElse(origin, () => UiOrigin.make(`http://127.0.0.1:${port}`)),
