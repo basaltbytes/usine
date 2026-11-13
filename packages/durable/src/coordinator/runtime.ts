@@ -745,10 +745,10 @@ const make = Effect.gen(function* () {
         Effect.tapError((failure) =>
           Effect.logInfo("The Attempt ended without success", { failure: failure._tag }),
         ),
-        // A stop leaves the state for the call that resumes the Attempt.
-        Effect.onExit((exit) =>
-          Exit.hasInterrupts(exit) ? Effect.void : retire(attemptId, isFinished(attemptId)),
-        ),
+        // Every exit retires, an interrupt included: a process stop leaves an unfinished Attempt's
+        // state for the call that resumes it, and a cancel that outlasted its grace has already
+        // settled the journal, so the interrupted call is the last one that can drop the state.
+        Effect.onExit(() => retire(attemptId, isFinished(attemptId))),
       );
     },
     (effect, request) =>

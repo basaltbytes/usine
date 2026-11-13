@@ -780,6 +780,87 @@ describe("event-driven coordinator runtime", () => {
     }).pipe(Effect.scoped),
   );
 
+  it.live("drops a canceled Attempt's state when the cancel outlasts its grace", () =>
+    Effect.gen(function* () {
+      const database = yield* temporaryDatabase;
+      const request = coordinated("coordinator/state-cancel-past-grace");
+      const attemptId = request.spec.attemptId;
+      const recording = recordingSink();
+      // The transcript is slow to take `Interrupted`, so the cancel can't finish within its grace.
+      const slow: AttemptChannel.Sink = {
+        ...recording.sink,
+        append: (direction, envelope) =>
+          envelope._tag === "OutboundEnvelope" && envelope.payload._tag === "Interrupted"
+            ? Effect.sleep("2 seconds").pipe(
+                Effect.andThen(recording.sink.append(direction, envelope)),
+              )
+            : recording.sink.append(direction, envelope),
+      };
+      const { changes, logger } = hubChanges();
+      const process = yield* orchestrator(sqliteJournal(database).pipe(coordinator));
+      const { canceled, live } = yield* Effect.gen(function* () {
+        const execution = yield* process.execute(request, slow);
+        yield* process.nextChild;
+        // As the executor's stop does: cancel within a grace, then interrupt `execute`.
+        const canceled = yield* process.attempts
+          .cancel(attemptId)
+          .pipe(Effect.timeoutOption("200 millis"));
+        yield* Fiber.interrupt(execution);
+        // The executor then finds the Attempt not live and calls neither cancel nor settle.
+        const live = yield* process.attempts.isLive(attemptId);
+        return { canceled, live };
+      }).pipe(Effect.provide(logger));
+      const journal = yield* stored(database, attemptId);
+      yield* process.stop;
+
+      assert.isTrue(Option.isNone(canceled));
+      assert.isFalse(live);
+      assert.deepStrictEqual(
+        Option.map(journal, ({ status }) => status._tag),
+        Option.some("Settled"),
+      );
+      assert.deepStrictEqual(changes, [
+        { change: "created", attemptId, hubs: 1 },
+        { change: "dropped", attemptId, hubs: 0 },
+      ]);
+    }).pipe(Effect.scoped),
+  );
+
+  it.live("drops a Terminal Attempt's state on settle after its sink failed on Final", () =>
+    Effect.gen(function* () {
+      const database = yield* temporaryDatabase;
+      const request = coordinated("coordinator/state-final-failed");
+      const attemptId = request.spec.attemptId;
+      const recording = recordingSink();
+      const { changes, logger } = hubChanges();
+      const process = yield* orchestrator(sqliteJournal(database).pipe(coordinator));
+      const { failure, live, afterCancel } = yield* Effect.gen(function* () {
+        const execution = yield* process.execute(
+          request,
+          failingWhere(recording.sink, ({ _tag }) => _tag === "Final"),
+        );
+        yield* (yield* process.nextChild).reply("Done.");
+        const failure = yield* Fiber.join(execution).pipe(Effect.flip);
+        // As the executor's stop does: the undelivered `Final` keeps the Attempt live, so it
+        // cancels, then settles.
+        const live = yield* process.attempts.isLive(attemptId);
+        yield* process.attempts.cancel(attemptId);
+        const afterCancel = [...changes];
+        yield* process.attempts.settle(attemptId);
+        return { failure, live, afterCancel };
+      }).pipe(Effect.provide(logger));
+      yield* process.stop;
+
+      assert.strictEqual(failure._tag, "InfraFailure");
+      assert.isTrue(live);
+      assert.deepStrictEqual(afterCancel, [{ change: "created", attemptId, hubs: 1 }]);
+      assert.deepStrictEqual(changes, [
+        { change: "created", attemptId, hubs: 1 },
+        { change: "dropped", attemptId, hubs: 0 },
+      ]);
+    }).pipe(Effect.scoped),
+  );
+
   it.live("relays a second execute call once the first detaches, with the same report", () =>
     Effect.gen(function* () {
       const database = yield* temporaryDatabase;

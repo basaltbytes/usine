@@ -402,12 +402,6 @@ export const sqliteAttemptJournalLayer = Layer.effect(
       saveProgress: Effect.fn("AttemptJournal.saveProgress")(function* (attemptId, number, change) {
         yield* Effect.annotateCurrentSpan({ attemptId, delegation: number, change: change._tag });
         yield* Effect.gen(function* () {
-          if (change._tag === "OutputSaved") {
-            // The most frequent change replaces one field in place, without decoding the progress.
-            const updated =
-              yield* sql`UPDATE ${sql(delegations)} SET progress = json_set(progress, '$.output', ${change.output}) WHERE attempt_id = ${attemptId} AND number = ${number} AND progress IS NOT NULL RETURNING number`;
-            if (updated.length > 0) return;
-          }
           const record = yield* delegationRow(attemptId, number).pipe(
             Effect.flatMap((current) => progressed(current, change)),
           );
