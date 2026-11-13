@@ -521,20 +521,29 @@ describe("structured completion wake-up", () => {
     }),
   );
 
-  it.effect("reads an empty optional text as null", () =>
-    Effect.gen(function* () {
-      const { decision } = yield* wake(
-        answering({ decision: { _tag: "Blocked", message: "" }, reason: "No access." }),
-        requestFor("completion/empty-optional"),
-        reported("No access to the repository."),
-      );
+  const emptyOptional: ReadonlyArray<readonly [string, Schema.Json, ModelDecision]> = [
+    ["Complete", { _tag: "Complete", message: "" }, Complete.make({})],
+    ["RetryChild", { _tag: "RetryChild", assignment: "" }, RetryChild.make({})],
+    ["Blocked", { _tag: "Blocked", message: "" }, Blocked.make({})],
+  ];
 
-      assert.deepStrictEqual(
-        Option.map(decision, ({ decision }) => decision),
-        Option.some(Blocked.make({})),
-      );
-    }),
-  );
+  for (const [tag, answer, expected] of emptyOptional) {
+    it.effect(`reads an empty optional text as null: ${tag}`, () =>
+      Effect.gen(function* () {
+        const { decision, recorded } = yield* wake(
+          answering({ decision: answer, reason: "The report says so." }),
+          requestFor("completion/empty-optional"),
+          reported("No access to the repository."),
+        );
+
+        assert.deepStrictEqual(
+          Option.map(decision, ({ decision }) => decision),
+          Option.some(expected),
+        );
+        assert.strictEqual(recorded.length, 1);
+      }),
+    );
+  }
 
   const empty: ReadonlyArray<readonly [Schema.Json, string]> = [
     [{ _tag: "Question", question: "" }, "The answer's Question has an empty question"],
