@@ -62,7 +62,7 @@ Without `supervisor`, the instance starts and **Configuration > Settings** repor
 
 Each turn runs in its own container on the orchestrator host, which usine removes when the turn ends. A container whose orchestrator stops ends itself within seconds, and the next start removes any that remain. A conversation runs one turn at a time.
 
-- **Source.** Each repository that the turn reads is mounted read-only at `<owner>/<repo>` in the session's working directory, at the head of its default branch when the turn starts. The orchestrator keeps a shallow cache of each repository under `.usine/supervisor/` in the instance folder, and exports the head's files there without the git history. A turn keeps reading the head that it started on after a push; the orchestrator removes an earlier head's files once no turn reads them.
+- **Source.** Each repository that the turn reads is mounted read-only at `<owner>/<repo>` in the session's working directory, at the head of its default branch when the turn starts, without the git history. A turn keeps reading the head that it started on after a push. In this release, no interface opens a turn, so the orchestrator doesn't choose or prepare these repositories.
 - **Files.** No other instance file is in the container: not the database, the GitHub App key, or a provider login. Only the conversation's own directory, which keeps the harness's saved session, is writable.
 - **Network.** The container has no network. The harness reaches the model through a relay to the orchestrator, which sends each model request through the instance's gateway with the instance's credential. The session reaches usine only through the operator tools that its harness serves over the session's own connection.
 

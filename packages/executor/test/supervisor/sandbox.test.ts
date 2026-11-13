@@ -239,12 +239,20 @@ describe("the supervisor sandbox's container runtime", () => {
 });
 
 describe("a supervisor sandbox on a container runtime", () => {
-  /** A Podman that runs every command, and lists `left` as the containers that it still runs. */
-  const podman = (calls: Array<ReadonlyArray<string>>, left: ReadonlyArray<string> = []) =>
+  /**
+   * A Podman that runs every command, and lists `left` as the containers that it still runs.
+   * `relay.starts` says whether the sandbox's model relay accepts connections.
+   */
+  const podman = (
+    calls: Array<ReadonlyArray<string>>,
+    left: ReadonlyArray<string> = [],
+    relay: { starts: boolean } = { starts: true },
+  ) =>
     spawning((command, args) => {
       if (command !== "podman") return undefined;
       if (args[0] === "info") return { stdout: "true", exitCode: 0 };
       if (args[0] === "ps") return { stdout: left.map((id) => `${id}\n`).join(""), exitCode: 0 };
+      if (args[0] === "exec") return { stdout: "", exitCode: relay.starts ? 0 : 1 };
       return { stdout: "", exitCode: 0 };
     }, calls);
 
@@ -352,6 +360,74 @@ describe("a supervisor sandbox on a container runtime", () => {
           started.map((args) => args[args.indexOf("--name") + 1]),
         );
       }).pipe(Effect.scoped, Effect.provide(NodeFileSystem.layer)),
+  );
+  it.live("runs one turn at a time for conversations that share a directory", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "usine-supervisor-" });
+      const calls: Array<ReadonlyArray<string>> = [];
+      yield* Effect.gen(function* () {
+        const sandbox = yield* sandboxAt(root);
+        yield* sandbox.open(codexTurn("supervisor:c1"));
+        for (const sharing of ["supervisor/c1", "supervisor_c1"]) {
+          assert.strictEqual(safeSegment(sharing), safeSegment("supervisor:c1"));
+          const refused = yield* sandbox.open(codexTurn(sharing)).pipe(Effect.scoped, Effect.flip);
+          assert.strictEqual(
+            refused.message,
+            "Another turn of this supervisor conversation is running",
+          );
+        }
+        // A conversation with its own directory still opens.
+        yield* sandbox.open(codexTurn("supervisor:c2")).pipe(Effect.scoped);
+      }).pipe(Effect.scoped, Effect.provide(podman(calls)));
+      assert.lengthOf(
+        calls.filter(([, command]) => command === "run"),
+        2,
+      );
+    }).pipe(Effect.scoped, Effect.provide(NodeFileSystem.layer)),
+  );
+
+  it.effect("ends a turn whose model relay doesn't start within 30 seconds", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "usine-supervisor-" });
+      const calls: Array<ReadonlyArray<string>> = [];
+      const relay = { starts: false };
+      yield* Effect.gen(function* () {
+        const sandbox = yield* sandboxAt(root);
+        const turn = yield* sandbox
+          .open(codexTurn("supervisor:c1"))
+          .pipe(Effect.scoped, Effect.flip, Effect.forkChild);
+        // The sandbox starts on the host's clock; its relay's wait runs on the test clock.
+        yield* TestClock.withLive(
+          Effect.sleep("10 millis").pipe(
+            Effect.repeat({
+              until: () => calls.some(([, command]) => command === "exec"),
+            }),
+          ),
+        );
+        yield* TestClock.adjust("30 seconds");
+        const failure = yield* Fiber.join(turn);
+        assert.strictEqual(
+          failure.message,
+          "The supervisor sandbox's model relay didn't start within 30 seconds",
+        );
+        assert.isAbove(
+          calls.filter(([, command]) => command === "exec").length,
+          1,
+          "the probe retries until the timeout",
+        );
+        const started = calls.filter(([, command]) => command === "run");
+        const removed = calls.filter(([, command]) => command === "rm");
+        assert.deepStrictEqual(
+          removed.map(([, , , name]) => name),
+          started.map((args) => args[args.indexOf("--name") + 1]),
+        );
+        // The failed turn released the conversation, so its next turn opens.
+        relay.starts = true;
+        yield* sandbox.open(codexTurn("supervisor:c1")).pipe(Effect.scoped);
+      }).pipe(Effect.provide(podman(calls, [], relay)));
+    }).pipe(Effect.scoped, Effect.provide(NodeFileSystem.layer)),
   );
 });
 

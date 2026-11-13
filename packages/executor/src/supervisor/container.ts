@@ -479,18 +479,19 @@ const makeContainerSandbox = Effect.fn("SupervisorSandbox.make")(function* (
     ),
   );
 
-  /** The conversations whose turn has a sandbox open in this process. */
+  /**
+   * The conversation directories that a turn's sandbox has open in this process. Conversations
+   * whose IDs map to one directory share it, so the hold is on the directory.
+   */
   const running = new Set<string>();
-  /** Holds `conversation` for the scope, or fails if another turn of it holds it. */
-  const holdConversation = (conversation: string) =>
+  /** Holds `directory` for the scope, or fails if another turn holds it. */
+  const holdConversation = (conversation: string, directory: string) =>
     Effect.acquireRelease(
       Effect.suspend(() => {
-        if (running.has(conversation))
+        if (running.has(directory))
           return Effect.logWarning(
             "Refused a supervisor turn: another turn of the conversation is running",
-            {
-              conversation,
-            },
+            { conversation, directory },
           ).pipe(
             Effect.andThen(
               Effect.fail(
@@ -500,10 +501,10 @@ const makeContainerSandbox = Effect.fn("SupervisorSandbox.make")(function* (
               ),
             ),
           );
-        running.add(conversation);
+        running.add(directory);
         return Effect.void;
       }),
-      () => Effect.sync(() => running.delete(conversation)),
+      () => Effect.sync(() => running.delete(directory)),
     );
 
   return Effect.fn("SupervisorSandbox.open")(function* (request: SandboxRequest) {
@@ -512,9 +513,9 @@ const makeContainerSandbox = Effect.fn("SupervisorSandbox.make")(function* (
       harness: request.harness,
       sources: request.sources.length,
     });
-    // No sandbox of the conversation writes to its directory while this turn prepares it.
-    yield* holdConversation(request.conversation);
     const root = `${options.root}/conversations/${safeSegment(request.conversation)}`;
+    // No sandbox of the conversation writes to its directory while this turn prepares it.
+    yield* holdConversation(request.conversation, root);
     const paths: ConversationPaths = { root, home: `${root}/home`, workspace: `${root}/workspace` };
     // The mount points of the sources exist before the read-only workspace is mounted.
     yield* fs

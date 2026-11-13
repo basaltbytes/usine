@@ -107,6 +107,9 @@ it.effect(
             {
               authorization: "Bearer local-login-must-not-escape",
               "x-api-key": "local-api-key-must-not-escape",
+              "proxy-authorization": "Basic local-proxy-login-must-not-escape",
+              // The gateway reads its own token header before Authorization.
+              "x-usine-gateway-token": "ugw1.local-token-must-not-escape",
               "chatgpt-account-id": "local-account",
             },
           );

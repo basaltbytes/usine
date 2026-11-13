@@ -26,17 +26,13 @@ import { GitHubItemHistory } from "@usine/github/item-history";
 import { GitHubItemWriter } from "@usine/github/item-writer";
 import { GitHubLabelWriter } from "@usine/github/label-writer";
 import { GitHubPolling } from "@usine/github/polling";
-import { Context, Effect, Layer, Option } from "effect";
-import { SupervisorSandbox } from "@usine/agents/supervisor";
-import { WorkerName } from "@usine/core/worker";
-import { ATTEMPT_IMAGE } from "@usine/executor/ssh";
-import { containerSandboxLayer } from "@usine/executor/supervisor";
+import { Effect, Layer } from "effect";
 import type { SqlClient } from "effect/sql";
 import { gitHubCredentialLayer } from "./credentials.ts";
 import { parentAdmissionLayer } from "./current-instance/parents.ts";
 import { CurrentInstance } from "./current-instance/current-instance.ts";
 import { externalHttpClientLayer } from "./http-client.ts";
-import { reportSupervisorAvailability } from "./supervisor-sandbox.ts";
+import { supervisorSandboxLayer } from "./supervisor-sandbox.ts";
 import { idleTriggersLayer } from "./idle-triggers.ts";
 import { LabelReconciler } from "./label-reconciler.ts";
 import { OperatorConfiguration } from "./operator/configuration/view.ts";
@@ -46,7 +42,7 @@ import { PollingTriggers } from "./polling-triggers.ts";
 import { ScheduleTriggers } from "./schedule-triggers.ts";
 import { triggerConditionLayer } from "./trigger-condition.ts";
 import { workerEngineLayer } from "./worker-engine.ts";
-import { instanceModelRoute, parentModels } from "./parent-models.ts";
+import { parentModels } from "./parent-models.ts";
 import { WorkerStatus } from "./worker-status.ts";
 
 /**
@@ -180,25 +176,9 @@ export const runtimeLayer = (
     Layer.provide(ci),
   );
   // Supervisor sessions run in a container on this host; the view reports why they can't.
-  const supervisorSandbox = Layer.unwrap(
-    Effect.gen(function* () {
-      const startup = yield* (yield* CurrentInstance).get;
-      const route = yield* instanceModelRoute(startup, WorkerName.make(`supervisor-${instanceId}`));
-      return containerSandboxLayer({
-        root: `${instanceDirectory}/.usine/supervisor`,
-        image: ATTEMPT_IMAGE,
-        runtime: Option.none(),
-        route,
-      }).pipe(
-        Layer.tap((context) =>
-          reportSupervisorAvailability(
-            Option.isSome(startup.config.settings.supervisor),
-            Context.get(context, SupervisorSandbox),
-          ),
-        ),
-      );
-    }),
-  ).pipe(Layer.provide(NodeServices.layer));
+  const supervisorSandbox = supervisorSandboxLayer(instanceDirectory, instanceId).pipe(
+    Layer.provide(NodeServices.layer),
+  );
   const services = Layer.mergeAll(
     Operator.layer,
     OperatorConfiguration.layer,
