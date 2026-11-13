@@ -449,6 +449,7 @@ const schedulerContext = (
     readonly kind?: WorkerKind;
     readonly failing?: ReadonlyArray<string>;
     readonly coordinators?: Array<CoordinatorKind>;
+    readonly prepareFailure?: WorkerCapabilityError;
   } = {},
 ) =>
   Effect.gen(function* () {
@@ -472,7 +473,7 @@ const startScheduler = (...args: Parameters<typeof schedulerContext>) =>
 /**
  * Returns an executor of `kind` whose preflight records `worker xN: model` for each check and fails
  * for the Workers in `failing`. With `coordinators`, its preparation records the coordinator of
- * each request, then fails.
+ * each request, then fails. With `prepareFailure`, its preparation fails with it.
  */
 const recordingExecutor = (
   preflighted: Array<string>,
@@ -480,6 +481,7 @@ const recordingExecutor = (
     readonly kind?: WorkerKind;
     readonly failing?: ReadonlyArray<string>;
     readonly coordinators?: Array<CoordinatorKind>;
+    readonly prepareFailure?: WorkerCapabilityError;
   },
 ) =>
   Layer.succeed(Executor)({
@@ -488,6 +490,7 @@ const recordingExecutor = (
     isLive: unused,
     outcome: unused,
     prepare: (request) => {
+      if (options.prepareFailure !== undefined) return Effect.fail(options.prepareFailure);
       const coordinators = options.coordinators;
       if (coordinators === undefined) return unused();
       return Effect.sync(() => coordinators.push(request.coordinator)).pipe(
@@ -1209,6 +1212,51 @@ describe("Worker scheduler on reload", () => {
         assert.deepStrictEqual(coordinators, ["session", "events"]);
       }).pipe(Effect.scoped),
     ),
+  );
+
+  it.effect(
+    "fails an Attempt on a Worker out of disk space for a retry and holds the Worker until a preflight passes",
+    () =>
+      withWorkers(localWorkers([["local", 1]]), () =>
+        Effect.gen(function* () {
+          const preflighted: Array<string> = [];
+          const message =
+            'SSH worker "local" has 1.0 GiB free on /, below its threshold of 10 GiB.';
+          const context = yield* schedulerContext(preflighted, {
+            prepareFailure: WorkerCapabilityError.make({
+              worker: local,
+              capability: "disk",
+              message,
+              cause: new Error("/=1.0 GiB"),
+            }),
+          });
+          const steps = Context.get(context, StepExecutor);
+          const status = Context.get(context, WorkerStatus);
+          const agent = yield* developer;
+
+          const failure = yield* steps
+            .execute(executionOf(submission(agent, 1), 1), executionSink)
+            .pipe(Effect.flip);
+          assert.strictEqual(failure._tag, "InfraFailure");
+          const unavailable = yield* status.unavailable;
+          assert.deepStrictEqual(unavailable, [{ worker: local, message }]);
+          const prerequisites = (yield* status.preflights).find(
+            ({ worker }) => worker === local,
+          )?.prerequisites;
+          assert(prerequisites !== undefined && Option.isSome(prerequisites));
+          assert(prerequisites.value._tag === "Failed");
+          assert.deepStrictEqual(prerequisites.value.capability, Option.some("disk"));
+          assert.strictEqual(
+            (yield* status.slots).find(({ worker }) => worker === local)?.capacity,
+            0,
+          );
+
+          yield* TestClock.adjust("1 minute");
+          const recovered = yield* status.unavailable;
+          assert.deepStrictEqual(recovered, []);
+          assert.lengthOf(preflighted, 2);
+        }).pipe(Effect.scoped),
+      ),
   );
 
   it.live("a reload that raises max_concurrent_attempts admits a waiting Run at once", () =>

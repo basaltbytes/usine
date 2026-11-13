@@ -182,6 +182,8 @@ interface FakeMachineState {
   readonly attemptPaths: Array<string>;
   /** Whether a clone fails with git's token in its stderr. */
   cloneEchoesToken: boolean;
+  /** The stderr of a clone that fails for another reason, such as a full disk. */
+  cloneError: string | undefined;
   /** The checkout the salvage finds: clean, dirty, or one whose `git status` never answers. */
   salvage: "clean" | "dirty" | "stalls";
   salvageCommitted: boolean;
@@ -249,6 +251,15 @@ interface FakeMachineState {
   cachePreparationFailure: string | undefined;
   cachePreparationDuration: string;
   storeSizeKiB: string;
+  /** The free disk space in GiB that `df` reports for the Worker's root, and for the image storage. */
+  freeDiskGib: number;
+  storageFreeDiskGib: number;
+  /** The images that `docker image ls` lists, as `<ID> <repository> <tag> <created at>` lines. */
+  workerImages: Array<string>;
+  /** The image IDs that the machine's containers use, as `docker container inspect` prints them. */
+  containerImageIds: Array<string>;
+  /** The arguments of each `docker image rm`. */
+  readonly imageRemovals: Array<ReadonlyArray<string>>;
   /** The containers on the machine, by name. */
   readonly containers: Map<string, FakeContainer>;
   /** The number of containers that `docker run` created, which gives each its ID. */
@@ -380,6 +391,7 @@ export const fakeMachine = () => {
     cacheExists: false,
     attemptPaths: [],
     cloneEchoesToken: false,
+    cloneError: undefined,
     salvage: "clean",
     salvageCommitted: false,
     claudeLoggedIn: true,
@@ -418,6 +430,11 @@ export const fakeMachine = () => {
     cachePreparationFailure: undefined,
     cachePreparationDuration: "17\n",
     storeSizeKiB: "4096",
+    freeDiskGib: 100,
+    storageFreeDiskGib: 100,
+    workerImages: [],
+    containerImageIds: [],
+    imageRemovals: [],
     containers: new Map(),
     containersCreated: 0,
     containerRemovalFails: false,
@@ -431,6 +448,39 @@ export const fakeMachine = () => {
   const respondToDocker = (commandLine: string, input: string) => {
     const line = commandLine.replace(/^exec 'podman'/u, "exec 'docker'");
     const words = remoteWords(line);
+    if (line.includes("df -Pk")) {
+      const kib = (gib: number) => Math.round(gib * 1024 ** 2);
+      const runtime = words.at(-1);
+      return oneShotHandle(
+        [
+          "Filesystem     1024-blocks      Used Available Capacity Mounted on",
+          `/dev/sda1         78643200   1048576 ${kib(state.freeDiskGib)}       2% /`,
+          ...(runtime === "docker" || runtime === "podman"
+            ? [
+                `/dev/sdb1         78643200   1048576 ${kib(state.storageFreeDiskGib)}       2% /var/lib/docker`,
+              ]
+            : []),
+          "",
+        ].join("\n"),
+        0,
+      );
+    }
+    if (line.startsWith("exec 'docker' 'image' 'ls' "))
+      return oneShotHandle(state.workerImages.map((image) => `${image}\n`).join(""), 0);
+    if (line.includes("ps --all --quiet"))
+      return oneShotHandle(state.containerImageIds.map((id) => `${id}\n`).join(""), 0);
+    if (line.startsWith("exec 'docker' 'image' 'rm' ")) {
+      const removed = words.slice(3);
+      state.imageRemovals.push(removed);
+      state.workerImages = state.workerImages.filter((image) => {
+        const [id = "", repository = "", tag = ""] = image.split(" ");
+        return (
+          !removed.includes(`${repository}:${tag}`) &&
+          !removed.includes(id.replace(/^sha256:/u, ""))
+        );
+      });
+      return oneShotHandle("", 0);
+    }
     if (line.includes("version -f")) {
       if (state.podmanInfo !== undefined)
         return oneShotHandle(`podman\n${state.podmanInfo}\n`, state.runtimeExitCode);
@@ -776,6 +826,8 @@ export const fakeMachine = () => {
     if (line.startsWith("exec 'find' ") && line.includes("/repos'"))
       return oneShotHandle(`${WORKER_ROOT}/repos/acme_demo.git${NUL}`, 0);
     if (line.startsWith("exec 'test' ")) return oneShotHandle("", state.cacheExists ? 0 : 1);
+    if (line.includes("&& exec 'git' 'clone'") && state.cloneError !== undefined)
+      return oneShotHandle("", 128, state.cloneError);
     if (line.includes("&& exec 'git' 'clone'") && state.cloneEchoesToken) {
       const token = [...state.credentials.values()].at(-1) ?? "";
       return oneShotHandle(

@@ -190,10 +190,14 @@ const releasedFrom = (pool: SlotPool, worker: WorkerName): [SlotRelease, SlotPoo
     : [{ _tag: "Freed" }, next];
 };
 
-// Only errors that a retry can avoid become the `InfraFailure` that the engine retries.
+// Only errors that a retry can avoid become the `InfraFailure` that the engine retries. A Worker
+// out of disk space waits for a preflight that passes, so the retry can run there or elsewhere.
 const asAttemptFailure = (error: ExecutorError): AgentFailure | InfraFailure =>
   Match.valueTags(error, {
-    WorkerCapabilityError: ({ message }) => AgentFailure.make({ message }),
+    WorkerCapabilityError: ({ capability, message }) =>
+      capability === "disk"
+        ? InfraFailure.make({ message, cause: error })
+        : AgentFailure.make({ message }),
     CredentialUnavailableError: ({ reason, message }) =>
       reason === "refused"
         ? AgentFailure.make({ message })
@@ -989,6 +993,19 @@ export const stepExecutorLayer = (
                         reason: error.reason,
                         message: error.message,
                       },
+                    )
+                  : Effect.void,
+              ),
+              Effect.tapError((error) =>
+                error._tag === "WorkerCapabilityError" && error.capability === "disk"
+                  ? instances.get.pipe(
+                      Effect.flatMap(({ agents }) =>
+                        preflight.attemptFailed(
+                          execution.attempt.worker,
+                          EffectArray.dedupe(agents.map(({ agent }) => agent.brain)),
+                          error,
+                        ),
+                      ),
                     )
                   : Effect.void,
               ),

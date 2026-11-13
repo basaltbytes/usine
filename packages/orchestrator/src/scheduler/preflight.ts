@@ -139,6 +139,27 @@ export const preflightFor = Effect.fn("WorkerScheduler.preflightFor")(function* 
   });
 
   /**
+   * Records a check that failed while an Attempt prepared on the Worker, such as too little free
+   * disk space, and disables scheduling on the Worker until a preflight passes, as a failed
+   * preflight does.
+   */
+  const attemptFailed = Effect.fn("WorkerScheduler.recordAttemptCheckFailure")(function* (
+    worker: WorkerName,
+    roster: ReadonlyArray<BrainSpec>,
+    error: WorkerCapabilityError,
+  ) {
+    yield* Effect.annotateCurrentSpan({ worker, capability: error.capability });
+    yield* record(worker, roster, Exit.fail(error));
+    yield* TxRef.update(blocked, (current) => new Map(current).set(worker, error.message));
+    yield* FiberMap.run(retries, worker, retry(worker), { onlyIfMissing: true });
+    yield* Effect.logWarning(
+      "A worker check failed while an attempt prepared; scheduling disabled until preflight passes",
+      { worker, capability: error.capability, message: error.message },
+    );
+    yield* changed(worker);
+  });
+
+  /**
    * Records a machine that the Worker created: its check if it got one, or else the record from
    * before the machine creation failures that the current record shows.
    */
@@ -430,6 +451,7 @@ export const preflightFor = Effect.fn("WorkerScheduler.preflightFor")(function* 
     refresh,
     check,
     machineFailed,
+    attemptFailed,
     machineCreated,
     accept,
     exclusive,

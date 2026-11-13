@@ -129,6 +129,14 @@ export interface RemoteWorker<M extends RemoteMachine> {
   /** Returns how new Attempts on `machine` run, as the Worker's last preflight found. */
   readonly isolation: (machine: M) => Effect.Effect<AttemptIsolation, ExecutorError>;
   /**
+   * Checks `machine` before a new Attempt's checkout starts, such as its free disk space. A
+   * reattachment skips it. Defaults to no check.
+   */
+  readonly verifyBeforeCheckout?: (
+    machine: M,
+    isolation: AttemptIsolation,
+  ) => Effect.Effect<void, ExecutorError>;
+  /**
    * Whether the Worker kind runs Attempt containers. If true, each existing checkout's container
    * marker decides how a reattachment or recovery runs commands in it.
    */

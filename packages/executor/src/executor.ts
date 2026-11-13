@@ -61,6 +61,7 @@ export const WorkerCapability = Schema.Literals([
   "machine",
   "toolchain",
   "memory",
+  "disk",
   "harness-login",
   "credentials",
   "gateway",
@@ -114,6 +115,8 @@ export class WorkerCapabilityError extends Schema.TaggedError<
    * - `toolchain`: Git or a brain's harness doesn't run.
    * - `memory`: less than 1.5 GiB per concurrent Attempt, no swap for more than one, or memory
    *   not reported.
+   * - `disk`: the machine has less free disk space than its threshold, or a command of the
+   *   executor ran out of disk space.
    * - `harness-login`: a brain's harness isn't logged in.
    * - `credentials`: an exe.dev integration isn't ready, or the Worker kind can't issue a
    *   read-only credential for a `permissions: read` Loop.
