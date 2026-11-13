@@ -49,12 +49,16 @@ const HandoffFromJson = Schema.fromJsonString(
   ),
 );
 
+/** Whether `message` starts with `AWAITING_CI_MARKER`, ignoring leading whitespace. */
+export const handsOffCi = (message: string): boolean =>
+  message.trim().startsWith(AWAITING_CI_MARKER);
+
 /** Decodes a handoff following the marker, or returns `None` for an ordinary final answer. */
 export const ciHandoff = (
   message: string,
 ): Result.Result<Option.Option<CiHandoff>, AgentFailure> => {
+  if (!handsOffCi(message)) return Result.succeed(Option.none());
   const answer = message.trim();
-  if (!answer.startsWith(AWAITING_CI_MARKER)) return Result.succeed(Option.none());
   return Schema.decodeResult(HandoffFromJson)(answer.slice(AWAITING_CI_MARKER.length).trim(), {
     onExcessProperty: "error",
   }).pipe(
