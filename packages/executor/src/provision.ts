@@ -588,6 +588,7 @@ export const provisionWorktree = Effect.fn("Executor.provisionWorktree")(functio
         agent: request.agent,
         parentModel: request.parentModel,
         maxChildren: request.maxChildren,
+        maxBackgroundWaitMinutes: request.maxBackgroundWaitMinutes,
         parentEffort: request.parentEffort,
         coordinator: request.coordinator,
         resume: checkout.resume,

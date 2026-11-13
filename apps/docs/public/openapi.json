@@ -45977,6 +45977,18 @@
               }
             ]
           },
+          "maxBackgroundWaitMinutes": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "parentModel": {
             "anyOf": [
               {
@@ -46082,6 +46094,7 @@
           "maxChildren",
           "maxAttemptMinutes",
           "maxAttemptTokens",
+          "maxBackgroundWaitMinutes",
           "parentModel",
           "parentEffort",
           "coordinator",

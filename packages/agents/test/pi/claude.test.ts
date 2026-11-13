@@ -2201,6 +2201,12 @@ describe("Claude child backend", () => {
     });
     const waiting = (lines: ReadonlyArray<string>) =>
       lines.some((line) => line.includes("Claude child is waiting for background work"));
+    /** A request whose child waits at most two minutes for background work after an answer. */
+    const limited = (host?: ChildHost) =>
+      ChildRequest.make({
+        ...request(undefined, undefined, host),
+        maxBackgroundWaitMinutes: Option.some(2),
+      });
 
     const cancelled = (lines: ReadonlyArray<string>, reason: string) =>
       lines.some(
@@ -2208,6 +2214,66 @@ describe("Claude child backend", () => {
           line.includes("Claude child cancelled the wait limit for its background work") &&
           line.includes(`"reason":"${reason}"`),
       );
+
+    it.effect.each([
+      {
+        protocol: "session-state",
+        messages: [
+          { type: "system", subtype: "session_state_changed", state: "running" },
+          gate,
+          answered("Waiting for the test suite"),
+          { type: "system", subtype: "session_state_changed", state: "idle" },
+        ],
+        notification: [
+          { type: "system", subtype: "background_tasks_changed", tasks: [] },
+          { type: "system", subtype: "session_state_changed", state: "running" },
+          answered("Fixed the failing test"),
+          { type: "system", subtype: "session_state_changed", state: "idle" },
+        ],
+      },
+      {
+        protocol: "legacy",
+        messages: [gate, answered("Waiting for the test suite")],
+        notification: [
+          { type: "system", subtype: "background_tasks_changed", tasks: [] },
+          { type: "assistant", message: { content: [{ type: "text", text: "Suite failed" }] } },
+          answered("Fixed the failing test"),
+        ],
+      },
+    ])(
+      "waits past two minutes for the follow-up turn without a configured limit ($protocol)",
+      ({ messages, notification }) =>
+        Effect.gen(function* () {
+          const { query, output, sdk } = yield* openOutput(messages);
+          const logs = logLines(["Info", "Warn"]);
+          yield* Effect.gen(function* () {
+            const session = yield* (yield* ChildBackend).launch(request());
+            const result = yield* Effect.forkChild(session.result);
+            while (!waiting(logs.lines)) yield* Effect.yieldNow;
+            assert.isTrue(
+              logs.lines.some((line) => waiting([line]) && line.includes('"limit":"none"')),
+              "the waiting log says that the wait has no limit",
+            );
+            yield* TestClock.adjust("30 minutes");
+            assert.isUndefined(result.pollUnsafe(), "the child waits for its background work");
+            assert.isFalse(query.closed, "the Claude process keeps running");
+            assert.isFalse(logs.lines.some((line) => line.includes("outlasted the wait limit")));
+            yield* Queue.offerAll(output, notification);
+            assert.strictEqual((yield* Fiber.join(result)).message, "Fixed the failing test");
+            assert.isFalse(
+              logs.lines.some((line) =>
+                line.includes("Claude child cancelled the wait limit for its background work"),
+              ),
+              "no limit ran, so none is cancelled",
+            );
+          }).pipe(
+            Effect.provide(
+              claudeChild.pipe(Layer.provideMerge(sdk), Layer.provideMerge(logs.layer)),
+            ),
+            Effect.scoped,
+          );
+        }),
+    );
 
     it.effect.each([
       {
@@ -2225,7 +2291,7 @@ describe("Claude child backend", () => {
         const { query, sdk } = yield* openOutput(messages);
         const logs = logLines(["Info", "Warn"]);
         yield* Effect.gen(function* () {
-          const session = yield* (yield* ChildBackend).launch(request());
+          const session = yield* (yield* ChildBackend).launch(limited());
           const result = yield* Effect.forkChild(session.result);
           while (!waiting(logs.lines)) yield* Effect.yieldNow;
           assert.isTrue(
@@ -2297,7 +2363,7 @@ describe("Claude child backend", () => {
           const { output, sdk } = yield* openOutput(messages);
           const logs = infoLines();
           yield* Effect.gen(function* () {
-            const session = yield* (yield* ChildBackend).launch(request());
+            const session = yield* (yield* ChildBackend).launch(limited());
             const result = yield* Effect.forkChild(session.result);
             while (!waiting(logs.lines)) yield* Effect.yieldNow;
             yield* TestClock.adjust("1 minute");
@@ -2327,7 +2393,7 @@ describe("Claude child backend", () => {
         const logs = logLines(["Info", "Warn"]);
         yield* Effect.gen(function* () {
           const running = yield* (yield* ChildBackend).launch(
-            ChildRequest.make({ ...request(), held: true }),
+            ChildRequest.make({ ...limited(), held: true }),
           );
           const events: Array<string> = [];
           yield* Effect.forkScoped(
@@ -2387,7 +2453,7 @@ describe("Claude child backend", () => {
         const logs = infoLines();
         yield* Effect.gen(function* () {
           const running = yield* (yield* ChildBackend).launch(
-            ChildRequest.make({ ...request(), held: true }),
+            ChildRequest.make({ ...limited(), held: true }),
           );
           const result = yield* Effect.forkChild(running.result);
           while (!waiting(logs.lines)) yield* Effect.yieldNow;
@@ -2421,7 +2487,7 @@ describe("Claude child backend", () => {
         ]);
         const logs = logLines(["Info", "Warn"]);
         yield* Effect.gen(function* () {
-          const running = yield* (yield* ChildBackend).launch(request());
+          const running = yield* (yield* ChildBackend).launch(limited());
           const events: Array<string> = [];
           yield* Effect.forkScoped(
             running.events.pipe(
@@ -2465,7 +2531,7 @@ describe("Claude child backend", () => {
         const logs = infoLines();
         yield* Effect.gen(function* () {
           const running = yield* (yield* ChildBackend).launch(
-            ChildRequest.make({ ...request(), held: true }),
+            ChildRequest.make({ ...limited(), held: true }),
           );
           const events: Array<string> = [];
           yield* Effect.forkScoped(
@@ -2510,7 +2576,7 @@ describe("Claude child backend", () => {
         ]);
         const logs = logLines(["Info", "Warn"]);
         yield* Effect.gen(function* () {
-          const running = yield* (yield* ChildBackend).launch(request());
+          const running = yield* (yield* ChildBackend).launch(limited());
           const events: Array<string> = [];
           yield* Effect.forkScoped(
             running.events.pipe(
@@ -2552,7 +2618,7 @@ describe("Claude child backend", () => {
         const logs = logLines(["Info", "Warn"]);
         yield* Effect.gen(function* () {
           const running = yield* (yield* ChildBackend).launch(
-            ChildRequest.make({ ...request(), held: true }),
+            ChildRequest.make({ ...limited(), held: true }),
           );
           const result = yield* Effect.forkChild(running.result);
           while (!waiting(logs.lines)) yield* Effect.yieldNow;
@@ -2610,9 +2676,7 @@ describe("Claude child backend", () => {
         const { outputs, sdk } = yield* resumableSdk;
         const logs = infoLines();
         yield* Effect.gen(function* () {
-          const session = yield* (yield* ChildBackend).launch(
-            request(undefined, undefined, exitingHost(0)),
-          );
+          const session = yield* (yield* ChildBackend).launch(limited(exitingHost(0)));
           const result = yield* Effect.forkChild(session.result);
           yield* Queue.offerAll(outputs[0]!, [gate, answered("Waiting for CI")]);
           while (!waiting(logs.lines)) yield* Effect.yieldNow;
@@ -2637,7 +2701,7 @@ describe("Claude child backend", () => {
         const logs = infoLines();
         yield* Effect.gen(function* () {
           const running = yield* (yield* ChildBackend).launch(
-            ChildRequest.make({ ...request(undefined, undefined, exitingHost(0)), held: true }),
+            ChildRequest.make({ ...limited(exitingHost(0)), held: true }),
           );
           const events: Array<string> = [];
           yield* Effect.forkScoped(

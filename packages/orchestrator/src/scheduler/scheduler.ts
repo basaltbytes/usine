@@ -964,6 +964,7 @@ export const stepExecutorLayer = (
                 maxChildren: settings.maxChildren,
                 maxAttemptMinutes: settings.maxAttemptMinutes,
                 maxAttemptTokens: settings.maxAttemptTokens,
+                maxBackgroundWaitMinutes: settings.maxBackgroundWaitMinutes,
                 parentEffort: resolveParentEffort(execution.agent, settings.parentEffort),
                 coordinator,
                 salvageRef: salvageRefFor(execution.run.id, execution.attempt.number),

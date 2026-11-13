@@ -164,14 +164,6 @@ const LOGIN_RETRY_DELAYS: ReadonlyArray<Duration.Duration> = [
  */
 const LOGIN_WINDOW = Duration.seconds(60);
 
-/**
- * The maximum time an idle Claude child that has answered waits for its background work to start a
- * turn. When the limit passes, the child returns the saved answer. If the operator holds or pauses
- * the child, a Release returns the answer instead, unless a turn starts first. The limit is kept in
- * memory, so a child that was already waiting when the orchestrator restarted has none.
- */
-const BACKGROUND_WAIT_LIMIT = Duration.minutes(2);
-
 /** One Claude Code launch for a child. */
 interface ClaudeLaunch {
   readonly input: AsyncInput;
@@ -659,29 +651,41 @@ const makeClaudeSessions = Effect.gen(function* () {
     let retrying = false;
 
     /**
-     * Waits for background work after `answer`, then returns `answer` once the limit passes. If the
-     * operator holds or pauses the session, a Release returns `answer` instead.
+     * The configured wait for background work after an answer, or `None` for no limit. The limit
+     * is kept in memory, so a child that was already waiting when the orchestrator restarted has
+     * none.
+     */
+    const backgroundWaitLimit = Option.map(spec.maxBackgroundWaitMinutes, Duration.minutes);
+    /**
+     * Waits for background work after `answer`. With a configured limit, returns `answer` once the
+     * limit passes; if the operator holds the session then, a Release returns `answer` instead, and
+     * a paused session stays open until the operator's next message.
      */
     const awaitBackgroundWork = Effect.fn("ClaudeRuntime.awaitBackgroundWork")(function* (
       answer: string,
     ) {
       yield* Effect.annotateCurrentSpan({ sessionId: session.id });
+      const limitText = Option.match(backgroundWaitLimit, {
+        onNone: () => "none",
+        onSome: Duration.format,
+      });
       yield* Effect.logInfo("Claude child is waiting for background work", {
         sessionId: session.id,
         backgroundTaskIds: backgroundTasks,
-        limit: Duration.format(BACKGROUND_WAIT_LIMIT),
+        limit: limitText,
       });
+      if (Option.isNone(backgroundWaitLimit)) return;
       const outlasted = (log: typeof Effect.logInfo, message: string) =>
         Effect.suspend(() =>
           log(message, {
             sessionId: session.id,
             backgroundTaskIds: backgroundTasks,
-            limit: Duration.format(BACKGROUND_WAIT_LIMIT),
+            limit: limitText,
           }),
         );
       yield* FiberHandle.run(
         backgroundWait,
-        Effect.sleep(BACKGROUND_WAIT_LIMIT).pipe(
+        Effect.sleep(backgroundWaitLimit.value).pipe(
           Effect.andThen(
             conversation.finishOverdue(
               answer,

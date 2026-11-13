@@ -187,6 +187,7 @@ export const childSpec = (request: ChildRequest, admitted: AdmittedBrain): Sessi
     machine: request.machine,
     cwd: request.cwd,
     environment: request.environment,
+    maxBackgroundWaitMinutes: request.maxBackgroundWaitMinutes,
   });
 
 /** The conversation state that `request` restores. */

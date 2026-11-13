@@ -557,6 +557,7 @@ describe("Configuration view", () => {
         maxChildren: 4,
         maxAttemptMinutes: null,
         maxAttemptTokens: null,
+        maxBackgroundWaitMinutes: null,
         parentModel: "gpt-5.6-sol",
         parentEffort: null,
         coordinator: "session",

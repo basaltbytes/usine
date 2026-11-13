@@ -54,6 +54,17 @@ const groups = (
             ? "No token ceiling."
             : "Tokens an attempt may use, parent and children combined, before the runaway guard fails it.",
       },
+      {
+        key: "settings.max_background_wait_minutes",
+        value:
+          settings.maxBackgroundWaitMinutes === null
+            ? unset("Not set")
+            : mono(settings.maxBackgroundWaitMinutes),
+        effect:
+          settings.maxBackgroundWaitMinutes === null
+            ? "A child that answers while its background tasks run waits for them without a limit."
+            : "Minutes a child that answered waits for its background tasks to start a turn. Then it returns its answer and its background tasks stop.",
+      },
     ],
   ],
   [
