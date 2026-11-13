@@ -7,6 +7,7 @@ import {
   HarnessSession,
   HarnessSessionId,
   RoleSession,
+  SessionStarted,
   SessionTokensUpdated,
   TokenCount,
 } from "@usine/core/agent/session";
@@ -14,7 +15,7 @@ import * as AttemptChannel from "@usine/core/attempt/channel";
 import { WorkerName } from "@usine/core/worker";
 import { Array as Arr, Effect, Layer, Option, Result, Stream } from "effect";
 import { LocalProcess } from "../../src/child-host/child-host.ts";
-import { CapabilityProfile, Lacking } from "../../src/harness/capability.ts";
+import { type Capability, CapabilityProfile, Lacking } from "../../src/harness/capability.ts";
 import { catalog } from "../../src/harness/catalog.ts";
 import { claude } from "../../src/harness/claude/descriptor.ts";
 import { codex } from "../../src/harness/codex/descriptor.ts";
@@ -121,29 +122,32 @@ const scriptedClaude = (session: {
   };
 };
 
-/** The harness catalog, with every Claude Code profile lacking `resume-session`. */
-const unresumable = HarnessCatalog.make({
-  descriptors: catalog.descriptors.map((descriptor) =>
-    descriptor.id === claude.id
-      ? HarnessDescriptor.make({
-          ...descriptor,
-          capabilities: Arr.map(descriptor.capabilities, (profile) =>
-            CapabilityProfile.make({
-              ...profile,
-              supported: profile.supported.filter((supported) => supported !== "resume-session"),
-              lacking: [
-                ...profile.lacking,
-                Lacking.make({
-                  capability: "resume-session",
-                  reason: "This test's harness reopens no saved session",
-                }),
-              ],
-            }),
-          ),
-        })
-      : descriptor,
-  ),
-});
+/** The harness catalog, with every Claude Code profile lacking `capabilities` for `reason`. */
+const lacking = (capabilities: ReadonlyArray<Capability>, reason: string) =>
+  HarnessCatalog.make({
+    descriptors: catalog.descriptors.map((descriptor) =>
+      descriptor.id === claude.id
+        ? HarnessDescriptor.make({
+            ...descriptor,
+            capabilities: Arr.map(descriptor.capabilities, (profile) =>
+              CapabilityProfile.make({
+                ...profile,
+                supported: profile.supported.filter(
+                  (supported) => !capabilities.includes(supported),
+                ),
+                lacking: [
+                  ...profile.lacking,
+                  ...capabilities.map((capability) => Lacking.make({ capability, reason })),
+                ],
+              }),
+            ),
+          })
+        : descriptor,
+    ),
+  });
+
+const unresumable = lacking(["resume-session"], "This test's harness reopens no saved session");
+const unsteerable = lacking(["steer", "interrupt"], "This test's harness takes no interventions");
 
 const started = (events: ReadonlyArray<AgentSessionEvent>) =>
   events.flatMap((event) => (event._tag === "ToolStarted" ? [event.tool] : []));
@@ -158,7 +162,10 @@ describe("the supervisor role", () => {
       `${provider}: lists only the operator tools, calls one, and resumes the session`,
       () =>
         Effect.gen(function* () {
-          const { replies, entries } = yield* runSupervisorScenario(provider, "replay");
+          const logs = collectLogs(["Info"]);
+          const { replies, entries } = yield* runSupervisorScenario(provider, "replay").pipe(
+            Effect.provide(logs.layer),
+          );
           const [first, second] = replies;
           assert.include(first.message, WAITING_RUN);
           assert.deepStrictEqual(started(first.events), ["overview"]);
@@ -195,6 +202,25 @@ describe("the supervisor role", () => {
             first.usage.value.totalTokens,
             "the second turn's usage includes the first turn's",
           );
+          if (provider === "claude") {
+            // Claude restores the first process's 3591 tokens on resume; the session counts them once.
+            assert.deepStrictEqual(
+              [first.usage.value.totalTokens, second.usage.value.totalTokens],
+              [3591, 5133],
+            );
+            assert.deepInclude(
+              logs.records.map(({ message }) => message),
+              [
+                "Claude restored the resumed session's usage; counting it once",
+                {
+                  sessionId: "replay-parent:child:1",
+                  resultTokens: 5133,
+                  processTokens: 1542,
+                  restoredTokens: 3591,
+                },
+              ],
+            );
+          }
 
           for (const reply of replies) {
             assert(Option.isSome(reply.usage), "each turn reports the session's usage");
@@ -279,6 +305,65 @@ describe("the supervisor role", () => {
       "lacks resume-session (This test's harness reopens no saved session)",
     );
   });
+
+  it("runs only on the gateway credential routes", () => {
+    for (const credential of ["gateway", "gateway-subscription", "gateway-api-key"] as const)
+      assert(Result.isSuccess(admitSupervisor(catalog, claudeBrain, credential)), credential);
+    for (const credential of ["host-login", "api-key"] as const) {
+      const refused = admitSupervisor(catalog, claudeBrain, credential);
+      assert(Result.isFailure(refused), credential);
+      assert.deepInclude(
+        refused.failure.missing,
+        Lacking.make({
+          capability: "credential-route",
+          reason: "The supervisor uses the gateway credential that the instance already has",
+        }),
+        credential,
+      );
+    }
+  });
+
+  it("refuses a harness that takes no steering or interrupts", () => {
+    const refused = admitSupervisor(unsteerable, claudeBrain, "gateway");
+    assert(Result.isFailure(refused));
+    assert.deepStrictEqual(
+      refused.failure.missing.map(({ capability }) => capability),
+      ["steer", "interrupt"],
+    );
+    assert.include(
+      refused.failure.message,
+      "lacks steer (This test's harness takes no interventions)",
+    );
+  });
+
+  it.effect("keeps the previous turn's usage when a turn reports none", () =>
+    Effect.gen(function* () {
+      const saved = HarnessSession.make({ id: HarnessSessionId.make("claude-saved"), cwd: "/tmp" });
+      const scripted = scriptedClaude({
+        events: Stream.make(
+          SessionStarted.make({ session: spent(0).session, harnessSession: Option.some(saved) }),
+        ),
+        result: Effect.succeed(SessionResult.make({ message: WAITING_RUN })),
+        active: false,
+      });
+      const reply = yield* runSupervisorTurn(
+        SupervisorTurn.make({
+          session: conversation,
+          brain: claudeBrain,
+          seat,
+          saved: Option.some(saved),
+          usage: Option.some(spent(1000)),
+          message: supervisorMessages[1],
+        }),
+        operatorTools,
+      ).pipe(Effect.provide(Layer.merge(operatorToolHandlers, scripted.layer)));
+      assert.strictEqual(reply.message, WAITING_RUN);
+      assert.deepStrictEqual(
+        Option.map(reply.usage, ({ totalTokens }) => totalTokens),
+        Option.some(TokenCount.make(1000)),
+      );
+    }),
+  );
 
   it.effect("continues the previous turn's usage when it reopens the saved session", () =>
     Effect.gen(function* () {
