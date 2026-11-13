@@ -63,5 +63,6 @@ In Claude Code, run `/mcp` and open **usine**; in Codex, run `/mcp`. The list co
 - A refused request returns an error result with the HTTP status and the error body. A tool outside the token's list is unknown to the server.
 - The change stream, `GET /api/changes`, has no tool.
 - The client reads the tool list when it connects. After you change the token's scopes or operations, reconnect the server in the client.
+- A session belongs to the token that opened it. It ends after one hour without a request, or when the token's tool list changes; the client then starts a new session.
 
 Revoke the device entry under **Tokens** to end the agent's access.

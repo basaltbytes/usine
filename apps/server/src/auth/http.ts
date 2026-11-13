@@ -13,6 +13,7 @@ import {
   AuthError,
   authFailure,
   ceilingAdmits,
+  CredentialId,
   GitHubUserId,
   Member,
   NO_EXPIRY,
@@ -44,9 +45,17 @@ export const RequestOperations = Context.Reference<Option.Option<ReadonlyArray<O
   "@usine/server/RequestOperations",
   { defaultValue: Option.none },
 );
+/** The credential that authenticated the request; `None` outside the auth guard. */
+export const RequestCredential = Context.Reference<Option.Option<CredentialId>>(
+  "@usine/server/RequestCredential",
+  { defaultValue: Option.none },
+);
+/** Returns the operation IDs that the published API doesn't have. */
+const unknownOperations = (operations: ReadonlyArray<OperationId>) =>
+  operations.filter((operation) => !operationPermissions.has(operation));
 /** Refuses an operation ID that the published API doesn't have. */
 const knownOperations = (operations: ReadonlyArray<OperationId>) => {
-  const unknown = operations.filter((operation) => !operationPermissions.has(operation));
+  const unknown = unknownOperations(operations);
   return unknown.length === 0
     ? Effect.succeed(operations)
     : Effect.logWarning("Token operations refused: unknown operation IDs", {
@@ -63,6 +72,11 @@ const ceilingExempt: ReadonlySet<string> = new Set([
 const RequestAccess = Context.Reference<Option.Option<Access>>("@usine/server/RequestAccess", {
   defaultValue: Option.none,
 });
+/** The CSRF token of the request's credential; `None` outside the auth guard. */
+export const RequestCsrf = Effect.map(
+  RequestAccess,
+  Option.map(({ csrf }) => csrf),
+);
 const accessEffect = Effect.flatMap(RequestAccess, (access) =>
   Effect.fromOption(access, () => authFailure("Sign in to continue.")),
 );
@@ -286,7 +300,12 @@ export const authenticatedRoutes = (services: AuthServices) => {
               scopes,
               ...Option.match(operations, {
                 onNone: () => ({}),
-                onSome: (allowed) => ({ operations: allowed }),
+                onSome: (allowed) => {
+                  const unknown = unknownOperations(allowed);
+                  return unknown.length === 0
+                    ? { operations: allowed }
+                    : { operations: allowed, unknownOperations: unknown };
+                },
               }),
               expiresAt: kind === "device" && expiresAt === NO_EXPIRY ? null : expiresAt,
             }),
@@ -345,6 +364,20 @@ export const authenticatedRoutes = (services: AuthServices) => {
       }),
     ),
   ] satisfies ReadonlyArray<HttpRouter.Route<AuthError>>;
+  // A stored ceiling keeps an operation ID that a later release renamed or removed.
+  const staleCeilingsLogged = new Set<TokenId>();
+  const logStaleCeiling = (access: Access) => {
+    if (Option.isNone(access.token) || Option.isNone(access.operations)) return Effect.void;
+    const tokenId = access.token.value.id;
+    if (staleCeilingsLogged.has(tokenId)) return Effect.void;
+    const unknown = unknownOperations(access.operations.value);
+    if (unknown.length === 0) return Effect.void;
+    staleCeilingsLogged.add(tokenId);
+    return Effect.logWarning("Token operation ceiling names operations that don't exist", {
+      tokenId,
+      unknown: unknown.join(", "),
+    });
+  };
   const guard = HttpRouter.middleware<{ handles: AuthError }>()((handler) =>
     Effect.gen(function* () {
       const { route } = yield* HttpRouter.RouteContext;
@@ -354,6 +387,7 @@ export const authenticatedRoutes = (services: AuthServices) => {
       }
       const request = yield* HttpServerRequest.HttpServerRequest;
       const access = yield* auth.authenticate(secretOf(request));
+      yield* logStaleCeiling(access);
       const operation = guardedGroups
         .flatMap((group) =>
           Object.values(group.endpoints)
@@ -420,6 +454,14 @@ export const authenticatedRoutes = (services: AuthServices) => {
             ),
         ),
         Effect.provideService(RequestAccess, Option.some(access)),
+        Effect.provideService(
+          RequestCredential,
+          Option.some(
+            CredentialId.make(
+              Option.match(access.token, { onNone: () => access.csrf, onSome: ({ id }) => id }),
+            ),
+          ),
+        ),
         Effect.provideService(
           ActingMember,
           access.credential === "local"

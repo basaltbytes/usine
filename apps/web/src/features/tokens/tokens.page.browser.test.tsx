@@ -91,7 +91,7 @@ it("distinguishes tokens with the same name and confirms revocation through the 
   }
 });
 
-it("shows a device token's operation ceiling and expiry", async () => {
+it("shows a device token's operation ceiling, its unknown operations, and expiry", async () => {
   const client = new QueryClient({
     defaultOptions: { queries: { staleTime: Infinity, retry: false } },
   });
@@ -104,7 +104,8 @@ it("shows a device token's operation ceiling and expiry", async () => {
       lastUsedAt: 0,
       kind: "device",
       scopes: administratorPermissions,
-      operations: ["operator.overview", "operator.approve"],
+      operations: ["operator.overview", "operator.approve", "operator.renamed"],
+      unknownOperations: ["operator.renamed"],
       expiresAt,
     },
   ]);
@@ -126,7 +127,10 @@ it("shows a device token's operation ceiling and expiry", async () => {
       ),
     );
     await expect
-      .element(page.getByText("Operations: operator.overview, operator.approve"))
+      .element(page.getByText("Operations: operator.overview, operator.approve, operator.renamed"))
+      .toBeVisible();
+    await expect
+      .element(page.getByText("Unknown operations: operator.renamed.", { exact: false }))
       .toBeVisible();
     await expect
       .element(page.getByText(`Expires ${new Date(expiresAt).toLocaleString()}`, { exact: false }))

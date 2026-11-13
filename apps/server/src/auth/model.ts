@@ -20,6 +20,9 @@ export class Member extends Schema.Class<Member, Brand.Brand<"@usine/server/auth
 }) {}
 export const TokenId = Schema.NonEmptyString.pipe(Schema.brand("TokenId"));
 export type TokenId = typeof TokenId.Type;
+/** Identifies the credential of a request: its token ID, or a hash of an instance credential's secret. */
+export const CredentialId = Schema.NonEmptyString.pipe(Schema.brand("CredentialId"));
+export type CredentialId = typeof CredentialId.Type;
 export const TokenHash = Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/u)).pipe(
   Schema.brand("TokenHash"),
 );
