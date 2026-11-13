@@ -16,6 +16,8 @@ export const Scenario = Schema.Literals([
   "restart",
   "credential-changed",
   "early-exit",
+  "host-tool",
+  "closed-tools",
   "usage-limit",
   "structured-result",
   "ephemeral",

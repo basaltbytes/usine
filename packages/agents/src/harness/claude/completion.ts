@@ -130,13 +130,15 @@ const readClaudeCompletion = Effect.fn("ClaudeRuntime.readCompletion")(function*
 });
 
 /**
- * Returns the SDK options of a structured completion: no built-in tools, no saved transcript, and
- * `schema` as the output format. Claude Code then offers only its `StructuredOutput` tool, checks
- * the tool's input against `schema`, and asks the model again when it doesn't match.
+ * Returns the SDK options of a structured completion: no built-in tools, no MCP servers from the
+ * worker's configuration, no saved transcript, and `schema` as the output format. Claude Code then
+ * offers only its `StructuredOutput` tool, checks the tool's input against `schema`, and asks the
+ * model again when it doesn't match.
  */
 const completionOptions = (spec: SessionSpec, schema: CompletionSchema): ClaudeQueryOptions => ({
   ...brainOptions(spec),
   tools: [],
+  strictMcpConfig: true,
   outputFormat: { type: "json_schema", schema },
   permissionMode: "dontAsk",
   persistSession: false,

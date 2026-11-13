@@ -9,21 +9,31 @@ import { Boxd, Machine } from "@boxd-sh/sdk";
 import { boxdEgress } from "./egress.mjs";
 
 const USAGE =
-  "Usage: build-snapshot.mjs [--size <vcpu>x<GiB>] [--region <id>] [--endpoint <url>] [--no-isolated] <snapshot-name>";
+  "Usage: build-snapshot.mjs [--size <vcpu>x<GiB>] [--region <id>] [--endpoint <url>] [--no-isolated] [--setup-timeout <minutes>] <snapshot-name>";
 /** The pattern of `BoxdSize` in `@usine/core/worker`, so `provisioner.size` can name the size. */
 const SIZE = /^[1-9][0-9]{0,3}x[1-9][0-9]{0,5}$/u;
 const NAME = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/u;
 const REGION = /^[a-z0-9][a-z0-9_-]{0,62}$/u;
 const IMAGE = /^[A-Za-z0-9./:@_-]+$/u;
+const MINUTES = /^[1-9][0-9]{0,3}$/u;
 const READY_TIMEOUT_MS = 180_000;
 const SNAPSHOT_TIMEOUT_MS = 600_000;
 const POLL_MS = 1_000;
 const EGRESS_TIMEOUT_MS = 30_000;
 /**
- * How long after boxd reports an egress edit the edit may still be on its way to the machine. The
- * SDK documents that an edit takes effect within a second, and the boxd provisioner waits as long.
+ * How long the script waits after boxd reports the allowlist lifted before it reads the allowlist
+ * again and starts the setup. The SDK documents that an edit takes effect within a second; the
+ * longer wait gives a late edit time to show in the second read.
  */
-const EGRESS_IN_FORCE_MS = 1_000;
+const EGRESS_IN_FORCE_MS = 5_000;
+const SETUP_TIMEOUT_MINUTES = "20";
+/** How long the setup may run without output before the script stops it. */
+const SETUP_QUIET_MS = 300_000;
+/** The line that the setup prints when `apt-get update` or the Tailscale installer times out. */
+const TIMED_OUT = /^usine: .+ didn't finish within \d+ seconds$/u;
+/** How many of the setup's last output lines the error of a stopped setup quotes. */
+const TAIL_LINES = 20;
+const TAIL_CHARS = 8_192;
 
 /**
  * The most stdin bytes in one `Exec` message. boxd closes the command's stdin without an error at
@@ -36,16 +46,42 @@ export class UsageError extends Error {}
 
 /**
  * Runs in the builder as user `boxd`, with the runtime and the image as `$1` and `$2`, and leaves
- * the state that every restore resumes.
+ * the state that every restore resumes. apt gives up on a connection after 30 seconds without
+ * data, and `apt-get update` and the Tailscale installer, which runs `apt-get update` itself, run
+ * once more if they fail or don't finish in time. Each failed run prints a line that starts with
+ * `usine:` and says why it failed. `apt-get update` exits 0 when an index fails to download, so
+ * the first run uses `--error-on=any`.
  */
 const SETUP = `set -eu
 runtime=$1
 image=$2
+# Runs a command as root and stops it after $1 seconds. $2 names it in the line about a failure.
+run_limited() {
+  seconds=$1
+  what=$2
+  shift 2
+  status=0
+  sudo timeout -k 10 "$seconds" "$@" || status=$?
+  if [ "$status" -eq 124 ] || [ "$status" -eq 137 ]; then
+    echo "usine: $what didn't finish within $seconds seconds" >&2
+  elif [ "$status" -ne 0 ]; then
+    echo "usine: $what exited with code $status" >&2
+  fi
+  return "$status"
+}
+apt_update() {
+  run_limited 120 'apt-get update' apt-get --error-on=any update || {
+    echo 'usine: running apt-get update again' >&2
+    run_limited 120 'apt-get update' apt-get update
+  }
+}
+printf '%s\\n' 'Acquire::http::Timeout "30";' 'Acquire::https::Timeout "30";' |
+  sudo tee /etc/apt/apt.conf.d/80usine-network >/dev/null
 sudo install -d -m 0755 /etc/usine
 printf '%s\\n' "$runtime" | sudo tee /etc/usine/container-runtime >/dev/null
 install -d -m 0700 /home/boxd/.usine /home/boxd/.cache/turbo
 if [ "$runtime" = podman ]; then
-  sudo apt-get update
+  apt_update
   sudo apt-get install -y podman crun uidmap dbus-user-session slirp4netns fuse-overlayfs
   sudo loginctl enable-linger boxd
   sudo systemctl start "user@$(id -u).service"
@@ -55,7 +91,10 @@ fi
 "$runtime" volume create usine-pnpm-store >/dev/null
 "$runtime" volume create usine-turbo-cache >/dev/null
 curl -fsSL https://tailscale.com/install.sh -o /tmp/usine-tailscale.sh
-sudo sh /tmp/usine-tailscale.sh
+run_limited 240 'the Tailscale installer' sh /tmp/usine-tailscale.sh || {
+  echo 'usine: running the Tailscale installer again' >&2
+  run_limited 240 'the Tailscale installer' sh /tmp/usine-tailscale.sh
+}
 rm /tmp/usine-tailscale.sh
 sudo systemctl enable tailscaled
 sudo systemctl stop tailscaled
@@ -65,7 +104,8 @@ sync
 
 /**
  * Parses the command line and the environment. Throws `UsageError` for a missing API key, an
- * unknown option, or an invalid size, region, endpoint, snapshot name, runtime, or image.
+ * unknown option, or an invalid size, region, endpoint, setup timeout, snapshot name, runtime, or
+ * image.
  */
 export const parseOptions = (argv, env) => {
   let parsed;
@@ -78,6 +118,7 @@ export const parseOptions = (argv, env) => {
         region: { type: "string" },
         endpoint: { type: "string" },
         "no-isolated": { type: "boolean", default: false },
+        "setup-timeout": { type: "string", default: SETUP_TIMEOUT_MINUTES },
       },
     });
   } catch (error) {
@@ -96,6 +137,10 @@ export const parseOptions = (argv, env) => {
     throw new UsageError(`Invalid region ${JSON.stringify(values.region)}`);
   if (values.endpoint !== undefined && values.endpoint.trim() === "")
     throw new UsageError("Invalid endpoint: pass the cluster's API endpoint URL");
+  if (!MINUTES.test(values["setup-timeout"]))
+    throw new UsageError(
+      `Invalid setup timeout ${JSON.stringify(values["setup-timeout"])}: pass a whole number of minutes, such as 20`,
+    );
   const apiKey = env.BOXD_API_KEY ?? "";
   if (apiKey === "") throw new UsageError("Set BOXD_API_KEY to a boxd API key");
   const runtime = env.USINE_CONTAINER_RUNTIME ?? "docker";
@@ -111,6 +156,7 @@ export const parseOptions = (argv, env) => {
     region: values.region,
     endpoint: values.endpoint,
     isolated: !values["no-isolated"],
+    setupTimeoutMs: Number(values["setup-timeout"]) * 60_000,
     apiKey,
     runtime,
     image,
@@ -162,22 +208,112 @@ const waitForEgress = async (boxd, machine, entries, { signal, pollMs, timeoutMs
   }
 };
 
-/** Runs the setup on `machine` and relays its output to `output`. Returns the exit code. */
-const runSetup = async (boxd, machine, { runtime, image }, { output, signal }) => {
+/** The error of a setup that ran past one of its limits. */
+class SetupLimitError extends Error {}
+
+/** Returns the last `TAIL_LINES` lines of the chunks that `push` receives. */
+const outputTail = () => {
+  const decoder = new TextDecoder();
+  let text = "";
+  return {
+    push: (chunk) => {
+      text = (text + decoder.decode(chunk)).slice(-TAIL_CHARS);
+    },
+    lines: () => text.trimEnd().split("\n").slice(-TAIL_LINES).join("\n"),
+  };
+};
+
+/**
+ * Runs the setup on `machine`, relays its output to `output`, and returns the exit code. Calls
+ * `onTimeout` for each line that says a command in the setup timed out. Stops the setup and throws
+ * `SetupLimitError`, with the last output lines, when it runs longer than `setupTimeoutMs` or
+ * prints nothing for `quietMs`. When `signal` aborts, stops the setup and throws at once, without
+ * waiting for the stream to end.
+ */
+const runSetup = async (
+  boxd,
+  machine,
+  { runtime, image, setupTimeoutMs },
+  { output, signal, quietMs, onTimeout },
+) => {
   const stream = boxd.machines.streamExec(machine, {
     command: `sh -s -- '${runtime}' '${image}'`,
   });
-  const close = () => stream.close();
-  signal.addEventListener("abort", close, { once: true });
+  const tail = outputTail();
+  const { promise: stopped, reject } = Promise.withResolvers();
+  const stop = (error) => {
+    stream.close();
+    reject(error);
+  };
+  const limit = (reason) => {
+    const lines = tail.lines();
+    stop(
+      new SetupLimitError(
+        lines === ""
+          ? `${reason}. It printed no output`
+          : `${reason}. Its last output lines:\n${lines}`,
+      ),
+    );
+  };
+  const overall = setTimeout(
+    () => limit(`The setup didn't finish within ${setupTimeoutMs / 1000} seconds`),
+    setupTimeoutMs,
+  );
+  let quiet;
+  const heard = () => {
+    clearTimeout(quiet);
+    quiet = setTimeout(
+      () => limit(`The setup printed nothing for ${quietMs / 1000} seconds`),
+      quietMs,
+    );
+  };
+  const interrupt = () => stop(new Error("Interrupted"));
+  signal.addEventListener("abort", interrupt, { once: true });
+  heard();
   try {
     sendStdin(stream, new TextEncoder().encode(SETUP));
     const relay = async (chunks) => {
-      for await (const chunk of chunks) output.write(chunk);
+      const decoder = new TextDecoder();
+      let partial = "";
+      for await (const chunk of chunks) {
+        heard();
+        tail.push(chunk);
+        output.write(chunk);
+        const lines = (partial + decoder.decode(chunk, { stream: true })).split("\n");
+        partial = lines.pop();
+        for (const line of lines) if (TIMED_OUT.test(line.trimEnd())) onTimeout();
+      }
     };
-    const [code] = await Promise.all([stream.wait(), relay(stream.stdout), relay(stream.stderr)]);
+    const run = Promise.all([stream.wait(), relay(stream.stdout), relay(stream.stderr)]);
+    const [code] = await Promise.race([run, stopped]);
     return code;
   } finally {
-    signal.removeEventListener("abort", close);
+    clearTimeout(overall);
+    clearTimeout(quiet);
+    signal.removeEventListener("abort", interrupt);
+  }
+};
+
+/** Calls `use` with a new client from `connect` and closes the client when `use` settles. */
+const withNewClient = async (connect, use) => {
+  const client = connect();
+  try {
+    return await use(client);
+  } finally {
+    await client.close();
+  }
+};
+
+/**
+ * Logs the egress allowlist that boxd reports for `machine`, read through a new client from
+ * `connect`, or why it can't be read.
+ */
+const logEgress = async (connect, machine, log) => {
+  try {
+    const read = await withNewClient(connect, (client) => client.machines.get(machine));
+    log(`boxd reports the temporary machine's egress as ${describeEgress(read.egressAllow)}`);
+  } catch (error) {
+    log(`Couldn't read the temporary machine's egress: ${error?.message ?? error}`);
   }
 };
 
@@ -214,15 +350,19 @@ const saveSnapshot = async (boxd, machine, name, { signal, pollMs, timeoutMs }) 
  * with the egress allowlist of `egress.mjs` in its spec, which the snapshot keeps. The setup runs
  * with egress unrestricted, because it downloads from hosts outside the allowlist. The machine is
  * deleted when the build ends, fails, or `signal` aborts; `log` names it if its deletion fails.
- * `pollMs` sets how often the script reads the machine and the snapshot. `egressTimeoutMs` and
- * `snapshotTimeoutMs` set how long it waits for an egress edit and the snapshot, and
- * `egressInForceMs` how long it waits after boxd reports an egress edit before it relies on the
- * edit.
+ * `connect` returns a new client. The deletion and each egress read during and after the setup go
+ * through a client of their own from `connect`, which is closed afterward. On an `https://`
+ * endpoint, each such client opens a new connection; on a plaintext endpoint, grpc-js shares one
+ * connection between clients. `pollMs` sets how often the script reads the machine and the
+ * snapshot. `egressTimeoutMs` and `snapshotTimeoutMs` set how long it waits for an egress
+ * edit and the snapshot, `egressInForceMs` how long it waits after boxd reports the allowlist
+ * lifted before it reads it again, and `quietMs` how long the setup may run without output.
  */
 export const build = async (
   boxd,
   options,
   {
+    connect,
     log,
     output,
     signal,
@@ -230,6 +370,7 @@ export const build = async (
     egressTimeoutMs = EGRESS_TIMEOUT_MS,
     egressInForceMs = EGRESS_IN_FORCE_MS,
     snapshotTimeoutMs = SNAPSHOT_TIMEOUT_MS,
+    quietMs = SETUP_QUIET_MS,
   },
 ) => {
   const egress = boxdEgress();
@@ -237,16 +378,26 @@ export const build = async (
   const name = `usine-snapshot-${stamp}-${process.pid}`;
   const sized = Machine.spec().size(options.size);
   const spec = (options.isolated ? sized.isolated() : sized).egress(...egress);
-  const machine = await boxd.machines.create({ name, shared: true, spec });
-  log(`Created temporary machine ${name}`);
+  let machine;
   let removal;
-  const remove = () =>
-    (removal ??= boxd.machines.delete(machine.id).then(
+  const remove = () => {
+    if (machine === undefined) return Promise.resolve();
+    return (removal ??= withNewClient(connect, (client) => client.machines.delete(machine.id)).then(
       () => log(`Deleted temporary machine ${name}`),
       () => log(`Delete temporary machine ${name} in boxd`),
     ));
-  signal.addEventListener("abort", remove, { once: true });
+  };
+  // Before `create` returns, the deletion starts once it does, from the `finally` below.
+  const interrupted = () => {
+    log("Interrupted; deleting the temporary machine");
+    void remove();
+  };
+  if (signal.aborted) interrupted();
+  else signal.addEventListener("abort", interrupted, { once: true });
   try {
+    throwIfAborted(signal);
+    machine = await boxd.machines.create({ name, shared: true, spec });
+    log(`Created temporary machine ${name}`);
     throwIfAborted(signal);
     await boxd.machines.waitUntilReady(machine.id, { timeout: READY_TIMEOUT_MS });
     await boxd.machines.setAutoHibernateTimeout(machine.id, 0);
@@ -254,9 +405,33 @@ export const build = async (
     const polling = { signal, pollMs, timeoutMs: egressTimeoutMs };
     await boxd.machines.setEgressAllow(machine.id, []);
     await waitForEgress(boxd, machine.id, [], polling);
+    log("boxd reports the temporary machine's egress unrestricted");
     await sleep(egressInForceMs);
     throwIfAborted(signal);
-    const code = await runSetup(boxd, machine.id, options, { output, signal });
+    const lifted = await boxd.machines.get(machine.id);
+    if (!sameEntries(lifted.egressAllow, []))
+      throw new Error(
+        `boxd reported the temporary machine's egress unrestricted, then ${describeEgress(lifted.egressAllow)} ${egressInForceMs / 1000} seconds later`,
+      );
+    log(
+      `boxd still reports the temporary machine's egress unrestricted ${egressInForceMs / 1000} seconds later`,
+    );
+    const reads = [];
+    const readEgress = () => reads.push(logEgress(connect, machine.id, log));
+    let code;
+    try {
+      code = await runSetup(boxd, machine.id, options, {
+        output,
+        signal,
+        quietMs,
+        onTimeout: readEgress,
+      });
+    } catch (error) {
+      if (error instanceof SetupLimitError) readEgress();
+      throw error;
+    } finally {
+      await Promise.all(reads);
+    }
     throwIfAborted(signal);
     if (code !== 0) throw new Error(`The setup exited with code ${code}`);
     await boxd.machines.setEgressAllow(machine.id, egress);
@@ -273,36 +448,47 @@ export const build = async (
     });
     return options.snapshot;
   } finally {
-    signal.removeEventListener("abort", remove);
+    signal.removeEventListener("abort", interrupted);
     await remove();
   }
 };
 
-if (import.meta.main) {
-  const log = (message) => process.stderr.write(`${message}\n`);
+/**
+ * Runs the command line with `argv` and `env` and returns its exit code. `connect` returns a new
+ * client for the given client options. `log` takes each log line, `output` the setup's output, and
+ * `print` the snapshot name. An abort of `signal` with an exit code interrupts the build.
+ */
+export const main = async (argv, env, { connect, log, output, print, signal }) => {
   let options;
   try {
-    options = parseOptions(process.argv.slice(2), process.env);
+    options = parseOptions(argv, env);
   } catch (error) {
     if (!(error instanceof UsageError)) throw error;
-    log(`${error.message}\n${USAGE}`);
-    process.exit(2);
+    output.write(`${error.message}\n${USAGE}\n`);
+    return 2;
   }
-  const controller = new AbortController();
-  process.once("SIGINT", () => controller.abort(130));
-  process.once("SIGTERM", () => controller.abort(143));
-  const boxd = new Boxd(clientOptions(options));
+  const client = () => connect(clientOptions(options));
+  const boxd = client();
   try {
-    const name = await build(boxd, options, {
-      log,
-      output: process.stderr,
-      signal: controller.signal,
-    });
-    process.stdout.write(`${name}\n`);
+    print(await build(boxd, options, { connect: client, log, output, signal }));
+    return 0;
   } catch (error) {
     log(String(error?.message ?? error).replaceAll(options.apiKey, "[redacted]"));
-    process.exitCode = controller.signal.aborted ? controller.signal.reason : 1;
+    return signal.aborted ? signal.reason : 1;
   } finally {
     await boxd.close();
   }
+};
+
+if (import.meta.main) {
+  const controller = new AbortController();
+  process.once("SIGINT", () => controller.abort(130));
+  process.once("SIGTERM", () => controller.abort(143));
+  process.exitCode = await main(process.argv.slice(2), process.env, {
+    connect: (options) => new Boxd(options),
+    log: (message) => process.stderr.write(`${new Date().toISOString()} ${message}\n`),
+    output: process.stderr,
+    print: (name) => process.stdout.write(`${name}\n`),
+    signal: controller.signal,
+  });
 }

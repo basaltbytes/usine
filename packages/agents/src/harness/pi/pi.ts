@@ -8,7 +8,8 @@ import { parentFields, resolvedSession, startPrompt, startReference } from "../a
 import { HarnessCatalog } from "../harness.ts";
 import { piPreflight } from "./preflight.ts";
 import { pi } from "./descriptor.ts";
-import type { HarnessRuntime } from "../runtime.ts";
+import { type HarnessRuntime, openWithTools } from "../runtime.ts";
+import { callHostTool, decodeHostToolInput, type HostToolSet, hostToolNames } from "../tools.ts";
 import { Harness, BrainSpec, type ModelId } from "@usine/core/agent/brain";
 import {
   EndpointName,
@@ -17,7 +18,8 @@ import {
   TokenCount,
   type UsdAmount,
 } from "@usine/core/agent/session";
-import { Clock, Deferred, Effect, Layer, Match, Option, Stream } from "effect";
+import { Clock, Deferred, Effect, FiberSet, Layer, Match, Option, Stream } from "effect";
+import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import {
   ChildBackend,
   ChildSessionJournal,
@@ -30,6 +32,7 @@ import {
 import { sessionChannel, subscribePiSession } from "../session.ts";
 import {
   PI_OUTPUT_TOOL,
+  piBuiltInToolNames,
   type PiRejection,
   PiSdk,
   type PiSessionStorage,
@@ -127,6 +130,41 @@ const resolvedPi = (spec: SessionSpec, model: ModelId, pool: PiPool) =>
 
 const piCatalog = HarnessCatalog.make({ descriptors: [pi] });
 
+/** Model APIs take tool names of at most 64 characters; Pi's own tools keep their names. */
+const toolNameRule = { maxLength: 64, reserved: piBuiltInToolNames };
+
+/**
+ * Defines `tools` as Pi tools, whose calls run in the calling scope. Returns them with the
+ * mapping from the name that Pi reports to the toolkit name.
+ */
+const serveTools = Effect.fn("PiRuntime.serveTools")(function* (tools: HostToolSet) {
+  const names = yield* hostToolNames(tools, toolNameRule);
+  const call = callHostTool(tools, names);
+  const run = yield* FiberSet.makeRuntimePromise();
+  const definitions = tools.tools.map((tool): ToolDefinition =>
+    defineTool({
+      name: names.alias(tool.name),
+      label: tool.name,
+      description: tool.description,
+      // Lists the tool in the system prompt's tool section, as Pi lists its own.
+      promptSnippet: tool.description,
+      parameters: tool.parameters,
+      execute: (toolCallId, params, signal) =>
+        run(call(names.alias(tool.name), decodeHostToolInput(params), Option.some(toolCallId)), {
+          signal,
+        }).then((result) => ({
+          content: [{ type: "text", text: result.text }],
+          details: undefined,
+          isError: result.isError,
+        })),
+    }),
+  );
+  return {
+    definitions,
+    toolName: (reported: string) => Option.getOrElse(names.name(reported), () => reported),
+  };
+});
+
 const makePiSessions = Effect.gen(function* () {
   const sdk = yield* PiSdk;
 
@@ -136,6 +174,7 @@ const makePiSessions = Effect.gen(function* () {
       storage: PiSessionStorage,
       prompt: Option.Option<string>,
       policy: ContinuationPolicy,
+      hostTools: HostToolSet,
     ) {
       yield* Effect.annotateCurrentSpan({
         agent: spec.session.agent,
@@ -154,6 +193,7 @@ const makePiSessions = Effect.gen(function* () {
         }),
       );
       const gate = yield* piPauseGate;
+      const served = yield* serveTools(hostTools);
       return yield* usePiStart(
         (signal) =>
           sdk.start({
@@ -161,6 +201,8 @@ const makePiSessions = Effect.gen(function* () {
             storage,
             environment: Option.some(spec.environment),
             extensions: [gate.extension],
+            nativeTools: spec.admitted.role.nativeTools,
+            hostTools: served.definitions,
             model: spec.session.brain.model,
             signal,
             thinkingLevel: spec.session.brain.effort,
@@ -199,6 +241,7 @@ const makePiSessions = Effect.gen(function* () {
               session,
               channel,
               policy.restored.usage,
+              served.toolName,
             );
             yield* Effect.addFinalizer(() =>
               Effect.sync(subscription.unsubscribe).pipe(
@@ -311,6 +354,7 @@ const makePiSessions = Effect.gen(function* () {
     spec: SessionSpec,
     start: Start,
     policy: ContinuationPolicy,
+    hostTools: HostToolSet,
   ) {
     yield* checkContinuationHome(
       spec,
@@ -330,10 +374,11 @@ const makePiSessions = Effect.gen(function* () {
       }),
       startPrompt(start),
       policy,
+      hostTools,
     );
   });
   return {
-    open,
+    open: openWithTools(open),
     stop: (_spec: SessionSpec) => Effect.void,
     complete: structuredCompletion(completeJson),
   } satisfies Pick<HarnessRuntime, "open" | "stop" | "complete">;

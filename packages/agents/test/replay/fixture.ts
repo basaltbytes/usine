@@ -176,6 +176,7 @@ export const openPiFixture = (
       tape,
       cwd,
       request,
+      /** The recorded provider stream that a Pi runtime starts its sessions on. */
       harness,
       backend: piChildLayer.pipe(Layer.provide(harness), Layer.provideMerge(NodeServices.layer)),
       controls: {
@@ -461,13 +462,19 @@ export const openFixture = (
         }
       }
       if (mode !== "record") return;
+      // A Claude replay answers at the SDK boundary, so it never starts the Claude Code process
+      // whose traffic a recording sees beneath the SDK. The owned-process replays read it.
+      const sdkBoundary =
+        provider === "claude" && scenario !== "transport-loss" && scenario !== "early-exit";
       const transcript = {
         protocol: provider === "claude" ? "claude-sdk" : "codex-app-server",
         harnessVersion: version,
         model,
         scenario,
         environment: tape.normalize(environment),
-        entries: tape.entries,
+        entries: sdkBoundary
+          ? tape.entries.filter(({ port }) => !port.startsWith("process:"))
+          : tape.entries,
       };
       const decoded = yield* Schema.decodeUnknownEffect(Transcript)(transcript);
       const encoded = yield* Schema.encodeEffect(Schema.fromJsonString(Transcript))(decoded);

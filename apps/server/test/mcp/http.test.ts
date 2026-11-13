@@ -838,18 +838,7 @@ describe("operator MCP endpoint", () => {
           ConfigProvider.fromUnknown({ USINE_GITHUB_WEBHOOK_SECRET: webhookSecret }),
         ),
       );
-      yield* Layer.build(
-        serverLayer(
-          backend,
-          webRoot,
-          Port.make(Number(new URL(origin).port)),
-          services,
-          upgrades,
-          webhooks,
-          undefined,
-          listener,
-        ),
-      );
+      yield* Layer.build(serverLayer(backend, webRoot, listener, services, upgrades, webhooks));
       const initialize = (headers: Readonly<Record<string, string>>) =>
         webRequest(`${origin}${MCP_PATH}`, {
           method: "POST",

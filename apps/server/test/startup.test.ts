@@ -22,10 +22,11 @@ import {
   Result,
   Schema,
 } from "effect";
-import { HttpClient } from "effect/http";
+import { FetchHttpClient, HttpClient } from "effect/http";
+import { createServer } from "node:net";
 import { serverLayer } from "../src/http.ts";
 import { FactoryBackend } from "../src/backend.ts";
-import { Port } from "../src/cli.ts";
+import { Port, SERVER_HOST } from "../src/cli.ts";
 import { authFixture } from "./auth/fixture.ts";
 import { assert, it } from "@effect/vitest";
 import { committedBeforeCrash, submission } from "../../../packages/engine/test/support.ts";
@@ -38,8 +39,9 @@ import {
   noGateway,
   COMMIT_AUTHOR,
 } from "../../../packages/executor/test/ssh/support.ts";
-import { startupListener } from "../src/listener.ts";
+import { listenThenBuild, startupListener } from "../src/listener.ts";
 import { sqliteTempDirectory } from "../../../tooling/test/sqlite.mts";
+import { webRequest } from "../../../tooling/test/http.mts";
 
 it.live(
   "answers the version while recovering 400 finished attempts without per-attempt remote commands",
@@ -161,12 +163,10 @@ it.live(
         serverLayer(
           Layer.mock(FactoryBackend)({}),
           directory,
-          Port.make(7331),
+          listener,
           auth,
           Layer.empty,
           Layer.empty,
-          undefined,
-          listener,
         ),
       );
       const readiness = yield* client.get("/api/ready");
@@ -185,4 +185,44 @@ it.live(
       Effect.provide(NodeHttpServer.layerTest.pipe(Layer.provideMerge(NodeServices.layer))),
     ),
   30_000,
+);
+
+/** A port on the server host that was free when the probe closed it. */
+const freePort = Effect.callback<Port>((resume) => {
+  const probe = createServer();
+  probe.listen({ host: SERVER_HOST, port: 0 }, () => {
+    // Node event callbacks decode their arguments synchronously.
+    // @effect-diagnostics-next-line schemaSync:off
+    const { port } = Schema.decodeUnknownSync(Schema.Struct({ port: Port }))(probe.address());
+    probe.close(() => resume(Effect.succeed(port)));
+  });
+});
+
+it.live("answers on the port while a runtime startup step is still pending", () =>
+  Effect.gen(function* () {
+    const port = yield* freePort;
+    const checking = yield* Deferred.make<void>();
+    const finish = yield* Deferred.make<void>();
+    // Stands in for the startup coordinator brain check, which has no time limit.
+    const runtime = Layer.effectDiscard(
+      Deferred.succeed(checking, undefined).pipe(Effect.andThen(Deferred.await(finish))),
+    );
+    const starting = yield* listenThenBuild(port, "0.5.1-next.341", runtime).pipe(
+      Effect.forkScoped,
+    );
+    yield* Deferred.await(checking);
+    const origin = `http://${SERVER_HOST}:${port}`;
+    const version = yield* webRequest(`${origin}/api/version`).pipe(Effect.timeout("5 seconds"));
+    assert.strictEqual(version.status, 200);
+    const body = yield* Effect.promise(() => version.json());
+    assert.strictEqual(body, "0.5.1-next.341");
+    const pending = yield* webRequest(`${origin}/api/overview`).pipe(Effect.timeout("5 seconds"));
+    assert.strictEqual(pending.status, 503);
+    assert.strictEqual(pending.headers.get("retry-after"), "1");
+    yield* Deferred.succeed(finish, undefined);
+    yield* Fiber.join(starting);
+  }).pipe(
+    Effect.scoped,
+    Effect.provide(Layer.provideMerge(NodeServices.layer, FetchHttpClient.layer)),
+  ),
 );

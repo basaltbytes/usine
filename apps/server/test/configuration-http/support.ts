@@ -274,6 +274,7 @@ export const harness = (
       });
     return {
       request,
+      handler: app.handler,
       projections,
       store,
       current,
