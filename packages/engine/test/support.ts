@@ -14,7 +14,7 @@ import type { RunId } from "@usine/core/run";
 import { ApprovalSource } from "@usine/core/run/approval";
 import { StepName } from "@usine/core/step";
 import { StepCompletion, StepResult } from "@usine/core/step/result";
-import { WorkerName } from "@usine/core/worker";
+import { type WorkerKind, WorkerName } from "@usine/core/worker";
 import { DateTime, Effect, FileSystem, Layer, Option, Ref, TxRef } from "effect";
 import { layer, localSqliteLayer } from "../src/database/local-sqlite.ts";
 import type { RunEngine } from "../src/engine/engine.ts";
@@ -60,7 +60,11 @@ export const engineLayer = (
   check: Layer.Layer<CompletionCheck> = CompletionCheck.unverified,
 ) => layer(directory).pipe(Layer.provide(executor), Layer.provide(condition), Layer.provide(check));
 
-export const executorLayer = (plans: Ref.Ref<ReadonlyArray<AttemptPlan>>) =>
+/** Returns a `StepExecutor` that leases Worker `local` as `kind` and runs the next of `plans`. */
+export const executorLayer = (
+  plans: Ref.Ref<ReadonlyArray<AttemptPlan>>,
+  kind: WorkerKind = "local",
+) =>
   Layer.succeed(StepExecutor)({
     workers: Effect.succeed([WorkerName.make("local")]),
     isLive: () => Effect.succeed(false),
@@ -68,11 +72,10 @@ export const executorLayer = (plans: Ref.Ref<ReadonlyArray<AttemptPlan>>) =>
     recover: () => Effect.succeed("found" as const),
     intervene: () => Effect.void,
     interrupt: () => Effect.void,
-    occupy: (worker) => Effect.succeed({ worker, kind: "local", release: Effect.void }),
+    occupy: (worker) => Effect.succeed({ worker, kind, release: Effect.void }),
     sweep: Effect.void,
     discard: () => Effect.void,
-    reserve: () =>
-      Effect.succeed({ worker: WorkerName.make("local"), kind: "local", release: Effect.void }),
+    reserve: () => Effect.succeed({ worker: WorkerName.make("local"), kind, release: Effect.void }),
     execute: () =>
       Ref.modify(plans, (remaining) => {
         const [next, ...rest] = remaining;

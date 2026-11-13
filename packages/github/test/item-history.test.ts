@@ -196,6 +196,58 @@ describe("GitHubItemHistory", () => {
     },
   );
 
+  /** Returns a client that serves `pages` timeline pages, each with one bot label event. */
+  const pagedClient = (pages: number, requests: Array<HttpClientRequest.HttpClientRequest>) =>
+    HttpClient.make((request) =>
+      Effect.sync(() => {
+        requests.push(request);
+        const served = requests.length;
+        return respond(
+          request,
+          page(
+            [
+              {
+                __typename: "LabeledEvent",
+                createdAt: "2026-10-15T19:31:31Z",
+                actor: { __typename: "Bot", login: "usine-phildl" },
+                label: label(`page-${served}`, "ededed"),
+              },
+            ],
+            served < pages ? `cursor-${served}` : null,
+          ),
+        );
+      }),
+    );
+
+  const readTimeline = Effect.gen(function* () {
+    const history = yield* GitHubItemHistory;
+    return yield* history.appChanges(
+      repository,
+      ItemNumber.make(247),
+      DateTime.makeUnsafe("2026-10-15T19:30:39Z"),
+      BotLogin.make("usine-phildl[bot]"),
+    );
+  });
+
+  it.effect("reads a timeline of ten pages", () => {
+    const requests: Array<HttpClientRequest.HttpClientRequest> = [];
+    return Effect.gen(function* () {
+      const changes = yield* readTimeline;
+      assert.strictEqual(changes.length, 10);
+      assert.strictEqual(requests.length, 10);
+    }).pipe(Effect.provide(historyLayer(pagedClient(10, requests))));
+  });
+
+  it.effect("stops after ten pages of a longer timeline with an invalid response", () => {
+    const requests: Array<HttpClientRequest.HttpClientRequest> = [];
+    return Effect.gen(function* () {
+      const failure = yield* Effect.flip(readTimeline);
+      assert(failure._tag === "InvalidGitHubResponseError");
+      assert.include(failure.detail, "has more than 10 pages");
+      assert.strictEqual(requests.length, 10);
+    }).pipe(Effect.provide(historyLayer(pagedClient(11, requests))));
+  });
+
   it.effect("reports an Item the repository no longer has as not found", () => {
     const client = HttpClient.make((request) =>
       Effect.succeed(

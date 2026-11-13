@@ -1837,6 +1837,32 @@ describe("SSH Workers on reload", () => {
   );
 });
 
+describe("Worker scheduler leases", () => {
+  it.live("carry the executor's kind, which the Run records on the Attempt", () =>
+    withWorkers(sshWorker("build-1", 1), () =>
+      Effect.gen(function* () {
+        const scheduler = yield* startSshScheduler([]);
+        const agent = yield* developer;
+        const reserved = yield* scheduler.reserve(runOf(1), submission(agent, 1), Option.none());
+        const occupied = yield* scheduler.occupy(build1, AttemptId.make("running-1"));
+        const unknown = yield* scheduler.occupy(
+          WorkerName.make("gone"),
+          AttemptId.make("running-2"),
+        );
+        assert.deepStrictEqual(
+          [reserved, occupied, unknown].map(({ worker, kind }) => [worker, kind]),
+          [
+            [build1, "ssh"],
+            [build1, "ssh"],
+            [WorkerName.make("gone"), "ssh"],
+          ],
+        );
+        yield* Effect.forEach([reserved, occupied, unknown], ({ release }) => release);
+      }).pipe(Effect.scoped),
+    ),
+  );
+});
+
 describe("Worker status", () => {
   it.live(
     "reports slots in use and the last preflight per harness, including a refused reload's",

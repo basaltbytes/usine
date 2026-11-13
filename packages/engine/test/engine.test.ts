@@ -285,6 +285,30 @@ describe("durable run engine", () => {
     ),
   );
 
+  it.live("records the kind of the leased Worker on the Attempt it starts", () =>
+    withInstance((directory) =>
+      Effect.gen(function* () {
+        const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([
+          Effect.succeed(stepResult("finished")),
+        ]);
+        yield* Effect.gen(function* () {
+          const engine = yield* RunEngine;
+          const accepted = yield* engine.submit(submission({ number: 1 }));
+          assert(accepted._tag === "Claimed");
+          const snapshot = yield* waitFor(
+            engine,
+            accepted.runId,
+            ({ run }) => run.state._tag === "Succeeded",
+          );
+          assert.deepStrictEqual(
+            snapshot.attempts.map(({ workerKind }) => workerKind),
+            [Option.some("exe.dev")],
+          );
+        }).pipe(Effect.provide(engineLayer(directory, executorLayer(plans, "exe.dev"))));
+      }),
+    ),
+  );
+
   it.live("drives each Run in its own trace, linked to the span that launched it", () =>
     withInstance((directory) =>
       Effect.gen(function* () {
