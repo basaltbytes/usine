@@ -239,13 +239,32 @@ const loginRace = (contended: number) => {
 };
 
 /** Returns a logger `layer` and the info lines logged where it is provided. */
-const infoLines = () => {
+/** Collects the messages logged at `levels`. */
+const logLines = (levels: ReadonlyArray<string>) => {
   const lines: Array<string> = [];
   const logger = Logger.make<unknown, void>(({ logLevel, message }) => {
-    if (logLevel === "Info") lines.push(jsonKey(message));
+    if (levels.includes(logLevel)) lines.push(jsonKey(message));
   });
   return { lines, layer: Logger.layer([logger]) };
 };
+
+const infoLines = () => logLines(["Info"]);
+
+/** A Claude SDK whose output stays open, after the login check, until the test offers more. */
+const openOutput = (messages: ReadonlyArray<Schema.Json>) =>
+  Effect.gen(function* () {
+    const output = yield* Queue.make<Schema.Json, Cause.Done>();
+    yield* Queue.offerAll(output, [rateLimitEvent, ...messages]);
+    const sdk = Layer.succeed(ClaudeSdk)({
+      open: () => ({
+        ...scripted([]),
+        close: () => Queue.endUnsafe(output),
+        [Symbol.asyncIterator]: () =>
+          Stream.toAsyncIterable(Stream.fromQueue(output))[Symbol.asyncIterator](),
+      }),
+    });
+    return { output, sdk };
+  });
 
 /** Advances the test clock in 5-second steps until `fiber` ends. */
 const joinAdvancingClock = Effect.fn(function* <A, E>(fiber: Fiber.Fiber<A, E>) {
@@ -2156,6 +2175,95 @@ describe("Claude child backend", () => {
       );
     },
   );
+
+  describe("after an answer while background work runs", () => {
+    const gate = {
+      type: "system",
+      subtype: "background_tasks_changed",
+      tasks: [{ task_id: "ci-watch", task_type: "local_bash", description: "Watch CI" }],
+    };
+    const answered = (result: string) => ({
+      type: "result",
+      subtype: "success",
+      result,
+      queued_turn_count: 0,
+    });
+    const waiting = (lines: ReadonlyArray<string>) =>
+      lines.some((line) => line.includes("Claude child is waiting for background work"));
+
+    it.effect.each([
+      {
+        protocol: "session-state",
+        messages: [
+          { type: "system", subtype: "session_state_changed", state: "running" },
+          gate,
+          answered("Review posted"),
+          { type: "system", subtype: "session_state_changed", state: "idle" },
+        ],
+      },
+      { protocol: "legacy", messages: [gate, answered("Review posted")] },
+    ])("returns the answer once the wait limit passes ($protocol)", ({ messages }) =>
+      Effect.gen(function* () {
+        const { sdk } = yield* openOutput(messages);
+        const logs = logLines(["Info", "Warn"]);
+        yield* Effect.gen(function* () {
+          const session = yield* (yield* ChildBackend).launch(request());
+          const result = yield* Effect.forkChild(session.result);
+          while (!waiting(logs.lines)) yield* Effect.yieldNow;
+          yield* TestClock.adjust("119 seconds");
+          assert.isUndefined(result.pollUnsafe(), "the child waits until the limit");
+          yield* TestClock.adjust("1 second");
+          assert.strictEqual((yield* Fiber.join(result)).message, "Review posted");
+          assert.isTrue(
+            logs.lines.some(
+              (line) =>
+                line.includes("outlasted the wait limit") &&
+                line.includes("ci-watch") &&
+                line.includes("2m"),
+            ),
+            "the log names the limit and the background tasks",
+          );
+        }).pipe(
+          Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk), Layer.provideMerge(logs.layer))),
+          Effect.scoped,
+        );
+      }),
+    );
+
+    it.effect("does not end a notification turn that starts within the limit", () =>
+      Effect.gen(function* () {
+        const { output, sdk } = yield* openOutput([
+          { type: "system", subtype: "session_state_changed", state: "running" },
+          gate,
+          answered("Waiting for CI"),
+          { type: "system", subtype: "session_state_changed", state: "idle" },
+        ]);
+        const logs = infoLines();
+        yield* Effect.gen(function* () {
+          const session = yield* (yield* ChildBackend).launch(request());
+          const result = yield* Effect.forkChild(session.result);
+          while (!waiting(logs.lines)) yield* Effect.yieldNow;
+          yield* TestClock.adjust("1 minute");
+          yield* Queue.offerAll(output, [
+            { type: "system", subtype: "background_tasks_changed", tasks: [] },
+            { type: "system", subtype: "session_state_changed", state: "running" },
+          ]);
+          while (!logs.lines.some((line) => line.includes('"backgroundTaskIds":[]')))
+            yield* Effect.yieldNow;
+          yield* TestClock.adjust("5 minutes");
+          assert.isUndefined(result.pollUnsafe(), "the running turn keeps the child open");
+          yield* Queue.offerAll(output, [
+            answered("CI passed"),
+            { type: "system", subtype: "session_state_changed", state: "idle" },
+          ]);
+          assert.strictEqual((yield* Fiber.join(result)).message, "CI passed");
+        }).pipe(
+          Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk), Layer.provideMerge(logs.layer))),
+          Effect.scoped,
+        );
+      }),
+    );
+  });
 
   it.effect("closes a paused tool hook with its child scope even without a vendor abort", () =>
     Effect.gen(function* () {
