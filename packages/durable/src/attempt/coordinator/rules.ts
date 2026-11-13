@@ -9,6 +9,7 @@ import {
   ProviderCapacityFailure,
   QuestionFailure,
 } from "@usine/core/attempt/failure";
+import { handsOffCi } from "@usine/core/ci";
 import { OutcomeLabels } from "@usine/core/loop";
 import { RepositoryName } from "@usine/core/repository";
 import { type Brand, Match, Option, Schema } from "effect";
@@ -323,6 +324,10 @@ const reservedDecision = {
   failed: (message) => Failed.make({ message }),
 } satisfies { readonly [Kind in ReservedKind]: (message: string) => Decision };
 
+/** Whether the child-session budget has a slot for a child that replaces `child`. */
+const hasReplacementSlot = (child: ChildSessionCount, context: AttemptContext): boolean =>
+  child < context.maxChildren;
+
 /** Returns the rule's decision for `event`. */
 export const ruleFor = (event: CoordinatorEvent, context: AttemptContext): Decision =>
   Match.valueTags(event, {
@@ -333,7 +338,7 @@ export const ruleFor = (event: CoordinatorEvent, context: AttemptContext): Decis
         onSome: ({ kind, message }) => reservedDecision[kind](message),
       }),
     ChildInterrupted: ({ child, reason }): Decision =>
-      child < context.maxChildren
+      hasReplacementSlot(child, context)
         ? RetryChild.make({})
         : InfraFailed.make({
             message: `Child ${child} was interrupted and couldn't resume, and the ${context.maxChildren}-child budget has no room for a replacement: ${reason}`,
@@ -350,11 +355,12 @@ export const ruleFor = (event: CoordinatorEvent, context: AttemptContext): Decis
   });
 
 /**
- * Whether a model may answer `event`: only a report without a reserved marker. Every other event
- * takes its rule, so typed facts win, and an interrupted child that left no report can't complete.
+ * Whether a model may answer `event`: only a report without a reserved marker or a CI handoff.
+ * Every other event takes its rule, so typed facts win, a handoff reaches the engine unchanged, and
+ * an interrupted child that left no report can't complete.
  */
-const modelEligible = (event: ChildEvent): boolean =>
-  event._tag === "ChildReported" && Option.isNone(event.reserved);
+export const modelEligible = (event: CoordinatorEvent): boolean =>
+  event._tag === "ChildReported" && Option.isNone(event.reserved) && !handsOffCi(event.report);
 
 const reportText = (event: ChildReported): string =>
   event.report.trim() === "" ? BLANK_REPORT_MESSAGE : event.report;
@@ -395,7 +401,7 @@ const resolve = (
           )
         : byRule(),
     RetryChild: ({ assignment }): ClampedDecision =>
-      event.child < context.maxChildren
+      hasReplacementSlot(event.child, context)
         ? Replace.make({
             replaces: event.child,
             assignment: assignment ?? defaultAssignment(event),
@@ -426,14 +432,35 @@ const resolve = (
 };
 
 /**
- * Checks `decision` against `context.event`. A reserved marker and the other typed facts keep their
- * rule over any decision, a rule-only tag about a child takes the event's rule, and a replacement
+ * Checks `decision` against `context.event`. A reserved marker, a CI handoff, and the other typed
+ * facts keep their rule over any decision, a rule-only tag about a child takes the event's rule, and a replacement
  * past the child-session budget becomes `Failed`.
  */
 export const clamp = (decision: Decision, context: AttemptContext): ClampedDecision => {
   const { event } = context;
   if (event._tag === "AttemptStarted") return Start.make({});
   return resolve(modelEligible(event) ? decision : ruleFor(event, context), event, context);
+};
+
+/**
+ * Returns why `clamp` would replace a model's `decision` about `context.event` instead of applying
+ * it as given, or `None` if it applies it: the event takes its rule, or a replacement has no room
+ * in the child-session budget.
+ */
+export const clampRejection = (
+  decision: ModelDecision,
+  context: AttemptContext,
+): Option.Option<string> => {
+  const { event } = context;
+  if (event._tag !== "ChildReported") return Option.some(`${event._tag} takes its rule`);
+  if (Option.isSome(event.reserved))
+    return Option.some("A report with a reserved marker takes its rule");
+  if (handsOffCi(event.report)) return Option.some("A report with a CI handoff takes its rule");
+  if (decision._tag === "RetryChild" && !hasReplacementSlot(event.child, context))
+    return Option.some(
+      `Child ${event.child} can't be replaced: the Attempt has used its ${context.maxChildren}-child budget`,
+    );
+  return Option.none();
 };
 
 type Transition = readonly [CoordinatorState, ReadonlyArray<EffectIntent>];

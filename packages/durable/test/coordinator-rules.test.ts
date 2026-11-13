@@ -1,5 +1,6 @@
 import { assert, describe, expect, it } from "@effect/vitest";
 import { AgentName } from "@usine/core/agent";
+import { AWAITING_CI_MARKER } from "@usine/core/ci";
 import { ChildSessionBudget, ChildSessionCount } from "@usine/core/agent/session";
 import { RepositoryName } from "@usine/core/repository";
 import { AttemptFailure } from "@usine/core/attempt/failure";
@@ -211,6 +212,7 @@ describe("coordinator rules", () => {
   it("clamp keeps every typed fact's rule over a model's decision", () => {
     const events: ReadonlyArray<CoordinatorEvent> = [
       reservedReport("question", "Which base branch?"),
+      reported(`${AWAITING_CI_MARKER}\n{"pull_request":12}`),
       ChildAtCapacity.make({ child: child(1), message: "HTTP 529", resetsAt: Option.none() }),
       ChildFailed.make({ child: child(1), message: "ssh: closed" }),
       BudgetExceeded.make({ child: child(1), attempted: child(4) }),

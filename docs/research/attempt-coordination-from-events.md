@@ -8,9 +8,9 @@ The goal is a quickstart that requires no subscription from a specific model pro
 
 ## Status
 
-Built: the delegation core (#1179), the rules and the `Decision` contract (#1169), the relay without a parent session (#1171), the attempt journal with memory and SQLite adapters (#1181), the coordinator runtime and router with rules-only wake-up (#1197), the widened wake-up seam (#1244), the restart replays (#1245), operator input to the coordinator (#1163), and configuration as `coordinator: session | events`, with an optional agent `decision: { model, effort }` (#1158). The router sends an attempt to the coordinator when its `RunSpec.coordinator` is `events`.
+Built: the delegation core (#1179), the rules and the `Decision` contract (#1169), the relay without a parent session (#1171), the attempt journal with memory and SQLite adapters (#1181), the coordinator runtime and router with rules-only wake-up (#1197), the widened wake-up seam (#1244), the restart replays (#1245), operator input to the coordinator (#1163), configuration as `coordinator: session | events`, with an optional agent `decision: { model, effort }` (#1158), and the structured completion (#1165). The router sends an attempt to the coordinator when its `RunSpec.coordinator` is `events`.
 
-Decided, not built: the quickstart (#1160); the decision session (#1164); the structured completion (#1165); removing the Pi parent (#1166); and the design-review follow-ups (#1237).
+Decided, not built: the quickstart (#1160); the decision session (#1164); removing the Pi parent (#1166); and the design-review follow-ups (#1237).
 
 ## Recommendation
 
@@ -242,7 +242,7 @@ Without read tools, a small model can't check GitHub state (labels, pull request
 
 **Rule.** Always available, and the fallback for every failure below.
 
-**Structured completion (#1165).** No tools and no saved conversation. The handler builds a prompt from the attempt context, calls `complete` on the harness contract (#1208) with the agent's `decision` brain, and asks for one `ModelDecision` value. An OpenAI-compatible endpoint is a Pi credential route behind the same admission, pools, and usage events, so the handler has no configuration of its own. A refusal, an invalid value, capacity, or any other error returns `None`, so the rule applies.
+**Structured completion (#1165).** No usine tools and no saved conversation; a harness that can't turn its own tools off runs them read-only. The handler builds a prompt from the attempt context, calls `complete` on the harness contract (#1208) with the agent's `decision` brain, and asks for one `ModelDecision` value. An OpenAI-compatible endpoint is a Pi credential route behind the same admission, pools, and usage events, so the handler has no configuration of its own. A refusal, an invalid value, capacity, or any other error returns `None`, so the rule applies.
 
 **Decision session on the child's harness (#1164).** A short session on the attempt's worker, with the child's harness and route and the agent's `decision` model. It is a role against the harness contract: a closed tool set with this event's decision tools and three read tools (`attempt_context`, `child_report(number)`, and `child_output(number, characters)`), the harness's own tools off, no saved conversation, and at most 4 turns. [harness-contract-and-roles.md](./harness-contract-and-roles.md) gives the role shape (section 5) and each harness's tool delivery (section 6). A harness that can't close its tool set refuses the role with a reason, and the rule applies.
 

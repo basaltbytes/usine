@@ -20,7 +20,7 @@ The server builds one harness runtime registry at startup and shares it between 
 | `coordinator` | `session` or `events` | instance setting | What coordinates the agent's attempts. See [Coordinator](#coordinator). |
 | `parent_model` | string | instance setting, then Pi selection | Model for the Pi parent in `provider/model` form. Not allowed with `coordinator: events`. |
 | `parent_effort` | effort | instance setting, then child effort | Reasoning effort of the Pi parent. Not allowed with `coordinator: events`. |
-| `decision` | `model` and `effort` | none | Model and effort of the agent's decision sessions, which run on the agent's own harness. No behavior reads it yet. |
+| `decision` | `model` and `effort` | none | Model and effort that decide a child's report with `coordinator: events`, on the agent's own harness. See [Coordinator](#coordinator). |
 | persona | non-blank Markdown | required | Standing instructions included for the parent and every child. |
 
 For example, create `developer` with harness `codex`, model `gpt-6-astra`, effort `medium`, and this persona:
@@ -39,6 +39,8 @@ The coordinator decides what an attempt does next. `coordinator` selects it for 
 
 - `session`: a parent session coordinates the attempt. See [Parent selection](#parent-selection).
 - `events`: rules applied to the attempt's lifecycle events coordinate it, with no parent session and no parent model credential. The coordinator starts one child with the task and turns the child's report into the attempt's outcome. The attempt details show **No parent session**, and input addressed to the parent goes to the child. See [Message an agent](/guides/message-an-agent/).
+
+With `decision`, the `events` coordinator asks the decision model what to do with a child's report that has no reserved marker and no CI handoff: complete the attempt, start another child to continue the work, fail it as blocked, as a question, or as a failure, or fail it for a retry after an infrastructure failure or a usage limit. The request runs once on the agent's harness, on the attempt's worker with the child's credential, with no usine tools and no saved conversation. A harness that can't turn its own tools off, such as Codex, runs them read-only in the checkout. It reads the event, the start of the task, the outcome labels and CI policy, the earlier children's reports, and the end of the child's output. Its tokens count toward the attempt's usage as a separate session. A replacement child must fit the child-session budget. If the model refuses, answers with something other than a decision, hits a usage limit, or doesn't answer within 10 minutes, the attempt completes with the report, as without `decision`, and the server logs the reason at Warning. A reserved marker and every other event keep their fixed outcome, and a report that starts with `[usine:awaiting-ci]` completes the attempt with the handoff unchanged.
 
 An agent that resolves to `events` needs no parent model, effort, or credential, so startup, reloads, and saved edits don't validate them. An instance without a Pi credential starts when every agent resolves to `events`. Configuration imports, reloads, and saved edits refuse `parent_model` or `parent_effort` in the same agent file or `settings` block as `coordinator: events`, and the problem names the field.
 
