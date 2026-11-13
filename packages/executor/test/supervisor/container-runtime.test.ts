@@ -8,6 +8,7 @@ import { CommitSha, RepositoryName } from "@usine/core/repository";
 import { ContainerImage } from "@usine/core/worker";
 import { Effect, FileSystem, Option, Schema, Stream } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
+import { homedir } from "node:os";
 import { env } from "node:process";
 import { ContainerRuntime } from "../../src/remote/runtime.ts";
 import type { GatewayModelRoute } from "../../src/ssh/gateway/model-route.ts";
@@ -34,7 +35,12 @@ describe.skipIf(Option.isNone(runtime))(
         Effect.gen(function* () {
           const fs = yield* FileSystem.FileSystem;
           const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-          const instance = yield* fs.makeTempDirectoryScoped({ prefix: "usine-instance-" });
+          // An instance folder outside the system's temporary directory, as on a real host: the
+          // container mounts its own empty /tmp.
+          const instance = yield* fs.makeTempDirectoryScoped({
+            directory: homedir(),
+            prefix: "usine-instance-",
+          });
           yield* fs.writeFileString(`${instance}/usine.db`, SECRET);
           const tree = `${instance}/supervisor/trees/acme_demo/${REVISION}`;
           yield* fs.makeDirectory(tree, { recursive: true });
