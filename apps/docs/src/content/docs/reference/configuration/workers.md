@@ -115,6 +115,8 @@ If one of usine's own commands on the worker, such as an image pull or a checkou
 
 After each image pull, usine removes the older images of the attempt image's repository, such as the worker images of earlier releases. It keeps the current image, the newest older image so that a rollback doesn't download it again, and every image that a container uses. The server logs the images it removes; a failed removal is logged and doesn't fail preflight.
 
+Cleanup recognizes Docker Hub names in both qualified and short form. When a mutable tag such as `latest` replaces an image and leaves it untagged, usine adds a local `usine-retained-<image-id>` tag in the same repository. Later pulls include that image in cleanup, so only the current image, the newest older image, and images in use remain. Unrelated untagged images are left alone.
+
 ## Gateway
 
 Fields belong to `gateway` on an SSH worker.

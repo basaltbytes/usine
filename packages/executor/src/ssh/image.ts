@@ -119,7 +119,7 @@ export const prepareAttemptImage = Effect.fn("SshExecutor.prepareAttemptImage")(
       ...pullFields,
       downloaded: Option.isNone(before) || before.value !== after.value,
     });
-    yield* removeOldWorkerImages(commands, machine, image, after.value, runtime, operation);
+    yield* removeOldWorkerImages(commands, machine, image, after.value, before, runtime, operation);
     return;
   }
 });
@@ -143,6 +143,7 @@ const removeOldWorkerImages = Effect.fn("SshExecutor.removeOldWorkerImages")(
     machine: SshMachine,
     image: ContainerImage,
     currentId: string,
+    before: Option.Option<string>,
     runtime: ContainerRuntime,
     operation: "preflight" | "prepare",
   ) {
@@ -160,15 +161,38 @@ const removeOldWorkerImages = Effect.fn("SshExecutor.removeOldWorkerImages")(
       "--no-trunc",
       "--format",
       "{{.ID}} {{.Repository}} {{.Tag}} {{.CreatedAt}}",
-      repository,
     ]);
-    const images = workerImagesFromList(listed, repository);
+    const images = workerImagesFromList(listed, repository, before);
     if (Option.isNone(images)) {
       yield* Effect.logWarning(
         "Kept the older worker images: the runtime listed an image without a readable creation time",
         { ...fields, listed: listed.trim().slice(0, 1000) },
       );
       return;
+    }
+    const current = images.value.find(({ id }) => id === withoutAlgorithm(currentId));
+    const retainedRepository =
+      current !== undefined && Option.isSome(current.reference)
+        ? imageRepository(current.reference.value)
+        : repository;
+    const retained: Array<WorkerImage> = [];
+    for (const entry of images.value) {
+      if (
+        Option.isSome(entry.reference) ||
+        Option.isNone(before) ||
+        entry.id !== withoutAlgorithm(before.value)
+      ) {
+        retained.push(entry);
+        continue;
+      }
+      const reference = `${retainedRepository}:usine-retained-${entry.id}`;
+      yield* commands.run(operation, machine.shell, runtime, ["image", "tag", entry.id, reference]);
+      retained.push({ ...entry, reference: Option.some(reference) });
+      yield* Effect.logInfo("Tagged an untagged worker image for later cleanup", {
+        ...fields,
+        id: entry.id,
+        reference,
+      });
     }
     const used = yield* commands.run(operation, machine.shell, "sh", [
       "-c",
@@ -177,7 +201,7 @@ const removeOldWorkerImages = Effect.fn("SshExecutor.removeOldWorkerImages")(
       runtime,
     ]);
     const selection = oldWorkerImages(
-      images.value,
+      retained,
       currentId,
       new Set(
         used
@@ -247,6 +271,11 @@ export interface WorkerImage {
 
 const withoutAlgorithm = (id: string): string => id.trim().replace(/^sha256:/u, "");
 
+const familiarRepository = (repository: string): string => {
+  const name = repository.replace(/^(?:docker\.io|index\.docker\.io)\//u, "");
+  return name.startsWith("library/") ? name.slice("library/".length) : name;
+};
+
 /** Matches Go's `time.Time` string, such as `2026-11-12 10:00:00 +0000 UTC`, and RFC 3339. */
 const CREATED_AT =
   /^(?<date>\d{4}-\d{2}-\d{2})[ T](?<time>\d{2}:\d{2}:\d{2})(?:\.\d+)?\s*(?<offset>Z|[+-]\d{2}:?\d{2})/u;
@@ -265,16 +294,23 @@ const createdAtMillis = (text: string): Option.Option<number> => {
 
 /**
  * Parses the lines `<ID> <repository> <tag> <created at>` of an image listing and keeps the
- * images of `repository`. Returns `None` if a creation time can't be read.
+ * images of `repository` and the untagged image replaced by the pull. Returns `None` if a
+ * creation time can't be read.
  */
 export const workerImagesFromList = (
   output: string,
   repository: string,
+  before: Option.Option<string> = Option.none(),
 ): Option.Option<ReadonlyArray<WorkerImage>> => {
   const images: Array<WorkerImage> = [];
   for (const line of output.split("\n")) {
     const [id = "", name = "", tag = "", ...created] = line.trim().split(/\s+/u);
-    if (id === "" || name !== repository) continue;
+    const replaced =
+      name === "<none>" &&
+      Option.isSome(before) &&
+      withoutAlgorithm(id) === withoutAlgorithm(before.value);
+    if (id === "" || (!replaced && familiarRepository(name) !== familiarRepository(repository)))
+      continue;
     const createdAt = createdAtMillis(created.join(" "));
     if (Option.isNone(createdAt)) return Option.none();
     images.push({

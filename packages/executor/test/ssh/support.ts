@@ -478,8 +478,8 @@ df() {
     *) printf '/dev/root 200000000 1048576 104857600 2%% %s\\n' "$2" ;;
   esac
 }
-docker() { ${state.storageProbe === "info-fails" ? "return 1" : state.storageProbe === "info-empty" ? "return 0" : "printf '/var/lib/docker\\n'"}; }
-podman() { ${state.storageProbe === "info-fails" ? "return 1" : state.storageProbe === "info-empty" ? "return 0" : "printf '/var/lib/podman\\n'"}; }
+docker() { [ "$1" = info ] && [ "$2" = --format ] && [ "$3" = '{{.DockerRootDir}}' ] || return 1; ${state.storageProbe === "info-fails" ? "return 1" : state.storageProbe === "info-empty" ? "return 0" : "printf '/var/lib/docker\\n'"}; }
+podman() { [ "$1" = info ] && [ "$2" = --format ] && [ "$3" = '{{.Store.GraphRoot}}' ] || return 1; ${state.storageProbe === "info-fails" ? "return 1" : state.storageProbe === "info-empty" ? "return 0" : "printf '/var/lib/podman\\n'"}; }
 `;
       const read = spawnSync("sh", ["-c", `${probes}\n${script}`, "sh", root, runtime], {
         encoding: "utf8",
@@ -488,9 +488,33 @@ podman() { ${state.storageProbe === "info-fails" ? "return 1" : state.storagePro
       if (read.error !== undefined) throw read.error;
       return oneShotHandle(read.stdout, read.status ?? 1, read.stderr);
     }
+    if (line.startsWith("exec 'docker' 'image' 'tag' ")) {
+      const source = words[3] ?? "";
+      const reference = words[4] ?? "";
+      const original = state.workerImages.find(
+        (image) =>
+          image.split(" ")[0]?.replace(/^sha256:/u, "") === source.replace(/^sha256:/u, ""),
+      );
+      if (original === undefined) return oneShotHandle("", 1, "No such image");
+      const [id, , , ...created] = original.split(" ");
+      const colon = reference.lastIndexOf(":");
+      state.workerImages = state.workerImages.filter(
+        (image) => !image.startsWith(`${id} <none> <none> `),
+      );
+      state.workerImages.push(
+        `${id} ${reference.slice(0, colon)} ${reference.slice(colon + 1)} ${created.join(" ")}`,
+      );
+      return oneShotHandle("", 0);
+    }
     if (line.startsWith("exec 'docker' 'image' 'ls' "))
       return state.imageListError === undefined
-        ? oneShotHandle(state.workerImages.map((image) => `${image}\n`).join(""), 0)
+        ? oneShotHandle(
+            state.workerImages
+              .filter((image) => words[6] === undefined || image.split(" ")[1] === words[6])
+              .map((image) => `${image}\n`)
+              .join(""),
+            0,
+          )
         : oneShotHandle("", 1, state.imageListError);
     if (line.includes("ps --all --quiet"))
       return state.containerListError === undefined

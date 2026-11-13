@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest";
-import { MinFreeDiskGib } from "@usine/core/worker";
+import { ContainerImage, MinFreeDiskGib } from "@usine/core/worker";
 import { Effect, Fiber, Layer, Option } from "effect";
 import { TestClock } from "effect/testing";
 import { reportsDiskFull } from "../../src/disk-full.ts";
@@ -203,6 +203,119 @@ describe("free disk space of an SSH Worker", () => {
 });
 
 describe("older worker images on an SSH Worker", () => {
+  it.effect.each([
+    { configured: "docker.io/acme/worker", listed: "acme/worker" },
+    { configured: "docker.io/library/ubuntu", listed: "ubuntu" },
+    { configured: "acme/worker", listed: "docker.io/acme/worker" },
+    { configured: "ubuntu", listed: "docker.io/library/ubuntu" },
+  ])("cleans images configured as $configured and listed as $listed", ({ configured, listed }) => {
+    const machine = fakeMachine();
+    machine.state.docker = "running";
+    machine.state.pulledImageId = "sha256:c0";
+    machine.state.workerImages = [
+      `sha256:c0 ${listed} current 2026-11-13 08:00:00 +0000 UTC`,
+      `sha256:b0 ${listed} previous 2026-11-12 08:00:00 +0000 UTC`,
+      `sha256:a0 ${listed} older 2026-11-11 08:00:00 +0000 UTC`,
+      `sha256:ff private.example.com/${listed} older 2026-11-10 08:00:00 +0000 UTC`,
+    ];
+    return Effect.gen(function* () {
+      const executor = yield* Executor;
+      yield* executor.preflight(WORKER, [], 1);
+      assert.deepStrictEqual(machine.state.imageRemovals, [[`${listed}:older`]]);
+      assert.lengthOf(machine.state.workerImages, 3);
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        executorLayer(machine, mintingProvider(), {
+          ...ADDRESS,
+          container: {
+            ...ADDRESS.container,
+            image: Option.some(ContainerImage.make(`${configured}:current`)),
+          },
+        }).pipe(Layer.provide(noGateway)),
+      ),
+    );
+  });
+
+  it.effect.each([
+    { configured: REPOSITORY, listed: REPOSITORY },
+    { configured: "acme/worker", listed: "docker.io/acme/worker" },
+  ])(
+    "tracks mutable images configured as $configured across pulls without removing unrelated dangling images",
+    ({ configured, listed }) => {
+      const machine = fakeMachine();
+      machine.state.docker = "running";
+      machine.state.imageId = "sha256:a0";
+      machine.state.workerImages = [
+        `sha256:a0 ${listed} latest 2026-11-10 08:00:00 +0000 UTC`,
+        "sha256:ff <none> <none> 2026-11-01 08:00:00 +0000 UTC",
+      ];
+      machine.state.beforePull = Effect.sync(() => {
+        machine.state.workerImages = machine.state.workerImages.map((line) =>
+          line.startsWith(`${machine.state.imageId} ${listed} latest `)
+            ? line.replace(`${listed} latest`, "<none> <none>")
+            : line,
+        );
+        const day = machine.state.pulledImageId === "sha256:b0" ? 11 : 12;
+        machine.state.workerImages.push(
+          `${machine.state.pulledImageId} ${listed} latest 2026-11-${day} 08:00:00 +0000 UTC`,
+        );
+      });
+      const layer = executorLayer(machine, mintingProvider(), {
+        ...ADDRESS,
+        container: {
+          ...ADDRESS.container,
+          image: Option.some(ContainerImage.make(`${configured}:latest`)),
+        },
+      }).pipe(Layer.provide(noGateway));
+      return Effect.gen(function* () {
+        machine.state.pulledImageId = "sha256:b0";
+        yield* Effect.gen(function* () {
+          const executor = yield* Executor;
+          yield* executor.preflight(WORKER, [], 1);
+        }).pipe(Effect.scoped, Effect.provide(layer));
+        assert.lengthOf(machine.state.imageRemovals, 0);
+        const retained = machine.state.workerImages.find((line) => line.startsWith("sha256:a0 "));
+        assert.strictEqual(retained?.split(" ")[1], listed);
+        machine.state.pulledImageId = "sha256:c0";
+        yield* Effect.gen(function* () {
+          const executor = yield* Executor;
+          yield* executor.preflight(WORKER, [], 1);
+        }).pipe(Effect.scoped, Effect.provide(layer));
+        assert.deepStrictEqual(
+          machine.state.workerImages.map((line) => line.split(" ")[0]).sort(),
+          ["sha256:b0", "sha256:c0", "sha256:ff"],
+        );
+        assert.lengthOf(machine.state.imageRemovals, 1);
+      });
+    },
+  );
+
+  it.effect("keeps all images and warns when a worker image creation time is unreadable", () => {
+    const machine = fakeMachine();
+    machine.state.docker = "running";
+    machine.state.pulledImageId = "sha256:c0";
+    machine.state.workerImages = [
+      `sha256:c0 ${REPOSITORY} current 2026-11-13 08:00:00 +0000 UTC`,
+      `sha256:b0 ${REPOSITORY} previous yesterday`,
+      `sha256:a0 ${REPOSITORY} older 2026-11-11 08:00:00 +0000 UTC`,
+    ];
+    const images = [...machine.state.workerImages];
+    const logs = capturedLogs();
+    return Effect.gen(function* () {
+      const executor = yield* Executor;
+      yield* executor.preflight(WORKER, [], 1);
+      assert.deepStrictEqual(machine.state.workerImages, images);
+      assert.lengthOf(machine.state.imageRemovals, 0);
+      assert.isTrue(
+        logs.warnings.some((line) => line.includes("without a readable creation time")),
+      );
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(runtime(machine, mintingProvider()).pipe(Layer.provideMerge(logs.layer))),
+    );
+  });
+
   it("names the repository of an image without its tag or digest", () => {
     assert.strictEqual(imageRepository("ghcr.io/acme/worker:1.2"), "ghcr.io/acme/worker");
     assert.strictEqual(imageRepository("localhost:5000/worker"), "localhost:5000/worker");
