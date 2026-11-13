@@ -131,6 +131,11 @@ export class FailedAttemptView extends Schema.TaggedClass<
 >("@usine/orchestrator/FailedAttemptView")("Failed", {
   /** The failure details safe to return to operator clients. */
   failure: FailureView,
+  /**
+   * The final report that the Attempt kept when the completion check rejected it, or null for
+   * other failures and in Run lists.
+   */
+  report: Schema.NullOr(Schema.String).pipe(Schema.withConstructorDefault(Effect.succeed(null))),
 }) {}
 
 /** An Attempt that ended after cancellation. */

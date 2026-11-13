@@ -44700,11 +44700,22 @@
                 "$ref": "#/components/schemas/_usine_orchestrator_ChildSessionBudgetFailureViewEncoded"
               }
             ]
+          },
+          "report": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
           "_tag",
-          "failure"
+          "failure",
+          "report"
         ],
         "additionalProperties": false
       },

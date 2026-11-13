@@ -19,6 +19,7 @@ import { type BotAccount, BotLogin, WorkerName } from "@usine/core/worker";
 import { CompletionCheck } from "@usine/engine/completion-check";
 import { RunEngine, Submission } from "@usine/engine/engine";
 import { layer as engineLayer } from "@usine/engine/local-sqlite";
+import { summarizeRun } from "@usine/engine/run-reader";
 import { StepExecutor } from "@usine/engine/step-executor";
 import {
   GitHubApiError,
@@ -52,6 +53,7 @@ import {
 } from "effect";
 import { TestClock } from "effect/testing";
 import { completionCheckLayer } from "../src/completion-check.ts";
+import { runSummaryView, runView } from "../src/operator/projection.ts";
 import { gitHubItemKey } from "../src/polling/repository-sync.ts";
 import { engineItemChecksLayer } from "../src/runtime.ts";
 import { sqliteTempDirectory } from "../../../tooling/test/sqlite.mts";
@@ -922,6 +924,20 @@ it.live("fails without re-running the agent when the attempt added no outcome la
       const outcome = finished.attempts[0]?.outcome;
       assert(outcome !== undefined && Option.isSome(outcome) && outcome.value._tag === "Failed");
       assert.strictEqual(outcome.value.failure._tag, "AgentFailure");
+      // The run detail shows the rejected report next to the failure; Run lists omit it.
+      const view = runView(finished, new Set(), new Map());
+      assert.deepStrictEqual(
+        view.attempts.map(({ outcome }) =>
+          outcome?._tag === "Failed" ? [outcome.failure._tag, outcome.report] : null,
+        ),
+        [["AgentFailure", "Review published."]],
+      );
+      assert.deepStrictEqual(
+        runSummaryView(summarizeRun(finished), new Set(), new Map()).attempts.map(({ outcome }) =>
+          outcome?._tag === "Failed" ? outcome.report : undefined,
+        ),
+        [null],
+      );
     }),
   );
 });
