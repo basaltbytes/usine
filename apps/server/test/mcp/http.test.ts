@@ -128,6 +128,12 @@ const idleEnds = (logs: ReadonlyArray<LogLine>) =>
       message === "MCP session ended" && jsonKey(fields ?? null) === jsonKey({ reason: "idle" }),
   ).length;
 
+const linesOf = (logs: ReadonlyArray<LogLine>, message: string) =>
+  logs.filter((line) => line.message === message).length;
+
+const HAND_BACK = "MCP sweep handed sessions back for the next sweep";
+const CLIENT_REFUSED = "MCP tool server refused the client's DELETE; the session stays open";
+
 const makeFixture = () =>
   Effect.gen(function* () {
     // Replaces one call of the auth store's `authenticate`, after `skip` calls pass through.
@@ -635,12 +641,14 @@ describe("operator MCP endpoint", () => {
       yield* Deferred.succeed(release, undefined);
       assert.equal(idleEnds(logs), 0);
       assert.deepInclude(logs, {
-        message: "MCP sweep handed sessions back for the next sweep",
+        message: HAND_BACK,
         fields: { sessions: 3, reasons: "idle" },
       });
       const owned = yield* owner.status("tools/list");
       assert.equal(owned, 404);
       assert.equal(idleEnds(logs), 3);
+      // A sweep with nothing to hand back logs nothing.
+      assert.equal(linesOf(logs, HAND_BACK), 1);
     }).pipe(Effect.scoped),
   );
 
@@ -675,12 +683,13 @@ describe("operator MCP endpoint", () => {
       yield* Deferred.succeed(release, undefined);
       assert.equal(idleEnds(logs), 1);
       assert.deepInclude(logs, {
-        message: "MCP sweep handed sessions back for the next sweep",
+        message: HAND_BACK,
         fields: { sessions: 2, reasons: "idle" },
       });
       const owned = yield* owner.status("tools/list");
       assert.equal(owned, 404);
       assert.equal(idleEnds(logs), 3);
+      assert.equal(linesOf(logs, HAND_BACK), 1);
       assert.notInclude(
         logs.map(({ message }) => message),
         "MCP session already ended on its tool server",
@@ -712,12 +721,13 @@ describe("operator MCP endpoint", () => {
       );
       assert.equal(idleEnds(logs), 1);
       assert.deepInclude(logs, {
-        message: "MCP sweep handed sessions back for the next sweep",
+        message: HAND_BACK,
         fields: { sessions: 1, reasons: "idle" },
       });
       const owned = yield* owner.status("tools/list");
       assert.equal(owned, 404);
       assert.equal(idleEnds(logs), 2);
+      assert.equal(linesOf(logs, HAND_BACK), 1);
     }).pipe(Effect.scoped),
   );
 
@@ -802,7 +812,7 @@ describe("operator MCP endpoint", () => {
       assert.equal(kept, 200);
       assert.notDeepInclude(logs, { message: "MCP session ended", fields: { reason: "client" } });
       assert.deepInclude(logs, {
-        message: "MCP tool server refused the client's DELETE; the session stays open",
+        message: CLIENT_REFUSED,
         fields: { status: 400 },
       });
       const ended = yield* client.end;
@@ -815,6 +825,8 @@ describe("operator MCP endpoint", () => {
         logs.filter(({ fields }) => jsonKey(fields ?? null) === jsonKey({ reason: "idle" })),
         [],
       );
+      // Only the refused DELETE is logged as refused; the session's other requests aren't DELETEs.
+      assert.equal(linesOf(logs, CLIENT_REFUSED), 1);
     }).pipe(Effect.scoped),
   );
 
