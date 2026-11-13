@@ -453,6 +453,7 @@ export const configurationJson = {
     maxChildren: 4,
     maxAttemptMinutes: null,
     maxAttemptTokens: 20_000_000,
+    maxBackgroundWaitMinutes: null,
     parentModel: "openai-codex/gpt-5.6-terra",
     parentEffort: null,
     coordinator: "session",

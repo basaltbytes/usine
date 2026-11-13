@@ -161,7 +161,12 @@ const finishHarvested = (
         }),
         runId,
       );
-      const started = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
+      const started = yield* store.beginAttempt(
+        runId,
+        WorkerName.make("local"),
+        "local",
+        Option.none(),
+      );
       assert(started._tag === "AttemptStarted");
       const execution: StepExecution = started.execution;
       const commands: Array<string> = [];

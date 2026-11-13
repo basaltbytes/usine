@@ -34,6 +34,7 @@ import {
   Effect,
   Exit,
   Fiber,
+  FiberHandle,
   FiberSet,
   Layer,
   Option,
@@ -651,11 +652,90 @@ const makeClaudeSessions = Effect.gen(function* () {
     );
     const readRateLimits = claudeRateLimits(session);
     let backgroundTasks: ReadonlyArray<string> = [];
+    // Holds the timer that ends a wait for background work after the child answered.
+    const backgroundWait = yield* FiberHandle.make<void>();
     let reportsSessionState = false;
     let completedTurn = Option.none<string>();
     // API retries reported in the current turn, and whether the last retry is unresolved.
     let retries = 0;
     let retrying = false;
+
+    /**
+     * The configured wait for background work after an answer, or `None` for no limit. The limit
+     * is kept in memory, so a child that was already waiting when the orchestrator restarted has
+     * none.
+     */
+    const backgroundWaitLimit = Option.map(spec.maxBackgroundWaitMinutes, Duration.minutes);
+    /**
+     * Waits for background work after `answer`. With a configured limit, returns `answer` once the
+     * limit passes; if the operator holds the session then, a Release returns `answer` instead, and
+     * a paused session stays open until the operator's next message.
+     */
+    const awaitBackgroundWork = Effect.fn("ClaudeRuntime.awaitBackgroundWork")(function* (
+      answer: string,
+    ) {
+      yield* Effect.annotateCurrentSpan({ sessionId: session.id });
+      const limitText = Option.match(backgroundWaitLimit, {
+        onNone: () => "none",
+        onSome: Duration.format,
+      });
+      yield* Effect.logInfo("Claude child is waiting for background work", {
+        sessionId: session.id,
+        backgroundTaskIds: backgroundTasks,
+        limit: limitText,
+      });
+      if (Option.isNone(backgroundWaitLimit)) return;
+      const outlasted = (log: typeof Effect.logInfo, message: string) =>
+        Effect.suspend(() =>
+          log(message, {
+            sessionId: session.id,
+            backgroundTaskIds: backgroundTasks,
+            limit: limitText,
+          }),
+        );
+      yield* FiberHandle.run(
+        backgroundWait,
+        Effect.sleep(backgroundWaitLimit.value).pipe(
+          Effect.andThen(
+            conversation.finishOverdue(
+              answer,
+              outlasted(
+                Effect.logWarning,
+                "Claude child's background work outlasted the wait limit; returning its answer",
+              ),
+            ),
+          ),
+          Effect.flatMap((finished) =>
+            finished
+              ? Effect.void
+              : outlasted(
+                  Effect.logInfo,
+                  "Claude child's background work outlasted the wait limit; the operator's Hold or pause keeps it open until a Release",
+                ),
+          ),
+        ),
+      );
+    });
+    /**
+     * Cancels the running wait limit and logs `reason` if a wait ran. A started turn also drops the
+     * answer that a passed limit kept for a Release; a process resume keeps it, so that the
+     * recovery reports it.
+     */
+    const resumeTurn = Effect.fn("ClaudeRuntime.resumeTurn")(function* (
+      reason: "turn started" | "process resumed",
+    ) {
+      const wait = yield* FiberHandle.get(backgroundWait);
+      if (Option.isSome(wait)) yield* FiberHandle.clear(backgroundWait);
+      const dropped = reason === "turn started" && (yield* conversation.dropOverdue);
+      if (Option.isNone(wait) && !dropped) return;
+      yield* Effect.annotateCurrentSpan({ sessionId: session.id });
+      yield* Effect.logInfo("Claude child cancelled the wait limit for its background work", {
+        sessionId: session.id,
+        reason,
+        limitPassed: dropped,
+        backgroundTaskIds: backgroundTasks,
+      });
+    });
 
     const reportRetry = Effect.fn("ClaudeRuntime.reportRetry")(function* (
       retry: typeof ClaudeApiRetry.Type,
@@ -745,7 +825,10 @@ const makeClaudeSessions = Effect.gen(function* () {
             resetsAt: DateTime.formatIso(reported.rejectedUntil.value),
           });
         if (Option.isSome(reported.retry)) return yield* reportRetry(reported.retry.value);
-        if (isAssistantMessage(message)) betweenTurns = false;
+        if (isAssistantMessage(message)) {
+          betweenTurns = false;
+          yield* resumeTurn("turn started");
+        }
         if (retrying && isAssistantMessage(message)) yield* reportRecovery();
         if (Schema.is(ClaudeCompletionHeader)(message)) {
           const update = yield* decodeCompletionUpdate(message).pipe(
@@ -765,6 +848,7 @@ const makeClaudeSessions = Effect.gen(function* () {
             });
           } else {
             reportsSessionState = true;
+            if (update.state !== "idle") yield* resumeTurn("turn started");
             const candidate = completedTurn;
             completedTurn = Option.none();
             // The SDK reports idle after the result flush and the background-notification loop.
@@ -772,11 +856,7 @@ const makeClaudeSessions = Effect.gen(function* () {
             // answer is not reused before the notification has run.
             if (update.state === "idle" && Option.isSome(candidate)) {
               if (backgroundTasks.length === 0) yield* conversation.finish(candidate.value);
-              else
-                yield* Effect.logInfo("Claude child is waiting for background work", {
-                  sessionId: session.id,
-                  backgroundTaskIds: backgroundTasks,
-                });
+              else yield* awaitBackgroundWork(candidate.value);
             }
           }
           return;
@@ -790,6 +870,7 @@ const makeClaudeSessions = Effect.gen(function* () {
           yield* channel.emit(event);
         }
         if (!Schema.is(ClaudeResultMessage)(message)) return;
+        yield* resumeTurn("turn started");
         betweenTurns = true;
         completedTurn = Option.none();
         retries = 0;
@@ -850,10 +931,7 @@ const makeClaudeSessions = Effect.gen(function* () {
         if (reportsSessionState) {
           completedTurn = Option.some(answer);
         } else if (backgroundTasks.length > 0) {
-          yield* Effect.logInfo("Claude child is waiting for background work", {
-            sessionId: session.id,
-            backgroundTaskIds: backgroundTasks,
-          });
+          yield* awaitBackgroundWork(answer);
         } else {
           // Older Claude Code versions on Workers do not send session-state messages.
           yield* conversation.finish(answer);
@@ -911,6 +989,7 @@ const makeClaudeSessions = Effect.gen(function* () {
       if ((yield* lifecycle.isStopping) || (yield* channel.isTerminal)) return;
       const empty = !(yield* Ref.updateAndGet(taskSaved, (saved) => saved || prompted));
       yield* channel.emit(SessionTokensUpdated.make({ session, ...usage.restart() }));
+      yield* resumeTurn("process resumed");
       backgroundTasks = [];
       completedTurn = Option.none();
       reportsSessionState = false;

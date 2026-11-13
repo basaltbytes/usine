@@ -120,7 +120,7 @@ const gatedExecutor = Layer.succeed(StepExecutor)({
   recover: () => Effect.succeed("found" as const),
   intervene: () => Effect.void,
   interrupt: () => Effect.void,
-  occupy: (worker) => Effect.succeed({ worker, release: Effect.void }),
+  occupy: (worker) => Effect.succeed({ worker, kind: "local", release: Effect.void }),
   sweep: Effect.void,
   discard: () => Effect.void,
   reserve: () => Effect.die("an approval-gated test run must not reserve a worker"),

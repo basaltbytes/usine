@@ -1,7 +1,8 @@
 import { jsonKey } from "@usine/core/json-key";
 import { assert, describe, it } from "@effect/vitest";
 import { CHILD_KILL_SCRIPT, RemoteShell } from "@usine/agents/child-host";
-import { githubSignature } from "@usine/core/agent";
+import { AgentName, githubSignature } from "@usine/core/agent";
+import { AgentSessionId, ChildSession, SessionFinished } from "@usine/core/agent/session";
 import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { AttemptId, AttemptWindow, AttemptWindows } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
@@ -791,6 +792,58 @@ describe("exe.dev launch", () => {
           const currentLive = yield* executor.isLive(ATTEMPT_ID);
           assert.isFalse(currentLive);
         }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer, completes, storage)));
+      });
+    },
+  );
+
+  it.effect(
+    "salvages a reattached Attempt that succeeded after an answer at its wait limit, with the limit it ran with",
+    () => {
+      const ssh = fakeSsh();
+      ssh.state.salvage = "dirty";
+      const storage = new StubStorage();
+      return Effect.gen(function* () {
+        yield* stopMidAttempt(
+          ssh,
+          storage,
+          CheckoutRequest.make({ ...request, maxBackgroundWaitMinutes: Option.some(10) }),
+        );
+        const { transcript, sink } = recording();
+        // The transcript store keeps the child's answer at the limit from before the restart.
+        transcript.push([
+          "outbound",
+          AttemptChannel.OutboundEnvelope.make({
+            version: AttemptChannel.PROTOCOL_VERSION,
+            attemptId: ATTEMPT_ID,
+            sequence: AttemptChannel.Sequence.make(1),
+            sentAt: yield* DateTime.now,
+            payload: AttemptChannel.SessionEvent.make({
+              event: SessionFinished.make({
+                session: ChildSession.make({
+                  id: AgentSessionId.make("child"),
+                  parentId: AgentSessionId.make("parent"),
+                  agent: AgentName.make("developer"),
+                  brain: TEST_AGENT.brain,
+                }),
+                backgroundWaitLimitPassed: true,
+              }),
+            }),
+          }),
+        ]);
+        const salvaged: Array<string> = [];
+        yield* Effect.gen(function* () {
+          const executor = yield* Executor;
+          yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
+          // The operator removed the limit before the restart.
+          const prepared = yield* executor.prepare(
+            CheckoutRequest.make({ ...request, reattach: true }),
+          );
+          yield* prepared.launch({
+            ...sink,
+            salvage: (salvage) => Effect.sync(() => void salvaged.push(salvage._tag)),
+          });
+        }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer, completes, storage)));
+        assert.deepStrictEqual(salvaged, ["Pushed"]);
       });
     },
   );

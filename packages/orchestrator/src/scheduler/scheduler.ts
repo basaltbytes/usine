@@ -652,6 +652,7 @@ export const stepExecutorLayer = (
         });
         return {
           worker,
+          kind: executor.kind,
           release: Ref.modify(released, (done) => [!done, true] as const).pipe(
             Effect.flatMap((first) =>
               first
@@ -735,7 +736,7 @@ export const stepExecutorLayer = (
               "An Attempt already runs on a Worker the scheduler does not have; it occupies no slot, and that Worker takes no new Attempt",
               { worker },
             );
-            return { worker, release: Effect.void } satisfies WorkerLease;
+            return { worker, kind: executor.kind, release: Effect.void } satisfies WorkerLease;
           }
           yield* changedWorker(worker);
           const fields = { worker, running: slots.leased + 1, slots: slots.capacity };
@@ -964,6 +965,7 @@ export const stepExecutorLayer = (
                 maxChildren: settings.maxChildren,
                 maxAttemptMinutes: settings.maxAttemptMinutes,
                 maxAttemptTokens: settings.maxAttemptTokens,
+                maxBackgroundWaitMinutes: settings.maxBackgroundWaitMinutes,
                 parentEffort: resolveParentEffort(execution.agent, settings.parentEffort),
                 coordinator,
                 salvageRef: salvageRefFor(execution.run.id, execution.attempt.number),

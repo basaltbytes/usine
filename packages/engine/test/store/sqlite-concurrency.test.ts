@@ -53,7 +53,12 @@ for (const method of ["standalone", "list", "board"] as const) {
           const store = yield* RunStore;
           const runId = RunId.make("concurrent-read");
           yield* store.recordAndClaim(lifecycleSubmission, runId);
-          const started = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
+          const started = yield* store.beginAttempt(
+            runId,
+            WorkerName.make("local"),
+            "local",
+            Option.none(),
+          );
           assert(started._tag === "AttemptStarted");
           const envelope = AttemptChannel.OutboundEnvelope.make({
             version: AttemptChannel.PROTOCOL_VERSION,

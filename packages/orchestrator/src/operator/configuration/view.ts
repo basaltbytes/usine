@@ -464,6 +464,11 @@ export class SettingsView extends Schema.Class<
   maxAttemptMinutes: Schema.NullOr(Schema.Int),
   /** The attempt token ceiling, or null without a ceiling. */
   maxAttemptTokens: Schema.NullOr(Schema.Int),
+  /**
+   * The minutes an idle child that answered waits for its background work, or null without a
+   * limit.
+   */
+  maxBackgroundWaitMinutes: Schema.NullOr(Schema.Int),
   /** The instance default parent model, or null to let Pi choose. */
   parentModel: Schema.NullOr(ModelId),
   /** The instance default parent reasoning effort, or null to use the agent effort. */
@@ -793,6 +798,7 @@ const makeOperatorConfiguration = Effect.gen(function* () {
         maxChildren: settings.maxChildren,
         maxAttemptMinutes: Option.getOrNull(settings.maxAttemptMinutes),
         maxAttemptTokens: Option.getOrNull(settings.maxAttemptTokens),
+        maxBackgroundWaitMinutes: Option.getOrNull(settings.maxBackgroundWaitMinutes),
         parentModel: Option.getOrNull(settings.parentModel),
         parentEffort: Option.getOrNull(settings.parentEffort),
         coordinator: settings.coordinator,

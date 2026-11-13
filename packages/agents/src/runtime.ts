@@ -186,6 +186,14 @@ export class ChildRequest extends Schema.Class<
    * on other workers, whose attempts share one Claude login.
    */
   machine: Schema.Option(MachineId),
+  /**
+   * The minutes an idle child that answered waits for its background work to start a turn, or
+   * `None` for no limit. When the limit passes, the child returns its answer, and closing it stops
+   * its background tasks.
+   */
+  maxBackgroundWaitMinutes: Schema.OptionFromOptionalKey(
+    Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
+  ).pipe(Schema.withConstructorDefault(Effect.succeed(Option.none<number>()))),
 }) {}
 
 /** The final message a parent or child session returns. */

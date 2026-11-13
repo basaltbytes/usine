@@ -196,6 +196,7 @@ export const attemptSelection = {
   runId: attempts.runId,
   stepName: attempts.stepName,
   worker: attempts.workerName,
+  workerKind: attempts.workerKind,
   number: attempts.attemptNumber,
   brain: attempts.brainJson,
   task: attempts.task,
@@ -351,7 +352,10 @@ export const queriesFor = (
       return decoded.map(({ number, outcome, salvage, ...attempt }) => ({
         ...attempt,
         ref: salvageRefFor(attempt.runId, number),
-        succeeded: outcome === "Succeeded" || outcome === "AwaitingCi" || outcome === "HandedOff",
+        // A success whose salvage didn't push all its work keeps its checkout for recovery to salvage.
+        succeeded:
+          (outcome === "Succeeded" || outcome === "AwaitingCi" || outcome === "HandedOff") &&
+          (salvage === null || salvage._tag === "Pushed"),
         open: outcome === "",
         rejected: salvage?._tag === "Rejected" ? Option.some(salvage) : Option.none(),
       }));
@@ -676,6 +680,7 @@ export const queriesFor = (
         runId: attempt.runId,
         stepName: attempt.stepName,
         workerName: attempt.worker,
+        workerKind: Option.getOrNull(attempt.workerKind),
         attemptNumber: attempt.number,
         brainJson: brainJson,
         task: attempt.task,

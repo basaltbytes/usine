@@ -15,7 +15,7 @@ import type { RunState } from "../run/state.ts";
 import { RunId } from "../run/run.ts";
 import { Comment, StepResult } from "../step/result.ts";
 import { StepName } from "../step/step.ts";
-import { ContainerId, ContainerMemoryMib, WorkerName } from "../worker.ts";
+import { ContainerId, ContainerMemoryMib, WorkerKind, WorkerName } from "../worker.ts";
 import { AttemptFailure, isAutoRetryableFailure } from "./failure.ts";
 import { AttemptOutcome } from "./outcome.ts";
 import { AttemptSalvage } from "./salvage.ts";
@@ -181,6 +181,14 @@ export class Attempt extends Schema.Class<
   stepName: StepName,
   /** The worker assigned to this attempt. */
   worker: WorkerName,
+  /**
+   * The kind of `worker` when the attempt started, which decides its GitHub writer, or `None` for
+   * older records.
+   */
+  workerKind: Schema.Option(WorkerKind).pipe(
+    Schema.withDecodingDefaultKey(Effect.succeedNone),
+    Schema.withConstructorDefault(Effect.succeedNone),
+  ),
   /** The 1-based position of this attempt in the step, including automatic retries. */
   number: AttemptNumber,
   /** The child-session brain settings recorded for this attempt. */

@@ -207,6 +207,92 @@ const deliveries = () => {
 };
 
 describe("session supervision", () => {
+  it.effect("keeps an overdue answer under the Hold of an in-flight operator message", () =>
+    Effect.gen(function* () {
+      const session = child("overdue-takeover");
+      const channel = yield* sessionChannel({ sessionId: session.id, label: "Conversation test" });
+      const sending = yield* Deferred.make<void>();
+      const delivered = yield* Deferred.make<void>();
+      const controls = yield* sessionConversation({
+        session,
+        channel,
+        held: false,
+        paused: false,
+        idle: Option.none(),
+        idleAnsweredOperator: false,
+        send: () =>
+          Deferred.succeed(sending, undefined).pipe(
+            Effect.andThen(Deferred.await(delivered)),
+            Effect.as("read" as const),
+          ),
+        pause: Effect.void,
+        beforeFinish: Effect.void,
+      });
+      const takeover = yield* controls
+        .intervene(OperatorMessage.make({ message: "Wait for my review." }), noDelivery)
+        .pipe(Effect.forkChild);
+      yield* Deferred.await(sending);
+      const overdue = yield* controls
+        .finishOverdue("Waiting for CI", Effect.void)
+        .pipe(Effect.forkChild({ startImmediately: true }));
+      assert.strictEqual(overdue.pollUnsafe(), undefined);
+      const returnedDuringSend = yield* Deferred.isDone(channel.result);
+      assert.isFalse(returnedDuringSend);
+
+      yield* Deferred.succeed(delivered, undefined);
+      assert.isTrue((yield* Fiber.join(takeover)).held);
+      const finishedOverdue = yield* Fiber.join(overdue);
+      const terminal = yield* channel.isTerminal;
+      const idle = yield* controls.isIdle;
+      const events = yield* Queue.clear(channel.events);
+      assert.isFalse(finishedOverdue);
+      assert.isFalse(terminal);
+      assert.isFalse(idle);
+      assert.deepStrictEqual(events, []);
+
+      yield* controls.intervene(Release.make(), noDelivery);
+      assert.strictEqual((yield* Deferred.await(channel.result)).message, "Waiting for CI");
+    }),
+  );
+
+  it.effect("waits for a Release to finish before dropping a kept answer", () =>
+    Effect.gen(function* () {
+      const session = child("overdue-release");
+      const channel = yield* sessionChannel({ sessionId: session.id, label: "Conversation test" });
+      const finishing = yield* Deferred.make<void>();
+      const cleanedUp = yield* Deferred.make<void>();
+      const controls = yield* sessionConversation({
+        session,
+        channel,
+        held: true,
+        paused: false,
+        idle: Option.some("CI passed"),
+        idleAnsweredOperator: false,
+        send: () => Effect.succeed("read"),
+        pause: Effect.void,
+        beforeFinish: Deferred.succeed(finishing, undefined).pipe(
+          Effect.andThen(Deferred.await(cleanedUp)),
+        ),
+      });
+      const finishedOverdue = yield* controls.finishOverdue("Waiting for CI", Effect.void);
+      assert.isFalse(finishedOverdue);
+      const release = yield* controls.intervene(Release.make(), noDelivery).pipe(Effect.forkChild);
+      yield* Deferred.await(finishing);
+      const drop = yield* controls.dropOverdue.pipe(Effect.forkChild({ startImmediately: true }));
+      assert.strictEqual(drop.pollUnsafe(), undefined);
+      const returnedDuringCleanup = yield* Deferred.isDone(channel.result);
+      assert.isFalse(returnedDuringCleanup);
+
+      yield* Deferred.succeed(cleanedUp, undefined);
+      assert.isFalse((yield* Fiber.join(release)).held);
+      const dropped = yield* Fiber.join(drop);
+      assert.isTrue(dropped);
+      assert.strictEqual((yield* Deferred.await(channel.result)).message, "CI passed");
+      const droppedAgain = yield* controls.dropOverdue;
+      assert.isFalse(droppedAgain);
+    }),
+  );
+
   it.effect(
     "reports a message to a working child queued, with no resume, until the harness reads it",
     () =>

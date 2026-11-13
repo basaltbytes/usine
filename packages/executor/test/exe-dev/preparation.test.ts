@@ -465,7 +465,12 @@ describe("exe.dev preparation", () => {
       // The sweep failure doesn't block prepare, and the path outside the Worker root isn't touched.
       const outcomeLabels = [GitHubLabelName.make("ready-to-merge")];
       const prepared = yield* executor.prepare(
-        CheckoutRequest.make({ ...request, requiresCi: true, outcomeLabels }),
+        CheckoutRequest.make({
+          ...request,
+          requiresCi: true,
+          outcomeLabels,
+          maxBackgroundWaitMinutes: Option.some(9),
+        }),
       );
       assert.strictEqual(prepared.workspace.spec.attemptId, ATTEMPT_ID);
       assert.deepStrictEqual(prepared.workspace.spec.payload, request.payload);
@@ -473,6 +478,7 @@ describe("exe.dev preparation", () => {
       assert.deepStrictEqual(prepared.workspace.spec.parentModel, request.parentModel);
       assert.isTrue(prepared.workspace.spec.requiresCi);
       assert.deepStrictEqual(prepared.workspace.spec.outcomeLabels, outcomeLabels);
+      assert.deepStrictEqual(prepared.workspace.spec.maxBackgroundWaitMinutes, Option.some(9));
       const commandLine = ssh.state.commands.map(({ args }) => args.join(" ")).join("\n");
       assert(!commandLine.includes("/tmp/not-a-worker-child"));
       assert(commandLine.includes("integrations attach"));

@@ -259,6 +259,13 @@ export class CheckoutRequest extends Schema.Class<
   maxAttemptMinutes: Schema.Option(Schema.Int.check(Schema.isGreaterThan(0))),
   /** The maximum tokens consumed by the parent and all children, or `None` for no limit. Holds don't pause it. */
   maxAttemptTokens: Schema.Option(Schema.Int.check(Schema.isGreaterThan(0))),
+  /**
+   * The minutes an idle child that answered waits for its background work to start a turn, or
+   * `None` for no limit; copied into the RunSpec.
+   */
+  maxBackgroundWaitMinutes: Schema.Option(Schema.Int.check(Schema.isGreaterThan(0))).pipe(
+    Schema.withConstructorDefault(Effect.succeed(Option.none<number>())),
+  ),
   /** The Pi parent's reasoning effort. The launch fails if the model doesn't support it. */
   parentEffort: Effort,
   /** What coordinates the Attempt's children, copied into the RunSpec. */

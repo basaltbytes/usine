@@ -93,7 +93,12 @@ it.live.each(["verified", "unverified"] as const)(
         const store = yield* RunStore;
         const runId = RunId.make("lagging-handoff");
         yield* store.recordAndClaim(required(), runId);
-        const started = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
+        const started = yield* store.beginAttempt(
+          runId,
+          WorkerName.make("local"),
+          "local",
+          Option.none(),
+        );
         assert(started._tag === "AttemptStarted");
         const result = StepResult.make({
           message: `[usine:awaiting-ci]\n${jsonKey({ pull_request: 815, head, fix_loop: "fix", timeout_seconds: 3600, on_green: [] })}`,
@@ -508,6 +513,7 @@ it.live(
             const started = yield* store.beginAttempt(
               sourceId,
               WorkerName.make("local"),
+              "local",
               Option.none(),
             );
             assert(started._tag === "AttemptStarted");
@@ -595,6 +601,7 @@ it.live("a reset replays a blocked CI fix that was ignored as superseded", () =>
           const started = yield* store.beginAttempt(
             RunId.make("source"),
             WorkerName.make("local"),
+            "local",
             Option.none(),
           );
           assert(started._tag === "AttemptStarted");
@@ -737,7 +744,12 @@ it.live("a suppressed CI fix stays queued until the operator resolves the blocke
         const current = submission({ number: 1 });
         const runId = RunId.make("blocked-ci-fix");
         yield* store.recordAndClaim(current, runId);
-        const started = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
+        const started = yield* store.beginAttempt(
+          runId,
+          WorkerName.make("local"),
+          "local",
+          Option.none(),
+        );
         assert(started._tag === "AttemptStarted");
         yield* store.finishAttempt(
           started.execution.attempt,
@@ -841,6 +853,7 @@ it.live.each([
             const started = yield* store.beginAttempt(
               sourceId,
               WorkerName.make("local"),
+              "local",
               Option.none(),
             );
             assert(started._tag === "AttemptStarted");

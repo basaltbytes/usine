@@ -15,7 +15,7 @@ import { Step } from "@usine/core/step";
 import { type Brand, Schema, Context, Effect, type Option, type Result } from "effect";
 import type * as AttemptChannel from "@usine/core/attempt/channel";
 import type { AttemptFailure } from "@usine/core/attempt/failure";
-import type { WorkerName } from "@usine/core/worker";
+import type { WorkerKind, WorkerName } from "@usine/core/worker";
 import type { StepCompletion } from "@usine/core/step/result";
 import type { Submission } from "./engine/submission.ts";
 
@@ -58,6 +58,8 @@ export class StepExecution extends Schema.Class<
 export interface WorkerLease {
   /** The worker whose capacity is reserved for the attempt. */
   readonly worker: WorkerName;
+  /** The kind of `worker`, which the Run records on an Attempt it starts there. */
+  readonly kind: WorkerKind;
   /** Frees the reserved slot after execution or recovery; the lease owner must run this effect. */
   readonly release: Effect.Effect<void>;
 }

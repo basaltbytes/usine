@@ -58,7 +58,7 @@ Infrastructure failures (`InfraFailure`) and provider capacity refusals (`Provid
 
 ## Attempt windows
 
-`AttemptWindow` is when an attempt worked on its run's item: `startedAt` to `endedAt` from its record, with no end while open. `windowOf(attempt)` returns none for an attempt that ended before usine recorded end times. `windowHolds(window, at)` opens a window at its start second, since GitHub records times to the second. `windowsOverlap` says whether GitHub can record a time inside both windows.
+`Attempt.workerKind` is the kind of the attempt's worker when the attempt started, which decides the GitHub account it writes as; it is none for older records. `AttemptWindow` is when an attempt worked on its run's item: `startedAt` to `endedAt` from its record, with no end while open. `windowOf(attempt)` returns none for an attempt that ended before usine recorded end times. `windowHolds(window, at)` opens a window at its start second, since GitHub records times to the second. `windowsOverlap` says whether GitHub can record a time inside both windows.
 
 Attempts on local and SSH workers all write as the same GitHub App, so a write inside two attempts' windows belongs to neither, in the run reader and in the harvest. The harvest keeps a comment only if the bot login wrote it with the agent's signature, after the worker prepared the checkout (creation, or a review's submission), inside the attempt's own window, and in no window of the agent's other overlapping attempts.
 
