@@ -117,7 +117,9 @@ const reservedReports = [
  * hub, and reports reserved reports and infrastructure failures to `call`.
  *
  * A replayed delegation whose earlier launch never returned launches again in the same slot if
- * it saved no conversation or the harness cannot reopen that conversation.
+ * it saved no conversation or the harness reports it unavailable with `SessionInterruptedError`.
+ * An unreadable saved conversation or a changed worker, machine, checkout, harness, or harness
+ * home returns `Interrupted` and uses a budget slot.
  *
  * Fails with `JournalError` when the journal fails outside a progress checkpoint, and with
  * `AgentSessionError` when a new delegation's child fails to launch or ends without a report; a

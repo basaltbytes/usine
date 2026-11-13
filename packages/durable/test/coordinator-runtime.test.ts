@@ -1826,6 +1826,16 @@ describe("event-driven coordinator restarts on SQLite", () => {
         assert.strictEqual(report.message, "Opened #12.");
         assert.strictEqual(relaunched.request.session.id, childSessionId(attemptId, 1));
         assert.include(relaunched.request.prompt, FIRST_ASSIGNMENT);
+        assert.deepStrictEqual(
+          recording
+            .outbound()
+            .flatMap(({ payload }) =>
+              payload._tag === "SessionEvent" && payload.event._tag === "SessionStarted"
+                ? [payload.event.prompt]
+                : [],
+            ),
+          [Option.some(relaunched.request.prompt)],
+        );
         assert.isTrue(Option.isNone(relaunched.request.resume));
         assert.deepStrictEqual(trace(recording.outbound()), [
           "Started",
@@ -1845,6 +1855,60 @@ describe("event-driven coordinator restarts on SQLite", () => {
         );
       }).pipe(Effect.scoped),
     );
+
+  it.live("fails a relaunched child as new without starting a replacement after a crash", () =>
+    Effect.gen(function* () {
+      const database = yield* temporaryDatabase;
+      const request = coordinated("restart/relaunched-crash", 2);
+      const attemptId = request.spec.attemptId;
+      const recording = recordingSink();
+      const launching = yield* Deferred.make<void>();
+      const first = yield* orchestrator(
+        CoordinatorRuntime.layer.pipe(
+          Layer.provide(Layer.mergeAll(sqliteJournal(database), WakeUp.rules)),
+          Layer.provideMerge(hangingLaunches(launching, "after-save")),
+        ),
+      );
+      yield* first.execute(request, recording.sink);
+      yield* Deferred.await(launching);
+      yield* first.stop;
+
+      const second = yield* orchestrator(
+        CoordinatorRuntime.layer.pipe(
+          Layer.provide(Layer.mergeAll(sqliteJournal(database), WakeUp.rules)),
+          Layer.provideMerge(unavailableConversations),
+        ),
+      );
+      const execution = yield* second.execute(request, recording.sink);
+      const relaunched = yield* second.nextChild;
+      yield* relaunched.crash("ssh: closed");
+      const failure = yield* Effect.raceFirst(
+        Fiber.join(execution).pipe(Effect.flip, Effect.asSome),
+        second.nextChild.pipe(Effect.as(Option.none())),
+      );
+      yield* second.stop;
+      const snapshot = yield* stored(database, attemptId);
+
+      assert.isTrue(
+        Option.isSome(failure),
+        "The crash must fail the attempt without a replacement",
+      );
+      assert.deepStrictEqual(
+        Option.map(failure, ({ _tag, message }) => ({ _tag, message })),
+        Option.some({ _tag: "InfraFailure", message: "ssh: closed" }),
+      );
+      assert.deepStrictEqual(
+        Option.map(snapshot, ({ events, delegations }) => ({
+          events: events.map(({ event }) =>
+            Option.match(tagOf(event), { onNone: () => "untagged", onSome: ({ _tag }) => _tag }),
+          ),
+          delegations: delegations.map(({ number }) => number),
+        })),
+        Option.some({ events: ["AttemptStarted", "ChildFailed"], delegations: [1] }),
+      );
+      assert.strictEqual(trace(recording.outbound()).at(-1), "Failed");
+    }).pipe(Effect.scoped),
+  );
 
   it.live("resumes a child that saved its session, with the same child ID", () =>
     Effect.gen(function* () {
