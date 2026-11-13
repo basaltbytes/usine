@@ -85,12 +85,14 @@ export const gatewayTokenVariables = Effect.fn("Instance.gatewayTokenVariables")
   return [...new Set(configuration.workers.flatMap(({ gateway }) => gateway?.adminTokenEnv ?? []))];
 });
 
-/** Returns whether an HTTP server answers on `port`, with any status. */
-export const answers = (port: Port) =>
-  Effect.flatMap(HttpClient.HttpClient, (client) => client.get(apiUrl(port, "/api/overview"))).pipe(
-    Effect.flatMap((response) => response.text),
+/**
+ * Returns whether the `usine up` on `port` has started: `GET /api/version` returns HTTP 200. Until
+ * then, its listener answers every request with HTTP 503.
+ */
+export const hasStarted = (port: Port) =>
+  Effect.flatMap(HttpClient.HttpClient, (client) => client.get(apiUrl(port, "/api/version"))).pipe(
+    Effect.flatMap((response) => Effect.as(response.text, response.status === 200)),
     Effect.timeout("2 seconds"),
-    Effect.as(true),
     Effect.orElseSucceed(() => false),
   );
 
