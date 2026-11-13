@@ -65,7 +65,7 @@ import {
   ParentReported,
   ResultRecorded,
 } from "../src/attempt-runtime.ts";
-import { AttemptRecordDoc } from "../src/attempt/documents.ts";
+import { AttemptRecordDoc, HoldDoc } from "../src/attempt/documents.ts";
 import { routedRuntimeLayer as attemptRuntimeLayer } from "../src/testing.ts";
 import { SUBAGENT_TOOL } from "../src/attempt/subagent.ts";
 import {
@@ -1739,6 +1739,53 @@ describe("durable AttemptRuntime", () => {
     }).pipe(Effect.scoped),
   );
 
+  it.live("keeps a held child's report from the parent until the operator's Release", () =>
+    Effect.gen(function* () {
+      const database = yield* temporaryDatabase;
+      yield* Effect.gen(function* () {
+        const runtime = yield* AttemptRuntime;
+        const request = attemptRequest("run/step/1188-held-report");
+        const recording = recordingSink();
+        const execution = yield* Effect.forkChild(runtime.execute(request, recording.sink));
+        const child = yield* (yield* StubChildren).next;
+        const sessionId = child.request.session.id;
+        // Hold the child in storage alone, so its result resolves while the Hold lasts.
+        yield* (yield* DurableHarness).use("hold the child", async (harness, context) => {
+          const record = await harness.snapshot(AttemptRecordDoc, request.spec.attemptId, context);
+          const taskId = record?.taskId;
+          assert(taskId !== null && taskId !== undefined);
+          await harness.commit(async (tx) => {
+            const hold = await tx.doc(HoldDoc, taskId);
+            hold.held = [...hold.held, sessionId];
+          }, context);
+        });
+        yield* child.reply("Finished.");
+        const early = yield* Fiber.join(execution).pipe(Effect.timeoutOption("300 millis"));
+        assert.isTrue(Option.isNone(early));
+        assert.notInclude(trace(recording.outbound()), "parent.ToolFinished:subagent");
+
+        yield* runtime.intervene(
+          request.spec.attemptId,
+          AttemptChannel.Intervention.make({
+            operator: "philippe",
+            target: AttemptChannel.ChildTarget.make({ sessionId }),
+            action: AttemptChannel.Release.make(),
+          }),
+        );
+        const report = yield* Fiber.join(execution);
+        assert.strictEqual(report.message, "Continued after the release.");
+        assertAdmitted(request.spec.attemptId, recording.outbound());
+      }).pipe(
+        Effect.provide(
+          layer({
+            database,
+            parent: [delegate("Fix the flaky test"), answer("Continued after the release.")],
+          }),
+        ),
+      );
+    }).pipe(Effect.scoped, Effect.timeout("10 seconds")),
+  );
+
   it.live(
     "gives every child the child host and machine its execute call supplies, and records on each child's session the Gateway credential in force when it starts",
     () =>
@@ -2291,6 +2338,43 @@ describe("durable AttemptRuntime", () => {
     }).pipe(Effect.scoped),
   );
 
+  it.live("keeps the first refusal when parallel delegations exceed the budget", () =>
+    Effect.gen(function* () {
+      const database = yield* temporaryDatabase;
+      yield* Effect.gen(function* () {
+        const runtime = yield* AttemptRuntime;
+        const request = attemptRequest("run/step/1188-first-refusal", 1);
+        const execution = yield* Effect.forkChild(runtime.execute(request, recordingSink().sink));
+
+        yield* (yield* (yield* StubChildren).next).reply("First child done.");
+        const failure = yield* Fiber.join(execution).pipe(Effect.flip);
+        assert.strictEqual(failure._tag, "ChildSessionBudgetFailure");
+        const record = yield* (yield* DurableHarness).use(
+          "read the Attempt record",
+          (harness, context) => harness.snapshot(AttemptRecordDoc, request.spec.attemptId, context),
+        );
+        assert.strictEqual(record?.children, 3);
+        assert.deepStrictEqual(record?.childBudgetExceeded, { attempted: 2, max: 1 });
+      }).pipe(
+        Effect.provide(
+          layer({
+            database,
+            parent: [
+              delegate("First part"),
+              fauxAssistantMessage(
+                [
+                  fauxToolCall(SUBAGENT_TOOL, { task: "Second part" }),
+                  fauxToolCall(SUBAGENT_TOOL, { task: "Third part" }),
+                ],
+                { stopReason: "toolUse" },
+              ),
+            ],
+          }),
+        ),
+      );
+    }).pipe(Effect.scoped),
+  );
+
   it.live("ends the Attempt with the operator question a child asked", () =>
     Effect.gen(function* () {
       const database = yield* temporaryDatabase;
@@ -2476,6 +2560,47 @@ describe("durable AttemptRuntime", () => {
               delegate("Complete the task"),
               delegate("Try again"),
               answer("Both children lost their transport."),
+            ],
+          }),
+        ),
+      );
+    }).pipe(Effect.scoped),
+  );
+
+  // Records written by older versions store a blocker without a `kind`.
+  it.live("keeps a stored blocker without a kind as a blocker when a new delegation starts", () =>
+    Effect.gen(function* () {
+      const database = yield* temporaryDatabase;
+      yield* Effect.gen(function* () {
+        const runtime = yield* AttemptRuntime;
+        const request = attemptRequest("run/step/1188-legacy-blocker");
+        const execution = yield* Effect.forkChild(runtime.execute(request, recordingSink().sink));
+
+        const first = yield* (yield* StubChildren).next;
+        yield* (yield* DurableHarness).use("store a blocker without a kind", (harness, context) =>
+          harness.commit(async (tx) => {
+            const record = await tx.doc(AttemptRecordDoc, request.spec.attemptId, null);
+            record.childBlocker = {
+              sessionId: "parent:run/step/1188-legacy-blocker:child:0",
+              message: "The repository is archived.",
+            };
+          }, context),
+        );
+        yield* first.reply("First child done.");
+        yield* (yield* (yield* StubChildren).next).reply("Second child done.");
+        const failure = yield* Fiber.join(execution).pipe(Effect.flip);
+        assert.deepStrictEqual(
+          failure,
+          BlockedFailure.make({ message: "The repository is archived." }),
+        );
+      }).pipe(
+        Effect.provide(
+          layer({
+            database,
+            parent: [
+              delegate("Publish the package"),
+              delegate("Try another way"),
+              answer("The children published the package."),
             ],
           }),
         ),
