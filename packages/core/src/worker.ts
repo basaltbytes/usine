@@ -189,6 +189,33 @@ export class ContainerLimits extends Schema.Class<
   pids: ContainerPids,
 }) {}
 
+/** Host protection limits for one supervisor conversation. */
+export class SupervisorLimits extends Schema.Class<
+  SupervisorLimits,
+  Brand.Brand<"@usine/core/worker/SupervisorLimits">
+>("SupervisorLimits")({
+  cpus: ContainerCpus.pipe(
+    Schema.withConstructorDefault(Effect.succeed(ContainerCpus.make(1))),
+    Schema.withDecodingDefaultKey(Effect.succeed(ContainerCpus.make(1))),
+  ),
+  memoryMib: ContainerMemoryMib.pipe(
+    Schema.withConstructorDefault(Effect.succeed(ContainerMemoryMib.make(1024))),
+    Schema.withDecodingDefaultKey(Effect.succeed(ContainerMemoryMib.make(1024))),
+  ),
+  pids: ContainerPids.pipe(
+    Schema.withConstructorDefault(Effect.succeed(ContainerPids.make(256))),
+    Schema.withDecodingDefaultKey(Effect.succeed(ContainerPids.make(256))),
+  ),
+  tmpfsSizeMib: ContainerScratchMib.pipe(
+    Schema.withConstructorDefault(Effect.succeed(ContainerScratchMib.make(64))),
+    Schema.withDecodingDefaultKey(Effect.succeed(ContainerScratchMib.make(64))),
+  ),
+  conversationSizeMib: ContainerScratchMib.pipe(
+    Schema.withConstructorDefault(Effect.succeed(ContainerScratchMib.make(512))),
+    Schema.withDecodingDefaultKey(Effect.succeed(ContainerScratchMib.make(512))),
+  ),
+}) {}
+
 /** The fields of `ContainerLimits`, in the order that logs and the web UI give them. */
 export const CONTAINER_LIMITS = ["cpus", "memoryMib", "pids"] as const satisfies ReadonlyArray<
   keyof typeof ContainerLimits.fields

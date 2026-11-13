@@ -1200,6 +1200,39 @@ workers:
     }).pipe(Effect.provide(parserLayer)),
   );
 
+  it.effect("parses supervisor limits with defaults and refuses disabled limits", () =>
+    Effect.gen(function* () {
+      const parser = yield* ConfigParser;
+      const config = yield* parser.parseUsineYaml(
+        InstancePath.make("usine.yaml"),
+        "version: 1\nrepos: []\nsettings:\n  supervisor_limits:\n    cpus: 0.5\n    conversation_size_mib: 128\n",
+      );
+      assert(Option.isSome(config.settings.supervisorLimits));
+      expect({ ...config.settings.supervisorLimits.value }).toEqual({
+        cpus: 0.5,
+        memoryMib: 1024,
+        pids: 256,
+        tmpfsSizeMib: 64,
+        conversationSizeMib: 128,
+      });
+      for (const field of [
+        "cpus",
+        "memory_mib",
+        "pids",
+        "tmpfs_size_mib",
+        "conversation_size_mib",
+      ]) {
+        const refused = yield* parser
+          .parseUsineYaml(
+            InstancePath.make("usine.yaml"),
+            `version: 1\nrepos: []\nsettings:\n  supervisor_limits:\n    ${field}: 0\n`,
+          )
+          .pipe(Effect.flip);
+        expect(refused.details?.some(({ path }) => path.includes(field))).toBe(true);
+      }
+    }).pipe(Effect.provide(parserLayer)),
+  );
+
   it.effect("parses the supervisor brain in settings", () =>
     Effect.gen(function* () {
       const parser = yield* ConfigParser;

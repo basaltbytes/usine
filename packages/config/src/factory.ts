@@ -21,6 +21,7 @@ import {
   CloudflareImageName,
   CloudflareInstanceType,
   CloudflareLlmProvider,
+  SupervisorLimits,
   ContainerCpus,
   ContainerImage,
   ContainerMemoryMib,
@@ -711,6 +712,16 @@ export class Settings extends Schema.Class<Settings, Brand.Brand<"@usine/config/
   supervisor: Schema.OptionFromOptionalKey(BrainSpec).pipe(
     Schema.withConstructorDefault(Effect.succeedNone),
   ),
+  /** Defaults to the host protection limits when omitted. */
+  supervisorLimits: Schema.OptionFromOptionalKey(
+    SupervisorLimits.pipe(
+      Schema.encodeKeys({
+        memoryMib: "memory_mib",
+        tmpfsSizeMib: "tmpfs_size_mib",
+        conversationSizeMib: "conversation_size_mib",
+      }),
+    ),
+  ).pipe(Schema.withConstructorDefault(Effect.succeedNone)),
 }) {}
 
 /**
@@ -769,6 +780,7 @@ const SettingsFromYaml = Settings.pipe(
     maxAttemptMinutes: "max_attempt_minutes",
     maxAttemptTokens: "max_attempt_tokens",
     maxBackgroundWaitMinutes: "max_background_wait_minutes",
+    supervisorLimits: "supervisor_limits",
     parentModel: "parent_model",
     parentEffort: "parent_effort",
   }),

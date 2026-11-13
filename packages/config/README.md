@@ -14,6 +14,8 @@ Each worker accepts `paused` (default `false`), which keeps new attempts off the
 
 Agent files and agent configuration values validate their harness ID against `@usine/agents/harness`. An unregistered ID fails schema validation before the agent enters the roster. Configuration import and edits also check each coding-agent brain against every configured worker through `admitBrain`. Unsupported placements or credential routes reject the configuration with the agent, worker, role, and the reason from the role or the harness descriptor.
 
+`settings.supervisor_limits` accepts positive `cpus`, `memory_mib`, `pids`, `tmpfs_size_mib` and `conversation_size_mib`. Decoded `Settings.supervisorLimits` uses camelCase fields. Omission preserves the default limits in `SupervisorLimits`; it does not disable protection. See the [settings reference](https://docs.usine.dev/reference/configuration/settings/#host-limits) for defaults and storage prerequisites.
+
 ## Labels and lanes
 
 Declare the labels that loops and lanes use once. usine creates missing labels in every managed repo and never edits or deletes labels:
