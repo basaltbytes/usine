@@ -291,6 +291,48 @@ describe("older worker images on an SSH Worker", () => {
     },
   );
 
+  it.effect("keeps another repository's tag when a mutable worker image rolls back", () => {
+    const machine = fakeMachine();
+    machine.state.docker = "running";
+    machine.state.imageId = "sha256:a0";
+    machine.state.pulledImageId = "sha256:b0";
+    const previous = `sha256:c0 ${REPOSITORY} 1.0 2026-11-12 08:00:00 +0000 UTC`;
+    const unrelated = "sha256:a0 team/tools a 2026-11-11 08:00:00 +0000 UTC";
+    const current = `sha256:b0 ${REPOSITORY} latest 2026-11-10 08:00:00 +0000 UTC`;
+    machine.state.workerImages = [
+      previous,
+      `sha256:a0 ${REPOSITORY} latest 2026-11-11 08:00:00 +0000 UTC`,
+      unrelated,
+    ];
+    machine.state.beforePull = Effect.sync(() => {
+      machine.state.workerImages = [
+        previous,
+        `sha256:a0 ${REPOSITORY} <none> 2026-11-11 08:00:00 +0000 UTC`,
+        unrelated,
+        current,
+      ];
+    });
+    return Effect.gen(function* () {
+      const executor = yield* Executor;
+      yield* executor.preflight(WORKER, [], 1);
+      assert.include(machine.state.workerImages, unrelated);
+      assert.include(machine.state.workerImages, previous);
+      assert.include(machine.state.workerImages, current);
+      assert.deepStrictEqual(machine.state.imageRemovals, [[`${REPOSITORY}:usine-retained-a0`]]);
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        executorLayer(machine, mintingProvider(), {
+          ...ADDRESS,
+          container: {
+            ...ADDRESS.container,
+            image: Option.some(ContainerImage.make(`${REPOSITORY}:latest`)),
+          },
+        }).pipe(Layer.provide(noGateway)),
+      ),
+    );
+  });
+
   it.effect("keeps all images and warns when a worker image creation time is unreadable", () => {
     const machine = fakeMachine();
     machine.state.docker = "running";
