@@ -15,7 +15,13 @@ import * as AttemptChannel from "@usine/core/attempt/channel";
 import { WorkerName } from "@usine/core/worker";
 import { Array as Arr, Effect, Layer, Option, Result, Stream } from "effect";
 import { LocalProcess } from "../../src/child-host/child-host.ts";
-import { type Capability, CapabilityProfile, Lacking } from "../../src/harness/capability.ts";
+import { AdmissionContext, admitBrain } from "../../src/harness/admission.ts";
+import {
+  type Capability,
+  CapabilityProfile,
+  Lacking,
+  Placement,
+} from "../../src/harness/capability.ts";
 import { catalog } from "../../src/harness/catalog.ts";
 import { claude } from "../../src/harness/claude/descriptor.ts";
 import { codex } from "../../src/harness/codex/descriptor.ts";
@@ -321,6 +327,28 @@ describe("the supervisor role", () => {
           reason: "The supervisor uses the gateway credential that the instance already has",
         }),
         credential,
+      );
+    }
+  });
+
+  it("runs only at the orchestrator placement", () => {
+    const elsewhere = Placement.literals.filter((placement) => placement !== "orchestrator");
+    for (const placement of elsewhere) {
+      const refused = admitBrain(
+        catalog,
+        supervisor,
+        claudeBrain,
+        AdmissionContext.make({ placement, credential: "gateway" }),
+        { reopens: true },
+      );
+      assert(Result.isFailure(refused), placement);
+      assert.deepInclude(
+        refused.failure.missing,
+        Lacking.make({
+          capability: "orchestrator",
+          reason: "The supervisor runs on the orchestrator host",
+        }),
+        placement,
       );
     }
   });

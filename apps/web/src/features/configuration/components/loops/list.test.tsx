@@ -675,6 +675,15 @@ const selectLabeled = (markup: string, label: string): string => {
   return markup.slice(start, end);
 };
 
+/** Returns the markup of the input labeled `label`, from its label to the end of the input tag. */
+const inputLabeled = (markup: string, label: string): string => {
+  const start = markup.indexOf(`>${label}</label>`);
+  assert.isAtLeast(start, 0, `the form has a ${label} field`);
+  const input = markup.indexOf("<input", start);
+  assert.isAtLeast(input, 0, `the ${label} field is an input`);
+  return markup.slice(start, markup.indexOf(">", input) + 1);
+};
+
 describe("Configuration forms", () => {
   const noop = () => {};
 
@@ -699,17 +708,25 @@ describe("Configuration forms", () => {
     assert.notInclude(without, "Supervisor model");
     const markup = await render(() => (
       <SettingsFields
-        value={{ settings: { supervisor: { harness: "", model: "", effort: "medium" } } }}
+        value={{
+          settings: {
+            supervisor: { harness: "claude", model: "claude-sonnet-5-5", effort: "medium" },
+          },
+        }}
         onChange={noop}
         problems={[]}
       />
     ));
     assert.include(
+      selectLabeled(markup, "Supervisor harness"),
+      '<option value="claude" selected="">',
+    );
+    assert.include(inputLabeled(markup, "Supervisor model"), 'value="claude-sonnet-5-5"');
+    assert.include(
       selectLabeled(markup, "Supervisor effort"),
       '<option value="medium" selected="">',
     );
     assert.include(text(markup), "The harness must serve usine tool sets.");
-    assert.include(markup, ">Supervisor model</label>");
   });
 
   it("edits an Agent's coordinator in the agent form", async () => {
