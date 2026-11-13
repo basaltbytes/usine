@@ -242,28 +242,39 @@ const loginRace = (contended: number) => {
 /** Collects the messages logged at `levels`. */
 const logLines = (levels: ReadonlyArray<string>) => {
   const lines: Array<string> = [];
+  // The level of each entry in `lines`, at the same index.
+  const lineLevels: Array<string> = [];
   const logger = Logger.make<unknown, void>(({ logLevel, message }) => {
-    if (levels.includes(logLevel)) lines.push(jsonKey(message));
+    if (!levels.includes(logLevel)) return;
+    lines.push(jsonKey(message));
+    lineLevels.push(logLevel);
   });
-  return { lines, layer: Logger.layer([logger]) };
+  return { lines, lineLevels, layer: Logger.layer([logger]) };
 };
 
 const infoLines = () => logLines(["Info"]);
 
-/** A Claude SDK whose output stays open, after the login check, until the test offers more. */
+/**
+ * A Claude SDK whose output stays open, after the login check, until the test offers more.
+ * `query.closed` is whether the session closed the query.
+ */
 const openOutput = (messages: ReadonlyArray<Schema.Json>) =>
   Effect.gen(function* () {
     const output = yield* Queue.make<Schema.Json, Cause.Done>();
     yield* Queue.offerAll(output, [rateLimitEvent, ...messages]);
+    const query = { closed: false };
     const sdk = Layer.succeed(ClaudeSdk)({
       open: () => ({
         ...scripted([]),
-        close: () => Queue.endUnsafe(output),
+        close: () => {
+          query.closed = true;
+          Queue.endUnsafe(output);
+        },
         [Symbol.asyncIterator]: () =>
           Stream.toAsyncIterable(Stream.fromQueue(output))[Symbol.asyncIterator](),
       }),
     });
-    return { output, sdk };
+    return { output, query, sdk };
   });
 
 /** Advances the test clock in 5-second steps until `fiber` ends. */
@@ -2191,6 +2202,13 @@ describe("Claude child backend", () => {
     const waiting = (lines: ReadonlyArray<string>) =>
       lines.some((line) => line.includes("Claude child is waiting for background work"));
 
+    const cancelled = (lines: ReadonlyArray<string>, reason: string) =>
+      lines.some(
+        (line) =>
+          line.includes("Claude child cancelled the wait limit for its background work") &&
+          line.includes(`"reason":"${reason}"`),
+      );
+
     it.effect.each([
       {
         protocol: "session-state",
@@ -2204,59 +2222,133 @@ describe("Claude child backend", () => {
       { protocol: "legacy", messages: [gate, answered("Review posted")] },
     ])("returns the answer once the wait limit passes ($protocol)", ({ messages }) =>
       Effect.gen(function* () {
-        const { sdk } = yield* openOutput(messages);
+        const { query, sdk } = yield* openOutput(messages);
         const logs = logLines(["Info", "Warn"]);
         yield* Effect.gen(function* () {
           const session = yield* (yield* ChildBackend).launch(request());
           const result = yield* Effect.forkChild(session.result);
           while (!waiting(logs.lines)) yield* Effect.yieldNow;
+          assert.isTrue(
+            logs.lines.some((line) => waiting([line]) && line.includes('"limit":"2m"')),
+            "the waiting log names the limit",
+          );
           yield* TestClock.adjust("119 seconds");
           assert.isUndefined(result.pollUnsafe(), "the child waits until the limit");
           yield* TestClock.adjust("1 second");
           assert.strictEqual((yield* Fiber.join(result)).message, "Review posted");
-          assert.isTrue(
-            logs.lines.some(
-              (line) =>
-                line.includes("outlasted the wait limit") &&
-                line.includes("ci-watch") &&
-                line.includes("2m"),
-            ),
-            "the log names the limit and the background tasks",
+          const outlasted = logs.lines.findIndex((line) =>
+            line.includes("outlasted the wait limit"),
           );
+          assert.strictEqual(logs.lineLevels[outlasted], "Warn", "the limit logs a warning");
+          assert.include(logs.lines[outlasted], '"backgroundTaskIds":["ci-watch"]');
+          assert.include(logs.lines[outlasted], '"limit":"2m"');
+          assert.isFalse(query.closed, "the answer alone does not close the Claude process");
         }).pipe(
           Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk), Layer.provideMerge(logs.layer))),
           Effect.scoped,
         );
+        assert.isTrue(query.closed, "closing the child closes the Claude process");
       }),
     );
 
-    it.effect("does not end a notification turn that starts within the limit", () =>
-      Effect.gen(function* () {
-        const { output, sdk } = yield* openOutput([
+    it.effect.each([
+      {
+        protocol: "session-state",
+        messages: [
           { type: "system", subtype: "session_state_changed", state: "running" },
           gate,
           answered("Waiting for CI"),
           { type: "system", subtype: "session_state_changed", state: "idle" },
-        ]);
+        ],
+        notification: [
+          { type: "system", subtype: "background_tasks_changed", tasks: [] },
+          { type: "system", subtype: "session_state_changed", state: "running" },
+        ],
+        rest: [
+          answered("CI passed"),
+          { type: "system", subtype: "session_state_changed", state: "idle" },
+        ],
+      },
+      {
+        protocol: "legacy",
+        messages: [gate, answered("Waiting for CI")],
+        notification: [
+          { type: "system", subtype: "background_tasks_changed", tasks: [] },
+          { type: "assistant", message: { content: [{ type: "text", text: "CI finished" }] } },
+        ],
+        rest: [answered("CI passed")],
+      },
+    ])(
+      "does not end a notification turn that starts within the limit ($protocol)",
+      ({ messages, notification, rest }) =>
+        Effect.gen(function* () {
+          const { output, sdk } = yield* openOutput(messages);
+          const logs = infoLines();
+          yield* Effect.gen(function* () {
+            const session = yield* (yield* ChildBackend).launch(request());
+            const result = yield* Effect.forkChild(session.result);
+            while (!waiting(logs.lines)) yield* Effect.yieldNow;
+            yield* TestClock.adjust("1 minute");
+            yield* Queue.offerAll(output, notification);
+            while (!cancelled(logs.lines, "turn started")) yield* Effect.yieldNow;
+            yield* TestClock.adjust("5 minutes");
+            assert.isUndefined(result.pollUnsafe(), "the running turn keeps the child open");
+            yield* Queue.offerAll(output, rest);
+            assert.strictEqual((yield* Fiber.join(result)).message, "CI passed");
+          }).pipe(
+            Effect.provide(
+              claudeChild.pipe(Layer.provideMerge(sdk), Layer.provideMerge(logs.layer)),
+            ),
+            Effect.scoped,
+          );
+        }),
+    );
+
+    it.effect("returns the continuation's answer after a process resume within the limit", () =>
+      Effect.gen(function* () {
+        const outputs: Array<Queue.Queue<Schema.Json, Cause.Done>> = [];
+        const lost = { type: "test_process_lost" };
+        const context = yield* Effect.context<never>();
+        const sdk = Layer.succeed(ClaudeSdk)({
+          open: (input) => {
+            const output = Effect.runSyncWith(context)(Queue.make<Schema.Json, Cause.Done>());
+            outputs.push(output);
+            void (async () => {
+              for await (const _message of input) Queue.offerUnsafe(output, rateLimitEvent);
+            })();
+            return {
+              ...scripted([]),
+              close: () => Queue.endUnsafe(output),
+              async *[Symbol.asyncIterator]() {
+                for (;;) {
+                  const next = await Effect.runPromiseWith(context)(
+                    Effect.option(Queue.take(output)),
+                  );
+                  if (Option.isNone(next)) return;
+                  if (next.value === lost)
+                    throw ChildProcessLost.make({ exitCode: 255, stderrTail: "" });
+                  yield next.value;
+                }
+              },
+            };
+          },
+        });
         const logs = infoLines();
         yield* Effect.gen(function* () {
-          const session = yield* (yield* ChildBackend).launch(request());
+          const session = yield* (yield* ChildBackend).launch(
+            request(undefined, undefined, exitingHost(0)),
+          );
           const result = yield* Effect.forkChild(session.result);
+          yield* Queue.offerAll(outputs[0]!, [gate, answered("Waiting for CI")]);
           while (!waiting(logs.lines)) yield* Effect.yieldNow;
-          yield* TestClock.adjust("1 minute");
-          yield* Queue.offerAll(output, [
-            { type: "system", subtype: "background_tasks_changed", tasks: [] },
-            { type: "system", subtype: "session_state_changed", state: "running" },
-          ]);
-          while (!logs.lines.some((line) => line.includes('"backgroundTaskIds":[]')))
+          yield* Queue.offer(outputs[0]!, lost);
+          while (!logs.lines.some((line) => line.includes("Resumed the Claude child's session")))
             yield* Effect.yieldNow;
+          assert.isTrue(cancelled(logs.lines, "process resumed"));
           yield* TestClock.adjust("5 minutes");
-          assert.isUndefined(result.pollUnsafe(), "the running turn keeps the child open");
-          yield* Queue.offerAll(output, [
-            answered("CI passed"),
-            { type: "system", subtype: "session_state_changed", state: "idle" },
-          ]);
-          assert.strictEqual((yield* Fiber.join(result)).message, "CI passed");
+          assert.isUndefined(result.pollUnsafe(), "the continuation turn keeps the child open");
+          yield* Queue.offer(outputs.at(-1)!, answered("Continued"));
+          assert.strictEqual((yield* Fiber.join(result)).message, "Continued");
         }).pipe(
           Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk), Layer.provideMerge(logs.layer))),
           Effect.scoped,

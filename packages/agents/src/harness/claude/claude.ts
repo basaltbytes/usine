@@ -166,8 +166,8 @@ const LOGIN_WINDOW = Duration.seconds(60);
 
 /**
  * The maximum time an idle Claude child that has answered waits for its background work and the
- * notification turn that follows it. When the limit passes, the child returns the saved answer
- * and closing the session stops the background work (#1269).
+ * notification turn that follows it. When the limit passes, the child returns the saved answer.
+ * The limit is kept in memory, so a child reattached after an orchestrator restart has none.
  */
 const BACKGROUND_WAIT_LIMIT = Duration.minutes(2);
 
@@ -686,8 +686,20 @@ const makeClaudeSessions = Effect.gen(function* () {
         ),
       );
     });
-    /** Cancels a wait for background work because the child runs another turn. */
-    const resumeTurn = FiberHandle.clear(backgroundWait);
+    /** Cancels the running wait limit, if any, and logs `reason`. */
+    const resumeTurn = Effect.fn("ClaudeRuntime.resumeTurn")(function* (
+      reason: "turn started" | "process resumed",
+    ) {
+      const wait = yield* FiberHandle.get(backgroundWait);
+      if (Option.isNone(wait)) return;
+      yield* Effect.annotateCurrentSpan({ sessionId: session.id });
+      yield* FiberHandle.clear(backgroundWait);
+      yield* Effect.logInfo("Claude child cancelled the wait limit for its background work", {
+        sessionId: session.id,
+        reason,
+        backgroundTaskIds: backgroundTasks,
+      });
+    });
 
     const reportRetry = Effect.fn("ClaudeRuntime.reportRetry")(function* (
       retry: typeof ClaudeApiRetry.Type,
@@ -756,7 +768,7 @@ const makeClaudeSessions = Effect.gen(function* () {
         if (Option.isSome(reported.retry)) return yield* reportRetry(reported.retry.value);
         if (isAssistantMessage(message)) {
           betweenTurns = false;
-          yield* resumeTurn;
+          yield* resumeTurn("turn started");
         }
         if (retrying && isAssistantMessage(message)) yield* reportRecovery();
         if (Schema.is(ClaudeCompletionHeader)(message)) {
@@ -777,7 +789,7 @@ const makeClaudeSessions = Effect.gen(function* () {
             });
           } else {
             reportsSessionState = true;
-            if (update.state !== "idle") yield* resumeTurn;
+            if (update.state !== "idle") yield* resumeTurn("turn started");
             const candidate = completedTurn;
             completedTurn = Option.none();
             // The SDK reports idle after the result flush and the background-notification loop.
@@ -797,7 +809,7 @@ const makeClaudeSessions = Effect.gen(function* () {
           yield* channel.emit(event);
         }
         if (!Schema.is(ClaudeResultMessage)(message)) return;
-        yield* resumeTurn;
+        yield* resumeTurn("turn started");
         betweenTurns = true;
         completedTurn = Option.none();
         retries = 0;
@@ -914,8 +926,8 @@ const makeClaudeSessions = Effect.gen(function* () {
       yield* Scope.close(current.scope, Exit.void);
       if ((yield* lifecycle.isStopping) || (yield* channel.isTerminal)) return;
       yield* channel.emit(SessionTokensUpdated.make({ session, ...usage.restart() }));
+      yield* resumeTurn("process resumed");
       backgroundTasks = [];
-      yield* resumeTurn;
       completedTurn = Option.none();
       reportsSessionState = false;
       provider.clear();
