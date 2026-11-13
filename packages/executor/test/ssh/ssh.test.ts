@@ -308,28 +308,49 @@ describe("SSH Worker", () => {
   });
 
   it.effect.each([
-    { case: "a child answered at the wait limit", limit: Option.some(10), passed: true, kept: 1 },
+    {
+      case: "a child answered at the wait limit",
+      limit: Option.some(10),
+      passed: true,
+      kept: 1,
+      decision: "A session's answer returned at its background wait limit; salvaging",
+    },
     {
       case: "its transcript can't be read with a wait limit",
       limit: Option.some(10),
       passed: false,
       kept: 1,
       unreadable: true,
+      decision: "Could not read the transcript of a successful Attempt",
     },
-    { case: "no child answered at the wait limit", limit: Option.some(10), passed: false, kept: 0 },
-    { case: "no wait limit is configured", limit: Option.none<number>(), passed: true, kept: 0 },
+    {
+      case: "no child answered at the wait limit",
+      limit: Option.some(10),
+      passed: false,
+      kept: 0,
+      decision: "No session's answer returned at the Attempt's background wait limit",
+    },
+    {
+      case: "no wait limit is configured",
+      limit: Option.none<number>(),
+      passed: true,
+      kept: 0,
+      decision: "The successful Attempt ran without a background wait limit",
+    },
     {
       case: "its Loop has read permissions",
       limit: Option.some(10),
       passed: true,
       kept: 0,
       permissions: "read" as const,
+      decision: "The Attempt's Loop has read permissions",
     },
   ])(
     "salvages a successful Attempt's checkout only if $case",
-    ({ limit, passed, kept, unreadable, permissions }) => {
+    ({ limit, passed, kept, unreadable, permissions, decision }) => {
       const machine = fakeMachine();
       const credentials = mintingProvider();
+      const logs = capturedLogs();
       return Effect.gen(function* () {
         const executor = yield* Executor;
         machine.state.salvage = "dirty";
@@ -392,7 +413,47 @@ describe("SSH Worker", () => {
           lines.some((line) => line.includes("'worktree' 'remove'")),
           "the checkout is removed",
         );
-      }).pipe(Effect.scoped, Effect.provide(runtime(machine, credentials)));
+        assert(
+          logs.lines.some((line) => line.includes(decision)),
+          "cleanup logs why it salvages the checkout or removes it without salvage",
+        );
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(runtime(machine, credentials).pipe(Layer.provideMerge(logs.layer))),
+      );
+    },
+  );
+
+  it.effect(
+    "logs that an Attempt canceled before its launch has no transcript to check for its wait limit",
+    () => {
+      const machine = fakeMachine();
+      const credentials = mintingProvider();
+      const logs = capturedLogs();
+      return Effect.gen(function* () {
+        const executor = yield* Executor;
+        machine.state.salvage = "dirty";
+        yield* executor.prepare(
+          CheckoutRequest.make({ ...request, maxBackgroundWaitMinutes: Option.some(10) }),
+        );
+        yield* executor.cancel(request.attemptId, "cancel");
+        const lines = machine.state.calls.map(({ line }) => line);
+        assert(!lines.some((line) => line.includes("'push' '--force'")), "nothing is salvaged");
+        assert(
+          lines.some((line) => line.includes("'worktree' 'remove'")),
+          "the checkout is removed",
+        );
+        assert(
+          logs.lines.some((line) =>
+            line.includes(
+              "The Attempt ended before its launch, so it has no transcript that shows an answer",
+            ),
+          ),
+        );
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(runtime(machine, credentials).pipe(Layer.provideMerge(logs.layer))),
+      );
     },
   );
 

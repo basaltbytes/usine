@@ -266,20 +266,33 @@ const registerRelease = Effect.fn("Executor.registerRelease")(function* <E exten
       );
       return false;
     }
+    const limited = { ...fields, maxBackgroundWaitMinutes: waitLimit.value };
     const sink = yield* Ref.get(recorder);
-    if (Option.isNone(sink)) return false;
+    if (Option.isNone(sink)) {
+      yield* Effect.logInfo(
+        "The Attempt ended before its launch, so it has no transcript that shows an answer at its background wait limit; its checkout is removed without salvage",
+        limited,
+      );
+      return false;
+    }
     const transcript = yield* Effect.result(sink.value.transcript);
     if (Result.isFailure(transcript)) {
       yield* Effect.logWarning(
         "Could not read the transcript of a successful Attempt with a background wait limit; salvaging its checkout",
-        { ...fields, errorTag: transcript.failure._tag },
+        { ...limited, errorTag: transcript.failure._tag },
       );
       return true;
     }
-    if (!transcript.success.some(finishedAtWaitLimit)) return false;
+    if (!transcript.success.some(finishedAtWaitLimit)) {
+      yield* Effect.logInfo(
+        "No session's answer returned at the Attempt's background wait limit; its checkout is removed without salvage",
+        limited,
+      );
+      return false;
+    }
     yield* Effect.logInfo(
       "A session's answer returned at its background wait limit; salvaging the checkout of the successful Attempt",
-      fields,
+      limited,
     );
     return true;
   });
