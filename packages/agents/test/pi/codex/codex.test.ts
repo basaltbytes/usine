@@ -751,6 +751,7 @@ describe("Codex child backend", () => {
           const turns: Array<string> = [];
           const guidance = OperatorMessage.make({ message: "Check the tests" });
           const interrupts: Array<string> = [];
+          const steers: Array<string> = [];
           const saved = HarnessSession.make({
             id: HarnessSessionId.make("unprompted-codex"),
             cwd: request().cwd,
@@ -771,6 +772,7 @@ describe("Codex child backend", () => {
                 request: (_operation, method, params) =>
                   Effect.sync(() => {
                     if (method === "turn/start") turns.push(jsonKey(params));
+                    if (method === "turn/steer") steers.push(jsonKey(params));
                     if (method === "turn/interrupt") interrupts.push(jsonKey(params));
                     return responses.get(method) ?? {};
                   }),
@@ -783,14 +785,15 @@ describe("Codex child backend", () => {
                 resume: Option.some(saved),
                 held: supervision === "held",
                 paused: supervision === "paused",
-                unread:
-                  supervision === "paused" ? [{ id: guidance.id, message: guidance.message }] : [],
+                unread: [{ id: guidance.id, message: guidance.message }],
               }),
             );
             assert.lengthOf(turns, 1);
             assert.include(turns[0], request().prompt);
             assert.notInclude(turns[0], CONTINUATION_MESSAGE);
             assert.lengthOf(interrupts, supervision === "paused" ? 1 : 0);
+            assert.lengthOf(steers, supervision === "held" ? 1 : 0);
+            if (supervision === "held") assert.include(steers[0], guidance.message);
             const answer = supervision === "paused" ? "Codex turn paused" : "Task done";
             yield* Queue.offerAll(
               notifications,
@@ -845,107 +848,143 @@ describe("Codex child backend", () => {
     );
   }
 
-  it.effect(
-    "reports a paused Codex child idle again when its app-server is lost during its task turn",
-    () =>
-      Effect.gen(function* () {
-        const original = yield* Queue.make<CodexNotification, SessionOperationError | Cause.Done>();
-        const restored = yield* Queue.make<CodexNotification, Cause.Done>();
-        const saved = HarnessSession.make({
-          id: HarnessSessionId.make("unprompted-codex"),
-          cwd: request().cwd,
-        });
-        const responses: Readonly<Record<string, Schema.Json>> = successfulResponses([
-          { id: "gpt-5.6-terra", model: "gpt-5.6-terra" },
-        ]);
-        const turns: Array<string> = [];
-        let opens = 0;
-        const server = Layer.succeed(CodexAppServer)({
-          stop: () => Effect.void,
-          open: () =>
-            Effect.sync(() => {
-              const first = opens++ === 0;
-              return {
-                notifications: first ? Stream.fromQueue(original) : Stream.fromQueue(restored),
-                notify: () => Effect.void,
-                close: Queue.end(restored),
-                request: (_operation, method, params) =>
-                  Effect.sync(() => {
-                    if (method === "turn/start") turns.push(jsonKey(params));
-                    if (method === "thread/resume")
-                      return {
-                        modelProvider: "openai",
-                        thread: {
-                          id: saved.id,
-                          // The lost process recorded the task turn that it didn't finish.
-                          turns: first
-                            ? []
-                            : [
-                                {
-                                  id: "turn-1",
-                                  status: "interrupted",
-                                  items: [
+  for (const taskRecorded of [true, false])
+    it.effect(
+      `recovers a paused Codex child after losing its task turn (recorded: ${taskRecorded})`,
+      () =>
+        Effect.gen(function* () {
+          const original = yield* Queue.make<
+            CodexNotification,
+            SessionOperationError | Cause.Done
+          >();
+          const restored = yield* Queue.make<CodexNotification, Cause.Done>();
+          const recovered = yield* Deferred.make<void>();
+          const methods: Array<string> = [];
+          const saved = HarnessSession.make({
+            id: HarnessSessionId.make("unprompted-codex"),
+            cwd: request().cwd,
+          });
+          const responses: Readonly<Record<string, Schema.Json>> = successfulResponses([
+            { id: "gpt-5.6-terra", model: "gpt-5.6-terra" },
+          ]);
+          const turns: Array<string> = [];
+          let opens = 0;
+          const server = Layer.succeed(CodexAppServer)({
+            stop: () => Effect.void,
+            open: () =>
+              Effect.sync(() => {
+                const first = opens++ === 0;
+                return {
+                  notifications: first
+                    ? Stream.fromQueue(original)
+                    : Stream.unwrap(
+                        Deferred.succeed(recovered, undefined).pipe(
+                          Effect.as(Stream.fromQueue(restored)),
+                        ),
+                      ),
+                  notify: () => Effect.void,
+                  close: Queue.end(restored),
+                  request: (_operation, method, params) =>
+                    Effect.sync(() => {
+                      if (method === "turn/start" || method === "turn/interrupt")
+                        methods.push(method);
+                      if (method === "turn/start") turns.push(jsonKey(params));
+                      if (method === "thread/resume")
+                        return {
+                          modelProvider: "openai",
+                          thread: {
+                            id: saved.id,
+                            turns:
+                              first || !taskRecorded
+                                ? []
+                                : [
                                     {
-                                      type: "userMessage",
-                                      id: "task",
-                                      content: [
-                                        { type: "text", text: request().prompt, text_elements: [] },
+                                      id: "turn-1",
+                                      status: "interrupted",
+                                      items: [
+                                        {
+                                          type: "userMessage",
+                                          id: "task",
+                                          content: [
+                                            {
+                                              type: "text",
+                                              text: request().prompt,
+                                              text_elements: [],
+                                            },
+                                          ],
+                                        },
                                       ],
                                     },
                                   ],
-                                },
-                              ],
-                        },
-                      };
-                    return responses[method] ?? {};
-                  }),
-              } satisfies CodexConnection;
-            }),
-        });
-        yield* Effect.gen(function* () {
-          const host = RemoteShell.make({
-            ssh: { command: "ssh", args: [] },
-            sshEnvironment: {},
-            destination: "worker",
+                          },
+                        };
+                      return responses[method] ?? {};
+                    }),
+                } satisfies CodexConnection;
+              }),
           });
-          const running = yield* (yield* ChildBackend).launch(
-            ChildRequest.make({
-              ...request(undefined, undefined, host),
-              resume: Option.some(saved),
-              paused: true,
-            }),
-          );
-          assert.lengthOf(turns, 1);
-          assert.include(turns[0], request().prompt);
-          yield* Queue.fail(
-            original,
-            SessionOperationError.make({
-              operation: "stream",
-              sessionId: Option.some(running.session.id),
-              message: "App-server exited",
-              cause: ChildProcessLost.make({ exitCode: 1, stderrTail: "App-server exited" }),
-            }),
-          );
-          const lifecycle = new Set(["SessionStarted", "SessionIdle", "SessionResumed"]);
-          const seen = yield* running.events.pipe(
-            Stream.filter((event) => lifecycle.has(event._tag)),
-            Stream.takeUntil(
-              (event) =>
-                event._tag === "SessionIdle" &&
-                Option.contains(event.message, "Session interrupted before its turn returned"),
-            ),
-            Stream.runCollect,
-          );
-          // The task input ended the restored idle report, so the lost task turn reports idle.
-          assert.deepStrictEqual(
-            seen.map((event) => event._tag),
-            ["SessionStarted", "SessionIdle", "SessionResumed", "SessionIdle"],
-          );
-          assert.strictEqual(opens, 2);
-          assert.lengthOf(turns, 1, "the paused child waits after the restored turn");
-        }).pipe(Effect.provide(codexChildLayer.pipe(Layer.provideMerge(server))));
-      }).pipe(Effect.scoped),
-  );
+          yield* Effect.gen(function* () {
+            const host = RemoteShell.make({
+              ssh: { command: "ssh", args: [] },
+              sshEnvironment: {},
+              destination: "worker",
+            });
+            const running = yield* (yield* ChildBackend).launch(
+              ChildRequest.make({
+                ...request(undefined, undefined, host),
+                resume: Option.some(saved),
+                paused: true,
+              }),
+            );
+            assert.lengthOf(turns, 1);
+            assert.include(turns[0], request().prompt);
+            yield* Queue.fail(
+              original,
+              SessionOperationError.make({
+                operation: "stream",
+                sessionId: Option.some(running.session.id),
+                message: "App-server exited",
+                cause: ChildProcessLost.make({ exitCode: 1, stderrTail: "App-server exited" }),
+              }),
+            );
+            yield* Deferred.await(recovered);
+            assert.deepStrictEqual(
+              methods,
+              taskRecorded
+                ? ["turn/start", "turn/interrupt"]
+                : ["turn/start", "turn/interrupt", "turn/start", "turn/interrupt"],
+            );
+            if (!taskRecorded)
+              yield* Queue.offer(restored, {
+                method: "turn/completed",
+                params: { turn: { id: "turn-1", status: "interrupted", error: null } },
+              });
+            const lifecycle = new Set(["SessionStarted", "SessionIdle", "SessionResumed"]);
+            const seen = yield* running.events.pipe(
+              Stream.filter((event) => lifecycle.has(event._tag)),
+              Stream.takeUntil(
+                (event) =>
+                  event._tag === "SessionIdle" &&
+                  Option.contains(
+                    event.message,
+                    taskRecorded
+                      ? "Session interrupted before its turn returned"
+                      : "Codex turn paused",
+                  ),
+              ),
+              Stream.runCollect,
+            );
+            // The task input ended the restored idle report, so the lost task turn reports idle.
+            assert.deepStrictEqual(
+              seen.map((event) => event._tag),
+              ["SessionStarted", "SessionIdle", "SessionResumed", "SessionIdle"],
+            );
+            assert.strictEqual(opens, 2);
+            assert.lengthOf(turns, taskRecorded ? 1 : 2);
+            assert(turns.every((input) => input.includes(request().prompt)));
+          }).pipe(Effect.provide(codexChildLayer.pipe(Layer.provideMerge(server))));
+        }).pipe(Effect.scoped),
+    );
 
   it.effect(
     "pauses without closing Codex and resumes a held conversation on its existing thread",
@@ -1670,6 +1709,129 @@ describe("Codex child backend", () => {
         assert.deepStrictEqual(received, [["task", "guidance"]]);
       }).pipe(Effect.scoped),
     );
+
+    for (const recovery of ["repeated guidance", "new guidance"] as const)
+      it.effect(`matches ${recovery} after an older delegation loses its app-server`, () =>
+        Effect.gen(function* () {
+          const original = yield* Queue.make<
+            CodexNotification,
+            SessionOperationError | Cause.Done
+          >();
+          const restored = yield* Queue.make<CodexNotification, Cause.Done>();
+          const recovered = yield* Deferred.make<void>();
+          const repeated = OperatorMessage.make({ message: "Check the tests" });
+          const guidance = Steer.make({ message: "Run the linter" });
+          const items = [
+            userMessage("task", request().prompt),
+            userMessage("guidance", repeated.message),
+          ];
+          const inputs: Array<{ method: string; params: Schema.Json }> = [];
+          const received: Array<ReadonlyArray<string>> = [];
+          const reads: Array<string> = [];
+          const responses: Readonly<Record<string, Schema.Json>> = successfulResponses([
+            { id: "gpt-5.6-terra", model: "gpt-5.6-terra" },
+          ]);
+          let opens = 0;
+          let turn = 1;
+          const server = Layer.succeed(CodexAppServer)({
+            stop: () => Effect.void,
+            open: () =>
+              Effect.sync(() => {
+                const first = opens++ === 0;
+                return {
+                  notifications: first
+                    ? Stream.fromQueue(original)
+                    : Stream.unwrap(
+                        Deferred.succeed(recovered, undefined).pipe(
+                          Effect.as(Stream.fromQueue(restored)),
+                        ),
+                      ),
+                  notify: () => Effect.void,
+                  close: Queue.end(restored),
+                  request: (_operation, method, params) =>
+                    Effect.sync(() => {
+                      if (method === "turn/start" || method === "turn/steer")
+                        inputs.push({ method, params });
+                      if (method === "turn/start") return { turn: { id: `turn-${++turn}` } };
+                      if (method === "thread/resume")
+                        return {
+                          modelProvider: "openai",
+                          thread: {
+                            id: saved.id,
+                            turns: [
+                              { id: "turn-1", status: "completed", items },
+                              ...(!first && recovery === "new guidance"
+                                ? [
+                                    {
+                                      id: "turn-2",
+                                      status: "completed",
+                                      items: [userMessage("new-guidance", guidance.message)],
+                                    },
+                                  ]
+                                : []),
+                            ],
+                          },
+                        };
+                      return responses[method] ?? {};
+                    }),
+                } satisfies CodexConnection;
+              }),
+          });
+          yield* Effect.gen(function* () {
+            const host = RemoteShell.make({
+              ssh: { command: "ssh", args: [] },
+              sshEnvironment: {},
+              destination: "worker",
+            });
+            const running = yield* (yield* ChildBackend).launch(
+              ChildRequest.make({
+                ...request(undefined, undefined, host),
+                resume: Option.some(saved),
+                held: true,
+                receipts: Option.none(),
+                unread:
+                  recovery === "repeated guidance"
+                    ? [{ id: repeated.id, message: repeated.message }]
+                    : [],
+              }),
+            );
+            assert.deepStrictEqual(received, [["task", "guidance"]]);
+            assert.deepStrictEqual(reads, []);
+            assert.deepStrictEqual(inputs, []);
+            if (recovery === "new guidance")
+              yield* running.intervene(guidance, (state) =>
+                Effect.sync(() => {
+                  if (Option.isSome(state)) reads.push(guidance.id);
+                }),
+              );
+            yield* Queue.fail(
+              original,
+              SessionOperationError.make({
+                operation: "stream",
+                sessionId: Option.some(running.session.id),
+                message: "App-server exited",
+                cause: ChildProcessLost.make({ exitCode: 1, stderrTail: "App-server exited" }),
+              }),
+            );
+            yield* Deferred.await(recovered);
+            assert.strictEqual(opens, 2);
+            assert.deepStrictEqual(reads, recovery === "repeated guidance" ? [] : [guidance.id]);
+            const before = inputs.length;
+            yield* running.intervene(OperatorMessage.make({ message: "Continue" }), noDelivery);
+            const resumed = inputs.slice(before);
+            assert.deepStrictEqual(
+              resumed.map(({ method }) => method),
+              recovery === "repeated guidance" ? ["turn/start", "turn/steer"] : ["turn/start"],
+            );
+            if (recovery === "repeated guidance")
+              assert.include(jsonKey(resumed[0]?.params), repeated.message);
+            else assert.notInclude(jsonKey(resumed), guidance.message);
+          }).pipe(
+            Effect.provide(codexChildLayer.pipe(Layer.provide(server))),
+            recording(received, reads),
+          );
+        }).pipe(Effect.scoped),
+      );
 
     it.effect(
       "does not count restored reads as an operator answer in the held placeholder report",

@@ -569,7 +569,7 @@ for (const receipt of ["unacknowledged", "acknowledged", "absent"] as const)
       const acknowledged = receipt !== "unacknowledged";
       const database = yield* temporaryDatabase;
       const request = attemptRequest(`recovery/prompted-${receipt}`);
-      const restored: Array<boolean> = [];
+      const restored: Array<{ prompted: boolean; receipts: ChildRequest["receipts"] }> = [];
       const backend = Layer.effectContext(
         Effect.gen(function* () {
           const services = yield* Effect.context<ChildBackend | StubChildren>();
@@ -579,11 +579,7 @@ for (const receipt of ["unacknowledged", "acknowledged", "absent"] as const)
             launch: (child) =>
               Effect.gen(function* () {
                 if (Option.isSome(child.resume)) {
-                  restored.push(child.prompted);
-                  assert.deepStrictEqual(
-                    child.receipts,
-                    receipt === "absent" ? Option.none() : Option.some([]),
-                  );
+                  restored.push({ prompted: child.prompted, receipts: child.receipts });
                   return yield* SessionInterruptedError.make({
                     sessionId: child.session.id,
                     message: "Native reopen failed",
@@ -644,7 +640,12 @@ for (const receipt of ["unacknowledged", "acknowledged", "absent"] as const)
           assert.strictEqual(result.message, "Recovered.");
         }),
       );
-      assert.deepStrictEqual(restored, [acknowledged]);
+      assert.deepStrictEqual(restored, [
+        {
+          prompted: acknowledged,
+          receipts: receipt === "absent" ? Option.none() : Option.some([]),
+        },
+      ]);
     }).pipe(Effect.scoped, Effect.timeout("10 seconds")),
   );
 
