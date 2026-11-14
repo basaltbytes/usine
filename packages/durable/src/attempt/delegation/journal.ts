@@ -48,6 +48,8 @@ export interface DelegationProgress {
   readonly idleAnsweredOperator: boolean;
   /** The times of the continuation turns, in epoch milliseconds. */
   readonly continuations: ReadonlyArray<number>;
+  /** The native user-message items that the child observed in its last turn. */
+  readonly receipts: Option.Option<ReadonlyArray<string>>;
   /** The child's tool calls that started and did not finish. */
   readonly inFlight: ReadonlyArray<{ readonly callId: string; readonly tool: string }>;
   /** Whether the child received its prompt. */
@@ -125,6 +127,8 @@ export interface DelegationJournal {
   readonly saveContinuations: (
     timestamps: ReadonlyArray<number>,
   ) => Effect.Effect<void, JournalError>;
+  /** Saves the IDs of the native user-message items that the child observed in its last turn. */
+  readonly saveReceipts: (items: ReadonlyArray<string>) => Effect.Effect<void, JournalError>;
   /** Saves the child's cumulative usage with its saved conversation, if one is saved. */
   readonly saveUsage: (
     usage: typeof ChildRequest.fields.usage.Encoded,

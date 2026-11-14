@@ -105,6 +105,7 @@ const toolJournal = (
         idle: Option.fromNullishOr(saved.idle),
         idleAnsweredOperator: saved.idleAnsweredOperator ?? false,
         continuations: [...(saved.continuations ?? [])],
+        receipts: Option.map(Option.fromUndefinedOr(saved.receipts), (items) => [...items]),
         inFlight: (saved.inFlight ?? []).map(({ callId, tool }) => ({ callId, tool })),
         prompted: saved.prompted ?? true,
         // The tool records no launch, so a replayed call without a saved conversation ends as
@@ -214,6 +215,11 @@ const toolJournal = (
       commit("save the child's continuation history", async (tx) => {
         const record = await delegation(tx);
         record.continuations = [...timestamps];
+      }),
+    saveReceipts: (items) =>
+      commit("save the child's user-message receipts", async (tx) => {
+        const record = await delegation(tx);
+        record.receipts = [...items];
       }),
     saveUsage: (usage) =>
       commit("save the child's cumulative usage", async (tx) => {

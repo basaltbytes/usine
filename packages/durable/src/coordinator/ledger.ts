@@ -265,6 +265,7 @@ const changed = (progress: ChildProgress, change: ProgressChange): ChildProgress
       }),
       Prompted: () => ({ prompted: true }),
       ContinuationsSaved: ({ timestamps }) => ({ continuations: timestamps }),
+      ReceiptsSaved: ({ items }) => ({ receipts: Option.some(items) }),
       UsageSaved: ({ usage }) => ({
         saved: Option.map(progress.saved, (saved) =>
           Option.match(decodeSavedObject(saved), {

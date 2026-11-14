@@ -569,7 +569,7 @@ for (const receipt of ["unacknowledged", "acknowledged", "absent"] as const)
       const acknowledged = receipt !== "unacknowledged";
       const database = yield* temporaryDatabase;
       const request = attemptRequest(`recovery/prompted-${receipt}`);
-      const restored: Array<boolean> = [];
+      const restored: Array<{ prompted: boolean; receipts: ChildRequest["receipts"] }> = [];
       const backend = Layer.effectContext(
         Effect.gen(function* () {
           const services = yield* Effect.context<ChildBackend | StubChildren>();
@@ -579,7 +579,7 @@ for (const receipt of ["unacknowledged", "acknowledged", "absent"] as const)
             launch: (child) =>
               Effect.gen(function* () {
                 if (Option.isSome(child.resume)) {
-                  restored.push(child.prompted);
+                  restored.push({ prompted: child.prompted, receipts: child.receipts });
                   return yield* SessionInterruptedError.make({
                     sessionId: child.session.id,
                     message: "Native reopen failed",
@@ -624,6 +624,7 @@ for (const receipt of ["unacknowledged", "acknowledged", "absent"] as const)
                   const record = await tx.doc(SubagentDoc, task.id);
                   assert.isTrue(record.prompted);
                   delete record.prompted;
+                  delete record.receipts;
                 }, context),
             );
           yield* Fiber.interrupt(execution);
@@ -639,9 +640,79 @@ for (const receipt of ["unacknowledged", "acknowledged", "absent"] as const)
           assert.strictEqual(result.message, "Recovered.");
         }),
       );
-      assert.deepStrictEqual(restored, [acknowledged]);
+      assert.deepStrictEqual(restored, [
+        {
+          prompted: acknowledged,
+          receipts: receipt === "absent" ? Option.none() : Option.some([]),
+        },
+      ]);
     }).pipe(Effect.scoped, Effect.timeout("10 seconds")),
   );
+
+it.live("restores the native user-message items that the saved child observed", () =>
+  Effect.gen(function* () {
+    const database = yield* temporaryDatabase;
+    const request = attemptRequest("recovery/receipts");
+    const restored: Array<Option.Option<ReadonlyArray<string>>> = [];
+    const backend = Layer.effectContext(
+      Effect.gen(function* () {
+        const services = yield* Effect.context<ChildBackend | StubChildren>();
+        const stub = Context.get(services, ChildBackend);
+        return Context.add(services, ChildBackend, {
+          ...stub,
+          launch: (child) =>
+            Effect.gen(function* () {
+              if (Option.isSome(child.resume)) {
+                restored.push(child.receipts);
+                return yield* SessionInterruptedError.make({
+                  sessionId: child.session.id,
+                  message: "Native reopen failed",
+                });
+              }
+              const journal = yield* ChildSessionJournal.current;
+              yield* journal.started(HarnessSession.make({ cwd: child.cwd }));
+              yield* journal.received(["task", "guidance"]);
+              return yield* stub.launch(child);
+            }),
+        });
+      }),
+    ).pipe(Layer.provide(stubChildBackendLayer));
+    const open = (parent: Parameters<typeof fauxParent>[0]) =>
+      runtimeLayer.pipe(
+        Layer.provideMerge(
+          harnessLayer({
+            ...fauxParent(parent),
+            openStorage: Effect.tryPromise({
+              try: () => openNodeSqliteStorage(database),
+              catch: (cause) => durableError("open recovery storage", cause),
+            }),
+          }),
+        ),
+        Layer.provideMerge(backend),
+      );
+    yield* Effect.scoped(
+      Effect.gen(function* () {
+        const services = yield* Layer.build(open([delegate("Fix the findings.")]));
+        const execution = yield* Effect.forkChild(
+          Context.get(services, AttemptRuntime).execute(request, recordingSink().sink),
+        );
+        yield* Context.get(services, StubChildren).next;
+        yield* Fiber.interrupt(execution);
+      }),
+    );
+    yield* Effect.scoped(
+      Effect.gen(function* () {
+        const services = yield* Layer.build(open([answer("Recovered.")]));
+        const result = yield* Context.get(services, AttemptRuntime).execute(
+          request,
+          recordingSink().sink,
+        );
+        assert.strictEqual(result.message, "Recovered.");
+      }),
+    );
+    assert.deepStrictEqual(restored, [Option.some(["task", "guidance"])]);
+  }).pipe(Effect.scoped, Effect.timeout("10 seconds")),
+);
 
 // A harness saves the conversation again on every launch, a resume included, and a resumed child
 // that already has its prompt does not acknowledge it again.

@@ -74,6 +74,10 @@ export class ChildProgress extends Schema.Class<
   ),
   /** The times of the continuation turns, in epoch milliseconds. */
   continuations: Schema.Array(Schema.Finite),
+  /** The native user-message items that the child observed in its last turn; None on older records. */
+  receipts: Schema.OptionFromOptionalKey(Schema.Array(Schema.String)).pipe(
+    Schema.withConstructorDefault(Effect.succeedNone),
+  ),
   /** The child's tool calls that started and did not finish. */
   inFlight: Schema.Array(Schema.Struct({ callId: Schema.String, tool: Schema.String })),
   /** The child's retained output. */
@@ -90,6 +94,7 @@ export class ChildProgress extends Schema.Class<
       prompted: true,
       idle: Option.none(),
       continuations: [],
+      receipts: Option.some([]),
       inFlight: [],
       output: "",
       launched: false,
@@ -159,6 +164,11 @@ export const ContinuationsSaved = Schema.TaggedStruct("ContinuationsSaved", {
   timestamps: Schema.Array(Schema.Finite),
 });
 
+/** The native user-message items that the child observed in its last turn. */
+export const ReceiptsSaved = Schema.TaggedStruct("ReceiptsSaved", {
+  items: Schema.Array(Schema.String),
+});
+
 /** The child's cumulative usage, saved with its saved conversation if one is saved. */
 export const UsageSaved = Schema.TaggedStruct("UsageSaved", { usage: Schema.Json });
 
@@ -190,6 +200,7 @@ export const ProgressChange = Schema.Union([
   SessionSaved,
   Prompted,
   ContinuationsSaved,
+  ReceiptsSaved,
   UsageSaved,
   ToolStarted,
   ToolFinished,

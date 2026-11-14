@@ -23,6 +23,7 @@ import {
   AttemptJournal,
   ChildProgress,
   ContinuationsSaved,
+  ReceiptsSaved,
   type CoordinatorSnapshot,
   Delegate,
   Delegation,
@@ -1096,6 +1097,7 @@ export const attemptJournalContract = (adapter: JournalAdapter) =>
                 ToolStarted.make({ callId: "call-2", tool: "read" }),
                 ToolFinished.make({ callId: "call-1" }),
                 ContinuationsSaved.make({ timestamps: [1_000, 2_000] }),
+                ReceiptsSaved.make({ items: ["item-1", "item-2"] }),
                 IdleSaved.make({
                   report: Option.some("Waiting for the operator."),
                   answeredOperator: true,
@@ -1141,6 +1143,7 @@ export const attemptJournalContract = (adapter: JournalAdapter) =>
               idle: Option.some("Waiting for the operator."),
               idleAnsweredOperator: true,
               continuations: [1_000, 2_000],
+              receipts: Option.some(["item-1", "item-2"]),
               inFlight: [{ callId: "call-2", tool: "read" }],
               output: "Working\n",
               launched: true,

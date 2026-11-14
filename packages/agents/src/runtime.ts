@@ -65,6 +65,8 @@ export class ChildSessionJournal extends Context.Service<
     readonly continued: (
       timestamps: ReadonlyArray<number>,
     ) => Effect.Effect<void, SessionOperationError>;
+    /** Saves the IDs of the native user-message items that the session observed in its last turn. */
+    readonly received: (items: ReadonlyArray<string>) => Effect.Effect<void, SessionOperationError>;
     readonly delivered: (
       id: AttemptChannel.OperatorMessageId,
       state: Option.Option<AttemptChannel.InterventionState>,
@@ -78,6 +80,7 @@ export class ChildSessionJournal extends Context.Service<
         started: () => Effect.void,
         prompted: Effect.void,
         continued: () => Effect.void,
+        received: () => Effect.void,
         delivered: () => Effect.void,
       }),
     ),
@@ -101,6 +104,15 @@ const restartFields = {
   /** Continuation timestamps in milliseconds, retained across orchestrator restarts. */
   continuations: Schema.Array(Schema.Finite).pipe(
     Schema.withConstructorDefault(Effect.succeed([])),
+  ),
+  /**
+   * The IDs of the native user-message items that the session observed in its last turn before the
+   * restart. Only Codex records them, so recovery doesn't take an item that acknowledged an earlier
+   * message as the receipt of an unread message with the same text. None means the delegation
+   * predates receipt tracking.
+   */
+  receipts: Schema.OptionFromOptionalKey(Schema.Array(Schema.String)).pipe(
+    Schema.withConstructorDefault(Effect.succeedNone),
   ),
   /** Tool calls without a committed result at restart. */
   inFlight: Schema.Array(InterruptedTool).pipe(Schema.withConstructorDefault(Effect.succeed([]))),

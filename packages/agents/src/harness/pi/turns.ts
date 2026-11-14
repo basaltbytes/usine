@@ -154,11 +154,12 @@ export const piTurns = Effect.fn("PiTurns.start")(function* (options: {
   options.gate.set(conversation.awaitUnpaused);
   if (!options.paused && Option.isNone(options.idle) && Option.isSome(options.prompt))
     yield* startTurn(options.prompt.value);
-  const steer = (message: string, id?: OperatorMessageId) =>
-    launched ? queueSteer(message, id).pipe(Effect.asVoid) : startTurn(message);
+  const send = (message: string, id?: OperatorMessageId) =>
+    launched ? queueSteer(message, id) : startTurn(message).pipe(Effect.as("read" as const));
+  const steer = (message: string, id?: OperatorMessageId) => send(message, id).pipe(Effect.asVoid);
   return {
     recover: (tools: ReadonlyArray<InterruptedTool>) =>
-      conversation.recover(options.policy, tools, steer),
+      conversation.recover(options.policy, tools, send),
     intervene: conversation.intervene,
     steer,
     interrupt: Effect.tryPromise({

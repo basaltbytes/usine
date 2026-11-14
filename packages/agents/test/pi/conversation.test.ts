@@ -706,7 +706,7 @@ describe("answers to the operator", () => {
         reopen: (native) => native,
         recover: (_state, _tools, _unread, _emit, send) => send("Continue the task."),
       };
-      yield* session.recover(policy, [], () => Effect.void);
+      yield* session.recover(policy, [], () => Effect.succeed("queued" as const));
       yield* session.finish("Done.");
       assert.isFalse((yield* Fiber.join(session.result)).answeredOperator);
     }),

@@ -58,6 +58,12 @@ const request = ChildRequest.make({
   ],
 });
 const working = { held: false, paused: false, idle: false };
+const unsaved = SessionOperationError.make({
+  operation: "launch",
+  sessionId: Option.some(session.id),
+  message: "Could not save the child before its first prompt",
+  cause: "storage unavailable",
+});
 
 describe("shared continuation policy", () => {
   it.effect("refuses to resume when the credential route lacks resume-session", () => {
@@ -98,6 +104,7 @@ describe("shared continuation policy", () => {
         started: () => Effect.void,
         prompted: Effect.void,
         continued: () => Effect.void,
+        received: () => Effect.void,
         delivered: () => Effect.void,
       }),
       Effect.scoped,
@@ -112,11 +119,17 @@ describe("shared continuation policy", () => {
       continuationPlan(session, working, [1, 2, 3], 600_003),
       Result.succeed({ continue: true, history: [600_003] }),
     );
-    for (const field of ["held", "paused", "idle"] as const)
+    for (const field of ["held", "paused", "idle"] as const) {
       assert.deepStrictEqual(
         continuationPlan(session, { ...working, [field]: true }, [1, 2, 3], 4),
         Result.succeed({ continue: false, history: [1, 2, 3] }),
       );
+      assert.deepStrictEqual(
+        continuationPlan(session, { ...working, [field]: true, empty: true }, [], 4),
+        Result.succeed({ continue: true, history: [4] }),
+        `a child without its task gets it while ${field}`,
+      );
+    }
   });
 
   for (const state of [
@@ -149,13 +162,7 @@ describe("shared continuation policy", () => {
                   closed++;
                 }),
               );
-              if (state === "missing")
-                return yield* SessionOperationError.make({
-                  operation: "launch",
-                  sessionId: Option.some(session.id),
-                  message: "Missing native session",
-                  cause: "missing",
-                });
+              yield* (yield* ChildSessionJournal.current).started(reference);
               const channel = yield* sessionChannel({
                 sessionId: session.id,
                 label: "Continuation test",
@@ -188,7 +195,13 @@ describe("shared continuation policy", () => {
               return {
                 running,
                 active: false,
-                recover: (tools) => conversation.recover(policy, tools, steer, state === "empty"),
+                recover: (tools) =>
+                  conversation.recover(
+                    policy,
+                    tools,
+                    (message, id) => steer(message, id).pipe(Effect.as("queued" as const)),
+                    state === "empty",
+                  ),
               };
             }),
         });
@@ -204,7 +217,8 @@ describe("shared continuation policy", () => {
           assert(Option.isNone(absent));
           assert.strictEqual(closed, 1, "failed native reopening closes its resources immediately");
           const failure = yield* adapter.launch(input).pipe(Effect.flip);
-          assert.strictEqual(failure._tag, "SessionInterruptedError");
+          assert(failure._tag === "SessionInterruptedError");
+          assert.deepStrictEqual(failure.cause, Option.some(unsaved));
           assert.lengthOf(sent, 0);
         } else {
           const native = yield* adapter.resume(input, reference);
@@ -247,12 +261,13 @@ describe("shared continuation policy", () => {
         assert.strictEqual(opens, 2);
       }).pipe(
         Effect.provideService(ChildSessionJournal, {
-          started: () => Effect.void,
+          started: () => (state === "missing" ? Effect.fail(unsaved) : Effect.void),
           prompted: Effect.void,
           continued: (timestamps) =>
             Effect.sync(() => {
               history.push(timestamps);
             }),
+          received: () => Effect.void,
           delivered: () => Effect.void,
         }),
         Effect.scoped,

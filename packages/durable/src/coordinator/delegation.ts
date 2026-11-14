@@ -18,6 +18,7 @@ import {
   OutputSaved,
   type ProgressChange,
   Prompted,
+  ReceiptsSaved,
   SessionSaved,
   ToolFinished,
   ToolStarted,
@@ -84,6 +85,7 @@ export const journalDelegation = (
       ),
     savePrompted: save(Prompted.make({})),
     saveContinuations: (timestamps) => save(ContinuationsSaved.make({ timestamps })),
+    saveReceipts: (items) => save(ReceiptsSaved.make({ items })),
     saveUsage: (usage) =>
       asJson(usage).pipe(Effect.flatMap((json) => save(UsageSaved.make({ usage: json })))),
     toolStarted: (callId, tool) => save(ToolStarted.make({ callId, tool })),

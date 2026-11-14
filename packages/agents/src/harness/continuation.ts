@@ -92,7 +92,10 @@ export interface ContinuationState {
   readonly empty?: boolean;
 }
 
-/** Decides whether recovery needs a turn, without spending a child-session budget slot. */
+/**
+ * Decides whether recovery needs a turn, without spending a child-session budget slot. A child
+ * whose native history holds no task gets its task even under Hold, pause, or an idle report.
+ */
 export const continuationPlan = (
   session: AgentSession,
   state: ContinuationState,
@@ -103,7 +106,7 @@ export const continuationPlan = (
   ContinuationLimitError
 > => {
   const recent = history.filter((at) => now - at < CONTINUATION_WINDOW);
-  if (state.held || state.paused || state.idle)
+  if (state.empty !== true && (state.held || state.paused || state.idle))
     return Result.succeed({ continue: false, history: recent });
   if (recent.length >= MAX_CONTINUATIONS)
     return Result.fail(
@@ -196,11 +199,19 @@ export const continuationPolicy = Effect.fn("HarnessContinuation.make")(function
       history = plan.history;
       yield* Effect.logInfo("Continuing interrupted child work", {
         sessionId: session.id,
+        sendsTask: state.empty === true,
         continuations: history.length,
         tools: tools.length,
         unread: unread.length,
       });
       yield* send(state.empty === true ? task : CONTINUATION_MESSAGE);
+      if (state.paused) {
+        yield* Effect.logInfo("Recovered paused child keeps unread guidance queued", {
+          sessionId: session.id,
+          unread: unread.length,
+        });
+        return;
+      }
       for (const message of unread) yield* send(message.message, message.id);
     }),
   } satisfies ContinuationPolicy;
@@ -237,12 +248,11 @@ export const childContinuation = (
     return yield* runtime.open(spec, StartResume.make({ reference }), policy).pipe(
       Scope.provide(scope),
       Effect.onError((cause) => Scope.close(scope, Exit.failCause(cause))),
-      Effect.asSome,
-      Effect.catchTag("SessionOperationError", (error) =>
+      Effect.tapErrorTag("SessionOperationError", (error) =>
         Effect.logWarning("Saved native conversation could not be reopened", {
           sessionId: spec.session.id,
           message: error.message,
-        }).pipe(Effect.as(Option.none<NativeSession>())),
+        }),
       ),
     );
   });
@@ -259,7 +269,10 @@ export const childContinuation = (
       const { spec, policy } = yield* prepare(
         ChildRequest.make({ ...request, resume: Option.some(reference) }),
       );
-      return yield* reopen(spec, reference, policy);
+      return yield* reopen(spec, reference, policy).pipe(
+        Effect.asSome,
+        Effect.catchTag("SessionOperationError", () => Effect.succeedNone),
+      );
     }),
     launch: Effect.fn("HarnessContinuation.launch")(function* (request) {
       yield* Effect.annotateCurrentSpan({ sessionId: request.session.id });
@@ -267,13 +280,17 @@ export const childContinuation = (
       if (Option.isNone(request.resume))
         return (yield* runtime.open(spec, StartPrompt.make({ text: request.prompt }), policy))
           .running;
-      const reopened = yield* reopen(spec, request.resume.value, policy);
-      if (Option.isNone(reopened))
-        return yield* SessionInterruptedError.make({
-          sessionId: request.session.id,
-          message: "The saved native conversation is unavailable",
-        });
-      const { running, active, recover } = reopened.value;
+      const { running, active, recover } = yield* reopen(spec, request.resume.value, policy).pipe(
+        Effect.catchTag("SessionOperationError", (error) =>
+          Effect.fail(
+            SessionInterruptedError.make({
+              sessionId: request.session.id,
+              message: "The saved native conversation is unavailable",
+              cause: Option.some(error),
+            }),
+          ),
+        ),
+      );
       if (!active) yield* recover(request.inFlight);
       return running;
     }),

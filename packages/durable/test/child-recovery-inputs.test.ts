@@ -70,7 +70,7 @@ const readOnReopen = Layer.effectContext(
   }),
 ).pipe(Layer.provide(stubChildBackendLayer));
 
-for (const failure of ["harness-mismatch", "native-reopen"] as const) {
+for (const failure of ["harness-mismatch", "native-reopen", "spawn-count"] as const) {
   it.live(`returns a restored forwarded steer to the parent after ${failure}`, () =>
     Effect.gen(function* () {
       const database = yield* temporaryDatabase;
@@ -120,9 +120,9 @@ for (const failure of ["harness-mismatch", "native-reopen"] as const) {
               action: AttemptChannel.Steer.make({ message: "Fix the third finding." }),
             }),
           );
-          if (failure === "harness-mismatch")
+          if (failure !== "native-reopen")
             yield* Context.get(services, DurableHarness).use(
-              "change the saved harness",
+              "change the saved delegation",
               (opened, context) =>
                 opened.commit(async (tx) => {
                   const tasks = await tx.scanTasks({ kind: "pi.tool" }, 100);
@@ -130,7 +130,10 @@ for (const failure of ["harness-mismatch", "native-reopen"] as const) {
                   assert(task !== undefined);
                   const record = await tx.doc(SubagentDoc, task.id);
                   assert(record.saved !== null);
-                  Object.assign(record.saved.session.brain, { harness: "codex" });
+                  if (failure === "harness-mismatch")
+                    Object.assign(record.saved.session.brain, { harness: "codex" });
+                  // The replay's spawn-count commit then fails before it restores the inputs.
+                  else Object.assign(record, { inFlight: "unreadable" });
                 }, context),
             );
           yield* Fiber.interrupt(execution);
@@ -138,12 +141,18 @@ for (const failure of ["harness-mismatch", "native-reopen"] as const) {
       );
       yield* Effect.scoped(
         Effect.gen(function* () {
+          const returned = yield* Deferred.make<void>();
+          const context = yield* Effect.context<never>();
           const services = yield* Layer.build(
             runtimeLayer.pipe(
               Layer.provideMerge(
                 harnessLayer({
                   ...fauxParent([
-                    answer("The earlier work is done."),
+                    // Only the pass that the replayed call's tool result starts can return the steer.
+                    () =>
+                      Effect.runPromiseWith(context)(Deferred.await(returned)).then(() =>
+                        answer("The earlier work is done."),
+                      ),
                     (context) => {
                       assert.include(jsonKey(context.messages.at(-1)), "Fix the third finding.");
                       return answer("Handled the returned steer.");
@@ -158,10 +167,20 @@ for (const failure of ["harness-mismatch", "native-reopen"] as const) {
               Layer.provideMerge(failedReopen(restored)),
             ),
           );
-          const result = yield* Context.get(services, AttemptRuntime).execute(
-            request,
-            recording.sink,
-          );
+          const result = yield* Context.get(services, AttemptRuntime).execute(request, {
+            ...recording.sink,
+            append: (direction, envelope) =>
+              recording.sink
+                .append(direction, envelope)
+                .pipe(
+                  Effect.andThen(
+                    envelope._tag === "OutboundEnvelope" &&
+                      envelope.payload._tag === "InterventionApplied"
+                      ? Deferred.succeed(returned, undefined).pipe(Effect.asVoid)
+                      : Effect.void,
+                  ),
+                ),
+          });
           assert.strictEqual(result.message, "Handled the returned steer.");
           const receipts = recording
             .outbound()

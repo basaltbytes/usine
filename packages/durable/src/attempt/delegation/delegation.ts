@@ -339,6 +339,7 @@ export const delegate = Effect.fn("Delegation.delegate")(function* (
     idleAnsweredOperator: Option.isSome(idle) && previous.idleAnsweredOperator,
     prompted: previous.prompted,
     continuations: previous.continuations,
+    receipts: previous.receipts,
     inFlight: previous.inFlight,
     unread,
     prompt: assembleChildPrompt({
@@ -437,6 +438,10 @@ export const delegate = Effect.fn("Delegation.delegate")(function* (
     continued: Effect.fn("Delegation.saveContinuations")(function* (timestamps) {
       yield* Effect.annotateCurrentSpan({ sessionId });
       yield* journal.saveContinuations(timestamps).pipe(Effect.mapError(journalError));
+    }),
+    received: Effect.fn("Delegation.saveReceipts")(function* (items) {
+      yield* Effect.annotateCurrentSpan({ sessionId });
+      yield* journal.saveReceipts(items).pipe(Effect.mapError(journalError));
     }),
     delivered: (id, delivered) =>
       Effect.suspend(() => {

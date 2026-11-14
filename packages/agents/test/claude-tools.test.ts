@@ -227,9 +227,11 @@ describe("Claude Code usine tool sets", () => {
     );
   });
 
-  it.effect("serve the usine tools to the process that resumes a lost remote session", () => {
-    const opened: Array<{ options: ClaudeQueryOptions; server: Option.Option<ClaudeToolServer> }> =
-      [];
+  it.effect("serve usine tools after an unprompted remote process is lost", () => {
+    const opened: Array<{
+      options: ClaudeQueryOptions;
+      server: Option.Option<ClaudeToolServer>;
+    }> = [];
     const results: Array<HostToolResult> = [];
     const remote = SessionSpec.make({
       ...spec,
@@ -288,7 +290,8 @@ describe("Claude Code usine tool sets", () => {
       assert.lengthOf(opened, 2, "the lost process is relaunched once");
       const [first, second] = opened;
       assert(first !== undefined && second !== undefined);
-      assert.isString(second.options.resume, "the relaunch resumes the saved session");
+      assert.isUndefined(second.options.resume);
+      assert.strictEqual(second.options.sessionId, first.options.sessionId);
       assert(Option.isSome(first.server) && Option.isSome(second.server));
       assert.deepStrictEqual(
         second.server.value.tools.map(({ name }) => name),
