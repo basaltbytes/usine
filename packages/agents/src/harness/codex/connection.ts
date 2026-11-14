@@ -1,5 +1,6 @@
 import { Context, Effect, Option, Schema, type Scope, Stream } from "effect";
 import type { AgentSessionId } from "@usine/core/agent/session";
+import type { MessageSizeMib } from "@usine/core/worker";
 import type { ChildHost } from "../../child-host/child-host.ts";
 import { type WorkingDirectory, SessionOperationError } from "../../runtime.ts";
 
@@ -16,6 +17,8 @@ export interface CodexClient {
   readonly environment: Readonly<Record<string, string>>;
   /** The local or remote host on which to start the app-server process. */
   readonly host: ChildHost;
+  /** Incoming frame bound for roles that protect the orchestrator host. */
+  readonly protocolFrameMib?: MessageSizeMib | undefined;
   /** Reattach the retained process, or confirm its termination before replacement. */
   readonly transport?: "replace" | "resume";
   /**

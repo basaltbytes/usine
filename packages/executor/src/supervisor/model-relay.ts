@@ -1,13 +1,12 @@
 // @effect-diagnostics-next-line nodeBuiltinImport:off
 import { createServer } from "node:http";
 import type { ModelId } from "@usine/core/agent/brain";
-import type { GatewayLlmProtocol } from "@usine/core/worker";
+import { type GatewayLlmProtocol, SupervisorLimits } from "@usine/core/worker";
 import { CALLER_CREDENTIAL_HEADERS } from "@usine/gateway/admin";
 import { Effect, Result, Schema, Stream } from "effect";
 import { HttpServerRequest, HttpServerResponse } from "effect/http";
 import type { GatewayModelRoute } from "../ssh/gateway/model-route.ts";
 
-export const MAX_RELAY_BODY_BYTES = 2 * 1024 ** 2;
 export const MAX_RELAY_CONNECTIONS = 8;
 
 export const modelRelayServer = () => {
@@ -41,7 +40,8 @@ const decodeModel = Schema.decodeUnknownResult(
 
 /** Forwards bounded requests for the configured model without caller credentials. */
 export const relayModelRequest = Effect.fn("SupervisorModelRelay.request")(
-  function* (route: GatewayModelRoute, model: ModelId) {
+  function* (route: GatewayModelRoute, model: ModelId, limits = SupervisorLimits.make({})) {
+    const maxBodyBytes = limits.modelRequestMib * 1024 ** 2;
     const request = yield* HttpServerRequest.HttpServerRequest;
     const path = new URL(request.url, "http://model-relay").pathname;
     const protocol = request.method === "POST" ? relayedPaths.get(path) : undefined;
@@ -57,14 +57,17 @@ export const relayModelRequest = Effect.fn("SupervisorModelRelay.request")(
     yield* request.stream.pipe(
       Stream.runForEachWhile((chunk) => {
         bytes += chunk.byteLength;
-        if (bytes > MAX_RELAY_BODY_BYTES) return Effect.succeed(false);
+        if (bytes > maxBodyBytes) return Effect.succeed(false);
         chunks.push(chunk);
         return Effect.succeed(true);
       }),
     );
-    if (bytes > MAX_RELAY_BODY_BYTES) {
+    if (bytes > maxBodyBytes) {
       yield* Effect.logWarning("The supervisor model relay refused an oversized body", { bytes });
-      return refusal(413, "The model request exceeds 2 MiB");
+      return refusal(
+        413,
+        `The model request exceeds ${limits.modelRequestMib} MiB; increase settings.supervisor_limits.model_request_mib`,
+      );
     }
     const body = Buffer.concat(chunks).toString("utf8");
     const parsed = decodeModel(body);

@@ -447,6 +447,17 @@ describe("a supervisor sandbox on a container runtime", () => {
         const started = calls.filter(([, command]) => command === "run");
         const removed = calls.filter(([, command]) => command === "rm").slice(2);
         assert.lengthOf(started, 2);
+        const cleanup = calls
+          .filter(
+            ([command, flag]) =>
+              (command === "podman" && flag === "rm") ||
+              (command === "fusermount" && flag === "-u"),
+          )
+          .slice(2);
+        assert.deepStrictEqual(
+          cleanup.map(([command]) => command),
+          ["podman", "fusermount", "podman", "fusermount"],
+        );
         assert.deepStrictEqual(
           removed.map(([, , , name]) => name),
           started.map((args) => args[args.indexOf("--name") + 1]),

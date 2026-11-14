@@ -1,3 +1,4 @@
+import { MessageSizeMib } from "@usine/core/worker";
 import { ChildProcessLost } from "../../../src/child-host/process.ts";
 import { jsonKey } from "@usine/core/json-key";
 import { assert, describe, it } from "@effect/vitest";
@@ -103,6 +104,7 @@ describe("Codex app-server transport", () => {
               sessionId: Option.some(request.session.id),
               environment: request.environment,
               host: request.host,
+              protocolFrameMib: MessageSizeMib.make(4),
             });
             const response = yield* connection
               .request("stream", "probe", {})
@@ -115,6 +117,39 @@ describe("Codex app-server transport", () => {
             assert.include(error.message, "frame exceeds 4 MiB");
             const streamError = yield* connection.notifications.pipe(Stream.runDrain, Effect.flip);
             assert.strictEqual(streamError, error);
+          }).pipe(
+            Effect.scoped,
+            Effect.provide(codexAppServerLive.pipe(Layer.provide(spawnerFor(process)))),
+          );
+        }),
+    );
+  }
+
+  for (const protocolFrameMib of [undefined, MessageSizeMib.make(8)]) {
+    it.effect(
+      `reads a large resume response with frame allowance ${protocolFrameMib ?? "unset"}`,
+      () =>
+        Effect.gen(function* () {
+          const process = yield* fakeProcess;
+          yield* Effect.gen(function* () {
+            const connection = yield* (yield* CodexAppServer).open({
+              cwd: request.cwd,
+              sessionId: Option.some(request.session.id),
+              environment: request.environment,
+              host: request.host,
+              protocolFrameMib,
+            });
+            const pending = yield* connection
+              .request("launch", "thread/resume", {})
+              .pipe(Effect.forkChild);
+            yield* awaitStdinLines(process, 1);
+            const rpc = yield* Schema.decodeUnknownEffect(
+              Schema.fromJsonString(Schema.Struct({ id: Schema.Int })),
+            )(process.stdinLines[0]);
+            const history = "x".repeat(5 * 1024 ** 2);
+            yield* Queue.offer(process.stdout, line({ id: rpc.id, result: { history } }));
+            const response = yield* Fiber.join(pending);
+            assert.deepStrictEqual(response, { history });
           }).pipe(
             Effect.scoped,
             Effect.provide(codexAppServerLive.pipe(Layer.provide(spawnerFor(process)))),

@@ -189,6 +189,12 @@ export class ContainerLimits extends Schema.Class<
   pids: ContainerPids,
 }) {}
 
+/** The maximum size of a protocol message or request body in MiB. */
+export const MessageSizeMib = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)).pipe(
+  Schema.brand("MessageSizeMib"),
+);
+export type MessageSizeMib = typeof MessageSizeMib.Type;
+
 /** Host protection limits for one supervisor conversation. */
 export class SupervisorLimits extends Schema.Class<
   SupervisorLimits,
@@ -209,6 +215,14 @@ export class SupervisorLimits extends Schema.Class<
   tmpfsSizeMib: ContainerScratchMib.pipe(
     Schema.withConstructorDefault(Effect.succeed(ContainerScratchMib.make(64))),
     Schema.withDecodingDefaultKey(Effect.succeed(ContainerScratchMib.make(64))),
+  ),
+  protocolFrameMib: MessageSizeMib.pipe(
+    Schema.withConstructorDefault(Effect.succeed(MessageSizeMib.make(4))),
+    Schema.withDecodingDefaultKey(Effect.succeed(MessageSizeMib.make(4))),
+  ),
+  modelRequestMib: MessageSizeMib.pipe(
+    Schema.withConstructorDefault(Effect.succeed(MessageSizeMib.make(32))),
+    Schema.withDecodingDefaultKey(Effect.succeed(MessageSizeMib.make(32))),
   ),
   conversationSizeMib: ContainerScratchMib.pipe(
     Schema.withConstructorDefault(Effect.succeed(ContainerScratchMib.make(512))),

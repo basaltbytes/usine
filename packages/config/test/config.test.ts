@@ -1,3 +1,4 @@
+import { SupervisorLimits } from "@usine/core/worker";
 import { jsonKey } from "@usine/core/json-key";
 import { NodeFileSystem, NodePath } from "@effect/platform-node";
 import { assert, describe, expect, it } from "@effect/vitest";
@@ -1205,7 +1206,7 @@ workers:
       const parser = yield* ConfigParser;
       const config = yield* parser.parseUsineYaml(
         InstancePath.make("usine.yaml"),
-        "version: 1\nrepos: []\nsettings:\n  supervisor_limits:\n    cpus: 0.5\n    conversation_size_mib: 128\n",
+        "version: 1\nrepos: []\nsettings:\n  supervisor_limits:\n    cpus: 0.5\n    conversation_size_mib: 128\n    model_request_mib: 64\n    protocol_frame_mib: 8\n",
       );
       assert(Option.isSome(config.settings.supervisorLimits));
       expect({ ...config.settings.supervisorLimits.value }).toEqual({
@@ -1214,13 +1215,32 @@ workers:
         pids: 256,
         tmpfsSizeMib: 64,
         conversationSizeMib: 128,
+        modelRequestMib: 64,
+        protocolFrameMib: 8,
       });
+      const defaults = yield* parser.parseUsineYaml(
+        InstancePath.make("usine.yaml"),
+        "version: 1\nrepos: []\nsettings:\n  supervisor_limits: {}\n",
+      );
+      assert(Option.isSome(defaults.settings.supervisorLimits));
+      expect({ ...defaults.settings.supervisorLimits.value }).toEqual({
+        cpus: 1,
+        memoryMib: 1024,
+        pids: 256,
+        tmpfsSizeMib: 64,
+        conversationSizeMib: 512,
+        modelRequestMib: 32,
+        protocolFrameMib: 4,
+      });
+      expect(SupervisorLimits.make({})).toEqual(defaults.settings.supervisorLimits.value);
       for (const field of [
         "cpus",
         "memory_mib",
         "pids",
         "tmpfs_size_mib",
         "conversation_size_mib",
+        "model_request_mib",
+        "protocol_frame_mib",
       ]) {
         const refused = yield* parser
           .parseUsineYaml(

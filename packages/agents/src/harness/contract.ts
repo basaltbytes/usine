@@ -4,7 +4,7 @@ import {
   HarnessSession,
   SessionTokensUpdated,
 } from "@usine/core/agent/session";
-import { MachineId, WorkerName } from "@usine/core/worker";
+import { MachineId, MessageSizeMib, WorkerName } from "@usine/core/worker";
 import { type Brand, Effect, Option, Schema } from "effect";
 import { ChildHost } from "../child-host/child-host.ts";
 import {
@@ -31,6 +31,10 @@ export class SessionSpec extends Schema.Class<
   admitted: AdmittedBrain,
   /** Where to start the harness process and run its commands. */
   host: ChildHost,
+  /** Bounds incoming protocol messages when the role protects the orchestrator host. */
+  protocolFrameMib: Schema.OptionFromOptionalKey(MessageSizeMib).pipe(
+    Schema.withConstructorDefault(Effect.succeedNone),
+  ),
   /** The worker that `host` runs on. */
   worker: WorkerName,
   /** The provisioned machine that `host` runs on, or `None` on a worker with a shared login. */

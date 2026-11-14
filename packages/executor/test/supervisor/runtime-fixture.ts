@@ -56,6 +56,8 @@ export interface RuntimeState {
   starts: boolean;
   hangStart?: boolean;
   rejectLimits?: boolean;
+  staleMount?: boolean;
+  repaired?: boolean;
   image?: Answer;
   pull?: Answer;
 }
@@ -75,7 +77,11 @@ export const podman = (
   const mounts = new Set<string>();
   return spawning((command, args) => {
     if (command === "mountpoint")
-      return { stdout: "", exitCode: args[0] === "--version" || mounts.has(args[1]!) ? 0 : 32 };
+      return {
+        stdout: "",
+        exitCode:
+          args[0] === "--version" || relay.staleMount === true || mounts.has(args[1]!) ? 0 : 32,
+      };
     if (command === "fuse2fs") {
       if (args[0] !== "-V") {
         mounts.add(args[args.length - 1]!);
@@ -84,14 +90,21 @@ export const podman = (
       return { stdout: "", exitCode: 0 };
     }
     if (command === "fusermount") {
-      if (args[0] === "-u") mounts.delete(args[1]!);
+      if (args[0] === "-u") {
+        mounts.delete(args[1]!);
+        relay.staleMount = false;
+      }
       return { stdout: "", exitCode: 0 };
     }
     if (command === "fallocate") {
       if (args[0] === "-l") truncateSync(args[2]!, Number(args[1]));
       return { stdout: "", exitCode: 0 };
     }
-    if (command === "mkfs.ext4" || command === "e2fsck") return { stdout: "", exitCode: 0 };
+    if (command === "mkfs.ext4" || command === "e2fsck")
+      return {
+        stdout: "",
+        exitCode: command === "e2fsck" && args[0] === "-p" && relay.repaired === true ? 1 : 0,
+      };
     if (command !== "podman") return undefined;
     if (args[0] === "image") return relay.image ?? { stdout: "", exitCode: 1 };
     if (args[0] === "pull") return relay.pull ?? { stdout: "", exitCode: 0 };

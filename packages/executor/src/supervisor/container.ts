@@ -441,7 +441,7 @@ const makeContainerSandbox = Effect.fn("SupervisorSandbox.make")(function* (
   ) {
     // A model response streams for as long as the turn's longest answer.
     const server = yield* NodeHttpServer.make(modelRelayServer, { path: socket });
-    yield* server.serve(relayModelRequest(route, model));
+    yield* server.serve(relayModelRequest(route, model, limits));
   });
 
   const startContainer = Effect.fn("SupervisorSandbox.startContainer")(function* (
@@ -712,6 +712,7 @@ const makeContainerSandbox = Effect.fn("SupervisorSandbox.make")(function* (
         }),
       ).pipe(Effect.mapError(unavailableBecause("construct the supervisor seat"))),
       worker: WorkerName.make("supervisor"),
+      protocolFrameMib: limits.protocolFrameMib,
       cwd: WorkingDirectory.make(paths.workspace),
       environment: Option.match(wiring, {
         onNone: () => ({}),

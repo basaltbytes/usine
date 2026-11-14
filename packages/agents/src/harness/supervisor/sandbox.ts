@@ -1,7 +1,7 @@
 import { Harness, ModelId } from "@usine/core/agent/brain";
 import { AgentSessionId } from "@usine/core/agent/session";
 import { CommitSha, RepositoryName } from "@usine/core/repository";
-import { WorkerName } from "@usine/core/worker";
+import { MessageSizeMib, WorkerName } from "@usine/core/worker";
 import { type Brand, Context, Effect, Option, Schema, type Scope } from "effect";
 import { ExecShell, type ShellContainer } from "../../child-host/child-host.ts";
 import { WorkingDirectory } from "../../runtime.ts";
@@ -21,6 +21,10 @@ export class SupervisorSeat extends Schema.Class<
   ),
   /** The worker name that the session's process and logs carry. */
   worker: WorkerName,
+  /** Maximum incoming harness protocol frame size in MiB. */
+  protocolFrameMib: MessageSizeMib.pipe(
+    Schema.withConstructorDefault(Effect.succeed(MessageSizeMib.make(4))),
+  ),
   /** The directory that the conversation's harness process starts in. */
   cwd: WorkingDirectory,
   /** The complete environment of the harness process, with the gateway credential (ADR 0011). */

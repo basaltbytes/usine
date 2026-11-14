@@ -4,7 +4,7 @@ import { SupervisorSandbox, SandboxRequest } from "@usine/agents/supervisor";
 import { Harness, ModelId } from "@usine/core/agent/brain";
 import { AgentSessionId } from "@usine/core/agent/session";
 import { ContainerImage, SupervisorLimits } from "@usine/core/worker";
-import { Effect, FileSystem, Layer, Option } from "effect";
+import { Effect, FileSystem, Layer, Logger, Option } from "effect";
 import { ChildProcessSpawner } from "effect/process";
 import { containerSandboxLayer } from "../../src/supervisor/container.ts";
 import { mountConversation } from "../../src/supervisor/storage.ts";
@@ -98,6 +98,34 @@ describe("bounded supervisor storage", () => {
         calls.filter(([command, flag]) => command === "fusermount" && flag === "-u"),
         [["fusermount", "-u", `${root}/conversations/test`]],
       );
+    }).pipe(Effect.scoped, Effect.provide(NodeFileSystem.layer)),
+  );
+
+  it.live("logs a leftover mount reset and a repaired conversation", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const root = yield* fs.makeTempDirectoryScoped();
+      const logs: Array<unknown> = [];
+      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner.pipe(
+        Effect.provide(podman([], [], { starts: true, staleMount: true, repaired: true })),
+      );
+      yield* mountConversation(fs, spawner, root, "test", SupervisorLimits.make({})).pipe(
+        Effect.scoped,
+        Effect.withLogger(
+          Logger.make(({ logLevel, message }) => {
+            logs.push({ logLevel, message });
+          }),
+        ),
+      );
+      const directory = `${root}/conversations/test`;
+      assert.deepInclude(logs, {
+        logLevel: "Info",
+        message: ["Unmounting a previous supervisor filesystem before a turn", { directory }],
+      });
+      assert.deepInclude(logs, {
+        logLevel: "Warn",
+        message: ["Repaired a supervisor conversation filesystem", { directory }],
+      });
     }).pipe(Effect.scoped, Effect.provide(NodeFileSystem.layer)),
   );
 

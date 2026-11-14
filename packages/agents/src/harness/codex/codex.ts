@@ -192,6 +192,7 @@ const makeCodexSessions = Effect.gen(function* () {
       sessionId: Option.some(spec.session.id),
       environment: spec.environment,
       host: spec.host,
+      protocolFrameMib: Option.getOrUndefined(spec.protocolFrameMib),
       serve: tools.serve,
     };
     if (start._tag === "StartResume") client = { ...client, transport: "resume" };
@@ -786,7 +787,11 @@ const makeCodexSessions = Effect.gen(function* () {
     };
   });
   const stop = Effect.fn("CodexRuntime.stop")((spec: SessionSpec) =>
-    appServer.stop({ ...spec, sessionId: Option.some(spec.session.id) }),
+    appServer.stop({
+      ...spec,
+      protocolFrameMib: Option.getOrUndefined(spec.protocolFrameMib),
+      sessionId: Option.some(spec.session.id),
+    }),
   );
   return {
     open: openWithTools(open),

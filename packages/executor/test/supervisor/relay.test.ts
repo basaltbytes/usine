@@ -4,17 +4,19 @@
 import { connect } from "node:net";
 import { NodeHttpClient, NodeHttpServer, NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
+import { MessageSizeMib, SupervisorLimits } from "@usine/core/worker";
 import { ModelId } from "@usine/core/agent/brain";
 import { Effect, Logger, Result, Schema } from "effect";
 import { HttpClient, HttpClientRequest, HttpServerRequest, HttpServerResponse } from "effect/http";
 import { GatewayModelError, type GatewayModelRoute } from "../../src/ssh/gateway/model-route.ts";
 import {
   modelRelayServer,
-  MAX_RELAY_BODY_BYTES,
   MAX_RELAY_CONNECTIONS,
   relayModelRequest,
 } from "../../src/supervisor/model-relay.ts";
 
+const limits = SupervisorLimits.make({ modelRequestMib: MessageSizeMib.make(2) });
+const MAX_RELAY_BODY_BYTES = 2 * 1024 ** 2;
 const model = ModelId.make("allowed");
 const unused: GatewayModelRoute = {
   credential: () => Effect.succeedNone,
@@ -53,7 +55,7 @@ describe("supervisor relay limits", () => {
         request("x".repeat(MAX_RELAY_BODY_BYTES + 1)),
       ];
       const statuses = yield* Effect.forEach(requests, (request) =>
-        relayModelRequest(unused, model).pipe(
+        relayModelRequest(unused, model, limits).pipe(
           Effect.provideService(HttpServerRequest.HttpServerRequest, request),
           Effect.map((response) => response.status),
         ),
@@ -74,7 +76,7 @@ describe("supervisor relay limits", () => {
 
   it.effect("refuses another model and hides the gateway destination in a 502", () =>
     Effect.gen(function* () {
-      const denied = yield* relayModelRequest(unused, model).pipe(
+      const denied = yield* relayModelRequest(unused, model, limits).pipe(
         Effect.provideService(HttpServerRequest.HttpServerRequest, request('{"model":"other"}')),
       );
       assert.strictEqual(denied.status, 403);
@@ -102,7 +104,7 @@ describe("supervisor relay limits", () => {
         host: "127.0.0.1",
         port: 0,
       });
-      yield* server.serve(relayModelRequest(unused, model));
+      yield* server.serve(relayModelRequest(unused, model, limits));
       const address = server.address;
       assert(address._tag === "InetAddressV4");
       const client = yield* HttpClient.HttpClient;
@@ -128,7 +130,7 @@ describe("supervisor relay limits", () => {
           },
         }),
       };
-      const bounded = yield* relayModelRequest(unused, model).pipe(
+      const bounded = yield* relayModelRequest(unused, model, limits).pipe(
         Effect.provideService(
           HttpServerRequest.HttpServerRequest,
           HttpServerRequest.fromWeb(
@@ -140,6 +142,32 @@ describe("supervisor relay limits", () => {
       assert.isBelow(pulls, 36);
       assert.isTrue(cancelled);
     }).pipe(Effect.scoped, Effect.provide([NodeServices.layer, NodeHttpClient.layerUndici])),
+  );
+
+  it.effect("forwards bodies above 2 MiB with the configured allowance", () =>
+    Effect.gen(function* () {
+      const body = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Json))({
+        model,
+        input: "x".repeat(3 * 1024 ** 2),
+      });
+      const route: GatewayModelRoute = {
+        credential: () => Effect.succeedNone,
+        request: (_protocol, received) =>
+          Effect.sync(() => {
+            assert.strictEqual(received, body);
+            return new Response("ok");
+          }),
+      };
+      for (const configured of [
+        SupervisorLimits.make({}),
+        SupervisorLimits.make({ modelRequestMib: MessageSizeMib.make(4) }),
+      ]) {
+        const response = yield* relayModelRequest(route, model, configured).pipe(
+          Effect.provideService(HttpServerRequest.HttpServerRequest, request(body)),
+        );
+        assert.strictEqual(response.status, 200);
+      }
+    }),
   );
 
   it("drops connections above the limit", async () => {

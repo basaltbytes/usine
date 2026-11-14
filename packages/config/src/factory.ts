@@ -719,6 +719,8 @@ export class Settings extends Schema.Class<Settings, Brand.Brand<"@usine/config/
         memoryMib: "memory_mib",
         tmpfsSizeMib: "tmpfs_size_mib",
         conversationSizeMib: "conversation_size_mib",
+        modelRequestMib: "model_request_mib",
+        protocolFrameMib: "protocol_frame_mib",
       }),
     ),
   ).pipe(Schema.withConstructorDefault(Effect.succeedNone)),

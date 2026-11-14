@@ -29,7 +29,12 @@ export const mountConversation = Effect.fn("SupervisorSandbox.mountConversation"
     yield* fs.makeDirectory(`${root}/disks`, { recursive: true });
     yield* fs.makeDirectory(directory, { recursive: true });
     const mounted = yield* run("mountpoint", ["-q", directory], [0, 32]);
-    if (mounted.exitCode === 0) yield* run("fusermount", ["-u", directory]);
+    if (mounted.exitCode === 0) {
+      yield* Effect.logInfo("Unmounting a previous supervisor filesystem before a turn", {
+        directory,
+      });
+      yield* run("fusermount", ["-u", directory]);
+    }
     if (!(yield* fs.exists(image))) {
       const staging = `${image}.creating`;
       yield* fs.remove(staging, { force: true });
@@ -65,7 +70,9 @@ export const mountConversation = Effect.fn("SupervisorSandbox.mountConversation"
         message:
           "The existing conversation filesystem differs from conversation_size_mib; migrate it before changing the limit",
       });
-    yield* run("e2fsck", ["-p", image], [0, 1]);
+    const checked = yield* run("e2fsck", ["-p", image], [0, 1]);
+    if (checked.exitCode === 1)
+      yield* Effect.logWarning("Repaired a supervisor conversation filesystem", { directory });
     const mountedProcess = yield* spawner.spawn(
       ChildProcess.make("fuse2fs", ["-f", "-o", "rw,nosuid,nodev,allow_other", image, directory], {
         detached: false,

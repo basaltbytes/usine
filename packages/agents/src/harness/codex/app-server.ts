@@ -272,11 +272,22 @@ const makeCodexAppServer = Effect.gen(function* () {
           });
         });
 
-      const stdoutReader = yield* boundedLines(handle.stdout, () =>
-        operationError("stream", request, "Codex app-server frame exceeds 4 MiB", {
-          limitBytes: 4 * 1024 ** 2,
-        }),
-      ).pipe(
+      const lines =
+        request.protocolFrameMib === undefined
+          ? handle.stdout.pipe(Stream.decodeText(), Stream.splitLines)
+          : boundedLines(
+              handle.stdout,
+              () =>
+                operationError(
+                  "stream",
+                  request,
+                  `Codex app-server frame exceeds ${request.protocolFrameMib} MiB; increase settings.supervisor_limits.protocol_frame_mib`,
+                  { limitMib: request.protocolFrameMib },
+                ),
+              "emit",
+              request.protocolFrameMib * 1024 ** 2,
+            );
+      const stdoutReader = yield* lines.pipe(
         Stream.runForEach(routeLine),
         Effect.flatMap(() =>
           Ref.get(closing).pipe(

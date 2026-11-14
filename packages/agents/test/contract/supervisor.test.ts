@@ -1,3 +1,5 @@
+import { CodexAppServer } from "../../src/harness/codex/app-server.ts";
+import { codexRuntime } from "../../src/harness/codex/codex.ts";
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import { BrainSpec, Harness, ModelId } from "@usine/core/agent/brain";
@@ -13,7 +15,7 @@ import {
   TokenCount,
 } from "@usine/core/agent/session";
 import * as AttemptChannel from "@usine/core/attempt/channel";
-import { WorkerName } from "@usine/core/worker";
+import { MessageSizeMib, WorkerName } from "@usine/core/worker";
 import { Array as Arr, Effect, Layer, Option, Result, Schema, Stream } from "effect";
 import { ExecShell, LocalProcess } from "../../src/child-host/child-host.ts";
 import { AdmissionContext, admitBrain } from "../../src/harness/admission.ts";
@@ -40,6 +42,7 @@ import {
 } from "../../src/harness/supervisor/turn.ts";
 import {
   AgentCapacityError,
+  SessionOperationError,
   type AgentSessionError,
   RestartState,
   SessionResult,
@@ -94,6 +97,7 @@ const seat = SupervisorSeat.make({
     { container },
   ),
   worker: WorkerName.make("orchestrator"),
+  protocolFrameMib: MessageSizeMib.make(12),
   cwd: WorkingDirectory.make("/tmp"),
   environment: {},
   credential: "gateway",
@@ -134,6 +138,7 @@ const scriptedClaude = (session: {
     id: claudeBrain.harness,
     open: (spec, _start, continuation) =>
       Effect.sync((): NativeSession => {
+        assert.deepStrictEqual(spec.protocolFrameMib, Option.some(12));
         restored.push(continuation.restored);
         return {
           running: {
@@ -204,6 +209,47 @@ const finished = (events: ReadonlyArray<AgentSessionEvent>) =>
   );
 
 describe("the supervisor role", () => {
+  it.effect("passes the seat's frame allowance into the Codex connection", () => {
+    const opened: Array<number | undefined> = [];
+    const server = Layer.succeed(CodexAppServer)({
+      stop: () => Effect.void,
+      open: (client) =>
+        Effect.gen(function* () {
+          opened.push(client.protocolFrameMib);
+          return yield* SessionOperationError.make({
+            operation: "launch",
+            sessionId: client.sessionId,
+            message: "Stopped at the connection boundary",
+            cause: undefined,
+          });
+        }),
+    });
+    const harnesses = Layer.unwrap(
+      Effect.map(codexRuntime, (runtime) =>
+        Harnesses.layerFrom(HarnessCatalog.make({ descriptors: [codex] }), [runtime]),
+      ),
+    ).pipe(Layer.provide(server));
+    return Effect.gen(function* () {
+      const failure = yield* runSupervisorTurn(
+        SupervisorTurn.make({
+          session: conversation,
+          brain: BrainSpec.make({
+            harness: codex.id,
+            model: ModelId.make("gpt-5.6-terra"),
+            effort: "low",
+          }),
+          seat,
+          saved: Option.none(),
+          usage: Option.none(),
+          message: "Inspect the factory",
+        }),
+        operatorTools,
+      ).pipe(Effect.flip);
+      assert.include(failure.message, "Stopped at the connection boundary");
+      assert.deepStrictEqual(opened, [12]);
+    }).pipe(Effect.provide([harnesses, operatorToolHandlers]), Effect.provide(NodeServices.layer));
+  });
+
   for (const provider of supervisorProviders)
     it.live(
       `${provider}: reads the source, calls one operator tool, and resumes the session`,

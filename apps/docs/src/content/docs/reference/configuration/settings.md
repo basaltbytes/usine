@@ -71,7 +71,7 @@ Each turn runs in its own container on the orchestrator host, which usine remove
 
 - **Source.** Each repository that the turn reads is mounted read-only at `<owner>/<repo>` in the session's working directory, at the head of its default branch when the turn starts, without the git history. A turn keeps reading the head that it started on after a push. In this release, no interface opens a turn, so the orchestrator doesn't choose or prepare these repositories.
 - **Files.** No other instance file is in the container: not the database, the GitHub App key, or a provider login. The conversation's own directory keeps the harness's saved session and writable home. Its fixed-size filesystem bounds these writes, including Pi's session files written by the orchestrator. Temporary writes use bounded `/tmp` and shared memory.
-- **Network.** The container has no network. The harness reaches the model through a relay to the orchestrator, which sends each model request through the instance's gateway with the instance's credential. The relay accepts only the configured supervisor model, limits each request body to 2 MiB and accepts at most eight simultaneous connections. Oversized requests receive HTTP 413. The session reaches usine only through the operator tools that its harness serves over the session's own connection.
+- **Network.** The container has no network. The harness reaches the model through a relay to the orchestrator, which sends each model request through the instance's gateway with the instance's credential. The relay accepts only the configured supervisor model, limits each request body to `supervisor_limits.model_request_mib` (32 MiB by default) and accepts at most eight simultaneous connections. Oversized requests receive HTTP 413. The session reaches usine only through the operator tools that its harness serves over the session's own connection.
 
 ### Tools per harness
 
@@ -95,11 +95,11 @@ Conversation storage requires `fuse2fs`, `fusermount`, `mkfs.ext4`, `e2fsck`, `f
 
 Without the runtime, storage prerequisites, enforced cgroup limits or a gateway, the supervisor refuses turns. The instance still starts and logs the reason; **Configuration > Settings** reports when preparation makes the supervisor unavailable.
 
-Codex output and process-owner protocol frames are limited to 4 MiB per line, including unfinished lines. Exceeding the limit fails the session.
+Supervisor Codex protocol frames are limited to `supervisor_limits.protocol_frame_mib` (4 MiB by default), including unfinished lines. If a long conversation exceeds this limit while resuming, increase the setting and restart the orchestrator. Ordinary Codex coding sessions have no app-server frame limit. Process-owner transport frames remain limited to 4 MiB; the owner splits harness output into smaller chunks.
 
 ### Host limits
 
-Limits are always enabled, including when `supervisor_limits` is omitted. `cpus` must be positive; fractional values are accepted. The other values must be integers: `memory_mib` is at least 256, `pids` is at least 64, and both filesystem sizes are at least 1 MiB. Changes take effect after restarting the orchestrator.
+Limits are always enabled, including when `supervisor_limits` is omitted. `cpus` must be positive; fractional values are accepted. The other values must be integers: `memory_mib` is at least 256, `pids` is at least 64, and filesystem and message sizes are at least 1 MiB. Changes take effect after restarting the orchestrator.
 
 | Field in `settings.supervisor_limits` | Default | Description |
 | --- | --- | --- |
@@ -107,7 +107,11 @@ Limits are always enabled, including when `supervisor_limits` is omitted. `cpus`
 | `memory_mib` | `1024` | Container memory limit in MiB. Swap is disabled. |
 | `pids` | `256` | Maximum processes and threads in the container. |
 | `tmpfs_size_mib` | `64` | Size of `/tmp` in MiB. Shared memory is separately capped at 16 MiB. |
+| `model_request_mib` | `32` | Maximum model request body in MiB. Increase this for larger contexts or attachments. |
+| `protocol_frame_mib` | `4` | Maximum incoming supervisor Codex protocol frame in MiB. Increase this for long saved histories. |
 | `conversation_size_mib` | `512` | Preallocated filesystem size per conversation, including filesystem metadata, in MiB. |
+
+The relay buffers up to eight request bodies at once, so the raw body budget is eight times `model_request_mib`, plus JSON decoding and forwarding overhead. The 32 MiB default accommodates text requests for million-token contexts; attachments may need a larger value. A 413 response names the setting to increase.
 
 ```yaml
 settings:
