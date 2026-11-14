@@ -39,6 +39,7 @@ export interface MemoryDelegation {
   receipts: Array<string>;
   inFlight: Array<{ readonly callId: string; readonly tool: string }>;
   prompted: boolean;
+  launched: boolean;
 }
 
 const emptyAttempt = (): MemoryAttempt => ({
@@ -60,6 +61,7 @@ const emptyDelegation = (): MemoryDelegation => ({
   receipts: [],
   inFlight: [],
   prompted: true,
+  launched: false,
 });
 
 /**
@@ -102,6 +104,7 @@ export const memoryJournal = (
     receipts: Option.some([...delegation.receipts]),
     inFlight: [...delegation.inFlight],
     prompted: delegation.prompted,
+    launched: delegation.launched,
   });
   const journal: DelegationJournal = {
     start: Effect.sync(() => {
@@ -184,6 +187,9 @@ export const memoryJournal = (
       Effect.sync(() => {
         delegation.output = output;
       }).pipe(guarded("saveOutput")),
+    saveLaunched: Effect.sync(() => {
+      delegation.launched = true;
+    }).pipe(guarded("saveLaunched")),
   };
   const call: DelegationCall = {
     output: (chunk) =>

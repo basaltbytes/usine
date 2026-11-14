@@ -50,7 +50,7 @@ const role = RoleSpec.make({
   name: RoleName.make("decision"),
   placement: RolePlacements.make({ placements: ["local"], reason: "The probe runs locally" }),
   credential: Option.none(),
-  nativeTools: false,
+  nativeTools: "none",
   hostTools: true,
   persistence: "saved",
   interventions: false,

@@ -25,7 +25,7 @@ const probe = RoleSpec.make({
     reason: "The contract probe runs on the local worker",
   }),
   credential: Option.none(),
-  nativeTools: true,
+  nativeTools: "all",
   hostTools: false,
   persistence: "saved",
   interventions: true,

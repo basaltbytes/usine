@@ -46,7 +46,7 @@ Effort values are `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max`.
 
 ## Supervisor
 
-The supervisor observes and operates the factory for a member. It runs on the orchestrator with the instance's gateway credential, and each turn reopens the conversation that the previous turn saved. It lists only the operator tools that the member's token allows, the same tools that the [MCP endpoint](/guides/connect-an-mcp-client/) serves, and every call goes through the operator API with that token, so the supervisor can do no more than the member. The setting selects and checks the supervisor's brain; this release has no interface that opens a conversation with it.
+The supervisor observes and operates the factory for a member, and reads the instance's source to answer questions about the code and the runs. It runs on the orchestrator host, in a read-only container, with the instance's gateway credential, and each turn reopens the conversation that the previous turn saved. It lists the operator tools that the member's token allows, the same tools that the [MCP endpoint](/guides/connect-an-mcp-client/) serves, and every call goes through the operator API with that token, so the supervisor can do no more than the member. The setting selects and checks the supervisor's brain; this release has no interface that opens a conversation with it.
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -63,7 +63,33 @@ settings:
     effort: medium
 ```
 
-Without `supervisor`, the instance starts and **Configuration > Settings** reports the supervisor as not configured. Saving refuses a harness that can't serve the role and names what it lacks: the harness must serve usine tool sets with its own tools off, reopen a saved conversation, take steering and interrupts, and report token usage. Claude Code and Pi serve the role. Codex is refused, because it lists its own tools in every thread.
+Without `supervisor`, the instance starts and **Configuration > Settings** reports the supervisor as not configured. Saving refuses a harness that can't serve the role and names what it lacks: the harness must serve usine tool sets, reopen a saved conversation, take steering and interrupts, and report token usage. Claude Code, Codex, and Pi serve the role.
+
+### Where the supervisor runs
+
+Each turn runs in its own container on the orchestrator host, which usine removes when the turn ends. A container whose orchestrator stops ends itself within seconds, and the next start removes any that remain. A conversation runs one turn at a time.
+
+- **Source.** Each repository that the turn reads is mounted read-only at `<owner>/<repo>` in the session's working directory, at the head of its default branch when the turn starts, without the git history. A turn keeps reading the head that it started on after a push. In this release, no interface opens a turn, so the orchestrator doesn't choose or prepare these repositories.
+- **Files.** No other instance file is in the container: not the database, the GitHub App key, or a provider login. Only the conversation's own directory, which keeps the harness's saved session, is writable.
+- **Network.** The container has no network. The harness reaches the model through a relay to the orchestrator, which sends each model request through the instance's gateway with the instance's credential. The session reaches usine only through the operator tools that its harness serves over the session's own connection.
+
+### Tools per harness
+
+| Harness | The harness's own tools in a supervisor session |
+| --- | --- |
+| Claude Code | `Read`, `Grep`, and `Glob` only. |
+| Pi | `read`, `grep`, `find`, and `ls` only. Pi runs in the orchestrator process and runs these tools' file operations in the container. |
+| Codex | All of its own tools, including its shell and `apply_patch`, because Codex lists them in every thread. The container limits what they reach: they read the source, can't change it, and reach no network. |
+
+Pi's `grep` and `find` accept patterns that start with `-`, such as `--network`, so the supervisor can search for command-line flags and filenames that begin with a dash.
+
+**Configuration > Settings** and the settings form say when the selected harness keeps all its own tools, with the reason that its descriptor gives.
+
+### Host requirements
+
+The orchestrator host needs Podman or Docker. usine uses Podman when both are installed, and rootless Podman is the recommended runtime. The host needs no hardware virtualization, so a cloud VM works. Each container runs the attempt image, `ghcr.io/basaltbytes/usine-worker`, which the runtime pulls on the first turn. The supervisor reaches the model through the gateway of the instance's first SSH worker that has one.
+
+On a host without a container runtime, or an instance without a gateway, the instance still starts. It logs `The configured supervisor is unavailable on this orchestrator` with the reason, and **Configuration > Settings** shows the supervisor container as unavailable, with the reason.
 
 ## Instance metadata
 

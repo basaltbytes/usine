@@ -32,6 +32,7 @@ import { gitHubCredentialLayer } from "./credentials.ts";
 import { parentAdmissionLayer } from "./current-instance/parents.ts";
 import { CurrentInstance } from "./current-instance/current-instance.ts";
 import { externalHttpClientLayer } from "./http-client.ts";
+import { supervisorSandboxLayer } from "./supervisor-sandbox.ts";
 import { idleTriggersLayer } from "./idle-triggers.ts";
 import { LabelReconciler } from "./label-reconciler.ts";
 import { OperatorConfiguration } from "./operator/configuration/view.ts";
@@ -174,10 +175,16 @@ export const runtimeLayer = (
     Layer.provide(dependencies),
     Layer.provide(ci),
   );
+  // Supervisor sessions run in a container on this host; the view reports why they can't.
+  const supervisorSandbox = supervisorSandboxLayer(instanceDirectory, instanceId).pipe(
+    Layer.provide(NodeServices.layer),
+  );
   const services = Layer.mergeAll(
     Operator.layer,
     OperatorConfiguration.layer,
     Orchestrator.layer,
-  ).pipe(Layer.provide(Layer.mergeAll(dependencies, triggers, ci, itemHistory, app)));
+  ).pipe(
+    Layer.provide(Layer.mergeAll(dependencies, triggers, ci, itemHistory, app, supervisorSandbox)),
+  );
   return Layer.mergeAll(dependencies, triggers, services, app, files, WebhookHealth.layer);
 };

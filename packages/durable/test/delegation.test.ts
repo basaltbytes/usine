@@ -1,11 +1,20 @@
 import { assert, describe, it } from "@effect/vitest";
 import type { TaskId } from "@earendil-works/pi-durable";
-import { ChildBackend } from "@usine/agents/runtime";
-import { AgentSessionId, ChildSessionBudget, ChildSessionCount } from "@usine/core/agent/session";
+import { ChildBackend, type ChildRequest, ContinuationMismatchError } from "@usine/agents/runtime";
+import {
+  AgentSessionId,
+  ChildSessionBudget,
+  ChildSessionCount,
+  HarnessSession,
+  HarnessSessionId,
+} from "@usine/core/agent/session";
 import * as AttemptChannel from "@usine/core/attempt/channel";
-import { Deferred, Effect, Exit, Fiber, Option } from "effect";
+import { MachineId, WorkerName } from "@usine/core/worker";
+import { Deferred, Effect, Exit, Fiber, Option, Schema } from "effect";
 import { delegate } from "../src/attempt/delegation/delegation.ts";
-import { attemptHubs } from "../src/attempt/hubs.ts";
+import { SavedChild } from "../src/attempt/delegation/journal.ts";
+import { childSessionId, parentSessionId } from "../src/attempt/sessions.ts";
+import { attemptHubs, delegationAttachment } from "../src/attempt/hubs.ts";
 import { stubChildBackendLayer, StubChildren } from "../src/testing.ts";
 import { memoryJournal } from "./memory-journal.ts";
 import { attemptRequest } from "./support.ts";
@@ -32,7 +41,7 @@ const start = (attemptId: string, memory: ReturnType<typeof memoryJournal>, atta
           childSpawns: hub.childSpawns,
           childInputs: hub.childInputs,
           routing: hub.routing,
-          attached: hub.attached,
+          attachment: delegationAttachment(hub),
           event: (event) => hubs.event(hub, event),
           delivery: (delivery) => hubs.delivery(hub, delivery),
         },
@@ -129,6 +138,7 @@ describe("delegate", () => {
       memory.attempt.children = 1;
       memory.attempt.held = [sessionId];
       memory.delegation.count = Option.some(1);
+      memory.delegation.launched = true;
       memory.delegation.output = "Partial work\n";
       const { fiber, hub } = yield* start("delegation/interrupted", memory);
       const outcome = yield* Fiber.join(fiber);
@@ -144,6 +154,147 @@ describe("delegate", () => {
       assert.strictEqual(hub.childSpawns.size, 0);
     }).pipe(Effect.provide(stubChildBackendLayer)),
   );
+
+  it.effect("launches a resumed delegation whose earlier launch never returned in its slot", () =>
+    Effect.gen(function* () {
+      const sessionId = AgentSessionId.make("parent:delegation/never-launched:child:1");
+      const memory = memoryJournal();
+      memory.attempt.children = 1;
+      memory.delegation.count = Option.some(1);
+      const { fiber, hub } = yield* start("delegation/never-launched", memory);
+      const child = yield* (yield* StubChildren).next;
+      yield* child.reply("Finished.");
+      const outcome = yield* Fiber.join(fiber);
+
+      assert.strictEqual(child.request.session.id, sessionId);
+      assert.isTrue(Option.isNone(child.request.resume));
+      assert.deepStrictEqual(outcome, {
+        _tag: "Reported",
+        sessionId,
+        report: "Finished.",
+        answeredOperator: false,
+      });
+      assert.strictEqual(memory.attempt.children, 1);
+      assert.isTrue(memory.delegation.launched);
+      assert.isTrue(hub.childSpawns.has(sessionId));
+    }).pipe(Effect.provide(stubChildBackendLayer)),
+  );
+
+  it.effect("resumes a delegation that saved its conversation before its launch returned", () =>
+    Effect.gen(function* () {
+      const request = attemptRequest("delegation/saved-not-launched");
+      const sessionId = childSessionId(request.spec.attemptId, 1);
+      const harnessSession = HarnessSession.make({
+        id: HarnessSessionId.make("native-1"),
+        cwd: request.cwd,
+      });
+      const memory = memoryJournal();
+      memory.attempt.children = 1;
+      memory.delegation.count = Option.some(1);
+      memory.delegation.output = "Partial work\n";
+      // A stop after the harness reported its session and before `launch` returned.
+      const saved = yield* Schema.encodeEffect(SavedChild)(
+        SavedChild.make({
+          session: {
+            id: sessionId,
+            parentId: parentSessionId(request.spec.attemptId),
+            agent: request.spec.agent.name,
+            brain: request.spec.agent.brain,
+          },
+          usage: Option.none(),
+          harnessSession,
+          worker: request.worker,
+          machine: Option.none(),
+        }),
+      );
+      memory.delegation.saved = Option.some(saved);
+      const { fiber } = yield* start("delegation/saved-not-launched", memory);
+      const child = yield* (yield* StubChildren).next;
+      yield* child.reply("Finished.");
+      const outcome = yield* Fiber.join(fiber);
+
+      assert.strictEqual(child.request.session.id, sessionId);
+      assert.deepStrictEqual(child.request.resume, Option.some(harnessSession));
+      assert.strictEqual(outcome._tag, "Reported");
+      assert.strictEqual(memory.delegation.output, "Partial work\nFinished.\n");
+      assert.strictEqual(memory.attempt.children, 1);
+    }).pipe(Effect.provide(stubChildBackendLayer)),
+  );
+
+  for (const changed of ["worker", "machine", "checkout", "home"] as const) {
+    it.effect(`interrupts an unfinished launch when its saved ${changed} changed`, () =>
+      Effect.gen(function* () {
+        const attemptId = `delegation/unfinished-changed-${changed}`;
+        const request = attemptRequest(attemptId);
+        const sessionId = childSessionId(request.spec.attemptId, 1);
+        const harnessSession = HarnessSession.make({
+          id: HarnessSessionId.make("native-1"),
+          cwd: changed === "checkout" ? "/workspace/previous" : request.cwd,
+        });
+        const memory = memoryJournal();
+        memory.attempt.children = 1;
+        memory.delegation.count = Option.some(1);
+        memory.delegation.launched = false;
+        memory.delegation.prompted = false;
+        memory.delegation.output = "Partial work\n";
+        const saved = yield* Schema.encodeEffect(SavedChild)(
+          SavedChild.make({
+            session: {
+              id: sessionId,
+              parentId: parentSessionId(request.spec.attemptId),
+              agent: request.spec.agent.name,
+              brain: request.spec.agent.brain,
+            },
+            usage: Option.none(),
+            harnessSession,
+            worker: changed === "worker" ? WorkerName.make("previous") : request.worker,
+            machine:
+              changed === "machine" ? Option.some(MachineId.make("previous")) : request.machine,
+          }),
+        );
+        memory.delegation.saved = Option.some(saved);
+        const mismatch = ContinuationMismatchError.make({
+          sessionId,
+          field: "home",
+          message: "Cannot resume claude: home mismatch",
+        });
+        const launches: Array<ChildRequest> = [];
+        const backend = yield* ChildBackend;
+        const { fiber } = yield* start(attemptId, memory).pipe(
+          Effect.provideService(
+            ChildBackend,
+            ChildBackend.of({
+              ...backend,
+              launch: (childRequest) =>
+                Effect.gen(function* () {
+                  launches.push(childRequest);
+                  return yield* mismatch;
+                }),
+            }),
+          ),
+        );
+        const outcome = yield* Fiber.join(fiber);
+
+        assert.deepStrictEqual(outcome, {
+          _tag: "Interrupted",
+          sessionId,
+          reason:
+            changed === "home"
+              ? mismatch.message
+              : "the original worker, machine, or checkout is unavailable",
+          output: "Partial work\n",
+        });
+        assert.deepStrictEqual(
+          launches.map((launch) => launch.resume),
+          changed === "home" ? [Option.some(harnessSession)] : [],
+        );
+        assert.strictEqual(memory.attempt.children, 1);
+        assert.deepStrictEqual(memory.delegation.count, Option.some(1));
+        assert.isFalse(memory.delegation.launched);
+        assert.deepStrictEqual(memory.attempt.reports, []);
+      }).pipe(Effect.provide(stubChildBackendLayer)),
+    );
+  }
 
   it.effect("returns BudgetExceeded without launching a child past the budget", () =>
     Effect.gen(function* () {

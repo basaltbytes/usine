@@ -4,7 +4,7 @@ import { assert, it } from "@effect/vitest";
 import { ChildSessionCount } from "@usine/core/agent/session";
 import { AttemptId } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
-import { Effect, FileSystem, Layer, Option } from "effect";
+import { Effect, FileSystem, Layer, Option, Schema } from "effect";
 import { SqlClient } from "effect/sql";
 
 import { sqliteTempDirectory } from "../../../tooling/test/sqlite.mts";
@@ -125,4 +125,19 @@ it.effect("restores delegation progress written before native receipts were reco
     );
     assert.deepStrictEqual(restored.progress.receipts, Option.none());
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
+it.effect("reads a delegation's progress stored before launches were recorded as launched", () =>
+  Effect.gen(function* () {
+    const codec = Schema.toCodecJson(ChildProgress);
+    const encoded = yield* Schema.encodeEffect(codec)(ChildProgress.empty()).pipe(
+      Effect.flatMap(Schema.decodeUnknownEffect(Schema.Record(Schema.String, Schema.Json))),
+    );
+    assert.property(encoded, "launched");
+    const older = Object.fromEntries(Object.entries(encoded).filter(([key]) => key !== "launched"));
+    const progress = yield* Schema.decodeEffect(codec)(older);
+
+    assert.isFalse(ChildProgress.empty().launched);
+    assert.isTrue(progress.launched);
+  }),
 );

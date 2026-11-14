@@ -9,6 +9,8 @@ Run an always-on instance on a VPS or another Linux machine. This setup uses one
 
 A Linux machine with systemd and cgroup v2, SSH access, administrator privileges, and persistent storage. Install Node.js 22.22 or later and npm system-wide, with `node` and `npm` on `/usr/local/bin` or `/usr/bin`. Install Git, Bash, curl, `timeout`, `flock`, and polkit; on Debian or Ubuntu, the last tools come from `coreutils`, `util-linux`, and `polkitd`.
 
+To run the [supervisor](/reference/configuration/settings/#supervisor), install rootless Podman, or Docker, for the `usine` user: each supervisor turn runs in a read-only container on this server.
+
 You also need a GitHub account that can create and install a GitHub App. For HTTPS, use a domain with a reverse proxy or a Tailscale tailnet with MagicDNS and HTTPS enabled. Keep port 7331 reachable only through loopback.
 
 ## Procedure

@@ -1,4 +1,5 @@
 import type { ChildSessionCount } from "@usine/core/agent/session";
+import type { AttemptId } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { Duration, Effect, Equal, Match, Option, Schema } from "effect";
 
@@ -29,26 +30,40 @@ import {
 
 const invariant = (message: string) => Effect.die(new Error(message));
 
+/**
+ * Returns the outbox's next sequence after `envelopes`, or dies unless they belong to `attemptId`
+ * and continue at `nextOutbound`.
+ */
+export const reservation = (
+  attemptId: AttemptId,
+  nextOutbound: AttemptChannel.Sequence,
+  envelopes: ReadonlyArray<AttemptChannel.OutboundEnvelope>,
+) =>
+  Effect.gen(function* () {
+    for (const [index, envelope] of envelopes.entries()) {
+      if (envelope.attemptId !== attemptId)
+        return yield* invariant(
+          `Envelope for Attempt ${envelope.attemptId} reserved in Attempt ${attemptId}`,
+        );
+      if (envelope.sequence !== nextOutbound + index)
+        return yield* invariant(
+          `Envelope ${envelope.sequence} reserved where ${nextOutbound + index} is next`,
+        );
+    }
+    return AttemptChannel.Sequence.make(nextOutbound + envelopes.length);
+  });
+
 /** Returns the snapshot with `envelopes` appended to the outbox. */
 export const reserved = (
   snapshot: CoordinatorSnapshot,
   envelopes: ReadonlyArray<AttemptChannel.OutboundEnvelope>,
 ) =>
   Effect.gen(function* () {
-    for (const [index, envelope] of envelopes.entries()) {
-      if (envelope.attemptId !== snapshot.attemptId)
-        return yield* invariant(
-          `Envelope for Attempt ${envelope.attemptId} reserved in Attempt ${snapshot.attemptId}`,
-        );
-      if (envelope.sequence !== snapshot.nextOutbound + index)
-        return yield* invariant(
-          `Envelope ${envelope.sequence} reserved where ${snapshot.nextOutbound + index} is next`,
-        );
-    }
+    const nextOutbound = yield* reservation(snapshot.attemptId, snapshot.nextOutbound, envelopes);
     return CoordinatorSnapshot.make({
       ...snapshot,
       outbox: [...snapshot.outbox, ...envelopes],
-      nextOutbound: AttemptChannel.Sequence.make(snapshot.nextOutbound + envelopes.length),
+      nextOutbound,
     });
   });
 
@@ -270,8 +285,13 @@ const changed = (progress: ChildProgress, change: ProgressChange): ChildProgress
         idleAnsweredOperator: Option.isSome(report) && answeredOperator,
       }),
       OutputSaved: ({ output }) => ({ output }),
+      Launched: () => ({ launched: true }),
     }),
   });
+
+/** Dies because a progress change names delegation `number`, which hasn't started. */
+const notStarted = (number: ChildSessionCount): Effect.Effect<never> =>
+  invariant(`Progress saved for delegation ${number}, which hasn't started`);
 
 /** Returns the record with `change` applied, or dies if the delegation hasn't started. */
 export const progressed = (
@@ -279,7 +299,7 @@ export const progressed = (
   change: ProgressChange,
 ): Effect.Effect<DelegationRecord> =>
   Option.match(record.progress, {
-    onNone: () => invariant(`Progress saved for delegation ${record.number}, which hasn't started`),
+    onNone: () => notStarted(record.number),
     onSome: (progress) =>
       Effect.succeed(
         DelegationRecord.make({ ...record, progress: Option.some(changed(progress, change)) }),

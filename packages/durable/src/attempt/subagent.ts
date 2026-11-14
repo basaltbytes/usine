@@ -15,7 +15,7 @@ import { ChildSessionBudget, ChildSessionCount } from "@usine/core/agent/session
 import type { AttemptId } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { Effect, Match, Option, Schema } from "effect";
-import { JournalError } from "../coordinator/journal.ts";
+import { JournalError } from "./journal-error.ts";
 import { durableError } from "../harness.ts";
 import { SubagentDoc } from "./child.ts";
 import { delegate, type DelegationOutcome } from "./delegation/delegation.ts";
@@ -27,7 +27,7 @@ import type {
   DelegationStart,
 } from "./delegation/journal.ts";
 import { type AttemptRecord, AttemptRecordDoc, HoldDoc } from "./documents.ts";
-import type { AttemptHub, AttemptHubs } from "./hubs.ts";
+import { type AttemptHub, type AttemptHubs, delegationAttachment } from "./hubs.ts";
 import { storedRequestOf } from "./request.ts";
 import type { ExtensionServices } from "./services.ts";
 import { firstAccepted } from "./watch.ts";
@@ -108,6 +108,9 @@ const toolJournal = (
         receipts: Option.map(Option.fromUndefinedOr(saved.receipts), (items) => [...items]),
         inFlight: (saved.inFlight ?? []).map(({ callId, tool }) => ({ callId, tool })),
         prompted: saved.prompted ?? true,
+        // The tool records no launch, so a replayed call without a saved conversation ends as
+        // interrupted, and its parent decides what to do next.
+        launched: true,
       };
       if (saved.count !== null)
         return {
@@ -247,6 +250,7 @@ const toolJournal = (
         const record = await delegation(tx);
         record.output = output;
       }),
+    saveLaunched: Effect.void,
   };
 };
 
@@ -354,9 +358,7 @@ const delegationHub = (hubs: AttemptHubs, hub: AttemptHub): DelegationHub => ({
   childSpawns: hub.childSpawns,
   childInputs: hub.childInputs,
   routing: hub.routing,
-  get attached() {
-    return hub.attached;
-  },
+  attachment: delegationAttachment(hub),
   event: (event) => hubs.event(hub, event),
   delivery: (delivery) => hubs.delivery(hub, delivery),
 });

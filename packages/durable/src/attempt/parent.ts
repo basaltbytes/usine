@@ -40,7 +40,7 @@ const coordinator = RoleSpec.make({
     reason: "The coordinator runs on the orchestrator host",
   }),
   credential: Option.none(),
-  nativeTools: false,
+  nativeTools: "none",
   hostTools: true,
   persistence: "journaled",
   interventions: true,

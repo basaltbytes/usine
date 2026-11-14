@@ -252,21 +252,12 @@ describe("configuration domain without layers", () => {
         ),
       ).toEqual(Option.some("claude"));
 
+      // Codex keeps its own tools on, which the supervisor's read-only container limits.
       const codex = yield* Option.some(brain("codex", "gpt-5.6-terra")).pipe(
         withSupervisor,
         committed,
       );
-      assert(Result.isFailure(codex) && codex.failure._tag === "ConfigurationInvalid");
-      const [problem] = codex.failure.problems;
-      assert(problem !== undefined);
-      expect(problem.file).toBe("usine.yaml");
-      expect(problem.message).toContain("codex cannot run as supervisor at orchestrator");
-      expect(problem.message).toContain(
-        "lacks closed-tools (Codex lists apply_patch, its code-mode exec and wait tools",
-      );
-      expect(problem.details?.map(({ path }) => path)).toEqual([
-        ["settings", "supervisor", "harness"],
-      ]);
+      assert(Result.isSuccess(codex), "Codex serves the supervisor role");
 
       // Every turn after the first reopens the saved session, so a harness that can't reopen one
       // is refused even when it serves every other requirement.

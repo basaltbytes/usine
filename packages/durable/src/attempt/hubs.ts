@@ -6,7 +6,7 @@ import type * as AttemptChannel from "@usine/core/attempt/channel";
 import { Deferred, Effect, Exit, Option, Queue, Semaphore } from "effect";
 import type { AttemptRequest } from "../attempt-runtime.ts";
 import type { DurableStorageFailed, HarnessListener } from "../harness.ts";
-import type { ChildDelivery } from "./delegation/journal.ts";
+import type { ChildDelivery, DelegationAttachment } from "./delegation/journal.ts";
 import { ATTEMPT_RECORD_KIND, type AttemptRecord } from "./documents.ts";
 import { keepNotice } from "./notices.ts";
 
@@ -65,6 +65,21 @@ export interface AttemptHub {
   /** Completes with the storage failure that failed the harness while a channel was attached. */
   readonly storageFailure: Deferred.Deferred<DurableStorageFailed>;
 }
+
+/** The `execute` call relaying `hub`'s Attempt, as its delegations see it. */
+export const delegationAttachment = (hub: AttemptHub): DelegationAttachment => ({
+  isAttached: Effect.suspend(() => Deferred.isDone(hub.attached)),
+  next: Effect.suspend(() => {
+    // The relay replaces `attached` when its call detaches.
+    const current = hub.attached;
+    return Deferred.await(current).pipe(
+      Effect.map((request) => ({
+        request,
+        stopped: Effect.sync(() => hub.attached !== current),
+      })),
+    );
+  }),
+});
 
 /** An Attempt whose `execute` a storage failure ended, with its task to abort. */
 export interface EndedAttempt {

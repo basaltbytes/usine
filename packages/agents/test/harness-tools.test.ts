@@ -12,7 +12,7 @@ import { checkedPreflight } from "../src/harness/runtime.ts";
 import { continuationPolicy } from "../src/harness/continuation.ts";
 import { SessionSpec, StartPrompt } from "../src/harness/contract.ts";
 import { Harnesses, type HarnessRuntime } from "../src/harness/node.ts";
-import { RolePlacements, RoleSpec } from "../src/harness/role.ts";
+import { type NativeTools, RolePlacements, RoleSpec } from "../src/harness/role.ts";
 import { openWithTools } from "../src/harness/runtime.ts";
 import {
   callHostTool,
@@ -369,7 +369,7 @@ describe("usine tool sets", () => {
   );
 });
 
-const role = (hostTools: boolean, nativeTools = false) =>
+const role = (hostTools: boolean, nativeTools: NativeTools = "none") =>
   RoleSpec.make({
     name: RoleName.make("tool-probe"),
     placement: RolePlacements.make({
@@ -384,7 +384,7 @@ const role = (hostTools: boolean, nativeTools = false) =>
     output: "text",
   });
 
-const spec = (harness: string, hostTools: boolean, nativeTools = false) => {
+const spec = (harness: string, hostTools: boolean, nativeTools: NativeTools = "none") => {
   const brain = BrainSpec.make({
     harness: Harness.make(harness),
     model: ModelId.make("probe"),
@@ -455,7 +455,7 @@ describe("usine tool sets through the registry", () => {
         const extra = yield* open(spec(harness, false), true);
         assert.include(extra.message, "runs no usine tool set, but its session opened with one");
       }
-      const codex = yield* open(spec("codex", true, true), true);
+      const codex = yield* open(spec("codex", true, "all"), true);
       assert.strictEqual(codex.message, "opened with [read_note,explode]");
       const closed = yield* open(spec("codex", true), true);
       assert.include(closed.message, "lacks closed-tools (Codex lists apply_patch");

@@ -1,3 +1,4 @@
+import type { AttemptId } from "@usine/core/attempt";
 import { Effect, Match, Option, Schema } from "effect";
 
 import {
@@ -7,6 +8,7 @@ import {
   DelegationSummary,
 } from "../attempt/coordinator/rules.ts";
 import type { CoordinatorSnapshot, DelegationRecord } from "./journal.ts";
+import { decodeOutcome } from "./records.ts";
 
 /** The most characters of encoded JSON that a context takes, about 4,000 tokens. */
 export const CONTEXT_CHARACTERS = 16_000;
@@ -15,7 +17,6 @@ const REPORT_CHARACTERS = 4_000;
 const OUTPUT_CHARACTERS = 2_000;
 const LINE_CHARACTERS = 160;
 
-const decodeEvent = Schema.decodeUnknownEffect(Schema.toCodecJson(CoordinatorEvent));
 /** Encodes a context as the JSON text that a model reads. */
 export const encodeAttemptContext = Schema.encodeEffect(
   Schema.fromJsonString(Schema.toCodecJson(AttemptContext)),
@@ -37,8 +38,6 @@ const endOf = (event: CoordinatorEvent): Option.Option<readonly [DelegationEnd, 
     ChildInterrupted: ({ reason }) => Option.some(["interrupted", reason] as const),
     ChildAtCapacity: ({ message }) => Option.some(["capacity", message] as const),
     ChildFailed: ({ message }) => Option.some(["infrastructure", message] as const),
-    BudgetExceeded: ({ attempted }) =>
-      Option.some(["over-budget", `Admission refused child ${attempted}`] as const),
   });
 
 /** The child that `event` is about, or `None` for the Attempt's start. */
@@ -46,6 +45,7 @@ const childOf = (event: CoordinatorEvent) =>
   event._tag === "AttemptStarted" ? Option.none() : Option.some(event.child);
 
 const summaries = Effect.fn("AttemptContext.delegations")(function* (
+  attemptId: AttemptId,
   delegations: ReadonlyArray<DelegationRecord>,
   event: CoordinatorEvent,
 ) {
@@ -53,10 +53,8 @@ const summaries = Effect.fn("AttemptContext.delegations")(function* (
     Option.match(record.outcome, {
       onNone: () =>
         Effect.succeed({ record, end: Option.none<readonly [DelegationEnd, string]>() }),
-      // The coordinator encoded every outcome it recorded.
       onSome: (outcome) =>
-        decodeEvent(outcome).pipe(
-          Effect.orDie,
+        decodeOutcome(attemptId, outcome).pipe(
           Effect.map((decoded) => ({ record, end: endOf(decoded) })),
         ),
     }),
@@ -154,7 +152,7 @@ export const buildAttemptContext = Effect.fn("AttemptContext.build")(function* (
     Option.flatMap(latest, ({ progress }) => Option.map(progress, ({ output }) => output)),
     () => "",
   );
-  const delegations = yield* summaries(snapshot.delegations, event);
+  const delegations = yield* summaries(spec.attemptId, snapshot.delegations, event);
   const context = yield* fitted(
     AttemptContext.make({
       event,

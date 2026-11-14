@@ -25,6 +25,8 @@
       "env": [
         "PLAYWRIGHT_BROWSERS_PATH",
         "PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH",
+        "USINE_SANDBOX_TEST_IMAGE",
+        "USINE_SANDBOX_TEST_RUNTIME",
         "VITEST_MAX_WORKERS"
       ]
     },

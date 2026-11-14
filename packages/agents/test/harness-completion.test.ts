@@ -83,7 +83,7 @@ const decision = RoleSpec.make({
     reason: "The decision follows the coding agent on its worker",
   }),
   credential: Option.none(),
-  nativeTools: true,
+  nativeTools: "all",
   hostTools: false,
   persistence: "ephemeral",
   interventions: false,
@@ -199,7 +199,7 @@ describe("structured completions through the registry", () => {
         const runtime = yield* harnesses.runtime(harness);
         for (const role of [
           RoleSpec.make({ ...decision, hostTools: true }),
-          RoleSpec.make({ ...decision, hostTools: true, nativeTools: false }),
+          RoleSpec.make({ ...decision, hostTools: true, nativeTools: "none" }),
         ]) {
           const refused = yield* runtime
             .complete(specFor(role, harness), "Approve?", Verdict)
@@ -213,7 +213,7 @@ describe("structured completions through the registry", () => {
           assert.deepStrictEqual(refused.usage, Option.none());
         }
         const closed = yield* runtime.complete(
-          specFor(RoleSpec.make({ ...decision, nativeTools: false }), harness),
+          specFor(RoleSpec.make({ ...decision, nativeTools: "none" }), harness),
           "Approve?",
           Verdict,
         );

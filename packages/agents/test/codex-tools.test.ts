@@ -67,7 +67,7 @@ const role = RoleSpec.make({
   name: RoleName.make("tool-probe"),
   placement: RolePlacements.make({ placements: ["local"], reason: "The probe runs locally" }),
   credential: Option.none(),
-  nativeTools: true,
+  nativeTools: "all",
   hostTools: true,
   persistence: "saved",
   interventions: false,
