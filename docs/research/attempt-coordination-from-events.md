@@ -132,7 +132,8 @@ A rule is a pure function, `ruleFor(event, context): Decision`, in `attempt/coor
 | `ChildInterrupted` (resume refused, no saved session, worker or checkout gone) | Delegation outcome after a restart | `RetryChild` within budget, else `InfraFailed` | No: an interrupted child has no report to complete with (#1236) |
 | `ChildAtCapacity` | `AgentCapacityError` | `AtCapacity`, which fails with `ProviderCapacityFailure`; the engine waits and retries | No |
 | `ChildFailed` (launch or transport) | `AgentSessionError` | `InfraFailed`, which fails with `InfraFailure` | No |
-| `BudgetExceeded` | Admission | `OverBudget`, which fails with `ChildSessionBudgetFailure`. The coordinator numbers each delegation within the budget, so this can't occur on its path (#1237). | No |
+
+The coordinator has no budget event: each transition numbers its delegation within the child-session budget, so admission never refuses one (#1237). A replacement that the budget has no slot for fails in the rule that decides it.
 
 Some inputs are deliberately not coordinator events:
 
@@ -208,7 +209,7 @@ export const ModelDecision = Schema.Union([
   InfraFailed, // message
   AtCapacity, // message, resetsAt?
 ]);
-export const Decision = Schema.Union([StartChild, ...ModelDecision.members, OverBudget]);
+export const Decision = Schema.Union([StartChild, ...ModelDecision.members]);
 
 // coordinator/wake-up.ts
 export class RecordedDecision extends Schema.Class<RecordedDecision>("@usine/durable/RecordedDecision")({

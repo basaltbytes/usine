@@ -16,11 +16,11 @@ import {
 } from "effect";
 
 import type { ChildDelivery } from "../attempt/delegation/journal.ts";
+import type { JournalError } from "../attempt/journal-error.ts";
 import {
   type AttemptJournal,
   decodeIntervention,
   encodeIntervention,
-  type JournalError,
   QueuedInput,
   Supervision,
 } from "./journal.ts";

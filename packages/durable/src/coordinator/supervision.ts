@@ -2,12 +2,8 @@ import type { AgentSessionId } from "@usine/core/agent/session";
 import type { AttemptId } from "@usine/core/attempt";
 import { Effect, Option } from "effect";
 
-import {
-  type AttemptJournal,
-  type CoordinatorSnapshot,
-  type JournalError,
-  Supervision,
-} from "./journal.ts";
+import type { JournalError } from "../attempt/journal-error.ts";
+import { type AttemptJournal, type CoordinatorSnapshot, Supervision } from "./journal.ts";
 
 /** The operator's supervision of one Attempt's children, stored in the attempt journal. */
 export interface Supervisor {

@@ -5,7 +5,8 @@ import { Context, Effect, Layer, Option, Semaphore } from "effect";
 
 import { type AttemptRequest, AttemptRuntime } from "../attempt-runtime.ts";
 import { keepNotice } from "../attempt/notices.ts";
-import { AttemptJournal, type JournalError } from "./journal.ts";
+import type { JournalError } from "../attempt/journal-error.ts";
+import { AttemptJournal } from "./journal.ts";
 import { CoordinatorRuntime } from "./runtime.ts";
 
 /** The runtime of Attempts that a Pi parent session coordinates, on pi-durable storage. */
