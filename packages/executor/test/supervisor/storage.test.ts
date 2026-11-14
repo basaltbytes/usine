@@ -141,6 +141,68 @@ describe("bounded supervisor storage", () => {
     );
   }
 
+  it.live("keeps only the last 8,192 diagnostic characters when a mount fails", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const root = yield* fs.makeTempDirectoryScoped();
+      const calls: Array<ReadonlyArray<string>> = [];
+      const detail = "DENIED: user_allow_other";
+      const encoder = new TextEncoder();
+      const failure = yield* Effect.gen(function* () {
+        const sandbox = yield* sandboxAt(root);
+        return yield* sandbox.open(turn).pipe(Effect.scoped, Effect.flip);
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(
+          podman(calls, [], {
+            starts: true,
+            mount: {
+              stdout: "",
+              stderr: Stream.make(
+                encoder.encode("a".repeat(12_000)),
+                encoder.encode("b".repeat(8_192)),
+                encoder.encode(detail),
+              ),
+              exitCode: 1,
+            },
+          }),
+        ),
+      );
+      const prefix = "Cannot mount the supervisor conversation filesystem: fuse2fs exited with 1: ";
+      assert.lengthOf(failure.message, prefix.length + 8_192);
+      assert.strictEqual(failure.message, prefix + "b".repeat(8_192 - detail.length) + detail);
+      assert.isFalse(calls.some(([c, f]) => c === "podman" && f === "run"));
+    }).pipe(Effect.scoped, Effect.provide(NodeFileSystem.layer)),
+  );
+
+  it.live("refuses an unrepaired filesystem before mounting or starting a container", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const root = yield* fs.makeTempDirectoryScoped();
+      const calls: Array<ReadonlyArray<string>> = [];
+      const detail = "Filesystem errors left uncorrected; run fsck manually";
+      const failure = yield* Effect.gen(function* () {
+        const sandbox = yield* sandboxAt(root);
+        return yield* sandbox.open(turn).pipe(Effect.scoped, Effect.flip);
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(
+          podman(calls, [], {
+            starts: true,
+            filesystemCheck: { stdout: "", stderr: detail, exitCode: 4 },
+          }),
+        ),
+      );
+      assert.strictEqual(
+        failure.message,
+        `Cannot mount the supervisor conversation filesystem: e2fsck failed: ${detail}`,
+      );
+      assert.isTrue(calls.some(([c, f]) => c === "e2fsck" && f === "-p"));
+      assert.isFalse(calls.some(([c, f]) => c === "fuse2fs" && f === "-f"));
+      assert.isFalse(calls.some(([c, f]) => c === "podman" && f === "run"));
+    }).pipe(Effect.scoped, Effect.provide(NodeFileSystem.layer)),
+  );
+
   it.live("keeps stderr from a real mount process that writes and immediately exits", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
@@ -156,11 +218,7 @@ describe("bounded supervisor storage", () => {
         command.command === "fuse2fs" &&
         command.args[0] === "-f"
           ? realSpawner.spawn(
-              ChildProcess.make(process.execPath, [
-                "-e",
-                'require("node:fs").writeSync(2, process.argv[1]); process.exit(1)',
-                detail,
-              ]),
+              ChildProcess.make("/bin/sh", ["-c", 'printf "%s" "$0" >&2; exit 1', detail]),
             )
           : runtimeSpawner.spawn(command),
       );

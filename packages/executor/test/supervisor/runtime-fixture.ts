@@ -77,6 +77,7 @@ export interface RuntimeState {
   mount?: Answer;
   allocation?: Answer;
   mountCheck?: Answer;
+  filesystemCheck?: Answer;
 }
 
 /**
@@ -123,6 +124,8 @@ export const podman = (
         if (args[0] === "-l") truncateSync(args[2]!, Number(args[1]));
         return { stdout: "", exitCode: 0 };
       }
+      if (command === "e2fsck" && args[0] === "-p" && relay.filesystemCheck !== undefined)
+        return relay.filesystemCheck;
       if (command === "mkfs.ext4" || command === "e2fsck")
         return {
           stdout: "",
