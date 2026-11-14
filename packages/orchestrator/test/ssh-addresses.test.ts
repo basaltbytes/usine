@@ -5,6 +5,29 @@ import { ConfigProvider, Effect, Option, Redacted, Schema } from "effect";
 import { provisionerView } from "../src/operator/machines.ts";
 import { sshWorkerAddressesOf } from "../src/ssh.ts";
 
+it.effect.each([0, 20])(
+  "passes min_free_disk_gib %s from config to the SSH executor address",
+  (threshold) =>
+    Effect.gen(function* () {
+      const config = yield* Schema.decodeEffect(UsineConfig)({
+        version: 1,
+        repos: [],
+        workers: [
+          {
+            name: "build",
+            kind: "ssh",
+            destination: "usine@build.example.com",
+            root: "/srv/usine",
+            min_free_disk_gib: threshold,
+          },
+        ],
+      });
+      const [worker] = yield* sshWorkerAddressesOf(config);
+      assert.isDefined(worker);
+      assert.strictEqual(worker?.minFreeDiskGib, threshold);
+    }),
+);
+
 for (const provider of ["boat", "boxd"] as const) {
   it.effect(
     `resolves ${provider} OAuth variables without LLM API keys and reports a missing secret by variable name`,

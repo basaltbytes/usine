@@ -245,6 +245,7 @@ it.effect(
         `#!/bin/sh
 case "$*" in
   *'/proc/meminfo'*) printf 'MemTotal: 33554432 kB\nSwapTotal: 0 kB\n' ;;
+  *'df -Pk'*) printf 'Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/sda1 78643200 1048576 73400320 2%% /\n' ;;
   *"'git' '--version'"*) printf 'git version 2.50.0\n' ;;
   *docker*) exit 3 ;;
 esac

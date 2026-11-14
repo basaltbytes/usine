@@ -44,6 +44,7 @@ Preflight requires at least 1.5 GiB per concurrent attempt and warns below 3 GiB
 | `port` | integer, 1–65535 | SSH configuration | Port for a fixed destination, refused with a provisioner. |
 | `identity_file` | path | SSH configuration or agent | Private key on the orchestrator, required for Boat. |
 | `root` | absolute path | required | Writable remote base for `workers/<name>/`. |
+| `min_free_disk_gib` | integer ≥ 0 | 10 | Free disk space in GiB that the machine needs before an attempt starts; `0` turns the check off. |
 | `container` | container settings | derived limits | Attempt image and resource limits. |
 | `gateway` | gateway settings | omitted | GitHub and model credential proxy. |
 | `tailnet.gateway_address` | IPv4 address in `100.64.0.0/10` | omitted | Gateway address for a long-lived machine already on Tailscale; requires `gateway` and `destination`. |
@@ -93,6 +94,28 @@ Containers mount the attempt checkout and credential directory, the SSH user's l
 Claude Code sessions in attempt containers persist in `<root>/workers/<name>/claude/<attempt>`, mounted writable at `/home/usine/.claude/projects`. This directory remains while the attempt checkout exists, so reattached children resume their saved conversations after an orchestrator restart recreates the container. Cleanup removes it after checkout removal; the sweep also removes orphan session directories that no attempt uses. Claude's credential file mount and seeded `.claude.json` remain separate. Shared-user SSH continues to use the SSH user's session directory.
 
 Shared `usine-pnpm-store` and `usine-turbo-cache` volumes survive containers on a fixed machine; provisioned-machine deletion removes them. Preflight logs pnpm disk usage but does not prune it. To reclaim a volume, pause the worker's loops, let attempts finish, remove containers referencing it, then run `podman volume rm usine-pnpm-store` or `podman volume rm usine-turbo-cache`. Use `docker` for Docker workers. Run preflight to recreate empty volumes.
+
+### Free disk space and older images
+
+Preflight and each attempt, before its checkout starts, check the free disk space on the filesystem of `root` and on the container runtime's image storage. If either has less than `min_free_disk_gib` GiB free, the check fails with a `disk` error that states the free space and the threshold. **Needs attention** shows the error, and no attempt starts on the worker until a preflight passes. Preflight runs again after 1, 2, 5, and then every 10 minutes. When the check fails before a checkout, the attempt fails with an infrastructure failure, which usine retries.
+
+A threshold of `0` skips disk probes and logs that the check is disabled. When the container runtime cannot report its image storage path, or `df` cannot read that path, usine logs the skipped storage check at Info and checks the worker root. Cleanup also logs at Info when there are no older worker images to remove.
+
+To change the threshold, set `min_free_disk_gib` on the worker, for example with `usine config edit worker worker-one`:
+
+```yaml
+name: worker-one
+kind: ssh
+destination: usine@203.0.113.20
+root: /home/usine/.usine
+min_free_disk_gib: 20
+```
+
+If one of usine's own commands on the worker, such as an image pull or a checkout, reports `ENOSPC` or `No space left on device` during preflight or attempt preparation, usine reports the same `disk` error. A report from the attempt's agent keeps its own outcome.
+
+After each image pull, usine removes the other images of the attempt image's repository. It keeps the current image, the most recently built other image, and every image that a container uses. After a rollback, the retained image can be newer than the current image. The server logs the images it removes; a failed removal is logged and doesn't fail preflight.
+
+Cleanup recognizes Docker Hub names in both qualified and short form. When a mutable tag such as `latest` replaces an image and leaves it untagged, usine adds a local `usine-retained-<image-id>` tag in the same repository. Later pulls include that image in cleanup, so only the current image, the most recently built other image, and images in use remain. Unrelated untagged images are left alone.
 
 ## Gateway
 

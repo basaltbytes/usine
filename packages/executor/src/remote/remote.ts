@@ -31,6 +31,7 @@ import {
   WorkerCapabilityError,
 } from "../executor.ts";
 import { verifyHarnessReadiness } from "../harness-preflight.ts";
+import { classifyDiskFull } from "../disk-full.ts";
 import { childEnvironment, commitIdentity } from "../child-environment.ts";
 import { keyedLockFor } from "../keyed-lock.ts";
 import {
@@ -809,6 +810,8 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
         () => worker.released?.(request.attemptId, machine) ?? Effect.void,
       );
       const isolation = yield* worker.isolation(machine);
+      if (!request.reattach && worker.verifyBeforeCheckout !== undefined)
+        yield* worker.verifyBeforeCheckout(machine, isolation);
       const probeBrain = (shell: RemoteHost) =>
         verifyHarnessReadiness(
           request.worker,
@@ -1092,7 +1095,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
           ),
       outcome: session.outcome,
       preflight: worker.preflight,
-      prepare,
+      prepare: (request) => classifyDiskFull(request.worker, prepare(request)),
       sweep: worker.sweep ?? Effect.void,
     });
   });

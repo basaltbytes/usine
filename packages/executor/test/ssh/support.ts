@@ -54,6 +54,9 @@ import {
   Schema,
 } from "effect";
 import { HttpClient } from "effect/http";
+// The synchronous SSH fake runs the disk and container-image probes with stub commands.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
+import { spawnSync } from "node:child_process";
 
 import {
   CheckoutRequest,
@@ -182,6 +185,8 @@ interface FakeMachineState {
   readonly attemptPaths: Array<string>;
   /** Whether a clone fails with git's token in its stderr. */
   cloneEchoesToken: boolean;
+  /** The stderr of a clone that fails for another reason, such as a full disk. */
+  cloneError: string | undefined;
   /** The checkout the salvage finds: clean, dirty, or one whose `git status` never answers. */
   salvage: "clean" | "dirty" | "stalls";
   salvageCommitted: boolean;
@@ -249,6 +254,20 @@ interface FakeMachineState {
   cachePreparationFailure: string | undefined;
   cachePreparationDuration: string;
   storeSizeKiB: string;
+  /** The free disk space in GiB that `df` reports for the Worker's root, and for the image storage. */
+  freeDiskGib: number;
+  storageFreeDiskGib: number;
+  diskReadError: string | undefined;
+  storageProbe: "ready" | "info-fails" | "info-empty" | "df-fails";
+  imageListError: string | undefined;
+  containerListError: string | undefined;
+  imageRemovalError: string | undefined;
+  /** The images that `docker image ls` lists, as `<ID> <repository> <tag> <created at>` lines. */
+  workerImages: Array<string>;
+  /** The image IDs that the machine's containers use, as `docker container inspect` prints them. */
+  containerImageIds: Array<string>;
+  /** The arguments of each `docker image rm`. */
+  readonly imageRemovals: Array<ReadonlyArray<string>>;
   /** The containers on the machine, by name. */
   readonly containers: Map<string, FakeContainer>;
   /** The number of containers that `docker run` created, which gives each its ID. */
@@ -380,6 +399,7 @@ export const fakeMachine = () => {
     cacheExists: false,
     attemptPaths: [],
     cloneEchoesToken: false,
+    cloneError: undefined,
     salvage: "clean",
     salvageCommitted: false,
     claudeLoggedIn: true,
@@ -418,6 +438,16 @@ export const fakeMachine = () => {
     cachePreparationFailure: undefined,
     cachePreparationDuration: "17\n",
     storeSizeKiB: "4096",
+    freeDiskGib: 100,
+    storageFreeDiskGib: 100,
+    diskReadError: undefined,
+    storageProbe: "ready",
+    imageListError: undefined,
+    containerListError: undefined,
+    imageRemovalError: undefined,
+    workerImages: [],
+    containerImageIds: [],
+    imageRemovals: [],
     containers: new Map(),
     containersCreated: 0,
     containerRemovalFails: false,
@@ -431,6 +461,126 @@ export const fakeMachine = () => {
   const respondToDocker = (commandLine: string, input: string) => {
     const line = commandLine.replace(/^exec 'podman'/u, "exec 'docker'");
     const words = remoteWords(line);
+    if (line.includes("df -Pk")) {
+      const kib = (gib: number) => Math.round(gib * 1024 ** 2);
+      const script = words[2] ?? "";
+      const root = words.at(-2) ?? "";
+      const runtime = words.at(-1) ?? "";
+      const probes = `
+df() {
+  printf 'Filesystem 1024-blocks Used Available Capacity Mounted on\\n'
+  case "$2" in
+    ${quote(ADDRESS.root)})
+      ${state.diskReadError === undefined ? `printf '/dev/data 200000000 1048576 ${kib(state.freeDiskGib)} 2%% /srv/usine\\n'` : `printf '%s\\n' ${quote(state.diskReadError)} >&2; return 1`} ;;
+    /var/lib/docker|/var/lib/podman)
+      ${state.storageProbe === "df-fails" ? "return 1" : `printf '/dev/images 200000000 1048576 ${kib(state.storageFreeDiskGib)} 2%% %s\\n' "$2"`} ;;
+    /) printf '/dev/root 200000000 1048576 104857600 2%% /\\n' ;;
+    *) printf '/dev/root 200000000 1048576 104857600 2%% %s\\n' "$2" ;;
+  esac
+}
+docker() { [ "$1" = info ] && [ "$2" = --format ] && [ "$3" = '{{.DockerRootDir}}' ] || return 1; ${state.storageProbe === "info-fails" ? "return 1" : state.storageProbe === "info-empty" ? "return 0" : "printf '/var/lib/docker\\n'"}; }
+podman() { [ "$1" = info ] && [ "$2" = --format ] && [ "$3" = '{{.Store.GraphRoot}}' ] || return 1; ${state.storageProbe === "info-fails" ? "return 1" : state.storageProbe === "info-empty" ? "return 0" : "printf '/var/lib/podman\\n'"}; }
+`;
+      const read = spawnSync("sh", ["-c", `${probes}\n${script}`, "sh", root, runtime], {
+        encoding: "utf8",
+        timeout: 5_000,
+      });
+      if (read.error !== undefined) throw read.error;
+      return oneShotHandle(read.stdout, read.status ?? 1, read.stderr);
+    }
+    if (line.startsWith("exec 'docker' 'image' 'tag' ")) {
+      const source = words[3] ?? "";
+      const reference = words[4] ?? "";
+      const original = state.workerImages.find(
+        (image) =>
+          image.split(" ")[0]?.replace(/^sha256:/u, "") === source.replace(/^sha256:/u, ""),
+      );
+      if (original === undefined) return oneShotHandle("", 1, "No such image");
+      const [id, , , ...created] = original.split(" ");
+      const colon = reference.lastIndexOf(":");
+      state.workerImages = state.workerImages.filter(
+        (image) => !image.startsWith(`${id} <none> <none> `),
+      );
+      state.workerImages.push(
+        `${id} ${reference.slice(0, colon)} ${reference.slice(colon + 1)} ${created.join(" ")}`,
+      );
+      return oneShotHandle("", 0);
+    }
+    if (line.startsWith("exec 'docker' 'image' 'ls' "))
+      return state.imageListError === undefined
+        ? oneShotHandle(
+            state.workerImages
+              .filter(
+                (image) =>
+                  commandLine.startsWith("exec 'podman'") ||
+                  words.includes("--all") ||
+                  image.split(" ")[2] !== "<none>",
+              )
+              .map((image) => `${image}\n`)
+              .join(""),
+            0,
+          )
+        : oneShotHandle("", 1, state.imageListError);
+    if (line.includes("ps --all --quiet")) {
+      const containers = state.containerImageIds.map((image, index) => ({
+        id: `container-${index}`,
+        image,
+      }));
+      const stub = `#!/bin/sh
+set -eu
+case "$*" in
+  'ps --all --quiet --no-trunc')
+    ${state.containerListError === undefined ? containers.map(({ id }) => `printf '%s\\n' ${quote(id)}`).join("\n    ") : `printf '%s\\n' ${quote(state.containerListError)} >&2; exit 1`}
+    ;;
+  'container inspect --format '* )
+    format=$4
+    shift 4
+    [ "$#" -gt 0 ] || { printf 'container inspect requires at least one container\\n' >&2; exit 1; }
+    for id do
+      case "$id" in
+        ${containers.map(({ id, image }) => `${quote(id)}) image=${quote(image)} ;;`).join("\n        ")}
+        *) exit 1 ;;
+      esac
+      case "$format" in
+        '{{.Image}}') printf '%s\\n' "$image" ;;
+        '{{.Config.Image}}') printf 'example.com/worker:configured\\n' ;;
+        *) exit 1 ;;
+      esac
+    done
+    ;;
+  *) exit 1 ;;
+esac`;
+      // Executable stubs let the production script use exec, which cannot invoke shell functions.
+      const probe = `
+set -eu
+probe_dir=$(mktemp -d)
+trap 'rm -rf "$probe_dir"' EXIT
+printf '%s\\n' ${quote(stub)} > "$probe_dir/docker"
+chmod +x "$probe_dir/docker"
+ln -s docker "$probe_dir/podman"
+PATH="$probe_dir:$PATH" sh -c "$1" sh "$2"
+`;
+      const read = spawnSync("sh", ["-c", probe, "sh", words[2] ?? "", words.at(-1) ?? ""], {
+        encoding: "utf8",
+        timeout: 5_000,
+      });
+      if (read.error !== undefined) throw read.error;
+      return oneShotHandle(read.stdout, read.status ?? 1, read.stderr);
+    }
+    if (line.startsWith("exec 'docker' 'image' 'rm' ")) {
+      const removed = words.slice(3);
+      state.imageRemovals.push(removed);
+      if (state.imageRemovalError !== undefined)
+        return oneShotHandle("", 1, state.imageRemovalError);
+      state.workerImages = state.workerImages.filter((image) => {
+        const [id = "", repository = "", tag = ""] = image.split(" ");
+        return (
+          !removed.includes(`${repository}:${tag}`) &&
+          !removed.includes(id.replace(/^sha256:/u, ""))
+        );
+      });
+      return oneShotHandle("", 0);
+    }
     if (line.includes("version -f")) {
       if (state.podmanInfo !== undefined)
         return oneShotHandle(`podman\n${state.podmanInfo}\n`, state.runtimeExitCode);
@@ -776,6 +926,8 @@ export const fakeMachine = () => {
     if (line.startsWith("exec 'find' ") && line.includes("/repos'"))
       return oneShotHandle(`${WORKER_ROOT}/repos/acme_demo.git${NUL}`, 0);
     if (line.startsWith("exec 'test' ")) return oneShotHandle("", state.cacheExists ? 0 : 1);
+    if (line.includes("&& exec 'git' 'clone'") && state.cloneError !== undefined)
+      return oneShotHandle("", 128, state.cloneError);
     if (line.includes("&& exec 'git' 'clone'") && state.cloneEchoesToken) {
       const token = [...state.credentials.values()].at(-1) ?? "";
       return oneShotHandle(

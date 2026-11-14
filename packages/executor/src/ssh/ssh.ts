@@ -23,6 +23,7 @@ import type { RemoteGrant } from "../remote/machine.ts";
 import { remoteExecutorFor } from "../remote/remote.ts";
 import { attemptHomesFor } from "./attempt-homes.ts";
 import { sshContainersFor } from "./container.ts";
+import { verifyFreeDisk } from "./disk.ts";
 import { sshCredentialsFor } from "./credentials.ts";
 import { gatewayAttachmentsFor } from "./gateway/attachments.ts";
 import { gatewayRepositoryUrl } from "./gateway/environment.ts";
@@ -331,6 +332,13 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
       preflight: sshPreflightFor(workerFor, verifyMachine, provisioned.verifyProvisioned),
       harnessProbe,
       isolation: containers.isolation,
+      verifyBeforeCheckout: (machine, isolation) =>
+        verifyFreeDisk(
+          commands,
+          machine,
+          isolation._tag === "Container" ? Option.some(isolation.settings.runtime) : Option.none(),
+          "prepare",
+        ),
       runsContainers: true,
       repositoryUrl: (machine, repository) =>
         Option.match(machine.gateway, {

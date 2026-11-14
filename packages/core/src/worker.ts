@@ -176,6 +176,15 @@ export const ContainerPids = Schema.Int.check(Schema.isGreaterThanOrEqualTo(64))
 );
 export type ContainerPids = typeof ContainerPids.Type;
 
+/**
+ * The least free disk space in GiB that an SSH Worker's machine keeps before an Attempt starts.
+ * Zero disables the check.
+ */
+export const MinFreeDiskGib = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)).pipe(
+  Schema.brand("MinFreeDiskGib"),
+);
+export type MinFreeDiskGib = typeof MinFreeDiskGib.Type;
+
 /** The CPU, memory, and process limits of one Attempt container. */
 export class ContainerLimits extends Schema.Class<
   ContainerLimits,

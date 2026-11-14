@@ -25,6 +25,7 @@ import {
   ContainerImage,
   ContainerMemoryMib,
   ContainerScratchMib,
+  MinFreeDiskGib,
   ContainerPids,
   GatewayAdminPort,
   GatewayDomain,
@@ -449,6 +450,11 @@ export class SshWorker extends Schema.Class<
   port: Schema.OptionFromOptionalKey(SshPort),
   /** The remote base directory for worker state under `workers/<name>`. */
   root: WorkerRoot,
+  /**
+   * The least free disk space in GiB that the machine keeps before an attempt starts, or `None`
+   * for the executor's default of 10. Zero disables the check.
+   */
+  minFreeDiskGib: Schema.OptionFromOptionalKey(MinFreeDiskGib),
   /** The credential proxy settings, or `None` for direct credential delivery. */
   gateway: Schema.OptionFromOptionalKey(
     WorkerGateway.pipe(
@@ -785,6 +791,7 @@ export const WorkerFromYaml = Schema.Union([
     Schema.encodeKeys({
       maxConcurrentAttempts: "max_concurrent_attempts",
       identityFile: "identity_file",
+      minFreeDiskGib: "min_free_disk_gib",
     }),
   ).check(Schema.makeFilter((worker: SshWorker) => sshMachineConflict(worker) ?? true)),
   CloudflareWorker.pipe(

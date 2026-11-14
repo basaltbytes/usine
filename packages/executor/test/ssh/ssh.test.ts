@@ -688,7 +688,7 @@ describe("SSH Worker", () => {
   );
 
   it.effect(
-    "reattaches after a restart with a fresh credential and clears the persisted worker outage",
+    "reattaches below the disk threshold after a restart and clears the persisted worker outage",
     () => {
       const machine = fakeMachine();
       const credentials = mintingProvider();
@@ -739,6 +739,7 @@ describe("SSH Worker", () => {
         // A process that crashed instead would have left its token behind.
         machine.state.credentials.set(CREDENTIALS, credentials.minted[0] ?? "");
 
+        machine.state.freeDiskGib = 0;
         const { parent, signalsOf } = yield* workingAttempts([request.attemptId]);
         yield* Effect.gen(function* () {
           const executor = yield* Executor;
@@ -749,6 +750,7 @@ describe("SSH Worker", () => {
             CheckoutRequest.make({ ...request, reattach: true }),
           );
           const lines = machine.state.calls.slice(before).map(({ line }) => line);
+          assert.isFalse(lines.some((line) => line.includes("df -Pk")));
           const stale = lines.findIndex((line) => line.includes('for directory in "$root"/*'));
           assert(stale >= 0 && stale < lines.findIndex(writesCredential));
           assert(

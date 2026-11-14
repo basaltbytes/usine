@@ -16,8 +16,10 @@ import type { RemoteCommands } from "../remote/commands.ts";
 import { loginFiles } from "../remote/container.ts";
 import type { MachineCredentialRoute } from "../remote/machine.ts";
 import { verifyKernelLog } from "../remote/memory.ts";
+import { classifyDiskFull } from "../disk-full.ts";
 import { machineCredentialRoute } from "./api-keys.ts";
 import type { SshContainers } from "./container.ts";
+import { verifyFreeDisk } from "./disk.ts";
 import { gatewayExportedEnvironment } from "./gateway/environment.ts";
 import { verifyGateway } from "./gateway/preflight.ts";
 import { configureTailnetGateway } from "./gateway/tailnet.ts";
@@ -78,9 +80,10 @@ const containerLogins = Effect.fn("SshExecutor.containerLogins")(function* (
 /**
  * Verifies an SSH Worker's machine: SSH connects, the root is a writable directory, Git runs,
  * memory is enough for the concurrent Attempts, the Gateway (if any) responds and is reachable,
- * the container runtime and attempt image work when installed, and each brain is ready. Pulls
- * the Attempt image. For a fixed tailnet worker, configures gateway routing with passwordless
- * sudo. With a container runtime, it derives the container limits that `usine.yaml` leaves unset
+ * the container runtime and attempt image work when installed, the root and the image storage
+ * have the free disk space of the Worker's threshold, and each brain is ready. Pulls the Attempt
+ * image and removes older images of its repository. For a fixed tailnet worker, configures
+ * gateway routing with passwordless sudo. With a container runtime, it derives the container limits that `usine.yaml` leaves unset
  * for `maxConcurrentAttempts` containers, which the report gives, and
  * brains are probed in a container from the image; without, as the SSH user, which the report
  * gives as degraded. With a container runtime, the report gives as a finding a kernel log that
@@ -169,6 +172,14 @@ export const sshMachinePreflightFor = (
       yield* verifyGateway(catalog, commands, worker, machine, machine.gateway.value);
     }
     const containerCheck = yield* containers.verify(machine, maxConcurrentAttempts);
+    yield* verifyFreeDisk(
+      commands,
+      machine,
+      containerCheck._tag === "Container"
+        ? Option.some(containerCheck.settings.runtime)
+        : Option.none(),
+      "preflight",
+    );
     // Only containers record out-of-memory kills, so only they need the kernel log.
     const findings =
       containerCheck._tag === "Container"
@@ -269,15 +280,19 @@ export const sshPreflightFor = (
     maxConcurrentAttempts: number,
   ) => Effect.Effect<PreflightReport, ExecutorError>,
 ) =>
-  Effect.fn("SshExecutor.preflight")(function* (
-    worker: WorkerName,
-    brains: ReadonlyArray<BrainSpec>,
-    maxConcurrentAttempts: number,
-  ) {
-    yield* Effect.annotateCurrentSpan({ worker, maxConcurrentAttempts });
-    const entry = yield* workerFor(worker);
-    return yield* Option.match(entry.machine, {
-      onNone: () => verifyProvisioned(entry, brains, maxConcurrentAttempts),
-      onSome: (machine) => verifyMachine(machine, brains, maxConcurrentAttempts),
-    });
-  }, logPreflightFailure);
+  Effect.fn("SshExecutor.preflight")(
+    function* (
+      worker: WorkerName,
+      brains: ReadonlyArray<BrainSpec>,
+      maxConcurrentAttempts: number,
+    ) {
+      yield* Effect.annotateCurrentSpan({ worker, maxConcurrentAttempts });
+      const entry = yield* workerFor(worker);
+      return yield* Option.match(entry.machine, {
+        onNone: () => verifyProvisioned(entry, brains, maxConcurrentAttempts),
+        onSome: (machine) => verifyMachine(machine, brains, maxConcurrentAttempts),
+      });
+    },
+    (effect, worker) => classifyDiskFull(worker, effect),
+    logPreflightFailure,
+  );

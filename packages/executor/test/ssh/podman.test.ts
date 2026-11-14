@@ -54,6 +54,24 @@ const sink = {
 
 describe("rootless Podman", () => {
   it.effect.each(["preflight", "prepare"] as const)(
+    "checks Podman GraphRoot disk space during %s",
+    (operation) => {
+      const machine = podmanMachine();
+      machine.state.storageFreeDiskGib = 1;
+      return Effect.gen(function* () {
+        const executor = yield* Executor;
+        const error =
+          operation === "preflight"
+            ? yield* executor.preflight(WORKER, [], 1).pipe(Effect.flip)
+            : yield* executor.prepare(request).pipe(Effect.flip);
+        assert(error._tag === "WorkerCapabilityError");
+        assert.strictEqual(error.capability, "disk");
+        assert.include(error.message, "has 1.0 GiB free on /var/lib/podman");
+      }).pipe(Effect.scoped, Effect.provide(runtime(machine, mintingProvider())));
+    },
+  );
+
+  it.effect.each(["preflight", "prepare"] as const)(
     "pulls a missing image before the first container during %s",
     (operation) => {
       const machine = podmanMachine();

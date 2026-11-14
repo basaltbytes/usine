@@ -43,6 +43,7 @@ const capabilityLabel = {
   machine: "machine",
   toolchain: "toolchain",
   memory: "memory",
+  disk: "disk space",
   "harness-login": "harness login",
   credentials: "credentials",
   gateway: "gateway",
