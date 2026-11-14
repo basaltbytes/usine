@@ -510,7 +510,12 @@ podman() { [ "$1" = info ] && [ "$2" = --format ] && [ "$3" = '{{.Store.GraphRoo
       return state.imageListError === undefined
         ? oneShotHandle(
             state.workerImages
-              .filter((image) => words[6] === undefined || image.split(" ")[1] === words[6])
+              .filter(
+                (image) =>
+                  commandLine.startsWith("exec 'podman'") ||
+                  words.includes("--all") ||
+                  image.split(" ")[2] !== "<none>",
+              )
               .map((image) => `${image}\n`)
               .join(""),
             0,

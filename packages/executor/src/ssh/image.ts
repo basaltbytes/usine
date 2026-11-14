@@ -158,6 +158,7 @@ const removeOldWorkerImages = Effect.fn("SshExecutor.removeOldWorkerImages")(
     const listed = yield* commands.run(operation, machine.shell, runtime, [
       "image",
       "ls",
+      "--all",
       "--no-trunc",
       "--format",
       "{{.ID}} {{.Repository}} {{.Tag}} {{.CreatedAt}}",

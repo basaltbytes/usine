@@ -203,6 +203,24 @@ describe("free disk space of an SSH Worker", () => {
 });
 
 describe("older worker images on an SSH Worker", () => {
+  it.effect("removes older worker images before it reports a disk below the threshold", () => {
+    const machine = fakeMachine();
+    machine.state.docker = "running";
+    machine.state.freeDiskGib = 3.5;
+    machine.state.pulledImageId = "sha256:c0";
+    machine.state.workerImages = [
+      `sha256:c0 ${REPOSITORY} current 2026-11-13 08:00:00 +0000 UTC`,
+      `sha256:b0 ${REPOSITORY} previous 2026-11-12 08:00:00 +0000 UTC`,
+      `sha256:a1 ${REPOSITORY} older 2026-11-11 08:00:00 +0000 UTC`,
+    ];
+    return Effect.gen(function* () {
+      const executor = yield* Executor;
+      const error = yield* executor.preflight(WORKER, [], 1).pipe(Effect.flip);
+      assert(error._tag === "WorkerCapabilityError" && error.capability === "disk");
+      assert.deepStrictEqual(machine.state.imageRemovals, [[`${REPOSITORY}:older`]]);
+    }).pipe(Effect.scoped, Effect.provide(runtime(machine, mintingProvider())));
+  });
+
   it.effect.each([
     { configured: "docker.io/acme/worker", listed: "acme/worker" },
     { configured: "docker.io/library/ubuntu", listed: "ubuntu" },
