@@ -2881,83 +2881,114 @@ describe("Claude child backend", () => {
 
     const lost = { type: "test_process_lost" };
     /** A Claude SDK whose launches each read a new queue, and throw `ChildProcessLost` on `lost`. */
-    const resumableSdk = Effect.gen(function* () {
-      const outputs: Array<Queue.Queue<Schema.Json, Cause.Done>> = [];
-      const context = yield* Effect.context<never>();
-      const prompted = yield* Deferred.make<void>();
-      const commands = workerCommands(0).layer;
-      const owner = ChildProcessSpawner.make((command) =>
-        command._tag === "StandardCommand" && Predicate.hasProperty(command.options.stdin, "stream")
-          ? Effect.gen(function* () {
-              const { spawner } = yield* scriptedOwner(
-                [{ offset: 10, ready: true, sequence: 0, retained: false }],
-                (sequence, frame) => frame({ offset: 10 + sequence, ack: sequence }),
-              );
-              return yield* spawner.spawn(command);
-            })
-          : ChildProcessSpawner.ChildProcessSpawner.pipe(
-              Effect.flatMap((other) => other.spawn(command)),
-              Effect.provide(commands),
-            ),
-      );
-      const sdk = Layer.succeed(ClaudeSdk)({
-        open: (input, options) => {
-          assert(options.spawnClaudeCodeProcess !== undefined);
-          const child = options.spawnClaudeCodeProcess({
-            command: "claude",
-            args: [],
-            env: {},
-            signal: new AbortController().signal,
-          });
-          const lines = createInterface({ input: child.stdout });
-          const output = Effect.runSyncWith(context)(Queue.make<Schema.Json, Cause.Done>());
-          outputs.push(output);
-          void (async () => {
-            for await (const message of input) {
-              child.stdin.write(await Effect.runPromiseWith(context)(jsonLine({ ...message })));
-              Queue.offerUnsafe(output, rateLimitEvent);
-            }
-          })();
-          return {
-            ...scripted([]),
-            close: () => {
-              lines.close();
-              Queue.endUnsafe(output);
-            },
-            async *[Symbol.asyncIterator]() {
-              for (;;) {
-                const next = await Effect.runPromiseWith(context)(
-                  Effect.option(Queue.take(output)),
+    const resumableSdk = (commit: Effect.Effect<void, SessionOperationError> = Effect.void) =>
+      Effect.gen(function* () {
+        const inputs = yield* Queue.make<ClaudeUserMessage>();
+        const launches: Array<ClaudeQueryOptions> = [];
+        const outputs: Array<Queue.Queue<Schema.Json, Cause.Done>> = [];
+        const context = yield* Effect.context<never>();
+        const prompted = yield* Deferred.make<void>();
+        const commands = workerCommands(0).layer;
+        const owner = ChildProcessSpawner.make((command) =>
+          command._tag === "StandardCommand" &&
+          Predicate.hasProperty(command.options.stdin, "stream")
+            ? Effect.gen(function* () {
+                const { spawner } = yield* scriptedOwner(
+                  [{ offset: 10, ready: true, sequence: 0, retained: false }],
+                  (sequence, frame) => frame({ offset: 10 + sequence, ack: sequence }),
                 );
-                if (Option.isNone(next)) return;
-                if (next.value === lost)
-                  throw ChildProcessLost.make({ exitCode: 255, stderrTail: "" });
-                yield next.value;
+                return yield* spawner.spawn(command);
+              })
+            : ChildProcessSpawner.ChildProcessSpawner.pipe(
+                Effect.flatMap((other) => other.spawn(command)),
+                Effect.provide(commands),
+              ),
+        );
+        const sdk = Layer.succeed(ClaudeSdk)({
+          open: (input, options) => {
+            launches.push(options);
+            assert(options.spawnClaudeCodeProcess !== undefined);
+            const child = options.spawnClaudeCodeProcess({
+              command: "claude",
+              args: [],
+              env: {},
+              signal: new AbortController().signal,
+            });
+            const lines = createInterface({ input: child.stdout });
+            const output = Effect.runSyncWith(context)(Queue.make<Schema.Json, Cause.Done>());
+            outputs.push(output);
+            void (async () => {
+              for await (const message of input) {
+                Queue.offerUnsafe(inputs, message);
+                child.stdin.write(await Effect.runPromiseWith(context)(jsonLine({ ...message })));
+                Queue.offerUnsafe(output, rateLimitEvent);
               }
-            },
-          };
-        },
+            })();
+            return {
+              ...scripted([]),
+              close: () => {
+                lines.close();
+                Queue.endUnsafe(output);
+              },
+              async *[Symbol.asyncIterator]() {
+                for (;;) {
+                  const next = await Effect.runPromiseWith(context)(
+                    Effect.option(Queue.take(output)),
+                  );
+                  if (Option.isNone(next)) return;
+                  if (next.value === lost)
+                    throw ChildProcessLost.make({ exitCode: 255, stderrTail: "" });
+                  yield next.value;
+                }
+              },
+            };
+          },
+        });
+        const layer = claudeChildWith(
+          Layer.succeed(ChildProcessSpawner.ChildProcessSpawner)(owner),
+        ).pipe(
+          Layer.provideMerge(sdk),
+          Layer.provideMerge(
+            Layer.succeed(ChildSessionJournal)({
+              started: () => Effect.void,
+              prompted: Deferred.succeed(prompted, undefined).pipe(Effect.andThen(commit)),
+              continued: () => Effect.void,
+              received: () => Effect.void,
+              delivered: () => Effect.void,
+            }),
+          ),
+        );
+        return { outputs, layer, prompted, inputs, launches };
       });
-      const layer = claudeChildWith(
-        Layer.succeed(ChildProcessSpawner.ChildProcessSpawner)(owner),
-      ).pipe(
-        Layer.provideMerge(sdk),
-        Layer.provideMerge(
-          Layer.succeed(ChildSessionJournal)({
-            started: () => Effect.void,
-            prompted: Deferred.succeed(prompted, undefined).pipe(Effect.asVoid),
-            continued: () => Effect.void,
-            received: () => Effect.void,
-            delivered: () => Effect.void,
-          }),
-        ),
-      );
-      return { outputs, layer, prompted };
-    });
+
+    it.effect("resumes an acknowledged Claude task after its receipt commit fails", () =>
+      Effect.gen(function* () {
+        const { outputs, layer, prompted, inputs, launches } = yield* resumableSdk(
+          Effect.fail(
+            SessionOperationError.make({
+              operation: "stream",
+              sessionId: Option.some(request().session.id),
+              message: "Receipt commit failed",
+              cause: new Error("Receipt commit failed"),
+            }),
+          ),
+        );
+        yield* Effect.gen(function* () {
+          yield* (yield* ChildBackend).launch(request(undefined, undefined, exitingHost(0)));
+          assert.strictEqual((yield* Queue.take(inputs)).message.content, request().prompt);
+          yield* Deferred.await(prompted);
+          yield* Queue.offer(outputs[0]!, lost);
+          assert.strictEqual((yield* Queue.take(inputs)).message.content, CONTINUATION_MESSAGE);
+          assert.lengthOf(launches, 2);
+          assert.strictEqual(launches[1]?.resume, launches[0]?.sessionId);
+          assert.isUndefined(launches[1]?.sessionId);
+        }).pipe(Effect.provide(layer), Effect.scoped);
+      }),
+    );
 
     it.effect("returns the continuation's answer after a process resume within the limit", () =>
       Effect.gen(function* () {
-        const { outputs, layer, prompted } = yield* resumableSdk;
+        const { outputs, layer, prompted } = yield* resumableSdk();
         const logs = infoLines();
         yield* Effect.gen(function* () {
           const session = yield* (yield* ChildBackend).launch(limited(exitingHost(0)));
@@ -2979,7 +3010,7 @@ describe("Claude child backend", () => {
 
     it.effect("returns the kept answer on a Release after a process resume", () =>
       Effect.gen(function* () {
-        const { outputs, layer, prompted } = yield* resumableSdk;
+        const { outputs, layer, prompted } = yield* resumableSdk();
         const logs = infoLines();
         yield* Effect.gen(function* () {
           const running = yield* (yield* ChildBackend).launch(

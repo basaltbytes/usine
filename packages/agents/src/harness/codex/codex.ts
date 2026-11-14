@@ -315,6 +315,20 @@ const makeCodexSessions = Effect.gen(function* () {
       items: [...observedItems],
     };
     let receiptsKnown = start._tag !== "StartResume" || Option.isSome(policy.restored.receipts);
+    if (!receiptsKnown && Option.isSome(thread.activeTurn)) {
+      const turn = thread.activeTurn.value;
+      const messages = yield* Effect.forEach(
+        turn.items.filter(Schema.is(UserMessageKindItem)),
+        (item) => decodeItem(UserMessageItem, "user message", session.id, item),
+      ).pipe(Effect.map(Arr.getSomes));
+      // Include these in the next save, but let their replayed notifications acknowledge inputs.
+      receipts = { turnId: Option.some(turn.id), items: messages.map(({ id }) => id) };
+      yield* Effect.logInfo("Preserving the active Codex turn's existing receipt IDs", {
+        sessionId: session.id,
+        turnId: turn.id,
+        items: receipts.items.length,
+      });
+    }
     const savedMessages = yield* Effect.forEach(
       Option.match(thread.activeTurn, { onNone: () => [], onSome: (turn) => turn.items }),
       (item) =>
@@ -478,13 +492,21 @@ const makeCodexSessions = Effect.gen(function* () {
       at: "now" | "restored",
     ) {
       const message = yield* decodeItem(UserMessageItem, "user message", session.id, item);
-      if (Option.isNone(message) || observedItems.has(message.value.id)) return;
+      if (Option.isNone(message)) return;
+      if (observedItems.has(message.value.id))
+        return yield* Effect.logInfo("Skipping an observed Codex user-message item", {
+          sessionId: session.id,
+          turnId: turn,
+          itemId: message.value.id,
+        });
       observedItems.add(message.value.id);
       receipts = {
         turnId: Option.some(turn),
         items: [
-          ...(Option.contains(receipts.turnId, turn) ? receipts.items : []),
-          message.value.id,
+          ...new Set([
+            ...(Option.contains(receipts.turnId, turn) ? receipts.items : []),
+            message.value.id,
+          ]),
         ],
       };
       // Saved before the read, so a restart never matches this item to another unread message.
