@@ -1,5 +1,35 @@
 # create-usine
 
+## 0.7.0
+
+### Patch Changes
+
+- Updated dependencies [f8f311c]
+- Updated dependencies [2b3ac6b]
+- Updated dependencies [095438d]
+- Updated dependencies [6aa5e72]
+- Updated dependencies [539349e]
+- Updated dependencies [bfa02ef]
+- Updated dependencies [c8ea557]
+- Updated dependencies [589ad7b]
+- Updated dependencies [e828b51]
+- Updated dependencies [d7e00bc]
+- Updated dependencies [64afcbb]
+- Updated dependencies [fd52df7]
+- Updated dependencies [e8003db]
+- Updated dependencies [c8241d7]
+- Updated dependencies [2a76a52]
+- Updated dependencies [360d371]
+- Updated dependencies [2882f71]
+- Updated dependencies [fa97db3]
+- Updated dependencies [c7bd772]
+- Updated dependencies [c7f39bc]
+- Updated dependencies [324bfed]
+- Updated dependencies [738c15c]
+- Updated dependencies [1eddd3d]
+- Updated dependencies [4aebd77]
+  - @usine/core@0.8.0
+
 ## 0.6.0
 
 ### Minor Changes

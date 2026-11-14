@@ -1,5 +1,144 @@
 # @usine/executor
 
+## 0.7.0
+
+### Minor Changes
+
+- f8f311c: boxd workers connect to any boxd cluster. `provisioner.endpoint` sets the cluster's account endpoint, such as `https://boxd.example.com:9443`, and defaults to the hosted service at `https://boxd.sh:9443`. The driver sends account calls and `ListRegions` there, and derives the token exchange URL from it as the boxd SDK does: `https://app.<host>/api/v1/auth/token`, without the port, or the endpoint itself for a `localhost`, IP address, or `app.` host.
+  
+  `provisioner.region` is optional and no longer defaults to `fra`. Without it, every call goes to the endpoint, and machines start where the endpoint runs them: Frankfurt on the hosted service, or the only location of a self-hosted cluster. A region that the endpoint serves itself needs no API endpoint in the region listing. Preflight compares the snapshot's region with the region that boxd serves, and fails with advice to remove `provisioner.region` when a cluster that runs in one place lists no regions.
+  
+  Over TLS or to a loopback address, the driver sends the API key as the bearer. It falls back to the token exchange when boxd refuses the key as a bearer, and keeps renewing the session and retrying a call once on `UNAUTHENTICATED`. `Exec` calls carry the session too once boxd refuses the key, so a cluster behind a load balancer that terminates TLS runs commands. `provisioner.endpoint` accepts `http://` only for `localhost`, `127.0.0.0/8`, or `[::1]`, and a port only from 1 to 65535. The driver refuses to connect to a region that boxd lists at an `http://` API endpoint on another host. When boxd doesn't answer or rate-limits, the error names the URL that usine called. The operator view and the worker form show the endpoint, and the view reports a missing region as null.
+- 2b3ac6b: boxd workers accept `provisioner.egress`, the complete egress allowlist of each machine: host names, `*.` wildcards, public IPv4 addresses or CIDR ranges of at most `/8`, or `none`. Like boxd, the configuration refuses an address with host bits set or one in a private, CGNAT, loopback, link-local, multicast, or reserved range. The driver sends it in the machine spec of the restore request, so each machine is created with it, and waits one second before it connects to the machine: processes that the snapshot resumes can reach hosts outside the list for up to about a second. If boxd reports the new machine unrestricted, the driver deletes the machine and retries creation. A reused machine gets the list again. Without `egress`, machines keep unrestricted egress.
+  
+  Behind a gateway, the configuration is refused when the list omits `*.tailscale.com`, or admits `github.com`, `api.github.com`, or the API and login hosts of a provider in `gateway.llm_providers`. Address entries aren't checked against the gateway; preflight logs a warning that names them. The operator view and the worker form show the list. `infra/boxd/egress.mjs` prints the gateway's `egress-allowlist` as `provisioner.egress`, so both enforcement points use one list.
+- b580789: `@usine/config` and `@usine/executor/ssh` no longer export the deprecated `BoatTailnet` alias. Use `ProvisionerTailnet`.
+  
+  A boxd `Exec` call takes its exit code from the last response only: one without data, or one with a non-zero exit code. A call whose last response is output fails as unreachable, even after an earlier empty response, and a last response that carries output and an exit code keeps both. Error messages stay readable when the boxd credential is empty. A dead `Exec` connection fails within 50 seconds by default.
+  
+  `infra/boxd/build-snapshot.mjs --no-isolated` builds a snapshot without isolation. A machine restored from an isolated snapshot is always isolated, so a worker's `isolated: false` takes effect only with such a snapshot.
+  
+  The worker page shows a boxd worker's region, snapshot, size, and isolation, with the default that applies when a setting is empty.
+- 55c75fe: boxd workers run commands over boxd's gRPC `Exec` stream instead of SSH. A boxd worker needs only its API key: neither the boxd account nor the snapshot needs an SSH key, and a boxd worker that still sets `identity_file`, as earlier releases required, loads and ignores it, with a preflight warning that names the file. The executor runs boxd commands in its own process through a new `ExecShell` child host, with one HTTP/2 connection per worker that raises the receive windows, sends stdin in small chunks, and sends keepalive pings. A lost command is a typed `HostUnreachable` error instead of exit code 255. The executor reports an SSH client's exit code 255 as the same error, so a machine that SSH loses during a preflight or preparation check fails with a message that names the host and the SSH client's reason, and the executor no longer pins a proxy host key or refreshes a proxy port for boxd machines.
+- 095438d: boxd `provisioner.region` accepts any lowercase region id, with `fra` as the default. The boxd driver finds the region's API endpoint with `ListRegions` on `boxd.sh`, so a worker can run on a boxd deployment in your own cloud account and region. Preflight fails with a `provider` capability error that names the listed region ids when boxd lists no region with the configured id. The worker form suggests `fra` and `nyc`.
+  
+  If boxd doesn't answer or rate-limits while the driver connects to the region, attempt launch waits and tries again instead of failing the Worker's check, and preflight names the hosts to reach: `app.boxd.sh`, `boxd.sh:9443`, and the region's API endpoint.
+- 6aa5e72: boxd workers follow how boxd restores machines. `provisioner.size` is optional and takes any `<vcpu>x<GiB>` size, such as `1x32` on a self-hosted cluster, instead of the hosted sizes only. A restore keeps its snapshot's size, so the setting only asserts it: when it is set, preflight compares the snapshot's vCPU count and memory with it and names the snapshot's size on a mismatch. Without it, preflight accepts the snapshot's size. Preflight logs the snapshot's size in `boxd provisioner verified`. `BoxdSize` is a branded `<vcpu>x<GiB>` string, and the operator view reports a missing size as null. `infra/boxd/build-snapshot.mjs --size` takes the same pattern and puts it in the temporary machine's spec.
+  
+  Each boxd machine is created with SSH off, since usine runs every command through `Exec`. A boxd worker ignores `provisioner.reuse`: boxd restores a machine in under a second, so every attempt gets a new machine. A stored worker that sets it still loads, and preflight warns that it has no effect and names the worker. The executor's `BoxdProvisioner` has no reuse policy and reports the ignored setting as `ignoredReuse`, `MachineDriver.assign` is optional and absent from the boxd driver, and the boxd client no longer updates labels.
+- 539349e: Add boxd as an SSH provisioner with snapshot size and region checks, machine reuse, and gateway tailnet support. Add worker configuration fields and a snapshot setup guide.
+- c8ea557: A CI handoff that names a merged pull request now fails with "pull request #<n> is merged" instead of "is closed". When a detached checkout's head is only on `refs/pull/<n>/head`, harvesting now also requires the pull request's head on GitHub to be that commit. A verified handoff keeps only the open pull requests from the attempt's repository among the others that GitHub's commit-to-pull-request index lists at its head, so a closed pull request at the same head no longer appears in the run's changes.
+  
+  `harvestFacts` now requires its `handoff` argument, and `StepExecution.requiresCi` and `CheckoutRequest.requiresCi` have no constructor default, so a caller that forgets either value fails to compile. `retryTransient` accepts a refinement and passes `onRetry` the narrowed failure.
+- e828b51: The new instance setting `settings.max_background_wait_minutes` limits how long a child that answers while its background tasks still run waits for that work to start a turn. The default is no limit: such a child waits for its background work and the turn it starts, however long they take. **Configuration > Settings** shows and edits the setting.
+  
+  Claude Code children apply the limit. When it passes and the child is still idle, the child returns its last answer as its report, and a warning names the limit and the background task IDs. Closing the child ends the Claude Code process, which stops its background tasks, and their results never reach the Attempt. The child's `SessionFinished` event sets `backgroundWaitLimitPassed`, and when the Attempt ends, even as a success, cleanup salvages its checkout as after a failure, so work that the child hasn't pushed is kept. Cleanup applies the limit that the Attempt started with. If that salvage doesn't push all the work, the checkout stays, and startup recovery salvages it again instead of removing it. A turn that starts within the limit runs to its own answer. If the operator holds or pauses the child when the limit passes, the child stays open without reporting idle. A Release of a held child then returns the answer, unless a turn started first. If the Claude process resumes in the meantime, the child reports the kept answer as idle, and a Release returns it. The limit runs in memory, so a child that was already waiting when usine restarted waits without one.
+- d7e00bc: Configuration selects what coordinates an attempt. The `coordinator` setting in `usine.yaml` takes `session`, the default, where a Pi parent session coordinates the attempt, or `events`, where the event-driven coordinator applies rules to the attempt's lifecycle events with no parent session. An agent file's `coordinator` overrides the instance setting, and the scheduler resolves it when each attempt launches. Startup, reloads, and saved edits check the parent brain only of agents that resolve to `session`, so an instance whose agents all resolve to `events` starts without a Pi credential and quarantines no agent. Imports, reloads, and saved edits refuse `parent_model` or `parent_effort` in the same agent file or `settings` block as `coordinator: events`, with the field path in the problem. An agent file also accepts an optional `decision` with a `model` and an `effort` for its decision sessions, which run on the agent's own harness; no behavior reads it yet.
+  
+  `ParentKind` (`pi` or `none`) is now `CoordinatorKind` (`session` or `events`), and `RunSpec.parent` is now `RunSpec.coordinator`, which decodes as `session` for attempts stored without it. A fourth attempt journal migration rewrites a stored `RunSpec.parent` of `pi` or `none` as `session` or `events`. `Agent` adds the optional `coordinator` and `decision` (`DecisionBrain`), and `resolveCoordinator` returns the agent's kind, else the instance setting. `CheckoutRequest.coordinator` carries the resolved kind into the `RunSpec`. In the operator API, `SettingsView.coordinator`, `AgentFileView.coordinator`, and `AgentFileView.resolvedCoordinator` report the setting. The web configuration pages show the coordinator of the instance and of each agent and edit it in the settings and agent forms; an agent on `events` shows no parent model or effort.
+- e8003db: Attempts can run without a Pi parent session. `RunSpec.parent` selects the coordinator: `pi`, the default and the value that stored attempts decode as, or `none`, which runs the attempt on the event-driven coordinator. `RunSpec.outcomeLabels` gives that coordinator the labels the engine verifies after a success: `RunSnapshot`, `StepExecution`, and `CheckoutRequest` carry the outcome labels saved with the Run's Event, and preparation copies them into the `RunSpec`. Configuration doesn't set `parent: none` yet, so every configured attempt still runs its Pi parent.
+  
+  The event-driven coordinator starts one child with the rendered task and turns the child's end into the attempt's outcome: a report completes it, a reserved marker fails it with its typed failure, a provider capacity refusal fails it with `ProviderCapacityFailure` and the time the usage limit resets, and a launch or transport failure fails it with `InfraFailure`. Each lifecycle event goes through the `WakeUp` seam, and `WakeUp.rules` applies the event's rule, so the coordinator needs no model credential. Its state lives in the attempt journal in the runtime database: an orchestrator restart resumes the open child, applies a decision recorded before its transition, reads a child's recorded outcome instead of starting another child, and replaces a child that couldn't resume once within the child-session budget. Its outbox sends envelopes that the transcript didn't acknowledge again. A cancel settles an attempt without an outcome before its child stops, so a restart doesn't resume it. It refuses operator input for now.
+  
+  `@usine/durable/live` routes each attempt to the runtime that started it and requires the runtime database's `SqlClient` for the attempt journal; the orchestrator's `runtimeLayer` and the exe.dev engine layer take the shared database layer. `AttemptJournal` adds `startDelegation`, `saveProgress`, `settleDelegation`, `settleOpen`, `recordResult`, and `recordUnsupervised`, and a second migration adds their columns. `@usine/durable/testing` exports `routedRuntimeLayer`, and its `layer` runs attempts through the router.
+- c8241d7: SSH worker preflight with a container runtime now checks that the SSH user can read the host kernel journal or ring buffer. A missing permission appears under **Preflight findings** on the worker's page, with the fix, and doesn't block attempts. `PreflightReport` and `MachineCheck` have a `findings` field, and the worker configuration and preflight views return `findings`.
+  
+  A container started again for a reason other than a memory kill now still records the processes the kernel killed before the start. The `dmesg` fallback filters `oom-kill:` lines on the worker instead of sending the whole ring buffer over SSH, the executor reads `dmesg` when a readable journal has no `oom-kill:` line instead of stopping at the journal's `-- No entries --` placeholder, a readable journal with no `oom-kill:` line no longer fails the read when `dmesg` is restricted, the executor logs which kernel log it read, and Podman's cgroupfs container cgroups (`libpod-<id>`) match. Out-of-memory records keep at most `MAX_KILLED_PROCESSES` (20) processes, and their kill count includes the rest; older records keep their first 20 processes.
+  
+  Attempt outcomes now name the killed-process list with its visible label, so screen readers announce it once. The **First time right** statistics hide the memory-kill line when the window has none.
+- c7bd772: SSH workers keep their disks from filling up with worker images. After each image pull, usine removes the other images of the attempt image's repository. It keeps the current image, the most recently built other image, and every image that a container uses. After a rollback, the retained image can be newer than the current image. Cleanup recognizes Docker Hub name aliases and tracks images replaced by mutable tags such as `latest`.
+  
+  Preflight and each new attempt, before its checkout starts, check the free disk space on the filesystem of the worker's `root` and on the container runtime's image storage. Below the threshold, the check fails with a `disk` capability error that states the free space and the threshold. **Needs attention** shows the error, and attempts wait until a preflight passes. The threshold defaults to 10 GiB; set `min_free_disk_gib` on the worker to change it, or to `0` to turn the check off. An attempt whose check fails before its checkout fails with an infrastructure failure, which usine retries.
+  
+  When one of usine's own commands on a worker, such as an image pull or a checkout, reports `ENOSPC` or `No space left on device` during preflight or preparation, usine reports the same `disk` error instead of the command's failure. A report from the attempt's agent keeps the outcome that the agent gave it.
+- 738c15c: Startup recovery stops tracking a finished attempt whose machine and checkout are both gone, so later starts skip it instead of visiting it at every start. `Executor.recover` and `StepExecutor.recover` now return `RecoveredLeftovers` from `@usine/core/attempt/salvage`: `gone` when neither the attempt's machine nor its checkout is left, otherwise `found`. When a recovery returns `gone` for a closed attempt, the engine sets its `leftoversDiscardedAt` after recording the attempt's comments, through the new `RunStore.discardClosedAttempt`. Open attempts and attempts whose recovery failed stay tracked. Startup logs one summary per configured worker with the attempts visited, kept, and discarded. The per-attempt lines "Resolved retained SSH machine for attempt recovery", "The Attempt's machine is gone", and "The Attempt's sandbox is gone" are now logged at debug level.
+  
+  The first preparation on a remote worker after a start no longer warns about the checkouts of attempts that are being reattached: the attempt that started the sweep, and each attempt whose parent task `isLive` reported live. The sweep logs the remaining paths under `attempts/` as one warning with their count, and the paths at debug level.
+- c5be05b: The orchestrator can run supervisor turns in a read-only container on its host, with the instance's source to read, on Claude Code, Codex, and Pi. No interface opens a supervisor conversation yet.
+  
+  `RoleSpec.nativeTools` is `none`, `read`, or `all`. A role that keeps only `read` tools gets Claude Code's `Read`, `Grep`, and `Glob`, or Pi's `read`, `grep`, `find`, and `ls`. A harness that can't turn its own tools off keeps them all, and `AdmittedBrain.ownToolsKept` and `HarnessPresentation.ownTools` carry the descriptor's reason. The supervisor role keeps `read` tools, so it no longer requires `closed-tools`, and Codex serves it. On an exec shell host, Pi runs its read and search tools' file operations on that host, and its grep runs as a Node.js script there, with Pi's glob, pattern, and output limits.
+  
+  `@usine/agents/supervisor` exports the `SupervisorSandbox` port: `open` starts the sandbox of one turn and returns the seat that the turn runs on, with each `SupervisorSource` under the seat's directory, and `unavailable` says why sessions can't run. `@usine/executor/supervisor` provides it as one Podman or Docker container per turn, with no network, the sources and the session's directory read-only, and no instance file but the conversation's own directory. A relay forwards the harness's model requests to the orchestrator, which sends them through the instance's gateway model route with the instance's credential. The relay and the route drop every header in `CALLER_CREDENTIAL_HEADERS`, which `@usine/gateway/admin` now exports. The sandbox writes the harness's settings without following a symbolic link, and runs one turn of a conversation at a time. A container whose orchestrator stops ends itself, and the next start removes any that remain. `makeSupervisorSources` exports each repository's default branch head, without its history, for the sandbox to mount, and holds each tree until the turn ends. It removes a tree once the tree is no longer the head and no turn holds it.
+  
+  `@usine/orchestrator/parent-models` exports `instanceModelRoute`. The orchestrator provides the container sandbox, with the attempt image and the instance's gateway route. On a host without Podman or Docker, or an instance without a gateway, the instance starts, logs `The configured supervisor is unavailable on this orchestrator` with the reason, and `SettingsView.supervisor.unavailable` carries it. `SettingsView.supervisor.ownTools` says when the supervisor's harness keeps all its own tools. **Configuration > Settings** and the settings form show both.
+
+### Patch Changes
+
+- 8a441c2: When boxd refuses to create a machine as invalid (`INVALID_ARGUMENT`), for example because it reserves the machine name, worker preflight now fails with boxd's message, which names the machine. Before, usine reported the machine as unavailable and retried creation, which failed the same way.
+- 3719899: boxd worker preflight logs a warning when boxd stores the snapshot as `archiving`, `archived`, or `unarchiving`, because boxd creates machines only from a local snapshot. A region that boxd lists without an API endpoint fails preflight like an unknown region.
+  
+  When boxd refuses a session before it expires, the boxd driver exchanges the API key again and retries the call once. It renews sessions 5 minutes before they expire. A token exchange that answers HTTP 400 or a server error other than 502, 503, or 504 fails as a worker fault instead of an outage that launch retries.
+  
+  Every saved revision of a boxd worker with the same API key, region, and endpoint shares one API client and one `Exec` connection, instead of keeping two HTTP/2 session managers per revision until shutdown. Concurrent callers that wait for a boxd driver now share its build's result, so a boxd outage fails them together instead of one after another.
+- 4ff30ae: `@usine/agents/child-host` exports `STDIN_ENVIRONMENT_PREFIX`, the start of a remote command line that reads the secret environment block from stdin, and the `HostInput` and `HostCommandOptions` types: a command on a host takes its input as a stream, so an `ExecShell` command no longer buffers a `"pipe"` input without a limit. An `ExecShell` command whose input stream fails reads end of file, also when `endOnDone` is `false`. `@usine/agents/harness` no longer exports `gatewayTokenVariables`, which had no caller.
+  
+  When an SSH client exits with code 255, the executor logs it at debug instead of as a warning, so a booting machine that preflight or preparation polls no longer logs a warning on each try; the caller that handles the `HostUnreachable` error chooses the level. When the gateway preflight's check of the variables sent on stdin fails with output on stderr, the error's cause keeps the names of the variables that the machine didn't receive and the exit code next to the stderr.
+- b9ec633: An attempt container on an SSH worker mounts the SSH user's login files for its harness only when the harness uses that login. When the gateway holds the provider's credential (`llm_providers`) or the provisioner gives the attempt an API key, the container gets no login files for that harness, even when they exist on the machine. Preflight logs, at Info, which login files the worker's containers mount for each harness if the machine has them, and why.
+- eb58cad: Configuration checks, worker preflight, and coordinator startup admit brains through role declarations. A refusal names the missing capability, placement, or credential route with the harness's reason. For example, a Pi child placed on an SSH or container worker is refused with "Pi runs its tools in the orchestrator process and supports only local children".
+- 5ae7631: Send gateway tokens and provisioner API keys to SSH workers as an environment block on each command's standard input instead of OpenSSH `SendEnv`, so they reach boxd workers and stay out of the local SSH client's environment. Gateway preflight fails with a `gateway` capability error naming the variables that don't arrive. Tailnet gateway setup no longer configures sshd `AcceptEnv`.
+- eb60495: Startup recovery stops tracking a finished attempt whose checkout is gone from the long-lived machine of an SSH or exe.dev worker, so later starts skip it. Before, `recover` returned `found` whenever the worker's machine answered, and every start visited each attempt the worker ever ran. A machine created for one attempt still counts as a leftover until it is deleted. The per-worker summary "Startup checkout reconciliation finished on a Worker" now splits `kept` into `kept` (leftovers found or kept on the worker), `failed` (reconciliation failed), and `empty` (still tracked, with nothing left on the worker).
+  
+  On an SSH worker, that recovery also removes the attempt's saved connection record, even if another attempt's cleanup failed on the same machine, and logs that removal at Info. Each attempt that startup keeps tracking now logs why at Info.
+- 4faa2c7: A provisioned machine on a tailnet checks that it reaches the gateway up to three times, 13 seconds each, with 3 seconds between tries, before usine deletes the machine. A boxd machine reaches the gateway only through Tailscale's relays, so the first request after a join can time out while the relay path comes up.
+  
+  When a check fails during machine creation, the worker's preflight shows the failure until a machine creation succeeds. That success now restores the worker's earlier preflight result on **Workers** and in `/api/desk`, instead of leaving the worker `Failed` while attempts run on it.
+- Updated dependencies [6b7ec62]
+- Updated dependencies [f8f311c]
+- Updated dependencies [2b3ac6b]
+- Updated dependencies [55c75fe]
+- Updated dependencies [095438d]
+- Updated dependencies [6aa5e72]
+- Updated dependencies [539349e]
+- Updated dependencies [7626bb7]
+- Updated dependencies [b6fd6b2]
+- Updated dependencies [4ff30ae]
+- Updated dependencies [039daa4]
+- Updated dependencies [322d45e]
+- Updated dependencies [bfa02ef]
+- Updated dependencies [c8ea557]
+- Updated dependencies [589ad7b]
+- Updated dependencies [71ecb9e]
+- Updated dependencies [e828b51]
+- Updated dependencies [322d45e]
+- Updated dependencies [f889e77]
+- Updated dependencies [3fef8e2]
+- Updated dependencies [4eec609]
+- Updated dependencies [d6fb554]
+- Updated dependencies [d7e00bc]
+- Updated dependencies [64afcbb]
+- Updated dependencies [6e55876]
+- Updated dependencies [8e2003f]
+- Updated dependencies [fd52df7]
+- Updated dependencies [ae523e4]
+- Updated dependencies [e8003db]
+- Updated dependencies [d159025]
+- Updated dependencies [fa97db3]
+- Updated dependencies [c8241d7]
+- Updated dependencies [2a76a52]
+- Updated dependencies [360d371]
+- Updated dependencies [a38a607]
+- Updated dependencies [2882f71]
+- Updated dependencies [fa97db3]
+- Updated dependencies [360d371]
+- Updated dependencies [eb58cad]
+- Updated dependencies [fa97db3]
+- Updated dependencies [eb58cad]
+- Updated dependencies [c7bd772]
+- Updated dependencies [c7f39bc]
+- Updated dependencies [324bfed]
+- Updated dependencies [738c15c]
+- Updated dependencies [5ae7631]
+- Updated dependencies [6a42cb3]
+- Updated dependencies [1eddd3d]
+- Updated dependencies [4aebd77]
+- Updated dependencies [c5be05b]
+- Updated dependencies [039daa4]
+  - @usine/durable@0.4.0
+  - @usine/core@0.8.0
+  - @usine/agents@0.8.0
+  - @usine/gateway@0.4.0
+  - @usine/cloudflare@0.2.1
+
 ## 0.6.0
 
 ### Minor Changes

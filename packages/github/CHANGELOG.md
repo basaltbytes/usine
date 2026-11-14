@@ -1,5 +1,66 @@
 # @usine/github
 
+## 0.6.0
+
+### Minor Changes
+
+- bfa02ef: A CI handoff that names a closed or merged pull request now fails as an agent failure with the new `PullRequestNotOpen` reason. A CI wait whose pull request is merged or closed before CI passes now ends at once, with no completion labels and no fix; before, a pending wait stayed pending until its timeout. A merged pull request ends the wait as passed. A pull request closed without a merge cancels the run with the new cancel reason `PullRequestClosed`, through the new `CiPullRequestClosed` resolution, so it isn't an agent failure. If CI on a merged pull request's head is already green, the wait passes and applies its completion labels. `CheckSnapshot` reports the pull request's state as `pullRequestState`, and reads a null branch target as the pull request's head instead of failing to decode.
+  
+  Harvesting compares the pull request's head repository with its base repository by ID, so a renamed repository verifies. A verified handoff also keeps the other pull requests that GitHub's commit-to-pull-request index lists at its head. A detached checkout whose head is only on `refs/pull/<n>/head` reads those pull requests by number instead of waiting on the index. A candidate branch or pull request whose read fails no longer hides another candidate's open pull request. GitHub reads now retry invalid output, like failed reads.
+  
+  Two new reasons separate failures that were all reported as `GitHubReadFailed`: `GitReadFailed` for a failed `git` read of the checkout or origin, and `VerificationTimedOut` for reads that take longer than 10 seconds. Both remain retryable infrastructure failures. `GitHubReadFailed` keeps the read's error as `cause`.
+- 2a76a52: Outcome label verification counts only the labels that an attempt's GitHub account added during that attempt, or that an earlier attempt of the same run added during that earlier attempt. Local, SSH, and Cloudflare workers write as the GitHub App's bot, which usine also uses for `on_green` labels, so a label added between two attempts no longer counts for the retry. A timeline of more than ten pages falls back to the current labels without a retry. Other responses that usine can't use, such as a body that fails partway through, are retried like transport failures. `GitHubItemHistory.appChanges` fails with the new `GitHubTimelineTooLongError` for a timeline of more than ten pages.
+  
+  `Attempt.workerKind` records the kind of the attempt's worker when it starts, and the check reads each attempt's GitHub account from it, so a later change to the worker's kind doesn't change the account. Older attempts have none and use their worker's configured kind. The SQLite store adds a nullable `worker_kind` column to `usine_attempts`. A `StepExecutor` lease (`WorkerLease`) has a required `kind`: the kind of the leased worker.
+  
+  `FailedAttemptView.report` is the final report that a failed attempt kept, set in run detail reads and null in run lists: the report that the completion check rejected, or the report that handed off to CI before CI failed, timed out, or ended incomplete. The run page and run drawer show it under **Final report**, after the failure.
+- 2882f71: A CI wait no longer treats a partially created GitHub Actions run as green or as a failure for the fix loop. Before it applies completion labels or starts a fix, usine reads the latest run of each workflow on the recorded head. When a run concluded `failure` or `cancelled` with no failed job, such as a run whose jobs Actions never created, the wait ends in **Needs attention** as an infrastructure failure that names each run ID and link. usine applies no completion labels and starts no fix. A failed job or failed commit status on the head still starts the fix loop without waiting for other workflow runs, except a gate job that failed only because jobs it needs stayed queued. Before the CI deadline, CI that ran only in part keeps the wait pending while a check outside the concluded runs, such as a commit status, is still pending. If GitHub refuses the commit-status read, such as when the App lacks the optional **Commit statuses: read-only** permission, usine decides from the check runs alone. A job that fails while usine reads CI waits for the next poll. Otherwise, a workflow run that hasn't concluded keeps the wait pending, even after its last job finished and the checks read green, until the CI deadline. usine doesn't rerun workflows, so the App doesn't need **Actions: read and write**; rerun the named runs and apply the completion labels after the checks pass.
+  
+  `GitHubChecks.workflowRuns` from `@usine/github/checks` returns runs that concluded `failure` or `cancelled` as `FailedWorkflowRun` records and runs that haven't concluded as `RunningWorkflowRun` records. `GitHubChecks.unfinishedChecks` returns the check runs and commit statuses on a head that haven't completed as `UnfinishedCheck` records; when GitHub refuses the commit-status read, it returns the check runs alone, and `CiIncomplete` from `@usine/core/ci` is the CI resolution that settles the wait.
+- 589ad7b: `GitHubChecks.pendingDetails` takes a `historyDeadline` and returns a `PendingCheckReport` instead of an array of `PendingCheck` records. The report lists running jobs before queued ones and counts in `omitted` the pending checks after the first ten. When no check run is pending, it lists the head's pending legacy commit statuses. Duration history reads stop at the deadline or at the first rate limit and keep the durations already read, so a slow history read no longer discards the job list. The baseline for a job's previous duration now comes from the latest successful run of the same workflow and event.
+  
+  The CI timeout diagnostic now reads "has been running for 31 min; its last successful run took 6 min" instead of quoting GitHub's `in_progress` status, states when a running job has no recorded start time, and says how many pending checks it leaves out. When the diagnostic read fails, its warning log includes the failed GitHub operation and message.
+- c7f39bc: A CI wait now tells a stalled or incomplete GitHub Actions run apart from red CI, and explains how to recover. At the CI deadline, usine reads the workflow runs on the recorded head even while the checks are pending. If GitHub Actions left a run `queued` or `in_progress`, the timeout message says that Actions didn't finish it and names the run with its ID and link. It tells you to push a commit or to rerun the run once GitHub allows it. A gate job that failed only because jobs it needs stayed queued is incomplete CI, not a failure: the wait ends in **Needs attention** as an infrastructure failure that names the run and the jobs that didn't finish, and it starts no fix. While that run is still going, the wait stays pending, because the queued jobs can still start. usine matches that job by its Actions job ID, so a failed job with the same name in another workflow run, or a failed commit status on the head, still starts the fix loop. A failed job from an earlier attempt of a rerun that is still going keeps the wait pending. When a run is still going or checks are still pending at the deadline, the message also lists the pending jobs with their running times. A run that ran only in part waits while another workflow run on the head is still going, so a later failure in that run still starts the fix loop. At the deadline, the message names every workflow run that didn't run or finish in full.
+  
+  A run whose CI wait ended this way offers **Apply CI labels** in **Needs attention**. After CI on the same head passes, with every workflow run concluded in full, the action applies the wait's completion labels and marks the failure resolved. While CI on the head hasn't passed, or after the pull request closed without a merge, it applies nothing and shows why. The operator API exposes it as `POST /api/runs/{runId}/apply-ci-labels`, which answers `409` with `CiNotPassedError` until CI passes. When GitHub refuses the workflow-run read, such as on a private repository without **Actions: read-only**, the check state decides alone, as it does during the wait.
+  
+  `RunState.Failed` from `@usine/core/run/state` keeps the wait's handoff as `unfinishedCi`, and `operatorActions` reports `canApplyCiLabels`. `GitHubChecks.workflowRuns` from `@usine/github/checks` reports the runs that concluded `failure` or `cancelled` as `FailedWorkflowRun` records in `failed`, and lists the jobs of each run's latest attempt as `WorkflowJob` records in `jobs`. `CheckFailureEvidence` now lists `checks` as `FailedCheck` records with their `ActionsJobRef`, and `GitHubChecks.failedStatuses` reads the failed commit statuses on a head. `CiMonitor.applyLabelsAfterGreen` applies the labels, and `RunView.canApplyCiLabels` and `RunFailureNeed.unfinishedCiAttemptId` from `@usine/orchestrator/operator` expose the action.
+- 4a83af0: On the task page, **Retry** after a pull request's base or head changed refreshes the task first and then loads the PR's current changes, instead of repeating the stale selection. When every recorded attempt on a pull request pushed no new commits, the **Changes** panel says so instead of reporting that no attempt commits were recorded. Task detail's `attemptChanges` now includes those attempts with a `base` equal to their `head`.
+  
+  When GitHub answers 404 for a file read because the GitHub App installation doesn't cover the repository, `GET /api/projects/:project/pull-requests/:repository/:item/files` returns `503` with `ProjectNotInstalledError` and says that the App lost access, instead of reporting an unavailable comparison or force push. `GitHubFiles.read` fails with `ProjectNotInstalledError` in that case.
+  
+  The server cache for pull request files holds up to 64 MiB of file paths and patch text and evicts the least recently read responses first, so responses over 512 KiB are cached too. Concurrent reads of one selection share their GitHub requests.
+  
+  `@usine/github/files` exports only `GitHubFiles`. Import `ChangedFile`, `FileChanges`, `FileChangesQuery`, `PullRequestFilesQuery`, `CommitRangeFilesQuery`, and `PullRequestFilesChangedError` from `@usine/github/file-changes`.
+
+### Patch Changes
+
+- Updated dependencies [f8f311c]
+- Updated dependencies [2b3ac6b]
+- Updated dependencies [095438d]
+- Updated dependencies [6aa5e72]
+- Updated dependencies [539349e]
+- Updated dependencies [bfa02ef]
+- Updated dependencies [c8ea557]
+- Updated dependencies [589ad7b]
+- Updated dependencies [e828b51]
+- Updated dependencies [d7e00bc]
+- Updated dependencies [64afcbb]
+- Updated dependencies [fd52df7]
+- Updated dependencies [e8003db]
+- Updated dependencies [c8241d7]
+- Updated dependencies [2a76a52]
+- Updated dependencies [360d371]
+- Updated dependencies [2882f71]
+- Updated dependencies [fa97db3]
+- Updated dependencies [c7bd772]
+- Updated dependencies [c7f39bc]
+- Updated dependencies [324bfed]
+- Updated dependencies [738c15c]
+- Updated dependencies [1eddd3d]
+- Updated dependencies [4aebd77]
+  - @usine/core@0.8.0
+
 ## 0.5.0
 
 ### Minor Changes

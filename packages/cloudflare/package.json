@@ -1,6 +1,6 @@
 {
   "name": "@usine/cloudflare",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "The Cloudflare Worker that runs each usine Attempt in its own sandbox, and the sandbox API the executor calls.",
   "license": "AGPL-3.0-only",
   "repository": {

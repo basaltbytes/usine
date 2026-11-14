@@ -1,5 +1,99 @@
 # @usine/engine
 
+## 0.8.0
+
+### Minor Changes
+
+- c8ea557: A CI handoff that names a merged pull request now fails with "pull request #<n> is merged" instead of "is closed". When a detached checkout's head is only on `refs/pull/<n>/head`, harvesting now also requires the pull request's head on GitHub to be that commit. A verified handoff keeps only the open pull requests from the attempt's repository among the others that GitHub's commit-to-pull-request index lists at its head, so a closed pull request at the same head no longer appears in the run's changes.
+  
+  `harvestFacts` now requires its `handoff` argument, and `StepExecution.requiresCi` and `CheckoutRequest.requiresCi` have no constructor default, so a caller that forgets either value fails to compile. `retryTransient` accepts a refinement and passes `onRetry` the narrowed failure.
+- e8003db: Attempts can run without a Pi parent session. `RunSpec.parent` selects the coordinator: `pi`, the default and the value that stored attempts decode as, or `none`, which runs the attempt on the event-driven coordinator. `RunSpec.outcomeLabels` gives that coordinator the labels the engine verifies after a success: `RunSnapshot`, `StepExecution`, and `CheckoutRequest` carry the outcome labels saved with the Run's Event, and preparation copies them into the `RunSpec`. Configuration doesn't set `parent: none` yet, so every configured attempt still runs its Pi parent.
+  
+  The event-driven coordinator starts one child with the rendered task and turns the child's end into the attempt's outcome: a report completes it, a reserved marker fails it with its typed failure, a provider capacity refusal fails it with `ProviderCapacityFailure` and the time the usage limit resets, and a launch or transport failure fails it with `InfraFailure`. Each lifecycle event goes through the `WakeUp` seam, and `WakeUp.rules` applies the event's rule, so the coordinator needs no model credential. Its state lives in the attempt journal in the runtime database: an orchestrator restart resumes the open child, applies a decision recorded before its transition, reads a child's recorded outcome instead of starting another child, and replaces a child that couldn't resume once within the child-session budget. Its outbox sends envelopes that the transcript didn't acknowledge again. A cancel settles an attempt without an outcome before its child stops, so a restart doesn't resume it. It refuses operator input for now.
+  
+  `@usine/durable/live` routes each attempt to the runtime that started it and requires the runtime database's `SqlClient` for the attempt journal; the orchestrator's `runtimeLayer` and the exe.dev engine layer take the shared database layer. `AttemptJournal` adds `startDelegation`, `saveProgress`, `settleDelegation`, `settleOpen`, `recordResult`, and `recordUnsupervised`, and a second migration adds their columns. `@usine/durable/testing` exports `routedRuntimeLayer`, and its `layer` runs attempts through the router.
+- 2a76a52: Outcome label verification counts only the labels that an attempt's GitHub account added during that attempt, or that an earlier attempt of the same run added during that earlier attempt. Local, SSH, and Cloudflare workers write as the GitHub App's bot, which usine also uses for `on_green` labels, so a label added between two attempts no longer counts for the retry. A timeline of more than ten pages falls back to the current labels without a retry. Other responses that usine can't use, such as a body that fails partway through, are retried like transport failures. `GitHubItemHistory.appChanges` fails with the new `GitHubTimelineTooLongError` for a timeline of more than ten pages.
+  
+  `Attempt.workerKind` records the kind of the attempt's worker when it starts, and the check reads each attempt's GitHub account from it, so a later change to the worker's kind doesn't change the account. Older attempts have none and use their worker's configured kind. The SQLite store adds a nullable `worker_kind` column to `usine_attempts`. A `StepExecutor` lease (`WorkerLease`) has a required `kind`: the kind of the leased worker.
+  
+  `FailedAttemptView.report` is the final report that a failed attempt kept, set in run detail reads and null in run lists: the report that the completion check rejected, or the report that handed off to CI before CI failed, timed out, or ended incomplete. The run page and run drawer show it under **Final report**, after the failure.
+- 360d371: `outcome_labels` entries use the GitHub label name rules and messages: a trimmed name of at most 50 characters. A loop file whose outcome labels differ only in letter case is rejected, because GitHub compares labels without case. A schedule loop that sets `outcome_labels` fails schema validation, because its runs have no item to label. An outcome label that `usine.yaml` doesn't declare under `labels` adds an `UndeclaredOutcomeLabelWarning` to `LoadedInstance.warnings` and logs `Loop outcome label is not a declared GitHub label` when the instance folder loads and each time `CurrentInstance` installs a configuration. The loop still loads. `logConfigWarnings` in `@usine/config/instance` logs these warnings.
+  
+  The SQLite configuration store rewrites stored loops that earlier versions accepted and these rules reject, so the stored configuration keeps loading. When it opens, it removes a schedule loop's outcome labels and each label that repeats an earlier one in a different letter case, records the change as one revision without an actor, and logs each loop. If the upgraded configuration is still invalid, the store leaves the stored loops unchanged and logs a warning with the problems. **Configuration > History** shows a stored agent or loop value that the current rules reject as YAML of its stored fields, through `formatRevisionEntity` in `@usine/config/folder-codec`, instead of failing to load the revision.
+  
+  `GitHubLabelName` and `canonicalLabelName` are exported from `@usine/core/label`; import them from there instead of `@usine/config/label`. `OutcomeLabels` in `@usine/core/loop`, and the `outcomeLabels` field of `Submission` in `@usine/engine`, now contain `GitHubLabelName` values.
+  
+  The loop detail page in **Configuration > Loops** lists a loop's outcome labels and warns about undeclared ones. `LoopFileView` in the operator API adds `outcomeLabels` and `undeclaredOutcomeLabels`. The loop form writes `outcome_labels` only when the loop sets at least one label.
+- 2882f71: A CI wait no longer treats a partially created GitHub Actions run as green or as a failure for the fix loop. Before it applies completion labels or starts a fix, usine reads the latest run of each workflow on the recorded head. When a run concluded `failure` or `cancelled` with no failed job, such as a run whose jobs Actions never created, the wait ends in **Needs attention** as an infrastructure failure that names each run ID and link. usine applies no completion labels and starts no fix. A failed job or failed commit status on the head still starts the fix loop without waiting for other workflow runs, except a gate job that failed only because jobs it needs stayed queued. Before the CI deadline, CI that ran only in part keeps the wait pending while a check outside the concluded runs, such as a commit status, is still pending. If GitHub refuses the commit-status read, such as when the App lacks the optional **Commit statuses: read-only** permission, usine decides from the check runs alone. A job that fails while usine reads CI waits for the next poll. Otherwise, a workflow run that hasn't concluded keeps the wait pending, even after its last job finished and the checks read green, until the CI deadline. usine doesn't rerun workflows, so the App doesn't need **Actions: read and write**; rerun the named runs and apply the completion labels after the checks pass.
+  
+  `GitHubChecks.workflowRuns` from `@usine/github/checks` returns runs that concluded `failure` or `cancelled` as `FailedWorkflowRun` records and runs that haven't concluded as `RunningWorkflowRun` records. `GitHubChecks.unfinishedChecks` returns the check runs and commit statuses on a head that haven't completed as `UnfinishedCheck` records; when GitHub refuses the commit-status read, it returns the check runs alone, and `CiIncomplete` from `@usine/core/ci` is the CI resolution that settles the wait.
+- 38a1f7e: A queued CI fix no longer opens when its recheck can't read the pull request because of a GitHub error or the five-second timeout. The fix stays queued, and the next reconcile rechecks it, so a GitHub outage right after a cycle reset can't admit a fix for a head that a newer push replaced. A queued trigger match still opens with its saved settings in that case.
+  
+  Unpausing a loop rechecks the queued CI fixes at once instead of at the next periodic reconcile, and the request doesn't wait for those rechecks. While a cycle-budget reset is pending, polling calls `RunEngine.admitCiFixes` instead of running a full engine reconcile, and a failure there logs a warning instead of failing the poll. That call admits every queue whose newest event is a CI fix, on every loop and repository, not only the fixes the reset replayed. When such a fix no longer matches, the item's next queued event is rechecked, and if it is a trigger match that still holds, its run opens. A reset whose repository is no longer configured is acknowledged on the next poll.
+  
+  Reconcile reads the admissible queues once per pass and admits each one, whatever the kind of its newest event. After a recheck mismatch, the next queued event is rechecked only while the item has no open run or suppression, so no GitHub read is spent on an event that can't be claimed. The reconcile summary logs at info only when it opened a run, started a fiber, or retried a stop.
+  
+  Breaking API changes:
+  
+  - `TriggerRecheck.Matches` carries `settings`, the Loop settings and task the run opens with, instead of a whole `submission`. The engine keeps only the setting keys from `settings`, so the event, item, revision, cycle generation, and CI evidence stay as recorded even when an adapter returns a whole submission. Adapters that keep the saved settings return `TriggerRecheck.Matches({ settings: savedSettings(submission) })`; `savedSettings`, which returns only the setting keys of its argument, and the `AdmissionSettings` type are exported from `@usine/engine/trigger-condition`.
+  - `TriggerRecheck.Undetermined()` is a new result for a recheck that could not read the item. Adapters that matched on a failed read return it instead.
+  - `RunStore` implementations must provide `admissibleQueue(loop, itemKey)`, which returns the item's queued events, newest first, or `None` while the item has an open run or a suppression. It replaces `RunStore.queuedOn`, which 0.7.0 added without listing it as a breaking change.
+  - `RunEngine` implementations must provide `admitCiFixes`, which admits the queues whose newest event is a CI fix, as reconcile does, and returns the run IDs it opened. Those can include a trigger match opened after a CI fix mismatch.
+- ec8e50b: A failed run in **Needs attention** says where its CI fix run stands: the fix run continues the work, finished it, handed it to another fix run, or failed too. A reopening or run-again of a fix event now counts as the source run's fix. When two fix runs opened at the same time, the one with the greater run ID is the newest.
+  
+  The fix run is no longer part of a failed run's attention revision, so a dismissed failure stays dismissed when its fix run opens or changes state. This changes the revision of every failed run once: failures dismissed before this upgrade appear in **Needs attention** again once, and dismissing them again keeps them dismissed.
+  
+  After a cycle budget reset that replays CI fixes, the web app shows a notice with the number of replayed fixes.
+  
+  A queued event stores its generated CI handoff instructions apart from its prompt, in a new `ci_instructions` column of `usine_trigger_events` that a migration adds. A recheck removes exactly the recorded instructions before it appends the current CI policy's, so a change to the instructions' wording no longer leaves two handoff instructions in the task. Events queued before this upgrade fall back to removing the instructions that their CI policy generates now.
+  
+  Breaking API changes:
+  
+  - `RunReader.ciFixRuns` returns a map from source run ID to `CiFixRun`, which holds the fix run's `runId` and `state`, instead of a map to the fix run ID.
+  - `RunFailureNeed.fixRunId` is replaced by `fixRun`, a `CiFixRun` or null. Clients of `GET /api/overview` read `fixRun.runId` and `fixRun.state`.
+  - `Submission` has a `ciInstructions` field, and `AdmissionSettings` includes it. A `TriggerCondition` that returns its own settings sets `ciInstructions` to the instructions that end its `task`, or `None`.
+- c7f39bc: A CI wait now tells a stalled or incomplete GitHub Actions run apart from red CI, and explains how to recover. At the CI deadline, usine reads the workflow runs on the recorded head even while the checks are pending. If GitHub Actions left a run `queued` or `in_progress`, the timeout message says that Actions didn't finish it and names the run with its ID and link. It tells you to push a commit or to rerun the run once GitHub allows it. A gate job that failed only because jobs it needs stayed queued is incomplete CI, not a failure: the wait ends in **Needs attention** as an infrastructure failure that names the run and the jobs that didn't finish, and it starts no fix. While that run is still going, the wait stays pending, because the queued jobs can still start. usine matches that job by its Actions job ID, so a failed job with the same name in another workflow run, or a failed commit status on the head, still starts the fix loop. A failed job from an earlier attempt of a rerun that is still going keeps the wait pending. When a run is still going or checks are still pending at the deadline, the message also lists the pending jobs with their running times. A run that ran only in part waits while another workflow run on the head is still going, so a later failure in that run still starts the fix loop. At the deadline, the message names every workflow run that didn't run or finish in full.
+  
+  A run whose CI wait ended this way offers **Apply CI labels** in **Needs attention**. After CI on the same head passes, with every workflow run concluded in full, the action applies the wait's completion labels and marks the failure resolved. While CI on the head hasn't passed, or after the pull request closed without a merge, it applies nothing and shows why. The operator API exposes it as `POST /api/runs/{runId}/apply-ci-labels`, which answers `409` with `CiNotPassedError` until CI passes. When GitHub refuses the workflow-run read, such as on a private repository without **Actions: read-only**, the check state decides alone, as it does during the wait.
+  
+  `RunState.Failed` from `@usine/core/run/state` keeps the wait's handoff as `unfinishedCi`, and `operatorActions` reports `canApplyCiLabels`. `GitHubChecks.workflowRuns` from `@usine/github/checks` reports the runs that concluded `failure` or `cancelled` as `FailedWorkflowRun` records in `failed`, and lists the jobs of each run's latest attempt as `WorkflowJob` records in `jobs`. `CheckFailureEvidence` now lists `checks` as `FailedCheck` records with their `ActionsJobRef`, and `GitHubChecks.failedStatuses` reads the failed commit statuses on a head. `CiMonitor.applyLabelsAfterGreen` applies the labels, and `RunView.canApplyCiLabels` and `RunFailureNeed.unfinishedCiAttemptId` from `@usine/orchestrator/operator` expose the action.
+- 324bfed: An attempt's channel no longer needs a Pi parent session to start. `Started.parentModel` is an `Option`: it names the selected Pi parent model, or is `None` for an attempt without a parent session, and a stored `Started` envelope without the key decodes as `None`. The durable relay sends `Started` once the attempt's task records `started` on its durable record, then the Worker notices kept before the start, then session events. A Pi-parent attempt sends the same envelopes in the same order as before. A `Started` without a model clears the attempt's recorded parent model, and the run page's attempt details show **No parent session**. In the operator API, the `parentModel` of a `Started` payload is `null` for an attempt without a parent session.
+- 738c15c: Startup recovery stops tracking a finished attempt whose machine and checkout are both gone, so later starts skip it instead of visiting it at every start. `Executor.recover` and `StepExecutor.recover` now return `RecoveredLeftovers` from `@usine/core/attempt/salvage`: `gone` when neither the attempt's machine nor its checkout is left, otherwise `found`. When a recovery returns `gone` for a closed attempt, the engine sets its `leftoversDiscardedAt` after recording the attempt's comments, through the new `RunStore.discardClosedAttempt`. Open attempts and attempts whose recovery failed stay tracked. Startup logs one summary per configured worker with the attempts visited, kept, and discarded. The per-attempt lines "Resolved retained SSH machine for attempt recovery", "The Attempt's machine is gone", and "The Attempt's sandbox is gone" are now logged at debug level.
+  
+  The first preparation on a remote worker after a start no longer warns about the checkouts of attempts that are being reattached: the attempt that started the sweep, and each attempt whose parent task `isLive` reported live. The sweep logs the remaining paths under `attempts/` as one warning with their count, and the paths at debug level.
+
+### Patch Changes
+
+- 589ad7b: A CI wait that times out or ends with partly run CI records an `InfraFailure` whose `cause` holds the CI resolution, pull request number, and head, instead of a copy of the message. The `InfraFailure` reference now states that these CI failures aren't retried automatically.
+- eb60495: Startup recovery stops tracking a finished attempt whose checkout is gone from the long-lived machine of an SSH or exe.dev worker, so later starts skip it. Before, `recover` returned `found` whenever the worker's machine answered, and every start visited each attempt the worker ever ran. A machine created for one attempt still counts as a leftover until it is deleted. The per-worker summary "Startup checkout reconciliation finished on a Worker" now splits `kept` into `kept` (leftovers found or kept on the worker), `failed` (reconciliation failed), and `empty` (still tracked, with nothing left on the worker).
+  
+  On an SSH worker, that recovery also removes the attempt's saved connection record, even if another attempt's cleanup failed on the same machine, and logs that removal at Info. Each attempt that startup keeps tracking now logs why at Info.
+- Updated dependencies [f8f311c]
+- Updated dependencies [2b3ac6b]
+- Updated dependencies [095438d]
+- Updated dependencies [6aa5e72]
+- Updated dependencies [539349e]
+- Updated dependencies [bfa02ef]
+- Updated dependencies [c8ea557]
+- Updated dependencies [589ad7b]
+- Updated dependencies [e828b51]
+- Updated dependencies [d7e00bc]
+- Updated dependencies [64afcbb]
+- Updated dependencies [fd52df7]
+- Updated dependencies [e8003db]
+- Updated dependencies [c8241d7]
+- Updated dependencies [2a76a52]
+- Updated dependencies [360d371]
+- Updated dependencies [2882f71]
+- Updated dependencies [fa97db3]
+- Updated dependencies [c7bd772]
+- Updated dependencies [c7f39bc]
+- Updated dependencies [324bfed]
+- Updated dependencies [738c15c]
+- Updated dependencies [1eddd3d]
+- Updated dependencies [4aebd77]
+  - @usine/core@0.8.0
+
 ## 0.7.0
 
 ### Minor Changes
