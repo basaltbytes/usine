@@ -281,7 +281,7 @@ const makeCodexAppServer = Effect.gen(function* () {
                 operationError(
                   "stream",
                   request,
-                  `Codex app-server frame exceeds ${request.protocolFrameMib} MiB; increase settings.supervisor_limits.protocol_frame_mib`,
+                  `Codex app-server frame exceeds ${request.protocolFrameMib} MiB`,
                   { limitMib: request.protocolFrameMib },
                 ),
               "emit",

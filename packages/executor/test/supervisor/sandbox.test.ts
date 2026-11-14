@@ -226,9 +226,10 @@ describe("a supervisor sandbox on a container runtime", () => {
     request: () => Effect.die("the test calls no model"),
   };
 
-  const sandboxAt = (root: string) =>
+  const sandboxAt = (root: string, imagePullTimeout?: Duration.Duration) =>
     containerSandboxLayer({
       root,
+      imagePullTimeout,
       image: ContainerImage.make("docker.io/library/node:22-slim"),
       runtime: Option.none(),
       route: Option.some(Effect.succeed(route)),
@@ -307,14 +308,14 @@ describe("a supervisor sandbox on a container runtime", () => {
     }).pipe(Effect.scoped, Effect.provide(NodeFileSystem.layer)),
   );
 
-  it.effect("starts during a stalled pull and recovers after a timed-out preparation", () =>
+  it.effect("starts during a stalled pull and recovers after the configured timeout", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const root = yield* fs.makeTempDirectoryScoped();
       const calls: Array<ReadonlyArray<string>> = [];
       const runtime: RuntimeState = { starts: true, pull: "hang" };
       yield* Effect.gen(function* () {
-        const sandbox = yield* sandboxAt(root);
+        const sandbox = yield* sandboxAt(root, Duration.minutes(5));
         assert(Option.isNone(sandbox.unavailable));
         yield* TestClock.withLive(
           Effect.sleep("10 millis").pipe(
@@ -336,6 +337,36 @@ describe("a supervisor sandbox on a container runtime", () => {
           2,
         );
       }).pipe(Effect.scoped, Effect.provide(podman(calls, [], runtime)));
+    }).pipe(Effect.scoped, Effect.provide(NodeFileSystem.layer)),
+  );
+
+  it.effect("finishes a slow image pull beyond both former command timeouts", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const root = yield* fs.makeTempDirectoryScoped();
+      const calls: Array<ReadonlyArray<string>> = [];
+      yield* Effect.gen(function* () {
+        const sandbox = yield* sandboxAt(root);
+        yield* TestClock.withLive(
+          Effect.sleep("10 millis").pipe(
+            Effect.repeat({ until: () => calls.some(([, command]) => command === "pull") }),
+          ),
+        );
+        yield* TestClock.adjust("11 minutes");
+        assert.lengthOf(
+          calls.filter(([, command]) => command === "pull"),
+          1,
+        );
+        yield* sandbox.open(codexTurn("slow-pull")).pipe(Effect.scoped);
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(
+          podman(calls, [], {
+            starts: true,
+            pull: { stdout: "progress".repeat(20000), exitCode: 0, duration: "11 minutes" },
+          }),
+        ),
+      );
     }).pipe(Effect.scoped, Effect.provide(NodeFileSystem.layer)),
   );
 

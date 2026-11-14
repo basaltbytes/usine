@@ -1,13 +1,18 @@
 // The fake command boundary synchronously checks mount sources and sizes sparse test images.
 // @effect-diagnostics-next-line nodeBuiltinImport:off
 import { existsSync, truncateSync } from "node:fs";
-import { Effect, Layer, PlatformError, Sink, Stream } from "effect";
+import { type Duration, Effect, Layer, PlatformError, Sink, Stream } from "effect";
 import { ChildProcessSpawner } from "effect/process";
 const encoder = new TextEncoder();
 
 /** What a fake command prints and its exit code, or `hang` for one that never exits. */
 export type Answer =
-  | { readonly stdout: string; readonly stderr?: string; readonly exitCode: number }
+  | {
+      readonly stdout: string;
+      readonly stderr?: string;
+      readonly exitCode: number;
+      readonly duration?: Duration.Input;
+    }
   | "hang";
 
 /**
@@ -36,7 +41,9 @@ export const spawning = (
           exitCode:
             answered === "hang"
               ? Effect.never
-              : Effect.succeed(ChildProcessSpawner.ExitCode(answered.exitCode)),
+              : Effect.succeed(ChildProcessSpawner.ExitCode(answered.exitCode)).pipe(
+                  Effect.delay(answered.duration ?? 0),
+                ),
           isRunning: Effect.succeed(answered === "hang"),
           kill: () => Effect.void,
           stdin: Sink.drain,

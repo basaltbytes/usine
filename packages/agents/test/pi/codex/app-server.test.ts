@@ -114,7 +114,8 @@ describe("Codex app-server transport", () => {
               yield* Queue.offer(process.stdout, encoder.encode("x".repeat(65536)));
             yield* Queue.offer(process.stdout, encoder.encode(terminated ? "x\n" : "x"));
             const error = yield* Fiber.join(response);
-            assert.include(error.message, "frame exceeds 4 MiB");
+            assert.strictEqual(error.message, "Codex app-server frame exceeds 4 MiB");
+            assert.deepStrictEqual(error.cause, { limitMib: 4 });
             const streamError = yield* connection.notifications.pipe(Stream.runDrain, Effect.flip);
             assert.strictEqual(streamError, error);
           }).pipe(

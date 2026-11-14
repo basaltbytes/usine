@@ -712,6 +712,10 @@ export class Settings extends Schema.Class<Settings, Brand.Brand<"@usine/config/
   supervisor: Schema.OptionFromOptionalKey(BrainSpec).pipe(
     Schema.withConstructorDefault(Effect.succeedNone),
   ),
+  /** Maximum image pull time in minutes, or `None` for no timeout. */
+  supervisorImagePullTimeoutMinutes: Schema.OptionFromOptionalKey(PositiveInt).pipe(
+    Schema.withConstructorDefault(Effect.succeedNone),
+  ),
   /** Defaults to the host protection limits when omitted. */
   supervisorLimits: Schema.OptionFromOptionalKey(
     SupervisorLimits.pipe(
@@ -783,6 +787,7 @@ const SettingsFromYaml = Settings.pipe(
     maxAttemptTokens: "max_attempt_tokens",
     maxBackgroundWaitMinutes: "max_background_wait_minutes",
     supervisorLimits: "supervisor_limits",
+    supervisorImagePullTimeoutMinutes: "supervisor_image_pull_timeout_minutes",
     parentModel: "parent_model",
     parentEffort: "parent_effort",
   }),

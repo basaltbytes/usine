@@ -3,7 +3,7 @@ import type { InstanceDirectory, InstanceId } from "@usine/core/instance";
 import { SupervisorLimits, WorkerName } from "@usine/core/worker";
 import { ATTEMPT_IMAGE } from "@usine/executor/ssh";
 import { containerSandboxLayer } from "@usine/executor/supervisor";
-import { Context, Effect, Layer, Option } from "effect";
+import { Context, Duration, Effect, Layer, Option } from "effect";
 import { CurrentInstance } from "./current-instance/current-instance.ts";
 import { instanceModelRoute } from "./parent-models.ts";
 
@@ -37,6 +37,10 @@ export const supervisorSandboxLayer = (
       return containerSandboxLayer({
         root: `${instanceDirectory}/.usine/supervisor`,
         image: ATTEMPT_IMAGE,
+        imagePullTimeout: startup.config.settings.supervisorImagePullTimeoutMinutes.pipe(
+          Option.map(Duration.minutes),
+          Option.getOrUndefined,
+        ),
         limits: Option.getOrElse(startup.config.settings.supervisorLimits, () =>
           SupervisorLimits.make({}),
         ),

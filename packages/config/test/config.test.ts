@@ -1253,6 +1253,35 @@ workers:
     }).pipe(Effect.provide(parserLayer)),
   );
 
+  it.effect("keeps image pulls unbounded unless a positive timeout is configured", () =>
+    Effect.gen(function* () {
+      const parser = yield* ConfigParser;
+      const file = InstancePath.make("usine.yaml");
+      const unset = yield* parser.parseUsineYaml(file, "version: 1\nrepos: []\n");
+      expect(unset.settings.supervisorImagePullTimeoutMinutes).toEqual(Option.none());
+      const configured = yield* parser.parseUsineYaml(
+        file,
+        "version: 1\nrepos: []\nsettings:\n  supervisor_image_pull_timeout_minutes: 12\n",
+      );
+      expect(configured.settings.supervisorImagePullTimeoutMinutes).toEqual(Option.some(12));
+      const encoded = yield* Schema.encodeEffect(UsineConfig)(configured);
+      expect(encoded.settings?.supervisor_image_pull_timeout_minutes).toBe(12);
+      for (const value of [0, -1, 1.5]) {
+        const refused = yield* parser
+          .parseUsineYaml(
+            file,
+            `version: 1\nrepos: []\nsettings:\n  supervisor_image_pull_timeout_minutes: ${value}\n`,
+          )
+          .pipe(Effect.flip);
+        expect(
+          refused.details?.some(({ path }) =>
+            path.includes("supervisor_image_pull_timeout_minutes"),
+          ),
+        ).toBe(true);
+      }
+    }).pipe(Effect.provide(parserLayer)),
+  );
+
   it.effect("parses the supervisor brain in settings", () =>
     Effect.gen(function* () {
       const parser = yield* ConfigParser;

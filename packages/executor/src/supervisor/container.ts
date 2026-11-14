@@ -18,6 +18,7 @@ import { checkConversationStorage, mountConversation } from "./storage.ts";
 import { type ContainerImage, SupervisorLimits, WorkerName } from "@usine/core/worker";
 import {
   Cause,
+  type Duration,
   Effect,
   Fiber,
   FileSystem,
@@ -295,6 +296,8 @@ export interface ContainerSandboxOptions {
   readonly root: string;
   /** The image of each sandbox, with Node.js, a POSIX shell, and the harness CLIs. */
   readonly image: ContainerImage;
+  /** Image pulls have no timeout when omitted. */
+  readonly imagePullTimeout?: Duration.Duration | undefined;
   readonly limits?: SupervisorLimits;
   /** The container runtime; detected when `None`. */
   readonly runtime: Option.Option<ContainerRuntime>;
@@ -325,7 +328,7 @@ const unavailableBecause = (action: string) => (error: { readonly message: strin
  * through `openRoute`.
  */
 const makeContainerSandbox = Effect.fn("SupervisorSandbox.make")(function* (
-  options: Pick<ContainerSandboxOptions, "root" | "image" | "limits">,
+  options: Pick<ContainerSandboxOptions, "root" | "image" | "limits" | "imagePullTimeout">,
   runtime: SandboxRuntime,
   openRoute: Effect.Effect<GatewayModelRoute, GatewayModelError>,
 ) {
@@ -549,7 +552,12 @@ const makeContainerSandbox = Effect.fn("SupervisorSandbox.make")(function* (
     });
   }
   yield* checkConversationStorage(options.root);
-  const imageReady = yield* prepareImage(spawner, runtime.runtime, options.image).pipe(
+  const imageReady = yield* prepareImage(
+    spawner,
+    runtime.runtime,
+    options.image,
+    Option.fromUndefinedOr(options.imagePullTimeout),
+  ).pipe(
     Effect.tapError((error) =>
       Effect.logWarning("Supervisor image preparation failed; retrying in one minute", {
         image: options.image,

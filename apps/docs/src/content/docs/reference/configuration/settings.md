@@ -53,6 +53,7 @@ The supervisor observes and operates the factory for a member, and reads the ins
 | `supervisor.harness` | harness ID | required | The harness that runs the supervisor. |
 | `supervisor.model` | string | required | The model that the harness runs. |
 | `supervisor.effort` | effort | required | The reasoning effort of the model. |
+| `supervisor_image_pull_timeout_minutes` | positive integer | unset | Maximum time for each image pull, in minutes. Omit for no timeout. |
 
 ```yaml
 version: 2
@@ -90,6 +91,8 @@ Pi's `grep` and `find` accept patterns that start with `-`, such as `--network`,
 ### Host requirements
 
 The orchestrator host needs Linux, Docker or Podman, and cgroup v2 with CPU, memory, swap and PID controls. usine uses Podman when both runtimes are installed. CI tests Docker; the Podman storage and resource-limit path is untested on a real runtime. No hardware virtualization is required. Each container runs `ghcr.io/basaltbytes/usine-worker` with the content-derived tag pinned by the installed usine version. Startup prepares that image in the background, using a cached copy when available and pulling it otherwise. Failed preparation retries every minute without delaying the API or orchestrator startup. A turn waits up to 30 seconds for preparation before asking you to retry; it never pulls an image. Container startup times out after 30 seconds. The supervisor reaches the model through the gateway of the instance's first SSH worker that has one.
+
+Image pulls have no timeout by default, so large layers can finish on slow connections. Set `settings.supervisor_image_pull_timeout_minutes` to a positive whole number to stop each pull after that many minutes and retry one minute later. Restart the orchestrator after changing this setting; choose a timeout long enough for the largest layer to download on your connection. Shutdown stops an active pull.
 
 Conversation storage requires `fuse2fs`, `fusermount`, `mkfs.ext4`, `e2fsck`, `fallocate` and `mountpoint`, access to `/dev/fuse`, and `user_allow_other` in `/etc/fuse.conf`. On Debian or Ubuntu, install `fuse`, `fuse2fs`, `e2fsprogs` and `util-linux`. The orchestrator user must be allowed to mount FUSE filesystems. Both runtimes bind-mount the same bounded filesystem; Docker volume options and Podman storage quotas are not required.
 
