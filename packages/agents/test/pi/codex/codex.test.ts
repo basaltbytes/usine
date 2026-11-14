@@ -1810,6 +1810,82 @@ describe("Codex child backend", () => {
           }).pipe(Effect.scoped),
       );
 
+    it.effect(
+      "reads guidance missed on an active reattach at the next restart with saved receipts",
+      () =>
+        Effect.gen(function* () {
+          const unread = OperatorMessage.make({ message: "Check the tests" });
+          const guidance = Steer.make({ message: "Run the linter" });
+          const items = [userMessage("task", request().prompt), userMessage("g1", unread.message)];
+          const received: Array<ReadonlyArray<string>> = [];
+          const notifications = yield* Queue.make<CodexNotification, Cause.Done>();
+          const saves = yield* Queue.make<void>();
+          yield* Effect.gen(function* () {
+            const running = yield* (yield* ChildBackend).launch(
+              ChildRequest.make({
+                ...request(),
+                resume: Option.some(saved),
+                receipts: Option.some(["task"]),
+                held: true,
+                unread: [{ id: unread.id, message: unread.message }],
+              }),
+            );
+            yield* running.intervene(guidance, noDelivery);
+            yield* Queue.offer(notifications, {
+              method: "item/started",
+              params: {
+                threadId: saved.id,
+                turnId: "turn-1",
+                item: userMessage("g2", guidance.message),
+              },
+            });
+            yield* Queue.take(saves);
+          }).pipe(
+            Effect.scoped,
+            Effect.provide(
+              codexChildLayer.pipe(
+                Layer.provide(appServer(notifications, items, [], "inProgress")),
+              ),
+            ),
+            recording(received, [], saves),
+          );
+
+          const restarted = yield* Queue.make<CodexNotification, Cause.Done>();
+          const inputs: Array<{ method: string; params: Schema.Json }> = [];
+          const reads: Array<string> = [];
+          yield* Effect.gen(function* () {
+            const running = yield* (yield* ChildBackend).launch(
+              ChildRequest.make({
+                ...request(),
+                resume: Option.some(saved),
+                receipts: Option.fromUndefinedOr(received.at(-1)),
+                held: true,
+                unread: [{ id: unread.id, message: unread.message }],
+              }),
+            );
+            assert.deepStrictEqual(reads, [unread.id]);
+            assert.deepStrictEqual(received, [["task", "g2"]]);
+            const next = OperatorMessage.make({ message: "Continue" });
+            yield* running.intervene(next, noDelivery);
+            assert.deepStrictEqual(
+              inputs.map(({ method }) => method),
+              ["turn/start"],
+            );
+            assert.include(jsonKey(inputs[0]?.params), next.message);
+          }).pipe(
+            Effect.scoped,
+            Effect.provide(
+              codexChildLayer.pipe(
+                Layer.provide(
+                  appServer(restarted, [...items, userMessage("g2", guidance.message)], inputs),
+                ),
+              ),
+            ),
+            recording([], reads),
+          );
+        }).pipe(Effect.scoped),
+    );
+
     it.effect("logs a saved receipt that excludes a replayed item of an active turn", () =>
       Effect.gen(function* () {
         const logs = collectLogs(["Info"]);
