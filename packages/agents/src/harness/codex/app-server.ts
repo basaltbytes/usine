@@ -16,6 +16,7 @@ import {
 import { type ChildProcess, ChildProcessSpawner } from "effect/process";
 import type { HostInput } from "../../child-host/child-host.ts";
 import { startChildProcess, childProcessCommand } from "../../child-host/node.ts";
+import { boundedLines } from "../../child-host/lines.ts";
 import { processError, stopChildProcess } from "../../child-host/process.ts";
 import { ChildSessionLifecycle, SessionOperationError } from "../../runtime.ts";
 
@@ -271,9 +272,22 @@ const makeCodexAppServer = Effect.gen(function* () {
           });
         });
 
-      const stdoutReader = yield* handle.stdout.pipe(
-        Stream.decodeText(),
-        Stream.splitLines,
+      const lines =
+        request.protocolFrameMib === undefined
+          ? handle.stdout.pipe(Stream.decodeText(), Stream.splitLines)
+          : boundedLines(
+              handle.stdout,
+              () =>
+                operationError(
+                  "stream",
+                  request,
+                  `Codex app-server frame exceeds ${request.protocolFrameMib} MiB`,
+                  { limitMib: request.protocolFrameMib },
+                ),
+              "emit",
+              request.protocolFrameMib * 1024 ** 2,
+            );
+      const stdoutReader = yield* lines.pipe(
         Stream.runForEach(routeLine),
         Effect.flatMap(() =>
           Ref.get(closing).pipe(
@@ -299,6 +313,12 @@ const makeCodexAppServer = Effect.gen(function* () {
                   ),
             ),
           ),
+        ),
+        Effect.tapError((error) =>
+          Effect.logWarning("Codex app-server output failed", {
+            sessionId: Option.getOrUndefined(request.sessionId),
+            message: error.message,
+          }),
         ),
         Effect.catch((error) =>
           failAll(

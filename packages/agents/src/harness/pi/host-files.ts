@@ -46,6 +46,27 @@ const succeeded = async (run: PiHostCommand, command: string, args: ReadonlyArra
 const holds = async (run: PiHostCommand, test: "-e" | "-d" | "-r", path: string) =>
   (await run("test", [test, path])).exitCode === 0;
 
+const READ_SCRIPT = String.raw`
+const fs = require("node:fs");
+const fd = fs.openSync(process.argv[1], fs.constants.O_RDONLY | fs.constants.O_NONBLOCK);
+try {
+  const limit = 2 * 1024 ** 2;
+  const stat = fs.fstatSync(fd);
+  if (!stat.isFile() || stat.size > limit) throw new Error("Read requires a regular file of at most 2 MiB");
+  const buffer = Buffer.alloc(limit + 1);
+  let length = 0;
+  while (length <= limit) {
+    const count = fs.readSync(fd, buffer, length, buffer.length - length, null);
+    if (count === 0) break;
+    length += count;
+  }
+  if (length > limit) throw new Error("Read exceeds 2 MiB");
+  process.stdout.write(buffer.subarray(0, length));
+} finally {
+  fs.closeSync(fd);
+}
+`;
+
 /**
  * Lists the files under `cwd` that match the glob `pattern`, at most `limit`, skipping version
  * control and dependency directories. Runs with the host's Node.js.
@@ -203,7 +224,8 @@ export const hostReadTools = (cwd: string, run: PiHostCommand): ReadonlyArray<To
   const directories = new Map<string, boolean>();
   const read = createReadToolDefinition(cwd, {
     operations: {
-      readFile: async (path) => Buffer.from(await succeeded(run, "cat", ["--", path])),
+      readFile: async (path) =>
+        Buffer.from(await succeeded(run, "node", ["-e", READ_SCRIPT, "--", path])),
       access: async (path) => {
         if (!(await holds(run, "-r", path))) throw new Error(`ENOENT: no readable file at ${path}`);
       },

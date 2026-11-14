@@ -1,3 +1,4 @@
+import { replayContainerHost } from "./container-seat.ts";
 import { assert } from "@effect/vitest";
 import { type BrainSpec } from "@usine/core/agent/brain";
 import {
@@ -87,7 +88,8 @@ const recordedRoutes = {
 export const runSupervisorScenario = (provider: SupervisorProvider, mode: "record" | "replay") =>
   Effect.gen(function* () {
     const fixture = yield* toolFixture(provider, "supervisor", mode);
-    const { host, worker, cwd, environment } = fixture.request;
+    const { worker, cwd, environment } = fixture.request;
+    const host = yield* replayContainerHost(fixture.tape);
     // The session reads the instance's source from its working directory, one directory per
     // repository, as the supervisor sandbox mounts it.
     const fs = yield* FileSystem.FileSystem;

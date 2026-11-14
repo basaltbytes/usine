@@ -159,6 +159,7 @@ export const runSupervisorTurn = Effect.fn("Supervisor.turn")(function* <
     }),
     admitted: admitted.success,
     host: seat.host,
+    protocolFrameMib: Option.some(seat.protocolFrameMib),
     worker: seat.worker,
     machine: Option.none(),
     cwd: seat.cwd,
