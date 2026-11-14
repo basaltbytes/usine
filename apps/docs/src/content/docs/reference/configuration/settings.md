@@ -96,7 +96,7 @@ Image pulls have no timeout by default, so large layers can finish on slow conne
 
 Conversation storage requires `fuse2fs`, `fusermount`, `mkfs.ext4`, `e2fsck`, `fallocate` and `mountpoint`, access to `/dev/fuse`, and `user_allow_other` in `/etc/fuse.conf`. On Debian or Ubuntu, install `fuse`, `fuse2fs`, `e2fsprogs` and `util-linux`. The orchestrator user must be allowed to mount FUSE filesystems. Both runtimes bind-mount the same bounded filesystem; Docker volume options and Podman storage quotas are not required.
 
-Without the runtime, storage prerequisites, enforced cgroup limits or a gateway, the supervisor refuses turns. The instance still starts and logs the reason; **Configuration > Settings** reports when preparation makes the supervisor unavailable.
+Without the runtime, storage prerequisites, enforced cgroup limits or a gateway, the supervisor refuses turns. The instance still starts and logs the reason. **Configuration > Settings** reports availability from startup checks; it does not track background image preparation. Check the orchestrator logs for image preparation progress and failures.
 
 Supervisor Codex protocol frames are limited to `supervisor_limits.protocol_frame_mib` (4 MiB by default), including unfinished lines. If a long conversation exceeds this limit while resuming, increase the setting and restart the orchestrator. Ordinary Codex coding sessions have no app-server frame limit. Process-owner transport frames remain limited to 4 MiB; the owner splits harness output into smaller chunks.
 

@@ -59,7 +59,7 @@ export const prepareImage = Effect.fn("SupervisorSandbox.prepareImage")(function
   );
   if (Number(pulled.exitCode) !== 0)
     return yield* SupervisorUnavailable.make({
-      message: `Cannot pull the supervisor image: ${pulled.stderr.trim().split("\n")[0]}`,
+      message: `Cannot pull the supervisor image: ${pulled.stderr.trim()}`,
     });
   yield* Effect.logInfo("The supervisor image is ready", { runtime, image });
 });

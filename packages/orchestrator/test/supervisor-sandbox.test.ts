@@ -145,7 +145,12 @@ for (const settings of [
             Effect.repeat({ until: () => calls.some(([, command]) => command === "pull") }),
           ),
         );
-        yield* TestClock.adjust(pullTimeout === undefined ? "11 minutes" : "3 minutes");
+        yield* TestClock.adjust("119 seconds");
+        assert.lengthOf(
+          calls.filter(([, command]) => command === "pull"),
+          1,
+        );
+        yield* TestClock.adjust(pullTimeout === undefined ? "541 seconds" : "61 seconds");
         assert.lengthOf(
           calls.filter(([, command]) => command === "pull"),
           pullTimeout === undefined ? 1 : 2,

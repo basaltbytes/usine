@@ -8,8 +8,8 @@ const encoder = new TextEncoder();
 /** What a fake command prints and its exit code, or `hang` for one that never exits. */
 export type Answer =
   | {
-      readonly stdout: string;
-      readonly stderr?: string;
+      readonly stdout: string | Stream.Stream<Uint8Array>;
+      readonly stderr?: string | Stream.Stream<Uint8Array>;
       readonly exitCode: number;
       readonly duration?: Duration.Input;
     }
@@ -22,6 +22,7 @@ export type Answer =
 export const spawning = (
   answer: (command: string, args: ReadonlyArray<string>) => Answer | undefined,
   calls: Array<ReadonlyArray<string>> = [],
+  releases: Array<ReadonlyArray<string>> = [],
 ) =>
   Layer.succeed(ChildProcessSpawner.ChildProcessSpawner)(
     ChildProcessSpawner.make((command) =>
@@ -36,7 +37,9 @@ export const spawning = (
             method: "spawn",
             description: `spawn ${command.command} ENOENT`,
           });
-        return ChildProcessSpawner.makeHandle({
+        const output = (value: string | Stream.Stream<Uint8Array>) =>
+          Stream.isStream(value) ? value : Stream.make(encoder.encode(value));
+        const handle = ChildProcessSpawner.makeHandle({
           pid: ChildProcessSpawner.ProcessId(1),
           exitCode:
             answered === "hang"
@@ -47,14 +50,18 @@ export const spawning = (
           isRunning: Effect.succeed(answered === "hang"),
           kill: () => Effect.void,
           stdin: Sink.drain,
-          stdout: answered === "hang" ? Stream.never : Stream.make(encoder.encode(answered.stdout)),
-          stderr:
-            answered === "hang" ? Stream.never : Stream.make(encoder.encode(answered.stderr ?? "")),
+          stdout: answered === "hang" ? Stream.never : output(answered.stdout),
+          stderr: answered === "hang" ? Stream.never : output(answered.stderr ?? ""),
           all: Stream.empty,
           getInputFd: () => Sink.drain,
           getOutputFd: () => Stream.empty,
           unref: Effect.succeed(Effect.void),
         });
+        return yield* Effect.acquireRelease(Effect.succeed(handle), () =>
+          Effect.sync(() => {
+            releases.push([command.command, ...command.args]);
+          }),
+        );
       }),
     ),
   );
@@ -79,86 +86,92 @@ export const podman = (
   left: ReadonlyArray<string> = [],
   relay: RuntimeState = { starts: true },
   removes = true,
+  releases: Array<ReadonlyArray<string>> = [],
 ) => {
   const containers = new Map(left.map((name) => [name, ""]));
   const mounts = new Set<string>();
-  return spawning((command, args) => {
-    if (command === "mountpoint")
-      return {
-        stdout: "",
-        exitCode:
-          args[0] === "--version" || relay.staleMount === true || mounts.has(args[1]!) ? 0 : 32,
-      };
-    if (command === "fuse2fs") {
-      if (args[0] !== "-V") {
-        mounts.add(args[args.length - 1]!);
-        return "hang";
-      }
-      return { stdout: "", exitCode: 0 };
-    }
-    if (command === "fusermount") {
-      if (args[0] === "-u") {
-        mounts.delete(args[1]!);
-        relay.staleMount = false;
-      }
-      return { stdout: "", exitCode: 0 };
-    }
-    if (command === "fallocate") {
-      if (args[0] === "-l") truncateSync(args[2]!, Number(args[1]));
-      return { stdout: "", exitCode: 0 };
-    }
-    if (command === "mkfs.ext4" || command === "e2fsck")
-      return {
-        stdout: "",
-        exitCode: command === "e2fsck" && args[0] === "-p" && relay.repaired === true ? 1 : 0,
-      };
-    if (command !== "podman") return undefined;
-    if (args[0] === "image") return relay.image ?? { stdout: "", exitCode: 1 };
-    if (args[0] === "pull") return relay.pull ?? { stdout: "", exitCode: 0 };
-    if (args[0] === "info") return { stdout: "true", exitCode: 0 };
-    if (args[0] === "ps") {
-      const filter = args.find((arg) => arg.startsWith("label=usine.supervisor.conversation="));
-      return {
-        stdout: [...containers]
-          .filter(
-            ([, conversation]) =>
-              filter === undefined ||
-              filter === `label=usine.supervisor.conversation=${conversation}`,
-          )
-          .map(([name]) => name)
-          .join("\n"),
-        exitCode: 0,
-      };
-    }
-    if (args[0] === "exec")
-      return {
-        stdout: "",
-        exitCode: relay.starts && !(relay.rejectLimits === true && args[2] === "sh") ? 0 : 1,
-      };
-    if (args[0] === "rm") {
-      if (!removes) return { stdout: "", stderr: "Error: cannot remove container", exitCode: 125 };
-      containers.delete(args[2]!);
-    }
-    if (args[0] === "run") {
-      const sources = args.flatMap((arg, index) =>
-        args[index - 1] === "--mount"
-          ? [arg.match(/"source=((?:[^"]|"")*)"/u)?.[1]?.replaceAll('""', '"')]
-          : [],
-      );
-      const missing = sources.find((source) => source !== undefined && !existsSync(source));
-      if (missing !== undefined)
+  return spawning(
+    (command, args) => {
+      if (command === "mountpoint")
         return {
           stdout: "",
-          stderr: `Error: statfs ${missing}: no such file or directory`,
-          exitCode: 125,
+          exitCode:
+            args[0] === "--version" || relay.staleMount === true || mounts.has(args[1]!) ? 0 : 32,
         };
-      const name = args[args.indexOf("--name") + 1]!;
-      const conversation = args
-        .find((arg) => arg.startsWith("usine.supervisor.conversation="))!
-        .slice("usine.supervisor.conversation=".length);
-      containers.set(name, conversation);
-      if (relay.hangStart === true) return "hang";
-    }
-    return { stdout: "", exitCode: 0 };
-  }, calls);
+      if (command === "fuse2fs") {
+        if (args[0] !== "-V") {
+          mounts.add(args[args.length - 1]!);
+          return "hang";
+        }
+        return { stdout: "", exitCode: 0 };
+      }
+      if (command === "fusermount") {
+        if (args[0] === "-u") {
+          mounts.delete(args[1]!);
+          relay.staleMount = false;
+        }
+        return { stdout: "", exitCode: 0 };
+      }
+      if (command === "fallocate") {
+        if (args[0] === "-l") truncateSync(args[2]!, Number(args[1]));
+        return { stdout: "", exitCode: 0 };
+      }
+      if (command === "mkfs.ext4" || command === "e2fsck")
+        return {
+          stdout: "",
+          exitCode: command === "e2fsck" && args[0] === "-p" && relay.repaired === true ? 1 : 0,
+        };
+      if (command !== "podman") return undefined;
+      if (args[0] === "image") return relay.image ?? { stdout: "", exitCode: 1 };
+      if (args[0] === "pull") return relay.pull ?? { stdout: "", exitCode: 0 };
+      if (args[0] === "info") return { stdout: "true", exitCode: 0 };
+      if (args[0] === "ps") {
+        const filter = args.find((arg) => arg.startsWith("label=usine.supervisor.conversation="));
+        return {
+          stdout: [...containers]
+            .filter(
+              ([, conversation]) =>
+                filter === undefined ||
+                filter === `label=usine.supervisor.conversation=${conversation}`,
+            )
+            .map(([name]) => name)
+            .join("\n"),
+          exitCode: 0,
+        };
+      }
+      if (args[0] === "exec")
+        return {
+          stdout: "",
+          exitCode: relay.starts && !(relay.rejectLimits === true && args[2] === "sh") ? 0 : 1,
+        };
+      if (args[0] === "rm") {
+        if (!removes)
+          return { stdout: "", stderr: "Error: cannot remove container", exitCode: 125 };
+        containers.delete(args[2]!);
+      }
+      if (args[0] === "run") {
+        const sources = args.flatMap((arg, index) =>
+          args[index - 1] === "--mount"
+            ? [arg.match(/"source=((?:[^"]|"")*)"/u)?.[1]?.replaceAll('""', '"')]
+            : [],
+        );
+        const missing = sources.find((source) => source !== undefined && !existsSync(source));
+        if (missing !== undefined)
+          return {
+            stdout: "",
+            stderr: `Error: statfs ${missing}: no such file or directory`,
+            exitCode: 125,
+          };
+        const name = args[args.indexOf("--name") + 1]!;
+        const conversation = args
+          .find((arg) => arg.startsWith("usine.supervisor.conversation="))!
+          .slice("usine.supervisor.conversation=".length);
+        containers.set(name, conversation);
+        if (relay.hangStart === true) return "hang";
+      }
+      return { stdout: "", exitCode: 0 };
+    },
+    calls,
+    releases,
+  );
 };
