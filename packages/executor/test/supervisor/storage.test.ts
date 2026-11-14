@@ -1,14 +1,16 @@
-import { NodeFileSystem } from "@effect/platform-node";
+import { NodeFileSystem, NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import { SupervisorSandbox, SandboxRequest } from "@usine/agents/supervisor";
 import { Harness, ModelId } from "@usine/core/agent/brain";
 import { AgentSessionId } from "@usine/core/agent/session";
 import { ContainerImage, SupervisorLimits } from "@usine/core/worker";
-import { Effect, FileSystem, Layer, Logger, Option } from "effect";
-import { ChildProcessSpawner } from "effect/process";
+import { Context, Effect, Fiber, FileSystem, Layer, Logger, Option, Stream } from "effect";
+import { ChildProcess, ChildProcessSpawner } from "effect/process";
+import { TestClock } from "effect/testing";
 import { containerSandboxLayer } from "../../src/supervisor/container.ts";
 import { mountConversation } from "../../src/supervisor/storage.ts";
-import { podman, spawning } from "./runtime-fixture.ts";
+import { directoryName } from "../../src/supervisor/names.ts";
+import { podman, spawning, type RuntimeState } from "./runtime-fixture.ts";
 
 const turn = SandboxRequest.make({
   conversation: AgentSessionId.make("bounded"),
@@ -17,7 +19,196 @@ const turn = SandboxRequest.make({
   sources: [],
 });
 
+const sandboxAt = (root: string) =>
+  containerSandboxLayer({
+    root,
+    image: ContainerImage.make("node:22-slim"),
+    runtime: Option.some("podman"),
+    route: Option.some(
+      Effect.succeed({
+        credential: () => Effect.succeedNone,
+        request: () => Effect.die("the test calls no model"),
+      }),
+    ),
+  }).pipe(
+    Layer.build,
+    Effect.map((context) => Context.get(context, SupervisorSandbox)),
+  );
+
 describe("bounded supervisor storage", () => {
+  for (const stalled of ["mount", "allocation"] as const) {
+    it.effect(
+      `refuses a stalled ${stalled} within its deadline and releases the conversation`,
+      () =>
+        Effect.gen(function* () {
+          const fs = yield* FileSystem.FileSystem;
+          const root = yield* fs.makeTempDirectoryScoped();
+          const calls: Array<ReadonlyArray<string>> = [];
+          const releases: Array<ReadonlyArray<string>> = [];
+          const runtime: RuntimeState = { starts: true, [stalled]: "hang" };
+          yield* Effect.gen(function* () {
+            const sandbox = yield* sandboxAt(root);
+            const opening = yield* sandbox
+              .open(turn)
+              .pipe(Effect.scoped, Effect.flip, Effect.forkChild);
+            const command = stalled === "mount" ? "fuse2fs" : "fallocate";
+            const flag = stalled === "mount" ? "-f" : "-l";
+            yield* TestClock.withLive(
+              Effect.sleep("10 millis").pipe(
+                Effect.repeat({ until: () => calls.some(([c, f]) => c === command && f === flag) }),
+              ),
+            );
+            yield* TestClock.adjust(stalled === "mount" ? "9 seconds" : "29 seconds");
+            assert.isUndefined(opening.pollUnsafe());
+            yield* TestClock.adjust("1 second");
+            const failure = yield* Fiber.join(opening);
+            assert.include(failure.message, "Cannot mount the supervisor conversation filesystem");
+            assert.include(failure.message, stalled === "mount" ? "10s" : "30s");
+            assert.isTrue(releases.some(([c, f]) => c === command && f === flag));
+            assert.isFalse(calls.some(([c, f]) => c === "podman" && f === "run"));
+            delete runtime[stalled];
+            yield* sandbox.open(turn).pipe(Effect.scoped);
+          }).pipe(Effect.scoped, Effect.provide(podman(calls, [], runtime, true, releases)));
+        }).pipe(Effect.scoped, Effect.provide(NodeFileSystem.layer)),
+    );
+  }
+
+  for (const keepsOutputOpen of [false, true]) {
+    it.effect(
+      `logs the mount error after process exit, with output left open: ${keepsOutputOpen}`,
+      () =>
+        Effect.gen(function* () {
+          const fs = yield* FileSystem.FileSystem;
+          const root = yield* fs.makeTempDirectoryScoped();
+          const calls: Array<ReadonlyArray<string>> = [];
+          const warnings: Array<unknown> = [];
+          const detail =
+            "fusermount: option allow_other only allowed if 'user_allow_other' is set in /etc/fuse.conf";
+          const output = Stream.fromEffect(
+            Effect.succeed(new TextEncoder().encode(`${detail}\n`)).pipe(
+              Effect.delay("100 millis"),
+            ),
+          );
+          const runtime: RuntimeState = {
+            starts: true,
+            mount: {
+              stdout: "",
+              stderr: keepsOutputOpen ? Stream.concat(output, Stream.never) : output,
+              exitCode: 1,
+            },
+          };
+          yield* Effect.gen(function* () {
+            const sandbox = yield* sandboxAt(root);
+            const opening = yield* sandbox
+              .open(turn)
+              .pipe(Effect.scoped, Effect.flip, Effect.forkChild);
+            yield* TestClock.withLive(
+              Effect.sleep("10 millis").pipe(
+                Effect.repeat({
+                  until: () => calls.some(([c, f]) => c === "fuse2fs" && f === "-f"),
+                }),
+              ),
+            );
+            yield* TestClock.adjust("100 millis");
+            if (keepsOutputOpen) yield* TestClock.adjust("900 millis");
+            const failure = yield* Fiber.join(opening);
+            assert.strictEqual(
+              failure.message,
+              `Cannot mount the supervisor conversation filesystem: fuse2fs exited with 1: ${detail}`,
+            );
+            assert.deepInclude(warnings, [
+              "Supervisor conversation mount refused",
+              {
+                directory: `${root}/conversations/${directoryName(turn.conversation)}`,
+                message: failure.message,
+              },
+            ]);
+            assert.isFalse(calls.some(([c, f]) => c === "podman" && f === "run"));
+            delete runtime.mount;
+            yield* sandbox.open(turn).pipe(Effect.scoped);
+          }).pipe(
+            Effect.scoped,
+            Effect.provide([
+              podman(calls, [], runtime),
+              Logger.layer([
+                Logger.make<unknown, void>(({ logLevel, message }) => {
+                  if (logLevel === "Warn") warnings.push(message);
+                }),
+              ]),
+            ]),
+          );
+        }).pipe(Effect.scoped, Effect.provide(NodeFileSystem.layer)),
+    );
+  }
+
+  it.live("keeps stderr from a real mount process that writes and immediately exits", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const root = yield* fs.makeTempDirectoryScoped();
+      const realSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+      const runtimeSpawner = yield* ChildProcessSpawner.ChildProcessSpawner.pipe(
+        Effect.provide(podman([])),
+      );
+      const detail =
+        "fusermount: option allow_other only allowed if 'user_allow_other' is set in /etc/fuse.conf";
+      const spawner = ChildProcessSpawner.make((command) =>
+        command._tag === "StandardCommand" &&
+        command.command === "fuse2fs" &&
+        command.args[0] === "-f"
+          ? realSpawner.spawn(
+              ChildProcess.make(process.execPath, [
+                "-e",
+                'require("node:fs").writeSync(2, process.argv[1]); process.exit(1)',
+                detail,
+              ]),
+            )
+          : runtimeSpawner.spawn(command),
+      );
+      const failure = yield* Effect.gen(function* () {
+        const sandbox = yield* sandboxAt(root);
+        return yield* sandbox.open(turn).pipe(Effect.scoped, Effect.flip);
+      }).pipe(
+        Effect.scoped,
+        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+      );
+      assert.include(failure.message, `fuse2fs exited with 1: ${detail}`);
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("finishes startup after 15 seconds when checking a leftover mount stalls", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const root = yield* fs.makeTempDirectoryScoped();
+      yield* fs.makeDirectory(`${root}/conversations/${directoryName(turn.conversation)}`, {
+        recursive: true,
+      });
+      const calls: Array<ReadonlyArray<string>> = [];
+      const releases: Array<ReadonlyArray<string>> = [];
+      yield* Effect.gen(function* () {
+        const starting = yield* sandboxAt(root).pipe(Effect.forkChild);
+        yield* TestClock.withLive(
+          Effect.sleep("10 millis").pipe(
+            Effect.repeat({
+              until: () => calls.some(([c, f]) => c === "mountpoint" && f === "-q"),
+            }),
+          ),
+        );
+        yield* TestClock.adjust("14 seconds");
+        assert.isUndefined(starting.pollUnsafe());
+        yield* TestClock.adjust("1 second");
+        const sandbox = yield* Fiber.join(starting);
+        assert(Option.isSome(sandbox.unavailable));
+        const failure = yield* sandbox.open(turn).pipe(Effect.scoped, Effect.flip);
+        assert.include(failure.message, "15s");
+        assert.isTrue(releases.some(([c, f]) => c === "mountpoint" && f === "-q"));
+        assert.isFalse(calls.some(([c, f]) => c === "podman" && f === "run"));
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(podman(calls, [], { starts: true, mountCheck: "hang" }, true, releases)),
+      );
+    }).pipe(Effect.scoped, Effect.provide(NodeFileSystem.layer)),
+  );
+
   it.live("refuses turns when filesystem tools are missing", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;

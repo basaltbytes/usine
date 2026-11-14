@@ -74,6 +74,9 @@ export interface RuntimeState {
   repaired?: boolean;
   image?: Answer;
   pull?: Answer;
+  mount?: Answer;
+  allocation?: Answer;
+  mountCheck?: Answer;
 }
 
 /**
@@ -92,14 +95,17 @@ export const podman = (
   const mounts = new Set<string>();
   return spawning(
     (command, args) => {
-      if (command === "mountpoint")
+      if (command === "mountpoint") {
+        if (args[0] === "-q" && relay.mountCheck !== undefined) return relay.mountCheck;
         return {
           stdout: "",
           exitCode:
             args[0] === "--version" || relay.staleMount === true || mounts.has(args[1]!) ? 0 : 32,
         };
+      }
       if (command === "fuse2fs") {
         if (args[0] !== "-V") {
+          if (relay.mount !== undefined) return relay.mount;
           mounts.add(args[args.length - 1]!);
           return "hang";
         }
@@ -113,6 +119,7 @@ export const podman = (
         return { stdout: "", exitCode: 0 };
       }
       if (command === "fallocate") {
+        if (args[0] === "-l" && relay.allocation !== undefined) return relay.allocation;
         if (args[0] === "-l") truncateSync(args[2]!, Number(args[1]));
         return { stdout: "", exitCode: 0 };
       }

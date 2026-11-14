@@ -47,6 +47,62 @@ const codexTurn = (conversation: string) =>
   });
 
 describe("supervisor image preparation", () => {
+  it.effect("releases a stalled image inspection after 15 seconds and retries a minute later", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const root = yield* fs.makeTempDirectoryScoped();
+      const calls: Array<ReadonlyArray<string>> = [];
+      const releases: Array<ReadonlyArray<string>> = [];
+      const warnings: Array<unknown> = [];
+      const runtime: RuntimeState = { starts: true, image: "hang" };
+      const inspect = ["podman", "image", "inspect", image];
+      yield* Effect.gen(function* () {
+        const sandbox = yield* sandboxAt(root);
+        yield* TestClock.withLive(
+          Effect.sleep("10 millis").pipe(
+            Effect.repeat({ until: () => calls.some(([, command]) => command === "image") }),
+          ),
+        );
+        yield* TestClock.adjust("14 seconds");
+        assert.notDeepInclude(releases, inspect);
+        assert.isEmpty(warnings);
+        yield* TestClock.adjust("1 second");
+        assert.deepInclude(releases, inspect);
+        assert.deepStrictEqual(warnings, [
+          [
+            "Supervisor image preparation failed; retrying in one minute",
+            {
+              image,
+              message: "Cannot prepare the supervisor image: Operation timed out after '15s'",
+            },
+          ],
+        ]);
+        runtime.image = { stdout: "cached", exitCode: 0 };
+        yield* TestClock.adjust("59 seconds");
+        assert.lengthOf(
+          calls.filter(([, command]) => command === "image"),
+          1,
+        );
+        yield* TestClock.adjust("1 second");
+        yield* sandbox.open(codexTurn("inspection-recovered")).pipe(Effect.scoped);
+        assert.lengthOf(
+          calls.filter(([, command]) => command === "image"),
+          2,
+        );
+      }).pipe(
+        Effect.scoped,
+        Effect.provide([
+          podman(calls, [], runtime, true, releases),
+          Logger.layer([
+            Logger.make<unknown, void>(({ logLevel, message }) => {
+              if (logLevel === "Warn") warnings.push(message);
+            }),
+          ]),
+        ]),
+      );
+    }).pipe(Effect.scoped, Effect.provide(NodeFileSystem.layer)),
+  );
+
   it.effect("releases an active pull when the sandbox shuts down", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;

@@ -1,6 +1,6 @@
 import { SupervisorUnavailable } from "@usine/agents/supervisor";
 import type { SupervisorLimits } from "@usine/core/worker";
-import { Effect, FileSystem, Ref, Schedule, Stream } from "effect";
+import { Effect, Fiber, FileSystem, Ref, Schedule, Stream } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import { collectCommand } from "../child-command.ts";
 
@@ -80,7 +80,10 @@ export const mountConversation = Effect.fn("SupervisorSandbox.mountConversation"
       }),
     );
     const diagnostics = yield* Ref.make("");
-    yield* Stream.merge(mountedProcess.stdout, mountedProcess.stderr).pipe(
+    const diagnosticsReader = yield* Stream.merge(
+      mountedProcess.stdout,
+      mountedProcess.stderr,
+    ).pipe(
       Stream.decodeText(),
       Stream.runForEach((text) => Ref.update(diagnostics, (tail) => (tail + text).slice(-8192))),
       Effect.catch((error) =>
@@ -108,26 +111,41 @@ export const mountConversation = Effect.fn("SupervisorSandbox.mountConversation"
       Effect.raceFirst(
         mountedProcess.exitCode.pipe(
           Effect.flatMap((code) =>
-            Ref.get(diagnostics).pipe(
-              Effect.flatMap((detail) =>
-                Effect.fail(
-                  SupervisorUnavailable.make({
-                    message: `fuse2fs exited with ${code}: ${detail.trim()}`,
-                  }),
-                ),
-              ),
-            ),
+            Effect.gen(function* () {
+              yield* Fiber.join(diagnosticsReader).pipe(
+                Effect.timeoutOrElse({
+                  duration: "1 second",
+                  orElse: () =>
+                    Effect.logWarning(
+                      "Supervisor filesystem diagnostics did not close after exit",
+                      {
+                        directory,
+                      },
+                    ),
+                }),
+              );
+              const detail = yield* Ref.get(diagnostics);
+              return yield* SupervisorUnavailable.make({
+                message: `fuse2fs exited with ${code}: ${detail.trim()}`,
+              });
+            }),
           ),
         ),
       ),
     );
     yield* Effect.logInfo("Mounted a bounded supervisor filesystem", { directory, bytes });
   },
-  (effect) =>
+  (effect, _fs, _spawner, root, name) =>
     effect.pipe(
       Effect.mapError((error) =>
         SupervisorUnavailable.make({
           message: `Cannot mount the supervisor conversation filesystem: ${error.message}`,
+        }),
+      ),
+      Effect.tapError((error) =>
+        Effect.logWarning("Supervisor conversation mount refused", {
+          directory: `${root}/conversations/${name}`,
+          message: error.message,
         }),
       ),
     ),
