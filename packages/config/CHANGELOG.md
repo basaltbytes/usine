@@ -1,5 +1,111 @@
 # @usine/config
 
+## 0.7.0
+
+### Minor Changes
+
+- f8f311c: boxd workers connect to any boxd cluster. `provisioner.endpoint` sets the cluster's account endpoint, such as `https://boxd.example.com:9443`, and defaults to the hosted service at `https://boxd.sh:9443`. The driver sends account calls and `ListRegions` there, and derives the token exchange URL from it as the boxd SDK does: `https://app.<host>/api/v1/auth/token`, without the port, or the endpoint itself for a `localhost`, IP address, or `app.` host.
+  
+  `provisioner.region` is optional and no longer defaults to `fra`. Without it, every call goes to the endpoint, and machines start where the endpoint runs them: Frankfurt on the hosted service, or the only location of a self-hosted cluster. A region that the endpoint serves itself needs no API endpoint in the region listing. Preflight compares the snapshot's region with the region that boxd serves, and fails with advice to remove `provisioner.region` when a cluster that runs in one place lists no regions.
+  
+  Over TLS or to a loopback address, the driver sends the API key as the bearer. It falls back to the token exchange when boxd refuses the key as a bearer, and keeps renewing the session and retrying a call once on `UNAUTHENTICATED`. `Exec` calls carry the session too once boxd refuses the key, so a cluster behind a load balancer that terminates TLS runs commands. `provisioner.endpoint` accepts `http://` only for `localhost`, `127.0.0.0/8`, or `[::1]`, and a port only from 1 to 65535. The driver refuses to connect to a region that boxd lists at an `http://` API endpoint on another host. When boxd doesn't answer or rate-limits, the error names the URL that usine called. The operator view and the worker form show the endpoint, and the view reports a missing region as null.
+- 2b3ac6b: boxd workers accept `provisioner.egress`, the complete egress allowlist of each machine: host names, `*.` wildcards, public IPv4 addresses or CIDR ranges of at most `/8`, or `none`. Like boxd, the configuration refuses an address with host bits set or one in a private, CGNAT, loopback, link-local, multicast, or reserved range. The driver sends it in the machine spec of the restore request, so each machine is created with it, and waits one second before it connects to the machine: processes that the snapshot resumes can reach hosts outside the list for up to about a second. If boxd reports the new machine unrestricted, the driver deletes the machine and retries creation. A reused machine gets the list again. Without `egress`, machines keep unrestricted egress.
+  
+  Behind a gateway, the configuration is refused when the list omits `*.tailscale.com`, or admits `github.com`, `api.github.com`, or the API and login hosts of a provider in `gateway.llm_providers`. Address entries aren't checked against the gateway; preflight logs a warning that names them. The operator view and the worker form show the list. `infra/boxd/egress.mjs` prints the gateway's `egress-allowlist` as `provisioner.egress`, so both enforcement points use one list.
+- b580789: `@usine/config` and `@usine/executor/ssh` no longer export the deprecated `BoatTailnet` alias. Use `ProvisionerTailnet`.
+  
+  A boxd `Exec` call takes its exit code from the last response only: one without data, or one with a non-zero exit code. A call whose last response is output fails as unreachable, even after an earlier empty response, and a last response that carries output and an exit code keeps both. Error messages stay readable when the boxd credential is empty. A dead `Exec` connection fails within 50 seconds by default.
+  
+  `infra/boxd/build-snapshot.mjs --no-isolated` builds a snapshot without isolation. A machine restored from an isolated snapshot is always isolated, so a worker's `isolated: false` takes effect only with such a snapshot.
+  
+  The worker page shows a boxd worker's region, snapshot, size, and isolation, with the default that applies when a setting is empty.
+- 55c75fe: boxd workers run commands over boxd's gRPC `Exec` stream instead of SSH. A boxd worker needs only its API key: neither the boxd account nor the snapshot needs an SSH key, and a boxd worker that still sets `identity_file`, as earlier releases required, loads and ignores it, with a preflight warning that names the file. The executor runs boxd commands in its own process through a new `ExecShell` child host, with one HTTP/2 connection per worker that raises the receive windows, sends stdin in small chunks, and sends keepalive pings. A lost command is a typed `HostUnreachable` error instead of exit code 255. The executor reports an SSH client's exit code 255 as the same error, so a machine that SSH loses during a preflight or preparation check fails with a message that names the host and the SSH client's reason, and the executor no longer pins a proxy host key or refreshes a proxy port for boxd machines.
+- 095438d: boxd `provisioner.region` accepts any lowercase region id, with `fra` as the default. The boxd driver finds the region's API endpoint with `ListRegions` on `boxd.sh`, so a worker can run on a boxd deployment in your own cloud account and region. Preflight fails with a `provider` capability error that names the listed region ids when boxd lists no region with the configured id. The worker form suggests `fra` and `nyc`.
+  
+  If boxd doesn't answer or rate-limits while the driver connects to the region, attempt launch waits and tries again instead of failing the Worker's check, and preflight names the hosts to reach: `app.boxd.sh`, `boxd.sh:9443`, and the region's API endpoint.
+- 6aa5e72: boxd workers follow how boxd restores machines. `provisioner.size` is optional and takes any `<vcpu>x<GiB>` size, such as `1x32` on a self-hosted cluster, instead of the hosted sizes only. A restore keeps its snapshot's size, so the setting only asserts it: when it is set, preflight compares the snapshot's vCPU count and memory with it and names the snapshot's size on a mismatch. Without it, preflight accepts the snapshot's size. Preflight logs the snapshot's size in `boxd provisioner verified`. `BoxdSize` is a branded `<vcpu>x<GiB>` string, and the operator view reports a missing size as null. `infra/boxd/build-snapshot.mjs --size` takes the same pattern and puts it in the temporary machine's spec.
+  
+  Each boxd machine is created with SSH off, since usine runs every command through `Exec`. A boxd worker ignores `provisioner.reuse`: boxd restores a machine in under a second, so every attempt gets a new machine. A stored worker that sets it still loads, and preflight warns that it has no effect and names the worker. The executor's `BoxdProvisioner` has no reuse policy and reports the ignored setting as `ignoredReuse`, `MachineDriver.assign` is optional and absent from the boxd driver, and the boxd client no longer updates labels.
+- 539349e: Add boxd as an SSH provisioner with snapshot size and region checks, machine reuse, and gateway tailnet support. Add worker configuration fields and a snapshot setup guide.
+- e828b51: The new instance setting `settings.max_background_wait_minutes` limits how long a child that answers while its background tasks still run waits for that work to start a turn. The default is no limit: such a child waits for its background work and the turn it starts, however long they take. **Configuration > Settings** shows and edits the setting.
+  
+  Claude Code children apply the limit. When it passes and the child is still idle, the child returns its last answer as its report, and a warning names the limit and the background task IDs. Closing the child ends the Claude Code process, which stops its background tasks, and their results never reach the Attempt. The child's `SessionFinished` event sets `backgroundWaitLimitPassed`, and when the Attempt ends, even as a success, cleanup salvages its checkout as after a failure, so work that the child hasn't pushed is kept. Cleanup applies the limit that the Attempt started with. If that salvage doesn't push all the work, the checkout stays, and startup recovery salvages it again instead of removing it. A turn that starts within the limit runs to its own answer. If the operator holds or pauses the child when the limit passes, the child stays open without reporting idle. A Release of a held child then returns the answer, unless a turn started first. If the Claude process resumes in the meantime, the child reports the kept answer as idle, and a Release returns it. The limit runs in memory, so a child that was already waiting when usine restarted waits without one.
+- d7e00bc: Configuration selects what coordinates an attempt. The `coordinator` setting in `usine.yaml` takes `session`, the default, where a Pi parent session coordinates the attempt, or `events`, where the event-driven coordinator applies rules to the attempt's lifecycle events with no parent session. An agent file's `coordinator` overrides the instance setting, and the scheduler resolves it when each attempt launches. Startup, reloads, and saved edits check the parent brain only of agents that resolve to `session`, so an instance whose agents all resolve to `events` starts without a Pi credential and quarantines no agent. Imports, reloads, and saved edits refuse `parent_model` or `parent_effort` in the same agent file or `settings` block as `coordinator: events`, with the field path in the problem. An agent file also accepts an optional `decision` with a `model` and an `effort` for its decision sessions, which run on the agent's own harness; no behavior reads it yet.
+  
+  `ParentKind` (`pi` or `none`) is now `CoordinatorKind` (`session` or `events`), and `RunSpec.parent` is now `RunSpec.coordinator`, which decodes as `session` for attempts stored without it. A fourth attempt journal migration rewrites a stored `RunSpec.parent` of `pi` or `none` as `session` or `events`. `Agent` adds the optional `coordinator` and `decision` (`DecisionBrain`), and `resolveCoordinator` returns the agent's kind, else the instance setting. `CheckoutRequest.coordinator` carries the resolved kind into the `RunSpec`. In the operator API, `SettingsView.coordinator`, `AgentFileView.coordinator`, and `AgentFileView.resolvedCoordinator` report the setting. The web configuration pages show the coordinator of the instance and of each agent and edit it in the settings and agent forms; an agent on `events` shows no parent model or effort.
+- 5c1ff0a: An `exe.dev` worker is refused with a message that names it and says that this version of usine doesn't run the kind. The configuration store refuses a commit that leaves an `exe.dev` worker in the configuration, and `usine up` refuses a stored one when it starts running attempts. Setup mode, which runs no attempts, still starts. Before, an instance whose workers were all `exe.dev` was told that the worker differed from the other workers. `@usine/config/factory` exports `exeDevWorkerRefusal`, the shared message. `@usine/config/configuration` exports `replay`, which applies stored revisions without this refusal. Replaying stored revisions, for a revert or when the running server applies a new revision, still accepts `exe.dev` workers.
+- 360d371: `outcome_labels` entries use the GitHub label name rules and messages: a trimmed name of at most 50 characters. A loop file whose outcome labels differ only in letter case is rejected, because GitHub compares labels without case. A schedule loop that sets `outcome_labels` fails schema validation, because its runs have no item to label. An outcome label that `usine.yaml` doesn't declare under `labels` adds an `UndeclaredOutcomeLabelWarning` to `LoadedInstance.warnings` and logs `Loop outcome label is not a declared GitHub label` when the instance folder loads and each time `CurrentInstance` installs a configuration. The loop still loads. `logConfigWarnings` in `@usine/config/instance` logs these warnings.
+  
+  The SQLite configuration store rewrites stored loops that earlier versions accepted and these rules reject, so the stored configuration keeps loading. When it opens, it removes a schedule loop's outcome labels and each label that repeats an earlier one in a different letter case, records the change as one revision without an actor, and logs each loop. If the upgraded configuration is still invalid, the store leaves the stored loops unchanged and logs a warning with the problems. **Configuration > History** shows a stored agent or loop value that the current rules reject as YAML of its stored fields, through `formatRevisionEntity` in `@usine/config/folder-codec`, instead of failing to load the revision.
+  
+  `GitHubLabelName` and `canonicalLabelName` are exported from `@usine/core/label`; import them from there instead of `@usine/config/label`. `OutcomeLabels` in `@usine/core/loop`, and the `outcomeLabels` field of `Submission` in `@usine/engine`, now contain `GitHubLabelName` values.
+  
+  The loop detail page in **Configuration > Loops** lists a loop's outcome labels and warns about undeclared ones. `LoopFileView` in the operator API adds `outcomeLabels` and `undeclaredOutcomeLabels`. The loop form writes `outcome_labels` only when the loop sets at least one label.
+- 331a899: Workers accept `paused`. A paused worker takes no new attempts, and its running attempts finish; a run that reattaches an attempt already on the worker still takes a free slot there. The scheduler sends other runs to the next unpaused worker, so pausing the workers listed before a new worker sends attempts to it. Pausing or resuming applies on reload without a restart or a preflight. The worker page, the worker list, and the **Workers** line on **Overview** show a paused worker, and **Needs attention** lists it until it resumes. The worker form has a **Paused** option, and exports omit `paused: false`.
+- 8fa25bb: Sign-in rate limits count each client address separately. Each sign-in operation allows 60 requests per minute from one client address and 600 per minute for the whole instance. The client address is the address of the connection. When that address is in the new `auth.trusted_proxies` setting, such as `[127.0.0.1/32, ::1/128]` for a reverse proxy on the same machine, the server reads the client address from `X-Forwarded-For`. Without the setting, the server ignores the header.
+  
+  On an instance behind a reverse proxy, the per-client limits take effect only after you list the proxy in `auth.trusted_proxies`. Until then, every client behind the proxy counts as the proxy's address and shares one allowance, so one client can still lock every member out of sign-in.
+- c7bd772: SSH workers keep their disks from filling up with worker images. After each image pull, usine removes the other images of the attempt image's repository. It keeps the current image, the most recently built other image, and every image that a container uses. After a rollback, the retained image can be newer than the current image. Cleanup recognizes Docker Hub name aliases and tracks images replaced by mutable tags such as `latest`.
+  
+  Preflight and each new attempt, before its checkout starts, check the free disk space on the filesystem of the worker's `root` and on the container runtime's image storage. Below the threshold, the check fails with a `disk` capability error that states the free space and the threshold. **Needs attention** shows the error, and attempts wait until a preflight passes. The threshold defaults to 10 GiB; set `min_free_disk_gib` on the worker to change it, or to `0` to turn the check off. An attempt whose check fails before its checkout fails with an infrastructure failure, which usine retries.
+  
+  When one of usine's own commands on a worker, such as an image pull or a checkout, reports `ENOSPC` or `No space left on device` during preflight or preparation, usine reports the same `disk` error instead of the command's failure. A report from the attempt's agent keeps the outcome that the agent gave it.
+- 4aebd77: The supervisor is a role of the harness contract. `@usine/agents/harness` exports `supervisor`, a role that runs on the orchestrator on a gateway credential route, lists only its usine tool set, keeps its conversation between turns, and takes interventions, and `admitSupervisor`, which requires `usine-tools`, `closed-tools`, `resume-session`, `steer`, `interrupt`, and `token-usage`. `@usine/agents/supervisor` exports `runSupervisorTurn`, which opens a supervisor session through `Harnesses` with a toolkit, or reopens the saved session for the conversation's next turn, and returns the answer, the saved session, and the session's cumulative usage across turns. A failed turn returns `SupervisorTurnError` with the usage that the session had spent. When a Claude Code process resumes a session, the first result's `modelUsage` minus its `model_usage_since_last_result` is the usage that Claude restored. usine counts that usage once and logs it at Info. This applies to a replacement process, to a process that the adapter resumes after its remote process stops, and to either one when the orchestrator reattaches it before its first result. `SessionTokensUpdated.processUsage` records `awaitsFirstResult` until then.
+  
+  `settings.supervisor: { harness, model, effort }` selects the supervisor's brain. Saving the configuration refuses a harness that can't serve the role and names what it lacks; Codex is refused, because it lists its own tools in every thread. An instance without the setting starts, and `SettingsView.supervisor` is null, which **Configuration > Settings** shows as not configured. The settings form edits the brain.
+  
+  The server builds the supervisor's operator toolkit from the operator tools that the MCP endpoint serves, filtered by the member's grants and operation ceiling, and answers each call through the operator API with the member's credential.
+
+### Patch Changes
+
+- eb58cad: Configuration checks, worker preflight, and coordinator startup admit brains through role declarations. A refusal names the missing capability, placement, or credential route with the harness's reason. For example, a Pi child placed on an SSH or container worker is refused with "Pi runs its tools in the orchestrator process and supports only local children".
+- Updated dependencies [f8f311c]
+- Updated dependencies [2b3ac6b]
+- Updated dependencies [55c75fe]
+- Updated dependencies [095438d]
+- Updated dependencies [6aa5e72]
+- Updated dependencies [539349e]
+- Updated dependencies [7626bb7]
+- Updated dependencies [b6fd6b2]
+- Updated dependencies [4ff30ae]
+- Updated dependencies [039daa4]
+- Updated dependencies [322d45e]
+- Updated dependencies [bfa02ef]
+- Updated dependencies [c8ea557]
+- Updated dependencies [589ad7b]
+- Updated dependencies [71ecb9e]
+- Updated dependencies [e828b51]
+- Updated dependencies [322d45e]
+- Updated dependencies [f889e77]
+- Updated dependencies [3fef8e2]
+- Updated dependencies [4eec609]
+- Updated dependencies [d6fb554]
+- Updated dependencies [d7e00bc]
+- Updated dependencies [64afcbb]
+- Updated dependencies [fd52df7]
+- Updated dependencies [e8003db]
+- Updated dependencies [fa97db3]
+- Updated dependencies [c8241d7]
+- Updated dependencies [2a76a52]
+- Updated dependencies [360d371]
+- Updated dependencies [2882f71]
+- Updated dependencies [fa97db3]
+- Updated dependencies [360d371]
+- Updated dependencies [fa97db3]
+- Updated dependencies [eb58cad]
+- Updated dependencies [c7bd772]
+- Updated dependencies [c7f39bc]
+- Updated dependencies [324bfed]
+- Updated dependencies [738c15c]
+- Updated dependencies [5ae7631]
+- Updated dependencies [6a42cb3]
+- Updated dependencies [1eddd3d]
+- Updated dependencies [4aebd77]
+- Updated dependencies [c5be05b]
+- Updated dependencies [039daa4]
+  - @usine/core@0.8.0
+  - @usine/agents@0.8.0
+
 ## 0.6.0
 
 ### Minor Changes
