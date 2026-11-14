@@ -254,7 +254,7 @@ describe("exec shell", () => {
       }).pipe(Effect.provide(NodeServices.layer)),
   );
 
-  it.live("reattaches the process owner after the transport loses it", () =>
+  it.live("reattaches the process owner after the transport drops mid-frame", () =>
     Effect.gen(function* () {
       const lines: Array<string> = [];
       const ready = encoder.encode('{"offset":0,"ready":true,"sequence":0,"retained":false}\n');
@@ -271,7 +271,7 @@ describe("exec shell", () => {
             yield* stdin.pipe(Stream.runDrain, Effect.forkScoped);
             if (lines.length === 1)
               return {
-                stdout: Stream.make(ready),
+                stdout: Stream.make(ready, hello.subarray(0, 20)),
                 stderr: Stream.empty,
                 exitCode: Effect.fail(lost),
               };

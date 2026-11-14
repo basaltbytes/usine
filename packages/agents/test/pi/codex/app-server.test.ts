@@ -1,12 +1,9 @@
+import { MessageSizeMib } from "@usine/core/worker";
 import { ChildProcessLost } from "../../../src/child-host/process.ts";
 import { jsonKey } from "@usine/core/json-key";
 import { assert, describe, it } from "@effect/vitest";
-import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
-import { AgentSessionId, ChildSession } from "@usine/core/agent/session";
-import { AgentName } from "@usine/core/agent";
-import { WorkerName } from "@usine/core/worker";
+import { AgentSessionId } from "@usine/core/agent/session";
 import {
-  Cause,
   Deferred,
   Effect,
   Fiber,
@@ -30,123 +27,17 @@ import {
   LocalProcess,
   RemoteShell,
 } from "../../../src/child-host/child-host.ts";
-import {
-  ChildRequest,
-  ChildSessionLifecycle,
-  SessionOperationError,
-  WorkingDirectory,
-} from "../../../src/runtime.ts";
+import { ChildSessionLifecycle, SessionOperationError } from "../../../src/runtime.ts";
 import {
   CodexAppServer,
   codexAppServerCommand,
   codexAppServerLive,
 } from "../../../src/harness/codex/app-server.ts";
 
-const request = ChildRequest.make({
-  worker: WorkerName.make("worker-1"),
-  machine: Option.none(),
-  environment: { HOME: "/home/worker", PATH: "/usr/bin:/bin" },
-  host: LocalProcess.make(),
-  session: ChildSession.make({
-    id: AgentSessionId.make("parent:attempt-1:child:2"),
-    parentId: AgentSessionId.make("parent:attempt-1"),
-    agent: AgentName.make("developer"),
-    brain: BrainSpec.make({
-      harness: Harness.make("codex"),
-      model: ModelId.make("gpt-5.6-terra"),
-      effort: "medium",
-    }),
-  }),
-  cwd: WorkingDirectory.make("/workspace/repo"),
-  prompt: "Implement the focused task.",
-});
+import { request, fakeProcess, spawnerFor } from "./transport-fixture.ts";
 
 const encoder = new TextEncoder();
 const line = (value: Schema.Json): Uint8Array => encoder.encode(`${jsonKey(value)}\n`);
-
-interface FakeProcess {
-  readonly stdout: Queue.Queue<Uint8Array, Cause.Done>;
-  readonly stderr: Queue.Queue<Uint8Array, Cause.Done>;
-  readonly exit: Deferred.Deferred<ChildProcessSpawner.ExitCode>;
-  readonly stdinClosed: Deferred.Deferred<void>;
-  readonly killed: Deferred.Deferred<void>;
-  readonly stdinLines: Array<string>;
-}
-
-const fakeProcess = Effect.gen(function* () {
-  return {
-    stdout: yield* Queue.make<Uint8Array, Cause.Done>(),
-    stderr: yield* Queue.make<Uint8Array, Cause.Done>(),
-    exit: yield* Deferred.make<ChildProcessSpawner.ExitCode>(),
-    stdinClosed: yield* Deferred.make<void>(),
-    killed: yield* Deferred.make<void>(),
-    stdinLines: [],
-  } satisfies FakeProcess;
-});
-
-const spawnerFor = (
-  process: FakeProcess,
-  options: {
-    readonly exitOnEof?: boolean;
-    readonly stdout?: Stream.Stream<Uint8Array>;
-    readonly kill?: Effect.Effect<void, PlatformError.PlatformError>;
-    readonly exitCode?: Effect.Effect<ChildProcessSpawner.ExitCode, PlatformError.PlatformError>;
-  } = {},
-) =>
-  Layer.succeed(ChildProcessSpawner.ChildProcessSpawner)(
-    ChildProcessSpawner.make((command) =>
-      Effect.gen(function* () {
-        yield* Deferred.await(process.exit).pipe(
-          Effect.andThen(Queue.end(process.stdout)),
-          Effect.andThen(Queue.end(process.stderr)),
-          Effect.forkScoped,
-        );
-        if (
-          command._tag === "StandardCommand" &&
-          Predicate.hasProperty(command.options.stdin, "stream") &&
-          Stream.isStream(command.options.stdin.stream)
-        ) {
-          yield* command.options.stdin.stream.pipe(
-            Stream.decodeText(),
-            Stream.splitLines,
-            Stream.runForEach((written) =>
-              Effect.sync(() => {
-                process.stdinLines.push(written);
-              }),
-            ),
-            Effect.andThen(Deferred.succeed(process.stdinClosed, undefined)),
-            Effect.andThen(
-              options.exitOnEof === false
-                ? Effect.void
-                : Deferred.succeed(process.exit, ChildProcessSpawner.ExitCode(0)),
-            ),
-            Effect.forkScoped,
-          );
-        }
-        return ChildProcessSpawner.makeHandle({
-          pid: ChildProcessSpawner.ProcessId(4242),
-          exitCode: options.exitCode ?? Deferred.await(process.exit),
-          isRunning: Deferred.isDone(process.exit).pipe(Effect.map((exited) => !exited)),
-          kill: () =>
-            Deferred.succeed(process.killed, undefined).pipe(
-              Effect.andThen(
-                options.kill ??
-                  Deferred.succeed(process.exit, ChildProcessSpawner.ExitCode(137)).pipe(
-                    Effect.asVoid,
-                  ),
-              ),
-            ),
-          stdin: Sink.drain,
-          stdout: options.stdout ?? Stream.fromQueue(process.stdout),
-          stderr: Stream.fromQueue(process.stderr),
-          all: Stream.empty,
-          getInputFd: () => Sink.drain,
-          getOutputFd: () => Stream.empty,
-          unref: Effect.succeed(Effect.void),
-        });
-      }),
-    ),
-  );
 
 // Effect's spawner fails a kill this way when the process can no longer be signalled.
 const failedKill = Effect.fail(
@@ -195,12 +86,79 @@ const stopMessages: ReadonlyArray<string> = [
 const stopRecordsIn = (records: ReadonlyArray<LogRecord>) =>
   records.filter(({ message }) => stopMessages.includes(message));
 
-const awaitStdinLines = (process: FakeProcess, count: number) =>
+const awaitStdinLines = (process: Effect.Success<typeof fakeProcess>, count: number) =>
   Effect.gen(function* () {
     while (process.stdinLines.length < count) yield* Effect.yieldNow;
   });
 
 describe("Codex app-server transport", () => {
+  for (const terminated of [false, true]) {
+    it.effect(
+      `fails a session on an oversized ${terminated ? "complete" : "unfinished"} app-server line`,
+      () =>
+        Effect.gen(function* () {
+          const process = yield* fakeProcess;
+          yield* Effect.gen(function* () {
+            const connection = yield* (yield* CodexAppServer).open({
+              cwd: request.cwd,
+              sessionId: Option.some(request.session.id),
+              environment: request.environment,
+              host: request.host,
+              protocolFrameMib: MessageSizeMib.make(4),
+            });
+            const response = yield* connection
+              .request("stream", "probe", {})
+              .pipe(Effect.flip, Effect.forkChild);
+            yield* awaitStdinLines(process, 1);
+            for (let i = 0; i < 64; i++)
+              yield* Queue.offer(process.stdout, encoder.encode("x".repeat(65536)));
+            yield* Queue.offer(process.stdout, encoder.encode(terminated ? "x\n" : "x"));
+            const error = yield* Fiber.join(response);
+            assert.strictEqual(error.message, "Codex app-server frame exceeds 4 MiB");
+            assert.deepStrictEqual(error.cause, { limitMib: 4 });
+            const streamError = yield* connection.notifications.pipe(Stream.runDrain, Effect.flip);
+            assert.strictEqual(streamError, error);
+          }).pipe(
+            Effect.scoped,
+            Effect.provide(codexAppServerLive.pipe(Layer.provide(spawnerFor(process)))),
+          );
+        }),
+    );
+  }
+
+  for (const protocolFrameMib of [undefined, MessageSizeMib.make(8)]) {
+    it.effect(
+      `reads a large resume response with frame allowance ${protocolFrameMib ?? "unset"}`,
+      () =>
+        Effect.gen(function* () {
+          const process = yield* fakeProcess;
+          yield* Effect.gen(function* () {
+            const connection = yield* (yield* CodexAppServer).open({
+              cwd: request.cwd,
+              sessionId: Option.some(request.session.id),
+              environment: request.environment,
+              host: request.host,
+              protocolFrameMib,
+            });
+            const pending = yield* connection
+              .request("launch", "thread/resume", {})
+              .pipe(Effect.forkChild);
+            yield* awaitStdinLines(process, 1);
+            const rpc = yield* Schema.decodeUnknownEffect(
+              Schema.fromJsonString(Schema.Struct({ id: Schema.Int })),
+            )(process.stdinLines[0]);
+            const history = "x".repeat(5 * 1024 ** 2);
+            yield* Queue.offer(process.stdout, line({ id: rpc.id, result: { history } }));
+            const response = yield* Fiber.join(pending);
+            assert.deepStrictEqual(response, { history });
+          }).pipe(
+            Effect.scoped,
+            Effect.provide(codexAppServerLive.pipe(Layer.provide(spawnerFor(process)))),
+          );
+        }),
+    );
+  }
+
   it.effect("leaves the app-server for recovery when its attempt is stopping", () =>
     Effect.gen(function* () {
       const process = yield* fakeProcess;

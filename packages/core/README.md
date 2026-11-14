@@ -8,6 +8,8 @@ Domain model for [usine](https://github.com/basaltbytes/usine): event, run, step
 
 `Harness` is a branded, kebab-case string. It validates ID syntax without fixing the set of harnesses; configuration validates membership through `@usine/agents/harness`.
 
+`SupervisorLimits` in `/worker` defines positive host protection limits: 1 CPU, 1024 MiB memory, 256 PIDs, 64 MiB temporary storage and 512 MiB per conversation by default.
+
 ## Subpaths
 
 | Subpath | Exports |

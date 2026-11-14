@@ -22,6 +22,7 @@ import { Clock, Deferred, Effect, FiberSet, Layer, Match, Option, Stream } from 
 import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import {
   ChildBackend,
+  AgentResultError,
   ChildSessionJournal,
   PoolUnavailableError,
   type RunningSession,
@@ -174,7 +175,14 @@ const serveTools = Effect.fn("PiRuntime.serveTools")(function* (tools: HostToolS
  */
 const hostCommand = Effect.fn("PiRuntime.hostCommand")(function* (spec: SessionSpec) {
   const host = spec.host;
-  if (host._tag !== "ExecShell") return Option.none<PiHostCommand>();
+  if (host._tag !== "ExecShell") {
+    if (spec.admitted.role.nativeTools === "read")
+      return yield* AgentResultError.make({
+        sessionId: Option.some(spec.session.id),
+        message: "Pi's read-only tools require an exec-shell host runner",
+      });
+    return Option.none<PiHostCommand>();
+  }
   const run = yield* FiberSet.makeRuntimePromise();
   const output = (command: string, args: ReadonlyArray<string>) =>
     Effect.scoped(
@@ -184,10 +192,25 @@ const hostCommand = Effect.fn("PiRuntime.hostCommand")(function* (spec: SessionS
           { cwd: spec.cwd, command, args, environment: {} },
           {},
         );
+        let bytes = 0;
+        const bounded = <E>(stream: Stream.Stream<Uint8Array, E>) =>
+          stream.pipe(
+            Stream.mapEffect((chunk) => {
+              bytes += chunk.byteLength;
+              return bytes > 4 * 1024 ** 2
+                ? Effect.fail(
+                    AgentResultError.make({
+                      sessionId: Option.some(spec.session.id),
+                      message: "Pi's file command output exceeds 4 MiB",
+                    }),
+                  )
+                : Effect.succeed(chunk);
+            }),
+          );
         const [stdout, stderr] = yield* Effect.all(
           [
-            Stream.runCollect(handle.stdout),
-            handle.stderr.pipe(Stream.decodeText(), Stream.mkString),
+            Stream.runCollect(bounded(handle.stdout)),
+            bounded(handle.stderr).pipe(Stream.decodeText(), Stream.mkString),
           ],
           { concurrency: "unbounded" },
         );

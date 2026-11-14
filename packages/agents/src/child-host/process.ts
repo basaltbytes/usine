@@ -20,6 +20,7 @@ import { childPidFile, type ChildHost, SSH_FAILURE } from "./child-host.ts";
 import { hostOutput, hostSpawn } from "./command.ts";
 import { unreachableCause } from "./exec.ts";
 import { PROCESS_OWNER } from "./supervisor.ts";
+import { boundedLines } from "./lines.ts";
 import { outputAcknowledgements } from "./output.ts";
 import { ChildSessionLifecycle, SessionOperationError } from "../runtime.ts";
 
@@ -247,15 +248,14 @@ export const remoteProcess = Effect.fn("ChildHost.remoteProcess")(function* (
   }) {
     yield* Effect.annotateCurrentSpan(fields);
     const skipped = yield* Ref.make(0);
-    const read = handle.stdout.pipe(
-      Stream.decodeText(),
-      Stream.mapAccum(
-        () => "",
-        (buffer, chunk) => {
-          const lines = (buffer + chunk).split("\n");
-          return [lines.pop() ?? "", lines];
-        },
-      ),
+    const read = boundedLines(
+      handle.stdout,
+      () =>
+        processError(target, "Child process owner frame exceeds 4 MiB", {
+          limitBytes: 4 * 1024 ** 2,
+        }),
+      "discard",
+    ).pipe(
       Stream.runForEach((line) =>
         Effect.gen(function* () {
           if (line.length === 0) return;

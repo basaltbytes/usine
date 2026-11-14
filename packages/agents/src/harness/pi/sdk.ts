@@ -214,14 +214,13 @@ export const piSessionTools = (
 ): Pick<CreateAgentSessionOptions, "customTools" | "tools"> => {
   const hosted = hostTools.map(({ name }) => name);
   if (nativeTools === "none") return { tools: hosted, customTools: [...hostTools] };
-  if (nativeTools === "read")
+  if (nativeTools === "read") {
+    if (Option.isNone(host)) throw new Error("Pi's read-only tools require a host runner");
     return {
       tools: [...piReadToolNames, ...hosted],
-      customTools: [
-        ...Option.match(host, { onNone: () => [], onSome: (run) => hostReadTools(cwd, run) }),
-        ...hostTools,
-      ],
+      customTools: [...hostReadTools(cwd, host.value), ...hostTools],
     };
+  }
   return {
     tools: [...piChildToolNames, ...hosted],
     // A custom tool replaces the built-in tool of the same name.

@@ -100,6 +100,12 @@ it.live.each(["Error: No such container: usine-gone", "Error: no such container 
 );
 
 it.live.each([
+  { cpus: 2.3, cpuMax: "230000 100000", accepted: true },
+  { cpus: 2.3, cpuMax: "229999 100000", accepted: true },
+  { cpus: 1.15, cpuMax: "115000 100000", accepted: true },
+  { cpus: 0.29, cpuMax: "29000 100000", accepted: true },
+  { cpus: 0.5, cpuMax: "50000 100000", accepted: true },
+  { cpus: 0.57, cpuMax: "57000 100000", accepted: true },
   { cpus: 0.57, cpuMax: "56999 100000", accepted: true },
   { cpus: 1.5, cpuMax: "150000 100000", accepted: true },
   { cpus: 1, cpuMax: "100000 100000", accepted: true },
@@ -107,38 +113,40 @@ it.live.each([
   { cpus: 0.57, cpuMax: "58000 100000", accepted: false },
   { cpus: 0.57, cpuMax: "max 100000", accepted: false },
   { cpus: 0.57, cpuMax: "56999 0", accepted: false },
-])("checks Podman's integer CPU quota: $cpus CPUs, cpu.max=$cpuMax", ({ cpus, cpuMax, accepted }) =>
-  Effect.gen(function* () {
-    const directory = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
-      fileSystem.makeTempDirectory({
-        directory: dirname("/tmp/usine-cgroup-"),
-        prefix: basename("/tmp/usine-cgroup-"),
-      }),
-    );
-    yield* Effect.addFinalizer(() =>
-      Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
-        fileSystem.remove(directory, { recursive: true, force: true }),
-      ).pipe(Effect.orDie),
-    );
-    for (const [file, value] of Object.entries({
-      "cpu.max": cpuMax,
-      "memory.max": "268435456",
-      "memory.swap.max": "0",
-      "pids.max": "64",
-    })) {
-      yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
-        fileSystem.writeFileString(join(directory, file), `${value}\n`),
+])(
+  "checks Docker and Podman CPU quotas: $cpus CPUs, cpu.max=$cpuMax",
+  ({ cpus, cpuMax, accepted }) =>
+    Effect.gen(function* () {
+      const directory = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+        fileSystem.makeTempDirectory({
+          directory: dirname("/tmp/usine-cgroup-"),
+          prefix: basename("/tmp/usine-cgroup-"),
+        }),
       );
-    }
-    const probe = run("sh", [
-      "-ec",
-      PODMAN_LIMITS_SCRIPT.replaceAll("/sys/fs/cgroup", directory),
-      "sh",
-      String(cpus),
-      "268435456",
-      "64",
-    ]);
-    if (accepted) yield* Effect.promise(() => probe);
-    else yield* Effect.promise(() => assert.rejects(probe));
-  }).pipe(Effect.provide(NodeFileSystem.layer)),
+      yield* Effect.addFinalizer(() =>
+        Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+          fileSystem.remove(directory, { recursive: true, force: true }),
+        ).pipe(Effect.orDie),
+      );
+      for (const [file, value] of Object.entries({
+        "cpu.max": cpuMax,
+        "memory.max": "268435456",
+        "memory.swap.max": "0",
+        "pids.max": "64",
+      })) {
+        yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+          fileSystem.writeFileString(join(directory, file), `${value}\n`),
+        );
+      }
+      const probe = run("sh", [
+        "-ec",
+        PODMAN_LIMITS_SCRIPT.replaceAll("/sys/fs/cgroup", directory),
+        "sh",
+        String(cpus),
+        "268435456",
+        "64",
+      ]);
+      if (accepted) yield* Effect.promise(() => probe);
+      else yield* Effect.promise(() => assert.rejects(probe));
+    }).pipe(Effect.provide(NodeFileSystem.layer)),
 );

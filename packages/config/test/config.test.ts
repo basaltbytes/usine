@@ -1,3 +1,4 @@
+import { SupervisorLimits } from "@usine/core/worker";
 import { jsonKey } from "@usine/core/json-key";
 import { NodeFileSystem, NodePath } from "@effect/platform-node";
 import { assert, describe, expect, it } from "@effect/vitest";
@@ -1207,6 +1208,87 @@ workers:
         "---\nharness: codex\nmodel: gpt-5.6-sol\neffort: xhigh\ncoordinator: session\nparent_model: openai-codex/gpt-5.6-terra\n---\nPersona body.",
       );
       expect(Option.getOrNull(sessionWithParent.agent.coordinator)).toBe("session");
+    }).pipe(Effect.provide(parserLayer)),
+  );
+
+  it.effect("parses supervisor limits with defaults and refuses disabled limits", () =>
+    Effect.gen(function* () {
+      const parser = yield* ConfigParser;
+      const config = yield* parser.parseUsineYaml(
+        InstancePath.make("usine.yaml"),
+        "version: 1\nrepos: []\nsettings:\n  supervisor_limits:\n    cpus: 0.5\n    conversation_size_mib: 128\n    model_request_mib: 64\n    protocol_frame_mib: 8\n",
+      );
+      assert(Option.isSome(config.settings.supervisorLimits));
+      expect({ ...config.settings.supervisorLimits.value }).toEqual({
+        cpus: 0.5,
+        memoryMib: 1024,
+        pids: 256,
+        tmpfsSizeMib: 64,
+        conversationSizeMib: 128,
+        modelRequestMib: 64,
+        protocolFrameMib: 8,
+      });
+      const defaults = yield* parser.parseUsineYaml(
+        InstancePath.make("usine.yaml"),
+        "version: 1\nrepos: []\nsettings:\n  supervisor_limits: {}\n",
+      );
+      assert(Option.isSome(defaults.settings.supervisorLimits));
+      expect({ ...defaults.settings.supervisorLimits.value }).toEqual({
+        cpus: 1,
+        memoryMib: 1024,
+        pids: 256,
+        tmpfsSizeMib: 64,
+        conversationSizeMib: 512,
+        modelRequestMib: 32,
+        protocolFrameMib: 4,
+      });
+      expect(SupervisorLimits.make({})).toEqual(defaults.settings.supervisorLimits.value);
+      for (const field of [
+        "cpus",
+        "memory_mib",
+        "pids",
+        "tmpfs_size_mib",
+        "conversation_size_mib",
+        "model_request_mib",
+        "protocol_frame_mib",
+      ]) {
+        const refused = yield* parser
+          .parseUsineYaml(
+            InstancePath.make("usine.yaml"),
+            `version: 1\nrepos: []\nsettings:\n  supervisor_limits:\n    ${field}: 0\n`,
+          )
+          .pipe(Effect.flip);
+        expect(refused.details?.some(({ path }) => path.includes(field))).toBe(true);
+      }
+    }).pipe(Effect.provide(parserLayer)),
+  );
+
+  it.effect("keeps image pulls unbounded unless a positive timeout is configured", () =>
+    Effect.gen(function* () {
+      const parser = yield* ConfigParser;
+      const file = InstancePath.make("usine.yaml");
+      const unset = yield* parser.parseUsineYaml(file, "version: 1\nrepos: []\n");
+      expect(unset.settings.supervisorImagePullTimeoutMinutes).toEqual(Option.none());
+      const configured = yield* parser.parseUsineYaml(
+        file,
+        "version: 1\nrepos: []\nsettings:\n  supervisor_image_pull_timeout_minutes: 12\n",
+      );
+      expect(configured.settings.supervisorImagePullTimeoutMinutes).toEqual(Option.some(12));
+      const encoded = yield* Schema.encodeEffect(UsineConfig)(configured);
+      expect(encoded.settings?.supervisor_image_pull_timeout_minutes).toBe(12);
+      for (const value of [0, -1, 1.5]) {
+        const refused = yield* parser
+          .parseUsineYaml(
+            file,
+            `version: 1\nrepos: []\nsettings:\n  supervisor_image_pull_timeout_minutes: ${value}\n`,
+          )
+          .pipe(Effect.flip);
+        expect(
+          refused.details?.some(({ path }) =>
+            path.includes("supervisor_image_pull_timeout_minutes"),
+          ),
+        ).toBe(true);
+      }
     }).pipe(Effect.provide(parserLayer)),
   );
 

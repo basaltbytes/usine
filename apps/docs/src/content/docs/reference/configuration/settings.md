@@ -53,6 +53,7 @@ The supervisor observes and operates the factory for a member, and reads the ins
 | `supervisor.harness` | harness ID | required | The harness that runs the supervisor. |
 | `supervisor.model` | string | required | The model that the harness runs. |
 | `supervisor.effort` | effort | required | The reasoning effort of the model. |
+| `supervisor_image_pull_timeout_minutes` | positive integer | unset | Maximum time for each image pull, in minutes. Omit for no timeout. |
 
 ```yaml
 version: 2
@@ -67,11 +68,11 @@ Without `supervisor`, the instance starts and **Configuration > Settings** repor
 
 ### Where the supervisor runs
 
-Each turn runs in its own container on the orchestrator host, which usine removes when the turn ends. A container whose orchestrator stops ends itself within seconds, and the next start removes any that remain. A conversation runs one turn at a time.
+Each turn runs in its own container on the orchestrator host, which usine removes when the turn ends. Shutdown and the next startup remove containers by their instance and conversation labels. After a crash, containers can remain until startup cleanup. A conversation runs one turn at a time; if cleanup cannot remove an earlier container, usine refuses another turn.
 
 - **Source.** Each repository that the turn reads is mounted read-only at `<owner>/<repo>` in the session's working directory, at the head of its default branch when the turn starts, without the git history. A turn keeps reading the head that it started on after a push. In this release, no interface opens a turn, so the orchestrator doesn't choose or prepare these repositories.
-- **Files.** No other instance file is in the container: not the database, the GitHub App key, or a provider login. Only the conversation's own directory, which keeps the harness's saved session, is writable.
-- **Network.** The container has no network. The harness reaches the model through a relay to the orchestrator, which sends each model request through the instance's gateway with the instance's credential. The session reaches usine only through the operator tools that its harness serves over the session's own connection.
+- **Files.** No other instance file is in the container: not the database, the GitHub App key, or a provider login. The conversation's own directory keeps the harness's saved session and writable home. Its fixed-size filesystem bounds these writes, including Pi's session files written by the orchestrator. Temporary writes use bounded `/tmp` and shared memory.
+- **Network.** The container has no network. The harness reaches the model through a relay to the orchestrator, which sends each model request through the instance's gateway with the instance's credential. The relay accepts only the configured supervisor model, limits each request body to `supervisor_limits.model_request_mib` (32 MiB by default) and accepts at most eight simultaneous connections. Oversized requests receive HTTP 413. The session reaches usine only through the operator tools that its harness serves over the session's own connection.
 
 ### Tools per harness
 
@@ -79,7 +80,9 @@ Each turn runs in its own container on the orchestrator host, which usine remove
 | --- | --- |
 | Claude Code | `Read`, `Grep`, and `Glob` only. |
 | Pi | `read`, `grep`, `find`, and `ls` only. Pi runs in the orchestrator process and runs these tools' file operations in the container. |
-| Codex | All of its own tools, including its shell and `apply_patch`, because Codex lists them in every thread. The container limits what they reach: they read the source, can't change it, and reach no network. |
+| Codex | All of its own tools, including its shell and `apply_patch`, because Codex lists them in every thread. Its shell runs inside the container. It can write files in its home that the next turn loads; it can read the source but cannot change it or reach the network. |
+
+Pi's `read` accepts regular files of at most 2 MiB. Each host command limits combined stdout and stderr to 4 MiB. Pi refuses read-only tools without a host runner.
 
 Pi's `grep` and `find` accept patterns that start with `-`, such as `--network`, so the supervisor can search for command-line flags and filenames that begin with a dash.
 
@@ -87,9 +90,45 @@ Pi's `grep` and `find` accept patterns that start with `-`, such as `--network`,
 
 ### Host requirements
 
-The orchestrator host needs Podman or Docker. usine uses Podman when both are installed, and rootless Podman is the recommended runtime. The host needs no hardware virtualization, so a cloud VM works. Each container runs the attempt image, `ghcr.io/basaltbytes/usine-worker`, which the runtime pulls on the first turn. The supervisor reaches the model through the gateway of the instance's first SSH worker that has one.
+The orchestrator host needs Linux, Docker or Podman, and cgroup v2 with CPU, memory, swap and PID controls. usine uses Podman when both runtimes are installed. CI tests Docker; the Podman storage and resource-limit path is untested on a real runtime. No hardware virtualization is required. Each container runs `ghcr.io/basaltbytes/usine-worker` with the content-derived tag pinned by the installed usine version. Startup prepares that image in the background, using a cached copy when available and pulling it otherwise. Failed preparation retries every minute without delaying the API or orchestrator startup. A turn waits up to 30 seconds for preparation before asking you to retry; it never pulls an image. Container startup times out after 30 seconds. The supervisor reaches the model through the gateway of the instance's first SSH worker that has one.
 
-On a host without a container runtime, or an instance without a gateway, the instance still starts. It logs `The configured supervisor is unavailable on this orchestrator` with the reason, and **Configuration > Settings** shows the supervisor container as unavailable, with the reason.
+Image pulls have no timeout by default, so large layers can finish on slow connections. Set `settings.supervisor_image_pull_timeout_minutes` to a positive whole number to stop each pull after that many minutes and retry one minute later. Restart the orchestrator after changing this setting; choose a timeout long enough for the largest layer to download on your connection. Shutdown stops an active pull.
+
+Conversation storage requires `fuse2fs`, `fusermount`, `mkfs.ext4`, `e2fsck`, `fallocate` and `mountpoint`, access to `/dev/fuse`, and `user_allow_other` in `/etc/fuse.conf`. On Debian or Ubuntu, install `fuse`, `fuse2fs`, `e2fsprogs` and `util-linux`. The orchestrator user must be allowed to mount FUSE filesystems. Both runtimes bind-mount the same bounded filesystem; Docker volume options and Podman storage quotas are not required.
+
+Without the runtime, storage prerequisites, enforced cgroup limits or a gateway, the supervisor refuses turns. The instance still starts and logs the reason; **Configuration > Settings** reports when preparation makes the supervisor unavailable.
+
+Supervisor Codex protocol frames are limited to `supervisor_limits.protocol_frame_mib` (4 MiB by default), including unfinished lines. If a long conversation exceeds this limit while resuming, increase the setting and restart the orchestrator. Ordinary Codex coding sessions have no app-server frame limit. Process-owner transport frames remain limited to 4 MiB; the owner splits harness output into smaller chunks.
+
+### Host limits
+
+Limits are always enabled, including when `supervisor_limits` is omitted. `cpus` must be positive; fractional values are accepted. The other values must be integers: `memory_mib` is at least 256, `pids` is at least 64, and filesystem and message sizes are at least 1 MiB. Changes take effect after restarting the orchestrator.
+
+| Field in `settings.supervisor_limits` | Default | Description |
+| --- | --- | --- |
+| `cpus` | `1` | CPU quota in cores. Fractional values are accepted. |
+| `memory_mib` | `1024` | Container memory limit in MiB. Swap is disabled. |
+| `pids` | `256` | Maximum processes and threads in the container. |
+| `tmpfs_size_mib` | `64` | Size of `/tmp` in MiB. Shared memory is separately capped at 16 MiB. |
+| `model_request_mib` | `32` | Maximum model request body in MiB. Increase this for larger contexts or attachments. |
+| `protocol_frame_mib` | `4` | Maximum incoming supervisor Codex protocol frame in MiB. Increase this for long saved histories. |
+| `conversation_size_mib` | `512` | Preallocated filesystem size per conversation, including filesystem metadata, in MiB. |
+
+The relay buffers up to eight request bodies at once, so the raw body budget is eight times `model_request_mib`, plus JSON decoding and forwarding overhead. The 32 MiB default accommodates text requests for million-token contexts; attachments may need a larger value. A 413 response names the setting to increase.
+
+```yaml
+settings:
+  supervisor_limits:
+    cpus: 1
+    memory_mib: 1024
+    pids: 256
+    tmpfs_size_mib: 64
+    conversation_size_mib: 512
+```
+
+Each conversation has a preallocated ext4 image under `.usine/supervisor/disks/<sha256>.ext4`, mounted through FUSE at `.usine/supervisor/conversations/<sha256>`. Filling the filesystem returns a no-space error without growing the image. The hash is derived from the complete conversation ID. Source caches and exported trees also use hashes of their repository names. Fetches verify received objects, and source exports remove absolute symbolic links.
+
+Plan disk capacity for the number of saved conversations. A filesystem that cannot be allocated or mounted prevents that turn from starting. Changing `conversation_size_mib` for an existing conversation requires an offline filesystem migration: usine refuses to open an image whose size differs from the setting.
 
 ## Instance metadata
 

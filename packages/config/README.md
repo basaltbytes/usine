@@ -14,6 +14,8 @@ Each worker accepts `paused` (default `false`), which keeps new attempts off the
 
 Agent files and agent configuration values validate their harness ID against `@usine/agents/harness`. An unregistered ID fails schema validation before the agent enters the roster. Configuration import and edits also check each coding-agent brain against every configured worker through `admitBrain`. Unsupported placements or credential routes reject the configuration with the agent, worker, role, and the reason from the role or the harness descriptor.
 
+`settings.supervisor_limits` accepts positive, possibly fractional `cpus`. The remaining values are integers: `memory_mib` must be at least 256, `pids` at least 64, and `tmpfs_size_mib`, `conversation_size_mib`, `model_request_mib` and `protocol_frame_mib` at least 1. Decoded `Settings.supervisorLimits` uses camelCase fields. Omission preserves the default limits in `SupervisorLimits`; it does not disable protection. See the [settings reference](https://docs.usine.dev/reference/configuration/settings/#host-limits) for defaults and storage prerequisites.
+
 ## Labels and lanes
 
 Declare the labels that loops and lanes use once. usine creates missing labels in every managed repo and never edits or deletes labels:
@@ -152,3 +154,5 @@ Configuration records use nominal Schema brands. `configurationEntities`, `forma
 Run `pnpm --filter @usine/config check` after building dependencies to check TypeScript and Effect diagnostics with the patched compiler.
 
 SSH workers accept `provisioner.provider: boxd`, a required snapshot, an optional size assertion as `<vcpu>x<GiB>` that preflight compares with the snapshot, an optional region id, isolation (default enabled), an optional egress allowlist, and optional gateway tailnet settings. A boxd worker ignores `reuse`, since boxd restores each attempt's machine in under a second; a stored worker that sets it, as earlier releases allowed, still loads, and preflight warns about it. A boxd worker ignores `identity_file`, since usine runs its commands through boxd's `Exec` API with the API key; a stored worker that sets it, as earlier releases required, still loads. Behind a gateway, an egress allowlist must include `*.tailscale.com` and must not admit GitHub or the API and login hosts of a provider whose credential the gateway holds.
+
+`settings.supervisor_image_pull_timeout_minutes` optionally bounds each supervisor image pull in positive whole minutes. Omit it to allow slow downloads to finish. Changes take effect after restarting the orchestrator.
