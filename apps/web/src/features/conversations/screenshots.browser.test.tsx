@@ -79,7 +79,7 @@ const failedTurn = () =>
     { turn: "t-2", member: ada, text: "Who can approve it?", minute: 3, state: interrupted(3) },
   ]);
 
-/** Lists three conversations: answered, running, and failed. */
+/** Lists three conversations: failed and running ones unread, and an answered one read. */
 const listed = (server: ConversationServer) => {
   const named = (id: string, title: string, record: ReturnType<typeof conversationOf>) => ({
     ...record,
@@ -95,6 +95,7 @@ const listed = (server: ConversationServer) => {
   );
   server.conversations.set("c-2", named("c-2", "Why did review-pr fail on #812?", runningTurn()));
   server.conversations.set(conversationId, finished());
+  server.reads.set(conversationId, 2);
 };
 
 type Scene = {
@@ -106,18 +107,29 @@ type Scene = {
 };
 
 const scenes: ReadonlyArray<Scene> = [
-  { name: "list", path: "/conversations", arrange: listed, ready: "3 conversations" },
+  { name: "inbox", path: "/conversations", arrange: listed, ready: "2 unread" },
   {
     name: "empty-list",
     path: "/conversations",
     arrange: () => undefined,
     ready: "No conversations",
   },
+  { name: "panel-inbox", path: "/tokens?conversation=inbox", arrange: listed, ready: "2 unread" },
+  {
+    name: "panel-thread",
+    path: `/tokens?conversation=${conversationId}`,
+    arrange: (server) => {
+      listed(server);
+      server.conversations.set(conversationId, runningTurn());
+      server.events.set(conversationId, turnEvents("t-1", 1, false));
+    },
+    ready: "Queued after the turn before it",
+  },
   {
     name: "new-conversation",
     path: "/conversations?conversation=new",
     arrange: listed,
-    ready: "Recent conversations",
+    ready: "Scope",
   },
   {
     name: "running-turn",
@@ -132,7 +144,7 @@ const scenes: ReadonlyArray<Scene> = [
     name: "finished-markdown",
     path: `/conversations?conversation=${conversationId}`,
     arrange: (server) => {
-      server.conversations.set(conversationId, finished());
+      listed(server);
       server.events.set(conversationId, turnEvents("t-1", 1, true));
     },
     ready: "Approve it, or cancel it if the issue is stale.",
@@ -210,7 +222,7 @@ it.each(devices)(
           ),
         );
         await loaded;
-        await expect.element(page.getByText(scene.ready).first()).toBeVisible();
+        await expect.element(page.getByText(scene.ready).last()).toBeVisible();
         await commands.configurationEditorScreenshot(`881-${scene.name}-${device}`);
         flushSync(() => root.unmount());
         host.remove();

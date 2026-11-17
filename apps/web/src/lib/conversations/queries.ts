@@ -1,6 +1,11 @@
 import { queryOptions, type QueryClient } from "@tanstack/react-query";
-import type { ConversationId, EventSequence, TurnEvent } from "@usine/core/conversation";
-import { EVENTS_PAGE } from "@usine/orchestrator/operator/http";
+import type {
+  ConversationId,
+  EventSequence,
+  MessageSequence,
+  TurnEvent,
+} from "@usine/core/conversation";
+import { type ConversationsView, EVENTS_PAGE } from "@usine/orchestrator/operator/http";
 import { conversationApi } from "~/lib/api";
 import { changes } from "~/lib/query-changes";
 
@@ -13,7 +18,13 @@ export const conversationStatusQuery = () =>
     meta: { refreshLabel: "Supervisor status", changes: changes.kind("configuration") },
   });
 
-/** The conversations that the member can read, newest first, with each one's latest turn. */
+export type ConversationList = typeof ConversationsView.Type;
+export type ConversationRow = ConversationList["conversations"][number];
+
+/**
+ * The conversations that the member can read, latest activity first, each with its latest turn,
+ * a preview of its latest message, and whether the member has read it.
+ */
 export const conversationsQuery = () =>
   queryOptions({
     queryKey: ["conversations"],
@@ -21,6 +32,21 @@ export const conversationsQuery = () =>
     staleTime: 30_000,
     meta: { refreshLabel: "Conversations", changes: changes.kind("conversation") },
   });
+
+/** Returns how many conversations of `list` have unread activity. */
+export const unreadCount = (list: ConversationList): number =>
+  list.conversations.filter(({ unread }) => unread === true).length;
+
+/** Returns `list` with `id` read through `through`, which clears it once that is its last message. */
+export const withRead = (
+  list: ConversationList,
+  id: ConversationId,
+  through: MessageSequence,
+): ConversationList => ({
+  conversations: list.conversations.map((row) =>
+    row.conversation.id === id && row.lastMessage <= through ? { ...row, unread: false } : row,
+  ),
+});
 
 export const conversationKey = (id: ConversationId) => ["conversation", id] as const;
 

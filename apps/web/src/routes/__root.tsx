@@ -9,9 +9,23 @@ import { ChatsCircleIcon, WarningIcon } from "@phosphor-icons/react";
 import { ConversationId } from "@usine/core/conversation";
 import { Tooltip, TooltipContent, TooltipTrigger } from "~/components/ui/tooltip";
 import { useOpenConversation } from "~/hooks/use-open-conversation";
-import { conversationQuery, conversationStatusQuery } from "~/lib/conversations/queries";
-import { conversationsTitle, openConversationsLabel } from "~/lib/conversations/strings";
-import { useQueryClient, useSuspenseQuery, type QueryClient } from "@tanstack/react-query";
+import {
+  conversationQuery,
+  conversationsQuery,
+  conversationStatusQuery,
+  unreadCount,
+} from "~/lib/conversations/queries";
+import {
+  conversationsTitle,
+  openConversationsLabel,
+  openConversationsWithUnread,
+} from "~/lib/conversations/strings";
+import {
+  useQuery,
+  useQueryClient,
+  useSuspenseQuery,
+  type QueryClient,
+} from "@tanstack/react-query";
 import {
   createRootRouteWithContext,
   type ErrorComponentProps,
@@ -44,6 +58,7 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "~/components/ui/breadcrumb";
+import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "~/components/ui/sidebar";
 import { ConfigurationCrumbs } from "~/components/configuration/navigation";
@@ -71,15 +86,47 @@ const ConversationPanel = lazy(() =>
 );
 
 /**
- * `run` and `conversation` are in the root search so the Run drawer and the conversation panel can
- * open over any route. `conversation` is a conversation ID, or `new` for the form that starts one.
+ * `run` and `conversation` are in the root search so the Run drawer and the supervisor inbox can
+ * open over any route. `conversation` is a conversation ID, `new` for the form that starts one,
+ * or `inbox` for the list with nothing open.
  */
 const RootSearch = Schema.toStandardSchemaV1(
   Schema.Struct({
     run: Schema.optional(RunId),
-    conversation: Schema.optional(Schema.Union([Schema.Literal("new"), ConversationId])),
+    conversation: Schema.optional(
+      Schema.Union([Schema.Literals(["inbox", "new"]), ConversationId]),
+    ),
   }),
 );
+
+/** The header control that opens the supervisor inbox, with the member's unread count. */
+const InboxButton = () => {
+  const openConversation = useOpenConversation();
+  const { data: unread = 0 } = useQuery({ ...conversationsQuery(), select: unreadCount });
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button
+            variant="ghost"
+            className="relative h-9 shrink-0 px-2 pointer-coarse:h-11 pointer-coarse:min-w-11"
+            aria-label={openConversationsWithUnread(unread)}
+            onClick={() => openConversation("inbox")}
+          />
+        }
+      >
+        <ChatsCircleIcon aria-hidden="true" className="size-4" />
+        {unread > 0 && (
+          // Over the icon's corner, so the count appearing shifts nothing in the header.
+          <Badge className="pointer-events-none absolute top-0.5 right-0 h-4 min-w-4 bg-primary px-1 text-xs tabular-nums text-primary-foreground ring-2 ring-background">
+            {unread}
+          </Badge>
+        )}
+      </TooltipTrigger>
+      <TooltipContent side="bottom">{openConversationsLabel}</TooltipContent>
+    </Tooltip>
+  );
+};
 
 interface RouterContext {
   readonly queryClient: QueryClient;
@@ -228,7 +275,8 @@ const Shell = () => {
   if (run !== undefined && run !== shownRun) setShownRun(run);
   const closeConversation = () =>
     void navigate({ to: ".", search: ({ conversation: _conversation, ...rest }) => rest });
-  const openConversation = useOpenConversation();
+  // The conversations page shows the inbox itself, so the search param opens no sheet there.
+  const inboxPage = view === "conversations";
   const [shownConversation, setShownConversation] = useState(conversation);
   if (conversation !== undefined && conversation !== shownConversation)
     setShownConversation(conversation);
@@ -270,21 +318,7 @@ const Shell = () => {
                 </BreadcrumbList>
               </Breadcrumb>
               <CommandPalette overview={data} />
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <Button
-                      variant="ghost"
-                      className="h-9 shrink-0 px-2"
-                      aria-label={openConversationsLabel}
-                      onClick={() => openConversation("new")}
-                    />
-                  }
-                >
-                  <ChatsCircleIcon aria-hidden="true" className="size-4" />
-                </TooltipTrigger>
-                <TooltipContent side="bottom">{openConversationsLabel}</TooltipContent>
-              </Tooltip>
+              <InboxButton />
               <NotificationTray needs={needs} />
             </header>
             <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
@@ -302,7 +336,9 @@ const Shell = () => {
                   </AlertDescription>
                 </Alert>
               )}
-              <PageCommandsScope active={run === undefined && conversation === undefined}>
+              <PageCommandsScope
+                active={run === undefined && (conversation === undefined || inboxPage)}
+              >
                 <RefreshProvider>
                   <Outlet />
                 </RefreshProvider>
@@ -320,7 +356,7 @@ const Shell = () => {
                 </Suspense>
               )}
             </PageCommandsScope>
-            {shownConversation !== undefined && (
+            {shownConversation !== undefined && !inboxPage && (
               <Suspense fallback={null}>
                 <ConversationPanel
                   target={shownConversation}
@@ -355,6 +391,8 @@ export const Route = createRootRouteWithContext<RouterContext>()({
     if (location.pathname === "/sign-in" || location.pathname === "/setup") return;
     const session = await queryClient.ensureQueryData(sessionQuery());
     if (!canReadOverview(session.permissions)) return;
+    // Starts the header's unread count early without holding the page for it.
+    void queryClient.prefetchQuery(conversationsQuery());
     await Promise.all([
       queryClient.ensureQueryData(overviewQuery()),
       queryClient.ensureQueryData(attentionQuery()),
@@ -368,7 +406,8 @@ export const Route = createRootRouteWithContext<RouterContext>()({
           ? []
           : [
               queryClient.ensureQueryData(conversationStatusQuery()),
-              ...(conversation === "new"
+              queryClient.ensureQueryData(conversationsQuery()),
+              ...(conversation === "new" || conversation === "inbox"
                 ? []
                 : [queryClient.ensureQueryData(conversationQuery(conversation))]),
             ],

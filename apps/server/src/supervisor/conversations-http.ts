@@ -22,6 +22,8 @@ import {
   EVENTS_PAGE,
   OperatorApi,
   OperatorHttpError,
+  readMarkerView,
+  summaryView,
   turnView,
 } from "@usine/orchestrator/operator/http";
 import { Effect, Option } from "effect";
@@ -92,35 +94,35 @@ const conversations = Effect.flatMap(Effect.serviceOption(Conversations), (servi
   ),
 );
 
+/** The member who sends the request; a credential without a member is refused with `message`. */
+const requireMember = (message: string) =>
+  Effect.flatMap(RequestMember, (current) =>
+    Option.match(current, {
+      onNone: () =>
+        Effect.logWarning("Conversation request refused for a credential without a member").pipe(
+          Effect.andThen(Effect.fail(OperatorHttpError.make({ error: "AccessDenied", message }))),
+        ),
+      onSome: Effect.succeed,
+    }),
+  );
+
 /**
  * The member who sends the request, with the device token or browser session they send it with;
  * another credential can't post to the supervisor.
  */
-const poster = Effect.flatMap(RequestMember, (current) =>
-  Option.match(current, {
-    onNone: () =>
-      Effect.logWarning("Conversation write refused for a credential without a member").pipe(
-        Effect.andThen(
-          Effect.fail(
-            OperatorHttpError.make({
-              error: "AccessDenied",
-              message: "Sign in as a member to talk to the supervisor.",
-            }),
-          ),
-        ),
+const poster = Effect.flatMap(
+  requireMember("Sign in as a member to talk to the supervisor."),
+  ({ id, login }) =>
+    Effect.map(RequestToken, (token) => ({
+      member: TurnMember.make({ id, login }),
+      credential: Option.match(
+        Option.filter(token, ({ kind }) => kind === "device"),
+        {
+          onNone: (): PostingCredential => PostedWithSession.make({}),
+          onSome: ({ id: tokenId }) => PostedWithToken.make({ tokenId }),
+        },
       ),
-    onSome: ({ id, login }) =>
-      Effect.map(RequestToken, (token) => ({
-        member: TurnMember.make({ id, login }),
-        credential: Option.match(
-          Option.filter(token, ({ kind }) => kind === "device"),
-          {
-            onNone: (): PostingCredential => PostedWithSession.make({}),
-            onSome: ({ id: tokenId }) => PostedWithToken.make({ tokenId }),
-          },
-        ),
-      })),
-  }),
+    })),
 );
 
 /** The handlers of the operator API's `conversation` group. */
@@ -140,15 +142,14 @@ export const conversationHandlers = HttpApiBuilder.group(OperatorApi, "conversat
     .handle("conversations", ({ query }) =>
       Effect.gen(function* () {
         const service = yield* conversations;
+        const member = yield* RequestMember;
         const listed = yield* service
-          .list(Option.fromUndefinedOr(query.anchor))
+          .list(
+            Option.fromUndefinedOr(query.anchor),
+            Option.map(member, ({ id }) => id),
+          )
           .pipe(Effect.mapError(failure));
-        return {
-          conversations: listed.map(({ conversation, lastTurn }) => ({
-            conversation,
-            lastTurn: Option.getOrNull(Option.map(lastTurn, turnView)),
-          })),
-        };
+        return { conversations: listed.map(summaryView) };
       }),
     )
     .handle("startConversation", ({ payload }) =>
@@ -198,6 +199,16 @@ export const conversationHandlers = HttpApiBuilder.group(OperatorApi, "conversat
           )
           .pipe(Effect.mapError(failure));
         return { message: posted.message, turn: turnView(posted.turn) };
+      }),
+    )
+    .handle("markRead", ({ params, payload }) =>
+      Effect.gen(function* () {
+        const service = yield* conversations;
+        const member = yield* requireMember("Sign in as a member to mark conversations read.");
+        const marker = yield* service
+          .markRead(params.conversation, payload.through, member.id)
+          .pipe(Effect.mapError(failure));
+        return readMarkerView(marker);
       }),
     )
     .handle("cancelTurn", ({ params }) =>

@@ -7,11 +7,11 @@ import {
   MessageBody,
   type TurnId,
 } from "@usine/core/conversation";
+import { OperatorHttpError } from "@usine/orchestrator/operator/http";
 import { DateTime, Schema } from "effect";
 import { type RefObject, useMemo, useState } from "react";
 import { ErrorAlert } from "~/components/error-alert";
 import { PageFact } from "~/components/page";
-import { SheetDescription, SheetHeader, SheetTitle } from "~/components/ui/sheet";
 import {
   MessageScroller,
   MessageScrollerButton,
@@ -19,10 +19,13 @@ import {
   MessageScrollerProvider,
   MessageScrollerViewport,
 } from "~/components/ui/message-scroller";
-import { Composer } from "~/components/conversations/composer";
+import { Skeleton } from "~/components/ui/skeleton";
 import { PanelFooter } from "~/components/conversations/footer";
-import { TimelineEmpty, TurnBlock } from "~/components/conversations/timeline";
+import { PaneHeader } from "~/components/conversations/pane-header";
+import { PromptInput } from "~/components/conversations/prompt-input";
+import { TimelineEmpty, TurnMessages } from "~/components/conversations/timeline";
 import { useMember, useReadOnlyReason, useScopeName } from "~/hooks/use-conversation-access";
+import { useMarkRead } from "~/hooks/use-mark-read";
 import { conversationApi, rejectionMessage } from "~/lib/api";
 import {
   conversationEventsQuery,
@@ -43,39 +46,37 @@ import {
   isPending,
   withPendingPost,
 } from "~/lib/conversations/timeline";
-import { OperatorHttpError } from "@usine/orchestrator/operator/http";
 import { dayTimeLabel, timestampLabel } from "~/lib/strings";
 
-type ConversationHeaderProps = { readonly conversation: ConversationRecord };
+type ThreadFactsProps = { readonly conversation: ConversationRecord };
 
-const ConversationHeader = ({ conversation }: ConversationHeaderProps) => {
+const ThreadFacts = ({ conversation }: ThreadFactsProps) => {
   const scope = useScopeName(conversation.scope);
   const started = DateTime.formatIso(conversation.createdAt);
   return (
-    <>
-      <SheetTitle className="wrap-anywhere">{conversation.title}</SheetTitle>
-      <SheetDescription render={<div />} className="flex flex-wrap gap-x-5 gap-y-1.5 text-sm">
-        <PageFact
-          icon={conversation.scope._tag === "Instance" ? SquaresFourIcon : KanbanIcon}
-          title="Scope"
+    <div className="flex flex-wrap gap-x-5 gap-y-1.5 text-sm text-muted-foreground">
+      <PageFact
+        icon={conversation.scope._tag === "Instance" ? SquaresFourIcon : KanbanIcon}
+        title="Scope"
+      >
+        {scope}
+      </PageFact>
+      <PageFact icon={UserIcon} title="Started by">
+        {conversation.createdBy}
+        <time
+          dateTime={started}
+          title={timestampLabel(started)}
+          className="font-mono text-xs tabular-nums"
         >
-          {scope}
+          {dayTimeLabel(started)}
+        </time>
+      </PageFact>
+      {conversation.anchor._tag === "Some" && (
+        <PageFact icon={LinkSimpleIcon} title="Anchor">
+          <span className="font-mono text-xs wrap-anywhere">{conversation.anchor.value.kind}</span>
         </PageFact>
-        <PageFact icon={UserIcon} title="Started by">
-          {conversation.createdBy}
-          <time dateTime={started} title={timestampLabel(started)} className="font-mono text-xs">
-            {dayTimeLabel(started)}
-          </time>
-        </PageFact>
-        {conversation.anchor._tag === "Some" && (
-          <PageFact icon={LinkSimpleIcon} title="Anchor">
-            <span className="font-mono text-xs wrap-anywhere">
-              {conversation.anchor.value.kind}
-            </span>
-          </PageFact>
-        )}
-      </SheetDescription>
-    </>
+      )}
+    </div>
   );
 };
 
@@ -84,17 +85,18 @@ const notReadyMessage = (cause: unknown) =>
     ? { title: notReadyTitle, message: cause.message }
     : { message: rejectionMessage(cause) };
 
-type ConversationBodyProps = {
+type ThreadBodyProps = {
   readonly id: ConversationId;
   readonly record: Conversation;
   readonly composerRef: RefObject<HTMLTextAreaElement | null>;
 };
 
-const ConversationBody = ({ id, record, composerRef }: ConversationBodyProps) => {
+const ThreadBody = ({ id, record, composerRef }: ThreadBodyProps) => {
   const queryClient = useQueryClient();
   const member = useMember();
   const readOnly = useReadOnlyReason(record.conversation.scope);
   const events = useQuery(conversationEventsQuery(queryClient, id));
+  useMarkRead(id, record);
   const [draft, setDraft] = useState("");
   const timeline = useMemo(
     () => conversationTimeline(record, events.data ?? []),
@@ -146,15 +148,16 @@ const ConversationBody = ({ id, record, composerRef }: ConversationBodyProps) =>
       <MessageScrollerProvider autoScroll defaultScrollPosition="end" scrollEdgeThreshold={8}>
         <MessageScroller className="min-h-0 flex-1">
           <MessageScrollerViewport aria-label="Messages">
-            <MessageScrollerContent className="gap-6 px-5 pt-5 pb-8">
+            <MessageScrollerContent className="mx-auto w-full max-w-3xl gap-5 px-5 pt-5 pb-8">
               {timeline.length === 0 ? (
                 <TimelineEmpty>{emptyConversation}</TimelineEmpty>
               ) : (
                 timeline.map((entry) => (
-                  <TurnBlock
+                  <TurnMessages
                     key={entry.turn.id}
                     entry={entry}
                     pending={isPending(entry.turn)}
+                    own={member !== undefined && entry.turn.member.id === member.id}
                     canceling={cancel.isPending && cancel.variables === entry.turn.id}
                     cancel={
                       readOnly === undefined &&
@@ -176,7 +179,7 @@ const ConversationBody = ({ id, record, composerRef }: ConversationBodyProps) =>
       <PanelFooter readOnly={readOnly}>
         <div className="space-y-3">
           {failure !== undefined && <ErrorAlert {...failure} />}
-          <Composer
+          <PromptInput
             inputRef={composerRef}
             value={draft}
             change={setDraft}
@@ -189,34 +192,41 @@ const ConversationBody = ({ id, record, composerRef }: ConversationBodyProps) =>
   );
 };
 
-type ConversationViewProps = {
+type ThreadProps = {
   readonly id: ConversationId;
   readonly composerRef: RefObject<HTMLTextAreaElement | null>;
+  readonly back: () => void;
 };
 
-/** Renders one conversation in the panel: its header, its turns, and the composer. */
-export const ConversationView = ({ id, composerRef }: ConversationViewProps) => {
+/** One conversation: its title and facts, its turns, and the prompt input. */
+export const Thread = ({ id, composerRef, back }: ThreadProps) => {
   const record = useQuery(conversationQuery(id));
   if (record.data === undefined)
     return (
-      <SheetHeader className="shrink-0 gap-1.5 border-b px-5 pt-5 pb-4 pr-20">
-        <SheetTitle>{record.isError ? conversationMissing : loadingConversation}</SheetTitle>
-        <SheetDescription>
-          {record.isError
-            ? Schema.is(OperatorHttpError)(record.error) &&
-              record.error.error === "ConversationNotFound"
+      <PaneHeader
+        back={back}
+        title={record.isError ? conversationMissing : loadingConversation}
+        aria-busy={!record.isError}
+      >
+        {record.isError ? (
+          <p className="text-sm text-muted-foreground">
+            {Schema.is(OperatorHttpError)(record.error) &&
+            record.error.error === "ConversationNotFound"
               ? conversationMissingDetail
-              : rejectionMessage(record.error)
-            : loadingConversation}
-        </SheetDescription>
-      </SheetHeader>
+              : rejectionMessage(record.error)}
+          </p>
+        ) : (
+          // The height of the facts line, so the header keeps its size when they arrive.
+          <Skeleton className="h-5 w-56" />
+        )}
+      </PaneHeader>
     );
   return (
     <>
-      <SheetHeader className="shrink-0 gap-1.5 border-b px-5 pt-5 pb-4 pr-20">
-        <ConversationHeader conversation={record.data.conversation} />
-      </SheetHeader>
-      <ConversationBody id={id} record={record.data} composerRef={composerRef} />
+      <PaneHeader back={back} title={record.data.conversation.title}>
+        <ThreadFacts conversation={record.data.conversation} />
+      </PaneHeader>
+      <ThreadBody id={id} record={record.data} composerRef={composerRef} />
     </>
   );
 };

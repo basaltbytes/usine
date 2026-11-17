@@ -6,12 +6,13 @@ import { OperatorHttpError } from "@usine/orchestrator/operator/http";
 import { Schema } from "effect";
 import { type RefObject, useId, useState } from "react";
 import { ErrorAlert } from "~/components/error-alert";
+import { Bubble, BubbleContent } from "~/components/ui/bubble";
 import { Label } from "~/components/ui/label";
+import { Message, MessageContent, MessageFooter, MessageHeader } from "~/components/ui/message";
 import { NativeSelect } from "~/components/ui/native-select";
-import { SheetDescription, SheetHeader, SheetTitle } from "~/components/ui/sheet";
-import { Composer } from "~/components/conversations/composer";
 import { PanelFooter } from "~/components/conversations/footer";
-import { RecentConversations } from "~/components/conversations/recent";
+import { PaneHeader } from "~/components/conversations/pane-header";
+import { PromptInput } from "~/components/conversations/prompt-input";
 import { INSTANCE_CHOICE, useMember, useScopeChoices } from "~/hooks/use-conversation-access";
 import { conversationApi, rejectionMessage } from "~/lib/api";
 import { conversationsQuery } from "~/lib/conversations/queries";
@@ -26,14 +27,15 @@ import {
 } from "~/lib/conversations/strings";
 
 type NewConversationProps = {
-  /** The project of the page the panel opened on, chosen first when the member can post there. */
+  /** The project of the page the inbox opened on, chosen first when the member can post there. */
   readonly project: ProjectId | undefined;
   readonly opened: (id: ConversationId) => void;
+  readonly back: () => void;
   readonly composerRef: RefObject<HTMLTextAreaElement | null>;
 };
 
 /** Starts a conversation: picks its scope, then sends the first message. */
-export const NewConversation = ({ project, opened, composerRef }: NewConversationProps) => {
+export const NewConversation = ({ project, opened, back, composerRef }: NewConversationProps) => {
   const queryClient = useQueryClient();
   const member = useMember();
   const choices = useScopeChoices();
@@ -74,39 +76,47 @@ export const NewConversation = ({ project, opened, composerRef }: NewConversatio
     : undefined;
   return (
     <>
-      <SheetHeader className="shrink-0 gap-1.5 border-b px-5 pt-5 pb-4 pr-20">
-        <SheetTitle>{newConversationLabel}</SheetTitle>
-        <SheetDescription>{readOnlyNotice}</SheetDescription>
-      </SheetHeader>
-      <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-5">
-        {choices.length > 0 && (
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor={select}>{scopeLabel}</Label>
-            <NativeSelect
-              id={select}
-              value={value}
-              disabled={start.isPending}
-              className="w-full max-w-xs [&_select]:h-8 [&_select]:text-sm max-sm:[&_select]:h-11 max-sm:[&_select]:text-lg pointer-coarse:[&_select]:h-11 pointer-coarse:[&_select]:text-lg"
-              onChange={(event) => setChosen(event.target.value)}
-            >
-              {choices.map((choice) => (
-                <option key={choice.value} value={choice.value}>
-                  {choice.label}
-                </option>
-              ))}
-            </NativeSelect>
-          </div>
-        )}
-        {start.isPending && start.variables !== undefined && member !== undefined && (
-          <section aria-label={`Message from ${member.login}`} className="space-y-1">
-            <p className="text-xs font-medium">{member.login}</p>
-            <p className="text-md whitespace-pre-wrap opacity-60 wrap-anywhere">
-              {start.variables.text}
-            </p>
-            <p className="text-xs text-muted-foreground">{unsentLabel}</p>
-          </section>
-        )}
-        {!start.isPending && <RecentConversations open={opened} />}
+      <PaneHeader back={back} title={newConversationLabel}>
+        <p className="text-sm text-muted-foreground">{readOnlyNotice}</p>
+      </PaneHeader>
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="mx-auto w-full max-w-3xl space-y-6 px-5 py-5">
+          {choices.length > 0 && (
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor={select}>{scopeLabel}</Label>
+              <NativeSelect
+                id={select}
+                value={value}
+                disabled={start.isPending}
+                className="w-full max-w-xs [&_select]:h-8 [&_select]:text-sm max-sm:[&_select]:h-11 max-sm:[&_select]:text-lg pointer-coarse:[&_select]:h-11 pointer-coarse:[&_select]:text-lg"
+                onChange={(event) => setChosen(event.target.value)}
+              >
+                {choices.map((choice) => (
+                  <option key={choice.value} value={choice.value}>
+                    {choice.label}
+                  </option>
+                ))}
+              </NativeSelect>
+            </div>
+          )}
+          {start.isPending && start.variables !== undefined && member !== undefined && (
+            <Message align="end" role="group" aria-label={`Message from ${member.login}`}>
+              <MessageContent className="gap-1">
+                <MessageHeader className="text-xs font-medium text-foreground">
+                  {member.login}
+                </MessageHeader>
+                <Bubble variant="muted" align="end" className="max-w-[85%]">
+                  <BubbleContent className="px-3 py-2 opacity-60">
+                    <p className="text-md whitespace-pre-wrap wrap-anywhere">
+                      {start.variables.text}
+                    </p>
+                  </BubbleContent>
+                </Bubble>
+                <MessageFooter className="font-normal">{unsentLabel}</MessageFooter>
+              </MessageContent>
+            </Message>
+          )}
+        </div>
       </div>
       <PanelFooter
         readOnly={
@@ -116,7 +126,7 @@ export const NewConversation = ({ project, opened, composerRef }: NewConversatio
         <div className="space-y-3">
           {failure !== undefined && <ErrorAlert {...failure} />}
           {scope !== undefined && (
-            <Composer
+            <PromptInput
               inputRef={composerRef}
               value={draft}
               change={setDraft}

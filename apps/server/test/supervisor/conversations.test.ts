@@ -25,7 +25,12 @@ import {
 import { ProjectId } from "@usine/core/project";
 import { TurnAccess } from "@usine/orchestrator/conversation/access";
 import { Conversations, SupervisorReady } from "@usine/orchestrator/conversation";
-import { ConversationRecord, Posted } from "@usine/orchestrator/conversation/store";
+import {
+  ConversationRecord,
+  ConversationSummary,
+  Posted,
+  ReadMarker,
+} from "@usine/orchestrator/conversation/store";
 import { OperatorApi } from "@usine/orchestrator/operator/http";
 import { Context, DateTime, Effect, Layer, Option, Redacted, Schema } from "effect";
 import { HttpRouter } from "effect/http";
@@ -77,6 +82,7 @@ interface MemberGrants {
 const fixture = (grants: MemberGrants = { current: administratorPermissions }) =>
   Effect.gen(function* () {
     const posts: Array<PostingCredential> = [];
+    const reads: Array<ReadMarker> = [];
     const services = yield* authFixture([alice], alice, () => grants.current);
     const signIn = yield* services.authentication.link;
     const link = new URL(signIn);
@@ -108,6 +114,21 @@ const fixture = (grants: MemberGrants = { current: administratorPermissions }) =
     );
     const conversations = Layer.mock(Conversations)({
       status: Effect.succeed(SupervisorReady.make({})),
+      list: (_key, reader) =>
+        Effect.succeed([
+          ConversationSummary.make({
+            conversation,
+            lastTurn: Option.some(first.turn),
+            lastMessage: Option.some(first.message),
+            unread: Option.map(reader, (member) => member === alice.id),
+          }),
+        ]),
+      markRead: (id, through, member) =>
+        Effect.sync(() => {
+          const marker = ReadMarker.make({ conversation: id, member, through, at });
+          reads.push(marker);
+          return marker;
+        }),
       read: () =>
         Effect.succeed(
           ConversationRecord.make({ conversation, messages: [first.message], turns: [first.turn] }),
@@ -139,6 +160,7 @@ const fixture = (grants: MemberGrants = { current: administratorPermissions }) =
     ).pipe(Effect.map((context) => Context.get(context, TurnAccess)));
     return {
       posts,
+      reads,
       request,
       router,
       services,
@@ -202,6 +224,33 @@ describe("conversations over the operator API", () => {
           assert.notInclude(response.text, leak);
         assert.include(response.text, '"member":{"id":1,"login":"alice"}');
       }
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("lists unread state for the calling member and marks read with a read grant", () =>
+    Effect.gen(function* () {
+      const { reads, request, token } = yield* fixture();
+      const viewer = yield* token([grant("read")]);
+      const listed = yield* request(viewer.secret)({
+        method: "GET",
+        url: "/api/conversations",
+        body: Option.none(),
+      });
+      assert.strictEqual(listed.status, 200);
+      assert.include(listed.text, '"unread":true');
+      assert.include(listed.text, '"preview":"What needs me?"');
+      assert.notInclude(listed.text, "credential");
+      const marked = yield* request(viewer.secret)({
+        method: "POST",
+        url: "/api/conversations/c-1/read",
+        body: Option.some({ through: 1 }),
+      });
+      assert.strictEqual(marked.status, 200);
+      assert.deepStrictEqual(
+        reads.map(({ conversation, member, through }) => [conversation, member, through]),
+        [["c-1", alice.id, 1]],
+      );
+      assert.notInclude(marked.text, '"member"');
     }).pipe(Effect.scoped),
   );
 });
@@ -289,14 +338,14 @@ describe("a supervisor turn's credential", () => {
 
   it.effect("is refused on every conversation endpoint", () =>
     Effect.gen(function* () {
-      const { posts, request, services } = yield* fixture();
+      const { posts, reads, request, services } = yield* fixture();
       const secret = yield* services.authentication.turnCredential(
         alice.id,
         alpha,
         PostedWithSession.make({}),
       );
       const endpoints = Object.values(OperatorApi.groups.conversation.endpoints);
-      assert.lengthOf(endpoints, 7);
+      assert.lengthOf(endpoints, 8);
       for (const endpoint of endpoints) {
         const url = endpoint.path.replace(":conversation", "c-1").replace(":turn", "t-1");
         const response = yield* request(secret)({
@@ -307,13 +356,16 @@ describe("a supervisor turn's credential", () => {
               ? Option.some(
                   url === "/api/conversations"
                     ? { scope: { _tag: "Project", project: "alpha" }, message }
-                    : message,
+                    : url.endsWith("/read")
+                      ? { through: 1 }
+                      : message,
                 )
               : Option.none(),
         });
         assert.strictEqual(response.status, 403, `${endpoint.method} ${url}`);
       }
       assert.isEmpty(posts);
+      assert.isEmpty(reads);
     }).pipe(Effect.scoped),
   );
 

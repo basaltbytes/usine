@@ -36,6 +36,8 @@ export const PanelFooter = ({ readOnly, children }: PanelFooterProps) => {
       children
     );
   return content === null ? null : (
-    <div className="shrink-0 border-t px-5 pt-4 pb-5">{content}</div>
+    <div className="shrink-0 border-t px-5 pt-4 pb-[max(1.25rem,env(safe-area-inset-bottom))]">
+      <div className="mx-auto w-full max-w-3xl">{content}</div>
+    </div>
   );
 };

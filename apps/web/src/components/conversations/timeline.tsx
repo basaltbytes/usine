@@ -3,7 +3,9 @@ import type { MemberMessage, SupervisorMessage } from "@usine/core/conversation"
 import type { ReactNode } from "react";
 import { Markdown } from "~/components/markdown";
 import { StatusBadge } from "~/components/status-badge";
+import { Bubble, BubbleContent } from "~/components/ui/bubble";
 import { Button } from "~/components/ui/button";
+import { Message, MessageContent, MessageFooter, MessageHeader } from "~/components/ui/message";
 import { MessageScrollerItem } from "~/components/ui/message-scroller";
 import { ConversationToolRow } from "~/components/conversations/tool-row";
 import {
@@ -19,72 +21,83 @@ import {
   unsentLabel,
 } from "~/lib/conversations/strings";
 import { bodyText, markdownBody, type TurnEntry } from "~/lib/conversations/timeline";
-import { clockLabel, timestampLabel } from "~/lib/strings";
+import { dayTimeLabel, timestampLabel } from "~/lib/strings";
 import { cn } from "~/lib/utils";
 
-type SpeakerLineProps = {
+type SpeakerProps = {
   readonly speaker: string;
   readonly at: DateTime.Utc | undefined;
-  readonly tone?: "plain" | "failed";
+  readonly className?: string;
 };
 
-const SpeakerLine = ({ speaker, at, tone = "plain" }: SpeakerLineProps) => {
+const Speaker = ({ speaker, at, className }: SpeakerProps) => {
   const instant = at === undefined ? undefined : DateTime.formatIso(at);
   return (
-    <p className="flex items-baseline gap-2 text-xs">
-      <span className={cn("font-medium", tone === "failed" && "text-destructive")}>{speaker}</span>
+    <MessageHeader className={cn("gap-2 text-xs", className)}>
+      <span className="font-medium text-foreground">{speaker}</span>
       {instant !== undefined && (
         <time
           dateTime={instant}
           title={timestampLabel(instant)}
-          className="font-mono tabular-nums text-muted-foreground"
+          className="font-mono font-normal tabular-nums"
         >
-          {clockLabel(instant)}
+          {dayTimeLabel(instant)}
         </time>
       )}
-    </p>
+    </MessageHeader>
   );
 };
 
-type MessageBodyProps = { readonly message: MemberMessage | SupervisorMessage };
+type MessageTextProps = {
+  readonly message: MemberMessage | SupervisorMessage;
+  readonly className?: string;
+};
 
-const MessageBody = ({ message }: MessageBodyProps) => {
+const MessageText = ({ message, className }: MessageTextProps) => {
   const markdown = markdownBody(message);
   return markdown === undefined ? (
-    <p className="text-md whitespace-pre-wrap wrap-anywhere">{bodyText(message.body)}</p>
+    <p className={cn("text-md whitespace-pre-wrap wrap-anywhere", className)}>
+      {bodyText(message.body)}
+    </p>
   ) : (
-    <Markdown className="text-md wrap-anywhere">{markdown}</Markdown>
+    <Markdown className={cn("text-md wrap-anywhere", className)}>{markdown}</Markdown>
   );
 };
 
-type TurnStateLineProps = {
+type TurnStateProps = {
   readonly entry: TurnEntry;
   readonly cancel: (() => void) | undefined;
   readonly canceling: boolean;
 };
 
-const TurnStateLine = ({ entry, cancel, canceling }: TurnStateLineProps) => {
+const TurnState = ({ entry, cancel, canceling }: TurnStateProps) => {
   const { state } = entry.turn;
   const action =
     cancel === undefined ? null : (
-      <Button variant="ghost" size="sm" onClick={cancel} disabled={canceling}>
+      <Button
+        variant="ghost"
+        size="sm"
+        className="pointer-coarse:h-11"
+        onClick={cancel}
+        disabled={canceling}
+      >
         {canceling ? cancelingTurnLabel : cancelTurnLabel}
       </Button>
     );
   switch (state._tag) {
     case "Queued":
       return (
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <MessageFooter className="flex-wrap gap-x-3 gap-y-1 px-0 font-normal">
           <StatusBadge state="Queued" label={entry.behind ? queuedBehindLabel : queuedLabel} />
           {action}
-        </div>
+        </MessageFooter>
       );
     case "Running":
       return (
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <MessageFooter className="flex-wrap gap-x-3 gap-y-1 px-0 font-normal">
           <StatusBadge state="Running" label={runningLabel} />
           {action}
-        </div>
+        </MessageFooter>
       );
     case "Failed":
       return (
@@ -94,60 +107,80 @@ const TurnStateLine = ({ entry, cancel, canceling }: TurnStateLineProps) => {
         </div>
       );
     case "Canceled":
-      return <StatusBadge state="Canceled" label={canceledLabel(state.by)} />;
+      return (
+        <MessageFooter className="px-0 font-normal">
+          <StatusBadge state="Canceled" label={canceledLabel(state.by)} />
+        </MessageFooter>
+      );
     case "Succeeded":
       return null;
   }
 };
 
-type TurnBlockProps = {
+type TurnMessagesProps = {
   readonly entry: TurnEntry;
   /** Whether the turn's member message is still being sent. */
   readonly pending: boolean;
+  /** Whether the signed-in member posted the turn's message, which aligns it to the end. */
+  readonly own: boolean;
   readonly cancel: (() => void) | undefined;
   readonly canceling: boolean;
 };
 
-/** Renders one turn: the member's message, the session's text and tool calls, then the answer. */
-export const TurnBlock = ({ entry, pending, cancel, canceling }: TurnBlockProps) => {
+/**
+ * Renders one turn as two messages: the member's message, then the supervisor's text, tool calls,
+ * state, and answer. The member's message is the scroll anchor while the answer streams in.
+ */
+export const TurnMessages = ({ entry, pending, own, cancel, canceling }: TurnMessagesProps) => {
   const { message, activity, reply } = entry;
+  const align = own ? "end" : "start";
   return (
-    <MessageScrollerItem
-      messageId={entry.turn.id}
-      scrollAnchor
-      className="space-y-4"
-      aria-busy={entry.turn.state._tag === "Running"}
-    >
+    <>
       {message !== undefined && (
-        <section aria-label={`Message from ${message.author}`} className="space-y-1">
-          <SpeakerLine speaker={message.author} at={message.createdAt} />
-          <div className={cn(pending && "opacity-60")}>
-            <MessageBody message={message} />
-          </div>
-          {pending && <p className="text-xs text-muted-foreground">{unsentLabel}</p>}
-        </section>
+        <MessageScrollerItem messageId={`${entry.turn.id}:message`} scrollAnchor>
+          <Message align={align} aria-label={`Message from ${message.author}`} role="group">
+            <MessageContent className="gap-1">
+              <Speaker speaker={message.author} at={message.createdAt} />
+              <Bubble variant="muted" align={align} className="max-w-[85%]">
+                <BubbleContent className={cn("px-3 py-2", pending && "opacity-60")}>
+                  <MessageText message={message} />
+                </BubbleContent>
+              </Bubble>
+              {pending && <MessageFooter className="font-normal">{unsentLabel}</MessageFooter>}
+            </MessageContent>
+          </Message>
+        </MessageScrollerItem>
       )}
-      {activity.length > 0 && (
-        <div className="space-y-2">
-          {activity.map((step) =>
-            step._tag === "Tool" ? (
-              <ConversationToolRow key={step.call.key} call={step.call} />
-            ) : (
-              <Markdown key={step.key} className="text-md text-muted-foreground wrap-anywhere">
-                {step.text}
-              </Markdown>
-            ),
-          )}
-        </div>
+      {!pending && (
+        <MessageScrollerItem messageId={`${entry.turn.id}:reply`}>
+          <Message aria-label="Answer" role="group" aria-busy={entry.turn.state._tag === "Running"}>
+            <MessageContent className="gap-3">
+              {(activity.length > 0 || reply !== undefined) && (
+                <Speaker speaker={supervisorSpeaker} at={reply?.createdAt} className="px-0" />
+              )}
+              {activity.length > 0 && (
+                <div className="space-y-1">
+                  {activity.map((step) =>
+                    step._tag === "Tool" ? (
+                      <ConversationToolRow key={step.call.key} call={step.call} />
+                    ) : (
+                      <Markdown
+                        key={step.key}
+                        className="py-1 text-md text-muted-foreground wrap-anywhere"
+                      >
+                        {step.text}
+                      </Markdown>
+                    ),
+                  )}
+                </div>
+              )}
+              {reply !== undefined && <MessageText message={reply} />}
+              <TurnState entry={entry} cancel={cancel} canceling={canceling} />
+            </MessageContent>
+          </Message>
+        </MessageScrollerItem>
       )}
-      {!pending && <TurnStateLine entry={entry} cancel={cancel} canceling={canceling} />}
-      {reply !== undefined && (
-        <section aria-label="Answer" className="space-y-1">
-          <SpeakerLine speaker={supervisorSpeaker} at={reply.createdAt} />
-          <MessageBody message={reply} />
-        </section>
-      )}
-    </MessageScrollerItem>
+    </>
   );
 };
 

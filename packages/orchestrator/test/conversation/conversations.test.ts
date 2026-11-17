@@ -40,6 +40,7 @@ import {
   AnchorReference,
   defaultFormat,
   MessageBody,
+  MessageSequence,
   type Turn,
   TurnMember,
 } from "@usine/core/conversation";
@@ -521,33 +522,50 @@ describe("conversations with the supervisor", () => {
     }).pipe(Effect.scoped),
   );
 
-  it.live("lets a viewer read a project conversation and refuses the viewer's post", () =>
-    Effect.gen(function* () {
-      const store = yield* memoryStore;
-      const { layer } = yield* conversations(store, { scripts: [script("ok")] });
-      yield* Effect.gen(function* () {
-        const service = yield* Conversations;
-        const started = yield* service.start(request("Hello"), as(ada)).pipe(asOperator);
-        const id = started.conversation.id;
-        const asViewer = Effect.provideService(RequestPermissions, viewer);
-        const read = yield* service.read(id).pipe(asViewer);
-        assert.strictEqual(read.conversation.id, id);
-        const listed = yield* service.list(Option.none()).pipe(asViewer);
-        assert.deepStrictEqual(
-          listed.map(({ conversation }) => conversation.id),
-          [id],
-        );
-        const refused = yield* service
-          .post(id, message("Me too"), as(grace))
-          .pipe(asViewer, Effect.flip);
-        assert.strictEqual(refused._tag, "AccessDenied");
-        const outsider = Effect.provideService(RequestPermissions, []);
-        const hidden = yield* service.read(id).pipe(outsider, Effect.flip);
-        assert.strictEqual(hidden._tag, "ConversationNotFound");
-        const none = yield* service.list(Option.none()).pipe(outsider);
-        assert.deepStrictEqual(none, []);
-      }).pipe(Effect.provide(layer));
-    }).pipe(Effect.scoped),
+  it.live(
+    "lets a viewer read a project conversation, mark it read, and refuses the viewer's post",
+    () =>
+      Effect.gen(function* () {
+        const store = yield* memoryStore;
+        const { layer } = yield* conversations(store, { scripts: [script("ok")] });
+        yield* Effect.gen(function* () {
+          const service = yield* Conversations;
+          const started = yield* service.start(request("Hello"), as(ada)).pipe(asOperator);
+          const id = started.conversation.id;
+          const asViewer = Effect.provideService(RequestPermissions, viewer);
+          const read = yield* service.read(id).pipe(asViewer);
+          assert.strictEqual(read.conversation.id, id);
+          const listed = yield* service.list(Option.none(), Option.some(grace.id)).pipe(asViewer);
+          assert.deepStrictEqual(
+            listed.map(({ conversation, unread }) => [conversation.id, unread]),
+            [[id, Option.some(true)]],
+          );
+          const marker = yield* service
+            .markRead(id, MessageSequence.make(99), grace.id)
+            .pipe(asViewer);
+          assert.strictEqual(marker.through, 1);
+          const afterRead = yield* service
+            .list(Option.none(), Option.some(grace.id))
+            .pipe(asViewer);
+          assert.deepStrictEqual(
+            afterRead.map(({ unread }) => unread),
+            [Option.some(false)],
+          );
+          const refused = yield* service
+            .post(id, message("Me too"), as(grace))
+            .pipe(asViewer, Effect.flip);
+          assert.strictEqual(refused._tag, "AccessDenied");
+          const outsider = Effect.provideService(RequestPermissions, []);
+          const hidden = yield* service.read(id).pipe(outsider, Effect.flip);
+          assert.strictEqual(hidden._tag, "ConversationNotFound");
+          const none = yield* service.list(Option.none(), Option.none()).pipe(outsider);
+          assert.deepStrictEqual(none, []);
+          const unmarked = yield* service
+            .markRead(id, MessageSequence.make(1), grace.id)
+            .pipe(outsider, Effect.flip);
+          assert.strictEqual(unmarked._tag, "ConversationNotFound");
+        }).pipe(Effect.provide(layer));
+      }).pipe(Effect.scoped),
   );
 
   it.live("reports setup required and refuses messages without a sandbox or a supervisor", () =>

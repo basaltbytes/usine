@@ -8,6 +8,7 @@ import {
 import {
   type AccessScope,
   AccessDenied,
+  type GitHubUserId,
   type Permission,
   permits,
   RequestPermissions,
@@ -38,6 +39,7 @@ import {
   MemberPost,
   MessageBody,
   type MessageFormat,
+  MessageSequence,
   type PostingCredential,
   type QueuedTurn,
   Reply,
@@ -84,7 +86,9 @@ import {
   ConversationStore,
   type ConversationStoreError,
   type ConversationSummary,
+  lastActivity,
   type Posted,
+  ReadMarker,
   type TurnConflict,
 } from "./store.ts";
 
@@ -164,10 +168,24 @@ export class Conversations extends Context.Service<
   Conversations,
   {
     readonly status: Effect.Effect<SupervisorStatus>;
-    /** The conversations that the member can read, with the anchor `key` or all, newest first. */
+    /**
+     * The conversations that the caller can read, with the anchor `key` or all, latest activity
+     * first. With a `reader`, each says whether it is unread for that member.
+     */
     readonly list: (
       key: Option.Option<AnchorKey>,
+      reader: Option.Option<GitHubUserId>,
     ) => Effect.Effect<ReadonlyArray<ConversationSummary>, ConversationStoreError>;
+    /**
+     * Marks `id` read by `member` through the message `through`, or through its last message if
+     * `through` is later. Needs `read` on the scope. A marker never moves back, and marking read
+     * notifies no one.
+     */
+    readonly markRead: (
+      id: ConversationId,
+      through: MessageSequence,
+      member: GitHubUserId,
+    ) => Effect.Effect<ReadMarker, ConversationNotFound | ConversationStoreError>;
     readonly start: (
       request: ConversationRequest,
       poster: Poster,
@@ -654,10 +672,28 @@ export const conversationsLayer = Layer.effect(
 
     return Conversations.of({
       status,
-      list: Effect.fn("Conversations.list")(function* (key) {
+      list: Effect.fn("Conversations.list")(function* (key, reader) {
         const grants = yield* RequestPermissions;
-        const all = yield* store.list(key);
-        return all.filter(({ conversation }) => permits(grants, "read", conversation.scope));
+        const all = yield* store.list(key, reader);
+        return all
+          .filter(({ conversation }) => permits(grants, "read", conversation.scope))
+          .map((summary) => ({ summary, at: DateTime.toEpochMillis(lastActivity(summary)) }))
+          .sort((left, right) => right.at - left.at)
+          .map(({ summary }) => summary);
+      }),
+      markRead: Effect.fn("Conversations.markRead")(function* (id, through, member) {
+        yield* Effect.annotateCurrentSpan({ conversation: id, through });
+        const record = yield* readable(id);
+        const last = record.messages.at(-1)?.sequence ?? through;
+        const at = yield* now;
+        return yield* store.markRead(
+          ReadMarker.make({
+            conversation: id,
+            member,
+            through: MessageSequence.make(Math.min(through, last)),
+            at,
+          }),
+        );
       }),
       start: Effect.fn("Conversations.start")(function* (request, { member, credential }) {
         yield* Effect.annotateCurrentSpan({ member: member.login });

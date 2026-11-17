@@ -37,6 +37,7 @@ import {
   ConversationEventsView,
   ConversationStatusView,
   ConversationsView,
+  ReadMarkerView,
   ConversationView,
   EVENTS_PAGE,
   TurnView,
@@ -227,8 +228,42 @@ export interface ConversationServer {
   events: Map<string, ReadonlyArray<TurnEvent>>;
   /** Answers a post; the default queues it as the server does. */
   post: (conversation: string, body: Schema.Json | undefined) => Promise<Response>;
+  /** The read marker of `ada`, the signed-in member, per conversation. */
+  readonly reads: Map<string, number>;
   readonly requests: Array<string>;
 }
+
+/** The list row of `record` for `ada`, as the server computes it. */
+const summaryOf = (
+  record: typeof ConversationView.Type,
+  through: number | undefined,
+): (typeof ConversationsView.Type)["conversations"][number] => {
+  const last = record.messages.at(-1);
+  const body = last?.body;
+  const times = [
+    record.conversation.createdAt,
+    ...record.messages.map(({ createdAt }) => createdAt),
+  ];
+  return {
+    conversation: record.conversation,
+    lastTurn: record.turns.at(-1) ?? null,
+    lastMessage: last?.sequence ?? MessageSequence.make(1),
+    lastActivity: times.reduce((latest, time) => DateTime.max(latest, time)),
+    preview: Schema.is(Schema.String)(body)
+      ? body
+          .replaceAll(/[*_`#]+/gu, "")
+          .replaceAll(/\s+/gu, " ")
+          .trim()
+      : "",
+    unread:
+      record.messages.some(
+        (message) =>
+          message.sequence > (through ?? 0) &&
+          !(message.role === "member" && message.author === ada.login),
+      ) ||
+      (through === undefined && record.turns.some(({ state }) => state._tag === "Failed")),
+  };
+};
 
 const readyStatus: typeof ConversationStatusView.Type = { state: "ready", reason: null };
 
@@ -241,6 +276,7 @@ export const conversationServer = (
     conversations: new Map(),
     events: new Map(),
     post: () => Promise.resolve(errorResponse("ConversationNotFound", "Not found", 404)),
+    reads: new Map(),
     requests: [],
   };
   const fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -255,10 +291,13 @@ export const conversationServer = (
       return encodedResponse(ConversationStatusView, server.status);
     if (url.pathname === "/api/conversations")
       return encodedResponse(ConversationsView, {
-        conversations: [...server.conversations.values()].map((record) => ({
-          conversation: record.conversation,
-          lastTurn: record.turns.at(-1) ?? null,
-        })),
+        conversations: [...server.conversations.values()]
+          .map((record) => summaryOf(record, server.reads.get(record.conversation.id)))
+          .sort(
+            (left, right) =>
+              DateTime.toEpochMillis(right.lastActivity) -
+              DateTime.toEpochMillis(left.lastActivity),
+          ),
       });
     const [, , , id, part] = url.pathname.split("/");
     const record = id === undefined ? undefined : server.conversations.get(id);
@@ -271,6 +310,17 @@ export const conversationServer = (
       return encodedResponse(ConversationEventsView, {
         events: page,
         next: page.at(-1)?.sequence ?? (after === 0 ? 0 : EventSequence.make(after)),
+      });
+    }
+    if (part === "read" && method === "POST") {
+      const { through } = await new Response(init?.body).json();
+      const last = record.messages.at(-1)?.sequence ?? 1;
+      const marked = Math.max(server.reads.get(id) ?? 0, Math.min(Number(through), last));
+      server.reads.set(id, marked);
+      return encodedResponse(ReadMarkerView, {
+        conversation: record.conversation.id,
+        through: MessageSequence.make(marked),
+        readAt: DateTime.nowUnsafe(),
       });
     }
     if (part === "messages" && method === "POST")

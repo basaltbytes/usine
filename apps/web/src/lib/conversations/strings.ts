@@ -1,19 +1,25 @@
-import type { TurnFailure, TurnState } from "@usine/core/conversation";
-
-/** Returns a turn's state as the list shows it. */
-export const turnStateLabel = (state: TurnState): string =>
-  state._tag === "Succeeded" ? "Answered" : state._tag;
+import type { TurnFailure } from "@usine/core/conversation";
 
 export const conversationsTitle = "Conversations";
 export const newConversationLabel = "New conversation";
 export const openConversationsLabel = "Ask the supervisor";
-export const allConversationsLabel = "All conversations";
-export const recentConversationsLabel = "Recent conversations";
-export const conversationPanelLabel = "Conversation with the supervisor";
+export const conversationPanelLabel = "Conversations with the supervisor";
+export const conversationListLabel = "Conversations";
+export const backToListLabel = "Back to conversations";
+export const allConversationsLabel = "Open conversations page";
 export const loadingConversation = "Loading conversation…";
+export const loadingConversations = "Loading conversations…";
 export const conversationMissing = "Conversation not found";
 export const conversationMissingDetail =
   "It was deleted, or your role bindings don't include its project.";
+export const noConversationOpen = "No conversation open";
+export const noConversationOpenDetail = "Select a conversation, or start a new one.";
+
+/** The header button's name, with the unread count when there is one. */
+export const openConversationsWithUnread = (unread: number) =>
+  unread === 0 ? openConversationsLabel : `${openConversationsLabel}, ${unread} unread`;
+export const unreadLabel = "Unread";
+export const unreadCountLabel = (unread: number) => `${unread} unread`;
 
 export const supervisorSpeaker = "Supervisor";
 export const instanceScope = "Instance";
@@ -50,12 +56,3 @@ export const emptyListTitle = "No conversations";
 export const emptyListDescription =
   "A conversation asks the supervisor about runs, tasks, and the source, in the instance or one project. Answers come from read-only access.";
 export const emptyConversation = "No messages yet";
-
-export const startedByColumn = "Started by";
-export const startedColumn = "Started";
-export const lastTurnColumn = "Last turn";
-export const conversationColumn = "Conversation";
-export const noTurn = "No turn";
-
-export const conversationCount = (count: number) =>
-  count === 1 ? "1 conversation" : `${count} conversations`;

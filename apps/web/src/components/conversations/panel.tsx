@@ -1,22 +1,17 @@
-import { ListBulletsIcon } from "@phosphor-icons/react";
+import { ArrowSquareOutIcon } from "@phosphor-icons/react";
 import { Link } from "@tanstack/react-router";
-import type { ConversationId } from "@usine/core/conversation";
 import type { ProjectId } from "@usine/core/project";
 import { useRef } from "react";
 import { buttonVariants } from "~/components/ui/button";
-import { Sheet, SheetContent } from "~/components/ui/sheet";
+import { Sheet, SheetContent, SheetTitle } from "~/components/ui/sheet";
 import { Tooltip, TooltipContent, TooltipTrigger } from "~/components/ui/tooltip";
-import { ConversationView } from "~/components/conversations/conversation-view";
-import { NewConversation } from "~/components/conversations/new-conversation";
+import { Inbox, type InboxTarget } from "~/components/conversations/inbox";
 import { useOpenConversation } from "~/hooks/use-open-conversation";
 import { allConversationsLabel, conversationPanelLabel } from "~/lib/conversations/strings";
 import { cn } from "~/lib/utils";
 
-/** What the panel shows: a conversation, or the form that starts one. */
-export type ConversationTarget = ConversationId | "new";
-
 type ConversationPanelProps = {
-  readonly target: ConversationTarget;
+  readonly target: InboxTarget;
   /** If `false`, the panel stays mounted until the sheet's exit transition ends. */
   readonly open: boolean;
   readonly close: () => void;
@@ -24,7 +19,10 @@ type ConversationPanelProps = {
   readonly project: ProjectId | undefined;
 };
 
-/** The conversation panel: a right sheet over any page, opened by the `conversation` search param. */
+/**
+ * The supervisor inbox in a right sheet over any page, opened by the `conversation` search param.
+ * Escape goes back from a conversation to the list, then closes the sheet.
+ */
 export const ConversationPanel = ({ target, open, close, project }: ConversationPanelProps) => {
   const composer = useRef<HTMLTextAreaElement>(null);
   const popup = useRef<HTMLDivElement>(null);
@@ -32,38 +30,43 @@ export const ConversationPanel = ({ target, open, close, project }: Conversation
   return (
     <Sheet
       open={open}
-      onOpenChange={(next) => {
-        if (!next) close();
+      onOpenChange={(next, details) => {
+        if (next) return;
+        if (details.reason === "escape-key" && target !== "inbox") openConversation("inbox");
+        else close();
       }}
     >
       <SheetContent
         side="right"
         ref={popup}
-        aria-label={conversationPanelLabel}
-        // Without a composer, the panel itself takes focus, not the first message.
-        initialFocus={() => composer.current ?? popup.current}
-        className="gap-0 outline-none data-[side=right]:w-full data-[side=right]:sm:max-w-xl"
+        // Focus goes to the prompt input, else to the open row, else to the first row.
+        initialFocus={() =>
+          composer.current ??
+          popup.current?.querySelector<HTMLElement>(
+            '[data-inbox-row][aria-current="true"], [data-inbox-row]',
+          ) ??
+          popup.current
+        }
+        // Room for the sheet's close and page buttons in the headers under them.
+        className="gap-0 outline-none [--inbox-controls:5rem] data-[side=right]:w-full data-[side=right]:sm:max-w-xl data-[side=right]:lg:max-w-4xl"
       >
-        {target === "new" ? (
-          <NewConversation project={project} opened={openConversation} composerRef={composer} />
-        ) : (
-          <ConversationView key={target} id={target} composerRef={composer} />
-        )}
+        <SheetTitle className="sr-only">{conversationPanelLabel}</SheetTitle>
+        <Inbox target={target} select={openConversation} project={project} composerRef={composer} />
         <Tooltip>
           <TooltipTrigger
             render={
               <Link
                 to="/conversations"
-                search={{}}
+                search={target === "inbox" ? {} : { conversation: target }}
                 aria-label={allConversationsLabel}
                 className={cn(
                   buttonVariants({ variant: "ghost", size: "icon-sm" }),
-                  "absolute top-4 right-11",
+                  "absolute top-4 right-11 max-md:hidden",
                 )}
               />
             }
           >
-            <ListBulletsIcon aria-hidden="true" />
+            <ArrowSquareOutIcon aria-hidden="true" />
           </TooltipTrigger>
           <TooltipContent side="bottom">{allConversationsLabel}</TooltipContent>
         </Tooltip>

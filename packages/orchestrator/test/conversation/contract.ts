@@ -27,6 +27,7 @@ import {
   isQueued,
   MemberPost,
   MessageBody,
+  MessageSequence,
   Reply,
   startTurn,
   succeedTurn,
@@ -39,7 +40,7 @@ import { OperatorLogin } from "@usine/core/operator";
 import { ProjectId } from "@usine/core/project";
 import { NodeServices } from "@effect/platform-node";
 import { DateTime, Effect, Layer, Option, type Scope } from "effect";
-import { ConversationStore } from "../../src/conversation/store.ts";
+import { ConversationStore, ReadMarker } from "../../src/conversation/store.ts";
 
 export interface StoreFixture {
   /** Opens the same store in a fresh scope, preserving committed records. */
@@ -54,6 +55,7 @@ export interface StoreAdapter {
 
 const at = (minute: number) => DateTime.makeUnsafe(Date.UTC(2026, 10, 17, 9, minute));
 const member = TurnMember.make({ id: GitHubUserId.make(7), login: OperatorLogin.make("ada") });
+const other = TurnMember.make({ id: GitHubUserId.make(8), login: OperatorLogin.make("grace") });
 const session = RoleSession.make({
   id: AgentSessionId.make("conversation-1"),
   role: RoleName.make("supervisor"),
@@ -78,11 +80,17 @@ const conversationOf = (id: string, minute: number, anchor = Option.none<Anchor>
     createdAt: at(minute),
   });
 
-const postTo = (conversation: Conversation, turn: string, minute: number, body: string) =>
+const postTo = (
+  conversation: Conversation,
+  turn: string,
+  minute: number,
+  body: string,
+  author = member,
+) =>
   MemberPost.make({
     conversation: conversation.id,
     turn: TurnId.make(turn),
-    member,
+    member: author,
     credential: PostedWithSession.make({}),
     format: defaultFormat,
     body: MessageBody.make(body),
@@ -175,12 +183,12 @@ export const conversationStoreContract = (adapter: StoreAdapter) =>
               postTo(conversation, `t-${conversation.id}`, 1, "hi"),
             );
           const second = yield* store.post(postTo(plain, "t-plain-2", 2, "again"));
-          const anchored = yield* store.list(Option.some(anchor.key));
+          const anchored = yield* store.list(Option.some(anchor.key), Option.none());
           assert.deepStrictEqual(
             anchored.map(({ conversation }) => conversation.id),
             [newer.id, older.id],
           );
-          const all = yield* store.list(Option.none());
+          const all = yield* store.list(Option.none(), Option.none());
           assert.deepStrictEqual(
             all.map(({ conversation }) => conversation.id),
             [plain.id, elsewhere.id, newer.id, older.id],
@@ -286,6 +294,94 @@ export const conversationStoreContract = (adapter: StoreAdapter) =>
           assert.deepStrictEqual(none, []);
         }),
       ),
+    );
+
+    it.effect(
+      "lists a conversation unread only for activity by someone else after the marker",
+      () =>
+        withStore((store, fixture) =>
+          Effect.gen(function* () {
+            const conversation = conversationOf("c1", 1);
+            const created = yield* store.create(
+              conversation,
+              postTo(conversation, "t1", 1, "first"),
+            );
+            const expectUnread = (reader: TurnMember, expected: boolean) =>
+              Effect.gen(function* () {
+                const all = yield* store.list(Option.none(), Option.some(reader.id));
+                assert.deepStrictEqual(
+                  all.map(({ unread }) => unread),
+                  [Option.some(expected)],
+                  reader.login,
+                );
+              });
+            const marker = (reader: TurnMember, through: number, minute: number) =>
+              ReadMarker.make({
+                conversation: conversation.id,
+                member: reader.id,
+                through: MessageSequence.make(through),
+                at: at(minute),
+              });
+            yield* expectUnread(member, false);
+            yield* expectUnread(other, true);
+            const unlisted = yield* store.list(Option.none(), Option.none());
+            assert.deepStrictEqual(
+              unlisted.map(({ unread }) => unread),
+              [Option.none()],
+            );
+            assert.deepStrictEqual(
+              unlisted.map(({ lastMessage }) => Option.map(lastMessage, ({ body }) => body)),
+              [Option.some(MessageBody.make("first"))],
+            );
+            yield* store.markRead(marker(other, 1, 2));
+            yield* expectUnread(other, false);
+            const queued = yield* queuedOf(created.turns[0]);
+            const running = startTurn(queued, at(3));
+            yield* store.transition(queued, running);
+            yield* store.answer(
+              running,
+              succeedTurn(running, at(4), HarnessSession.make({ cwd: "/conversation" }), spent(10)),
+              Reply.make({ body: MessageBody.make("Nothing."), at: at(4) }),
+            );
+            yield* expectUnread(member, true);
+            yield* store.markRead(marker(member, 2, 5));
+            const back = yield* store.markRead(marker(member, 1, 6));
+            assert.strictEqual(back.through, 2);
+            yield* expectUnread(member, false);
+            const second = yield* store.post(postTo(conversation, "t2", 7, "again", other));
+            yield* expectUnread(member, true);
+            yield* expectUnread(other, true);
+            yield* store.markRead(marker(member, 3, 8));
+            yield* store.markRead(marker(other, 3, 8));
+            yield* expectUnread(other, false);
+            const queuedAgain = yield* queuedOf(second.turn);
+            const runningAgain = startTurn(queuedAgain, at(9));
+            yield* store.transition(queuedAgain, runningAgain);
+            yield* store.transition(
+              runningAgain,
+              failTurn(runningAgain, at(10), Interrupted.make({}), Option.none()),
+            );
+            const reopened = yield* Effect.gen(function* () {
+              const store = yield* Effect.service(ConversationStore);
+              return yield* store.list(Option.none(), Option.some(member.id));
+            }).pipe(Effect.provide(fixture.open));
+            assert.deepStrictEqual(
+              reopened.map(({ unread }) => unread),
+              [Option.some(true)],
+            );
+            yield* store.markRead(marker(member, 3, 11));
+            yield* expectUnread(member, false);
+            const missing = yield* store
+              .markRead(
+                ReadMarker.make({
+                  ...marker(member, 1, 12),
+                  conversation: ConversationId.make("absent"),
+                }),
+              )
+              .pipe(Effect.flip);
+            assert.strictEqual(missing._tag, "ConversationNotFound");
+          }),
+        ),
     );
 
     it.effect("keeps a failed turn's interrupted marker after the store reopens", () =>
