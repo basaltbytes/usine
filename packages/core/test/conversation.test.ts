@@ -18,7 +18,6 @@ import {
   TokenCount,
 } from "../src/agent/session.ts";
 import {
-  authorityWithin,
   ConversationId,
   defaultFormat,
   failTurn,
@@ -29,7 +28,8 @@ import {
   resumePoint,
   startTurn,
   succeedTurn,
-  TurnAuthority,
+  turnGrants,
+  PostedWithSession,
   TurnError,
   TurnId,
   TurnMember,
@@ -61,7 +61,7 @@ const running = (turn: string, sequence: number) =>
         conversation: ConversationId.make("conversation"),
         turn: TurnId.make(turn),
         member: TurnMember.make({ id: GitHubUserId.make(1), login: OperatorLogin.make("ada") }),
-        authority: TurnAuthority.make({ grants: [], operations: Option.none() }),
+        credential: PostedWithSession.make({}),
         format: defaultFormat,
         body: MessageBody.make("hello"),
         reply: defaultFormat,
@@ -88,29 +88,22 @@ it("resumes from the last saved session with the usage of the last ended turn", 
   assert.deepStrictEqual(resumePoint([]), { session: Option.none(), usage: Option.none() });
 });
 
-it("bounds a turn's authority to its project and keeps the poster's operation ceiling", () => {
+it("gives a turn only read on its scope, and nothing without read", () => {
   const alpha = ProjectScope.make({ project: ProjectId.make("alpha") });
   const beta = ProjectScope.make({ project: ProjectId.make("beta") });
   const granted = (permission: "read" | "operate", scope: ProjectScope) =>
     PermissionGrant.make({ permission, scope });
-  const admin = authorityWithin(alpha, administratorPermissions, Option.none());
+  const read = (scope: ProjectScope | InstanceScope) => [
+    PermissionGrant.make({ permission: "read", scope }),
+  ];
+  assert.deepStrictEqual(turnGrants(alpha, administratorPermissions), read(alpha));
   assert.deepStrictEqual(
-    admin.grants.map(({ permission, scope }) => [permission, scope]),
-    [
-      ["read", alpha],
-      ["operate", alpha],
-      ["maintain", alpha],
-    ],
+    turnGrants(alpha, [granted("read", alpha), granted("operate", alpha), granted("read", beta)]),
+    read(alpha),
   );
-  const operator = authorityWithin(
-    alpha,
-    [granted("read", alpha), granted("operate", beta)],
-    Option.some(["operator.overview"]),
-  );
-  assert.deepStrictEqual(operator.grants, [granted("read", alpha)]);
-  assert.deepStrictEqual(operator.operations, Option.some(["operator.overview"]));
+  assert.deepStrictEqual(turnGrants(alpha, [granted("read", beta)]), []);
   assert.deepStrictEqual(
-    authorityWithin(InstanceScope.make(), administratorPermissions, Option.none()).grants,
-    administratorPermissions,
+    turnGrants(InstanceScope.make(), administratorPermissions),
+    read(InstanceScope.make()),
   );
 });

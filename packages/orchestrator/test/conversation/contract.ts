@@ -31,7 +31,7 @@ import {
   startTurn,
   succeedTurn,
   type Turn,
-  TurnAuthority,
+  PostedWithSession,
   TurnId,
   TurnMember,
 } from "@usine/core/conversation";
@@ -83,7 +83,7 @@ const postTo = (conversation: Conversation, turn: string, minute: number, body: 
     conversation: conversation.id,
     turn: TurnId.make(turn),
     member,
-    authority: TurnAuthority.make({ grants: [], operations: Option.none() }),
+    credential: PostedWithSession.make({}),
     format: defaultFormat,
     body: MessageBody.make(body),
     reply: defaultFormat,

@@ -1,13 +1,6 @@
 import { type Brand, Crypto, DateTime, Effect, Option, Schema } from "effect";
 import { Hex } from "effect/encoding";
-import {
-  AccessScope,
-  GitHubUserId,
-  type Permission,
-  PermissionGrant,
-  permits,
-  ProjectScope,
-} from "./access.ts";
+import { AccessScope, GitHubUserId, PermissionGrant, permits } from "./access.ts";
 import {
   type AgentSessionEvent,
   AgentSessionEvent as AgentSessionEventSchema,
@@ -128,46 +121,37 @@ export class TurnMember extends Schema.Class<
   login: OperatorLogin,
 }) {}
 
-/**
- * The most that a turn may do: the grants and the operation ceiling of the credential that posted
- * its message, within the conversation's scope. Each request of the turn also intersects them
- * with the member's grants at that time.
- */
-export class TurnAuthority extends Schema.Class<
-  TurnAuthority,
-  Brand.Brand<"@usine/core/conversation/TurnAuthority">
->("Conversation/TurnAuthority")({
-  grants: Schema.Array(PermissionGrant),
-  /** The operation IDs that the posting credential may call, or `None` without a ceiling. */
-  operations: Schema.OptionFromNullOr(Schema.Array(Schema.NonEmptyString)),
+/** A message posted with a device token, which the turn's access depends on. */
+export class PostedWithToken extends Schema.TaggedClass<
+  PostedWithToken,
+  Brand.Brand<"@usine/core/conversation/PostedWithToken">
+>("PostingCredential/PostedWithToken")("PostedWithToken", {
+  token: Schema.NonEmptyString,
 }) {}
 
-const projectPermissions: ReadonlyArray<Permission> = ["read", "operate", "maintain"];
+/** A message posted from a browser session, which ends without affecting the turn. */
+export class PostedWithSession extends Schema.TaggedClass<
+  PostedWithSession,
+  Brand.Brand<"@usine/core/conversation/PostedWithSession">
+>("PostingCredential/PostedWithSession")("PostedWithSession", {}) {}
 
 /**
- * Returns the authority of a turn in `scope` for a credential with `grants` and `operations`. In
- * a project, it keeps only what `grants` permit on that project, so that the turn reads nothing
- * that the conversation's readers can't read.
+ * The credential that posted a message. A turn's access is recomputed from it, and from the
+ * member's current grants, each time the turn uses it, so a revoked token ends that access.
  */
-export const authorityWithin = (
+export const PostingCredential = Schema.Union([PostedWithToken, PostedWithSession]);
+export type PostingCredential = typeof PostingCredential.Type;
+
+/**
+ * Returns the grants of a turn in `scope` for a posting credential with `grants`: `read` on the
+ * scope if `grants` permit it, and nothing else. A turn is read-only, and reads nothing that the
+ * conversation's readers can't read.
+ */
+export const turnGrants = (
   scope: AccessScope,
   grants: ReadonlyArray<PermissionGrant>,
-  operations: Option.Option<ReadonlyArray<string>>,
-) =>
-  TurnAuthority.make({
-    grants:
-      scope._tag === "Instance"
-        ? grants
-        : projectPermissions
-            .filter((permission) => permits(grants, permission, scope))
-            .map((permission) =>
-              PermissionGrant.make({
-                permission,
-                scope: ProjectScope.make({ project: scope.project }),
-              }),
-            ),
-    operations,
-  });
+): ReadonlyArray<PermissionGrant> =>
+  permits(grants, "read", scope) ? [PermissionGrant.make({ permission: "read", scope })] : [];
 
 const messageFields = {
   conversation: ConversationId,
@@ -291,7 +275,7 @@ export class Turn extends Schema.Class<Turn, Brand.Brand<"@usine/core/conversati
   id: TurnId,
   conversation: ConversationId,
   member: TurnMember,
-  authority: TurnAuthority,
+  credential: PostingCredential,
   /** The member message that the turn answers. */
   message: MessageSequence,
   /** The format that the member asked the answer to use. */
@@ -365,7 +349,7 @@ export class MemberPost extends Schema.Class<
   conversation: ConversationId,
   turn: TurnId,
   member: TurnMember,
-  authority: TurnAuthority,
+  credential: PostingCredential,
   format: MessageFormat,
   body: MessageBody,
   reply: MessageFormat,
@@ -389,7 +373,7 @@ export const posted = (post: MemberPost, sequence: MessageSequence) => ({
       id: post.turn,
       conversation: post.conversation,
       member: post.member,
-      authority: post.authority,
+      credential: post.credential,
       message: sequence,
       reply: post.reply,
       queuedAt: post.at,
