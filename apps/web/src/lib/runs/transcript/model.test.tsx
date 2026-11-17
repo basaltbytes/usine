@@ -1080,7 +1080,8 @@ describe("tool presentation", () => {
       error: null,
     };
     const mcp = presentTool(completedTool("mcp_tool", input, output));
-    assert.strictEqual(mcp.title, "github · get_issue");
+    assert.strictEqual(mcp.title, "get_issue");
+    assert.strictEqual(mcp.name, "github · get_issue");
     assert.deepInclude(sectionFields(mcp.input), { label: "Number", value: 79 });
     assert.strictEqual(sectionText(mcp.output), "Conversation UX");
     assert.deepInclude(sectionFields(mcp.output), {

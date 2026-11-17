@@ -31,7 +31,7 @@ export const presentFile = (
   input: Schema.Json | undefined,
   output: Schema.Json | undefined,
   action: "read" | "edit" | "write",
-): Omit<ToolPresentation, "category"> => {
+): Omit<ToolPresentation, "category" | "name"> => {
   const request = object(input);
   const result = object(output);
   const changes = fileChanges(result.changes ?? request.changes);

@@ -17,7 +17,7 @@ export type Conversation = typeof ConversationView.Type;
 export type Turn = typeof TurnView.Type;
 
 /** One step of a turn's activity, in the order the session reported it. */
-export type Activity =
+type Activity =
   | { readonly _tag: "Text"; readonly key: string; readonly text: string }
   | { readonly _tag: "Tool"; readonly call: ToolCall };
 
@@ -39,10 +39,7 @@ const isSupervisor = (message: Conversation["messages"][number]): message is Sup
   message.role === "supervisor";
 
 /** Returns the session events of `turn` as text and tool calls, each tool call paired by `callId`. */
-export const turnActivity = (
-  turn: Turn,
-  events: ReadonlyArray<TurnEvent>,
-): ReadonlyArray<Activity> => {
+const turnActivity = (turn: Turn, events: ReadonlyArray<TurnEvent>): ReadonlyArray<Activity> => {
   const activity: Array<Activity> = [];
   const calls = new Map<string, number>();
   for (const { sequence, event } of events) {
@@ -122,10 +119,6 @@ export const bodyText = (body: MemberMessage["body"]): string =>
 /** Returns the Markdown of a message whose body is Markdown text, or `undefined` otherwise. */
 export const markdownBody = (message: MemberMessage | SupervisorMessage): string | undefined =>
   message.format === "markdown" && isText(message.body) ? message.body : undefined;
-
-/** Returns the turns that are queued or running. */
-export const openTurns = (conversation: Conversation): ReadonlyArray<Turn> =>
-  conversation.turns.filter(open);
 
 const PENDING = "pending:";
 

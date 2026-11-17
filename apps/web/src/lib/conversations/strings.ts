@@ -40,7 +40,6 @@ export const cancelingTurnLabel = "Canceling…";
 export const queuedLabel = "Queued";
 export const queuedBehindLabel = "Queued after the turn before it";
 export const runningLabel = "Running";
-export const workingLabel = "Reading runs, tasks, and the source";
 export const canceledLabel = (by: string) => `Canceled by ${by}`;
 export const failedLabel = "Failed";
 export const failureReason = (failure: TurnFailure) =>

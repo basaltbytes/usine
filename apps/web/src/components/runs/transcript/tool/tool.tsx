@@ -80,6 +80,12 @@ export const ToolDetails = ({ entry, view }: ToolDetailsProps) => {
           Raw details
         </CollapsibleTrigger>
         <CollapsibleContent className="space-y-3 pt-2">
+          <ToolSections
+            category="tool"
+            sections={[
+              { _tag: "Fields", label: "Tool", fields: [{ label: "Name", value: view.name }] },
+            ]}
+          />
           {Option.match(entry.start, {
             onNone: () => null,
             onSome: ({ input }) => (

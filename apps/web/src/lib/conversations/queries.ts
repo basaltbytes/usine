@@ -34,7 +34,7 @@ export const conversationQuery = (id: ConversationId) =>
     meta: { refreshLabel: "Conversation", changes: changes.conversation(id) },
   });
 
-export const conversationEventsKey = (id: ConversationId) => ["conversation-events", id] as const;
+const conversationEventsKey = (id: ConversationId) => ["conversation-events", id] as const;
 
 /**
  * The session events of a conversation's turns. Each read asks only for the events after the last

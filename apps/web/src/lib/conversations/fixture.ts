@@ -26,7 +26,6 @@ import {
   Running,
   Succeeded,
   SupervisorMessage,
-  TurnError,
   TurnEvent,
   TurnId,
   TurnMember,
@@ -157,14 +156,7 @@ export const interrupted = (minute: number) =>
     failure: Interrupted.make({}),
     usage: Option.none(),
   });
-export const failedWith = (minute: number, message: string) =>
-  Failed.make({
-    startedAt: at(minute),
-    endedAt: at(minute + 1),
-    failure: TurnError.make({ message }),
-    usage: Option.none(),
-  });
-export const canceledBy = (minute: number, by: TurnMember) =>
+const canceledBy = (minute: number, by: TurnMember) =>
   Canceled.make({
     startedAt: Option.some(at(minute)),
     endedAt: at(minute + 1),
@@ -238,7 +230,7 @@ export interface ConversationServer {
   readonly requests: Array<string>;
 }
 
-export const readyStatus: typeof ConversationStatusView.Type = { state: "ready", reason: null };
+const readyStatus: typeof ConversationStatusView.Type = { state: "ready", reason: null };
 
 /** Returns a fake operator API for the conversation group, with `fallback` for other paths. */
 export const conversationServer = (

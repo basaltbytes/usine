@@ -28,6 +28,8 @@ export interface ToolPresentation {
   readonly category: "command" | "read" | "edit" | "write" | "search" | "agent" | "tool";
   readonly activity: ToolActivity;
   readonly title: string;
+  /** The tool's full name, with its MCP server. */
+  readonly name: string;
   readonly subject: string;
   readonly input: ReadonlyArray<ToolSection>;
   readonly output: ReadonlyArray<ToolSection>;
@@ -67,7 +69,7 @@ interface Payload {
   readonly input: Schema.Json | undefined;
   readonly output: Schema.Json | undefined;
 }
-type Body = Omit<ToolPresentation, "category">;
+type Body = Omit<ToolPresentation, "category" | "name"> & { readonly name?: string };
 
 const command = ({ input, output }: Payload): Body => {
   const request = object(input ?? output);
@@ -153,6 +155,11 @@ const agent = ({ input, output }: Payload): Body => {
   };
 };
 
+const MCP_NAME = /^mcp__.+?__(.+)$/u;
+
+/** Returns the operation of an MCP tool name `mcp__<server>__<operation>`, without the server prefix. */
+const mcpOperation = (name: string): string | undefined => MCP_NAME.exec(name)?.[1];
+
 const tool = ({ input, output, name }: Payload): Body => {
   const request = object(input);
   const result = object(output);
@@ -162,20 +169,21 @@ const tool = ({ input, output, name }: Payload): Body => {
     result.type === "mcpToolCall" ||
     result.type === "dynamicToolCall";
   const args = wrapped ? (request.arguments ?? result.arguments) : input;
-  const title = wrapped
-    ? [
-        string(request.server) ??
-          string(result.server) ??
-          string(request.namespace) ??
-          string(result.namespace),
-        string(request.tool) ?? string(result.tool),
-      ]
-        .filter((part) => part !== undefined)
-        .join(" · ")
-    : name;
+  const operation = wrapped ? (string(request.tool) ?? string(result.tool)) : mcpOperation(name);
+  const server =
+    string(request.server) ??
+    string(result.server) ??
+    string(request.namespace) ??
+    string(result.namespace);
   return {
     activity: { _tag: "Tool" },
-    title: title || name,
+    title: operation !== undefined && operation !== "" ? operation : name,
+    name:
+      !wrapped || operation === undefined
+        ? name
+        : server === undefined
+          ? operation
+          : `${server} · ${operation}`,
     subject: Schema.is(JsonObject)(args)
       ? Object.keys(args).length === 1
         ? "1 parameter"
@@ -214,5 +222,5 @@ export const presentTool = (entry: ToolCall): ToolPresentation => {
     agent,
     tool,
   } satisfies Record<ToolPresentation["category"], (payload: Payload) => Body>;
-  return { category: kind, ...presenters[kind](payload) };
+  return { category: kind, name: entry.name, ...presenters[kind](payload) };
 };
