@@ -1,9 +1,14 @@
 import { InstanceScope } from "@usine/core/access";
-import { GitHubUserId, PermissionGrant, administratorPermissions } from "@usine/core/access";
+import {
+  GitHubUserId,
+  PermissionGrant,
+  TokenId,
+  administratorPermissions,
+} from "@usine/core/access";
 import { OperatorActor, OperatorLogin } from "@usine/core/operator";
 import { type Brand, Data, Effect, Option, Schema } from "effect";
 
-export { GitHubUserId } from "@usine/core/access";
+export { GitHubUserId, TokenId } from "@usine/core/access";
 export class GitHubIdentity extends Schema.Class<
   GitHubIdentity,
   Brand.Brand<"@usine/server/auth/model/GitHubIdentity">
@@ -18,8 +23,6 @@ export class Member extends Schema.Class<Member, Brand.Brand<"@usine/server/auth
   addedAt: Schema.Finite,
   addedBy: OperatorActor,
 }) {}
-export const TokenId = Schema.NonEmptyString.pipe(Schema.brand("TokenId"));
-export type TokenId = typeof TokenId.Type;
 /** Identifies the credential of a request: its token ID, or a hash of an instance credential's secret. */
 export const CredentialId = Schema.NonEmptyString.pipe(Schema.brand("CredentialId"));
 export type CredentialId = typeof CredentialId.Type;

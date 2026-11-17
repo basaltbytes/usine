@@ -6,6 +6,9 @@ export const GitHubUserId = Schema.Int.check(Schema.isGreaterThan(0)).pipe(
   Schema.brand("GitHubUserId"),
 );
 export type GitHubUserId = typeof GitHubUserId.Type;
+/** The ID of a member's instance token, which identifies it and can't authenticate. */
+export const TokenId = Schema.NonEmptyString.pipe(Schema.brand("TokenId"));
+export type TokenId = typeof TokenId.Type;
 export const ProjectRole = Schema.Literals(["viewer", "operator", "maintainer"]);
 export type ProjectRole = typeof ProjectRole.Type;
 export const Permission = Schema.Literals(["read", "operate", "maintain", "admin"]);

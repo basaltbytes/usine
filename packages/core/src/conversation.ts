@@ -1,6 +1,6 @@
 import { type Brand, Crypto, DateTime, Effect, Option, Schema } from "effect";
 import { Hex } from "effect/encoding";
-import { AccessScope, GitHubUserId, PermissionGrant, permits } from "./access.ts";
+import { AccessScope, GitHubUserId, PermissionGrant, permits, TokenId } from "./access.ts";
 import {
   type AgentSessionEvent,
   AgentSessionEvent as AgentSessionEventSchema,
@@ -126,7 +126,8 @@ export class PostedWithToken extends Schema.TaggedClass<
   PostedWithToken,
   Brand.Brand<"@usine/core/conversation/PostedWithToken">
 >("PostingCredential/PostedWithToken")("PostedWithToken", {
-  token: Schema.NonEmptyString,
+  /** The token's ID; the token's secret is never stored. */
+  tokenId: TokenId,
 }) {}
 
 /** A message posted from a browser session, which ends without affecting the turn. */
@@ -136,8 +137,9 @@ export class PostedWithSession extends Schema.TaggedClass<
 >("PostingCredential/PostedWithSession")("PostedWithSession", {}) {}
 
 /**
- * The credential that posted a message. A turn's access is recomputed from it, and from the
- * member's current grants, each time the turn uses it, so a revoked token ends that access.
+ * What identifies the credential that posted a message. A turn's access is recomputed from it,
+ * and from the member's current grants, each time the turn uses it, so a revoked token ends that
+ * access. It stays on the server: API views of a turn leave it out.
  */
 export const PostingCredential = Schema.Union([PostedWithToken, PostedWithSession]);
 export type PostingCredential = typeof PostingCredential.Type;
