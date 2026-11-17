@@ -83,6 +83,7 @@ import {
   type ConversationRecord,
   ConversationStore,
   type ConversationStoreError,
+  type ConversationSummary,
   type Posted,
   type TurnConflict,
 } from "./store.ts";
@@ -166,7 +167,7 @@ export class Conversations extends Context.Service<
     /** The conversations that the member can read, with the anchor `key` or all, newest first. */
     readonly list: (
       key: Option.Option<AnchorKey>,
-    ) => Effect.Effect<ReadonlyArray<Conversation>, ConversationStoreError>;
+    ) => Effect.Effect<ReadonlyArray<ConversationSummary>, ConversationStoreError>;
     readonly start: (
       request: ConversationRequest,
       poster: Poster,
@@ -656,7 +657,7 @@ export const conversationsLayer = Layer.effect(
       list: Effect.fn("Conversations.list")(function* (key) {
         const grants = yield* RequestPermissions;
         const all = yield* store.list(key);
-        return all.filter(({ scope }) => permits(grants, "read", scope));
+        return all.filter(({ conversation }) => permits(grants, "read", conversation.scope));
       }),
       start: Effect.fn("Conversations.start")(function* (request, { member, credential }) {
         yield* Effect.annotateCurrentSpan({ member: member.login });

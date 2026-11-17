@@ -5,7 +5,12 @@ import { CommandPalette } from "~/components/command-palette/palette";
 import { PageCommandsProvider, PageCommandsScope } from "~/components/command-palette/context";
 import { RefreshProvider } from "~/components/refresh/provider";
 import { membersLabel, tokensPageLabel } from "~/lib/strings";
-import { WarningIcon } from "@phosphor-icons/react";
+import { ChatsCircleIcon, WarningIcon } from "@phosphor-icons/react";
+import { ConversationId } from "@usine/core/conversation";
+import { Tooltip, TooltipContent, TooltipTrigger } from "~/components/ui/tooltip";
+import { useOpenConversation } from "~/hooks/use-open-conversation";
+import { conversationQuery, conversationStatusQuery } from "~/lib/conversations/queries";
+import { conversationsTitle, openConversationsLabel } from "~/lib/conversations/strings";
 import { useQueryClient, useSuspenseQuery, type QueryClient } from "@tanstack/react-query";
 import {
   createRootRouteWithContext,
@@ -58,8 +63,23 @@ const RunDrawer = lazy(() =>
   import("~/components/runs/drawer").then(({ RunDrawer: drawer }) => ({ default: drawer })),
 );
 
-/** `run` is in the root search so the Run drawer can open over any route. */
-const RootSearch = Schema.toStandardSchemaV1(Schema.Struct({ run: Schema.optional(RunId) }));
+// Loaded on first open, like the Run drawer.
+const ConversationPanel = lazy(() =>
+  import("~/components/conversations/panel").then(({ ConversationPanel: panel }) => ({
+    default: panel,
+  })),
+);
+
+/**
+ * `run` and `conversation` are in the root search so the Run drawer and the conversation panel can
+ * open over any route. `conversation` is a conversation ID, or `new` for the form that starts one.
+ */
+const RootSearch = Schema.toStandardSchemaV1(
+  Schema.Struct({
+    run: Schema.optional(RunId),
+    conversation: Schema.optional(Schema.Union([Schema.Literal("new"), ConversationId])),
+  }),
+);
 
 interface RouterContext {
   readonly queryClient: QueryClient;
@@ -111,6 +131,12 @@ const Crumbs = ({ view, project, runId, task }: CrumbsProps) => {
       </BreadcrumbItem>
     );
   if (view === "configuration") return <ConfigurationCrumbs />;
+  if (view === "conversations")
+    return (
+      <BreadcrumbItem>
+        <BreadcrumbPage>{conversationsTitle}</BreadcrumbPage>
+      </BreadcrumbItem>
+    );
   if (project === undefined)
     return (
       <BreadcrumbItem>
@@ -183,7 +209,7 @@ const Shell = () => {
     ...attentionQuery(),
     select: (view) => view.needsYou,
   });
-  const { run } = Route.useSearch();
+  const { run, conversation } = Route.useSearch();
   // Plain useNavigate resolves "." against the current route; Route.useNavigate would pin it to "/".
   const navigate = useNavigate();
   const params = useParams({ strict: false });
@@ -200,6 +226,12 @@ const Shell = () => {
   // Keeps the last opened Run so the Sheet stays mounted during its exit transition.
   const [shownRun, setShownRun] = useState(run);
   if (run !== undefined && run !== shownRun) setShownRun(run);
+  const closeConversation = () =>
+    void navigate({ to: ".", search: ({ conversation: _conversation, ...rest }) => rest });
+  const openConversation = useOpenConversation();
+  const [shownConversation, setShownConversation] = useState(conversation);
+  if (conversation !== undefined && conversation !== shownConversation)
+    setShownConversation(conversation);
   const live = data._tag !== "NeedsSetup";
   return (
     <Toaster>
@@ -238,6 +270,21 @@ const Shell = () => {
                 </BreadcrumbList>
               </Breadcrumb>
               <CommandPalette overview={data} />
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      variant="ghost"
+                      className="h-9 shrink-0 px-2"
+                      aria-label={openConversationsLabel}
+                      onClick={() => openConversation("new")}
+                    />
+                  }
+                >
+                  <ChatsCircleIcon aria-hidden="true" className="size-4" />
+                </TooltipTrigger>
+                <TooltipContent side="bottom">{openConversationsLabel}</TooltipContent>
+              </Tooltip>
               <NotificationTray needs={needs} />
             </header>
             <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
@@ -255,7 +302,7 @@ const Shell = () => {
                   </AlertDescription>
                 </Alert>
               )}
-              <PageCommandsScope active={run === undefined}>
+              <PageCommandsScope active={run === undefined && conversation === undefined}>
                 <RefreshProvider>
                   <Outlet />
                 </RefreshProvider>
@@ -273,6 +320,16 @@ const Shell = () => {
                 </Suspense>
               )}
             </PageCommandsScope>
+            {shownConversation !== undefined && (
+              <Suspense fallback={null}>
+                <ConversationPanel
+                  target={shownConversation}
+                  open={conversation !== undefined}
+                  close={closeConversation}
+                  project={project === undefined ? undefined : projectId(project)}
+                />
+              </Suspense>
+            )}
           </PageCommandsProvider>
         </SidebarInset>
       </SidebarProvider>
@@ -293,8 +350,8 @@ const Root = () => {
 
 export const Route = createRootRouteWithContext<RouterContext>()({
   validateSearch: RootSearch,
-  loaderDeps: ({ search }) => ({ run: search.run }),
-  loader: async ({ context: { queryClient }, deps: { run }, location }) => {
+  loaderDeps: ({ search }) => ({ run: search.run, conversation: search.conversation }),
+  loader: async ({ context: { queryClient }, deps: { run, conversation }, location }) => {
     if (location.pathname === "/sign-in" || location.pathname === "/setup") return;
     const session = await queryClient.ensureQueryData(sessionQuery());
     if (!canReadOverview(session.permissions)) return;
@@ -304,6 +361,17 @@ export const Route = createRootRouteWithContext<RouterContext>()({
       // A rejected drawer query is displayed inside the drawer.
       Promise.allSettled(
         run === undefined ? [] : [queryClient.ensureQueryData(runDetailQuery(queryClient, run))],
+      ),
+      // A rejected conversation query is displayed inside the panel.
+      Promise.allSettled(
+        conversation === undefined
+          ? []
+          : [
+              queryClient.ensureQueryData(conversationStatusQuery()),
+              ...(conversation === "new"
+                ? []
+                : [queryClient.ensureQueryData(conversationQuery(conversation))]),
+            ],
       ),
     ]);
   },

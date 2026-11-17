@@ -1,5 +1,5 @@
 import { Match, Option, Schema } from "effect";
-import type { TranscriptTool } from "~/lib/runs/transcript/model";
+import type { ToolCall } from "~/lib/runs/transcript/model";
 import { presentFile } from "~/lib/runs/transcript/tool/files";
 import {
   JsonObject,
@@ -23,7 +23,7 @@ export type ToolActivity =
   | { readonly _tag: "Command"; readonly command: string | undefined }
   | { readonly _tag: "Search" | "Delegation" | "Tool" };
 
-/** The display form of a tool call; the original payload is on `TranscriptTool`. */
+/** The display form of a tool call; the original payload is on `ToolCall`. */
 export interface ToolPresentation {
   readonly category: "command" | "read" | "edit" | "write" | "search" | "agent" | "tool";
   readonly activity: ToolActivity;
@@ -177,7 +177,9 @@ const tool = ({ input, output, name }: Payload): Body => {
     activity: { _tag: "Tool" },
     title: title || name,
     subject: Schema.is(JsonObject)(args)
-      ? `${Object.keys(args).length} parameters`
+      ? Object.keys(args).length === 1
+        ? "1 parameter"
+        : `${Object.keys(args).length} parameters`
       : Schema.is(Schema.String)(args)
         ? args
         : "Tool details",
@@ -191,7 +193,7 @@ const tool = ({ input, output, name }: Payload): Body => {
   };
 };
 
-export const presentTool = (entry: TranscriptTool): ToolPresentation => {
+export const presentTool = (entry: ToolCall): ToolPresentation => {
   const payload: Payload = {
     name: entry.name,
     input: Option.match(entry.start, { onNone: () => undefined, onSome: ({ input }) => input }),

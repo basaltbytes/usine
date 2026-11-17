@@ -2,7 +2,6 @@ import { type ReactNode, useId, useState } from "react";
 import { Page, PageHeading } from "~/components/page";
 import { StatusBadge } from "~/components/status-badge";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "~/components/ui/empty";
-import { TableRow } from "~/components/ui/table";
 import { cn } from "~/lib/utils";
 import type { ConfigurationEntityKey, ConfigurationEntityKind } from "@usine/config/configuration";
 import { ConfigurationHeader } from "~/features/configuration/components/header";
@@ -180,25 +179,6 @@ export const Frontmatter = ({ entries, className }: FrontmatterProps) => (
     ))}
   </dl>
 );
-
-type OpeningRowProps = {
-  readonly open: () => void;
-  readonly children: ReactNode;
-};
-
-/** Renders a table row that opens a detail page on click; keyboard users use the link in its first cell. */
-export const OpeningRow = ({ open, children }: OpeningRowProps) => (
-  <TableRow
-    className="cursor-pointer hover:bg-muted/60 has-[a:focus-visible]:bg-muted/60"
-    onClick={open}
-  >
-    {children}
-  </TableRow>
-);
-
-/** Classes for the link in the first cell of an `OpeningRow`. */
-export const rowLinkClass =
-  "rounded-sm font-medium whitespace-nowrap outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring/70 focus-visible:outline-solid";
 
 export const NotLoaded = () => <StatusBadge state="Failed" label="Not loaded" />;
 

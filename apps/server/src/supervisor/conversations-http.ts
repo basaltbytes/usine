@@ -143,7 +143,12 @@ export const conversationHandlers = HttpApiBuilder.group(OperatorApi, "conversat
         const listed = yield* service
           .list(Option.fromUndefinedOr(query.anchor))
           .pipe(Effect.mapError(failure));
-        return { conversations: listed };
+        return {
+          conversations: listed.map(({ conversation, lastTurn }) => ({
+            conversation,
+            lastTurn: Option.getOrNull(Option.map(lastTurn, turnView)),
+          })),
+        };
       }),
     )
     .handle("startConversation", ({ payload }) =>

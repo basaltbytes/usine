@@ -519,7 +519,7 @@ const conversationGroup = HttpApiGroup.make("conversation")
       .annotate(OpenApi.Summary, "List conversations")
       .annotate(
         OpenApi.Description,
-        "Lists the conversations that the caller can read, newest first. `anchor` selects those with that anchor key: the lowercase hex SHA-256 of the JSON array `[kind, reference]`.",
+        "Lists the conversations that the caller can read, newest first, each with its latest turn. `anchor` selects those with that anchor key: the lowercase hex SHA-256 of the JSON array `[kind, reference]`.",
       ),
     HttpApiEndpoint.post("startConversation", "/api/conversations", {
       payload: StartConversationPayload,

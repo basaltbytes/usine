@@ -36728,7 +36728,83 @@
                     "conversations": {
                       "type": "array",
                       "items": {
-                        "$ref": "#/components/schemas/Conversation_ConversationEncoded"
+                        "type": "object",
+                        "properties": {
+                          "conversation": {
+                            "$ref": "#/components/schemas/Conversation_ConversationEncoded"
+                          },
+                          "lastTurn": {
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "conversation": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "member": {
+                                    "$ref": "#/components/schemas/Conversation_TurnMemberEncoded"
+                                  },
+                                  "message": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 9007199254740991
+                                  },
+                                  "reply": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 100
+                                  },
+                                  "queuedAt": {
+                                    "type": "string"
+                                  },
+                                  "state": {
+                                    "anyOf": [
+                                      {
+                                        "$ref": "#/components/schemas/TurnState_QueuedEncoded"
+                                      },
+                                      {
+                                        "$ref": "#/components/schemas/TurnState_RunningEncoded"
+                                      },
+                                      {
+                                        "$ref": "#/components/schemas/TurnState_SucceededEncoded"
+                                      },
+                                      {
+                                        "$ref": "#/components/schemas/TurnState_FailedEncoded"
+                                      },
+                                      {
+                                        "$ref": "#/components/schemas/TurnState_CanceledEncoded"
+                                      }
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "conversation",
+                                  "member",
+                                  "message",
+                                  "reply",
+                                  "queuedAt",
+                                  "state"
+                                ],
+                                "additionalProperties": false,
+                                "title": "Turn"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "required": [
+                          "conversation",
+                          "lastTurn"
+                        ],
+                        "additionalProperties": false
                       }
                     }
                   },
@@ -37359,7 +37435,7 @@
             }
           }
         },
-        "description": "Lists the conversations that the caller can read, newest first. `anchor` selects those with that anchor key: the lowercase hex SHA-256 of the JSON array `[kind, reference]`.",
+        "description": "Lists the conversations that the caller can read, newest first, each with its latest turn. `anchor` selects those with that anchor key: the lowercase hex SHA-256 of the JSON array `[kind, reference]`.",
         "summary": "List conversations",
         "x-usine-permission": "read"
       },

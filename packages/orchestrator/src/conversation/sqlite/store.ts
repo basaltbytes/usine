@@ -18,6 +18,7 @@ import {
   ConversationRecord,
   ConversationStore,
   ConversationStoreError,
+  ConversationSummary,
   Posted,
   TurnConflict,
 } from "../store.ts";
@@ -42,6 +43,10 @@ const decodeValues = <T>(codec: Schema.Codec<T, string>) => {
   return (rows: ReadonlyArray<unknown>) =>
     decode(rows).pipe(Effect.map((decoded) => decoded.map(({ value }) => value)));
 };
+
+const decodeSummaries = Schema.decodeUnknownEffect(
+  Schema.Array(Schema.Struct({ value: ConversationJson, lastTurn: Schema.NullOr(TurnJson) })),
+);
 
 /**
  * Provides the conversation store on the application's `SqlClient`. Applies its migrations with
@@ -160,14 +165,18 @@ export const sqliteConversationStoreLayer = Layer.effect(
         );
       }),
       list: Effect.fn("ConversationStore.list")(function* (key) {
+        const lastTurn = sql`(SELECT t.value FROM usine_conversation_turns t WHERE t.conversation_id = c.id ORDER BY t.message_sequence DESC LIMIT 1)`;
         const rows = yield* Option.match(key, {
           onNone: () =>
-            sql`SELECT value FROM usine_conversations ORDER BY created_at DESC, id DESC`,
+            sql`SELECT c.value AS value, ${lastTurn} AS "lastTurn" FROM usine_conversations c ORDER BY c.created_at DESC, c.id DESC`,
           onSome: (anchor) =>
-            sql`SELECT value FROM usine_conversations WHERE anchor_key = ${anchor} ORDER BY created_at DESC, id DESC`,
+            sql`SELECT c.value AS value, ${lastTurn} AS "lastTurn" FROM usine_conversations c WHERE c.anchor_key = ${anchor} ORDER BY c.created_at DESC, c.id DESC`,
         }).pipe(Effect.catchTag("SqlError", failure("list conversations")));
-        return yield* decodeValues(ConversationJson)(rows).pipe(
+        const decoded = yield* decodeSummaries(rows).pipe(
           Effect.catchTag("SchemaError", failure("list conversations")),
+        );
+        return decoded.map(({ value, lastTurn: turn }) =>
+          ConversationSummary.make({ conversation: value, lastTurn: Option.fromNullOr(turn) }),
         );
       }),
       transition: Effect.fn("ConversationStore.transition")(function* (from, to) {

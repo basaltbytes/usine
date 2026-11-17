@@ -1,7 +1,8 @@
 import { Link, useNavigate } from "@tanstack/react-router";
 import type { QuarantinedLoopView } from "@usine/orchestrator/operator";
 import { TableCell } from "~/components/ui/table";
-import { NotLoaded, OpeningRow, rowLinkClass } from "~/features/configuration/components/section";
+import { NotLoaded } from "~/features/configuration/components/section";
+import { OpeningRow, rowLinkClass } from "~/components/opening-row";
 
 type QuarantinedRowProps = { readonly loop: QuarantinedLoopView };
 

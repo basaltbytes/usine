@@ -13,12 +13,13 @@ import { Tool, ToolContent, ToolHeader, ToolOutput } from "~/components/ai-eleme
 import { Button } from "~/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "~/components/ui/collapsible";
 import { useMessageScroller } from "~/components/ui/message-scroller";
-import type { TranscriptTool } from "~/lib/runs/transcript/model";
+import type { ToolCall, TranscriptTool } from "~/lib/runs/transcript/model";
 import { ToolSections } from "~/components/runs/transcript/tool/content";
 import { presentTool, type ToolPresentation } from "~/lib/runs/transcript/tool/presentation";
 import { useTranscriptDisclosure } from "~/components/runs/transcript/grouping/disclosure";
 
-const icons = {
+/** The icon of each tool category. */
+export const toolIcons = {
   command: TerminalWindowIcon,
   read: FileTextIcon,
   edit: PencilSimpleIcon,
@@ -29,7 +30,7 @@ const icons = {
 };
 
 type ToolDetailsProps = {
-  readonly entry: TranscriptTool;
+  readonly entry: ToolCall;
   readonly view: ToolPresentation;
 };
 
@@ -132,7 +133,7 @@ type TranscriptToolRowProps = { readonly entry: TranscriptTool };
 export const TranscriptToolRow = ({ entry }: TranscriptToolRowProps) => {
   const disclosure = useToolDisclosure(entry.key);
   const view = presentTool(entry);
-  const Icon = icons[view.category];
+  const Icon = toolIcons[view.category];
   const state = entry.state;
   const status = state._tag === "Finished" ? "Completed" : state._tag;
   const duration = Option.match(entry.start, {

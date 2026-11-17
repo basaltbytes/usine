@@ -154,7 +154,7 @@ export const conversationStoreContract = (adapter: StoreAdapter) =>
       ),
     );
 
-    it.effect("lists conversations by anchor key, newest first", () =>
+    it.effect("lists conversations by anchor key, newest first, with the latest turn", () =>
       withStore((store) =>
         Effect.gen(function* () {
           const anchor = yield* anchorOf(
@@ -174,15 +174,20 @@ export const conversationStoreContract = (adapter: StoreAdapter) =>
               conversation,
               postTo(conversation, `t-${conversation.id}`, 1, "hi"),
             );
+          const second = yield* store.post(postTo(plain, "t-plain-2", 2, "again"));
           const anchored = yield* store.list(Option.some(anchor.key));
           assert.deepStrictEqual(
-            anchored.map(({ id }) => id),
+            anchored.map(({ conversation }) => conversation.id),
             [newer.id, older.id],
           );
           const all = yield* store.list(Option.none());
           assert.deepStrictEqual(
-            all.map(({ id }) => id),
+            all.map(({ conversation }) => conversation.id),
             [plain.id, elsewhere.id, newer.id, older.id],
+          );
+          assert.deepStrictEqual(
+            Option.map(all[0]?.lastTurn ?? Option.none(), ({ id }) => id),
+            Option.some(second.turn.id),
           );
         }).pipe(Effect.provide(NodeServices.layer)),
       ),

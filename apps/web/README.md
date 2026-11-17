@@ -264,6 +264,18 @@ To recover a saved row, the run page loads up to 20 earlier pages. If the row is
 
 Bookmarks expire after 30 days. Each browser origin keeps up to 20 runs, the 200 most recent disclosure choices per run, and at most 512,000 characters of bookmark data: identities, preferences, a row-relative position, and the acknowledged transcript sequence, but no transcript text or tool payloads. If browser storage is disabled or full, the conversation still works, but can't restore a saved place.
 
+## Supervisor conversations
+
+The conversation icon in the page header opens the conversation panel over the current page. The root search parameter `conversation` holds the conversation ID, or `new` for the form that starts one, so a reload or a link reopens it. Escape or **Close** removes the parameter and returns focus to the page. **Conversations** in the sidebar lists the conversations the member can read, newest first, with the title, scope, who started it, when, and the state of the last turn.
+
+A new conversation takes a scope, the instance or a project the member can operate on (the current page's project first), and a first message. The form also lists up to five recent conversations. In a conversation, each turn shows the member's message, the turn's text and tool calls while it runs (paired by call ID), and the answer as Markdown. A turn queued behind a running one says so. Failed turns show their reason, and canceled turns name who canceled them. Members with operate access see **Cancel turn** on queued and running turns.
+
+The composer sends on Enter and adds a line on Shift+Enter. A posted message shows at once as pending; if the server refuses it, the message is removed, the draft comes back, and the error shows above the composer. Members without operate access, signed-out sessions, and an instance whose supervisor isn't set up (the panel shows the reason) get no composer.
+
+Markdown across the app, conversations and run transcripts included, shows an image as a link to its URL, so the browser loads nothing until a click. Only `http`, `https`, and `mailto` URLs become links, they open in a new tab, and raw HTML shows as text.
+
+The panel reads new events after the last one it holds. A `conversation` change notice refetches that conversation, its events, and the list; nothing polls.
+
 ## Commands and refresh status
 
 The **Overview** sidebar entry shows the number of running runs beside the Needs attention count. Both counts update from the overview query.

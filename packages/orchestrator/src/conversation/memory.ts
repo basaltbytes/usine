@@ -16,6 +16,7 @@ import {
   ConversationNotFound,
   ConversationRecord,
   ConversationStore,
+  ConversationSummary,
   Posted,
   TurnConflict,
 } from "./store.ts";
@@ -93,9 +94,9 @@ export const memoryConversationStoreLayer = Layer.effect(
         return Option.map(stored, record);
       }),
       list: Effect.fn("ConversationStore.list")(function* (key) {
-        const all = [...(yield* Ref.get(state)).values()].map(({ conversation }) => conversation);
+        const all = [...(yield* Ref.get(state)).values()];
         return all
-          .filter((conversation) =>
+          .filter(({ conversation }) =>
             Option.match(key, {
               onNone: () => true,
               onSome: (wanted) =>
@@ -104,8 +105,15 @@ export const memoryConversationStoreLayer = Layer.effect(
           )
           .sort(
             (left, right) =>
-              DateTime.toEpochMillis(right.createdAt) - DateTime.toEpochMillis(left.createdAt) ||
-              right.id.localeCompare(left.id),
+              DateTime.toEpochMillis(right.conversation.createdAt) -
+                DateTime.toEpochMillis(left.conversation.createdAt) ||
+              right.conversation.id.localeCompare(left.conversation.id),
+          )
+          .map(({ conversation, turns }) =>
+            ConversationSummary.make({
+              conversation,
+              lastTurn: Option.fromUndefinedOr(turns.at(-1)),
+            }),
           );
       }),
       transition: Effect.fn("ConversationStore.transition")(function* (from, to) {

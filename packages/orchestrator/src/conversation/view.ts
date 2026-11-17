@@ -27,10 +27,6 @@ export const ConversationStatusView = Schema.Struct({
   reason: Schema.NullOr(Schema.String),
 }).annotate({ title: "Supervisor status" });
 
-export const ConversationsView = Schema.Struct({
-  conversations: Schema.Array(Conversation),
-}).annotate({ title: "Conversations" });
-
 /** A member message. `format` and `reply.format` default to `markdown`. */
 export const MessagePayload = Schema.Struct({
   body: MessageBody,
@@ -71,6 +67,16 @@ export const turnView = (turn: Turn): typeof TurnView.Type => ({
   queuedAt: turn.queuedAt,
   state: turn.state,
 });
+
+export const ConversationsView = Schema.Struct({
+  conversations: Schema.Array(
+    Schema.Struct({
+      conversation: Conversation,
+      /** The latest turn in message order, or null before the first. */
+      lastTurn: Schema.NullOr(TurnView),
+    }),
+  ),
+}).annotate({ title: "Conversations" });
 
 export const ConversationView = Schema.Struct({
   conversation: Conversation,

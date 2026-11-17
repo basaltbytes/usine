@@ -534,7 +534,7 @@ describe("conversations with the supervisor", () => {
         assert.strictEqual(read.conversation.id, id);
         const listed = yield* service.list(Option.none()).pipe(asViewer);
         assert.deepStrictEqual(
-          listed.map(({ id: listedId }) => listedId),
+          listed.map(({ conversation }) => conversation.id),
           [id],
         );
         const refused = yield* service

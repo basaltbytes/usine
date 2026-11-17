@@ -6,7 +6,7 @@ import { RepositoryMark } from "~/components/repository-mark";
 import { TableCell } from "~/components/ui/table";
 import { laneLabels } from "~/features/configuration/lib/repositories";
 import type { LabelStanding } from "~/features/configuration/lib/repositories";
-import { OpeningRow, rowLinkClass } from "~/features/configuration/components/section";
+import { OpeningRow, rowLinkClass } from "~/components/opening-row";
 import { cn } from "~/lib/utils";
 
 /** Returns a summary of the repository's lane and declared labels, for example `2 missing on GitHub`. */

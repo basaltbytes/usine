@@ -29,6 +29,15 @@ export class ConversationRecord extends Schema.Class<
   turns: Schema.Array(Turn),
 }) {}
 
+/** A conversation and its latest turn, in message order. */
+export class ConversationSummary extends Schema.Class<
+  ConversationSummary,
+  Brand.Brand<"@usine/orchestrator/conversation/store/ConversationSummary">
+>("@usine/orchestrator/ConversationSummary")({
+  conversation: Conversation,
+  lastTurn: Schema.Option(Turn),
+}) {}
+
 /** A member message and the turn that it queued. */
 export class Posted extends Schema.Class<
   Posted,
@@ -86,7 +95,7 @@ export class ConversationStore extends Context.Service<
     /** The conversations with the anchor `key`, or all with `None`, newest first. */
     readonly list: (
       key: Option.Option<AnchorKey>,
-    ) => Effect.Effect<ReadonlyArray<Conversation>, ConversationStoreError>;
+    ) => Effect.Effect<ReadonlyArray<ConversationSummary>, ConversationStoreError>;
     /** Replaces the stored `from` with `to`, which must have the same ID. */
     readonly transition: (
       from: QueuedTurn | RunningTurn,

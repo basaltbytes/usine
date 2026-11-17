@@ -3,12 +3,14 @@ import type { RepositoryName } from "@usine/core/repository";
 import { overviewQuery, projectForRepository } from "./overview";
 import { queryOptions, useQuery } from "@tanstack/react-query";
 import {
+  GitHubUserId,
   PermissionGrant,
   InstanceScope,
   ProjectScope,
   permits,
   type Permission,
 } from "@usine/core/access";
+import { OperatorLogin } from "@usine/core/operator";
 import { ProjectId } from "@usine/core/project";
 import { Option, Schema } from "effect";
 import { createContext, useContext } from "react";
@@ -20,7 +22,13 @@ export const sessionQuery = () =>
     queryFn: () =>
       authRequest(
         "/api/auth/session",
-        Schema.Struct({ permissions: Schema.Array(PermissionGrant) }),
+        Schema.Struct({
+          permissions: Schema.Array(PermissionGrant),
+          /** The signed-in member; null for the local admin token or setup. */
+          member: Schema.optionalKey(
+            Schema.NullOr(Schema.Struct({ id: GitHubUserId, login: OperatorLogin })),
+          ),
+        }),
       ),
     staleTime: 60_000,
     refetchInterval: (query) =>

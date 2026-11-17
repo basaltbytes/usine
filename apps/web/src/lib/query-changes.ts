@@ -42,6 +42,10 @@ export const changes = {
     (run: RunId): ChangePredicate =>
     (target) =>
       target.kind === "run" && target.id === run,
+  conversation:
+    (conversation: string): ChangePredicate =>
+    (target) =>
+      target.kind === "conversation" && target.id === conversation,
   item:
     (items: ReadonlyArray<ItemKey>): ChangePredicate =>
     (target) =>
