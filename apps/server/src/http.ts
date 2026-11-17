@@ -14,7 +14,12 @@ import type { Setup } from "./setup/control.ts";
 import { securityMiddleware } from "./security.ts";
 import { ProjectId } from "@usine/core/project";
 import { LoopName } from "@usine/core/loop";
-import { authenticatedRoutes, RequestOperations, type AuthServices } from "./auth/http.ts";
+import {
+  authenticatedRoutes,
+  RequestCredentialKind,
+  RequestOperations,
+  type AuthServices,
+} from "./auth/http.ts";
 import { ceilingAdmits } from "./auth/model.ts";
 import { mcpRoutes } from "./mcp/http.ts";
 import { EFFORTS } from "@usine/core/agent/brain";
@@ -32,8 +37,11 @@ import {
   OperatorApi,
   OperatorHttpError,
   OperatorHttpPolicy,
+  conversationPermissions,
   operatorPermissions,
 } from "@usine/orchestrator/operator/http";
+import type { Conversations } from "@usine/orchestrator/conversation";
+import { conversationHandlers } from "./supervisor/conversations-http.ts";
 import { ByteSize, Effect, Layer, Option, Path, Schema, type Types } from "effect";
 import {
   Headers,
@@ -117,9 +125,14 @@ const requireProjectRepository = (project: ProjectId, repository: RepositoryName
     }),
   );
 
-const policy = Layer.succeed(OperatorHttpPolicy)((handler, { endpoint }) =>
+const permissionsOf = (group: string) =>
+  group === OperatorApi.groups.conversation.identifier
+    ? conversationPermissions
+    : operatorPermissions;
+
+const policy = Layer.succeed(OperatorHttpPolicy)((handler, { endpoint, group }) =>
   Effect.gen(function* () {
-    const requirement = Object.entries(operatorPermissions).find(
+    const requirement = Object.entries(permissionsOf(group.identifier)).find(
       ([name]) => name === endpoint.identifier,
     )?.[1];
     if (requirement !== "public") {
@@ -143,7 +156,20 @@ const policy = Layer.succeed(OperatorHttpPolicy)((handler, { endpoint }) =>
         });
       }
     }
-    const operation = `${OperatorApi.groups.operator.identifier}.${endpoint.identifier}`;
+    const operation = `${group.identifier}.${endpoint.identifier}`;
+    // A supervisor turn is read-only, and must not start conversations or queue more turns.
+    const credential = yield* RequestCredentialKind;
+    if (
+      Option.contains(credential, "turn") &&
+      (group.identifier === OperatorApi.groups.conversation.identifier ||
+        (requirement !== "read" && requirement !== "public"))
+    ) {
+      yield* Effect.logWarning("Operation refused for a supervisor turn", { operation });
+      return yield* OperatorHttpError.make({
+        error: "AccessDenied",
+        message: `A supervisor turn can only read; it cannot call ${operation}.`,
+      });
+    }
     const ceiling = yield* RequestOperations;
     if (requirement !== "public" && !ceilingAdmits(ceiling, operation)) {
       yield* Effect.logWarning("Operator route refused by the token's operation ceiling", {
@@ -565,6 +591,7 @@ export const apiRoutes = Layer.mergeAll(
 ).pipe(
   Layer.provide(conditionalReads.layer),
   Layer.provide(handlers),
+  Layer.provide(conversationHandlers),
   Layer.provide(Changes.layer),
   Layer.provide(policy),
   Layer.provide(NodeHttpServer.layerHttpServices),
@@ -660,6 +687,9 @@ export const serverLayer = (
     | Layer.Layer<never> = Layer.empty,
   webhooks: Layer.Layer<never, never, HttpRouter.HttpRouter> = Layer.empty,
   setup?: Setup["Service"],
+  conversations:
+    | Layer.Layer<Conversations, never, HttpRouter.HttpRouter>
+    | Layer.Layer<never> = Layer.empty,
 ) => {
   const authenticated = authenticatedRoutes(auth);
   const setupHttp =
@@ -678,7 +708,7 @@ export const serverLayer = (
     webhooks,
     securityMiddleware(auth.authentication),
     requestBodyLimit,
-  ).pipe(HttpRouter.provideRequest(Layer.merge(backend, services)));
+  ).pipe(HttpRouter.provideRequest(Layer.mergeAll(backend, services, conversations)));
   return Layer.effectDiscard(
     Effect.gen(function* () {
       const platform = yield* HttpPlatform.HttpPlatform;

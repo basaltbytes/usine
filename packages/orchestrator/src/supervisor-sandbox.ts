@@ -1,8 +1,18 @@
-import { SupervisorSandbox, type SupervisorSandboxService } from "@usine/agents/supervisor";
+import {
+  SupervisorSandbox,
+  type SupervisorSandboxService,
+  SupervisorUnavailable,
+} from "@usine/agents/supervisor";
 import type { InstanceDirectory, InstanceId } from "@usine/core/instance";
 import { SupervisorLimits, WorkerName } from "@usine/core/worker";
 import { ATTEMPT_IMAGE } from "@usine/executor/ssh";
-import { containerSandboxLayer } from "@usine/executor/supervisor";
+import {
+  containerSandboxLayer,
+  makeSupervisorSources,
+  type SupervisorSources,
+} from "@usine/executor/supervisor";
+import { GitHubApp } from "@usine/github/github-app";
+import type { RepositoryName } from "@usine/core/repository";
 import { Context, Duration, Effect, Layer, Option } from "effect";
 import { CurrentInstance } from "./current-instance/current-instance.ts";
 import { instanceModelRoute } from "./parent-models.ts";
@@ -54,5 +64,44 @@ export const supervisorSandboxLayer = (
           ),
         ),
       );
+    }),
+  );
+
+/** The source that supervisor turns read: each repository's default-branch head. */
+export class SupervisorSourceTrees extends Context.Service<
+  SupervisorSourceTrees,
+  SupervisorSources
+>()("@usine/orchestrator/supervisor-sandbox/SupervisorSourceTrees") {}
+
+/**
+ * The supervisor's source under the instance's `.usine/supervisor/sources`, fetched from GitHub
+ * with a read-only token for each repository that the GitHub App mints. The token stays on the
+ * orchestrator.
+ */
+export const supervisorSourcesLayer = (instanceDirectory: InstanceDirectory) =>
+  Layer.effect(
+    SupervisorSourceTrees,
+    Effect.gen(function* () {
+      const app = yield* GitHubApp;
+      const unavailable = (repository: RepositoryName) => (error: { readonly message: string }) =>
+        SupervisorUnavailable.make({
+          message: `Can't get a token to read ${repository}: ${error.message}`,
+        });
+      return yield* makeSupervisorSources(`${instanceDirectory}/.usine/supervisor/sources`, {
+        url: (repository) => `https://github.com/${repository}.git`,
+        token: Effect.fn("SupervisorSources.token")(function* (repository) {
+          const [access] = yield* app
+            .projectAccess([repository])
+            .pipe(Effect.mapError(unavailable(repository)));
+          if (access?._tag !== "CoveredProject")
+            return yield* SupervisorUnavailable.make({
+              message: `The GitHub App installation can't read ${repository}`,
+            });
+          const token = yield* app
+            .workerToken(access, "read")
+            .pipe(Effect.mapError(unavailable(repository)));
+          return Option.some(token.value);
+        }),
+      });
     }),
   );

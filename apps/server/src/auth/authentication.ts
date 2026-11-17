@@ -1,5 +1,6 @@
 import { MemberAccess } from "./access.ts";
 import {
+  type AccessScope,
   administratorPermissions,
   intersectPermissions,
   permits,
@@ -7,7 +8,8 @@ import {
 } from "@usine/core/access";
 import { type UiOrigin } from "@usine/config/factory";
 import { OperatorLogin } from "@usine/core/operator";
-import { Clock, Context, Effect, Layer, Option, Redacted, Crypto } from "effect";
+import { Clock, Context, Effect, Layer, Option, Redacted, Crypto, type Scope } from "effect";
+import { type PostingCredential, turnGrants } from "@usine/core/conversation";
 import { HttpServerRequest } from "effect/http";
 import type { IpNetwork } from "effect/net";
 import { type ClientAddress, clientAddress } from "./client.ts";
@@ -30,7 +32,7 @@ import { AuthStore } from "./store.ts";
 import { randomSecret, secretHash } from "./crypto.ts";
 
 export interface Access {
-  readonly credential: "local" | "bootstrap" | "member";
+  readonly credential: "local" | "bootstrap" | "member" | "turn";
   readonly member: Option.Option<Member>;
   readonly token: Option.Option<InstanceToken>;
   readonly csrf: string;
@@ -44,6 +46,12 @@ const deviceExpiry = (caller: Access): Option.Option<number> =>
     caller.token,
     ({ kind, expiresAt }) => kind === "device" && expiresAt !== NO_EXPIRY,
   ).pipe(Option.map(({ expiresAt }) => expiresAt));
+/** What the credential that posted a message can do now. */
+export interface PostingAccess {
+  readonly member: Member;
+  readonly permissions: ReadonlyArray<PermissionGrant>;
+  readonly operations: Option.Option<ReadonlyArray<OperationId>>;
+}
 /** A device token that a member creates for a client. */
 export interface TokenRequest {
   readonly name: TokenName;
@@ -116,6 +124,27 @@ export class Authentication extends Context.Service<
     readonly pollDevice: (id: string) => Effect.Effect<Option.Option<IssuedToken>, AuthError>;
     readonly limit: (endpoint: string) => Effect.Effect<void, AuthError>;
     readonly signOut: (secret: string) => Effect.Effect<void, AuthError>;
+    /**
+     * Returns the current access of the credential with which `member` posted a message: the
+     * member's grants, intersected with a device token's scopes and limited by its operation
+     * ceiling. Fails with 403 when the member was removed or the token was revoked or expired.
+     */
+    readonly postingAccess: (
+      member: GitHubUserId,
+      credential: PostingCredential,
+    ) => Effect.Effect<PostingAccess, AuthError>;
+    /**
+     * Returns a read-only credential for a supervisor turn in `scope` until the scope of the
+     * returned effect closes. At each request it has `read` on `scope` if the posting access
+     * permits it, and the posting token's operation ceiling. It lives only in this process; the
+     * auth guard and the route policy refuse it outside the operator group and on operations
+     * that need more than `read`.
+     */
+    readonly turnCredential: (
+      member: GitHubUserId,
+      scope: AccessScope,
+      credential: PostingCredential,
+    ) => Effect.Effect<Redacted.Redacted<string>, never, Scope.Scope>;
   }
 >()("@usine/server/auth/authentication") {}
 
@@ -141,6 +170,14 @@ export const authenticationLayer = (options: {
       const devices = new Map<TokenHash, DeviceState>();
       const clientLimits = new Map<string, LimitWindow>();
       const instanceLimits = new Map<string, LimitWindow>();
+      const turnCredentials = new Map<
+        TokenHash,
+        {
+          readonly member: GitHubUserId;
+          readonly scope: AccessScope;
+          readonly credential: PostingCredential;
+        }
+      >();
       const localHash = secretHash(Redacted.value(options.localToken));
       const csrf = (secret: string) => secretHash(`csrf:${secret}`);
       const callback = `${options.origin}/api/auth/callback`;
@@ -227,6 +264,39 @@ export const authenticationLayer = (options: {
           403,
         );
       });
+      const postingAccess = Effect.fn("Authentication.postingAccess")(function* (
+        memberId: GitHubUserId,
+        credential: PostingCredential,
+      ) {
+        yield* Effect.annotateCurrentSpan({ memberId, credential: credential._tag });
+        const member = (yield* store.members).find(({ id }) => id === memberId);
+        if (member === undefined) {
+          yield* Effect.logWarning("Posting access refused: the member was removed", { memberId });
+          return yield* authFailure("The member who posted this message was removed.", 403);
+        }
+        const grants = yield* access.permissions(member.id);
+        if (credential._tag === "PostedWithSession")
+          return { member, permissions: grants, operations: Option.none() };
+        const now = yield* Clock.currentTimeMillis;
+        const token = (yield* store.tokens(member.id)).find(
+          ({ id, kind, expiresAt }) =>
+            id === credential.tokenId && kind === "device" && expiresAt > now,
+        );
+        if (token === undefined) {
+          yield* Effect.logWarning("Posting access refused: the token was revoked or expired", {
+            memberId,
+          });
+          return yield* authFailure(
+            "The token that posted this message was revoked or expired.",
+            403,
+          );
+        }
+        return {
+          member,
+          permissions: intersectPermissions(grants, token.scopes),
+          operations: token.operations,
+        };
+      });
       const authenticate = Effect.fn("Authentication.authenticate")(function* (secret: string) {
         const now = yield* Clock.currentTimeMillis;
         prune(now);
@@ -240,6 +310,18 @@ export const authenticationLayer = (options: {
             csrf: csrf(secret),
             permissions: hash === localHash ? administratorPermissions : [],
             operations: Option.none(),
+          };
+        }
+        const turn = turnCredentials.get(hash);
+        if (turn !== undefined) {
+          const posting = yield* postingAccess(turn.member, turn.credential);
+          return {
+            credential: "turn" as const,
+            member: Option.some(posting.member),
+            token: Option.none(),
+            csrf: csrf(secret),
+            permissions: turnGrants(turn.scope, posting.permissions),
+            operations: posting.operations,
           };
         }
         const found = yield* store.authenticate(hash, now);
@@ -569,6 +651,24 @@ export const authenticationLayer = (options: {
           const token = yield* issue(member, "device", state.name);
           return Option.some(token);
         }),
+        postingAccess,
+        turnCredential: (member, scope, credential) =>
+          Effect.acquireRelease(
+            Effect.sync(() => {
+              const secret = randomSecret();
+              turnCredentials.set(secretHash(Redacted.value(secret)), {
+                member,
+                scope,
+                credential,
+              });
+              return secret;
+            }),
+            (secret) =>
+              Effect.sync(() => {
+                turnCredentials.delete(secretHash(Redacted.value(secret)));
+                Redacted.wipeUnsafe(secret);
+              }),
+          ),
         signOut: Effect.fn("Authentication.signOut")(function* (secret) {
           const access = yield* authenticate(secret);
           bootstrapSessions.delete(secretHash(secret));

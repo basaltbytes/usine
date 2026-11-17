@@ -90,6 +90,29 @@ import { TaskView } from "./task.ts";
 import { ConfigurationView } from "./configuration/view.ts";
 import { DeskView } from "./desk.ts";
 import { RunStatisticsView, StatisticsView, StatisticsWindow } from "./statistics/view.ts";
+import { AnchorKey, ConversationId, EventSequence, TurnId } from "@usine/core/conversation";
+import {
+  ConversationEventsView,
+  ConversationStatusView,
+  ConversationsView,
+  ConversationView,
+  MessagePayload,
+  PostedView,
+  StartConversationPayload,
+  TurnView,
+} from "../conversation/view.ts";
+export {
+  ConversationEventsView,
+  ConversationStatusView,
+  ConversationsView,
+  ConversationView,
+  EVENTS_PAGE,
+  MessagePayload,
+  PostedView,
+  StartConversationPayload,
+  turnView,
+  TurnView,
+} from "../conversation/view.ts";
 
 const errorStatuses = {
   AccessDenied: 403,
@@ -130,6 +153,12 @@ const errorStatuses = {
   AppPermissionError: 503,
   ProjectNotInstalledError: 503,
   GitHubRateLimitError: 503,
+  ConversationNotFound: 404,
+  TurnNotFound: 404,
+  UnknownProject: 404,
+  TurnConflict: 409,
+  SupervisorNotReady: 409,
+  ConversationStoreError: 500,
 } as const;
 
 /**
@@ -465,6 +494,87 @@ const operatorApi = HttpApi.make("OperatorApi")
     OpenApi.Description,
     "Read instance state, manage configuration, and operate runs. Requests use instance bearer tokens or browser sessions. API paths remain under /api.",
   );
+
+const conversationGroup = HttpApiGroup.make("conversation")
+  .annotate(OpenApi.Title, "Conversations")
+  .annotate(
+    OpenApi.Description,
+    "Members' conversations with the supervisor. A conversation is readable by every member who can read its scope; a conversation that the caller can't read is not found. Posting needs operate on the scope. Each change emits a `conversation` change notice.",
+  )
+  .add(
+    HttpApiEndpoint.get("conversationStatus", "/api/conversations/status", {
+      success: ConversationStatusView,
+    })
+      .annotate(OpenApi.Summary, "Read the supervisor's status")
+      .annotate(
+        OpenApi.Description,
+        "Returns `ready`, or `setup-required` with the reason, such as a host without a container runtime.",
+      ),
+    HttpApiEndpoint.get("conversations", "/api/conversations", {
+      query: Schema.Struct({
+        anchor: Schema.optionalKey(queryValue.pipe(Schema.decodeTo(AnchorKey))),
+      }),
+      success: ConversationsView,
+    })
+      .annotate(OpenApi.Summary, "List conversations")
+      .annotate(
+        OpenApi.Description,
+        "Lists the conversations that the caller can read, newest first. `anchor` selects those with that anchor key: the lowercase hex SHA-256 of the JSON array `[kind, reference]`.",
+      ),
+    HttpApiEndpoint.post("startConversation", "/api/conversations", {
+      payload: StartConversationPayload,
+      success: ConversationView,
+    })
+      .annotate(OpenApi.Summary, "Start a conversation")
+      .annotate(
+        OpenApi.Description,
+        "Stores the conversation with its first message and queues the turn that answers it. Needs operate on the scope and a ready supervisor.",
+      ),
+    HttpApiEndpoint.get("conversation", "/api/conversations/:conversation", {
+      params: { conversation: ConversationId },
+      success: ConversationView,
+    })
+      .annotate(OpenApi.Summary, "Read a conversation")
+      .annotate(OpenApi.Description, "Returns the conversation with its messages and turns."),
+    HttpApiEndpoint.get("conversationEvents", "/api/conversations/:conversation/events", {
+      params: { conversation: ConversationId },
+      query: Schema.Struct({
+        after: Schema.optionalKey(
+          queryValue.pipe(
+            Schema.decodeTo(Schema.FiniteFromString),
+            Schema.decodeTo(Schema.Union([EventSequence, Schema.Literal(0)])),
+          ),
+        ),
+      }),
+      success: ConversationEventsView,
+    })
+      .annotate(OpenApi.Summary, "Read turn events")
+      .annotate(
+        OpenApi.Description,
+        "Returns up to 200 session events of the conversation's turns after the sequence `after`, in order. Pass the returned `next` to read on.",
+      ),
+    HttpApiEndpoint.post("postMessage", "/api/conversations/:conversation/messages", {
+      params: { conversation: ConversationId },
+      payload: MessagePayload,
+      success: PostedView,
+    })
+      .annotate(OpenApi.Summary, "Post a message")
+      .annotate(
+        OpenApi.Description,
+        "Appends a member message and queues the turn that answers it, behind the conversation's earlier turns. The turn runs with the caller's access.",
+      ),
+    HttpApiEndpoint.post("cancelTurn", "/api/conversations/:conversation/turns/:turn/cancel", {
+      params: { conversation: ConversationId, turn: TurnId },
+      success: TurnView,
+    })
+      .annotate(OpenApi.Summary, "Cancel a turn")
+      .annotate(
+        OpenApi.Description,
+        "Cancels a queued turn, or stops a running one and keeps the events it produced. Returns the turn once its end is stored.",
+      ),
+  )
+  .annotate(HttpApi.PayloadParseOptions, { onExcessProperty: "error" })
+  .middleware(OperatorHttpPolicy);
 
 /**
  * The operator's HTTP API contract for reads and interventions, shared by server handlers and
@@ -986,7 +1096,22 @@ export const OperatorApi = operatorApi.add(
     )
     .annotate(HttpApi.PayloadParseOptions, { onExcessProperty: "error" })
     .middleware(OperatorHttpPolicy),
+  conversationGroup,
 );
+
+/** Minimum route permissions; the conversation's scope is checked when it is read. */
+export const conversationPermissions = {
+  conversationStatus: "read",
+  conversations: "read",
+  startConversation: "operate",
+  conversation: "read",
+  conversationEvents: "read",
+  postMessage: "operate",
+  cancelTurn: "operate",
+} as const satisfies Record<
+  keyof typeof OperatorApi.groups.conversation.endpoints,
+  "read" | "operate"
+>;
 
 /** Minimum route permissions; resource-specific checks run in the operator and configuration editor. */
 export const operatorPermissions = {
