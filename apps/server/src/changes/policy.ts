@@ -44,7 +44,8 @@ export const expandTarget = (
   target: ChangeTarget,
   project: Option.Option<ProjectId>,
 ): ReadonlyArray<ChangeTarget> => {
-  if (target.kind === "activity" || target.kind === "navigation") return [target];
+  if (target.kind === "activity" || target.kind === "navigation" || target.kind === "conversation")
+    return [target];
   return [
     target,
     ...Option.match(project, {

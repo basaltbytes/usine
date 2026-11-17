@@ -25,6 +25,7 @@ export const ChangeTarget = Schema.Struct({
     "attention",
     "activity",
     "navigation",
+    "conversation",
   ]),
   id: Schema.String,
 });

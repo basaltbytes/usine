@@ -1,7 +1,11 @@
 import { ProviderApi } from "./providers/api.ts";
 import { SetupApi, setupPermissions } from "./setup/api.ts";
 import { CrossSiteRequestError } from "./security.ts";
-import { OperatorApi, operatorPermissions } from "@usine/orchestrator/operator/http";
+import {
+  OperatorApi,
+  conversationPermissions,
+  operatorPermissions,
+} from "@usine/orchestrator/operator/http";
 import { Option, Schema } from "effect";
 import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/http-api";
 import { AuthApi, AuthenticationError, authPermissions, publicAuthPaths } from "./auth/api.ts";
@@ -45,6 +49,7 @@ export const operationPermission = (operation: OpenApi.OpenAPISpecOperation) =>
 
 const groupPermissions = {
   [OperatorApi.groups.operator.identifier]: operatorPermissions,
+  [OperatorApi.groups.conversation.identifier]: conversationPermissions,
   [AuthApi.identifier]: authPermissions,
   [SetupApi.identifier]: setupPermissions,
   [ProviderApi.identifier]: Object.fromEntries(

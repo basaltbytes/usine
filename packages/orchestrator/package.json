@@ -27,6 +27,14 @@
       "types": "./dist/credentials.d.ts",
       "default": "./dist/credentials.js"
     },
+    "./conversation": {
+      "types": "./dist/conversation/conversations.d.ts",
+      "default": "./dist/conversation/conversations.js"
+    },
+    "./conversation/access": {
+      "types": "./dist/conversation/access.d.ts",
+      "default": "./dist/conversation/access.js"
+    },
     "./conversation/store": {
       "types": "./dist/conversation/store.d.ts",
       "default": "./dist/conversation/store.js"

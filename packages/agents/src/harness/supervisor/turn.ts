@@ -114,11 +114,16 @@ const lastUsage = (events: ReadonlyArray<AgentSessionEvent>) =>
  * Runs one turn of a supervisor conversation through `Harnesses`: admits the brain as the
  * supervisor, opens a session that serves `tools` with the handlers of the calling context, or
  * reopens the saved session and sends the message, and returns the answer once the turn ends.
- * The turn's usage continues `turn.usage`. The session closes when the turn ends.
+ * The turn's usage continues `turn.usage`. `observe` receives each session event as it arrives.
+ * The session closes when the turn ends.
  */
 export const runSupervisorTurn = Effect.fn("Supervisor.turn")(function* <
   Tools extends Record<string, Tool.Any>,
->(turn: SupervisorTurn, tools: Toolkit.Toolkit<Tools>) {
+>(
+  turn: SupervisorTurn,
+  tools: Toolkit.Toolkit<Tools>,
+  observe: (event: AgentSessionEvent) => Effect.Effect<void> = () => Effect.void,
+) {
   const { brain, seat } = turn;
   const resume = Option.isSome(turn.saved);
   const events: Array<AgentSessionEvent> = [];
@@ -186,7 +191,9 @@ export const runSupervisorTurn = Effect.fn("Supervisor.turn")(function* <
         ),
     });
     const collected = yield* Effect.forkScoped(
-      Stream.runForEach(native.running.events, (event) => Effect.sync(() => events.push(event))),
+      Stream.runForEach(native.running.events, (event) =>
+        Effect.sync(() => events.push(event)).pipe(Effect.andThen(observe(event))),
+      ),
     );
     if (resume) {
       if (native.active) {

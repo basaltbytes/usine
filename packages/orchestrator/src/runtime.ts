@@ -32,7 +32,7 @@ import { gitHubCredentialLayer } from "./credentials.ts";
 import { parentAdmissionLayer } from "./current-instance/parents.ts";
 import { CurrentInstance } from "./current-instance/current-instance.ts";
 import { externalHttpClientLayer } from "./http-client.ts";
-import { supervisorSandboxLayer } from "./supervisor-sandbox.ts";
+import { supervisorSandboxLayer, supervisorSourcesLayer } from "./supervisor-sandbox.ts";
 import { idleTriggersLayer } from "./idle-triggers.ts";
 import { LabelReconciler } from "./label-reconciler.ts";
 import { OperatorConfiguration } from "./operator/configuration/view.ts";
@@ -186,5 +186,20 @@ export const runtimeLayer = (
   ).pipe(
     Layer.provide(Layer.mergeAll(dependencies, triggers, ci, itemHistory, app, supervisorSandbox)),
   );
-  return Layer.mergeAll(dependencies, triggers, services, app, files, WebhookHealth.layer);
+  // Supervisor turns read the source with tokens that the GitHub App mints.
+  const supervisorSources = supervisorSourcesLayer(instanceDirectory).pipe(
+    Layer.provide(app),
+    Layer.provide(NodeServices.layer),
+  );
+  return Layer.mergeAll(
+    dependencies,
+    triggers,
+    services,
+    app,
+    files,
+    WebhookHealth.layer,
+    supervisorSandbox,
+    supervisorSources,
+    harnessesLive.pipe(Layer.provide(hostLoginLockLayer)),
+  );
 };

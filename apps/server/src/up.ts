@@ -17,6 +17,9 @@ import { sqliteAuthLayer } from "./auth/sqlite.ts";
 import { writeAdminToken } from "./auth/local.ts";
 import type { AuthServices } from "./auth/http.ts";
 import { FetchHttpClient, type HttpRouter } from "effect/http";
+import { conversationsLayer, type Conversations } from "@usine/orchestrator/conversation";
+import { sqliteConversationStoreLayer } from "@usine/orchestrator/conversation/sqlite";
+import { turnAccessLayer } from "./supervisor/turns.ts";
 import type { SqlClient } from "effect/sql";
 import { ItemProjectionReader } from "@usine/engine/item-projection";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
@@ -94,6 +97,7 @@ const serve = Effect.fnUntraced(function* (options: {
   readonly configurationEditor: ConfigurationEditor["Service"];
   readonly catalog?: Layer.Layer<GitHubApp | GitHubPolling | GitHubFiles>;
   readonly webhooks?: Layer.Layer<never, never, HttpRouter.HttpRouter>;
+  readonly conversations?: Layer.Layer<Conversations, never, HttpRouter.HttpRouter>;
   readonly listener: StartupListener;
 }) {
   yield* Layer.build(
@@ -110,6 +114,7 @@ const serve = Effect.fnUntraced(function* (options: {
       ),
       options.webhooks,
       options.setup,
+      options.conversations,
     ),
   );
   yield* options.upgrades.polling.pipe(Effect.forkScoped);
@@ -309,6 +314,21 @@ const start = Effect.fnUntraced(function* (
           listener,
           webhooks,
           upgrades,
+          // Turns run in the runtime's supervisor sandbox, with the access of their member.
+          conversations: conversationsLayer.pipe(
+            Layer.provide(turnAccessLayer),
+            Layer.provide(sqliteConversationStoreLayer),
+            Layer.provide(
+              Layer.mergeAll(
+                Layer.succeedContext(context),
+                Layer.succeed(Authentication, auth.authentication),
+                Layer.succeed(CurrentInstance, instances),
+                database,
+                NodeServices.layer,
+              ),
+            ),
+            Layer.orDie,
+          ),
         }),
         orchestrator.run.pipe(
           Effect.tapCause((cause) =>

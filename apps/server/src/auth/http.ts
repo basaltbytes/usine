@@ -15,6 +15,7 @@ import {
   ceilingAdmits,
   CredentialId,
   GitHubUserId,
+  type InstanceToken,
   Member,
   NO_EXPIRY,
   OperationCeilingChange,
@@ -43,6 +44,21 @@ export interface AuthServices {
 /** The operations the request's device token may call; `None` when it has no operation ceiling. */
 export const RequestOperations = Context.Reference<Option.Option<ReadonlyArray<OperationId>>>(
   "@usine/server/RequestOperations",
+  { defaultValue: Option.none },
+);
+/** The kind of credential that authenticated the request; `None` outside the auth guard. */
+export const RequestCredentialKind = Context.Reference<Option.Option<Access["credential"]>>(
+  "@usine/server/RequestCredentialKind",
+  { defaultValue: Option.none },
+);
+/** The member's token that authenticated the request; `None` for other credentials. */
+export const RequestToken = Context.Reference<Option.Option<InstanceToken>>(
+  "@usine/server/RequestToken",
+  { defaultValue: Option.none },
+);
+/** The member whose credential authenticated the request; `None` for other credentials. */
+export const RequestMember = Context.Reference<Option.Option<Member>>(
+  "@usine/server/RequestMember",
   { defaultValue: Option.none },
 );
 /** The credential that authenticated the request; `None` outside the auth guard. */
@@ -406,6 +422,10 @@ export const authenticatedRoutes = (services: AuthServices) => {
         });
         return yield* authFailure(`This token cannot call ${operation}.`, 403);
       }
+      if (access.credential === "turn" && operation !== undefined) {
+        yield* Effect.logWarning("Turn credential refused outside the operator API", { operation });
+        return yield* authFailure("A supervisor turn can call only the operator API.", 403);
+      }
       if (requirement === "local" && access.credential !== "local")
         return yield* authFailure("Run usine sign-in-link on the instance machine.", 403);
       if (requirement === "admin" && !permits(access.permissions, "admin", InstanceScope.make()))
@@ -454,6 +474,9 @@ export const authenticatedRoutes = (services: AuthServices) => {
             ),
         ),
         Effect.provideService(RequestAccess, Option.some(access)),
+        Effect.provideService(RequestMember, access.member),
+        Effect.provideService(RequestToken, access.token),
+        Effect.provideService(RequestCredentialKind, Option.some(access.credential)),
         Effect.provideService(
           RequestCredential,
           Option.some(
