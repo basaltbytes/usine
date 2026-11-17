@@ -143,6 +143,10 @@
       "types": "./dist/changes.d.ts",
       "default": "./dist/changes.js"
     },
+    "./conversation": {
+      "types": "./dist/conversation.d.ts",
+      "default": "./dist/conversation.js"
+    },
     "./json-key": {
       "types": "./dist/json-key.d.ts",
       "default": "./dist/json-key.js"

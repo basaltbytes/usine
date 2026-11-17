@@ -27,6 +27,18 @@
       "types": "./dist/credentials.d.ts",
       "default": "./dist/credentials.js"
     },
+    "./conversation/store": {
+      "types": "./dist/conversation/store.d.ts",
+      "default": "./dist/conversation/store.js"
+    },
+    "./conversation/memory": {
+      "types": "./dist/conversation/memory.d.ts",
+      "default": "./dist/conversation/memory.js"
+    },
+    "./conversation/sqlite": {
+      "types": "./dist/conversation/sqlite/store.d.ts",
+      "default": "./dist/conversation/sqlite/store.js"
+    },
     "./current-instance": {
       "types": "./dist/current-instance/current-instance.d.ts",
       "default": "./dist/current-instance/current-instance.js"
@@ -121,6 +133,7 @@
     "@usine/github": "workspace:*"
   },
   "devDependencies": {
+    "@effect/sql-sqlite-node": "catalog:",
     "@effect/vitest": "catalog:",
     "@usine/gateway": "workspace:*",
     "@usine/tsconfig": "workspace:*",

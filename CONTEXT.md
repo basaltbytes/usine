@@ -220,6 +220,14 @@ _Avoid_: orchestrator agent, assistant, operator agent
 The container on the orchestrator host that each supervisor turn runs in, with the instance's source read-only, no instance secret, and no network but the instance's model route.
 _Avoid_: jail, supervisor VM
 
+**Conversation**:
+A thread of member messages and supervisor answers on the instance or one project, readable by every member who can read that scope. Each message queues a turn that runs with the posting member's access, one turn at a time.
+_Avoid_: chat, thread, ask, question
+
+**Anchor**:
+What a conversation is about, such as a walkthrough passage: a kind and a reference that usine stores without reading, and a key for lookup.
+_Avoid_: target, subject, context
+
 **Usine tool set**:
 The tools that usine gives a session through the harness contract, defined once as a toolkit. The role that opens the session supplies their handlers, so it decides what each call can reach.
 _Avoid_: MCP tools, custom tools, plugin
