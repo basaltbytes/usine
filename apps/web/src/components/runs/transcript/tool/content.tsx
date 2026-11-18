@@ -36,9 +36,10 @@ const Value = ({ value }: ValueProps) => {
       <CollapsibleTrigger
         render={
           <Button
+            tone="muted"
             variant="ghost"
-            size="sm"
-            className="h-auto gap-1 px-0 py-0 text-muted-foreground data-[panel-open]:[&_svg]:rotate-90"
+            size="inline"
+            className="data-[panel-open]:[&_svg]:rotate-90"
           />
         }
       >

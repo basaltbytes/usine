@@ -1,18 +1,11 @@
 import type { ComponentProps, ReactNode } from "react";
 import { TableRow } from "~/components/ui/table";
-import { cn } from "~/lib/utils";
 
-type LinkedRowProps = Readonly<ComponentProps<typeof TableRow>>;
+type LinkedRowProps = Readonly<Omit<ComponentProps<typeof TableRow>, "variant">>;
 
 /** Renders a table row covered by one link; hover and the link's keyboard focus highlight the row. */
 export const LinkedRow = ({ className, ...props }: LinkedRowProps) => (
-  <TableRow
-    className={cn(
-      "relative hover:bg-muted/60 has-[a[data-row-link]:focus-visible]:bg-muted/60",
-      className,
-    )}
-    {...props}
-  />
+  <TableRow variant="linked" className={className} {...props} />
 );
 
 /** Classes for the link that covers a `LinkedRow`; give it `data-row-link`, and other controls in the row `relative z-10`. */

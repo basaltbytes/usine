@@ -25,7 +25,7 @@ const ProjectRow = ({ project, loops }: ProjectRowProps) => {
   const params = { project: project.id };
   return (
     <OpeningRow open={() => void navigate({ to: "/configuration/projects/$project", params })}>
-      <TableCell className="py-3">
+      <TableCell size="roomy">
         <Link
           to="/configuration/projects/$project"
           params={params}
@@ -35,7 +35,7 @@ const ProjectRow = ({ project, loops }: ProjectRowProps) => {
           {project.name}
         </Link>
       </TableCell>
-      <TableCell className="hidden font-mono text-xs text-muted-foreground sm:table-cell">
+      <TableCell variant="mono" tone="muted" className="hidden sm:table-cell">
         {project.id}
       </TableCell>
       <FillCell className="whitespace-normal">
@@ -48,14 +48,14 @@ const ProjectRow = ({ project, loops }: ProjectRowProps) => {
           ))}
         </ul>
       </FillCell>
-      <TableCell className="hidden text-right tabular-nums sm:table-cell">
+      <TableCell variant="count" className="hidden text-right sm:table-cell">
         {project.lanes.length === 0 ? (
           <span className="text-muted-foreground">Proposed</span>
         ) : (
           project.lanes.length
         )}
       </TableCell>
-      <TableCell className="text-right tabular-nums">
+      <TableCell variant="count" className="text-right">
         {loops === 0 ? <span className="text-muted-foreground">None</span> : loops}
       </TableCell>
     </OpeningRow>
@@ -77,7 +77,7 @@ export const ProjectsList = ({ configuration }: ProjectsListProps) => (
       <div className="-mx-2">
         <Table>
           <TableHeader>
-            <TableRow className="hover:bg-transparent">
+            <TableRow variant="static">
               <TableHead>Project</TableHead>
               <TableHead className="hidden sm:table-cell">ID</TableHead>
               <TableHead>Repositories</TableHead>

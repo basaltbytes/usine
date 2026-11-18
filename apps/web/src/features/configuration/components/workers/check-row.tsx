@@ -16,22 +16,30 @@ export const CheckRow = ({ subject, detail, check }: CheckRowProps) => {
   const message = check._tag === "Passed" ? null : check.message;
   const checkedLabel = dayTimeLabel(check.checkedAt);
   return (
-    <TableRow className="hover:bg-transparent">
-      <TableCell className="py-3 align-top whitespace-normal @2xl:min-w-56">
+    <TableRow variant="static">
+      <TableCell size="roomy" className="align-top whitespace-normal @2xl:min-w-56">
         <p className="font-medium">{subject}</p>
         <p className="text-xs text-muted-foreground">{detail}</p>
         {message !== null && <p className="mt-1 wrap-anywhere @2xl:hidden">{message}</p>}
       </TableCell>
-      <TableCell className="py-3 align-top">
+      <TableCell size="roomy" className="align-top">
         <CheckResult check={check} />
         <p className="mt-1 font-mono text-xs text-muted-foreground tabular-nums @2xl:hidden">
           {checkedLabel}
         </p>
       </TableCell>
-      <TableCell className="hidden py-3 align-top font-mono text-xs text-muted-foreground tabular-nums @2xl:table-cell">
+      <TableCell
+        size="roomy"
+        variant="numeric"
+        tone="muted"
+        className="hidden align-top @2xl:table-cell"
+      >
         {checkedLabel}
       </TableCell>
-      <FillCell className="hidden py-3 align-top whitespace-normal wrap-anywhere @2xl:table-cell">
+      <FillCell
+        size="roomy"
+        className="hidden align-top whitespace-normal wrap-anywhere @2xl:table-cell"
+      >
         {message}
       </FillCell>
     </TableRow>

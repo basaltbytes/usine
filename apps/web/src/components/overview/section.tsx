@@ -92,12 +92,8 @@ export const RunRow = ({ run, className, children }: RunRowProps) => {
   const navigate = useNavigate();
   return (
     <TableRow
-      className={cn(
-        run === null
-          ? "hover:bg-transparent"
-          : "cursor-pointer hover:bg-muted/60 has-[a:focus-visible]:bg-muted/60",
-        className,
-      )}
+      variant={run === null ? "static" : "interactive"}
+      className={className}
       onClick={
         run === null
           ? undefined

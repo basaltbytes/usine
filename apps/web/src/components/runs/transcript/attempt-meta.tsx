@@ -107,9 +107,10 @@ export const AttemptMeta = ({ chapter, runTask }: AttemptMetaProps) => {
             <CollapsibleTrigger
               render={
                 <Button
+                  tone="muted"
                   variant="ghost"
-                  size="sm"
-                  className="-mx-2 h-auto min-h-7 max-w-full justify-start gap-1 px-2 py-1 text-left text-xs font-normal whitespace-normal text-muted-foreground data-[panel-open]:[&_svg]:rotate-90"
+                  size="detail"
+                  className="-mx-2 max-w-full justify-start text-left whitespace-normal data-[panel-open]:[&_svg]:rotate-90"
                 />
               }
             >
@@ -127,9 +128,10 @@ export const AttemptMeta = ({ chapter, runTask }: AttemptMetaProps) => {
           <CollapsibleTrigger
             render={
               <Button
+                tone="muted"
                 variant="ghost"
-                size="sm"
-                className="-mx-2 h-7 gap-1 px-2 text-xs font-normal text-muted-foreground data-[panel-open]:[&_svg]:rotate-90"
+                size="metadata"
+                className="-mx-2 data-[panel-open]:[&_svg]:rotate-90"
               />
             }
           >

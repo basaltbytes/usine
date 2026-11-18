@@ -8,7 +8,7 @@ import { setupRequiredTitle } from "~/lib/conversations/strings";
 type SetupRequiredProps = { readonly reason: string };
 
 export const SetupRequired = ({ reason }: SetupRequiredProps) => (
-  <Alert className="border-needs-you/30 bg-needs-you/8">
+  <Alert variant="warning">
     <WarningIcon weight="fill" className="text-needs-you" />
     <AlertTitle>{setupRequiredTitle}</AlertTitle>
     <AlertDescription className="wrap-anywhere">{reason}</AlertDescription>

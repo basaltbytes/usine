@@ -1,3 +1,4 @@
+import { Button } from "~/components/ui/button";
 import type {
   AttemptView,
   PoolUsageView,
@@ -116,14 +117,11 @@ export const UsageFact = ({ usage, attempts }: UsageFactProps) => (
   <Popover>
     <PopoverTrigger
       aria-label={`Tokens: ${count.format(usage.tokens)}. Show per pool and session`}
-      className="rounded-sm text-primary underline-offset-4 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring/70 focus-visible:ring-inset"
+      render={<Button variant="inline-link" size="text" />}
     >
       <span className="font-mono text-xs tabular-nums">{tokensLabel(usage.tokens)}</span> tokens
     </PopoverTrigger>
-    <PopoverContent
-      align="start"
-      className="w-[26rem] max-w-[calc(100vw-2rem)] gap-3 p-3 text-xs shadow-raised"
-    >
+    <PopoverContent variant="usage" align="start" className="w-[26rem] max-w-[calc(100vw-2rem)]">
       <UsageBreakdown usage={usage} attempts={attempts} />
     </PopoverContent>
   </Popover>

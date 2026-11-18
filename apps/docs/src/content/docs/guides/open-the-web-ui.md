@@ -40,7 +40,7 @@ Open run drawers and run pages refresh during machine preparation and quota back
 
 Every board lane stays in one row. **Unmapped** holds tasks that match no lane and starts open while it holds an open issue or pull request. Lanes that hold only closed items, such as **Done**, and **Unmapped** with no open item start folded to a rail with their count. Select a rail to open its lane, and select the fold button in the lane header to fold it again. Your browser remembers each choice for that lane of the project.
 
-Board moves appear immediately. A failed label write restores the card's previous lane and displays the error. An accepted move remains visible until GitHub synchronization confirms the lane. Open **Done** and scroll to load all its cards; loaded cards support **Move to** and dragging to a writable lane. Long lanes and run histories load more rows as you scroll.
+Board moves appear immediately. A failed label write restores the card's previous lane and displays the error. An accepted move remains visible until GitHub synchronization confirms the lane. Open **Done** and scroll to load all its cards; loaded cards support **Move to** and dragging to a writable lane. Long lanes and run histories load more rows as you scroll. If loading fails, use **Could not load tasks. Retry** on the board or **Could not load runs. Retry** in the run history. Both retry controls show a focus indicator when reached with the keyboard.
 
 **Runs without a card** includes only runs whose items have no board card. Runs on cards in **Done** stay out of this section, including before you load the lane.
 

@@ -55,9 +55,9 @@ const ActionButton = ({
     )}
   >
     <Button
+      tone={appearance === "row" ? "muted" : undefined}
       variant={appearance === "row" ? "ghost" : "outline"}
       size={appearance === "row" ? "default" : "xs"}
-      className={appearance === "row" ? "text-muted-foreground" : undefined}
       title={description}
       disabled={disabled}
       onClick={(event) => {

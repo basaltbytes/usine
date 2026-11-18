@@ -42,7 +42,7 @@ const StalledRow = ({ stalled, overview, now, readOnly, narrow }: StalledRowProp
   if (narrow)
     return (
       <RunRow run={run}>
-        <FillCell className="py-3 align-top whitespace-normal">
+        <FillCell size="roomy" className="align-top whitespace-normal">
           {item}
           <p className="mt-0.5 truncate text-xs text-muted-foreground">{stalled.loop}</p>
           <p className="mt-1 text-sm text-foreground/90">{stallSentence(stalled, now)}</p>
@@ -52,12 +52,16 @@ const StalledRow = ({ stalled, overview, now, readOnly, narrow }: StalledRowProp
     );
   return (
     <RunRow run={run}>
-      <TableCell className="w-2/5 max-w-0 py-3 align-top whitespace-normal">{item}</TableCell>
-      <TableCell className="py-3 align-top">{stalled.loop}</TableCell>
-      <TableCell className="w-3/5 py-3 align-top whitespace-normal text-foreground/90">
+      <TableCell size="roomy" className="w-2/5 max-w-0 align-top whitespace-normal">
+        {item}
+      </TableCell>
+      <TableCell size="roomy" className="align-top">
+        {stalled.loop}
+      </TableCell>
+      <TableCell size="roomy" tone="subtle" className="w-3/5 align-top whitespace-normal">
         {stallSentence(stalled, now)}
       </TableCell>
-      <TableCell className="py-2 text-right align-top">{action}</TableCell>
+      <TableCell className="text-right align-top">{action}</TableCell>
     </RunRow>
   );
 };
@@ -82,7 +86,7 @@ export const NotMoving = ({ stalled, now, readOnly, polled }: NotMovingProps) =>
     <div className="-mx-2">
       <Table>
         <TableHeader>
-          <TableRow className="hover:bg-transparent">
+          <TableRow variant="static">
             <TableHead>Item</TableHead>
             {!narrow && (
               <>

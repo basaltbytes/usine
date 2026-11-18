@@ -97,7 +97,7 @@ export const ConfigurationCrumbs = () => {
         <>
           <BreadcrumbSeparator />
           <BreadcrumbItem>
-            <BreadcrumbPage className="flex items-center gap-1.5 wrap-anywhere">
+            <BreadcrumbPage variant="icon" className="flex items-center wrap-anywhere">
               {repository !== undefined && Schema.is(RepositoryName)(repository) && (
                 <RepositoryMark repository={repository} />
               )}

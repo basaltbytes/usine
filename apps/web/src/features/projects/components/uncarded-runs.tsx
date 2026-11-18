@@ -41,9 +41,11 @@ export const UncardedRuns = ({ runs, openRun }: UncardedRunsProps) => (
         <TableBody>
           {runs.map((run) => (
             <TableRow key={run.id} className="cursor-pointer" onClick={() => openRun(run.id)}>
-              <TableCell className="font-medium">{run.loop}</TableCell>
+              <TableCell variant="label">{run.loop}</TableCell>
               <TableCell>{run.agent}</TableCell>
-              <TableCell className="max-w-64 truncate font-mono text-xs">{run.itemKey}</TableCell>
+              <TableCell variant="mono" truncate className="max-w-64">
+                {run.itemKey}
+              </TableCell>
               <TableCell>
                 <StatusBadge state={run.state} />
               </TableCell>

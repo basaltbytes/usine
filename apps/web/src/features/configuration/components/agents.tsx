@@ -54,7 +54,7 @@ const AgentRow = ({ agent }: AgentRowProps) => {
   const params = { agent: agent.name };
   return (
     <OpeningRow open={() => void navigate({ to: "/configuration/agents/$agent", params })}>
-      <TableCell className="py-3">
+      <TableCell size="roomy">
         <Link
           to="/configuration/agents/$agent"
           params={params}
@@ -65,14 +65,14 @@ const AgentRow = ({ agent }: AgentRowProps) => {
         </Link>
       </TableCell>
       <TableCell>{harnessLabel(agent.harness)}</TableCell>
-      <TableCell className="font-mono text-xs">{agent.model}</TableCell>
+      <TableCell variant="mono">{agent.model}</TableCell>
       <TableCell className="hidden sm:table-cell">{agent.effort}</TableCell>
-      <TableCell className="hidden font-mono text-xs lg:table-cell">
+      <TableCell variant="mono" className="hidden lg:table-cell">
         {agent.resolvedParentModel ?? (
           <span className="font-sans text-sm text-muted-foreground">Chosen by Pi</span>
         )}
       </TableCell>
-      <FillCell className="hidden whitespace-normal text-muted-foreground md:table-cell">
+      <FillCell tone="muted" className="hidden whitespace-normal md:table-cell">
         {agent.loops.length === 0 ? "No loop" : agent.loops.join(", ")}
       </FillCell>
     </OpeningRow>
@@ -86,7 +86,7 @@ const InvalidAgentRow = ({ agent }: InvalidAgentRowProps) => {
   const params = { agent: agent.name };
   return (
     <OpeningRow open={() => void navigate({ to: "/configuration/agents/$agent", params })}>
-      <TableCell className="py-3">
+      <TableCell size="roomy">
         <Link
           to="/configuration/agents/$agent"
           params={params}
@@ -125,7 +125,7 @@ export const AgentsList = ({ configuration }: AgentsListProps) => {
         <div className="-mx-2">
           <Table>
             <TableHeader>
-              <TableRow className="hover:bg-transparent">
+              <TableRow variant="static">
                 <TableHead>Agent</TableHead>
                 <TableHead>Harness</TableHead>
                 <TableHead>Model</TableHead>

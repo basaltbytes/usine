@@ -46,13 +46,13 @@ export const RunRow = ({ run, item, pullRequest, openRun }: RunRowProps) => {
   return (
     <>
       <LinkedRow className="[&>td]:align-top">
-        <TableCell className="hidden py-3 sm:table-cell">
+        <TableCell size="roomy" className="hidden sm:table-cell">
           <span className="inline-flex items-center gap-2 text-foreground">
             <StateMark state={run.state} className="ml-0.75" />
             {run.state}
           </span>
         </TableCell>
-        <FillCell className="py-3 whitespace-normal">
+        <FillCell size="roomy" className="whitespace-normal">
           <div className="flex min-w-0 flex-col gap-1">
             <p className="flex min-w-0 items-baseline gap-2">
               <StateMark state={run.state} className="ml-0.75 self-center sm:hidden" />
@@ -76,26 +76,28 @@ export const RunRow = ({ run, item, pullRequest, openRun }: RunRowProps) => {
             )}
           </div>
         </FillCell>
-        <TableCell className="hidden py-3 xl:table-cell">{run.agent}</TableCell>
-        <TableCell className="hidden py-3 text-right tabular-nums xl:table-cell">
+        <TableCell size="roomy" className="hidden xl:table-cell">
+          {run.agent}
+        </TableCell>
+        <TableCell size="roomy" variant="count" className="hidden text-right xl:table-cell">
           {run.attempts.length}
         </TableCell>
-        <TableCell className="hidden py-3 text-right xl:table-cell">
+        <TableCell size="roomy" className="hidden text-right xl:table-cell">
           <Duration run={run} />
         </TableCell>
-        <TableCell className="hidden py-3 xl:table-cell">
+        <TableCell size="roomy" className="hidden xl:table-cell">
           <Opened run={run} />
         </TableCell>
-        <TableCell className="hidden py-3 xl:table-cell">
+        <TableCell size="roomy" className="hidden xl:table-cell">
           <PullRequest pullRequest={pullRequest} />
         </TableCell>
-        <TableCell className="py-2.5">
+        <TableCell size="action">
           <RowActions run={run} onEdit={setEditing} openRun={openRun} status={setStatus} />
         </TableCell>
       </LinkedRow>
       {editing !== null && editApplies(run, editing) && (
-        <TableRow className="hover:bg-transparent">
-          <TableCell colSpan={COLUMNS} className="px-2 pt-1 pb-4 whitespace-normal">
+        <TableRow variant="static">
+          <TableCell size="detail" colSpan={COLUMNS} className="whitespace-normal">
             <RunEdit
               key={`${run.id}:${editing}`}
               runId={run.id}

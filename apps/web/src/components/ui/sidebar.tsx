@@ -319,23 +319,47 @@ function SidebarInput({ className, ...props }: React.ComponentProps<typeof Input
   );
 }
 
-function SidebarHeader({ className, ...props }: React.ComponentProps<"div">) {
+const sidebarHeaderVariants = cva("flex flex-col gap-2 p-2", {
+  variants: {
+    spacing: {
+      roomy: "px-2 pt-2 pb-3",
+    },
+  },
+});
+
+function SidebarHeader({
+  spacing,
+  className,
+  ...props
+}: React.ComponentProps<"div"> & VariantProps<typeof sidebarHeaderVariants>) {
   return (
     <div
       data-slot="sidebar-header"
       data-sidebar="header"
-      className={cn("flex flex-col gap-2 p-2", className)}
+      className={cn(sidebarHeaderVariants({ spacing }), className)}
       {...props}
     />
   );
 }
 
-function SidebarFooter({ className, ...props }: React.ComponentProps<"div">) {
+const sidebarFooterVariants = cva("flex flex-col gap-2 p-2", {
+  variants: {
+    spacing: {
+      roomy: "px-2 pb-3",
+    },
+  },
+});
+
+function SidebarFooter({
+  spacing,
+  className,
+  ...props
+}: React.ComponentProps<"div"> & VariantProps<typeof sidebarFooterVariants>) {
   return (
     <div
       data-slot="sidebar-footer"
       data-sidebar="footer"
-      className={cn("flex flex-col gap-2 p-2", className)}
+      className={cn(sidebarFooterVariants({ spacing }), className)}
       {...props}
     />
   );
@@ -366,12 +390,24 @@ function SidebarContent({ className, ...props }: React.ComponentProps<"div">) {
   );
 }
 
-function SidebarGroup({ className, ...props }: React.ComponentProps<"div">) {
+const sidebarGroupVariants = cva("relative flex w-full min-w-0 flex-col px-2 py-1", {
+  variants: {
+    spacing: {
+      section: "pt-4",
+    },
+  },
+});
+
+function SidebarGroup({
+  spacing,
+  className,
+  ...props
+}: React.ComponentProps<"div"> & VariantProps<typeof sidebarGroupVariants>) {
   return (
     <div
       data-slot="sidebar-group"
       data-sidebar="group"
-      className={cn("relative flex w-full min-w-0 flex-col px-2 py-1", className)}
+      className={cn(sidebarGroupVariants({ spacing }), className)}
       {...props}
     />
   );
@@ -436,12 +472,24 @@ function SidebarGroupContent({ className, ...props }: React.ComponentProps<"div"
   );
 }
 
-function SidebarMenu({ className, ...props }: React.ComponentProps<"ul">) {
+const sidebarMenuVariants = cva("flex w-full min-w-0 flex-col gap-px", {
+  variants: {
+    spacing: {
+      relaxed: "gap-1.5",
+    },
+  },
+});
+
+function SidebarMenu({
+  spacing,
+  className,
+  ...props
+}: React.ComponentProps<"ul"> & VariantProps<typeof sidebarMenuVariants>) {
   return (
     <ul
       data-slot="sidebar-menu"
       data-sidebar="menu"
-      className={cn("flex w-full min-w-0 flex-col gap-px", className)}
+      className={cn(sidebarMenuVariants({ spacing }), className)}
       {...props}
     />
   );
@@ -472,6 +520,11 @@ const sidebarMenuButtonVariants = cva(
         sm: "h-7 text-xs",
         lg: "h-12 text-sm group-data-[collapsible=icon]:p-0!",
       },
+      content: {
+        brand: "text-md font-semibold tracking-tight text-foreground",
+        summary: "pr-20",
+        action: "pr-8",
+      },
     },
     defaultVariants: {
       variant: "default",
@@ -481,6 +534,7 @@ const sidebarMenuButtonVariants = cva(
 );
 
 function SidebarMenuButton({
+  content,
   render,
   isActive = false,
   variant = "default",
@@ -498,7 +552,7 @@ function SidebarMenuButton({
     defaultTagName: "button",
     props: mergeProps<"button">(
       {
-        className: cn(sidebarMenuButtonVariants({ variant, size }), className),
+        className: cn(sidebarMenuButtonVariants({ variant, size, content }), className),
       },
       props,
     ),
@@ -564,15 +618,29 @@ function SidebarMenuAction({
   });
 }
 
-function SidebarMenuBadge({ className, ...props }: React.ComponentProps<"div">) {
+const sidebarMenuBadgeVariants = cva(
+  "pointer-events-none absolute right-1.5 flex h-5 min-w-5 items-center justify-center rounded-sm px-1 text-xs font-medium text-sidebar-foreground tabular-nums select-none group-data-[collapsible=icon]:hidden peer-hover/menu-button:text-sidebar-accent-foreground peer-data-[size=default]/menu-button:top-1.5 peer-data-[size=lg]/menu-button:top-2.5 peer-data-[size=sm]/menu-button:top-1 peer-data-active/menu-button:text-sidebar-accent-foreground",
+  {
+    variants: {
+      variant: {
+        attention:
+          "px-0 text-needs-you peer-hover/menu-button:text-needs-you peer-data-active/menu-button:text-needs-you",
+        summary: "gap-2 px-0",
+      },
+    },
+  },
+);
+
+function SidebarMenuBadge({
+  variant,
+  className,
+  ...props
+}: React.ComponentProps<"div"> & VariantProps<typeof sidebarMenuBadgeVariants>) {
   return (
     <div
       data-slot="sidebar-menu-badge"
       data-sidebar="menu-badge"
-      className={cn(
-        "pointer-events-none absolute right-1.5 flex h-5 min-w-5 items-center justify-center rounded-sm px-1 text-xs font-medium text-sidebar-foreground tabular-nums select-none group-data-[collapsible=icon]:hidden peer-hover/menu-button:text-sidebar-accent-foreground peer-data-[size=default]/menu-button:top-1.5 peer-data-[size=lg]/menu-button:top-2.5 peer-data-[size=sm]/menu-button:top-1 peer-data-active/menu-button:text-sidebar-accent-foreground",
-        className,
-      )}
+      className={cn(sidebarMenuBadgeVariants({ variant }), className)}
       {...props}
     />
   );
@@ -608,15 +676,27 @@ function SidebarMenuSkeleton({
   );
 }
 
-function SidebarMenuSub({ className, ...props }: React.ComponentProps<"ul">) {
+const sidebarMenuSubVariants = cva(
+  "mx-3.5 flex min-w-0 translate-x-px flex-col gap-1 border-l border-sidebar-border px-2.5 py-0.5 group-data-[collapsible=icon]:hidden",
+  {
+    variants: {
+      variant: {
+        flat: "gap-px border-l-0 px-0 py-px",
+      },
+    },
+  },
+);
+
+function SidebarMenuSub({
+  variant,
+  className,
+  ...props
+}: React.ComponentProps<"ul"> & VariantProps<typeof sidebarMenuSubVariants>) {
   return (
     <ul
       data-slot="sidebar-menu-sub"
       data-sidebar="menu-sub"
-      className={cn(
-        "mx-3.5 flex min-w-0 translate-x-px flex-col gap-1 border-l border-sidebar-border px-2.5 py-0.5 group-data-[collapsible=icon]:hidden",
-        className,
-      )}
+      className={cn(sidebarMenuSubVariants({ variant }), className)}
       {...props}
     />
   );
@@ -633,7 +713,19 @@ function SidebarMenuSubItem({ className, ...props }: React.ComponentProps<"li">)
   );
 }
 
+const sidebarMenuSubButtonVariants = cva(
+  "flex h-7 min-w-0 -translate-x-px items-center gap-2 overflow-hidden rounded-md px-2 text-sidebar-foreground ring-sidebar-ring outline-hidden group-data-[collapsible=icon]:hidden hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground focus-visible:ring-2 active:bg-sidebar-accent active:text-sidebar-accent-foreground disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 data-[size=md]:text-sm data-[size=sm]:text-xs data-active:bg-sidebar-accent data-active:font-medium data-active:text-sidebar-accent-foreground [&>span:last-child]:truncate [&>svg]:size-4 [&>svg]:shrink-0 [&>svg]:text-muted-foreground hover:[&>svg]:text-sidebar-accent-foreground data-active:[&>svg]:text-sidebar-accent-foreground",
+  {
+    variants: {
+      indent: {
+        icon: "pl-8",
+      },
+    },
+  },
+);
+
 function SidebarMenuSubButton({
+  indent,
   render,
   size = "md",
   isActive = false,
@@ -643,15 +735,12 @@ function SidebarMenuSubButton({
   React.ComponentProps<"a"> & {
     size?: "sm" | "md";
     isActive?: boolean;
-  }) {
+  } & VariantProps<typeof sidebarMenuSubButtonVariants>) {
   return useRender({
     defaultTagName: "a",
     props: mergeProps<"a">(
       {
-        className: cn(
-          "flex h-7 min-w-0 -translate-x-px items-center gap-2 overflow-hidden rounded-md px-2 text-sidebar-foreground ring-sidebar-ring outline-hidden group-data-[collapsible=icon]:hidden hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground focus-visible:ring-2 active:bg-sidebar-accent active:text-sidebar-accent-foreground disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 data-[size=md]:text-sm data-[size=sm]:text-xs data-active:bg-sidebar-accent data-active:font-medium data-active:text-sidebar-accent-foreground [&>span:last-child]:truncate [&>svg]:size-4 [&>svg]:shrink-0 [&>svg]:text-muted-foreground hover:[&>svg]:text-sidebar-accent-foreground data-active:[&>svg]:text-sidebar-accent-foreground",
-          className,
-        ),
+        className: cn(sidebarMenuSubButtonVariants({ indent }), className),
       },
       props,
     ),

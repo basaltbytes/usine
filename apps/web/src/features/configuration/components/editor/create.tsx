@@ -89,7 +89,7 @@ export const CreationForm = ({ kind, initialMember, cancel }: CreationFormProps)
           }}
         >
           {kind === "loop" && (
-            <Label className="flex w-full flex-col items-start gap-2">
+            <Label className="flex w-full flex-col items-start">
               {projectCopy.project}
               <NativeSelect
                 className="w-full"
@@ -114,7 +114,7 @@ export const CreationForm = ({ kind, initialMember, cancel }: CreationFormProps)
           {kind === "repository" ? (
             <RepositoryPicker value={name} onChange={setName} disabled={checking} />
           ) : (
-            <Label className="flex w-full flex-col items-start gap-2">
+            <Label className="flex w-full flex-col items-start">
               {kind === "project" ? projectCopy.id : editorCopy.name}
               <Input
                 required

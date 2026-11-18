@@ -1,3 +1,4 @@
+import { Button } from "~/components/ui/button";
 import { useCanOperateRepository } from "~/lib/permissions";
 import { CaretRightIcon } from "@phosphor-icons/react";
 import type { AttemptId } from "@usine/core/attempt";
@@ -187,12 +188,14 @@ export const RunWorkspace = ({ detail, history }: RunWorkspaceProps) => {
         );
   return (
     <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
-      <button
+      <Button
         type="button"
         aria-expanded={outlineOpen}
         aria-controls={outlineId}
         onClick={() => setOutlineOpen((open) => !open)}
-        className="mx-4 mb-2 flex h-9 items-center justify-between gap-3 rounded-md border px-3 text-left outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring/70 focus-visible:ring-inset md:mx-5 lg:hidden"
+        variant="disclosure-outline"
+        size="navigation"
+        className="mx-4 mb-2 justify-between text-left md:mx-5 lg:hidden"
       >
         <span className="font-medium">Outline</span>
         <span className="flex items-center gap-2 text-muted-foreground">
@@ -202,7 +205,7 @@ export const RunWorkspace = ({ detail, history }: RunWorkspaceProps) => {
             className={cn("size-3 transition-transform", outlineOpen && "rotate-90")}
           />
         </span>
-      </button>
+      </Button>
       <Outline
         id={outlineId}
         run={run}

@@ -37,10 +37,11 @@ export const ExpressionField = ({
     <div className="flex min-w-0 flex-col gap-2">
       <Label htmlFor={id}>{label}</Label>
       <Textarea
+        variant="code"
         id={id}
         ref={textarea}
         value={text}
-        className="min-h-24 font-mono [field-sizing:fixed]"
+        className="min-h-24 [field-sizing:fixed]"
         aria-invalid={errors.length > 0}
         aria-describedby={`${id}-help`}
         onChange={(event) => {
@@ -86,10 +87,11 @@ export const ExpressionField = ({
         >
           {suggestions.map((field) => (
             <Button
+              font="mono"
               type="button"
               variant="outline"
               size="xs"
-              className="font-mono"
+
               key={field}
               onClick={() => {
                 const next = text.slice(0, token.start) + field + text.slice(cursor);

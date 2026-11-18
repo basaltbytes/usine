@@ -75,15 +75,12 @@ export const BoardCard = ({
       ref={setNodeRef}
       // oxlint-disable-next-line shadcn/no-inline-styles -- dnd-kit computes the drag offset and transition.
       style={{ transform: CSS.Translate.toString(transform), transition }}
-      className={cn("group/task relative", isDragging && "opacity-40")}
+      className={cn("group/task group/actions relative", isDragging && "opacity-40")}
     >
       <CardFrame
         ref={setActivatorNodeRef}
         needsYou={item.needsYou}
-        className={cn(
-          draggable &&
-            "touch-none focus-visible:ring-2 focus-visible:ring-ring/70 focus-visible:ring-inset",
-        )}
+        className={cn(draggable && "touch-none")}
         {...(draggable && attributes)}
         {...(draggable && listeners)}
       >
@@ -93,7 +90,6 @@ export const BoardCard = ({
           item={item}
           lane={lane}
           catalog={catalog}
-
           stall={stall}
           readOnly={readOnly}
           action={action}
@@ -109,7 +105,7 @@ export const BoardCard = ({
         openRun={openRun}
         action={action}
         again={again}
-        className="absolute top-1.5 right-1.5 transition-opacity [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover/task:opacity-100 [@media(hover:hover)]:group-focus-within/task:opacity-100 [@media(hover:hover)]:aria-expanded:opacity-100"
+        className="absolute top-1.5 right-1.5"
       />
     </div>
   );

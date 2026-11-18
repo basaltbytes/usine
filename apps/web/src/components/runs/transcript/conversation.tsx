@@ -140,7 +140,10 @@ const Reader = ({
               onNavigate={navigate}
               onInteract={() => setPendingRestore(null)}
             >
-              <MessageScrollerContent className="mx-auto w-full max-w-[38.5rem] gap-0 px-4 pt-5 pb-8 sm:px-2 [&>*]:-mx-2 [&>*]:px-2">
+              <MessageScrollerContent
+                variant="transcript"
+                className="mx-auto w-full max-w-[38.5rem] [&>*]:-mx-2"
+              >
                 <Transcript document={document} runTask={runTask} history={history} />
               </MessageScrollerContent>
             </ConversationViewport>

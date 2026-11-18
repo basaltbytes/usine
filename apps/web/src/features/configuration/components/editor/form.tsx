@@ -169,7 +169,7 @@ export const ConfigurationEditorForm = ({
         ) : (
           <WriteFailure error={write.error} />
         ))}
-      <Label className="flex flex-col items-start gap-2">
+      <Label className="flex flex-col items-start">
         {editorCopy.message}
         <Input
           value={message}

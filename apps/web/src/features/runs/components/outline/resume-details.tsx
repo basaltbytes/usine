@@ -29,20 +29,21 @@ export const ResumeDetails = ({ session, attempt }: ResumeDetailsProps) => {
       <PopoverTrigger
         render={
           <Button
+            tone="muted"
             variant="ghost"
             size="icon-sm"
             aria-label={`Resume details for ${sessionName(session)}`}
             title="Resume details"
-            className="text-muted-foreground"
           />
         }
       >
         <TerminalWindowIcon aria-hidden="true" />
       </PopoverTrigger>
       <PopoverContent
+        variant="detail"
         side="right"
         align="start"
-        className="w-[28rem] max-w-[calc(100vw-2rem)] p-3 shadow-raised"
+        className="w-[28rem] max-w-[calc(100vw-2rem)]"
       >
         <SessionHandoff session={session} attempt={attempt} />
       </PopoverContent>

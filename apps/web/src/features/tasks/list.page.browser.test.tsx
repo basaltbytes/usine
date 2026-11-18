@@ -31,6 +31,10 @@ import {
 import "~/index.css";
 import { ChangeNotice } from "@usine/orchestrator/operator/http";
 import { invalidateChanges } from "~/lib/changes";
+import { LinkedRow } from "~/features/tasks/components/section";
+
+// @ts-expect-error LinkedRow owns the positioning and hover treatment of its covering link
+void (<LinkedRow variant="plain" />);
 
 declare module "vitest/browser" {
   interface BrowserCommands {

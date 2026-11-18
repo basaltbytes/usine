@@ -38,7 +38,7 @@ export const RepositoryRow = ({ repository }: RepositoryRowProps) => {
     <OpeningRow
       open={() => void navigate({ to: "/configuration/repositories/$owner/$name", params })}
     >
-      <TableCell className="py-3">
+      <TableCell size="roomy">
         <Link
           to="/configuration/repositories/$owner/$name"
           params={params}
@@ -56,7 +56,7 @@ export const RepositoryRow = ({ repository }: RepositoryRowProps) => {
           repository.tags.join(", ")
         )}
       </TableCell>
-      <TableCell className="text-right tabular-nums">
+      <TableCell variant="count" className="text-right">
         {repository.lanes.length === 0 ? (
           <span className="text-muted-foreground">Proposed</span>
         ) : (
@@ -64,14 +64,12 @@ export const RepositoryRow = ({ repository }: RepositoryRowProps) => {
         )}
       </TableCell>
       <TableCell
-        className={cn(
-          "max-sm:whitespace-normal",
-          standing.problem ? "text-destructive" : "text-muted-foreground",
-        )}
+        tone={standing.problem ? "destructive" : "muted"}
+        className="max-sm:whitespace-normal"
       >
         {standing.text}
       </TableCell>
-      <FillCell className="hidden whitespace-normal text-muted-foreground sm:table-cell">
+      <FillCell tone="muted" className="hidden whitespace-normal sm:table-cell">
         {repository.loops.length === 0 ? "No loop" : repository.loops.join(", ")}
       </FillCell>
     </OpeningRow>

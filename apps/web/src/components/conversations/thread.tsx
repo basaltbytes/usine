@@ -154,7 +154,7 @@ const ThreadBody = ({ id, record, composerRef }: ThreadBodyProps) => {
       <MessageScrollerProvider autoScroll defaultScrollPosition="end" scrollEdgeThreshold={8}>
         <MessageScroller className="min-h-0 flex-1">
           <MessageScrollerViewport aria-label="Messages">
-            <MessageScrollerContent className="mx-auto w-full max-w-3xl gap-5 px-5 pt-5 pb-8">
+            <MessageScrollerContent variant="conversation" className="mx-auto w-full max-w-3xl">
               {timeline.length === 0 ? (
                 <TimelineEmpty>{emptyConversation}</TimelineEmpty>
               ) : (

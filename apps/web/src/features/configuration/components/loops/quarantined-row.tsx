@@ -12,7 +12,7 @@ export const QuarantinedRow = ({ loop }: QuarantinedRowProps) => {
   const params = { loop: loop.name };
   return (
     <OpeningRow open={() => void navigate({ to: "/configuration/loops/$loop", params })}>
-      <TableCell className="py-3">
+      <TableCell size="roomy">
         <Link
           to="/configuration/loops/$loop"
           params={params}

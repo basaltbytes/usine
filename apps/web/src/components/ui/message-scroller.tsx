@@ -1,3 +1,4 @@
+import { cva, type VariantProps } from "class-variance-authority";
 import * as React from "react";
 import {
   MessageScroller as MessageScrollerPrimitive,
@@ -48,32 +49,53 @@ function MessageScrollerViewport({
   );
 }
 
+const messageScrollerContentVariants = cva("flex h-max min-h-full flex-col gap-6", {
+  variants: {
+    variant: {
+      conversation: "gap-5 px-5 pt-5 pb-8",
+      transcript: "gap-0 px-4 pt-5 pb-8 sm:px-2 [&>*]:px-2",
+    },
+  },
+});
+
 function MessageScrollerContent({
+  variant,
   className,
   ...props
-}: React.ComponentProps<typeof MessageScrollerPrimitive.Content>) {
+}: React.ComponentProps<typeof MessageScrollerPrimitive.Content> &
+  VariantProps<typeof messageScrollerContentVariants>) {
   return (
     <MessageScrollerPrimitive.Content
       data-slot="message-scroller-content"
-      className={cn("flex h-max min-h-full flex-col gap-6", className)}
+      className={cn(messageScrollerContentVariants({ variant }), className)}
       {...props}
     />
   );
 }
 
+const messageScrollerItemVariants = cva(
+  "min-w-0 shrink-0 [contain-intrinsic-size:auto_10rem] [content-visibility:auto]",
+  {
+    variants: {
+      inset: {
+        true: "px-2",
+      },
+    },
+  },
+);
+
 function MessageScrollerItem({
+  inset,
   className,
   scrollAnchor = false,
   ...props
-}: React.ComponentProps<typeof MessageScrollerPrimitive.Item>) {
+}: React.ComponentProps<typeof MessageScrollerPrimitive.Item> &
+  VariantProps<typeof messageScrollerItemVariants>) {
   return (
     <MessageScrollerPrimitive.Item
       data-slot="message-scroller-item"
       scrollAnchor={scrollAnchor}
-      className={cn(
-        "min-w-0 shrink-0 [contain-intrinsic-size:auto_10rem] [content-visibility:auto]",
-        className,
-      )}
+      className={cn(messageScrollerItemVariants({ inset }), className)}
       {...props}
     />
   );

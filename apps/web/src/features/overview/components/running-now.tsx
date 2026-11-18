@@ -43,7 +43,7 @@ const RunningRow = ({ running, overview, now }: RunningRowProps) => {
   const origin = item === null ? null : itemIdentity(overview, item).origin;
   return (
     <RunRow run={run}>
-      <FillCell className="py-3 whitespace-normal align-top">
+      <FillCell size="roomy" className="whitespace-normal align-top">
         <RunPageLink run={run}>
           {origin === null ? (
             <span className="block truncate text-sm font-medium">
@@ -85,20 +85,24 @@ const RunningRow = ({ running, overview, now }: RunningRowProps) => {
           </p>
         ))}
       </FillCell>
-      <TableCell className="py-3 max-md:hidden align-top">
+      <TableCell size="roomy" className="max-md:hidden align-top">
         <RunningMark />
         {run.loop}
       </TableCell>
-      <TableCell className="py-3 max-lg:hidden align-top">{run.agent}</TableCell>
-      <TableCell className="py-3 max-lg:hidden align-top">{attempt.worker}</TableCell>
-      <TableCell className="py-3 max-sm:hidden align-top">
+      <TableCell size="roomy" className="max-lg:hidden align-top">
+        {run.agent}
+      </TableCell>
+      <TableCell size="roomy" className="max-lg:hidden align-top">
+        {attempt.worker}
+      </TableCell>
+      <TableCell size="roomy" className="max-sm:hidden align-top">
         <TextTooltip text={timestampLabel(attempt.startedAt)}>
           <time dateTime={attempt.startedAt} className="font-mono text-xs tabular-nums">
             {startLabel(attempt.startedAt, now)}
           </time>
         </TextTooltip>
       </TableCell>
-      <TableCell className="py-3 text-right align-top">
+      <TableCell size="roomy" className="text-right align-top">
         {lastActivityAt === null ? (
           <span className="text-xs text-muted-foreground">None yet</span>
         ) : (
@@ -135,7 +139,7 @@ export const RunningNow = ({ running, workers, now }: RunningNowProps) => {
         <div className="-mx-2">
           <Table>
             <TableHeader>
-              <TableRow className="hover:bg-transparent">
+              <TableRow variant="static">
                 <TableHead>Item</TableHead>
                 <TableHead className="max-md:hidden">Loop</TableHead>
                 <TableHead className="max-lg:hidden">Agent</TableHead>

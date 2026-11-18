@@ -39,7 +39,7 @@ export const Machines = ({ worker }: MachinesProps) => {
         <div className="-mx-2">
           <Table>
             <TableHeader>
-              <TableRow className="hover:bg-transparent">
+              <TableRow variant="static">
                 <TableHead className="max-sm:w-full">Machine</TableHead>
                 <TableHead>State</TableHead>
                 <TableHead className="text-right">{machineReuseCopy.attempts}</TableHead>
@@ -49,10 +49,7 @@ export const Machines = ({ worker }: MachinesProps) => {
             </TableHeader>
             <TableBody>
               {worker.machines.map((machine, index) => (
-                <TableRow
-                  key={machine.id ?? `${machine.since}:${index}`}
-                  className="hover:bg-transparent"
-                >
+                <TableRow variant="static" key={machine.id ?? `${machine.since}:${index}`}>
                   <TableCell className="whitespace-normal max-sm:w-full max-sm:align-top">
                     {machine.id === null ? (
                       <span className="text-muted-foreground">No ID yet</span>
@@ -66,9 +63,13 @@ export const Machines = ({ worker }: MachinesProps) => {
                   <TableCell className="max-sm:align-top">
                     <StatusBadge {...machineState[machine.state]} />
                   </TableCell>
-                  <TableCell className="text-right tabular-nums">{machine.attempts}</TableCell>
+                  <TableCell variant="count" className="text-right">
+                    {machine.attempts}
+                  </TableCell>
                   <TableCell
-                    className="text-right font-mono text-xs text-muted-foreground tabular-nums max-sm:align-top"
+                    variant="numeric"
+                    tone="muted"
+                    className="text-right max-sm:align-top"
                     title={`Since ${timestampLabel(machine.since)}`}
                   >
                     {elapsedLabel(machine.since, now)}

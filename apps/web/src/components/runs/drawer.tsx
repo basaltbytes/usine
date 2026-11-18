@@ -177,11 +177,12 @@ export const RunDrawer = ({ runId, open, close }: RunDrawerProps) => {
       }}
     >
       <SheetContent
+        variant="continuous"
         side="right"
         aria-label="Run detail"
-        className="gap-0 data-[side=right]:w-full data-[side=right]:sm:max-w-md"
+        className="data-[side=right]:w-full data-[side=right]:sm:max-w-md"
       >
-        <SheetHeader className="shrink-0 gap-3 border-b px-5 pt-5 pb-4 pr-20">
+        <SheetHeader variant="detail" className="shrink-0">
           {run === undefined || detail.data === undefined ? (
             <>
               <SheetTitle>Loading…</SheetTitle>

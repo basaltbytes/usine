@@ -24,16 +24,14 @@ export const NotificationTray = ({ needs }: NotificationTrayProps) => {
   useEffect(() => setOpen(false), [location]);
   const bell = (
     <Button
+      size="toolbar"
       variant="ghost"
-      className="h-9 shrink-0 gap-1.5 px-2"
+      className="h-9 shrink-0"
       aria-label={attentionBellLabel(needs.length)}
     >
       <BellIcon aria-hidden="true" className="size-4" />
       {needs.length > 0 && (
-        <Badge
-          aria-hidden="true"
-          className="bg-needs-you/15 px-1.5 text-foreground dark:text-needs-you tabular-nums"
-        >
+        <Badge variant="attention" aria-hidden="true">
           {needs.length}
         </Badge>
       )}
@@ -69,8 +67,10 @@ export const NotificationTray = ({ needs }: NotificationTrayProps) => {
   return mobile ? (
     <Sheet open={open} onOpenChange={setOpen}>
       <SheetTrigger render={bell} />
-      <SheetContent side="bottom" className="max-h-[70dvh] rounded-t-xl">
-        <SheetTitle className="shrink-0 border-b px-4 py-4 pr-14">{title}</SheetTitle>
+      <SheetContent variant="tray" side="bottom" className="max-h-[70dvh]">
+        <SheetTitle variant="heading" className="shrink-0">
+          {title}
+        </SheetTitle>
         {content}
       </SheetContent>
     </Sheet>
@@ -78,11 +78,14 @@ export const NotificationTray = ({ needs }: NotificationTrayProps) => {
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger render={bell} />
       <PopoverContent
+        variant="flush"
         align="end"
         sideOffset={8}
-        className="max-h-[70dvh] w-100 gap-0 overflow-hidden p-0"
+        className="max-h-[70dvh] w-100 overflow-hidden"
       >
-        <PopoverTitle className="shrink-0 border-b px-4 py-3 text-md">{title}</PopoverTitle>
+        <PopoverTitle variant="heading" className="shrink-0">
+          {title}
+        </PopoverTitle>
         {content}
       </PopoverContent>
     </Popover>

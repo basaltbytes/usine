@@ -63,7 +63,7 @@ export const LoopsList = ({ configuration, pause }: LoopsListProps) => {
         <div className="-mx-2">
           <Table>
             <TableHeader>
-              <TableRow className="hover:bg-transparent">
+              <TableRow variant="static">
                 <TableHead className="lg:w-56">Loop</TableHead>
                 <TableHead>Project</TableHead>
                 <TableHead>Trigger</TableHead>

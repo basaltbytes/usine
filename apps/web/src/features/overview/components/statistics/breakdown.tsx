@@ -88,7 +88,7 @@ export const Breakdown = ({ statistics }: BreakdownProps) => {
         <div className="-mx-2">
           <Table>
             <TableHeader>
-              <TableRow className="hover:bg-transparent">
+              <TableRow variant="static">
                 <TableHead>{dimensions.find(({ value }) => value === dimension)?.label}</TableHead>
                 <TableHead className="text-right">{unit === "run" ? "Runs" : "Attempts"}</TableHead>
                 <TableHead className="text-right">Succeeded</TableHead>
@@ -99,27 +99,29 @@ export const Breakdown = ({ statistics }: BreakdownProps) => {
             </TableHeader>
             <TableBody>
               {rows.map(({ name, outcomes, time, usage }) => (
-                <TableRow key={name} className="hover:bg-transparent">
+                <TableRow variant="static" key={name}>
                   <FillCell
-                    className={dimension === "model" ? "truncate font-mono text-xs" : "truncate"}
+                    variant={dimension === "model" ? "mono" : undefined}
+                    truncate
                     title={name}
                   >
                     {name}
                   </FillCell>
-                  <TableCell className="text-right tabular-nums">
+                  <TableCell variant="count" className="text-right">
                     {outcomeTotal(outcomes).toLocaleString("en")}
                   </TableCell>
-                  <TableCell className="text-right tabular-nums">
+                  <TableCell variant="count" className="text-right">
                     {percentLabel(outcomes.succeeded, outcomeTotal(outcomes))}
                   </TableCell>
-                  <TableCell className="text-right tabular-nums max-sm:hidden">
+                  <TableCell variant="count" className="text-right max-sm:hidden">
                     {time === null ? "None" : spanLabel(time.medianMillis)}
                   </TableCell>
-                  <TableCell className="text-right tabular-nums max-md:hidden">
+                  <TableCell variant="count" className="text-right max-md:hidden">
                     {usage.meanTokens === null ? "None" : tokensLabel(usage.meanTokens)}
                   </TableCell>
                   <TableCell
-                    className="text-right tabular-nums max-sm:hidden"
+                    variant="count"
+                    className="text-right max-sm:hidden"
                     title={
                       usage.cost === null
                         ? `No ${unit} has a price for every session`

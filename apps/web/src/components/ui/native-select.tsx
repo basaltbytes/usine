@@ -1,3 +1,4 @@
+import { cva, type VariantProps } from "class-variance-authority";
 import * as React from "react";
 
 import { cn } from "~/lib/utils";
@@ -7,13 +8,26 @@ type NativeSelectProps = Omit<React.ComponentProps<"select">, "size"> & {
   size?: "sm" | "default";
 };
 
-function NativeSelect({ className, size = "default", ...props }: NativeSelectProps) {
+const nativeSelectVariants = cva(
+  "group/native-select relative w-fit has-[select:disabled]:opacity-50",
+  {
+    variants: {
+      variant: {
+        form: "[&_select]:text-sm max-sm:[&_select]:text-lg pointer-coarse:[&_select]:text-lg",
+      },
+    },
+  },
+);
+
+function NativeSelect({
+  variant,
+  className,
+  size = "default",
+  ...props
+}: NativeSelectProps & VariantProps<typeof nativeSelectVariants>) {
   return (
     <div
-      className={cn(
-        "group/native-select relative w-fit has-[select:disabled]:opacity-50",
-        className,
-      )}
+      className={cn(nativeSelectVariants({ variant }), className)}
       data-slot="native-select-wrapper"
       data-size={size}
     >

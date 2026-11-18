@@ -114,13 +114,7 @@ export const ContextualActions = ({
               <DropdownMenu>
                 <DropdownMenuTrigger
                   disabled={busy}
-                  render={
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="text-muted-foreground hover:text-foreground aria-expanded:text-foreground"
-                    />
-                  }
+                  render={<Button tone="muted" variant="ghost" size="icon" />}
                   aria-label="More actions"
                 >
                   <DotsThreeIcon weight="bold" className="size-4" aria-hidden="true" />

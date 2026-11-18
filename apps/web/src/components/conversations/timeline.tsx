@@ -30,13 +30,13 @@ import { TextTooltip } from "~/components/text-tooltip";
 type SpeakerProps = {
   readonly speaker: string;
   readonly at: DateTime.Utc | undefined;
-  readonly className?: string;
+  readonly inset?: boolean;
 };
 
-const Speaker = ({ speaker, at, className }: SpeakerProps) => {
+const Speaker = ({ speaker, at, inset }: SpeakerProps) => {
   const instant = at === undefined ? undefined : DateTime.formatIso(at);
   return (
-    <MessageHeader className={cn("gap-2 text-xs", className)}>
+    <MessageHeader variant="metadata" inset={inset}>
       <span className="font-medium text-foreground">{speaker}</span>
       {instant !== undefined && (
         <TextTooltip text={timestampLabel(instant)}>
@@ -113,14 +113,14 @@ const TurnState = ({ entry, cancel, canceling }: TurnStateProps) => {
   switch (state._tag) {
     case "Queued":
       return (
-        <MessageFooter className="flex-wrap gap-x-3 gap-y-1 px-0 font-normal">
+        <MessageFooter variant="metadata" className="flex-wrap">
           <StatusBadge state="Queued" label={entry.behind ? queuedBehindLabel : queuedLabel} />
           {cancel !== undefined && <QueuedCancel cancel={cancel} canceling={canceling} />}
         </MessageFooter>
       );
     case "Running":
       return (
-        <MessageFooter className="px-0 font-normal">
+        <MessageFooter variant="flush">
           <StatusBadge state="Running" label={runningLabel} />
         </MessageFooter>
       );
@@ -133,7 +133,7 @@ const TurnState = ({ entry, cancel, canceling }: TurnStateProps) => {
       );
     case "Canceled":
       return (
-        <MessageFooter className="px-0 font-normal">
+        <MessageFooter variant="flush">
           <StatusBadge state="Canceled" label={canceledLabel(state.by)} />
         </MessageFooter>
       );
@@ -166,14 +166,14 @@ export const TurnMessages = ({ entry, pending, own, cancel, canceling }: TurnMes
       {message !== undefined && (
         <MessageScrollerItem messageId={`${entry.turn.id}:message`} scrollAnchor>
           <Message align={align} aria-label={`Message from ${message.author}`} role="group">
-            <MessageContent className="gap-1">
+            <MessageContent spacing="compact">
               <Speaker speaker={message.author} at={message.createdAt} />
               <Bubble variant="muted" align={align} className="max-w-[85%]">
-                <BubbleContent className={cn("px-3 py-2", pending && "opacity-60")}>
+                <BubbleContent variant="message" pending={pending}>
                   <MessageText message={message} />
                 </BubbleContent>
               </Bubble>
-              {pending && <MessageFooter className="font-normal">{unsentLabel}</MessageFooter>}
+              {pending && <MessageFooter variant="plain">{unsentLabel}</MessageFooter>}
             </MessageContent>
           </Message>
         </MessageScrollerItem>
@@ -181,9 +181,9 @@ export const TurnMessages = ({ entry, pending, own, cancel, canceling }: TurnMes
       {!pending && (
         <MessageScrollerItem messageId={`${entry.turn.id}:reply`}>
           <Message aria-label="Answer" role="group" aria-busy={entry.turn.state._tag === "Running"}>
-            <MessageContent className="gap-3">
+            <MessageContent spacing="relaxed">
               {(activity.length > 0 || reply !== undefined) && (
-                <Speaker speaker={supervisorSpeaker} at={reply?.createdAt} className="px-0" />
+                <Speaker speaker={supervisorSpeaker} at={reply?.createdAt} inset={false} />
               )}
               {activity.length > 0 && (
                 <div className="space-y-1">

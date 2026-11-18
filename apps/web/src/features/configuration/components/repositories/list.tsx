@@ -26,7 +26,7 @@ export const RepositoriesList = ({ configuration }: RepositoriesListProps) => (
       <div className="@container -mx-2">
         <Table>
           <TableHeader>
-            <TableRow className="hover:bg-transparent">
+            <TableRow variant="static">
               <TableHead>Repository</TableHead>
               <TableHead className="hidden @2xl:table-cell">Tags</TableHead>
               <TableHead className="text-right">Lanes</TableHead>

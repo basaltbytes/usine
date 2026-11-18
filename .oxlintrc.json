@@ -53,10 +53,32 @@
         "usine/no-raw-resize-observer": "error",
         "import/no-default-export": "error",
         "shadcn/no-raw-colors": "error",
-        "shadcn/no-arbitrary-values": ["error", { "allow": ["layout", "*env(safe-area-inset-*"] }],
+        "shadcn/no-arbitrary-values": [
+          "error",
+          {
+            "allow": ["layout", "*env(safe-area-inset-*"]
+          }
+        ],
         "shadcn/no-inline-styles": "error",
-        "shadcn/no-unknown-classes": ["error", { "allow": ["task-diff"] }],
-        "shadcn/require-static-classes": "error"
+        "shadcn/no-unknown-classes": [
+          "error",
+          {
+            "allow": ["task-diff"]
+          }
+        ],
+        "shadcn/require-static-classes": "error",
+        "shadcn/no-restyle": [
+          "error",
+          {
+            "allow": ["layout"],
+            "contracts": [
+              {
+                "pattern": "^Collapsible(Content)?$",
+                "allow": ["layout", "spacing", "border-l", "collapsible-motion"]
+              }
+            ]
+          }
+        ]
       }
     },
     {
@@ -67,7 +89,8 @@
         "shadcn/no-inline-styles": "off",
         "shadcn/no-unknown-classes": "off",
         "shadcn/require-static-classes": "off",
-        "usine/no-outset-state-indicators": "off"
+        "usine/no-outset-state-indicators": "off",
+        "shadcn/no-restyle": "off"
       }
     },
     {

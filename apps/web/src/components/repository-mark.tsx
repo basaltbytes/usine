@@ -1,6 +1,5 @@
 import { type RepositoryName, splitRepositoryName } from "@usine/core/repository";
 import { Avatar, AvatarFallback, AvatarImage } from "~/components/ui/avatar";
-import { cn } from "~/lib/utils";
 
 /** Rendered width in pixels; the image is fetched at twice this for high-density screens. */
 const pixels = { inline: 16, title: 20 } as const;
@@ -23,22 +22,14 @@ type RepositoryMarkProps = {
 export const RepositoryMark = ({ repository, size = "inline" }: RepositoryMarkProps) => {
   const { owner, name } = splitRepositoryName(repository);
   return (
-    <Avatar
-      aria-hidden="true"
-      className={cn(
-        "rounded-sm bg-accent after:rounded-sm",
-        size === "title" ? "size-5" : "size-4",
-      )}
-    >
+    <Avatar appearance="tile" aria-hidden="true" className={size === "title" ? "size-5" : "size-4"}>
       <AvatarImage
+        appearance="tile"
         src={`https://github.com/${owner}.png?size=${pixels[size] * 2}`}
         alt=""
         referrerPolicy="no-referrer"
-        className="rounded-sm"
       />
-      <AvatarFallback className="rounded-sm bg-accent text-xs font-semibold text-foreground">
-        {monogram(name)}
-      </AvatarFallback>
+      <AvatarFallback variant="initial">{monogram(name)}</AvatarFallback>
     </Avatar>
   );
 };

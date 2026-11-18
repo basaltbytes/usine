@@ -10,7 +10,7 @@ type RepositoryFilterProps = {
 };
 
 export const RepositoryFilter = ({ repositories, value, onChange }: RepositoryFilterProps) => (
-  <Label className="flex min-w-0 flex-wrap items-center gap-2">
+  <Label className="flex min-w-0 flex-wrap items-center">
     {repositoryFilterLabel}
     <NativeSelect
       className="w-full min-w-0 sm:w-auto"

@@ -1,5 +1,6 @@
 import { HandedOff } from "@usine/core/run/state";
 import { CardFace } from "./face";
+import { CardFrame } from "./frame";
 import { administratorPermissions } from "@usine/core/access";
 import { PermissionsContext } from "~/lib/permissions";
 import { CiHandoff } from "@usine/core/ci";
@@ -65,6 +66,12 @@ import { needCopy } from "~/lib/needs-you/strings";
 import { failureMessage } from "~/lib/runs/strings";
 import { WithRouter } from "~/lib/testing/memory-router";
 import { boardOverview, taskUsageOf } from "~/lib/projects/fixture";
+
+// @ts-expect-error needsYou controls the attention ring
+void (<CardFrame needsYou={false} tone="attention" />);
+// @ts-expect-error CardFrame owns its interactive appearance
+void (<CardFrame needsYou={false} variant="interactive" />);
+void (<CardFrame needsYou={false} elevated />);
 
 const brain = BrainSpec.make({
   harness: Harness.make("codex"),

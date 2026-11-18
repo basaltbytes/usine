@@ -45,14 +45,14 @@ export const TaskComments = ({ task }: TaskCommentsProps) => {
       ) : (
         <div className="-mx-2">
           <Table aria-labelledby="task-comments">
-            <TableBody className="border-t">
+            <TableBody divided>
               {comments.map((comment) => {
                 const run = runs.get(comment.runId);
                 const item = run === undefined ? undefined : items.get(run.itemKey);
                 const time = commentTime(comment);
                 return (
                   <LinkedRow key={comment.url}>
-                    <FillCell className="py-3 whitespace-normal">
+                    <FillCell size="roomy" className="whitespace-normal">
                       <a
                         data-row-link
                         href={comment.url}
@@ -68,7 +68,7 @@ export const TaskComments = ({ task }: TaskCommentsProps) => {
                         )}
                       </a>
                     </FillCell>
-                    <TableCell className="py-3">
+                    <TableCell size="roomy">
                       {run !== undefined && (
                         <Link
                           {...projectLinks.run(run.repository, run.id)}
@@ -78,7 +78,7 @@ export const TaskComments = ({ task }: TaskCommentsProps) => {
                         </Link>
                       )}
                     </TableCell>
-                    <TableCell className="py-3 text-right">
+                    <TableCell size="roomy" className="text-right">
                       {time !== null && (
                         <TextTooltip text={time.title}>
                           <time

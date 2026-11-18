@@ -24,7 +24,7 @@ const ConversationToolRow = ({ call }: ConversationToolRowProps) => {
   const Icon = toolIcons[view.category];
   const status = call.state._tag === "Finished" ? "Completed" : call.state._tag;
   return (
-    <MessageScrollerItem messageId={call.key} className="-mx-2 px-2 [content-visibility:visible]">
+    <MessageScrollerItem inset messageId={call.key} className="-mx-2 [content-visibility:visible]">
       <Tool data-conversation-tool={call.key} onOpenChange={hold}>
         <ToolHeader
           title={view.title}

@@ -17,9 +17,10 @@ export const DismissedNeeds = ({ needs }: DismissedNeedsProps) => {
       <CollapsibleTrigger
         render={
           <Button
+            tone="muted"
             variant="ghost"
-            size="sm"
-            className="-mx-2 w-fit gap-1.5 px-2 text-sm font-medium text-muted-foreground hover:text-foreground data-[panel-open]:text-foreground data-[panel-open]:[&>svg]:rotate-90"
+            size="section"
+            className="-mx-2 w-fit data-[panel-open]:[&>svg]:rotate-90"
           />
         }
       >
