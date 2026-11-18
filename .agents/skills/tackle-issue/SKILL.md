@@ -1,41 +1,26 @@
 ---
 name: tackle-issue
-description: Take a GitHub issue or an open PR to a shipped PR at the usine standard.
+description: Take a GitHub issue or an open PR to a pushed, reviewable PR.
 disable-model-invocation: true
 argument-hint: <issue-or-pr number> [notes]
 ---
 
 # Tackle an issue
 
-1. **Context** — load `coding-guidelines` and `effect-ts`. Read the issue with its comments and
-   every ADR and CONTEXT.md section it links; study the precedent packages (`packages/engine`,
-   `packages/config`) before writing anything.
+A review step checks the pushed diff against the coding standards and for code quality. This skill covers building the change and making it reviewable.
 
-2. **Branch** — `git worktree list` first: the branch may be checked out in another session's
-   worktree — leave those alone, work in a temporary worktree pushed to the branch. Fresh work
-   branches from `origin/main`; an existing PR rebases onto it. The gate is
-   `.github/workflows/ci.yml` run locally — green before any new work. A worker sandbox
-   cannot reach `raw.githubusercontent.com`, so `codex:check:upstream` exits 2 there after
-   the local check passes; that exit is not a blocker.
+1. **Context.** Read the issue with every comment, and each ADR and `CONTEXT.md` term it links. Find the precedent: the package that already does the nearest thing. This step is done when you can list the acceptance criteria and name the precedent for each module you plan to add.
 
-3. **Build** — decomposed, individually green commits. A pattern the precedents don't carry is
-   established deliberately and recorded: AGENTS.md for a standing rule, an ADR for an
-   architecture decision. Prove an unfamiliar Effect construct in a throwaway node probe before
-   building on it.
+2. **Branch.** Run `git worktree list`. A branch that is checked out in another session's worktree stays there: work in a temporary worktree and push to the branch. New work branches from `origin/main`; an existing PR rebases onto it.
 
-4. **Review your own diff** — walk every changed file against the loaded charter and `effect-ts`
-   rules, then run the `thermo-nuclear-code-quality-review` skill over the branch diff. Beyond
-   those: prove root entries platform-free by walking the built `dist` import graph; a literal
-   set restated across packages moves to its shared owner (usually `@usine/core`); divergence
-   from a sibling package is aligned or written down; every acceptance criterion re-confirmed
-   against the final diff.
+3. **Build.** Decomposed commits, each one a reviewable step. While you work, run only the test files that cover the change. When no precedent has the pattern you need, record the one you set: `AGENTS.md` for a standing rule, an ADR for an architecture decision. Prove an unfamiliar Effect construct in a throwaway `node` probe before you build on it.
 
-5. **Surface** — README per touched package; changesets for every package whose published
-   surface changed, siblings included; PR body through `public-facing-copy`. For changes to
-   behavior visible to users (CLI, configuration, web UI, operator API, or workers), update
-   the matching guide or reference page under `apps/docs/src/content/docs/` in the same PR,
-   describing the resulting behavior in the present tense. Confirm that each changed behavior
-   has a matching documentation update before shipping.
+4. **Confirm** against the final diff:
+   - Every acceptance criterion is met.
+   - Root entries are platform-free: walk the built `dist` import graph.
+   - A literal set that two packages repeat is in its owner, usually `@usine/core`.
+   - A divergence from a sibling package is aligned or written down.
 
-6. **Ship** — gate green, push, CI green on the PR. The balade GitHub App generates
-   `.agents/walkthroughs/` in CI; never write or refresh those files by hand.
+5. **Surface.** A README for each touched package. A changeset for each package whose published surface changed, siblings included. The docs page that `AGENTS.md` "Writing" requires for each behaviour visible to users. The PR body through `public-facing-copy`.
+
+6. **Ship.** Run the local checks in `AGENTS.md` "Checks", push, and open the PR. CI runs the full suite. Then follow the task's CI instruction; with none, wait until CI passes on the pushed head.

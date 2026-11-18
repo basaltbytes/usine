@@ -45,7 +45,7 @@ In changesets, release web changes as `@usine/server`; never name `@usine/web` o
 
 ### Coding
 
-Before you write or review code, load the `coding-guidelines` skill. When you touch TypeScript, also load the `effect-ts` skill: the monorepo uses Effect v4 throughout, with services, layers, typed errors, and Schema at every boundary.
+When you touch TypeScript, load the `effect-ts` skill: the monorepo uses Effect v4 throughout, with services, layers, typed errors, and Schema at every boundary. When you review code, also load the `coding-guidelines` skill: review is where its charter is enforced.
 
 Rules:
 
@@ -60,3 +60,12 @@ Rules:
 - Comment only what the name and signature don't say, such as a unit, an error case, or a side effect. Put design rationale in the commit, the PR body, or an ADR.
 - Build the web UI from the shadcn registry on Tailwind tokens. Before you change `apps/web`, read "How to add UI" in `apps/web/README.md` and load the `react-app-structure` skill for file placement. The components in `apps/web/src/components/ui/` are our code. Some come from shadcn, but they are meant to be tweaked, changed, and improved (that's the shadcn philosophy) and are never updated from the registry, so the usual code quality, constraints, and conventions apply to them.
 - Use snake_case keys in exported and imported YAML (`usine.yaml`, loop and agent frontmatter) and camelCase in domain fields. Rename keys once, at the parse boundary, with `Schema.encodeKeys`; see `Settings` in `@usine/config`.
+
+### Checks
+
+CI is the test gate: it runs the full suite on every pushed head. Before you push, run the local checks from the repository root.
+
+- Static checks: `pnpm lint && pnpm format:check && pnpm knip && pnpm check`.
+- Affected tests: `git fetch -q origin main && pnpm exec turbo run test --concurrency=1 --filter='[origin/main]' -- --changed origin/main`. In each package you changed, it runs the test files that import a changed file. When you change `scripts/`, `tooling/`, `infra/`, or `apps/docs/`, also run `pnpm test:scripts`.
+- While you work, run single files: `pnpm --filter <package> exec vitest run <files>`.
+- Run `pnpm test` or a package's whole suite only to reproduce a CI failure, and then only the failing package.
