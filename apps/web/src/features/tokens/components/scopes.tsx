@@ -124,7 +124,7 @@ export const TokenScopes = ({ token, close }: TokenScopesProps) => {
       }}
     >
       {token === undefined && (
-        <Label className="flex flex-col items-start gap-2">
+        <Label className="flex flex-col items-start">
           {scopeCopy.name}
           <Input
             value={name}
@@ -137,7 +137,7 @@ export const TokenScopes = ({ token, close }: TokenScopesProps) => {
       <fieldset className="space-y-2">
         <legend>{scopeCopy.title}</legend>
         {choices.map((grant) => (
-          <Label key={grantKey(grant)} className="flex gap-2">
+          <Label key={grantKey(grant)} className="flex">
             <Checkbox
               checked={selected.some((entry) => grantKey(entry) === grantKey(grant))}
               onCheckedChange={(checked) =>
@@ -153,7 +153,7 @@ export const TokenScopes = ({ token, close }: TokenScopesProps) => {
         ))}
       </fieldset>
       <div className="flex flex-col items-start gap-2">
-        <Label className="flex w-full flex-col items-start gap-2">
+        <Label className="flex w-full flex-col items-start">
           {scopeCopy.operations}
           <Input
             value={operations}
@@ -167,7 +167,7 @@ export const TokenScopes = ({ token, close }: TokenScopesProps) => {
         </p>
       </div>
       {token === undefined && (
-        <Label className="flex flex-col items-start gap-2">
+        <Label className="flex flex-col items-start">
           {scopeCopy.expires}
           <Input
             type="datetime-local"
@@ -178,7 +178,7 @@ export const TokenScopes = ({ token, close }: TokenScopesProps) => {
       )}
       {error && <ErrorAlert message={error} />}
       {secret && (
-        <Label className="flex flex-col items-start gap-2">
+        <Label className="flex flex-col items-start">
           {scopeCopy.once}
           <Input readOnly value={secret} />
         </Label>

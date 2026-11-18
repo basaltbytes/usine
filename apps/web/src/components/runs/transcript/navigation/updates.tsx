@@ -36,13 +36,13 @@ export const UpdateNavigation = ({
   return (
     <div className="flex h-10 shrink-0 items-center justify-center">
       {count > 0 ? (
-        <Button variant="secondary" size="sm" className="gap-1.5" onClick={onLatest}>
+        <Button variant="secondary" size="sm-wide" onClick={onLatest}>
           <ArrowDownIcon aria-hidden="true" />
           {count} new {count === 1 ? "update" : "updates"}
         </Button>
       ) : (
         end && (
-          <Button variant="ghost" size="sm" className="gap-1.5" onClick={onLatest}>
+          <Button variant="ghost" size="sm-wide" onClick={onLatest}>
             <ArrowDownIcon aria-hidden="true" />
             Jump to latest
           </Button>

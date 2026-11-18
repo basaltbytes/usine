@@ -32,9 +32,10 @@ export const Delegation = ({ row, speaker }: DelegationProps) => {
           aria-label={`Delegated task: ${view.subject} · ${state === "Finished" ? "Completed" : state}`}
           render={
             <Button
-              variant="ghost"
-              size="sm"
-              className="-mx-2 h-auto min-h-7 w-[calc(100%+1rem)] justify-start gap-2 px-2 py-1 text-left text-xs font-normal whitespace-normal text-muted-foreground hover:text-foreground aria-expanded:bg-transparent aria-expanded:hover:bg-muted/70 data-[panel-open]:[&>svg]:rotate-90"
+              tone="muted"
+              variant="disclosure"
+              size="disclosure"
+              className="-mx-2 w-[calc(100%+1rem)] justify-start text-left whitespace-normal data-[panel-open]:[&>svg]:rotate-90"
             />
           }
         >

@@ -1,3 +1,4 @@
+import { cva, type VariantProps } from "class-variance-authority";
 import * as React from "react";
 import { mergeProps } from "@base-ui/react/merge-props";
 import { useRender } from "@base-ui/react/use-render";
@@ -34,12 +35,25 @@ function BreadcrumbItem({ className, ...props }: React.ComponentProps<"li">) {
   );
 }
 
-function BreadcrumbLink({ className, render, ...props }: useRender.ComponentProps<"a">) {
+const breadcrumbLinkVariants = cva("transition-colors hover:text-foreground", {
+  variants: {
+    variant: {
+      icon: "gap-1.5",
+    },
+  },
+});
+
+function BreadcrumbLink({
+  variant,
+  className,
+  render,
+  ...props
+}: useRender.ComponentProps<"a"> & VariantProps<typeof breadcrumbLinkVariants>) {
   return useRender({
     defaultTagName: "a",
     props: mergeProps<"a">(
       {
-        className: cn("transition-colors hover:text-foreground", className),
+        className: cn(breadcrumbLinkVariants({ variant }), className),
       },
       props,
     ),
@@ -50,14 +64,26 @@ function BreadcrumbLink({ className, render, ...props }: useRender.ComponentProp
   });
 }
 
-function BreadcrumbPage({ className, ...props }: React.ComponentProps<"span">) {
+const breadcrumbPageVariants = cva("font-medium text-foreground", {
+  variants: {
+    variant: {
+      icon: "gap-1.5",
+    },
+  },
+});
+
+function BreadcrumbPage({
+  variant,
+  className,
+  ...props
+}: React.ComponentProps<"span"> & VariantProps<typeof breadcrumbPageVariants>) {
   return (
     <span
       data-slot="breadcrumb-page"
       role="link"
       aria-disabled="true"
       aria-current="page"
-      className={cn("font-medium text-foreground", className)}
+      className={cn(breadcrumbPageVariants({ variant }), className)}
       {...props}
     />
   );

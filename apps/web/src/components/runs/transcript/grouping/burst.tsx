@@ -44,9 +44,10 @@ export const ToolBurst = ({ burst }: ToolBurstProps) => {
       {/* The burst row already has content-visibility, so its calls render at their real heights. */}
       {burst.tools.map((tool) => (
         <MessageScrollerItem
+          inset
           key={tool.key}
           messageId={tool.key}
-          className="-mx-2 px-2 [content-visibility:visible]"
+          className="-mx-2 [content-visibility:visible]"
         >
           <TranscriptToolRow entry={tool} />
         </MessageScrollerItem>

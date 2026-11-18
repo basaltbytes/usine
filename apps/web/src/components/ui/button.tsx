@@ -17,17 +17,56 @@ const buttonVariants = cva(
         destructive:
           "bg-destructive/15 text-destructive hover:bg-destructive/25 focus-visible:ring-destructive/60",
         link: "text-primary underline-offset-4 hover:underline",
+        "disclosure-outline": "border-border hover:bg-muted/60 focus-visible:ring-inset",
+        disclosure:
+          "text-muted-foreground hover:bg-muted/70 hover:text-foreground aria-expanded:bg-transparent aria-expanded:text-foreground aria-expanded:hover:bg-muted/70",
+        "text-link":
+          "rounded-sm border-0 underline-offset-4 hover:underline focus-visible:ring-0 focus-visible:outline-2 focus-visible:outline-ring/70 focus-visible:outline-solid",
+        "inline-link":
+          "rounded-sm border-0 text-primary underline-offset-4 hover:underline focus-visible:ring-inset",
+        "destructive-link": "text-destructive underline-offset-4 hover:underline",
+        segment:
+          "rounded-none border-0 hover:bg-secondary focus-visible:ring-inset aria-expanded:bg-secondary",
       },
       size: {
+        navigation: "h-9 gap-3 px-3 text-sm font-normal",
+        toolbar: "h-7 gap-1.5 px-2 text-sm [&_svg:not([class*='size-'])]:size-3.5",
+        section: "h-6 gap-1.5 px-2 text-sm [&_svg:not([class*='size-'])]:size-3.5",
+        disclosure:
+          "h-auto min-h-7 gap-2 px-2 py-1 text-xs font-normal [&_svg:not([class*='size-'])]:size-3.5",
+        detail:
+          "h-auto min-h-7 gap-1 px-2 py-1 text-xs font-normal [&_svg:not([class*='size-'])]:size-3.5",
+        metadata: "h-7 gap-1 px-2 text-xs font-normal [&_svg:not([class*='size-'])]:size-3.5",
+        compact: "h-6 gap-1 px-0 text-xs [&_svg:not([class*='size-'])]:size-3.5",
+        inline: "h-auto gap-1 p-0 text-xs [&_svg:not([class*='size-'])]:size-3.5",
+        text: "h-auto gap-0 p-0 font-normal text-inherit [&_svg:not([class*='size-'])]:size-3.5",
+        segment:
+          "h-auto min-w-0 gap-1.5 px-2 text-sm font-normal [&_svg:not([class*='size-'])]:size-4",
+        "segment-icon":
+          "h-auto gap-1.5 px-1.5 text-sm max-sm:min-w-11 pointer-coarse:min-w-11 [&_svg:not([class*='size-'])]:size-3.5",
+
         default:
           "h-7 gap-1.5 px-2.5 text-sm has-data-[icon=inline-end]:pr-2 has-data-[icon=inline-start]:pl-2 [&_svg:not([class*='size-'])]:size-3.5",
         xs: "h-5 gap-1 rounded-sm px-1.5 text-xs has-data-[icon=inline-end]:pr-1 has-data-[icon=inline-start]:pl-1 [&_svg:not([class*='size-'])]:size-3",
+        "sm-wide":
+          "h-6 gap-1.5 px-2 text-xs has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5 [&_svg:not([class*='size-'])]:size-3.5",
         sm: "h-6 gap-1 px-2 text-xs has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5 [&_svg:not([class*='size-'])]:size-3.5",
         lg: "h-8 gap-1.5 px-3 text-sm has-data-[icon=inline-end]:pr-2.5 has-data-[icon=inline-start]:pl-2.5 [&_svg:not([class*='size-'])]:size-4",
         icon: "size-7 [&_svg:not([class*='size-'])]:size-4",
         "icon-xs": "size-5 rounded-sm [&_svg:not([class*='size-'])]:size-3",
         "icon-sm": "size-6 [&_svg:not([class*='size-'])]:size-3.5",
         "icon-lg": "size-8 [&_svg:not([class*='size-'])]:size-4",
+      },
+      visibility: {
+        contextual:
+          "transition-opacity [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover/actions:opacity-100 [@media(hover:hover)]:group-focus-within/actions:opacity-100 [@media(hover:hover)]:aria-expanded:opacity-100",
+      },
+      tone: {
+        muted:
+          "text-muted-foreground hover:text-foreground aria-expanded:text-foreground data-[panel-open]:text-foreground",
+      },
+      font: {
+        mono: "font-mono",
       },
     },
     defaultVariants: {
@@ -38,6 +77,9 @@ const buttonVariants = cva(
 );
 
 function Button({
+  visibility,
+  tone,
+  font,
   className,
   variant = "default",
   size = "default",
@@ -46,7 +88,7 @@ function Button({
   return (
     <ButtonPrimitive
       data-slot="button"
-      className={cn(buttonVariants({ variant, size, className }))}
+      className={cn(buttonVariants({ variant, size, tone, font, visibility }), className)}
       {...props}
     />
   );

@@ -1,3 +1,4 @@
+import { cva, type VariantProps } from "class-variance-authority";
 import * as React from "react";
 
 import { cn } from "~/lib/utils";
@@ -43,40 +44,84 @@ function MessageAvatar({ className, ...props }: React.ComponentProps<"div">) {
   );
 }
 
-function MessageContent({ className, ...props }: React.ComponentProps<"div">) {
+const messageContentVariants = cva(
+  "flex w-full min-w-0 flex-col gap-2 wrap-break-word group-data-[align=end]/message:*:data-slot:self-end",
+  {
+    variants: {
+      spacing: {
+        compact: "gap-1",
+        relaxed: "gap-3",
+      },
+    },
+  },
+);
+
+function MessageContent({
+  spacing,
+  className,
+  ...props
+}: React.ComponentProps<"div"> & VariantProps<typeof messageContentVariants>) {
   return (
     <div
       data-slot="message-content"
-      className={cn(
-        "flex w-full min-w-0 flex-col gap-2 wrap-break-word group-data-[align=end]/message:*:data-slot:self-end",
-        className,
-      )}
+      className={cn(messageContentVariants({ spacing }), className)}
       {...props}
     />
   );
 }
 
-function MessageHeader({ className, ...props }: React.ComponentProps<"div">) {
+const messageHeaderVariants = cva(
+  "flex max-w-full min-w-0 items-center px-2.5 text-xs font-medium text-muted-foreground group-has-data-[variant=ghost]/message:px-0",
+  {
+    variants: {
+      variant: {
+        speaker: "text-foreground",
+        metadata: "gap-2",
+      },
+      inset: {
+        false: "px-0",
+      },
+    },
+  },
+);
+
+function MessageHeader({
+  inset,
+  variant,
+  className,
+  ...props
+}: React.ComponentProps<"div"> & VariantProps<typeof messageHeaderVariants>) {
   return (
     <div
       data-slot="message-header"
-      className={cn(
-        "flex max-w-full min-w-0 items-center px-2.5 text-xs font-medium text-muted-foreground group-has-data-[variant=ghost]/message:px-0",
-        className,
-      )}
+      className={cn(messageHeaderVariants({ variant, inset }), className)}
       {...props}
     />
   );
 }
 
-function MessageFooter({ className, ...props }: React.ComponentProps<"div">) {
+const messageFooterVariants = cva(
+  "flex max-w-full min-w-0 items-center px-2.5 text-xs font-medium text-muted-foreground group-has-data-[variant=ghost]/message:px-0 group-data-[align=end]/message:justify-end",
+  {
+    variants: {
+      variant: {
+        plain: "font-normal",
+        flush: "px-0 font-normal",
+        metadata: "gap-x-3 gap-y-1 px-0 font-normal",
+      },
+    },
+  },
+);
+
+function MessageFooter({
+  variant,
+  className,
+  ...props
+}: React.ComponentProps<"div"> & VariantProps<typeof messageFooterVariants>) {
   return (
     <div
       data-slot="message-footer"
-      className={cn(
-        "flex max-w-full min-w-0 items-center px-2.5 text-xs font-medium text-muted-foreground group-has-data-[variant=ghost]/message:px-0 group-data-[align=end]/message:justify-end",
-        className,
-      )}
+      className={cn(messageFooterVariants({ variant }), className)}
       {...props}
     />
   );

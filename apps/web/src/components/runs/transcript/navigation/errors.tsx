@@ -75,21 +75,21 @@ export const ErrorControls = ({
         </span>
       </TextTooltip>
       <Button
+        tone={kind === "recovered" ? "muted" : undefined}
         variant="ghost"
         size="icon-sm"
         aria-label={`Previous ${words.name}`}
         title={`Previous ${words.name}`}
-        className={kind === "recovered" ? "text-muted-foreground" : undefined}
         onClick={() => onSelect(previous)}
       >
         <ArrowUpIcon aria-hidden="true" />
       </Button>
       <Button
+        tone={kind === "recovered" ? "muted" : undefined}
         variant="ghost"
         size="icon-sm"
         aria-label={`Next ${words.name}`}
         title={`Next ${words.name}`}
-        className={kind === "recovered" ? "text-muted-foreground" : undefined}
         onClick={() => onSelect(next)}
       >
         <ArrowDownIcon aria-hidden="true" />

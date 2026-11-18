@@ -97,7 +97,7 @@ const RevisionDetail = ({ number, entity }: RevisionDetailProps) => {
               <li key={key.key}>{key.key}</li>
             ))}
           </ul>
-          <Label className="flex flex-col items-start gap-2">
+          <Label className="flex flex-col items-start">
             {editorCopy.message}
             <Input value={message} onChange={(event) => setMessage(event.target.value)} />
           </Label>
@@ -171,7 +171,12 @@ const RevisionRow = ({ revision, entity, open, onOpenChange }: RevisionRowProps)
         <div className="flex min-w-0 flex-col gap-0.5">
           <CollapsibleTrigger
             aria-describedby={meta}
-            className={`text-left font-medium text-pretty wrap-anywhere outline-none after:absolute after:inset-0 after:rounded-md focus-visible:after:outline-2 focus-visible:after:outline-ring ${message === "" ? "text-muted-foreground" : ""}`}
+            render={
+              <button
+                type="button"
+                className={`text-left font-medium text-pretty wrap-anywhere outline-none after:absolute after:inset-0 after:rounded-md focus-visible:after:outline-2 focus-visible:after:outline-ring ${message === "" ? "text-muted-foreground" : ""}`}
+              />
+            }
           >
             {message === "" ? historyCopy.noMessage : message}
           </CollapsibleTrigger>

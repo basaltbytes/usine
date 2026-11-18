@@ -1,5 +1,7 @@
 "use client";
 
+import { cva, type VariantProps } from "class-variance-authority";
+
 import * as React from "react";
 import { Command as CommandPrimitive } from "cmdk";
 
@@ -14,14 +16,27 @@ import {
 import { InputGroup, InputGroupAddon } from "~/components/ui/input-group";
 import { MagnifyingGlassIcon, CheckIcon } from "@phosphor-icons/react";
 
-function Command({ className, ...props }: React.ComponentProps<typeof CommandPrimitive>) {
+const commandVariants = cva(
+  "flex size-full flex-col overflow-hidden rounded-xl bg-popover p-1 text-popover-foreground",
+  {
+    variants: {
+      variant: {
+        embedded:
+          "rounded-lg bg-transparent [&_[data-slot=input-group]]:max-sm:h-11! [&_[data-slot=input-group]]:pointer-coarse:h-11!",
+      },
+    },
+  },
+);
+
+function Command({
+  variant,
+  className,
+  ...props
+}: React.ComponentProps<typeof CommandPrimitive> & VariantProps<typeof commandVariants>) {
   return (
     <CommandPrimitive
       data-slot="command"
-      className={cn(
-        "flex size-full flex-col overflow-hidden rounded-xl bg-popover p-1 text-popover-foreground",
-        className,
-      )}
+      className={cn(commandVariants({ variant }), className)}
       {...props}
     />
   );
@@ -57,19 +72,29 @@ function CommandDialog({
   );
 }
 
+const commandInputVariants = cva(
+  "w-full text-xs/relaxed outline-hidden disabled:cursor-not-allowed disabled:opacity-50",
+  {
+    variants: {
+      variant: {
+        touch: "text-sm max-sm:text-lg pointer-coarse:text-lg",
+      },
+    },
+  },
+);
+
 function CommandInput({
+  variant,
   className,
   ...props
-}: React.ComponentProps<typeof CommandPrimitive.Input>) {
+}: React.ComponentProps<typeof CommandPrimitive.Input> &
+  VariantProps<typeof commandInputVariants>) {
   return (
     <div data-slot="command-input-wrapper" className="p-1 pb-0">
       <InputGroup className="h-8! bg-input/20 dark:bg-input/30">
         <CommandPrimitive.Input
           data-slot="command-input"
-          className={cn(
-            "w-full text-xs/relaxed outline-hidden disabled:cursor-not-allowed disabled:opacity-50",
-            className,
-          )}
+          className={cn(commandInputVariants({ variant }), className)}
           {...props}
         />
         <InputGroupAddon>
@@ -93,14 +118,24 @@ function CommandList({ className, ...props }: React.ComponentProps<typeof Comman
   );
 }
 
+const commandEmptyVariants = cva("py-6 text-center text-xs/relaxed", {
+  variants: {
+    variant: {
+      compact: "py-4 text-sm text-muted-foreground",
+    },
+  },
+});
+
 function CommandEmpty({
+  variant,
   className,
   ...props
-}: React.ComponentProps<typeof CommandPrimitive.Empty>) {
+}: React.ComponentProps<typeof CommandPrimitive.Empty> &
+  VariantProps<typeof commandEmptyVariants>) {
   return (
     <CommandPrimitive.Empty
       data-slot="command-empty"
-      className={cn("py-6 text-center text-xs/relaxed", className)}
+      className={cn(commandEmptyVariants({ variant }), className)}
       {...props}
     />
   );
@@ -135,18 +170,28 @@ function CommandSeparator({
   );
 }
 
+const commandItemVariants = cva(
+  "group/command-item relative flex min-h-7 cursor-default items-center gap-2 rounded-md px-2.5 py-1.5 text-xs/relaxed outline-hidden select-none in-data-[slot=dialog-content]:rounded-md data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-[selected=true]:bg-accent data-[selected=true]:text-accent-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5 data-[selected=true]:*:[svg]:text-accent-foreground",
+  {
+    variants: {
+      size: {
+        touch:
+          "text-sm max-sm:min-h-11 pointer-coarse:min-h-11 [&_svg:not([class*='size-'])]:size-4",
+      },
+    },
+  },
+);
+
 function CommandItem({
+  size,
   className,
   children,
   ...props
-}: React.ComponentProps<typeof CommandPrimitive.Item>) {
+}: React.ComponentProps<typeof CommandPrimitive.Item> & VariantProps<typeof commandItemVariants>) {
   return (
     <CommandPrimitive.Item
       data-slot="command-item"
-      className={cn(
-        "group/command-item relative flex min-h-7 cursor-default items-center gap-2 rounded-md px-2.5 py-1.5 text-xs/relaxed outline-hidden select-none in-data-[slot=dialog-content]:rounded-md data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-[selected=true]:bg-accent data-[selected=true]:text-accent-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5 data-[selected=true]:*:[svg]:text-accent-foreground",
-        className,
-      )}
+      className={cn(commandItemVariants({ size }), className)}
       {...props}
     >
       {children}

@@ -1,3 +1,4 @@
+import { Button } from "~/components/ui/button";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useEffect, useRef } from "react";
@@ -64,7 +65,7 @@ export const TaskRuns = ({ task, openRun }: TaskRunsProps) => {
         <div className="-mx-2">
           <Table>
             <TableHeader>
-              <TableRow className="hover:bg-transparent">
+              <TableRow variant="static">
                 <TableHead className="hidden sm:table-cell">State</TableHead>
                 <TableHead>Run</TableHead>
                 <TableHead className="hidden xl:table-cell">Agent</TableHead>
@@ -143,9 +144,14 @@ export const TaskRuns = ({ task, openRun }: TaskRunsProps) => {
       <div ref={more} aria-hidden="true" />
       {history.isFetchingNextPage && <p role="status">{loadingRuns}</p>}
       {history.isError && (
-        <button type="button" onClick={() => void history.refetch()}>
+        <Button
+          type="button"
+          variant="text-link"
+          size="text"
+          onClick={() => void history.refetch()}
+        >
           {retryRuns}
-        </button>
+        </Button>
       )}
     </section>
   );

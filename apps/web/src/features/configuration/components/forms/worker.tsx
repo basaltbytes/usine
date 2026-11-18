@@ -108,7 +108,7 @@ export const WorkerFields = (fields: FormFieldsProps) => {
       </Label>
       {fields.value.kind === "ssh" && (
         <>
-          <Label className="flex flex-col items-start gap-2">
+          <Label className="flex flex-col items-start">
             {formCopy.provisioner}
             <NativeSelect
               value={provider}

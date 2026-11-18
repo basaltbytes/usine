@@ -39,9 +39,7 @@ const LaneSources = ({ sources, catalog }: LaneSourcesProps) => (
         {"label" in source ? (
           <LabelBadge name={source.label} label={catalog.get(source.label)} />
         ) : (
-          <Badge variant="outline" className="text-muted-foreground">
-            {source.state}
-          </Badge>
+          <Badge variant="muted-outline">{source.state}</Badge>
         )}
       </li>
     ))}
@@ -166,12 +164,13 @@ export const BoardColumn = ({
           {flow !== undefined && <FlowArrow flow={flow} />}
           {foldable && (
             <Button
+              tone="muted"
               variant="ghost"
               size="icon-xs"
               aria-expanded={true}
               aria-label={`Fold ${lane.name}`}
               title={`Fold ${lane.name}`}
-              className="ml-auto text-muted-foreground hover:text-foreground"
+              className="ml-auto"
               onClick={() => setFolded(true)}
             >
               <ArrowsInLineHorizontalIcon aria-hidden="true" />
@@ -258,13 +257,14 @@ export const BoardColumn = ({
             </p>
           )}
           {history.isError && (
-            <button
+            <Button
               type="button"
+              variant="destructive-link"
+              size="inline"
               onClick={() => void history.refetch()}
-              className="text-xs text-destructive"
             >
               {retryTasks}
-            </button>
+            </Button>
           )}
         </SortableContext>
       </div>

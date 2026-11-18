@@ -19,8 +19,7 @@ export const CardLabels = ({ labels, catalog }: CardLabelsProps) => {
       ))}
       {hidden.length > 0 && (
         <Badge
-          variant="outline"
-          className="text-muted-foreground tabular-nums"
+          variant="muted-count"
           title={hidden.join(", ")}
           aria-label={`${hidden.length} more: ${hidden.join(", ")}`}
         >

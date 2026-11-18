@@ -85,10 +85,11 @@ export const NewConversation = ({ project, opened, back, composerRef }: NewConve
             <div className="flex flex-col gap-1.5">
               <Label htmlFor={select}>{scopeLabel}</Label>
               <NativeSelect
+                variant="form"
                 id={select}
                 value={value}
                 disabled={start.isPending}
-                className="w-full max-w-xs [&_select]:h-8 [&_select]:text-sm max-sm:[&_select]:h-11 max-sm:[&_select]:text-lg pointer-coarse:[&_select]:h-11 pointer-coarse:[&_select]:text-lg"
+                className="w-full max-w-xs [&_select]:h-8 max-sm:[&_select]:h-11 pointer-coarse:[&_select]:h-11"
                 onChange={(event) => setChosen(event.target.value)}
               >
                 {choices.map((choice) => (
@@ -101,18 +102,16 @@ export const NewConversation = ({ project, opened, back, composerRef }: NewConve
           )}
           {start.isPending && start.variables !== undefined && member !== undefined && (
             <Message align="end" role="group" aria-label={`Message from ${member.login}`}>
-              <MessageContent className="gap-1">
-                <MessageHeader className="text-xs font-medium text-foreground">
-                  {member.login}
-                </MessageHeader>
+              <MessageContent spacing="compact">
+                <MessageHeader variant="speaker">{member.login}</MessageHeader>
                 <Bubble variant="muted" align="end" className="max-w-[85%]">
-                  <BubbleContent className="px-3 py-2 opacity-60">
+                  <BubbleContent variant="message" pending>
                     <p className="text-md whitespace-pre-wrap wrap-anywhere">
                       {start.variables.text}
                     </p>
                   </BubbleContent>
                 </Bubble>
-                <MessageFooter className="font-normal">{unsentLabel}</MessageFooter>
+                <MessageFooter variant="plain">{unsentLabel}</MessageFooter>
               </MessageContent>
             </Message>
           )}

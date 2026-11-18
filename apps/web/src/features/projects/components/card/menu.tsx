@@ -30,7 +30,6 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "~/components/ui/dropdown-menu";
-import { cn } from "~/lib/utils";
 import { elapsedLabel } from "~/lib/strings";
 import { openedTitle, retryDescription, runActionLabel } from "~/lib/runs/strings";
 import type { RunActions } from "~/hooks/runs/actions";
@@ -207,12 +206,11 @@ export const CardMenu = ({
         <DropdownMenuTrigger
           render={
             <Button
+              tone="muted"
               variant="ghost"
               size="icon-sm"
-              className={cn(
-                "text-muted-foreground hover:text-foreground aria-expanded:text-foreground",
-                className,
-              )}
+              visibility="contextual"
+              className={className}
             />
           }
           aria-label={`Actions for ${subject}`}

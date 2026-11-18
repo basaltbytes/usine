@@ -35,6 +35,7 @@ export const ConversationPanel = ({ target, open, close, project }: Conversation
       }}
     >
       <SheetContent
+        variant="panel"
         side="right"
         ref={popup}
         // Focus goes to the prompt input, else to the open row, else to the first row.
@@ -46,7 +47,7 @@ export const ConversationPanel = ({ target, open, close, project }: Conversation
           popup.current
         }
         // Room for the sheet's close and page buttons in the headers under them.
-        className="gap-0 outline-none [--inbox-controls:5rem] data-[side=right]:w-full data-[side=right]:sm:max-w-xl data-[side=right]:lg:max-w-4xl"
+        className="[--inbox-controls:5rem] data-[side=right]:w-full data-[side=right]:sm:max-w-xl data-[side=right]:lg:max-w-4xl"
       >
         <SheetTitle className="sr-only">{conversationPanelLabel}</SheetTitle>
         <Inbox target={target} select={openConversation} project={project} composerRef={composer} />

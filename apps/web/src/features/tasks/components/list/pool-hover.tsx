@@ -1,10 +1,8 @@
+import { Button } from "~/components/ui/button";
 import type { TaskUsageView } from "@usine/orchestrator/operator";
 import { type ReactNode } from "react";
 import { PoolBreakdown } from "~/components/runs/usage";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "~/components/ui/hover-card";
-
-const usageTrigger =
-  "relative z-10 rounded-sm underline-offset-4 outline-none hover:underline focus-visible:outline-2 focus-visible:outline-ring/70 focus-visible:outline-solid";
 
 type PoolHoverProps = {
   readonly usage: TaskUsageView;
@@ -19,14 +17,11 @@ export const PoolHover = ({ usage, label, note, children }: PoolHoverProps) => (
     <HoverCardTrigger
       delay={200}
       aria-label={label}
-      render={<button type="button" className={usageTrigger} />}
+      render={<Button variant="text-link" size="text" className="relative z-10" />}
     >
       {children}
     </HoverCardTrigger>
-    <HoverCardContent
-      align="end"
-      className="w-[26rem] max-w-[calc(100vw-2rem)] p-3 font-sans text-xs shadow-raised"
-    >
+    <HoverCardContent variant="detail" align="end" className="w-[26rem] max-w-[calc(100vw-2rem)]">
       {note !== null && <p className="pb-2 text-muted-foreground">{note}.</p>}
       <PoolBreakdown pools={usage.pools} />
     </HoverCardContent>

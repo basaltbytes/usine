@@ -148,13 +148,7 @@ export const RowActions = ({ run, onEdit, openRun, status }: RowActionsProps) =>
       {entries.length > 0 && (
         <DropdownMenu>
           <DropdownMenuTrigger
-            render={
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                className="text-muted-foreground hover:text-foreground aria-expanded:text-foreground"
-              />
-            }
+            render={<Button tone="muted" variant="ghost" size="icon-sm" />}
             aria-label={`Actions for the ${run.loop} run opened ${dayTimeLabel(run.openedAt)}`}
           >
             <DotsThreeIcon weight="bold" className="size-4" aria-hidden="true" />

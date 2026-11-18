@@ -189,10 +189,10 @@ type MissingProps = {
 
 /** Renders a detail page for a name that the loaded configuration does not contain. */
 export const Missing = ({ title, children }: MissingProps) => (
-  <Empty className="items-start p-0 py-6 text-left">
+  <Empty variant="section" className="items-start text-left">
     <EmptyHeader className="items-start">
-      <EmptyTitle className="text-md font-semibold tracking-normal">{title}</EmptyTitle>
-      <EmptyDescription className="text-sm text-muted-foreground">{children}</EmptyDescription>
+      <EmptyTitle variant="heading">{title}</EmptyTitle>
+      <EmptyDescription variant="body">{children}</EmptyDescription>
     </EmptyHeader>
   </Empty>
 );

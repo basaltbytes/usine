@@ -10,6 +10,11 @@ const badgeVariants = cva(
     variants: {
       variant: {
         default: "bg-primary/15 text-primary [a]:hover:bg-primary/25",
+        label: "border-(--label-border) bg-(--label-fill) text-(--label-text)",
+        counter: "bg-primary px-1 text-primary-foreground ring-2 ring-background tabular-nums",
+        attention: "bg-needs-you/15 px-1.5 text-foreground tabular-nums dark:text-needs-you",
+        "muted-outline": "border-input text-muted-foreground [a]:hover:bg-muted/70",
+        "muted-count": "border-input text-muted-foreground tabular-nums [a]:hover:bg-muted/70",
         secondary: "bg-secondary text-secondary-foreground [a]:hover:bg-accent",
         destructive: "bg-destructive/15 text-destructive [a]:hover:bg-destructive/25",
         outline: "border-input text-foreground [a]:hover:bg-muted/70",

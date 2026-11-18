@@ -59,7 +59,7 @@ export const useOperatorView = (): OperatorView => {
 type AttentionCountProps = { readonly count: number };
 
 const AttentionCount = ({ count }: AttentionCountProps) => (
-  <SidebarMenuBadge className="right-2 min-w-0 px-0 text-needs-you peer-hover/menu-button:text-needs-you peer-data-active/menu-button:text-needs-you">
+  <SidebarMenuBadge variant="attention" className="right-2 min-w-0">
     {count}
     <span className="sr-only"> need attention</span>
   </SidebarMenuBadge>
@@ -87,13 +87,10 @@ export const AppSidebar = ({
   live,
 }: AppSidebarProps) => (
   <Sidebar variant="inset">
-    <SidebarHeader className="px-2 pt-2 pb-3">
+    <SidebarHeader spacing="roomy">
       <SidebarMenu>
         <SidebarMenuItem>
-          <SidebarMenuButton
-            render={<Link to="/" />}
-            className="text-md font-semibold tracking-tight text-foreground"
-          >
+          <SidebarMenuButton content="brand" render={<Link to="/" />}>
             {/* `align-middle` centers the mark on the x-height, and `-ml-px` on the icon column. */}
             <span className="-ml-px">
               <UsineMark className="mr-1.75 inline-block size-4.5! align-middle" />
@@ -109,14 +106,14 @@ export const AppSidebar = ({
           <SidebarMenu>
             <SidebarMenuItem>
               <SidebarMenuButton
+                content="summary"
                 isActive={view === "desk"}
-                className="pr-20"
                 render={<Link to="/" />}
               >
                 <SquaresFourIcon aria-hidden="true" />
                 <span>Overview</span>
               </SidebarMenuButton>
-              <SidebarMenuBadge className="right-2 gap-2 px-0 tabular-nums">
+              <SidebarMenuBadge variant="summary" className="right-2">
                 <span className="text-run-active">
                   {runningTotal}
                   <span className="sr-only"> running</span>
@@ -141,10 +138,10 @@ export const AppSidebar = ({
           </SidebarMenu>
         </SidebarGroupContent>
       </SidebarGroup>
-      <SidebarGroup className="pt-4">
+      <SidebarGroup spacing="section">
         <SidebarGroupLabel>Projects</SidebarGroupLabel>
         <SidebarGroupContent>
-          <SidebarMenu className="gap-1.5">
+          <SidebarMenu spacing="relaxed">
             {projects.map((entry) => {
               const count = needsYou.get(projectId(entry)) ?? 0;
               const params = { project: projectId(entry) };
@@ -154,13 +151,13 @@ export const AppSidebar = ({
                   {/* On Board and Tasks pages that row is active; on other Project pages, such as
                       a Run page, the Project row is active. */}
                   <SidebarMenuButton
+                    content={count > 0 ? "action" : undefined}
                     isActive={current && view === "project"}
                     title={
                       entry.repositories.length > 1
                         ? repositoryCountLabel(entry.repositories.length)
                         : undefined
                     }
-                    className={cn(count > 0 && "pr-8")}
                     render={<Link to="/projects/$project" params={params} />}
                   >
                     <RepositoryMark repository={entry.repository} />
@@ -168,11 +165,12 @@ export const AppSidebar = ({
                   </SidebarMenuButton>
                   {count > 0 && <AttentionCount count={count} />}
                   {/* Sub-row icons line up with the project name, and fills span the full row. */}
-                  <SidebarMenuSub className="mx-0 translate-x-0 gap-px border-l-0 px-0 py-px">
+                  <SidebarMenuSub variant="flat" className="mx-0 translate-x-0">
                     <SidebarMenuSubItem>
                       <SidebarMenuSubButton
+                        indent="icon"
                         isActive={current && view === "board"}
-                        className="translate-x-0 pl-8"
+                        className="translate-x-0"
                         render={<Link to="/projects/$project" params={params} />}
                       >
                         <KanbanIcon aria-hidden="true" />
@@ -181,8 +179,9 @@ export const AppSidebar = ({
                     </SidebarMenuSubItem>
                     <SidebarMenuSubItem>
                       <SidebarMenuSubButton
+                        indent="icon"
                         isActive={current && view === "tasks"}
-                        className="translate-x-0 pl-8"
+                        className="translate-x-0"
                         render={<Link to="/projects/$project/tasks" params={params} />}
                       >
                         <ListChecksIcon aria-hidden="true" />
@@ -196,14 +195,14 @@ export const AppSidebar = ({
           </SidebarMenu>
         </SidebarGroupContent>
       </SidebarGroup>
-      <SidebarGroup className="pt-4">
+      <SidebarGroup spacing="section">
         <SidebarGroupLabel>Configuration</SidebarGroupLabel>
         <SidebarGroupContent>
           <ConfigurationMenu inSection={view === "configuration"} />
         </SidebarGroupContent>
       </SidebarGroup>
     </SidebarContent>
-    <SidebarFooter className="px-2 pb-3">
+    <SidebarFooter spacing="roomy">
       <SessionMenu />
       {/* Shows trigger stream state, not server state, so idle pollers are not shown as running. */}
       <p className="flex h-8 items-center gap-2 px-2 text-xs text-muted-foreground">

@@ -28,11 +28,9 @@ export const BootScreen = ({
   children,
 }: BootScreenProps) => (
   <main className={cn("grid place-items-center p-6", inPanel ? "flex-1" : "min-h-svh")}>
-    <Empty className="max-w-md p-0">
-      <EmptyHeader className="gap-2">
-        <EmptyMedia
-          className={cn("mb-1", tone === "error" ? "text-destructive" : "text-foreground")}
-        >
+    <Empty variant="flush" className="max-w-md">
+      <EmptyHeader spacing="relaxed">
+        <EmptyMedia className="mb-1" tone={tone === "error" ? "destructive" : "foreground"}>
           {tone === "loading" ? (
             <span role="status" aria-label="Loading">
               <UsineMark running className="block size-8" />
@@ -41,8 +39,8 @@ export const BootScreen = ({
             <WarningCircleIcon weight="fill" className="size-5" />
           )}
         </EmptyMedia>
-        <EmptyTitle className="text-md font-semibold tracking-normal">{title}</EmptyTitle>
-        <EmptyDescription className="text-sm text-muted-foreground wrap-anywhere">
+        <EmptyTitle variant="heading">{title}</EmptyTitle>
+        <EmptyDescription variant="body" className="wrap-anywhere">
           {description}
         </EmptyDescription>
       </EmptyHeader>

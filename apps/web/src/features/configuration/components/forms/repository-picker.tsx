@@ -21,7 +21,7 @@ export const RepositoryPicker = ({ value, onChange, disabled }: RepositoryPicker
     installation.data?.filter((name) => !registered.has(name.toLowerCase())) ?? [];
   return (
     <div className="flex w-full min-w-0 flex-col gap-2">
-      <Label className="flex flex-col items-start gap-2">
+      <Label className="flex flex-col items-start">
         {formCopy.repositories}
         <NativeSelect
           className="w-full"

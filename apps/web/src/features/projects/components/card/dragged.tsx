@@ -21,14 +21,13 @@ export const DraggedCard = ({
   project,
   showRepository,
 }: DraggedCardProps) => (
-  <CardFrame needsYou={item.needsYou} className="cursor-grabbing shadow-raised">
+  <CardFrame needsYou={item.needsYou} elevated className="cursor-grabbing">
     <CardFace
       project={project}
       showRepository={showRepository}
       item={item}
       lane={lane}
       catalog={catalog}
-
       stall={stall}
       readOnly
       action={null}

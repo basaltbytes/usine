@@ -94,7 +94,9 @@ const RunDetails = ({ statistics }: RunDetailsProps) => {
                   <TableCell>{entry.day}</TableCell>
                   <TableCell>{entry.worker}</TableCell>
                   <TableCell>{entry.provider}</TableCell>
-                  <TableCell className="text-right tabular-nums">{entry.count}</TableCell>
+                  <TableCell variant="count" className="text-right">
+                    {entry.count}
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>
@@ -233,9 +235,10 @@ export const Details = ({ window }: DetailsProps) => (
     <CollapsibleTrigger
       render={
         <Button
+          tone="muted"
           variant="ghost"
-          size="sm"
-          className="-mx-2 w-fit gap-1.5 px-2 text-sm font-medium text-muted-foreground hover:text-foreground data-[panel-open]:text-foreground data-[panel-open]:[&>svg]:rotate-90"
+          size="section"
+          className="-mx-2 w-fit data-[panel-open]:[&>svg]:rotate-90"
         />
       }
     >

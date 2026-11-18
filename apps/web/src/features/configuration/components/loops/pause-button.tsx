@@ -21,10 +21,10 @@ export const PauseButton = ({ loop, pause, variant }: PauseButtonProps) => {
   return (
     <>
       <CommandButton
+        tone={variant === "ghost" ? "muted" : undefined}
         command={`${loop.paused ? "Resume" : "Pause"} ${loop.name}`}
         variant={variant}
         disabled={pause.isPending}
-        className={variant === "ghost" ? "text-muted-foreground" : undefined}
         onClick={(event) => {
           event.stopPropagation();
           if (loop.paused) setResuming(true);

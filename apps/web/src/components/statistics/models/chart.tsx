@@ -44,7 +44,8 @@ export const FirstReviewChart = ({ models }: FirstReviewChartProps) => {
             cursor={{ fill: "var(--muted)", fillOpacity: 0.5 }}
             content={
               <ChartTooltipContent
-                className="border-0 bg-popover shadow-raised"
+                variant="raised"
+
                 hideIndicator
                 formatter={(value, _name, item) =>
                   `${String(value)}% passed the first review (${String(item.payload.label)})`

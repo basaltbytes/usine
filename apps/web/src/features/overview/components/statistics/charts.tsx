@@ -34,8 +34,6 @@ const outcomeConfig = {
   canceled: { label: "Canceled", color: "var(--run-canceled)" },
 } satisfies ChartConfig;
 
-const tooltipClass = "border-0 bg-popover shadow-raised";
-
 type StatisticsBlockProps = {
   readonly title: string;
   /** Controls at the end of the header. */
@@ -82,7 +80,7 @@ export const ThroughputChart = ({ periods, bucket }: ThroughputChartProps) => (
           cursor={{ fill: "var(--muted)", fillOpacity: 0.5 }}
           content={
             <ChartTooltipContent
-              className={tooltipClass}
+              variant="raised"
               labelFormatter={(label) => periodLabel(String(label), bucket)}
             />
           }
@@ -139,7 +137,7 @@ export const AttemptsChart = ({ counts }: AttemptsChartProps) => {
           <YAxis type="category" dataKey="label" tickLine={false} axisLine={false} width={76} />
           <ChartTooltip
             cursor={{ fill: "var(--muted)", fillOpacity: 0.5 }}
-            content={<ChartTooltipContent className={tooltipClass} hideIndicator />}
+            content={<ChartTooltipContent variant="raised" hideIndicator />}
           />
           <Bar
             dataKey="runs"
@@ -202,7 +200,7 @@ export const NeedsAttentionChart = ({ periods, bucket }: NeedsAttentionChartProp
             cursor={{ fill: "var(--muted)", fillOpacity: 0.5 }}
             content={
               <ChartTooltipContent
-                className={tooltipClass}
+                variant="raised"
                 hideIndicator
                 labelFormatter={(label) => {
                   const start = String(label);

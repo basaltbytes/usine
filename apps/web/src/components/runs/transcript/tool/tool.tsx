@@ -70,9 +70,10 @@ export const ToolDetails = ({ entry, view }: ToolDetailsProps) => {
         <CollapsibleTrigger
           render={
             <Button
+              tone="muted"
               variant="ghost"
-              size="sm"
-              className="gap-1 px-0 text-muted-foreground data-[panel-open]:[&_svg]:rotate-90"
+              size="compact"
+              className="data-[panel-open]:[&_svg]:rotate-90"
             />
           }
         >

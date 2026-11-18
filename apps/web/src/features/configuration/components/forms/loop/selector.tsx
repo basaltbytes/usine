@@ -56,7 +56,7 @@ export const SelectorFields = ({
           <fieldset className="space-y-2" key={key}>
             <legend className="mb-2 font-medium">{label}</legend>
             {choices.map((choice) => (
-              <Label key={choice} className="flex items-center gap-2">
+              <Label key={choice} className="flex items-center">
                 <Checkbox
                   checked={selected(key).some((entry) => sameChoice(key, entry, choice))}
                   onCheckedChange={(checked) => toggle(key, choice, checked)}

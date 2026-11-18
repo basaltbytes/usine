@@ -58,7 +58,7 @@ export const Pairs = ({ path, label, value, onChange, problems }: PairsProps) =>
           </p>
         ))}
       <div className="flex min-w-0 items-end gap-2">
-        <Label className="min-w-0 flex-1 flex-col items-start gap-2">
+        <Label className="min-w-0 flex-1 flex-col items-start">
           {formCopy.key}
           <Input value={key} onChange={(event) => setKey(event.target.value)} />
         </Label>

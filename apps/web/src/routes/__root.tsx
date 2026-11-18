@@ -109,8 +109,9 @@ const InboxButton = () => {
       <TooltipTrigger
         render={
           <Button
+            size="toolbar"
             variant="ghost"
-            className="relative h-9 shrink-0 px-2 pointer-coarse:h-11 pointer-coarse:min-w-11"
+            className="relative h-9 shrink-0 pointer-coarse:h-11 pointer-coarse:min-w-11"
             aria-label={openConversationsWithUnread(unread)}
             onClick={() => openConversation("inbox")}
           />
@@ -119,7 +120,10 @@ const InboxButton = () => {
         <ChatsCircleIcon aria-hidden="true" className="size-4" />
         {unread > 0 && (
           // Over the icon's corner, so the count appearing shifts nothing in the header.
-          <Badge className="pointer-events-none absolute top-0.5 right-0 h-4 min-w-4 bg-primary px-1 text-xs tabular-nums text-primary-foreground ring-2 ring-background">
+          <Badge
+            variant="counter"
+            className="pointer-events-none absolute top-0.5 right-0 h-4 min-w-4"
+          >
             {unread}
           </Badge>
         )}
@@ -195,13 +199,14 @@ const Crumbs = ({ view, project, runId, task }: CrumbsProps) => {
     <>
       <BreadcrumbItem>
         {view === "board" ? (
-          <BreadcrumbPage className="flex items-center gap-1.5">
+          <BreadcrumbPage variant="icon" className="flex items-center">
             <RepositoryMark repository={project.repository} />
             {projectName(project)}
           </BreadcrumbPage>
         ) : (
           <BreadcrumbLink
-            className="flex items-center gap-1.5"
+            variant="icon"
+            className="flex items-center"
             render={<Link to="/projects/$project" params={{ project: projectId(project) }} />}
           >
             <RepositoryMark repository={project.repository} />
@@ -303,7 +308,7 @@ const Shell = () => {
         <SidebarInset className="h-svh min-w-0 overflow-hidden">
           <PageCommandsProvider>
             <header className="flex h-12 shrink-0 items-center gap-2 border-b px-3 md:px-4">
-              <SidebarTrigger className="text-muted-foreground hover:text-foreground" />
+              <SidebarTrigger tone="muted" />
               <Breadcrumb className="min-w-0 flex-1">
                 <BreadcrumbList>
                   <Crumbs
@@ -324,9 +329,9 @@ const Shell = () => {
             </header>
             <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
               {data._tag === "NeedsSetup" && (
-                <Alert className="rounded-none border-x-0 border-t-0 bg-transparent px-4 py-4 md:px-5">
+                <Alert variant="banner">
                   <WarningIcon weight="fill" className="text-needs-you" />
-                  <AlertTitle className="text-md">GitHub App not set up</AlertTitle>
+                  <AlertTitle size="lg">GitHub App not set up</AlertTitle>
                   <AlertDescription className="max-w-prose">
                     <p>
                       <a href="/setup" className="underline underline-offset-4">

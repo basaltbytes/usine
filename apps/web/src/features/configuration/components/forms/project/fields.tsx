@@ -81,7 +81,7 @@ export const ProjectFields = (fields: FormFieldsProps) => {
             </li>
           ))}
         </ol>
-        <Label className="flex min-w-0 flex-col items-start gap-2">
+        <Label className="flex min-w-0 flex-col items-start">
           {projectCopy.choose}
           <NativeSelect
             className="w-full"

@@ -33,13 +33,14 @@ export const SourceEditor = ({
             .join("\n")}
         </pre>
         <Textarea
+          variant="source"
           id={id}
           value={value}
           readOnly={onChange === undefined}
           disabled={disabled}
           spellCheck={false}
           wrap="off"
-          className="h-96 min-w-0 flex-1 rounded-none border-0 font-mono text-xs leading-5 [field-sizing:fixed]"
+          className="h-96 min-w-0 flex-1 [field-sizing:fixed]"
           onScroll={(event) => {
             if (gutter.current !== null) gutter.current.scrollTop = event.currentTarget.scrollTop;
           }}

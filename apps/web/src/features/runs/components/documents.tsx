@@ -103,9 +103,10 @@ export const EventDocument = ({ detail }: EventDocumentProps) => {
           <CollapsibleTrigger
             render={
               <Button
+                tone="muted"
                 variant="ghost"
                 size="sm"
-                className="-mx-2 gap-1 px-2 text-muted-foreground data-[panel-open]:[&_svg]:rotate-90"
+                className="-mx-2 data-[panel-open]:[&_svg]:rotate-90"
               />
             }
           >

@@ -122,7 +122,7 @@ export const EntityEditor = ({ entity, heading, actions, children }: EntityEdito
               {editorCopy.references(entityReferences(entity, configuration.data))}
             </p>
           )}
-          <Label className="flex flex-col items-start gap-2">
+          <Label className="flex flex-col items-start">
             {editorCopy.message}
             <Input value={message} onChange={(event) => setMessage(event.target.value)} />
           </Label>
