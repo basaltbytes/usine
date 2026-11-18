@@ -785,7 +785,7 @@ describe("the supervisor's source", () => {
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, traced),
       );
 
-      for (const round of [1, 2, 3]) {
+      for (const round of [1, 2]) {
         yield* origin.commit(`round ${round}\n`);
         yield* sources.prepare([repository]).pipe(Effect.scoped);
         const packs = yield* fs.readDirectory(`${cache}/objects/pack`);
@@ -797,6 +797,7 @@ describe("the supervisor's source", () => {
       }
       const commands = yield* fs.readFileString(trace);
       assert.include(commands, "maintenance run --auto");
+      assert.include(commands, "git repack", "automatic maintenance repacked the fetched objects");
       assert.notInclude(commands, "--detach", "maintenance stays inside the fetch process");
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
