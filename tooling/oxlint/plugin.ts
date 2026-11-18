@@ -2,9 +2,13 @@ import { eslintCompatPlugin } from "@oxlint/plugins";
 
 import { noChainedTypeAssertionsRule } from "./rules/no-chained-type-assertions.ts";
 import { noConditionalEmptyObjectSpreadRule } from "./rules/no-conditional-empty-object-spread.ts";
+import { noEmDashCopyRule } from "./rules/no-em-dash-copy.ts";
 import { noKnownValueWideningRule } from "./rules/no-known-value-widening.ts";
 import { noModuleMockingRule } from "./rules/no-module-mocking.ts";
+import { noNativeTitleTooltipRule } from "./rules/no-native-title-tooltip.ts";
 import { noObjectParametersRule } from "./rules/no-object-parameters.ts";
+import { noOutsetStateIndicatorsRule } from "./rules/no-outset-state-indicators.ts";
+import { noRawResizeObserverRule } from "./rules/no-raw-resize-observer.ts";
 import { noReflectApplyRule } from "./rules/no-reflect-apply.ts";
 import { noReflectGetRule } from "./rules/no-reflect-get.ts";
 import { noRuntimeTypeofRule } from "./rules/no-runtime-typeof.ts";
@@ -28,6 +32,10 @@ const usinePlugin = eslintCompatPlugin({
   meta: { name: "usine" },
   rules: {
     "web-import-direction": webImportDirectionRule,
+    "no-em-dash-copy": noEmDashCopyRule,
+    "no-native-title-tooltip": noNativeTitleTooltipRule,
+    "no-outset-state-indicators": noOutsetStateIndicatorsRule,
+    "no-raw-resize-observer": noRawResizeObserverRule,
     "no-chained-type-assertions": noChainedTypeAssertionsRule,
     "no-conditional-empty-object-spread": noConditionalEmptyObjectSpreadRule,
     "no-known-value-widening": noKnownValueWideningRule,
