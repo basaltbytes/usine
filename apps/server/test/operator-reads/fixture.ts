@@ -479,12 +479,16 @@ export const checkReads = ({
           const count = number === BUSY_ITEM ? BUSY_RUNS : number <= 200 ? 3 : 2;
           for (let round = 1; round <= count; round += 1) {
             const submission = started(number);
+            // The busy Item's later rounds add Runs to page through, so their text is short.
+            const later = round > 3;
             const result = yield* runs.submit(
               Submission.make({
                 ...submission,
+                task: later ? AttemptTask.make("Review the change again.") : submission.task,
                 approval: "required",
                 event: Event.make({
                   ...submission.event,
+                  payload: later ? { number } : submission.event.payload,
                   id: EventId.make(`event-${number}-${round}`),
                   dedupKey: DedupKey.make(`${firstLoop}/${number}/${round}`),
                 }),
