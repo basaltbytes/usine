@@ -301,7 +301,7 @@ it("loads every Done card as the virtual lane scrolls", async () => {
     await mountBoard(1024);
     const viewport = board();
     viewport.scrollLeft = viewport.scrollWidth;
-    await page.getByTitle("Open Done", { exact: true }).click();
+    await page.getByRole("region", { name: "Done lane", exact: true }).getByRole("button").click();
     await expect.element(page.getByRole("link", { name: "Task 1000", exact: true })).toBeVisible();
     const scroller = page.getByLabelText("Done cards").element();
     for (const offset of [50, 100]) {

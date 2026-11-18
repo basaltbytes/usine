@@ -1,5 +1,6 @@
 import { Fragment } from "react";
 import { totalsFigures, type TaskTotals } from "~/lib/tasks/model";
+import { TextTooltip } from "~/components/text-tooltip";
 
 type TotalsLineProps = { readonly totals: TaskTotals };
 
@@ -10,7 +11,14 @@ export const TotalsLine = ({ totals }: TotalsLineProps) => (
     {totalsFigures(totals).map(({ figure, words, lowerBound }, index) => (
       <Fragment key={words}>
         {index > 0 && ", "}
-        {lowerBound === null ? figure : <span title={lowerBound}>{`${figure}*`}</span>} {words}
+        {lowerBound === null ? (
+          figure
+        ) : (
+          <TextTooltip text={lowerBound}>
+            <span>{`${figure}*`}</span>
+          </TextTooltip>
+        )}{" "}
+        {words}
       </Fragment>
     ))}
   </p>

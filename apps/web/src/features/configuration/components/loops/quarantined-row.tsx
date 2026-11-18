@@ -3,6 +3,7 @@ import type { QuarantinedLoopView } from "@usine/orchestrator/operator";
 import { TableCell } from "~/components/ui/table";
 import { NotLoaded } from "~/features/configuration/components/section";
 import { OpeningRow, rowLinkClass } from "~/components/opening-row";
+import { TextTooltip } from "~/components/text-tooltip";
 
 type QuarantinedRowProps = { readonly loop: QuarantinedLoopView };
 
@@ -22,9 +23,9 @@ export const QuarantinedRow = ({ loop }: QuarantinedRowProps) => {
         </Link>
       </TableCell>
       <TableCell colSpan={5} className="max-w-0">
-        <p className="truncate text-destructive" title={loop.error.message}>
-          {loop.error.message}
-        </p>
+        <TextTooltip text={loop.error.message}>
+          <p className="truncate text-destructive">{loop.error.message}</p>
+        </TextTooltip>
       </TableCell>
       <TableCell>
         <NotLoaded />

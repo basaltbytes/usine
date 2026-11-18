@@ -10,6 +10,7 @@ import { stallNamesLoop, stallSentence } from "~/lib/stall/strings";
 import { agoLabel, timestampLabel } from "~/lib/strings";
 import { runActivityAt, type TaskRow } from "~/lib/tasks/model";
 import { cn } from "~/lib/utils";
+import { TextTooltip } from "~/components/text-tooltip";
 
 /** Returns the tone of a stall's state mark, from the Run its reason references or from the reason. */
 const stallTone = ({ reason }: StalledItemView): string =>
@@ -92,9 +93,11 @@ export const Status = ({ row, now }: StatusProps) => {
             {" "}
             <span className="font-normal whitespace-nowrap text-muted-foreground">
               ·{" "}
-              <time dateTime={at} title={timestampLabel(at)} className="font-mono tabular-nums">
-                {agoLabel(at, now)}
-              </time>
+              <TextTooltip text={timestampLabel(at)}>
+                <time dateTime={at} className="font-mono tabular-nums">
+                  {agoLabel(at, now)}
+                </time>
+              </TextTooltip>
             </span>
           </>
         )}

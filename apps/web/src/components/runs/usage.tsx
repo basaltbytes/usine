@@ -116,7 +116,7 @@ export const UsageFact = ({ usage, attempts }: UsageFactProps) => (
   <Popover>
     <PopoverTrigger
       aria-label={`Tokens: ${count.format(usage.tokens)}. Show per pool and session`}
-      className="rounded-sm text-primary underline-offset-4 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring/70"
+      className="rounded-sm text-primary underline-offset-4 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring/70 focus-visible:ring-inset"
     >
       <span className="font-mono text-xs tabular-nums">{tokensLabel(usage.tokens)}</span> tokens
     </PopoverTrigger>

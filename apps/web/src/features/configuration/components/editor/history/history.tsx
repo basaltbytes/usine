@@ -25,6 +25,7 @@ import {
 } from "~/features/configuration/queries";
 import { editorCopy, historyCopy } from "~/features/configuration/strings";
 import { WriteFailure } from "~/features/configuration/components/editor/failure";
+import { TextTooltip } from "~/components/text-tooltip";
 
 type RevisionDetailProps = {
   readonly number: ConfigurationRevisionNumber;
@@ -159,13 +160,14 @@ const RevisionRow = ({ revision, entity, open, onOpenChange }: RevisionRowProps)
   return (
     <Collapsible open={open} onOpenChange={onOpenChange} render={<li className="min-w-0" />}>
       <div className="relative -mx-2 grid grid-cols-[3rem_minmax(0,1fr)_1rem] gap-x-3 rounded-md px-2 py-2.5 transition-colors duration-(--duration-fast) has-hover:hover:bg-muted/60 has-[button:focus-visible]:bg-muted/60">
-        <time
-          dateTime={DateTime.formatIso(revision.time)}
-          title={date.toLocaleString()}
-          className="font-mono text-xs leading-5 text-muted-foreground tabular-nums"
-        >
-          {format(date, "HH:mm")}
-        </time>
+        <TextTooltip text={date.toLocaleString()}>
+          <time
+            dateTime={DateTime.formatIso(revision.time)}
+            className="font-mono text-xs leading-5 text-muted-foreground tabular-nums"
+          >
+            {format(date, "HH:mm")}
+          </time>
+        </TextTooltip>
         <div className="flex min-w-0 flex-col gap-0.5">
           <CollapsibleTrigger
             aria-describedby={meta}

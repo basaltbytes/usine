@@ -25,6 +25,7 @@ import {
 import { bodyText, markdownBody, type TurnEntry } from "~/lib/conversations/timeline";
 import { dayTimeLabel, timestampLabel } from "~/lib/strings";
 import { cn } from "~/lib/utils";
+import { TextTooltip } from "~/components/text-tooltip";
 
 type SpeakerProps = {
   readonly speaker: string;
@@ -38,13 +39,11 @@ const Speaker = ({ speaker, at, className }: SpeakerProps) => {
     <MessageHeader className={cn("gap-2 text-xs", className)}>
       <span className="font-medium text-foreground">{speaker}</span>
       {instant !== undefined && (
-        <time
-          dateTime={instant}
-          title={timestampLabel(instant)}
-          className="font-mono font-normal tabular-nums"
-        >
-          {dayTimeLabel(instant)}
-        </time>
+        <TextTooltip text={timestampLabel(instant)}>
+          <time dateTime={instant} className="font-mono font-normal tabular-nums">
+            {dayTimeLabel(instant)}
+          </time>
+        </TextTooltip>
       )}
     </MessageHeader>
   );

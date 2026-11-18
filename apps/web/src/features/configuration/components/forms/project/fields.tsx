@@ -14,6 +14,7 @@ import { arrayValue, stringValue, type FormFieldsProps } from "~/features/config
 import { projectCopy } from "~/features/configuration/strings";
 import { configurationQuery } from "~/lib/configuration/queries";
 import { ProjectLanes } from "./lanes";
+import { TextTooltip } from "~/components/text-tooltip";
 
 export const ProjectFields = (fields: FormFieldsProps) => {
   const admin = useCan("admin");
@@ -45,9 +46,9 @@ export const ProjectFields = (fields: FormFieldsProps) => {
           {repositories.map((repository, index) => (
             <li key={repository} className="flex min-w-0 items-center gap-2">
               <RepositoryMark repository={repository} />
-              <span className="min-w-0 flex-1 truncate" title={repository}>
-                {repository}
-              </span>
+              <TextTooltip text={repository}>
+                <span className="min-w-0 flex-1 truncate">{repository}</span>
+              </TextTooltip>
               <Button
                 type="button"
                 variant="ghost"

@@ -3,6 +3,7 @@ import { Option } from "effect";
 import { cn } from "~/lib/utils";
 import { dayTimeLabel, timestampLabel } from "~/lib/strings";
 import { approvalChannelLabel } from "~/lib/runs/strings";
+import { TextTooltip } from "~/components/text-tooltip";
 
 type ApprovalLineProps = {
   readonly approval: ApprovalView | null;
@@ -23,13 +24,14 @@ export const ApprovalLine = ({ approval, className }: ApprovalLineProps) => {
         })}
       </span>
       {" · "}
-      <time
-        dateTime={approval.approvedAt}
-        title={timestampLabel(approval.approvedAt)}
-        className="font-mono text-xs whitespace-nowrap tabular-nums"
-      >
-        {dayTimeLabel(approval.approvedAt)}
-      </time>
+      <TextTooltip text={timestampLabel(approval.approvedAt)}>
+        <time
+          dateTime={approval.approvedAt}
+          className="font-mono text-xs whitespace-nowrap tabular-nums"
+        >
+          {dayTimeLabel(approval.approvedAt)}
+        </time>
+      </TextTooltip>
       {Option.match(source, {
         onNone: () => null,
         onSome: ({ channel }) => (

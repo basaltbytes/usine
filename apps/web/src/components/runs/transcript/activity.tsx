@@ -13,6 +13,7 @@ import {
   type TranscriptTool,
 } from "~/lib/runs/transcript/model";
 import { presentTool } from "~/lib/runs/transcript/tool/presentation";
+import { TextTooltip } from "~/components/text-tooltip";
 
 /** Returns the elapsed time since `startedAt` as `45s`, `3m 12s`, or `2h 5m`. */
 export const elapsedActivity = (startedAt: string, now: number): string => {
@@ -33,14 +34,11 @@ type ElapsedProps = {
 export const Elapsed = ({ since, className }: ElapsedProps) => {
   const now = useNow(1_000);
   return (
-    <time
-      dateTime={since}
-      aria-live="off"
-      className={cn("font-mono tabular-nums", className)}
-      title={`Since ${timestampLabel(since)}`}
-    >
-      {elapsedActivity(since, now)}
-    </time>
+    <TextTooltip text={`Since ${timestampLabel(since)}`}>
+      <time dateTime={since} aria-live="off" className={cn("font-mono tabular-nums", className)}>
+        {elapsedActivity(since, now)}
+      </time>
+    </TextTooltip>
   );
 };
 
@@ -105,20 +103,21 @@ export const CurrentActivity = ({ chapter }: CurrentActivityProps) => {
         {Option.match(activity.since, {
           onNone: () => null,
           onSome: (since) => (
-            <span
-              aria-live="off"
-              className="ml-auto shrink-0 font-mono tabular-nums text-muted-foreground"
-              title={`Started ${timestampLabel(since)}`}
-            >
-              {elapsedActivity(since, now)}
-            </span>
+            <TextTooltip text={`Started ${timestampLabel(since)}`}>
+              <span
+                aria-live="off"
+                className="ml-auto shrink-0 font-mono tabular-nums text-muted-foreground"
+              >
+                {elapsedActivity(since, now)}
+              </span>
+            </TextTooltip>
           ),
         })}
       </p>
       {activity.detail !== "" && (
-        <p className="truncate pl-5 font-mono text-muted-foreground" title={activity.detail}>
-          {activity.detail}
-        </p>
+        <TextTooltip text={activity.detail}>
+          <p className="truncate pl-5 font-mono text-muted-foreground">{activity.detail}</p>
+        </TextTooltip>
       )}
       {Option.match(chapter.lastActivityAt, {
         onNone: () => null,
@@ -166,18 +165,19 @@ const ConnectivityLine = ({ warning, now }: ConnectivityLineProps) => {
           <span className="sr-only">Warning: </span>
           {line.text}
         </span>
-        <span
-          aria-live="off"
-          className="ml-auto shrink-0 font-mono tabular-nums text-muted-foreground"
-          title={`Since ${timestampLabel(line.since)}`}
-        >
-          {elapsedActivity(line.since, now)}
-        </span>
+        <TextTooltip text={`Since ${timestampLabel(line.since)}`}>
+          <span
+            aria-live="off"
+            className="ml-auto shrink-0 font-mono tabular-nums text-muted-foreground"
+          >
+            {elapsedActivity(line.since, now)}
+          </span>
+        </TextTooltip>
       </p>
       {line.detail !== null && (
-        <p className="truncate pl-5 text-muted-foreground" title={line.detail}>
-          {line.detail}
-        </p>
+        <TextTooltip text={line.detail}>
+          <p className="truncate pl-5 text-muted-foreground">{line.detail}</p>
+        </TextTooltip>
       )}
     </>
   );

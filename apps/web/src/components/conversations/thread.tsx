@@ -47,6 +47,7 @@ import {
   withPendingPost,
 } from "~/lib/conversations/timeline";
 import { dayTimeLabel, timestampLabel } from "~/lib/strings";
+import { TextTooltip } from "~/components/text-tooltip";
 
 type ThreadFactsProps = { readonly conversation: ConversationRecord };
 
@@ -63,13 +64,11 @@ const ThreadFacts = ({ conversation }: ThreadFactsProps) => {
       </PageFact>
       <PageFact icon={UserIcon} title="Started by">
         {conversation.createdBy}
-        <time
-          dateTime={started}
-          title={timestampLabel(started)}
-          className="font-mono text-xs tabular-nums"
-        >
-          {dayTimeLabel(started)}
-        </time>
+        <TextTooltip text={timestampLabel(started)}>
+          <time dateTime={started} className="font-mono text-xs tabular-nums">
+            {dayTimeLabel(started)}
+          </time>
+        </TextTooltip>
       </PageFact>
       {conversation.anchor._tag === "Some" && (
         <PageFact icon={LinkSimpleIcon} title="Anchor">

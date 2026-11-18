@@ -167,7 +167,7 @@ type FrontmatterProps = {
 export const Frontmatter = ({ entries, className }: FrontmatterProps) => (
   <dl
     className={cn(
-      "grid grid-cols-[max-content_minmax(0,1fr)] gap-x-4 gap-y-1.5 py-1 font-mono text-xs [font-variant-ligatures:none]",
+      "grid grid-cols-[max-content_minmax(0,1fr)] gap-x-4 gap-y-1.5 py-1 font-mono text-xs ligatures-none",
       className,
     )}
   >

@@ -82,8 +82,9 @@ export const TaskRuns = ({ task, openRun }: TaskRunsProps) => {
                 <tr aria-hidden="true">
                   <td
                     colSpan={8}
+                    className="h-(--spacer-height)"
                     style={{
-                      height: Math.max(0, (visible[0]?.start ?? 0) - virtual.options.scrollMargin),
+                      "--spacer-height": `${Math.max(0, (visible[0]?.start ?? 0) - virtual.options.scrollMargin)}px`,
                     }}
                   />
                 </tr>
@@ -124,12 +125,13 @@ export const TaskRuns = ({ task, openRun }: TaskRunsProps) => {
                 <tr aria-hidden="true">
                   <td
                     colSpan={8}
+                    className="h-(--spacer-height)"
                     style={{
-                      height: Math.max(
+                      "--spacer-height": `${Math.max(
                         0,
                         virtual.getTotalSize() -
                           ((visible.at(-1)?.end ?? 0) - virtual.options.scrollMargin),
-                      ),
+                      )}px`,
                     }}
                   />
                 </tr>

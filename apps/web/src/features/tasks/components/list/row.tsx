@@ -10,17 +10,23 @@ import { ItemHeading } from "~/components/item/heading";
 import { cardIdentity } from "~/components/item/identity";
 import { PullRequestMarks } from "~/components/item/pull-request-marks";
 import { StateMark } from "~/components/status-badge";
-import { TableCell, TableRow } from "~/components/ui/table";
+import { TableCell, TableHead, TableHeader, TableRow } from "~/components/ui/table";
 import { PoolHover } from "~/features/tasks/components/list/pool-hover";
-import { linkedRow, rowLink } from "~/features/tasks/components/section";
+import { LinkedRow, rowLink } from "~/features/tasks/components/section";
 import { Status } from "~/features/tasks/components/list/status";
 import { TaskCost } from "~/features/tasks/components/list/cost";
 import { TaskTime } from "~/features/tasks/components/list/time";
-import { SIDE_CONTENT, USAGE_COLUMN, WIDE_COLUMN } from "~/features/tasks/lib/columns";
+import { SIDE_CONTENT } from "~/features/tasks/lib/columns";
 import { tokensLabel } from "~/lib/strings";
 import { taskNumber, type TaskRow } from "~/lib/tasks/model";
 import { cn } from "~/lib/utils";
+import { TextTooltip } from "~/components/text-tooltip";
 
+// Column visibility uses container queries on the table width, because the sidebar can leave less
+// room than the viewport suggests. Elapsed time is always shown; Tokens and Estimated cost need
+// 56rem, Runs and Pull request 64rem.
+const WIDE_COLUMN = "hidden @5xl:table-cell";
+const USAGE_COLUMN = "hidden @4xl:table-cell";
 const SIDE_COLUMN = "py-3 align-top whitespace-normal";
 const TOTAL_COLUMN = "py-3 text-right align-top font-mono text-xs/5 whitespace-nowrap tabular-nums";
 
@@ -31,22 +37,38 @@ const Runs = ({ task }: RunsProps) => {
   const loops = task.loopStates;
   return (
     <span className={cn("flex items-baseline gap-2", SIDE_CONTENT)}>
-      <span className="truncate" title={loops.map(({ loop }) => loop).join(" · ")}>
-        {loops.map(({ loop, state }, index) => (
-          <Fragment key={loop}>
-            {index > 0 && <span className="text-muted-foreground"> · </span>}
-            <StateMark state={state} className="mr-2 ml-0.75 align-middle" />
-            {loop}
-            <span className="sr-only"> {state}</span>
-          </Fragment>
-        ))}
-      </span>
+      <TextTooltip text={loops.map(({ loop }) => loop).join(" · ")}>
+        <span className="truncate">
+          {loops.map(({ loop, state }, index) => (
+            <Fragment key={loop}>
+              {index > 0 && <span className="text-muted-foreground"> · </span>}
+              <StateMark state={state} className="mr-2 ml-0.75 align-middle" />
+              {loop}
+              <span className="sr-only"> {state}</span>
+            </Fragment>
+          ))}
+        </span>
+      </TextTooltip>
       <span className="shrink-0 font-mono text-xs text-muted-foreground tabular-nums">
         {task.runCount}
       </span>
     </span>
   );
 };
+
+export const TaskListHeader = () => (
+  <TableHeader>
+    <TableRow className="hover:bg-transparent">
+      <TableHead>Task</TableHead>
+      <TableHead>Status</TableHead>
+      <TableHead className={WIDE_COLUMN}>Runs</TableHead>
+      <TableHead className={cn("text-right", WIDE_COLUMN)}>Pull request</TableHead>
+      <TableHead className="text-right">Elapsed time</TableHead>
+      <TableHead className={cn("text-right", USAGE_COLUMN)}>Tokens</TableHead>
+      <TableHead className={cn("text-right", USAGE_COLUMN)}>Estimated cost</TableHead>
+    </TableRow>
+  </TableHeader>
+);
 
 type TaskListRowProps = {
   readonly project: ProjectId;
@@ -63,7 +85,7 @@ export const TaskListRow = ({
   project,
   showRepository,
 }: TaskListRowProps) => (
-  <TableRow className={linkedRow}>
+  <LinkedRow>
     <FillCell className="py-3 align-top">
       <Link
         data-row-link
@@ -115,5 +137,5 @@ export const TaskListRow = ({
     <TableCell className={cn(TOTAL_COLUMN, USAGE_COLUMN)}>
       <TaskCost usage={row.task.usage} />
     </TableCell>
-  </TableRow>
+  </LinkedRow>
 );

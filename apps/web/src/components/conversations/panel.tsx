@@ -1,14 +1,12 @@
 import { ArrowSquareOutIcon } from "@phosphor-icons/react";
-import { Link } from "@tanstack/react-router";
 import type { ProjectId } from "@usine/core/project";
 import { useRef } from "react";
-import { buttonVariants } from "~/components/ui/button";
+import { ButtonLink } from "~/components/button-link";
 import { Sheet, SheetContent, SheetTitle } from "~/components/ui/sheet";
 import { Tooltip, TooltipContent, TooltipTrigger } from "~/components/ui/tooltip";
 import { Inbox, type InboxTarget } from "~/components/conversations/inbox";
 import { useOpenConversation } from "~/hooks/use-open-conversation";
 import { allConversationsLabel, conversationPanelLabel } from "~/lib/conversations/strings";
-import { cn } from "~/lib/utils";
 
 type ConversationPanelProps = {
   readonly target: InboxTarget;
@@ -55,14 +53,13 @@ export const ConversationPanel = ({ target, open, close, project }: Conversation
         <Tooltip>
           <TooltipTrigger
             render={
-              <Link
+              <ButtonLink
                 to="/conversations"
                 search={target === "inbox" ? {} : { conversation: target }}
                 aria-label={allConversationsLabel}
-                className={cn(
-                  buttonVariants({ variant: "ghost", size: "icon-sm" }),
-                  "absolute top-4 right-11 max-md:hidden",
-                )}
+                variant="ghost"
+                size="icon-sm"
+                className="absolute top-4 right-11 max-md:hidden"
               />
             }
           >

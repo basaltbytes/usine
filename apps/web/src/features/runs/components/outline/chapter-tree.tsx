@@ -46,7 +46,7 @@ export const ChapterTree = ({
               type="button"
               aria-current={selectedSession === session.key}
               onClick={() => onSession(session.key)}
-              className="flex h-7 min-w-0 flex-1 items-center justify-between gap-2 rounded-md px-2 text-left text-sidebar-foreground outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring/70 aria-[current=true]:font-medium aria-[current=true]:text-foreground"
+              className="flex h-7 min-w-0 flex-1 items-center justify-between gap-2 rounded-md px-2 text-left text-sidebar-foreground outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring/70 focus-visible:ring-inset aria-[current=true]:font-medium aria-[current=true]:text-foreground"
             >
               <span className="truncate">{sessionName(session)}</span>
               {status !== null && (

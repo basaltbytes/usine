@@ -2,6 +2,7 @@ import { boardTaskRuns } from "@usine/orchestrator/operator";
 import type { BoardLaneId, BoardLaneView, LoopView, RunView } from "@usine/orchestrator/operator";
 import { Fragment } from "react";
 import { cn } from "~/lib/utils";
+import { TextTooltip } from "~/components/text-tooltip";
 
 /** The Run states in which a Loop counts as working on a Task. */
 const AT_WORK = new Set<RunView["state"]>(["Waiting", "Queued", "Running"]);
@@ -62,47 +63,50 @@ type FlowArrowProps = { readonly flow: LaneFlow };
 export const FlowArrow = ({ flow }: FlowArrowProps) => {
   const named = flow.loops.length > 0;
   return (
-    <p
-      data-slot="flow-arrow"
-      className={cn(
-        "-mr-3 ml-auto flex min-w-0 items-center gap-1.5 pl-2 text-xs",
-        flow.tone === "active"
-          ? "text-run-active"
-          : flow.tone === "waiting"
-            ? "text-run-waiting"
-            : "text-muted-foreground",
-      )}
-      title={
+    <TextTooltip
+      text={
         named
           ? `Loops matching this lane: ${loopsTitle(flow.loops)}. Flows to ${flow.next.name}`
           : undefined
       }
     >
-      <span className="sr-only">Flows to {flow.next.name}</span>
-      {named && (
-        <span className="truncate">
-          {flow.loops.map(({ name, paused }, index) => (
-            <Fragment key={name}>
-              {index > 0 && ", "}
-              {name}
-              {paused && <span className="text-muted-foreground"> paused</span>}
-            </Fragment>
-          ))}
-        </span>
-      )}
-      <svg
-        aria-hidden="true"
-        viewBox="0 0 22 8"
+      <p
+        data-slot="flow-arrow"
         className={cn(
-          "h-2 w-5.5 shrink-0 fill-none stroke-current",
-          flow.tone === "idle" && "text-faint",
+          "-mr-3 ml-auto flex min-w-0 items-center gap-1.5 pl-2 text-xs",
+          flow.tone === "active"
+            ? "text-run-active"
+            : flow.tone === "waiting"
+              ? "text-run-waiting"
+              : "text-muted-foreground",
         )}
-        strokeWidth="1"
-        strokeLinecap="round"
-        strokeLinejoin="round"
       >
-        <path d="M0.5 4h18M15.5 1l3 3-3 3" />
-      </svg>
-    </p>
+        <span className="sr-only">Flows to {flow.next.name}</span>
+        {named && (
+          <span className="truncate">
+            {flow.loops.map(({ name, paused }, index) => (
+              <Fragment key={name}>
+                {index > 0 && ", "}
+                {name}
+                {paused && <span className="text-muted-foreground"> paused</span>}
+              </Fragment>
+            ))}
+          </span>
+        )}
+        <svg
+          aria-hidden="true"
+          viewBox="0 0 22 8"
+          className={cn(
+            "h-2 w-5.5 shrink-0 fill-none stroke-current",
+            flow.tone === "idle" && "text-faint",
+          )}
+          strokeWidth="1"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <path d="M0.5 4h18M15.5 1l3 3-3 3" />
+        </svg>
+      </p>
+    </TextTooltip>
   );
 };

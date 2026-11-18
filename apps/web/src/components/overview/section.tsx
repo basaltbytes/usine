@@ -70,7 +70,7 @@ export const RunPageLink = ({ run, children }: RunPageLinkProps) => {
     <Link
       {...projectLinks.run(run.repository, run.id)}
       onClick={(event) => event.stopPropagation()}
-      className="block min-w-0 rounded-sm outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring/70 focus-visible:outline-solid"
+      className="block min-w-0 rounded-sm outline-none focus-visible:outline-2 focus-visible:outline-ring/70 focus-visible:outline-solid"
     >
       {children}
     </Link>

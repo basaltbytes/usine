@@ -7,6 +7,7 @@ import {
   IssueOpenedIcon,
 } from "@primer/octicons-react";
 import type { LaneItemState } from "@usine/config/board";
+import { TextTooltip } from "~/components/text-tooltip";
 import { cn } from "~/lib/utils";
 
 /** A GitHub issue or pull request; a `null` state is unknown. */
@@ -84,24 +85,27 @@ export const ItemMark = ({
       )}
     </>
   );
-  return linked ? (
-    <a
-      href={item.url}
-      target="_blank"
-      rel="noreferrer"
-      draggable={false}
-      title={label}
-      aria-label={label}
-      className={cn(
-        classes,
-        "rounded-sm underline-offset-4 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring/70",
+  return (
+    <TextTooltip text={label}>
+      {linked ? (
+        <a
+          href={item.url}
+          target="_blank"
+          rel="noreferrer"
+          draggable={false}
+          aria-label={label}
+          className={cn(
+            classes,
+            "rounded-sm underline-offset-4 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring/70 focus-visible:ring-inset",
+          )}
+        >
+          {mark}
+        </a>
+      ) : (
+        <span role="img" aria-label={label} className={classes}>
+          {mark}
+        </span>
       )}
-    >
-      {mark}
-    </a>
-  ) : (
-    <span role="img" title={label} aria-label={label} className={classes}>
-      {mark}
-    </span>
+    </TextTooltip>
   );
 };

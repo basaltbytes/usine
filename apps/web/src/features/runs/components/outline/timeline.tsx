@@ -9,6 +9,7 @@ import {
   type Checkpoint,
   type TurnsEntry,
 } from "~/lib/runs/transcript/document/model";
+import { observeResize } from "~/lib/observe-resize";
 import { cn } from "~/lib/utils";
 
 type TimelineProps = {
@@ -49,9 +50,7 @@ export const Timeline = ({ chapter, current, onCheckpoint }: TimelineProps) => {
     };
     place();
     // Opening a fold moves the rows below it while it expands.
-    const observer = new ResizeObserver(place);
-    observer.observe(rail);
-    return () => observer.disconnect();
+    return observeResize([rail], place);
   }, [marked]);
   if (entries.length === 0) return null;
   const toggle = (key: string) =>
@@ -64,8 +63,11 @@ export const Timeline = ({ chapter, current, onCheckpoint }: TimelineProps) => {
     <ol ref={railRef} className="relative mt-1 ml-2 space-y-px border-l pl-0.5">
       <span
         aria-hidden="true"
-        className="pointer-events-none absolute top-0 -left-px h-4.5 w-px bg-foreground transition-[transform,opacity] duration-(--duration-base) ease-out-expo"
-        style={{ transform: `translateY(${mark ?? 0}px)`, opacity: mark === null ? 0 : 1 }}
+        className={cn(
+          "pointer-events-none absolute top-0 -left-px h-4.5 w-px translate-y-(--mark-y) bg-foreground transition duration-(--duration-base) ease-out-expo",
+          mark === null && "opacity-0",
+        )}
+        style={{ "--mark-y": `${mark ?? 0}px` }}
       />
       {entries.map((entry) => {
         if (entry._tag === "Mark")

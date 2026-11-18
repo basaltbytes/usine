@@ -1,5 +1,6 @@
 import type { LabelView } from "@usine/orchestrator/operator";
 import { Badge } from "~/components/ui/badge";
+import { cn } from "~/lib/utils";
 
 const channel = (hex: string, offset: number): number =>
   parseInt(hex.slice(offset, offset + 2), 16);
@@ -42,12 +43,12 @@ export const LabelBadge = ({ name, label, className }: LabelBadgeProps) => {
   return (
     <Badge
       variant="outline"
-      className={className}
+      className={cn("border-(--label-border) bg-(--label-fill) text-(--label-text)", className)}
       title={label.description ?? undefined}
       style={{
-        color: labelTextColor(label.color),
-        borderColor: `#${label.color}66`,
-        backgroundColor: `#${label.color}1f`,
+        "--label-text": labelTextColor(label.color),
+        "--label-border": `#${label.color}66`,
+        "--label-fill": `#${label.color}1f`,
       }}
     >
       {name}

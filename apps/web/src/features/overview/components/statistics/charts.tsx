@@ -131,8 +131,8 @@ export const AttemptsChart = ({ counts }: AttemptsChartProps) => {
     <>
       <ChartContainer
         config={attemptsConfig}
-        className="aspect-auto w-full"
-        style={{ height: Math.max(2, data.length) * 28 + 8 }}
+        className="aspect-auto h-(--chart-height) w-full"
+        style={{ "--chart-height": `${Math.max(2, data.length) * 28 + 8}px` }}
       >
         <BarChart data={data} layout="vertical" margin={{ top: 4, right: 40, bottom: 4, left: 0 }}>
           <XAxis type="number" hide allowDecimals={false} />
@@ -257,7 +257,10 @@ export const UtilizationMeters = ({ workers }: UtilizationMetersProps) => (
           aria-valuenow={Math.round(share * 100)}
           className="h-1.5 overflow-hidden rounded-full bg-chart-1/15"
         >
-          <div className="h-full rounded-full bg-chart-1" style={{ width: `${share * 100}%` }} />
+          <div
+            className="h-full w-(--share) rounded-full bg-chart-1"
+            style={{ "--share": `${share * 100}%` }}
+          />
         </div>
         <span className="text-xs text-muted-foreground tabular-nums">
           {countLabel(slots, "slot", "slots")}, {spanLabel(occupiedMillis)} held

@@ -6,6 +6,7 @@ import { ItemMark } from "~/components/item/mark";
 import { LabelBadge } from "~/components/label-badge";
 import { timestampLabel } from "~/lib/strings";
 import type { GitHubChangeRow, LabelChanges } from "~/lib/runs/transcript/document/model";
+import { TextTooltip } from "~/components/text-tooltip";
 
 const reviewed = {
   APPROVED: (item) => <>Approved {item}</>,
@@ -74,21 +75,20 @@ const Labels = ({ change }: LabelsProps) => {
 type GitHubChangeLineProps = { readonly row: GitHubChangeRow };
 
 export const GitHubChangeLine = ({ row }: GitHubChangeLineProps) => (
-  <div
-    title={`GitHub recorded this at ${timestampLabel(row.at)}`}
-    className="flex min-h-7 min-w-0 items-start gap-2 py-1 text-xs text-muted-foreground"
-  >
-    <GithubLogoIcon aria-hidden="true" className="mt-0.75 size-3.5 shrink-0" />
-    <p className="min-w-0 leading-5 wrap-anywhere">
-      {Match.valueTags(row.change, {
-        Labels: (change) => <Labels change={change} />,
-        Commented: ({ url }) => (
-          <>
-            Commented on <ItemLink url={url} />
-          </>
-        ),
-        Reviewed: ({ url, state }) => reviewed[state](<ItemLink url={url} />),
-      })}
-    </p>
-  </div>
+  <TextTooltip text={`GitHub recorded this at ${timestampLabel(row.at)}`}>
+    <div className="flex min-h-7 min-w-0 items-start gap-2 py-1 text-xs text-muted-foreground">
+      <GithubLogoIcon aria-hidden="true" className="mt-0.75 size-3.5 shrink-0" />
+      <p className="min-w-0 leading-5 wrap-anywhere">
+        {Match.valueTags(row.change, {
+          Labels: (change) => <Labels change={change} />,
+          Commented: ({ url }) => (
+            <>
+              Commented on <ItemLink url={url} />
+            </>
+          ),
+          Reviewed: ({ url, state }) => reviewed[state](<ItemLink url={url} />),
+        })}
+      </p>
+    </div>
+  </TextTooltip>
 );

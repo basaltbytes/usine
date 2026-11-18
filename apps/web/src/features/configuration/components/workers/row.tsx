@@ -10,6 +10,7 @@ import { workerKindLabel, workerPlace } from "~/features/configuration/strings";
 import { useNow } from "~/hooks/use-now";
 import { StateMark } from "~/components/status-badge";
 import { creationFailureTitle, nextCreationLine, workerPausedLine } from "~/lib/workers/strings";
+import { TextTooltip } from "~/components/text-tooltip";
 
 type WorkerRowProps = { readonly worker: WorkerConfigurationView };
 
@@ -55,10 +56,12 @@ export const WorkerRow = ({ worker }: WorkerRowProps) => {
         <PreflightState worker={worker} />
         <PreflightAction worker={worker} />
         {worker.provisioning?.blocked === true && (
-          <p className="text-xs text-destructive tabular-nums" title={worker.provisioning.message}>
-            {creationFailureTitle(worker.provisioning)}.{" "}
-            {nextCreationLine(worker.provisioning, now)}
-          </p>
+          <TextTooltip text={worker.provisioning.message}>
+            <p className="text-xs text-destructive tabular-nums">
+              {creationFailureTitle(worker.provisioning)}.{" "}
+              {nextCreationLine(worker.provisioning, now)}
+            </p>
+          </TextTooltip>
         )}
       </FillCell>
     </OpeningRow>

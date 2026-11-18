@@ -67,10 +67,10 @@ export const ShareBar = ({ label, parts }: ShareBarProps) => {
           <div
             key={name}
             className={cn(
-              "min-w-0.5 transition-opacity duration-(--duration-fast)",
+              "min-w-0.5 grow-(--share) basis-0 bg-(--share-fill) transition-opacity duration-(--duration-fast)",
               dimmed(name) && "opacity-35",
             )}
-            style={{ flexGrow: share, flexBasis: 0, background: fill }}
+            style={{ "--share": share, "--share-fill": fill }}
             onPointerEnter={() => setHovered(name)}
           />
         ))}
@@ -90,8 +90,8 @@ export const ShareBar = ({ label, parts }: ShareBarProps) => {
           >
             <span
               aria-hidden="true"
-              className="size-2 shrink-0 rounded-[2px]"
-              style={{ background: fill }}
+              className="size-2 shrink-0 rounded-xs bg-(--share-fill)"
+              style={{ "--share-fill": fill }}
             />
             <span className="text-foreground">{name}</span>
             {shareLabel(share)}

@@ -27,8 +27,8 @@ export const FirstReviewChart = ({ models }: FirstReviewChartProps) => {
     <>
       <ChartContainer
         config={config}
-        className="aspect-auto w-full"
-        style={{ height: Math.max(2, data.length) * 28 + 8 }}
+        className="aspect-auto h-(--chart-height) w-full"
+        style={{ "--chart-height": `${Math.max(2, data.length) * 28 + 8}px` }}
       >
         <BarChart data={data} layout="vertical" margin={{ top: 4, right: 56, bottom: 4, left: 0 }}>
           <XAxis type="number" hide domain={[0, 100]} />

@@ -21,6 +21,12 @@ declare module "@tanstack/react-router" {
   }
 }
 
+declare module "react" {
+  interface CSSProperties {
+    [property: `--${string}`]: string | number | undefined;
+  }
+}
+
 const root = document.getElementById("root");
 if (root === null) throw new Error("Missing #root mount point");
 createRoot(root).render(

@@ -1,6 +1,7 @@
 import { checkpointRow } from "~/features/runs/lib/outline";
 import { type Checkpoint } from "~/lib/runs/transcript/document/model";
 import { cn } from "~/lib/utils";
+import { TextTooltip } from "~/components/text-tooltip";
 
 const checkpointTone = (tone: Checkpoint["tone"]) =>
   tone === "failed"
@@ -23,16 +24,17 @@ export const CheckpointButton = ({
   named,
   onCheckpoint,
 }: CheckpointButtonProps) => (
-  <button
-    type="button"
-    title={checkpoint.text}
-    aria-current={checkpoint.key === current ? "location" : undefined}
-    onClick={() => onCheckpoint(checkpoint)}
-    className={cn(checkpointRow, checkpointTone(checkpoint.tone))}
-  >
-    {named && checkpoint.speaker !== null && (
-      <span className="shrink-0 text-sidebar-foreground">{checkpoint.speaker}</span>
-    )}
-    <span className="truncate">{checkpoint.label}</span>
-  </button>
+  <TextTooltip text={checkpoint.text}>
+    <button
+      type="button"
+      aria-current={checkpoint.key === current ? "location" : undefined}
+      onClick={() => onCheckpoint(checkpoint)}
+      className={cn(checkpointRow, checkpointTone(checkpoint.tone))}
+    >
+      {named && checkpoint.speaker !== null && (
+        <span className="shrink-0 text-sidebar-foreground">{checkpoint.speaker}</span>
+      )}
+      <span className="truncate">{checkpoint.label}</span>
+    </button>
+  </TextTooltip>
 );

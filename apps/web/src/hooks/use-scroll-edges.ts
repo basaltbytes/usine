@@ -1,4 +1,5 @@
 import { type RefCallback, useCallback, useRef, useState } from "react";
+import { observeResize } from "~/lib/observe-resize";
 
 /** Whether content is hidden above and below the visible part of a scroll container. */
 export interface ScrollEdges {
@@ -27,24 +28,19 @@ export const useScrollEdges = (): readonly [RefCallback<HTMLElement>, ScrollEdge
         current.above === above && current.below === below ? current : { above, below },
       );
     };
-    const resize = new ResizeObserver(measure);
-    const observeChildren = () => {
-      resize.observe(node);
-      for (const child of node.children) resize.observe(child);
-    };
+    let stopResize = observeResize([node, ...node.children], measure);
     const mutation = new MutationObserver(() => {
-      resize.disconnect();
-      observeChildren();
+      stopResize();
+      stopResize = observeResize([node, ...node.children], measure);
       measure();
     });
-    observeChildren();
     mutation.observe(node, { childList: true });
     node.addEventListener("scroll", measure, { passive: true });
     measure();
     cleanup.current = () => {
       node.removeEventListener("scroll", measure);
       mutation.disconnect();
-      resize.disconnect();
+      stopResize();
     };
   }, []);
   return [ref, edges] as const;

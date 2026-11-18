@@ -39,6 +39,8 @@ import { runAgainBlocked, runAgainProgress } from "~/lib/runs/strings";
 import { overviewQuery } from "~/lib/overview";
 import { boardOverview, boardOverviewReviewing, boardStalled } from "~/lib/projects/fixture";
 import { memoryRouter } from "~/lib/testing/memory-router";
+import { tooltipText } from "~/lib/testing/tooltip";
+import { runLineTimeTitle } from "~/features/projects/strings";
 import "~/index.css";
 
 declare module "vitest/browser" {
@@ -277,8 +279,10 @@ it("times a running Run from its current Attempt, on one line with the running m
   const startedAt = runOf("run-redesign").attempts[1]?.startedAt ?? "";
   const time = row.querySelector("time");
   expect(time?.dateTime).toBe(startedAt);
-  expect(time?.title).toBe(`Running since ${timestampLabel(startedAt)}`);
-  expect(time?.title).toMatch(/^Running since \d{4}-\d{2}-\d{2} \d{2}:\d{2}$/u);
+  expect(runLineTimeTitle("Running", startedAt)).toBe(`Running since ${timestampLabel(startedAt)}`);
+  expect(runLineTimeTitle("Running", startedAt)).toMatch(
+    /^Running since \d{4}-\d{2}-\d{2} \d{2}:\d{2}$/u,
+  );
   // Earlier Attempts and their failures are shown only in the Run drawer.
   expect(running.textContent).not.toContain("Attempt");
   expect(running.textContent).not.toContain("The Worker restarted");
@@ -289,13 +293,13 @@ it("times a waiting Run from its opening and a failed one from its failure, with
   expect(waiting.textContent).toBe("implementWaiting3mdeveloper");
   expect(markAnimation(waiting)).toBe("none");
   const openedAt = runOf("run-salvage").openedAt;
-  expect(waiting.querySelector("time")?.title).toBe(`Opened ${timestampLabel(openedAt)}`);
+  expect(waiting.querySelector("time")?.dateTime).toBe(openedAt);
 
   const failed = runLine(cardOf(/^Pin GitHub Actions/u), "Failed");
   expect(failed.textContent).toBe("reviewFailed1hreviewer");
   expect(markAnimation(failed)).toBe("none");
   const endedAt = runOf("run-pinned").attempts[0]?.endedAt ?? "";
-  expect(failed.querySelector("time")?.title).toBe(`Failed at ${timestampLabel(endedAt)}`);
+  expect(failed.querySelector("time")?.dateTime).toBe(endedAt);
 });
 
 it("shows a card whose running Run's Loop removed its lane label in that lane, counted, with its Run line", async () => {
@@ -354,7 +358,9 @@ it("draws the flow between adjacent authored label lanes, named after the Loops 
   expect(flow("In progress")?.textContent).toBe("Flows to Review");
   expect(flow("Review")?.textContent).toBe("Flows to Mergereview paused");
   expect(flow("Review")?.classList).toContain("text-muted-foreground");
-  expect(flow("Review")?.getAttribute("title")).toBe(
+  const review = flow("Review");
+  if (review === null) throw new Error("No flow arrow after Review");
+  expect(await tooltipText(review)).toBe(
     "Loops matching this lane: review (paused). Flows to Merge",
   );
   // Pull requests is read-only, so neither Merge nor Pull requests flows into a next lane.

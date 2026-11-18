@@ -130,6 +130,8 @@
   --text-xl: 1.25rem;
   --text-xl--line-height: 1.75rem;
   --text-xl--letter-spacing: -0.01em;
+  /* One line of the reader's 14px prose at the typeset leading, for 12px text beside it. */
+  --leading-reader: 1.4rem;
   --shadow-raised: 0 8px 24px -6px rgb(0 0 0 / 50%), 0 2px 6px -2px rgb(0 0 0 / 35%);
   /* Motion decelerates hard and settles: arrivals and state changes share one curve. */
   --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
@@ -192,6 +194,11 @@
   &[data-ending-style] {
     transition-duration: var(--duration-fast);
   }
+}
+
+/* Code copied from a file reads as written: `==` and `=>` stay two characters. */
+@utility ligatures-none {
+  font-variant-ligatures: none;
 }
 
 /* Opening the Run page from the drawer: the Run's title and state line glide into place while the

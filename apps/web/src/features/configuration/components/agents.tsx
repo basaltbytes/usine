@@ -36,6 +36,7 @@ import {
   Unset,
 } from "~/features/configuration/components/section";
 import { OpeningRow, rowLinkClass } from "~/components/opening-row";
+import { TextTooltip } from "~/components/text-tooltip";
 
 const agentCounts = (configuration: ConfigurationView): string =>
   [
@@ -99,9 +100,9 @@ const InvalidAgentRow = ({ agent }: InvalidAgentRowProps) => {
         <NotLoaded />
       </TableCell>
       <TableCell colSpan={4} className="max-w-0">
-        <p className="truncate text-destructive" title={agent.error.message}>
-          {agent.error.message}
-        </p>
+        <TextTooltip text={agent.error.message}>
+          <p className="truncate text-destructive">{agent.error.message}</p>
+        </TextTooltip>
       </TableCell>
     </OpeningRow>
   );

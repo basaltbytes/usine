@@ -20,6 +20,7 @@ import { previewText } from "~/lib/runs/transcript/document/text";
 import { dayTimeLabel, durationLabel, timestampLabel } from "~/lib/strings";
 import { attemptStartLabel } from "~/lib/runs/strings";
 import { cn } from "~/lib/utils";
+import { TextTooltip } from "~/components/text-tooltip";
 
 /** The part of the Run shown in the reader: the Task, the Event, or an Attempt and one of its sessions. */
 export type OutlineSelection =
@@ -33,7 +34,7 @@ export type OutlineSelection =
     };
 
 const entry =
-  "relative block w-full rounded-md py-1.5 pr-2 pl-6 text-left outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring/70 aria-[current=true]:bg-muted";
+  "relative block w-full rounded-md py-1.5 pr-2 pl-6 text-left outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring/70 focus-visible:ring-inset aria-[current=true]:bg-muted";
 
 const chapterState = (chapter: Chapter): string =>
   chapter.live
@@ -183,12 +184,11 @@ export const Outline = ({
                       </span>
                     )}
                     {reattachedAt !== null && (
-                      <span
-                        className="block truncate text-xs text-muted-foreground"
-                        title={`Reattached ${timestampLabel(reattachedAt)}`}
-                      >
-                        Reattached after a restart
-                      </span>
+                      <TextTooltip text={`Reattached ${timestampLabel(reattachedAt)}`}>
+                        <span className="block truncate text-xs text-muted-foreground">
+                          Reattached after a restart
+                        </span>
+                      </TextTooltip>
                     )}
                     <span className="flex justify-between gap-3 font-mono text-xs tabular-nums text-muted-foreground">
                       <time dateTime={startedAt}>{dayTimeLabel(startedAt)}</time>

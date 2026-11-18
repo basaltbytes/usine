@@ -46,6 +46,7 @@ import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 import { expect, it } from "vitest";
 import { commands, page, userEvent } from "vitest/browser";
+import { tooltipText } from "~/lib/testing/tooltip";
 import { overviewQuery, attentionQuery, projectId } from "~/lib/overview";
 import { deskQuery } from "~/lib/desk/queries";
 import { runDetailQuery } from "~/lib/runs/queries";
@@ -767,9 +768,9 @@ it("shows the push refusal on the run page and in Needs attention alongside reta
     await page.getByRole("button", { name: "Needs attention (1)", exact: true }).click();
     const needs = page.getByRole("dialog", { name: "Needs attention 1" });
     await expect.element(needs.getByRole("button", { name: "Details", exact: true })).toBeVisible();
-    await expect
-      .element(needs.getByText("implement · resolution/project", { exact: false }))
-      .toHaveAttribute("title", message);
+    expect(
+      await tooltipText(needs.getByText("implement · resolution/project", { exact: false })),
+    ).toBe(message);
     await userEvent.keyboard("{Escape}");
     await expect.element(page.getByText("GitHub refused push", { exact: true })).toBeVisible();
     await expect.element(page.getByText(message, { exact: true }).last()).toBeVisible();

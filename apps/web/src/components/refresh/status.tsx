@@ -2,6 +2,7 @@ import { useContext } from "react";
 import { useNow } from "~/hooks/use-now";
 import { refreshCopy } from "~/lib/strings";
 import { RefreshContext } from "./provider";
+import { TextTooltip } from "~/components/text-tooltip";
 
 export const RefreshStatus = () => {
   const { sources, connection } = useContext(RefreshContext);
@@ -23,13 +24,11 @@ export const RefreshStatus = () => {
       ) : (
         <>
           {refreshCopy.label}{" "}
-          <time
-            dateTime={new Date(updatedAt).toISOString()}
-            title={new Date(updatedAt).toLocaleString()}
-            className="font-mono tabular-nums"
-          >
-            {new Date(updatedAt).toLocaleTimeString()}
-          </time>
+          <TextTooltip text={new Date(updatedAt).toLocaleString()}>
+            <time dateTime={new Date(updatedAt).toISOString()} className="font-mono tabular-nums">
+              {new Date(updatedAt).toLocaleTimeString()}
+            </time>
+          </TextTooltip>
         </>
       )}
       {connection === "disconnected" && <span role="status">{refreshCopy.disconnected}</span>}

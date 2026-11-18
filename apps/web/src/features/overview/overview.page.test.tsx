@@ -117,7 +117,7 @@ describe("Desk", () => {
     const html = render(<RunningNow running={desk.running} workers={desk.workers} now={now} />);
     const visible = text(html);
     assert.include(html, 'data-slot="usine-mark" data-running=""');
-    assert.include(html, 'title="Issue #403, open"');
+    assert.include(html, 'aria-label="Issue #403, open"');
     assert.include(visible, "Operator desk replaces the Projects home");
     assert.include(visible, "hz-worker-1");
     assert.include(visible, "1m ago");

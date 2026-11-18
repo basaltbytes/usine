@@ -1,12 +1,23 @@
-import type { ReactNode } from "react";
+import type { ComponentProps, ReactNode } from "react";
+import { TableRow } from "~/components/ui/table";
+import { cn } from "~/lib/utils";
 
-/** Classes for a table row covered by one link; hover and the link's keyboard focus highlight the row. */
-export const linkedRow =
-  "relative hover:bg-muted/60 has-[a[data-row-link]:focus-visible]:bg-muted/60";
+type LinkedRowProps = Readonly<ComponentProps<typeof TableRow>>;
 
-/** Classes for the link that covers a `linkedRow`; give it `data-row-link`, and other controls in the row `relative z-10`. */
+/** Renders a table row covered by one link; hover and the link's keyboard focus highlight the row. */
+export const LinkedRow = ({ className, ...props }: LinkedRowProps) => (
+  <TableRow
+    className={cn(
+      "relative hover:bg-muted/60 has-[a[data-row-link]:focus-visible]:bg-muted/60",
+      className,
+    )}
+    {...props}
+  />
+);
+
+/** Classes for the link that covers a `LinkedRow`; give it `data-row-link`, and other controls in the row `relative z-10`. */
 export const rowLink =
-  "rounded-sm outline-none after:absolute after:inset-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring/70 focus-visible:outline-solid";
+  "rounded-sm outline-none after:absolute after:inset-0 focus-visible:outline-2 focus-visible:outline-ring/70 focus-visible:outline-solid";
 
 type SectionHeadingProps = {
   readonly id: string;
