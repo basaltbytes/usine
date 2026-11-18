@@ -316,7 +316,8 @@ export const conversationsLayer = Layer.effect(
     const status = Effect.gen(function* () {
       const configured = yield* brain;
       if (Option.isNone(configured)) return SupervisorSetupRequired.make({ reason: notConfigured });
-      return Option.match(sandbox.unavailable, {
+      const unavailable = yield* sandbox.unavailable;
+      return Option.match(unavailable, {
         onNone: (): SupervisorStatus => SupervisorReady.make({}),
         onSome: ({ message }) => SupervisorSetupRequired.make({ reason: message }),
       });
@@ -413,13 +414,18 @@ export const conversationsLayer = Layer.effect(
         const resume = resumePoint(
           record.turns.filter(({ message: sequence }) => sequence < running.message),
         );
-        return yield* member
+        if (Option.isSome(resume.session) && !seat.restored)
+          yield* Effect.logWarning(
+            "Starting a new supervisor session: the conversation has no saved state",
+            { conversation: conversation.id, turn: running.id },
+          );
+        const reply = yield* member
           .run(
             SupervisorTurn.make({
               session: AgentSessionId.make(conversation.id),
               brain: supervisorBrain,
               seat,
-              saved: resume.session,
+              saved: seat.restored ? resume.session : Option.none(),
               usage: resume.usage,
               message: prompt,
             }),
@@ -434,6 +440,15 @@ export const conversationsLayer = Layer.effect(
               }),
             ),
           );
+        // The next turn reopens this turn's session only if its state was saved.
+        yield* sandbox
+          .save(seat)
+          .pipe(
+            Effect.mapError(({ message }) =>
+              TurnStopped.make({ failure: TurnError.make({ message }), usage: reply.usage }),
+            ),
+          );
+        return reply;
       }).pipe(Effect.scoped);
 
     const ended = Effect.fn("Conversations.ended")(function* (

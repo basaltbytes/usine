@@ -2,16 +2,14 @@ import { NodeFileSystem } from "@effect/platform-node";
 import { UsineConfig } from "@usine/config/factory";
 import { LoadedInstance } from "@usine/config/instance";
 import { InstanceDirectory, InstanceId } from "@usine/core/instance";
-import { AgentSessionId } from "@usine/core/agent/session";
-import { Harness, ModelId } from "@usine/core/agent/brain";
-import { SupervisorSandbox, SandboxRequest } from "@usine/agents/supervisor";
+import { SupervisorSandbox } from "@usine/agents/supervisor";
 import { Context, FileSystem, Layer, Schema, Stream } from "effect";
 import { spawning } from "../../executor/test/supervisor/runtime-fixture.ts";
 import { CurrentInstance } from "../src/current-instance/current-instance.ts";
 import { supervisorSandboxLayer } from "../src/supervisor-sandbox.ts";
 import { TestClock } from "effect/testing";
 import { assert, describe, it } from "@effect/vitest";
-import { SupervisorUnavailable } from "@usine/agents/supervisor";
+import { type SupervisorSandboxService, SupervisorUnavailable } from "@usine/agents/supervisor";
 import { Effect, Logger, Option } from "effect";
 import { reportSupervisorAvailability } from "../src/supervisor-sandbox.ts";
 
@@ -20,17 +18,23 @@ const warningsIn = (warnings: Array<unknown>) =>
     if (logLevel === "Warn") warnings.push(message);
   });
 
-const unavailable = {
-  unavailable: Option.some(
-    SupervisorUnavailable.make({
-      message:
-        "Supervisor sessions run in a container, and Podman or Docker isn't installed on the orchestrator host",
-    }),
-  ),
+const missing = SupervisorUnavailable.make({
+  message:
+    "Supervisor sessions run in a container, and Podman or Docker isn't installed on the orchestrator host",
+});
+
+const unavailable: SupervisorSandboxService = {
+  unavailable: Effect.succeedSome(missing),
+  checked: Effect.succeedSome(missing),
   open: () => Effect.die("the test opens no sandbox"),
+  save: () => Effect.die("the test opens no sandbox"),
 };
 
-const available = { unavailable: Option.none(), open: unavailable.open };
+const available: SupervisorSandboxService = {
+  ...unavailable,
+  unavailable: Effect.succeedNone,
+  checked: Effect.succeedNone,
+};
 
 describe("the supervisor's availability at startup", () => {
   it.effect("warns, with the reason, when the configured supervisor can't run", () =>
@@ -117,9 +121,7 @@ for (const settings of [
               };
             return { stdout: args[0] === "info" ? "true" : "", exitCode: 0 };
           }
-          if (command === "fallocate" && args[0] === "-l")
-            return { stdout: "", stderr: "allocation stopped by test", exitCode: 1 };
-          return { stdout: "", exitCode: command === "mountpoint" && args[0] === "-q" ? 32 : 0 };
+          return undefined;
         }, calls);
         const context = yield* Layer.build(
           supervisorSandboxLayer(
@@ -155,21 +157,10 @@ for (const settings of [
           calls.filter(([, command]) => command === "pull"),
           pullTimeout === undefined ? 1 : 2,
         );
-        const error = yield* sandbox
-          .open(
-            SandboxRequest.make({
-              conversation: AgentSessionId.make("test"),
-              harness: Harness.make("codex"),
-              model: ModelId.make("m"),
-              sources: [],
-            }),
-          )
-          .pipe(Effect.scoped, Effect.flip);
-        assert.include(error.message, "allocation stopped by test");
-        const allocation = calls.find(
-          ([command, flag]) => command === "fallocate" && flag === "-l",
-        );
-        assert.strictEqual(allocation?.[2], String(73 * 1024 ** 2));
+        const checked = yield* sandbox.checked;
+        assert.deepStrictEqual(checked, Option.none());
+        const check = calls.find(([, command]) => command === "run") ?? [];
+        assert.isTrue(check.some((arg) => arg.includes(`tmpfs-size=${73 * 1024 ** 2}`)));
       }).pipe(Effect.scoped, Effect.provide(NodeFileSystem.layer)),
   );
 }

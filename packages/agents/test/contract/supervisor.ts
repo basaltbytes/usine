@@ -105,6 +105,7 @@ export const runSupervisorScenario = (provider: SupervisorProvider, mode: "recor
       cwd,
       environment,
       credential: recordedRoutes[provider],
+      restored: true,
     });
     // The recorded traffic names the session in process and pid file paths.
     const session = AgentSessionId.make("replay-parent:child:1");

@@ -7,7 +7,7 @@ import { ContainerImage, MessageSizeMib, SupervisorLimits } from "@usine/core/wo
 import { Context, Effect, FileSystem, Layer, Option, Schema } from "effect";
 import { HttpClient, HttpClientRequest } from "effect/http";
 import { containerSandboxLayer } from "../../src/supervisor/container.ts";
-import { podman } from "./runtime-fixture.ts";
+import { podman, turnRuns } from "./runtime-fixture.ts";
 
 it.live("passes configured message limits to the supervisor seat and its model relay", () =>
   Effect.gen(function* () {
@@ -45,7 +45,7 @@ it.live("passes configured message limits to the supervisor seat and its model r
       }),
     );
     assert.strictEqual(seat.protocolFrameMib, 9);
-    const started = calls.find(([, command]) => command === "run");
+    const [started] = turnRuns(calls);
     const mount = started?.find((arg) => arg.includes('"destination=/run/usine"'));
     const relayDirectory = mount?.match(/"source=([^"]+)"/u)?.[1];
     assert.isDefined(relayDirectory);

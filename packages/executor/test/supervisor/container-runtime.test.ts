@@ -15,13 +15,19 @@ import {
   ContainerImage,
   SupervisorLimits,
 } from "@usine/core/worker";
-import { Effect, FileSystem, Option, Schema, Stream } from "effect";
+import { Effect, FileSystem, Layer, Option, Schema, Stream } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import { homedir } from "node:os";
 import { env } from "node:process";
 import { ContainerRuntime } from "../../src/remote/runtime.ts";
 import type { GatewayModelRoute } from "../../src/ssh/gateway/model-route.ts";
 import { containerSandboxLayer, MODEL_RELAY_PORT } from "../../src/supervisor/container.ts";
+import { fileHomesLayer } from "../../src/supervisor/homes/file.ts";
+import { conversationKey } from "../../src/supervisor/names.ts";
+
+/** The real sandbox at `root`, with its saved homes in `root/homes`. */
+const sandboxLayer = (options: Parameters<typeof containerSandboxLayer>[0]) =>
+  containerSandboxLayer(options).pipe(Layer.provide(fileHomesLayer(`${options.root}/homes`)));
 
 /**
  * The container runtime that this suite runs real sandboxes on. CI sets it; without it, the suite
@@ -69,7 +75,8 @@ describe.skipIf(Option.isNone(runtime))(
           const conversation = AgentSessionId.make("supervisor:conversation-1");
           const containerName = yield* Effect.gen(function* () {
             const sandbox = yield* SupervisorSandbox;
-            assert.deepStrictEqual(sandbox.unavailable, Option.none());
+            const checked = yield* sandbox.checked;
+            assert.deepStrictEqual(checked, Option.none());
             const seat = yield* sandbox.open(
               SandboxRequest.make({
                 model: ModelId.make("m"),
@@ -182,13 +189,17 @@ describe.skipIf(Option.isNone(runtime))(
 
             const home = yield* sh('touch "$HOME/saved-session" && echo "$HOME"');
             assert.strictEqual(home.exitCode, 0);
-            const saved = yield* fs.exists(`${home.stdout.trim()}/saved-session`);
-            assert.isTrue(saved, "the conversation's home stays on the orchestrator");
+            const onHost = yield* fs.exists(`${home.stdout.trim()}/saved-session`);
+            assert.isFalse(
+              onHost,
+              "the sandbox writes its home in memory, not on the orchestrator",
+            );
+            yield* sandbox.save(seat);
             return host.container.name;
           }).pipe(
             Effect.scoped,
             Effect.provide(
-              containerSandboxLayer({
+              sandboxLayer({
                 root: `${instance}/supervisor`,
                 image,
                 runtime,
@@ -233,15 +244,12 @@ describe.skipIf(Option.isNone(runtime))(
               ["exec", seat.host.container.name, "sh", "-c", 'test -f "$HOME/saved-session"'],
               {},
             );
-            assert.strictEqual(
-              result.exitCode,
-              0,
-              "the next turn loads the saved home from its bounded filesystem",
-            );
+            assert.strictEqual(result.exitCode, 0, "the next turn restores the saved home");
+            assert.isTrue(seat.restored);
           }).pipe(
             Effect.scoped,
             Effect.provide(
-              containerSandboxLayer({
+              sandboxLayer({
                 root: `${instance}/supervisor`,
                 image,
                 runtime,
@@ -278,7 +286,7 @@ describe.skipIf(Option.isNone(runtime))(
             credential: () => Effect.succeedNone,
             request: () => Effect.die("no model request"),
           };
-          const layer = containerSandboxLayer({
+          const layer = sandboxLayer({
             root,
             image,
             runtime,
@@ -396,7 +404,7 @@ describe.skipIf(Option.isNone(runtime))(
             credential: () => Effect.succeedNone,
             request: () => Effect.die("no model request"),
           };
-          const layer = containerSandboxLayer({
+          const layer = sandboxLayer({
             root: `${instance}/supervisor`,
             image,
             runtime,
@@ -450,6 +458,13 @@ describe.skipIf(Option.isNone(runtime))(
               assert.strictEqual(result.exitCode, attack.exit, attack.name);
               if (attack.name === "disk" || attack.name === "tmp")
                 assert.include(result.stderr, "ENOSPC");
+              if (attack.name === "disk") {
+                // The full home's archive exceeds conversation_size_mib, so no state is saved.
+                const saved = yield* fs.exists(
+                  `${instance}/supervisor/homes/${conversationKey(AgentSessionId.make("disk"))}.tar`,
+                );
+                assert.isFalse(saved);
+              }
               db.exec("INSERT INTO alive VALUES (1)");
               assert.strictEqual(
                 db.prepare("SELECT count(*) AS count FROM alive").get()?.count,

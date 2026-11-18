@@ -71,7 +71,7 @@ Without `supervisor`, the instance starts and **Configuration > Settings** repor
 Each turn runs in its own container on the orchestrator host, which usine removes when the turn ends. Shutdown and the next startup remove containers by their instance and conversation labels. After a crash, containers can remain until startup cleanup. A conversation runs one turn at a time; if cleanup cannot remove an earlier container, usine refuses another turn.
 
 - **Source.** Each repository that the turn reads is mounted read-only at `<owner>/<repo>` in the session's working directory, at the head of its default branch when the turn starts, without the git history. A turn keeps reading the head that it started on after a push. A turn of a project conversation reads the project's repositories, and a turn of an instance conversation reads every managed repo, each only if the posting member can read it. The orchestrator fetches each repository with a read-only GitHub App token that stays outside the container.
-- **Files.** No other instance file is in the container: not the database, the GitHub App key, or a provider login. The conversation's own directory keeps the harness's saved session and writable home. Its fixed-size filesystem bounds these writes, including Pi's session files written by the orchestrator. Temporary writes use bounded `/tmp` and shared memory.
+- **Files.** No other instance file is in the container: not the database, the GitHub App key, or a provider login. The harness's home, with its saved sessions, is an in-memory filesystem of `supervisor_limits.conversation_size_mib` in the container, and the kernel refuses writes past that size. No host path in the container is writable. Before the harness starts, usine copies the conversation's saved home into the container; when the turn ends, usine copies it back to the orchestrator. See [Saved conversations](#saved-conversations). Temporary writes use bounded `/tmp` and shared memory.
 - **Network.** The container has no network. The harness reaches the model through a relay to the orchestrator, which sends each model request through the instance's gateway with the instance's credential. The relay accepts only the configured supervisor model, limits each request body to `supervisor_limits.model_request_mib` (32 MiB by default) and accepts at most eight simultaneous connections. Oversized requests receive HTTP 413. The session reaches usine only through the operator tools that its harness serves over the session's own connection.
 
 ### Tools per harness
@@ -90,15 +90,13 @@ Pi's `grep` and `find` accept patterns that start with `-`, such as `--network`,
 
 ### Host requirements
 
-The orchestrator host needs Linux, Docker or Podman, and cgroup v2 with CPU, memory, swap and PID controls. usine uses Podman when both runtimes are installed. CI tests Docker; the Podman storage and resource-limit path is untested on a real runtime. No hardware virtualization is required. Each container runs `ghcr.io/basaltbytes/usine-worker` with the content-derived tag pinned by the installed usine version. Startup prepares that image in the background, using a cached copy when available and pulling it otherwise. Failed preparation retries every minute without delaying the API or orchestrator startup. A turn waits up to 30 seconds for preparation before asking you to retry; it never pulls an image. Container startup times out after 30 seconds. The supervisor reaches the model through the gateway of the instance's first SSH worker that has one.
+The orchestrator host needs Linux, Docker or Podman that the orchestrator's user can run, and cgroup v2 with CPU, memory, swap and PID controls. usine uses Podman when both runtimes are installed. Rootless Podman needs the setuid helpers `newuidmap` and `newgidmap`, which can't run in a service with `NoNewPrivileges=yes`, such as the unit in [Host usine on a Linux server](/guides/host-usine-on-linux/); use Docker there. On Debian 13, Docker is the `docker.io` and `docker-cli` packages, and the orchestrator's user needs to be in the `docker` group, which is equivalent to root on that host, so dedicate the host to usine. Rootless Docker needs no group; its daemon runs outside the usine unit, so `NoNewPrivileges` doesn't affect it, but it is untested. CI tests rootful Docker; the Podman path is untested on a real runtime. No FUSE, loop device, hardware virtualization, or other host privilege is required. Each container runs `ghcr.io/basaltbytes/usine-worker` with the content-derived tag pinned by the installed usine version. Startup prepares that image in the background, using a cached copy when available and pulling it otherwise. Failed preparation retries every minute without delaying the API or orchestrator startup. A turn waits up to 30 seconds for preparation before asking you to retry; it never pulls an image. Container startup times out after 30 seconds. The supervisor reaches the model through the gateway of the instance's first SSH worker that has one.
 
 Image pulls have no timeout by default, so large layers can finish on slow connections. Set `settings.supervisor_image_pull_timeout_minutes` to a positive whole number to stop each pull after that many minutes and retry one minute later. Restart the orchestrator after changing this setting; choose a timeout long enough for the largest layer to download on your connection. Shutdown stops an active pull.
 
-Conversation storage requires `fuse2fs`, `fusermount`, `mkfs.ext4`, `e2fsck`, `fallocate` and `mountpoint`, access to `/dev/fuse`, and `user_allow_other` in `/etc/fuse.conf`. On Debian or Ubuntu, install `fuse`, `fuse2fs`, `e2fsprogs` and `util-linux`. The orchestrator user must be allowed to mount FUSE filesystems. Both runtimes bind-mount the same bounded filesystem; Docker volume options and Podman storage quotas are not required.
+Once the image is ready, usine runs a startup check in the background: it starts a container with a turn's limits and in-memory home, verifies the cgroup limits, and copies a small home into the container and back out. **Configuration > Settings** and `GET /api/conversations/status` report the supervisor as ready only after the check passes. Until then, they say what usine is doing, such as preparing the image. If the check fails, they give the reason, and usine refuses turns until you fix the cause and restart it. A turn that arrives during the check waits up to 30 seconds for it.
 
-A failed conversation mount refuses the turn and logs a warning with the conversation directory and the error. If `fuse2fs` exits before mounting, usine waits up to one second for its remaining diagnostic output and includes the last 8,192 characters in the refusal. A mount that neither completes nor exits times out after 10 seconds.
-
-Without the runtime, storage prerequisites, enforced cgroup limits or a gateway, the supervisor refuses turns. The instance still starts and logs the reason. **Configuration > Settings** reports availability from startup checks; it does not track background image preparation. Check the orchestrator logs for image preparation progress and failures.
+Without a runtime, a gateway, or limits that leave the harness enough memory, the supervisor refuses turns. The instance still starts and logs the reason.
 
 Supervisor Codex protocol frames are limited to `supervisor_limits.protocol_frame_mib` (4 MiB by default), including unfinished lines. If a long conversation exceeds this limit while resuming, increase the setting and restart the orchestrator. Ordinary Codex coding sessions have no app-server frame limit. Process-owner transport frames remain limited to 4 MiB; the owner splits harness output into smaller chunks.
 
@@ -109,12 +107,14 @@ Limits are always enabled, including when `supervisor_limits` is omitted. `cpus`
 | Field in `settings.supervisor_limits` | Default | Description |
 | --- | --- | --- |
 | `cpus` | `1` | CPU quota in cores. Fractional values are accepted. |
-| `memory_mib` | `1024` | Container memory limit in MiB. Swap is disabled. |
+| `memory_mib` | `1024` | Container memory limit in MiB, including the files in the home and `/tmp`. Swap is disabled. |
 | `pids` | `256` | Maximum processes and threads in the container. |
 | `tmpfs_size_mib` | `64` | Size of `/tmp` in MiB. Shared memory is separately capped at 16 MiB. |
 | `model_request_mib` | `32` | Maximum model request body in MiB. Increase this for larger contexts or attachments. |
 | `protocol_frame_mib` | `4` | Maximum incoming supervisor Codex protocol frame in MiB. Increase this for long saved histories. |
-| `conversation_size_mib` | `512` | Preallocated filesystem size per conversation, including filesystem metadata, in MiB. |
+| `conversation_size_mib` | `128` | Size of the harness's in-memory home in MiB, and the most that usine saves for a conversation on the orchestrator. |
+
+The home and `/tmp` are in-memory filesystems, so their files count against `memory_mib`. `conversation_size_mib` plus `tmpfs_size_mib` must be at most half of `memory_mib`, or usine refuses turns and names the settings. With the defaults, files can use 192 MiB, and the harness keeps at least 832 MiB.
 
 The relay buffers up to eight request bodies at once, so the raw body budget is eight times `model_request_mib`, plus JSON decoding and forwarding overhead. The 32 MiB default accommodates text requests for million-token contexts; attachments may need a larger value. A 413 response names the setting to increase.
 
@@ -125,12 +125,20 @@ settings:
     memory_mib: 1024
     pids: 256
     tmpfs_size_mib: 64
-    conversation_size_mib: 512
+    conversation_size_mib: 128
 ```
 
-Each conversation has a preallocated ext4 image under `.usine/supervisor/disks/<sha256>.ext4`, mounted through FUSE at `.usine/supervisor/conversations/<sha256>`. Filling the filesystem returns a no-space error without growing the image. The hash is derived from the complete conversation ID. Source caches and exported trees also use hashes of their repository names. Fetches verify received objects, and source exports remove absolute symbolic links.
+### Saved conversations
 
-Plan disk capacity for the number of saved conversations. A filesystem that cannot be allocated or mounted prevents that turn from starting. Changing `conversation_size_mib` for an existing conversation requires an offline filesystem migration: usine refuses to open an image whose size differs from the setting.
+usine saves each conversation's home as a tar archive at `.usine/supervisor/homes/<sha256>.tar`, where the hash is derived from the complete conversation ID. Only usine writes this file. A save writes a new file and renames it over the previous archive only when the copy is complete, so a failed save keeps the archive of an earlier turn. A conversation uses disk space for what its harness saved, up to `conversation_size_mib`.
+
+When a turn ends, usine stops copying at `conversation_size_mib`. If the archive is larger, usine keeps the previous one and fails the turn with that reason, so the next turn reopens the session that the last saved turn left. A failed or canceled turn is saved too, when its container still runs. If the orchestrator crashes or is killed during a turn, that turn's changes to the home are lost, and the next turn resumes from the last saved archive.
+
+Pi runs in the orchestrator process and writes its session files in the conversation's directory on the orchestrator, under `.usine/supervisor/conversations/<sha256>/workspace/.usine/pi`. usine adds up the size of these files before and after each turn. If they exceed `conversation_size_mib`, the turn fails, and later turns of the conversation are refused until you start a new conversation or raise the limit.
+
+Earlier `next` versions kept each conversation in an ext4 image under `.usine/supervisor/disks`, mounted in `.usine/supervisor/conversations`, where turns could write. When `.usine/supervisor/disks` exists, startup removes every image and every conversation directory, and logs one line for each. The next turn of such a conversation starts a new harness session; its messages and events stay.
+
+Source caches and exported trees use hashes of their repository names. Fetches verify received objects, and source exports remove absolute symbolic links.
 
 ## Instance metadata
 

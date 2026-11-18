@@ -212,7 +212,9 @@ describe("supervisor image preparation", () => {
       const runtime: RuntimeState = { starts: true, pull: "hang" };
       yield* Effect.gen(function* () {
         const sandbox = yield* sandboxAt(root, Duration.minutes(5));
-        assert(Option.isNone(sandbox.unavailable));
+        const preparing = yield* sandbox.unavailable;
+        assert(Option.isSome(preparing));
+        assert.include(preparing.value.message, "preparing the supervisor image");
         yield* TestClock.withLive(
           Effect.sleep("10 millis").pipe(
             Effect.repeat({ until: () => calls.some(([, command]) => command === "pull") }),
@@ -223,7 +225,7 @@ describe("supervisor image preparation", () => {
           .pipe(Effect.scoped, Effect.flip, Effect.forkChild);
         yield* TestClock.adjust("30 seconds");
         const refused = yield* Fiber.join(waiting);
-        assert.include(refused.message, "still being prepared");
+        assert.strictEqual(refused.message, preparing.value.message);
         assert.notDeepInclude(releases, pullCommand);
         yield* TestClock.adjust("270 seconds");
         assert.deepInclude(releases, pullCommand);

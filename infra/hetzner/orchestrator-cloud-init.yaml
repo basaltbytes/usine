@@ -32,6 +32,9 @@ packages:
   - chrony
   - curl
   - dbus
+  # The Docker daemon and the docker command, for the supervisor's containers.
+  - docker-cli
+  - docker.io
   - git
   - nftables
   - polkitd
@@ -63,6 +66,17 @@ write_files:
     content: |
       net.ipv4.ip_forward = 0
       net.ipv6.conf.all.forwarding = 0
+
+  # Supervisor containers run without a network, so Docker creates no bridge, firewall rules, or
+  # forwarding, and nftables and the sysctl settings above stay in effect.
+  - path: /etc/docker/daemon.json
+    permissions: "0644"
+    content: |
+      {
+        "bridge": "none",
+        "iptables": false,
+        "ip-forward": false
+      }
 
   # The gateway's copy of Tailscale's package repository signing key, fingerprint 2596 A99E AAB3 3821 893C 0A79 458C A832 957F 5868.
   - path: /etc/apt/keyrings/tailscale.asc
@@ -150,6 +164,11 @@ write_files:
       chown usine:usine /home/usine/.npmrc
       runuser -l usine -c 'npm install --global @usine/server'
       install -d -o usine -g usine -m 0700 /home/usine/factory /home/usine/.ssh
+      # The docker group lets usine run the supervisor's containers. Its members control the Docker
+      # daemon, which runs as root, so they can start a container that mounts any host path or
+      # runs privileged: usine is equivalent to root on this server, which runs only usine.
+      # usine.service starts after this, so it has the group.
+      usermod --append --groups docker usine
       sysctl --system > /dev/null
       # nftables stays off until gateway.sh orchestrator-tailnet-up enables it, because its rules refuse SSH through the gateway, the only path to the server before it joins the tailnet.
       systemctl restart chrony

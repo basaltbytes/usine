@@ -800,6 +800,7 @@ const makeOperatorConfiguration = Effect.gen(function* () {
     });
     const { settings, webhooks, tracing } = config;
     const lastHint = yield* polling.lastHint;
+    const supervisorUnavailable = yield* sandbox.unavailable;
     const configuration = ConfigurationView.make({
       bindings: config.bindings,
       projects: config.projects,
@@ -837,7 +838,7 @@ const makeOperatorConfiguration = Effect.gen(function* () {
               onSuccess: ({ ownToolsKept }) => Option.getOrNull(ownToolsKept),
             }),
             unavailable: Option.getOrNull(
-              Option.map(sandbox.unavailable, ({ message }) => message),
+              Option.map(supervisorUnavailable, ({ message }) => message),
             ),
           }),
         }),
