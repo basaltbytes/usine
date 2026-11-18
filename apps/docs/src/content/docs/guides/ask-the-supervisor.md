@@ -15,10 +15,10 @@ Ask the supervisor about runs, tasks, and the source of a project or the whole i
 1. Select the conversation icon at the right of the page header. The supervisor inbox opens over the current page, with the conversations you can read.
 2. Select **New conversation**, then choose the **Scope**: the instance, or a project you can operate on. The project of the current page is chosen first.
 3. Type a question and press Enter. Shift+Enter starts a new line.
-4. Follow the turn. Its text and tool calls appear while it runs, and the answer follows as Markdown. Select a tool call to see its input and result.
+4. Follow the turn. Its text appears while it runs, and the tool calls between two texts fold into one line that says what they did and how many failed. While the turn runs, a line under the fold shows the running call. The answer follows as Markdown. Select a fold to list its calls, then select a call to see its input and result.
 5. Post a follow-up in the same conversation. A message posted while a turn runs is queued and runs after it.
 
-To stop a queued or running turn, select **Cancel turn**. The events that the turn produced stay in the conversation.
+To stop the running turn, select **Stop**, the square button that replaces the send button while a turn runs and the message box is empty. Typing in the box brings the send button back, and Enter always sends. To cancel a queued turn, select **Cancel turn** on its row, then **Confirm cancel**. The events that a stopped turn produced stay in the conversation.
 
 ## Check the result
 

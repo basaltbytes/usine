@@ -2,6 +2,7 @@ import { GitHubUserId, ProjectScope } from "@usine/core/access";
 import { AgentName } from "@usine/core/agent";
 import { BrainSpec, Harness, ModelId } from "@usine/core/agent/brain";
 import {
+  type AgentSessionEvent,
   RoleName,
   RoleSession,
   SessionTokensUpdated,
@@ -189,6 +190,60 @@ export const turnEvents = (turn: string, first: number, finished: boolean) => {
         ]
       : []),
   ];
+  return events.map((event, index) =>
+    TurnEvent.make({
+      conversation: conversationId,
+      sequence: EventSequence.make(first + index),
+      turn: id,
+      event,
+    }),
+  );
+};
+
+type Call = {
+  readonly tool: string;
+  readonly input: Schema.Json;
+  /** Whether the call finished, failed, or is still running; `finished` by default. */
+  readonly outcome?: "finished" | "failed" | "running";
+};
+
+const supervisorTools: ReadonlyArray<Call> = [
+  { tool: "mcp__usine__overview", input: { view: "attention" } },
+  { tool: "Read", input: { file_path: "packages/orchestrator/src/run/approval.ts" } },
+  { tool: "Grep", input: { pattern: "awaitingApproval" } },
+  { tool: "mcp__usine__run", input: { run: "run-7431" } },
+  { tool: "Read", input: { file_path: "packages/config/src/loop.ts" } },
+];
+
+/** Returns `count` finished calls that cycle through the supervisor's usual tools. */
+export const supervisorCalls = (count: number): ReadonlyArray<Call> =>
+  Array.from({ length: count }, (_, index) => index).flatMap(
+    (index) => supervisorTools[index % supervisorTools.length] ?? [],
+  );
+
+/**
+ * The events of one turn: `steps` in order, where a string is a text and a call is started and,
+ * unless it is running, finished.
+ */
+export const stepEvents = (turn: string, first: number, steps: ReadonlyArray<string | Call>) => {
+  const id = TurnId.make(turn);
+  const events = steps.flatMap((step, index): ReadonlyArray<AgentSessionEvent> => {
+    if (Schema.is(Schema.String)(step)) return [TextOutput.make({ session, text: step })];
+    const callId = `call-${index + 1}`;
+    const started = ToolStarted.make({ session, callId, tool: step.tool, input: step.input });
+    if (step.outcome === "running") return [started];
+    const failed = step.outcome === "failed";
+    return [
+      started,
+      ToolFinished.make({
+        session,
+        callId,
+        tool: step.tool,
+        output: failed ? "Run run-9999 was not found." : "{}",
+        isError: failed,
+      }),
+    ];
+  });
   return events.map((event, index) =>
     TurnEvent.make({
       conversation: conversationId,

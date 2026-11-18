@@ -1,5 +1,5 @@
 import { DateTime } from "effect";
-import { expect, it } from "vitest";
+import { assert, expect, it } from "vitest";
 import {
   ada,
   answered,
@@ -7,18 +7,27 @@ import {
   grace,
   queued,
   running,
+  stepEvents,
+  supervisorCalls,
   turnEvents,
 } from "~/lib/conversations/fixture";
-import { conversationTimeline, isPending, withPendingPost } from "./timeline";
+import { burstSummary, currentCall } from "~/lib/runs/transcript/grouping/summary";
+import { conversationTimeline, isPending, type TurnStep, withPendingPost } from "./timeline";
+
+const stepStates = (steps: ReadonlyArray<TurnStep> | undefined) =>
+  steps?.map((step) =>
+    step._tag === "Tools" ? step.calls.map((call) => call.state._tag) : step.text,
+  );
 
 it("pairs each tool call's result by call ID and keeps a running call open", () => {
   const live = conversationOf([
     { turn: "t-1", member: ada, text: "Why?", minute: 1, state: running(1) },
   ]);
   const [started] = conversationTimeline(live, turnEvents("t-1", 1, false));
-  expect(
-    started?.activity.map((step) => (step._tag === "Tool" ? step.call.state._tag : step.text)),
-  ).toEqual(["Checking the overview for run 7431.", "Running"]);
+  expect(stepStates(started?.activity)).toEqual([
+    "Checking the overview for run 7431.",
+    ["Running"],
+  ]);
   const done = conversationOf([
     {
       turn: "t-1",
@@ -31,10 +40,57 @@ it("pairs each tool call's result by call ID and keeps a running call open", () 
   ]);
   const [finished] = conversationTimeline(done, turnEvents("t-1", 1, true));
   // The text that repeats the answer shows once, as the answer.
-  expect(
-    finished?.activity.map((step) => (step._tag === "Tool" ? step.call.state._tag : step.text)),
-  ).toEqual(["Finished"]);
+  expect(stepStates(finished?.activity)).toEqual([["Finished"]]);
   expect(finished?.reply?.body).toBe("Checking the overview for run 7431.");
+});
+
+it("groups the tool calls between two texts and keeps a group's key as calls join it", () => {
+  const live = conversationOf([
+    { turn: "t-1", member: ada, text: "Why?", minute: 1, state: running(1) },
+  ]);
+  const steps = [
+    "Looking at the run.",
+    ...supervisorCalls(2),
+    "Now the loop.",
+    ...supervisorCalls(1),
+  ];
+  const [entry] = conversationTimeline(live, stepEvents("t-1", 1, steps));
+  expect(stepStates(entry?.activity)).toEqual([
+    "Looking at the run.",
+    ["Finished", "Finished"],
+    "Now the loop.",
+    ["Finished"],
+  ]);
+  const [grown] = conversationTimeline(
+    live,
+    stepEvents("t-1", 1, [...steps, { tool: "Grep", input: { pattern: "gate" } }]),
+  );
+  expect(grown?.activity.map((step) => step.key)).toEqual(entry?.activity.map((step) => step.key));
+});
+
+it("shows a turn of 40 calls as one group that counts its failures and names its running call", () => {
+  const live = conversationOf([
+    { turn: "t-1", member: ada, text: "Why?", minute: 1, state: running(1) },
+  ]);
+  const calls = [
+    ...supervisorCalls(38),
+    { tool: "mcp__usine__run", input: { run: "run-9999" }, outcome: "failed" as const },
+    {
+      tool: "Read",
+      input: { file_path: "packages/config/src/loop.ts" },
+      outcome: "running" as const,
+    },
+  ];
+  const [entry] = conversationTimeline(live, stepEvents("t-1", 1, calls));
+  expect(entry?.activity).toHaveLength(1);
+  const group = entry?.activity[0];
+  assert(group?._tag === "Tools");
+  expect(group.calls).toHaveLength(40);
+  expect(group.calls.filter((call) => call.state._tag === "Error")).toHaveLength(1);
+  expect(currentCall(group.calls)?.name).toBe("Read");
+  expect(burstSummary({ tools: group.calls })).toBe(
+    "16 tool calls · read approval.ts, loop.ts · 8 more calls",
+  );
 });
 
 it("marks a turn queued behind an open one, and a pending post until the server answers", () => {

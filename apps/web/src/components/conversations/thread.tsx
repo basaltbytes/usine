@@ -143,6 +143,8 @@ const ThreadBody = ({ id, record, composerRef }: ThreadBodyProps) => {
     onSettled: refresh,
   });
   const failure = post.isError ? notReadyMessage(post.error) : undefined;
+  const running = timeline.find(({ turn }) => turn.state._tag === "Running")?.turn;
+  const canceling = (turn: TurnId) => cancel.isPending && cancel.variables === turn;
   return (
     <>
       <MessageScrollerProvider autoScroll defaultScrollPosition="end" scrollEdgeThreshold={8}>
@@ -158,11 +160,11 @@ const ThreadBody = ({ id, record, composerRef }: ThreadBodyProps) => {
                     entry={entry}
                     pending={isPending(entry.turn)}
                     own={member !== undefined && entry.turn.member.id === member.id}
-                    canceling={cancel.isPending && cancel.variables === entry.turn.id}
+                    canceling={canceling(entry.turn.id)}
                     cancel={
                       readOnly === undefined &&
                       !isPending(entry.turn) &&
-                      (entry.turn.state._tag === "Queued" || entry.turn.state._tag === "Running")
+                      entry.turn.state._tag === "Queued"
                         ? () => cancel.mutate(entry.turn.id)
                         : undefined
                     }
@@ -170,7 +172,6 @@ const ThreadBody = ({ id, record, composerRef }: ThreadBodyProps) => {
                 ))
               )}
               {events.isError && <ErrorAlert message={rejectionMessage(events.error)} />}
-              {cancel.isError && <ErrorAlert message={rejectionMessage(cancel.error)} />}
             </MessageScrollerContent>
           </MessageScrollerViewport>
           <MessageScrollerButton />
@@ -179,12 +180,19 @@ const ThreadBody = ({ id, record, composerRef }: ThreadBodyProps) => {
       <PanelFooter readOnly={readOnly}>
         <div className="space-y-3">
           {failure !== undefined && <ErrorAlert {...failure} />}
+          {cancel.isError && <ErrorAlert message={rejectionMessage(cancel.error)} />}
           <PromptInput
             inputRef={composerRef}
             value={draft}
             change={setDraft}
             sending={post.isPending}
             send={() => post.mutate(draft)}
+            stop={
+              readOnly === undefined && running !== undefined
+                ? () => cancel.mutate(running.id)
+                : undefined
+            }
+            stopping={running !== undefined && canceling(running.id)}
           />
         </div>
       </PanelFooter>

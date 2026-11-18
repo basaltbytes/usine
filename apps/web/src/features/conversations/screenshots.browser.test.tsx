@@ -22,7 +22,8 @@ import {
   markdownAnswer,
   queued,
   running,
-  turnEvents,
+  stepEvents,
+  supervisorCalls,
 } from "~/lib/conversations/fixture";
 import { overviewQuery } from "~/lib/overview";
 import { sessionQuery } from "~/lib/permissions";
@@ -79,6 +80,31 @@ const failedTurn = () =>
     { turn: "t-2", member: ada, text: "Who can approve it?", minute: 3, state: interrupted(3) },
   ]);
 
+const failedCall = {
+  tool: "mcp__usine__run",
+  input: { run: "run-9999" },
+  outcome: "failed",
+} as const;
+const gateText = "Run 7431 waits on the start-dev gate. Reading the loop's approval rule.";
+/** A turn of 47 calls, as the owner reported in #1313, with one failure. */
+const finishedEvents = () =>
+  stepEvents("t-1", 1, [
+    "Checking the overview for run 7431.",
+    ...supervisorCalls(27),
+    failedCall,
+    gateText,
+    ...supervisorCalls(19),
+  ]);
+const runningEvents = () =>
+  stepEvents("t-1", 1, [
+    "Checking the overview for run 7431.",
+    ...supervisorCalls(11),
+    failedCall,
+    gateText,
+    ...supervisorCalls(4),
+    { tool: "Read", input: { file_path: "packages/config/src/loop.ts" }, outcome: "running" },
+  ]);
+
 /** Lists three conversations: failed and running ones unread, and an answered one read. */
 const listed = (server: ConversationServer) => {
   const named = (id: string, title: string, record: ReturnType<typeof conversationOf>) => ({
@@ -104,6 +130,8 @@ type Scene = {
   readonly permissions?: ReadonlyArray<PermissionGrant>;
   readonly arrange: (server: ConversationServer) => void;
   readonly ready: string;
+  /** Runs once the scene is ready, before the capture. */
+  readonly act?: () => Promise<void>;
 };
 
 const scenes: ReadonlyArray<Scene> = [
@@ -121,7 +149,7 @@ const scenes: ReadonlyArray<Scene> = [
     arrange: (server) => {
       listed(server);
       server.conversations.set(conversationId, runningTurn());
-      server.events.set(conversationId, turnEvents("t-1", 1, false));
+      server.events.set(conversationId, runningEvents());
     },
     ready: "Queued after the turn before it",
   },
@@ -136,7 +164,7 @@ const scenes: ReadonlyArray<Scene> = [
     path: `/conversations?conversation=${conversationId}`,
     arrange: (server) => {
       server.conversations.set(conversationId, runningTurn());
-      server.events.set(conversationId, turnEvents("t-1", 1, false));
+      server.events.set(conversationId, runningEvents());
     },
     ready: "Queued after the turn before it",
   },
@@ -145,9 +173,23 @@ const scenes: ReadonlyArray<Scene> = [
     path: `/conversations?conversation=${conversationId}`,
     arrange: (server) => {
       listed(server);
-      server.events.set(conversationId, turnEvents("t-1", 1, true));
+      server.events.set(conversationId, finishedEvents());
     },
     ready: "Approve it, or cancel it if the issue is stale.",
+  },
+  {
+    name: "tool-group-open",
+    path: `/conversations?conversation=${conversationId}`,
+    arrange: (server) => {
+      server.conversations.set(conversationId, finished());
+      server.events.set(conversationId, finishedEvents());
+    },
+    ready: "Approve it, or cancel it if the issue is stale.",
+    act: async () => {
+      const group = page.getByRole("button", { name: /28 tool calls$/u });
+      await group.click();
+      await expect.element(group).toHaveAttribute("aria-expanded", "true");
+    },
   },
   {
     name: "failed-turn",
@@ -223,6 +265,7 @@ it.each(devices)(
         );
         await loaded;
         await expect.element(page.getByText(scene.ready).last()).toBeVisible();
+        await scene.act?.();
         await commands.configurationEditorScreenshot(`881-${scene.name}-${device}`);
         flushSync(() => root.unmount());
         host.remove();

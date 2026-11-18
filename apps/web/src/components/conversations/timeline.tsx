@@ -1,19 +1,21 @@
 import { DateTime } from "effect";
 import type { MemberMessage, SupervisorMessage } from "@usine/core/conversation";
-import type { ReactNode } from "react";
+import { type ReactNode, useState } from "react";
 import { Markdown } from "~/components/markdown";
 import { StatusBadge } from "~/components/status-badge";
 import { Bubble, BubbleContent } from "~/components/ui/bubble";
 import { Button } from "~/components/ui/button";
 import { Message, MessageContent, MessageFooter, MessageHeader } from "~/components/ui/message";
 import { MessageScrollerItem } from "~/components/ui/message-scroller";
-import { ConversationToolRow } from "~/components/conversations/tool-row";
+import { ConversationToolGroup } from "~/components/conversations/tools";
 import {
   canceledLabel,
   cancelingTurnLabel,
   cancelTurnLabel,
+  confirmCancelLabel,
   failedLabel,
   failureReason,
+  keepQueuedLabel,
   queuedBehindLabel,
   queuedLabel,
   runningLabel,
@@ -64,6 +66,43 @@ const MessageText = ({ message, className }: MessageTextProps) => {
   );
 };
 
+type QueuedCancelProps = {
+  readonly cancel: () => void;
+  readonly canceling: boolean;
+};
+
+/**
+ * Cancels a queued turn in two steps. The first button keeps its place as it changes from Cancel
+ * turn to Keep queued, so a double-click doesn't confirm.
+ */
+const QueuedCancel = ({ cancel, canceling }: QueuedCancelProps) => {
+  const [confirming, setConfirming] = useState(false);
+  return (
+    <span className="flex flex-wrap gap-2">
+      <Button
+        variant="ghost"
+        size="sm"
+        className="pointer-coarse:h-11"
+        disabled={canceling}
+        onClick={() => setConfirming(!confirming)}
+      >
+        {confirming ? keepQueuedLabel : cancelTurnLabel}
+      </Button>
+      {confirming && (
+        <Button
+          variant="destructive"
+          size="sm"
+          className="pointer-coarse:h-11"
+          disabled={canceling}
+          onClick={cancel}
+        >
+          {canceling ? cancelingTurnLabel : confirmCancelLabel}
+        </Button>
+      )}
+    </span>
+  );
+};
+
 type TurnStateProps = {
   readonly entry: TurnEntry;
   readonly cancel: (() => void) | undefined;
@@ -72,31 +111,18 @@ type TurnStateProps = {
 
 const TurnState = ({ entry, cancel, canceling }: TurnStateProps) => {
   const { state } = entry.turn;
-  const action =
-    cancel === undefined ? null : (
-      <Button
-        variant="ghost"
-        size="sm"
-        className="pointer-coarse:h-11"
-        onClick={cancel}
-        disabled={canceling}
-      >
-        {canceling ? cancelingTurnLabel : cancelTurnLabel}
-      </Button>
-    );
   switch (state._tag) {
     case "Queued":
       return (
         <MessageFooter className="flex-wrap gap-x-3 gap-y-1 px-0 font-normal">
           <StatusBadge state="Queued" label={entry.behind ? queuedBehindLabel : queuedLabel} />
-          {action}
+          {cancel !== undefined && <QueuedCancel cancel={cancel} canceling={canceling} />}
         </MessageFooter>
       );
     case "Running":
       return (
-        <MessageFooter className="flex-wrap gap-x-3 gap-y-1 px-0 font-normal">
+        <MessageFooter className="px-0 font-normal">
           <StatusBadge state="Running" label={runningLabel} />
-          {action}
         </MessageFooter>
       );
     case "Failed":
@@ -123,13 +149,15 @@ type TurnMessagesProps = {
   readonly pending: boolean;
   /** Whether the signed-in member posted the turn's message, which aligns it to the end. */
   readonly own: boolean;
+  /** Cancels the turn while it is queued, or `undefined` when the member may not cancel it. */
   readonly cancel: (() => void) | undefined;
   readonly canceling: boolean;
 };
 
 /**
- * Renders one turn as two messages: the member's message, then the supervisor's text, tool calls,
- * state, and answer. The member's message is the scroll anchor while the answer streams in.
+ * Renders one turn as two messages: the member's message, then the supervisor's texts, groups of
+ * tool calls, state, and answer. The member's message is the scroll anchor while the answer
+ * streams in.
  */
 export const TurnMessages = ({ entry, pending, own, cancel, canceling }: TurnMessagesProps) => {
   const { message, activity, reply } = entry;
@@ -161,8 +189,8 @@ export const TurnMessages = ({ entry, pending, own, cancel, canceling }: TurnMes
               {activity.length > 0 && (
                 <div className="space-y-1">
                   {activity.map((step) =>
-                    step._tag === "Tool" ? (
-                      <ConversationToolRow key={step.call.key} call={step.call} />
+                    step._tag === "Tools" ? (
+                      <ConversationToolGroup key={step.key} group={step} />
                     ) : (
                       <Markdown
                         key={step.key}
