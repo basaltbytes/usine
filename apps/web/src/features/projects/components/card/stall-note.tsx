@@ -16,7 +16,7 @@ export const StallNote = ({ stalled, named, children }: StallNoteProps) => {
   const sentence = stallSentence(stalled, now);
   return (
     <div data-slot="stall-note" className="flex flex-col items-start gap-1.5 text-xs">
-      <TextTooltip text={`${stalled.loop}: ${sentence}`}>
+      <TextTooltip text={`${stalled.loop}: ${sentence}`} repeats={named}>
         <p className="line-clamp-3 text-muted-foreground">
           {named && <span className="font-medium text-foreground">{stalled.loop} </span>}
           {sentence}

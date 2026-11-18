@@ -581,7 +581,7 @@ describe("provisioned machine", () => {
       RunDetailView.make({ ...detail(running), worker: WorkerName.make("hz-pool"), machine }),
     );
     assert.include(visible(markup), "hz-pool 52341896");
-    assert.include(markup, 'title="Hetzner server 52341896"');
+    assert.include(markup, 'aria-description="Hetzner server 52341896"');
     assert.notInclude(outline(running, machine), "machine");
   });
 });

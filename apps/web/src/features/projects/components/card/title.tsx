@@ -19,7 +19,7 @@ type CardTitleProps = {
 export const CardTitle = ({ item, project }: CardTitleProps) => {
   const projectLinks = useProjectLinks();
   return (
-    <TextTooltip text={item.title}>
+    <TextTooltip text={item.title} repeats>
       <h3 className="text-sm/snug font-medium text-card-foreground">
         <Link
           {...(project === undefined

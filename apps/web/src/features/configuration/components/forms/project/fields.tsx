@@ -46,7 +46,7 @@ export const ProjectFields = (fields: FormFieldsProps) => {
           {repositories.map((repository, index) => (
             <li key={repository} className="flex min-w-0 items-center gap-2">
               <RepositoryMark repository={repository} />
-              <TextTooltip text={repository}>
+              <TextTooltip text={repository} repeats>
                 <span className="min-w-0 flex-1 truncate">{repository}</span>
               </TextTooltip>
               <Button

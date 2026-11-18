@@ -23,7 +23,7 @@ export const QuarantinedRow = ({ loop }: QuarantinedRowProps) => {
         </Link>
       </TableCell>
       <TableCell colSpan={5} className="max-w-0">
-        <TextTooltip text={loop.error.message}>
+        <TextTooltip text={loop.error.message} repeats>
           <p className="truncate text-destructive">{loop.error.message}</p>
         </TextTooltip>
       </TableCell>

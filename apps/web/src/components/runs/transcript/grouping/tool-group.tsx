@@ -18,7 +18,7 @@ const CurrentCall = ({ call }: CurrentCallProps) => {
   return (
     <p aria-live="off" className="flex min-w-0 items-baseline gap-2 pb-1 pl-5.5 text-xs">
       <span className="shrink-0 text-run-active">{callActivityLabel(view)}</span>
-      <TextTooltip text={view.subject}>
+      <TextTooltip text={view.subject} repeats>
         <span className="min-w-0 truncate font-mono text-muted-foreground">{view.subject}</span>
       </TextTooltip>
     </p>

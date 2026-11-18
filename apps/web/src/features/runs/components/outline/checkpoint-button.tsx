@@ -24,7 +24,7 @@ export const CheckpointButton = ({
   named,
   onCheckpoint,
 }: CheckpointButtonProps) => (
-  <TextTooltip text={checkpoint.text}>
+  <TextTooltip text={checkpoint.text} repeats>
     <button
       type="button"
       aria-current={checkpoint.key === current ? "location" : undefined}

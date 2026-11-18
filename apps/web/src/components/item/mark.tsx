@@ -86,7 +86,7 @@ export const ItemMark = ({
     </>
   );
   return (
-    <TextTooltip text={label}>
+    <TextTooltip text={label} repeats>
       {linked ? (
         <a
           href={item.url}

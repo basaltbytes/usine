@@ -115,7 +115,7 @@ export const CurrentActivity = ({ chapter }: CurrentActivityProps) => {
         })}
       </p>
       {activity.detail !== "" && (
-        <TextTooltip text={activity.detail}>
+        <TextTooltip text={activity.detail} repeats>
           <p className="truncate pl-5 font-mono text-muted-foreground">{activity.detail}</p>
         </TextTooltip>
       )}
@@ -175,7 +175,7 @@ const ConnectivityLine = ({ warning, now }: ConnectivityLineProps) => {
         </TextTooltip>
       </p>
       {line.detail !== null && (
-        <TextTooltip text={line.detail}>
+        <TextTooltip text={line.detail} repeats>
           <p className="truncate pl-5 text-muted-foreground">{line.detail}</p>
         </TextTooltip>
       )}

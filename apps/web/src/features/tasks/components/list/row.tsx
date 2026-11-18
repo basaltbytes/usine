@@ -37,7 +37,7 @@ const Runs = ({ task }: RunsProps) => {
   const loops = task.loopStates;
   return (
     <span className={cn("flex items-baseline gap-2", SIDE_CONTENT)}>
-      <TextTooltip text={loops.map(({ loop }) => loop).join(" · ")}>
+      <TextTooltip text={loops.map(({ loop }) => loop).join(" · ")} repeats>
         <span className="truncate">
           {loops.map(({ loop, state }, index) => (
             <Fragment key={loop}>

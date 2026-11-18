@@ -40,6 +40,7 @@ import { overviewQuery } from "~/lib/overview";
 import { boardOverview, boardOverviewReviewing, boardStalled } from "~/lib/projects/fixture";
 import { memoryRouter } from "~/lib/testing/memory-router";
 import { tooltipText } from "~/lib/testing/tooltip";
+import { TextTooltipProvider } from "~/components/text-tooltip";
 import { runLineTimeTitle } from "~/features/projects/strings";
 import "~/index.css";
 
@@ -132,7 +133,9 @@ beforeEach(async () => {
     root.render(
       <PermissionsContext.Provider value={administratorPermissions}>
         <QueryClientProvider client={queryClient}>
-          <RouterProvider router={router} />
+          <TextTooltipProvider>
+            <RouterProvider router={router} />
+          </TextTooltipProvider>
         </QueryClientProvider>
       </PermissionsContext.Provider>,
     ),

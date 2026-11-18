@@ -48,6 +48,7 @@ import { BootScreen } from "~/components/boot-screen";
 import { cardIdentity } from "~/components/item/identity";
 import { itemLabel } from "~/components/item/mark";
 import { RepositoryMark } from "~/components/repository-mark";
+import { TextTooltipProvider } from "~/components/text-tooltip";
 import { Toaster } from "~/components/ui/toast";
 import { Alert, AlertDescription, AlertTitle } from "~/components/ui/alert";
 import {
@@ -375,12 +376,16 @@ const Shell = () => {
 
 const Root = () => {
   const matchRoute = useMatchRoute();
-  return matchRoute({ to: "/sign-in" }) !== false || matchRoute({ to: "/setup" }) !== false ? (
-    <Outlet />
-  ) : (
-    <MemberShell>
-      <Shell />
-    </MemberShell>
+  return (
+    <TextTooltipProvider>
+      {matchRoute({ to: "/sign-in" }) !== false || matchRoute({ to: "/setup" }) !== false ? (
+        <Outlet />
+      ) : (
+        <MemberShell>
+          <Shell />
+        </MemberShell>
+      )}
+    </TextTooltipProvider>
   );
 };
 

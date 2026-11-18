@@ -48,7 +48,7 @@ export const LoopRow = ({ loop, pause, projects }: LoopRowProps) => {
       </TableCell>
       <TableCell>{triggerLabel(loop.stream)}</TableCell>
       <FillCell className="hidden lg:table-cell">
-        <TextTooltip text={loop.condition}>
+        <TextTooltip text={loop.condition} repeats>
           <code className="block truncate font-mono text-xs text-muted-foreground ligatures-none">
             {loop.condition}
           </code>

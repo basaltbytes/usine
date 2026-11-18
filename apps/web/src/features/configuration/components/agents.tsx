@@ -100,7 +100,7 @@ const InvalidAgentRow = ({ agent }: InvalidAgentRowProps) => {
         <NotLoaded />
       </TableCell>
       <TableCell colSpan={4} className="max-w-0">
-        <TextTooltip text={agent.error.message}>
+        <TextTooltip text={agent.error.message} repeats>
           <p className="truncate text-destructive">{agent.error.message}</p>
         </TextTooltip>
       </TableCell>
