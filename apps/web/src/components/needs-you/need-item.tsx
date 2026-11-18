@@ -64,30 +64,31 @@ export const NeedItem = ({
   const at = since ?? run?.closedAt ?? run?.openedAt;
   const title = subject?.title ?? heading ?? copy.detail;
   const context = [loop ?? run?.loop, copy.repository].filter((part) => part != null).join(" · ");
+  const lead = context || (title === copy.detail ? null : copy.detail);
   return (
     <li className="min-w-0 px-3 py-1.5 text-sm hover:bg-muted/40">
       <div className="flex min-w-0 items-center gap-2">
-        <TextTooltip text={`${copy.title}: ${copy.detail}`}>
-          <div className="min-w-0 flex-1">
-            {subject === undefined ? (
+        <div className="min-w-0 flex-1">
+          {subject === undefined ? (
+            <TextTooltip text={`${copy.title}: ${copy.detail}`}>
               <p className="truncate font-medium">{title}</p>
-            ) : (
-              <a
-                href={subject.url}
-                target="_blank"
-                rel="noreferrer"
-                className="block rounded-sm underline-offset-4 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring/70 focus-visible:ring-inset"
-              >
-                <ItemHeading
-                  item={Option.some(subject)}
-                  title={subject.title}
-                  variant="row"
-                  linked={false}
-                />
-              </a>
-            )}
-          </div>
-        </TextTooltip>
+            </TextTooltip>
+          ) : (
+            <a
+              href={subject.url}
+              target="_blank"
+              rel="noreferrer"
+              className="block rounded-sm underline-offset-4 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring/70 focus-visible:ring-inset"
+            >
+              <ItemHeading
+                item={Option.some(subject)}
+                title={subject.title}
+                variant="row"
+                linked={false}
+              />
+            </a>
+          )}
+        </div>
         <div className="flex shrink-0 items-center gap-1">
           {actions ??
             (open !== undefined && (
@@ -115,27 +116,29 @@ export const NeedItem = ({
           )}
         </div>
       </div>
-      <TextTooltip text={copy.detail}>
-        <p className="truncate text-xs text-muted-foreground">
-          {context || (title === copy.detail ? null : copy.detail)}
-          {description != null && (
-            <>
-              {" · "}
-              <span>{description}</span>
-            </>
-          )}
-          {at !== undefined && (
-            <>
-              {" · "}
-              <TextTooltip text={at}>
-                <time dateTime={at} className="font-mono tabular-nums">
-                  {agoLabel(at, now)}
-                </time>
-              </TextTooltip>
-            </>
-          )}
-        </p>
-      </TextTooltip>
+      <p className="truncate text-xs text-muted-foreground">
+        {lead !== null && (
+          <TextTooltip text={copy.detail} repeats={lead === copy.detail}>
+            <span>{lead}</span>
+          </TextTooltip>
+        )}
+        {description != null && (
+          <>
+            {" · "}
+            <span>{description}</span>
+          </>
+        )}
+        {at !== undefined && (
+          <>
+            {" · "}
+            <TextTooltip text={at}>
+              <time dateTime={at} className="font-mono tabular-nums">
+                {agoLabel(at, now)}
+              </time>
+            </TextTooltip>
+          </>
+        )}
+      </p>
       {error !== undefined && error !== null && (
         <p role="alert" className="text-xs text-destructive wrap-anywhere">
           {error}

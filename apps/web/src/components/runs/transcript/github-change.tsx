@@ -75,20 +75,20 @@ const Labels = ({ change }: LabelsProps) => {
 type GitHubChangeLineProps = { readonly row: GitHubChangeRow };
 
 export const GitHubChangeLine = ({ row }: GitHubChangeLineProps) => (
-  <TextTooltip text={`GitHub recorded this at ${timestampLabel(row.at)}`}>
-    <div className="flex min-h-7 min-w-0 items-start gap-2 py-1 text-xs text-muted-foreground">
+  <div className="flex min-h-7 min-w-0 items-start gap-2 py-1 text-xs text-muted-foreground">
+    <TextTooltip text={`GitHub recorded this at ${timestampLabel(row.at)}`}>
       <GithubLogoIcon aria-hidden="true" className="mt-0.75 size-3.5 shrink-0" />
-      <p className="min-w-0 leading-5 wrap-anywhere">
-        {Match.valueTags(row.change, {
-          Labels: (change) => <Labels change={change} />,
-          Commented: ({ url }) => (
-            <>
-              Commented on <ItemLink url={url} />
-            </>
-          ),
-          Reviewed: ({ url, state }) => reviewed[state](<ItemLink url={url} />),
-        })}
-      </p>
-    </div>
-  </TextTooltip>
+    </TextTooltip>
+    <p className="min-w-0 leading-5 wrap-anywhere">
+      {Match.valueTags(row.change, {
+        Labels: (change) => <Labels change={change} />,
+        Commented: ({ url }) => (
+          <>
+            Commented on <ItemLink url={url} />
+          </>
+        ),
+        Reviewed: ({ url, state }) => reviewed[state](<ItemLink url={url} />),
+      })}
+    </p>
+  </div>
 );

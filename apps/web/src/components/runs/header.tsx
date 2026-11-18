@@ -160,9 +160,12 @@ export const RunHeader = ({
                   <UsageFact usage={detail.usage} attempts={run.attempts} />
                 </PageFact>
               )}
-              <PageFact icon={HardDrivesIcon} title="Worker">
+              <PageFact
+                icon={HardDrivesIcon}
+                title="Worker"
+                trailing={<AttemptMachine detail={detail} />}
+              >
                 {detail.worker}
-                <AttemptMachine detail={detail} />
               </PageFact>
             </>
           )}

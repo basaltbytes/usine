@@ -62,13 +62,18 @@ const ThreadFacts = ({ conversation }: ThreadFactsProps) => {
       >
         {scope}
       </PageFact>
-      <PageFact icon={UserIcon} title="Started by">
+      <PageFact
+        icon={UserIcon}
+        title="Started by"
+        trailing={
+          <TextTooltip text={timestampLabel(started)}>
+            <time dateTime={started} className="font-mono text-xs tabular-nums">
+              {dayTimeLabel(started)}
+            </time>
+          </TextTooltip>
+        }
+      >
         {conversation.createdBy}
-        <TextTooltip text={timestampLabel(started)}>
-          <time dateTime={started} className="font-mono text-xs tabular-nums">
-            {dayTimeLabel(started)}
-          </time>
-        </TextTooltip>
       </PageFact>
       {conversation.anchor._tag === "Some" && (
         <PageFact icon={LinkSimpleIcon} title="Anchor">
