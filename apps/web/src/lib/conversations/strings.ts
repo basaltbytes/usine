@@ -37,10 +37,15 @@ export const readOnlyNotice =
 export const scopeLabel = "Scope";
 export const messageLabel = "Message";
 export const messagePlaceholder = "Ask about runs, tasks, or the source";
+export const followUpPlaceholder = "Ask a follow-up, queued after the running turn";
 export const composerHint = "Enter to send, Shift+Enter for a new line";
 export const sendLabel = "Send";
 export const sendingLabel = "Sending…";
+export const stopLabel = "Stop";
+export const stoppingLabel = "Stopping…";
 export const cancelTurnLabel = "Cancel turn";
+export const confirmCancelLabel = "Confirm cancel";
+export const keepQueuedLabel = "Keep queued";
 export const cancelingTurnLabel = "Canceling…";
 
 export const queuedLabel = "Queued";

@@ -16,16 +16,27 @@ import type { ToolCall } from "~/lib/runs/transcript/model";
 export type Conversation = typeof ConversationView.Type;
 export type Turn = typeof TurnView.Type;
 
+type TextStep = { readonly _tag: "Text"; readonly key: string; readonly text: string };
+
 /** One step of a turn's activity, in the order the session reported it. */
-type Activity =
-  | { readonly _tag: "Text"; readonly key: string; readonly text: string }
-  | { readonly _tag: "Tool"; readonly call: ToolCall };
+type Activity = TextStep | { readonly _tag: "Tool"; readonly call: ToolCall };
+
+/** The tool calls of a turn between two texts, shown as one line. */
+export interface ToolGroupStep {
+  readonly _tag: "Tools";
+  /** The key of its first call, so it stays the same as calls are added. */
+  readonly key: string;
+  readonly calls: readonly [ToolCall, ...ToolCall[]];
+}
+
+/** A text of a turn, or the tool calls between two texts. */
+export type TurnStep = TextStep | ToolGroupStep;
 
 /** A member message, what its turn did, and the supervisor's answer once there is one. */
 export interface TurnEntry {
   readonly turn: Turn;
   readonly message: MemberMessage | undefined;
-  readonly activity: ReadonlyArray<Activity>;
+  readonly activity: ReadonlyArray<TurnStep>;
   readonly reply: SupervisorMessage | undefined;
   /** Whether an earlier turn of the conversation is queued or running. */
   readonly behind: boolean;
@@ -80,9 +91,26 @@ const turnActivity = (turn: Turn, events: ReadonlyArray<TurnEvent>): ReadonlyArr
   return activity;
 };
 
+/** Returns `activity` with each run of consecutive tool calls as one group. */
+const groupCalls = (activity: ReadonlyArray<Activity>): ReadonlyArray<TurnStep> => {
+  const steps: Array<TurnStep> = [];
+  for (const step of activity) {
+    if (step._tag === "Text") {
+      steps.push(step);
+      continue;
+    }
+    const last = steps.at(-1);
+    if (last?._tag === "Tools")
+      steps[steps.length - 1] = { ...last, calls: [...last.calls, step.call] };
+    else steps.push({ _tag: "Tools", key: `tools:${step.call.key}`, calls: [step.call] });
+  }
+  return steps;
+};
+
 /**
- * Returns the conversation as turns in message order: each with its member message, its activity,
- * and its answer. A text that repeats the answer is left out, so the answer shows once.
+ * Returns the conversation as turns in message order: each with its member message, its activity
+ * as texts and groups of tool calls, and its answer. A text that repeats the answer is left out,
+ * so the answer shows once.
  */
 export const conversationTimeline = (
   conversation: Conversation,
@@ -94,10 +122,12 @@ export const conversationTimeline = (
       .filter(isSupervisor)
       .find((entry) => entry.turn === turn.id);
     const answer = reply === undefined ? undefined : bodyText(reply.body).trim();
-    const activity = turnActivity(
-      turn,
-      events.filter((entry) => entry.turn === turn.id),
-    ).filter((step) => step._tag !== "Text" || step.text.trim() !== answer);
+    const activity = groupCalls(
+      turnActivity(
+        turn,
+        events.filter((entry) => entry.turn === turn.id),
+      ).filter((step) => step._tag !== "Text" || step.text.trim() !== answer),
+    );
     return {
       turn,
       message: conversation.messages

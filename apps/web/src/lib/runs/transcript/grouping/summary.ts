@@ -1,5 +1,9 @@
-import type { Burst } from "~/lib/runs/transcript/document/model";
-import { presentTool, type ToolActivity } from "~/lib/runs/transcript/tool/presentation";
+import type { ToolCall } from "~/lib/runs/transcript/model";
+import {
+  presentTool,
+  type ToolActivity,
+  type ToolPresentation,
+} from "~/lib/runs/transcript/tool/presentation";
 
 // Returns `tests` or `build` only for known complete invocations; other arguments, shell
 // composition, and wrappers return `command`.
@@ -107,7 +111,7 @@ const activitySummary = (
 };
 
 /** Returns at most two descriptions in first-seen order, followed by the count of remaining calls. */
-export const burstSummary = (burst: Pick<Burst, "tools">): string => {
+export const burstSummary = (burst: { readonly tools: ReadonlyArray<ToolCall> }): string => {
   const activities = burst.tools.map((tool) => presentTool(tool).activity);
   const paths = [
     ...new Set(activities.flatMap((activity) => (activity._tag === "Files" ? activity.paths : []))),
@@ -126,3 +130,19 @@ export const burstSummary = (burst: Pick<Burst, "tools">): string => {
   const summary = summaries.join(" · ");
   return summary.charAt(0).toUpperCase() + summary.slice(1);
 };
+
+/** Returns the latest running call of `tools`, or `undefined` when none is running. */
+export const currentCall = <Call extends ToolCall>(tools: ReadonlyArray<Call>): Call | undefined =>
+  [...tools].reverse().find((tool) => tool.state._tag === "Running");
+
+/** Returns what a running call does, such as `Running command` or `Reading file`. */
+export const callActivityLabel = (view: ToolPresentation): string =>
+  ({
+    command: "Running command",
+    read: "Reading file",
+    edit: "Editing file",
+    write: "Writing file",
+    search: "Searching",
+    agent: "Delegating",
+    tool: `Running ${view.title}`,
+  })[view.category];

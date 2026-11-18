@@ -5,10 +5,12 @@ import { cn } from "~/lib/utils";
 import { clockLabel, timestampLabel } from "~/lib/strings";
 import type { ConnectivityWarning } from "~/lib/runs/transcript/document/connectivity";
 import type { Chapter } from "~/lib/runs/transcript/document/model";
+import { callActivityLabel, currentCall } from "~/lib/runs/transcript/grouping/summary";
 import {
   retriesLabel,
   sessionActivityLabel,
   type TranscriptSession,
+  type TranscriptTool,
 } from "~/lib/runs/transcript/model";
 import { presentTool } from "~/lib/runs/transcript/tool/presentation";
 
@@ -54,21 +56,13 @@ export const describeActivity = (session: TranscriptSession): Activity => {
     return { label: session.status, detail: "", since: Option.none<string>() };
   if (session.paused || session.held || session.idle)
     return { label: sessionActivityLabel(session), detail: "", since: Option.none<string>() };
-  const tool = [...session.entries]
-    .reverse()
-    .find((entry) => entry._tag === "Tool" && entry.state._tag === "Running");
-  if (tool?._tag !== "Tool") return { label: "Working", detail: "", since: Option.none<string>() };
+  const tool = currentCall(
+    session.entries.filter((entry): entry is TranscriptTool => entry._tag === "Tool"),
+  );
+  if (tool === undefined) return { label: "Working", detail: "", since: Option.none<string>() };
   const view = presentTool(tool);
   return {
-    label: {
-      command: "Running command",
-      read: "Reading file",
-      edit: "Editing file",
-      write: "Writing file",
-      search: "Searching",
-      agent: "Delegating",
-      tool: `Running ${view.title}`,
-    }[view.category],
+    label: callActivityLabel(view),
     detail: view.subject,
     since: Option.map(tool.start, ({ receivedAt }) => receivedAt),
   };
