@@ -733,11 +733,14 @@ describe("the supervisor's source", () => {
           assert.isFalse(absolute);
           assert.strictEqual(relative, "README.md");
         }
-        assert.isTrue(
-          commands
-            .filter((args) => args.includes("fetch"))
-            .every((args) => args.includes("transfer.fsckObjects=true")),
-        );
+        const fetches = commands.filter((args) => args.includes("fetch"));
+        assert.lengthOf(fetches, 2);
+        for (const args of fetches) {
+          assert.includeMembers(
+            [...args],
+            ["transfer.fsckObjects=true", "gc.autoDetach=false", "maintenance.autoDetach=false"],
+          );
+        }
         for (const repository of ["a/.", "a/.."]) {
           const failed = yield* sources
             .prepare([RepositoryName.make(repository)])
@@ -777,6 +780,7 @@ describe("the supervisor's source", () => {
       yield* git(root, "init", "--bare", "--quiet", cache);
       yield* git(cache, "config", "gc.autoPackLimit", "1");
       yield* git(cache, "config", "fetch.unpackLimit", "1");
+      yield* git(cache, "config", "maintenance.autoDetach", "true");
       const trace = `${root}/git.trace`;
       const traced = ChildProcessSpawner.make((command) =>
         native.spawn(ChildProcess.setEnv(command, { GIT_TRACE: trace })),
