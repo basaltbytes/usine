@@ -1,5 +1,6 @@
 import { clockLabel, timestampLabel } from "~/lib/strings";
 import { cn } from "~/lib/utils";
+import { TextTooltip } from "~/components/text-tooltip";
 
 type GutterProps = {
   readonly receivedAt?: string | undefined;
@@ -10,13 +11,14 @@ type GutterProps = {
 export const Gutter = ({ receivedAt, speaker, tone = "plain" }: GutterProps) => (
   <>
     {receivedAt !== undefined && (
-      <time
-        dateTime={receivedAt}
-        title={timestampLabel(receivedAt)}
-        className="font-mono text-xs leading-[1.4rem] tabular-nums text-muted-foreground"
-      >
-        {clockLabel(receivedAt)}
-      </time>
+      <TextTooltip text={timestampLabel(receivedAt)}>
+        <time
+          dateTime={receivedAt}
+          className="font-mono text-xs leading-reader tabular-nums text-muted-foreground"
+        >
+          {clockLabel(receivedAt)}
+        </time>
+      </TextTooltip>
     )}
     {speaker !== null && speaker !== undefined && (
       <span

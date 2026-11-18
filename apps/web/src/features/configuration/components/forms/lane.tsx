@@ -47,10 +47,12 @@ export const LaneFields = ({
   return (
     <div
       ref={sortable.setNodeRef}
+      /* oxlint-disable shadcn/no-inline-styles -- dnd-kit computes the drag offset and transition. */
       style={{
         transform: CSS.Transform.toString(sortable.transform),
         transition: sortable.transition,
       }}
+      /* oxlint-enable shadcn/no-inline-styles */
       className="min-w-0 space-y-4 border-b py-4"
     >
       <div className="flex flex-wrap items-center gap-2">

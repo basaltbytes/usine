@@ -6,4 +6,6 @@ The root `.oxlintrc.json` loads this package's local rules through `plugin.ts`.
 
 Application modules use named exports, enforced by `import/no-default-export`. Vendored UI and AI Elements components keep their upstream export conventions.
 
+`usine/no-native-title-tooltip`, `usine/no-outset-state-indicators`, `usine/no-raw-resize-observer`, and `usine/no-em-dash-copy` check the web UI in `apps/web/src`, next to `@shadcn/lint`. "How to add UI" in [`apps/web/README.md`](../../apps/web/README.md#how-to-add-ui) describes them. `no-outset-state-indicators` skips `components/ui/` and `components/ai-elements/`.
+
 Run `pnpm --filter @usine/oxlint test` to check these rules through the oxlint CLI.

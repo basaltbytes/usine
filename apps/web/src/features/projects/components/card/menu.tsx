@@ -35,6 +35,7 @@ import { elapsedLabel } from "~/lib/strings";
 import { openedTitle, retryDescription, runActionLabel } from "~/lib/runs/strings";
 import type { RunActions } from "~/hooks/runs/actions";
 import type { CardRunAgain } from "~/hooks/projects/run-again";
+import { TextTooltip } from "~/components/text-tooltip";
 
 /** The other writable lanes a card can move to; `disabled` while a move is pending. */
 export interface CardMoves {
@@ -73,13 +74,11 @@ const RunHistory = ({ item, displayedRun, openRun }: RunHistoryProps) => {
                 <StateMark state={run.state} />
                 {run.state}
               </span>
-              <time
-                dateTime={run.openedAt}
-                title={openedTitle(run.openedAt)}
-                className="font-mono tabular-nums"
-              >
-                {elapsedLabel(run.openedAt)}
-              </time>
+              <TextTooltip text={openedTitle(run.openedAt)}>
+                <time dateTime={run.openedAt} className="font-mono tabular-nums">
+                  {elapsedLabel(run.openedAt)}
+                </time>
+              </TextTooltip>
             </span>
           </DropdownMenuItem>
         ))}

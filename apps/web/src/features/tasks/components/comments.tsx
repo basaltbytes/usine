@@ -3,16 +3,17 @@ import { Link } from "@tanstack/react-router";
 import type { TaskCommentView, TaskView } from "@usine/orchestrator/operator";
 import { FillCell } from "~/components/fill-cell";
 import { ItemMark } from "~/components/item/mark";
-import { Table, TableBody, TableCell, TableRow } from "~/components/ui/table";
+import { Table, TableBody, TableCell } from "~/components/ui/table";
 import { dayTimeLabel, timestampLabel } from "~/lib/strings";
 
 import { commentKindLabel } from "~/lib/tasks/model";
 import {
-  linkedRow,
+  LinkedRow,
   rowLink,
   SectionEmpty,
   SectionHeading,
 } from "~/features/tasks/components/section";
+import { TextTooltip } from "~/components/text-tooltip";
 
 /** Returns the posted time, else the Attempt's end time for comments recorded before posted times
  * were stored; `null` if neither is known. */
@@ -50,7 +51,7 @@ export const TaskComments = ({ task }: TaskCommentsProps) => {
                 const item = run === undefined ? undefined : items.get(run.itemKey);
                 const time = commentTime(comment);
                 return (
-                  <TableRow key={comment.url} className={linkedRow}>
+                  <LinkedRow key={comment.url}>
                     <FillCell className="py-3 whitespace-normal">
                       <a
                         data-row-link
@@ -71,7 +72,7 @@ export const TaskComments = ({ task }: TaskCommentsProps) => {
                       {run !== undefined && (
                         <Link
                           {...projectLinks.run(run.repository, run.id)}
-                          className="relative z-10 rounded-sm text-muted-foreground underline-offset-4 outline-none hover:text-foreground hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring/70 focus-visible:outline-solid"
+                          className="relative z-10 rounded-sm text-muted-foreground underline-offset-4 outline-none hover:text-foreground hover:underline focus-visible:outline-2 focus-visible:outline-ring/70 focus-visible:outline-solid"
                         >
                           {run.loop}
                         </Link>
@@ -79,16 +80,17 @@ export const TaskComments = ({ task }: TaskCommentsProps) => {
                     </TableCell>
                     <TableCell className="py-3 text-right">
                       {time !== null && (
-                        <time
-                          dateTime={time.at}
-                          title={time.title}
-                          className="font-mono text-xs text-muted-foreground tabular-nums"
-                        >
-                          {dayTimeLabel(time.at)}
-                        </time>
+                        <TextTooltip text={time.title}>
+                          <time
+                            dateTime={time.at}
+                            className="font-mono text-xs text-muted-foreground tabular-nums"
+                          >
+                            {dayTimeLabel(time.at)}
+                          </time>
+                        </TextTooltip>
                       )}
                     </TableCell>
-                  </TableRow>
+                  </LinkedRow>
                 );
               })}
             </TableBody>

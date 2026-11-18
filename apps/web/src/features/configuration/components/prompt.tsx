@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { Markdown } from "~/components/markdown";
+import { TextTooltip } from "~/components/text-tooltip";
 
 /** Subset of a Markdown syntax tree node used by the interpolation marks. */
 interface MarkdownNode {
@@ -44,16 +45,15 @@ const remarkInterpolations = () => markInterpolations;
 type InterpolationProps = { readonly children?: ReactNode };
 
 const Interpolation = ({ children }: InterpolationProps) => (
-  <mark
-    className="bg-transparent p-0 text-inherit"
-    title="Filled in from the item when a run opens"
-  >
-    <code className="bg-transparent [font-variant-ligatures:none] ring-1 ring-input ring-inset [box-decoration-break:clone]">
-      <span className="text-muted-foreground">{"{{\u00a0"}</span>
-      {children}
-      <span className="text-muted-foreground">{"\u00a0}}"}</span>
-    </code>
-  </mark>
+  <TextTooltip text="Filled in from the item when a run opens">
+    <mark className="bg-transparent p-0 text-inherit">
+      <code className="bg-transparent ligatures-none ring-1 ring-input ring-inset [box-decoration-break:clone]">
+        <span className="text-muted-foreground">{"{{\u00a0"}</span>
+        {children}
+        <span className="text-muted-foreground">{"\u00a0}}"}</span>
+      </code>
+    </mark>
+  </TextTooltip>
 );
 
 type PromptMarkdownProps = { readonly template: string };

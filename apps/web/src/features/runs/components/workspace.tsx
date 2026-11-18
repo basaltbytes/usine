@@ -192,7 +192,7 @@ export const RunWorkspace = ({ detail, history }: RunWorkspaceProps) => {
         aria-expanded={outlineOpen}
         aria-controls={outlineId}
         onClick={() => setOutlineOpen((open) => !open)}
-        className="mx-4 mb-2 flex h-9 items-center justify-between gap-3 rounded-md border px-3 text-left outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring/70 md:mx-5 lg:hidden"
+        className="mx-4 mb-2 flex h-9 items-center justify-between gap-3 rounded-md border px-3 text-left outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring/70 focus-visible:ring-inset md:mx-5 lg:hidden"
       >
         <span className="font-medium">Outline</span>
         <span className="flex items-center gap-2 text-muted-foreground">

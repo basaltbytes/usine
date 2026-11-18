@@ -3,10 +3,9 @@ import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import type { RunId } from "@usine/core/run";
 import type { BoardLaneView, BoardTaskView, StalledItemView } from "@usine/orchestrator/operator";
-import { Card } from "~/components/ui/card";
 import { CardFace } from "~/features/projects/components/card/face";
+import { CardFrame } from "~/features/projects/components/card/frame";
 import { type CardMoves, CardMenu } from "~/features/projects/components/card/menu";
-import { cardClass } from "~/features/projects/lib/styles";
 import type { BoardMoveProgress } from "~/hooks/projects/moves";
 import { type CardRunAgain, useCardRunAgain } from "~/hooks/projects/run-again";
 import { type RunActions, useRunAction } from "~/hooks/runs/actions";
@@ -74,15 +73,16 @@ export const BoardCard = ({
   return (
     <div
       ref={setNodeRef}
+      // oxlint-disable-next-line shadcn/no-inline-styles -- dnd-kit computes the drag offset and transition.
       style={{ transform: CSS.Translate.toString(transform), transition }}
       className={cn("group/task relative", isDragging && "opacity-40")}
     >
-      <Card
+      <CardFrame
         ref={setActivatorNodeRef}
-        size="sm"
+        needsYou={item.needsYou}
         className={cn(
-          cardClass(item.needsYou),
-          draggable && "touch-none focus-visible:ring-2 focus-visible:ring-ring/70",
+          draggable &&
+            "touch-none focus-visible:ring-2 focus-visible:ring-ring/70 focus-visible:ring-inset",
         )}
         {...(draggable && attributes)}
         {...(draggable && listeners)}
@@ -100,7 +100,7 @@ export const BoardCard = ({
           again={again}
           progress={progressMessage(action, again, phase)}
         />
-      </Card>
+      </CardFrame>
       <CardMenu
         readOnly={readOnly}
         item={item}

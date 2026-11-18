@@ -248,9 +248,9 @@ const links = (markup: string, url: string) => markup.split(`href="${url}"`).len
 describe("Run header", () => {
   it("links the issue and the pull request the Run opened to GitHub in new tabs", () => {
     const markup = header(run({ pullRequestUrl: "https://github.com/basaltbytes/usine/pull/101" }));
-    assert.include(markup, 'title="Issue #33"');
+    assert.include(markup, 'aria-label="Issue #33"');
     assert.include(markup, 'href="https://github.com/basaltbytes/usine/issues/33"');
-    assert.include(markup, 'title="Pull request #101"');
+    assert.include(markup, 'aria-label="Pull request #101"');
     assert.include(markup, 'href="https://github.com/basaltbytes/usine/pull/101"');
     assert.lengthOf(markup.match(/target="_blank"/gu) ?? [], 2);
   });
@@ -283,8 +283,8 @@ describe("Run header", () => {
         members: [member(33, "issue", "issue-closed"), member(101, "pr", "pr-merged")],
       },
     );
-    assert.include(markup, 'title="Issue #33, closed"');
-    assert.include(markup, 'title="Pull request #101, merged"');
+    assert.include(markup, 'aria-label="Issue #33, closed"');
+    assert.include(markup, 'aria-label="Pull request #101, merged"');
     assert.notInclude(markup, "Issue closed");
   });
 
@@ -297,10 +297,16 @@ describe("Run header", () => {
     });
     const settled = (state: SettledItemState, payload = detail(failed).eventPayload) =>
       heading(RunDetailView.make({ ...detail(failed), settledItemState: state }), { payload });
-    assert.include(settled("issue-closed"), 'title="Issue #33, closed"');
-    assert.include(settled("pr-closed", pullRequestPayload), 'title="Pull request #33, closed"');
-    assert.include(settled("pr-merged", pullRequestPayload), 'title="Pull request #33, merged"');
-    assert.include(header(failed), 'title="Issue #33"');
+    assert.include(settled("issue-closed"), 'aria-label="Issue #33, closed"');
+    assert.include(
+      settled("pr-closed", pullRequestPayload),
+      'aria-label="Pull request #33, closed"',
+    );
+    assert.include(
+      settled("pr-merged", pullRequestPayload),
+      'aria-label="Pull request #33, merged"',
+    );
+    assert.include(header(failed), 'aria-label="Issue #33"');
   });
 
   it("names a pull request Run's Task after its issue, inline in the title, with the pull request in the facts", () => {
@@ -314,10 +320,10 @@ describe("Run header", () => {
     });
     assert.match(
       markup,
-      /<h1[^>]*style="view-transition-name:run-title"><a [^>]*title="Issue #30, open"/u,
+      /<h1[^>]*style="view-transition-name:run-title"><a [^>]*aria-label="Issue #30, open"/u,
     );
     assert.strictEqual(titleText(markup), "#30 Write the docs");
-    assert.include(markup, 'title="Pull request #33, open"');
+    assert.include(markup, 'aria-label="Pull request #33, open"');
     assert.strictEqual(links(markup, "https://github.com/basaltbytes/usine/pull/33"), 1);
   });
 
@@ -327,7 +333,7 @@ describe("Run header", () => {
       members: [member(33, "pr", "pr-closed", "Bump the npm group")],
     });
     assert.strictEqual(titleText(markup), "#33 Bump the npm group");
-    assert.include(markup, 'title="Pull request #33, closed"');
+    assert.include(markup, 'aria-label="Pull request #33, closed"');
     assert.strictEqual(links(markup, "https://github.com/basaltbytes/usine/pull/33"), 1);
   });
 
@@ -575,7 +581,7 @@ describe("provisioned machine", () => {
       RunDetailView.make({ ...detail(running), worker: WorkerName.make("hz-pool"), machine }),
     );
     assert.include(visible(markup), "hz-pool 52341896");
-    assert.include(markup, 'title="Hetzner server 52341896"');
+    assert.include(markup, 'aria-description="Hetzner server 52341896"');
     assert.notInclude(outline(running, machine), "machine");
   });
 });

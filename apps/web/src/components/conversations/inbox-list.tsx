@@ -32,6 +32,7 @@ import {
 } from "~/lib/conversations/strings";
 import { elapsedLabel, timestampLabel } from "~/lib/strings";
 import { cn } from "~/lib/utils";
+import { TextTooltip } from "~/components/text-tooltip";
 
 /** The last turn's state when the row shows it: only while it waits, runs, or has failed. */
 const shownState = (row: ConversationRow) => {
@@ -92,16 +93,17 @@ const Row = ({ row, selected, now, open }: RowProps) => {
         >
           {conversation.title}
         </span>
-        <time
-          dateTime={activity}
-          title={timestampLabel(activity)}
-          className={cn(
-            "font-mono text-xs tabular-nums",
-            unread ? "text-foreground" : "text-muted-foreground",
-          )}
-        >
-          {elapsedLabel(activity, now)}
-        </time>
+        <TextTooltip text={timestampLabel(activity)}>
+          <time
+            dateTime={activity}
+            className={cn(
+              "font-mono text-xs tabular-nums",
+              unread ? "text-foreground" : "text-muted-foreground",
+            )}
+          >
+            {elapsedLabel(activity, now)}
+          </time>
+        </TextTooltip>
         <span className="col-span-2 truncate text-sm text-muted-foreground">
           {row.preview === "" ? " " : row.preview}
         </span>
@@ -166,7 +168,7 @@ export const InboxList = ({ selected, open, start }: InboxListProps) => {
   const unread = list.data === undefined ? 0 : unreadCount(list.data);
   return (
     <section aria-label={conversationListLabel} className="flex min-h-0 flex-1 flex-col">
-      <header className="flex min-h-16 shrink-0 items-center gap-3 border-b px-5 py-3.5 pr-4 @max-3xl/inbox:pr-[var(--inbox-controls,1rem)]">
+      <header className="flex min-h-16 shrink-0 items-center gap-3 border-b px-5 py-3.5 pr-4 @max-3xl/inbox:pr-(--inbox-controls,1rem)">
         <h2 className="text-lg/snug font-semibold">{conversationListLabel}</h2>
         {unread > 0 && (
           <span className="text-sm whitespace-nowrap text-muted-foreground tabular-nums">

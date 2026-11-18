@@ -15,6 +15,7 @@ import {
 } from "~/components/ui/table";
 import { agoLabel, timestampLabel } from "~/lib/strings";
 import { EmptyLine, RunPageLink, RunRow } from "~/components/overview/section";
+import { TextTooltip } from "~/components/text-tooltip";
 
 type OutcomeRowProps = {
   readonly closed: ClosedRunView;
@@ -62,13 +63,11 @@ const OutcomeRow = ({ closed, overview, now }: OutcomeRowProps) => {
         <StatusBadge state={run.state} />
       </TableCell>
       <TableCell className="py-3 text-right max-sm:hidden">
-        <time
-          dateTime={closedAt}
-          title={timestampLabel(closedAt)}
-          className="text-xs text-muted-foreground tabular-nums"
-        >
-          {agoLabel(closedAt, now)}
-        </time>
+        <TextTooltip text={timestampLabel(closedAt)}>
+          <time dateTime={closedAt} className="text-xs text-muted-foreground tabular-nums">
+            {agoLabel(closedAt, now)}
+          </time>
+        </TextTooltip>
       </TableCell>
       <TableCell className="py-3 text-right">
         {run.pullRequestUrl === null ? (

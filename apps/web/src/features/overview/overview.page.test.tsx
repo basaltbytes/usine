@@ -117,7 +117,7 @@ describe("Desk", () => {
     const html = render(<RunningNow running={desk.running} workers={desk.workers} now={now} />);
     const visible = text(html);
     assert.include(html, 'data-slot="usine-mark" data-running=""');
-    assert.include(html, 'title="Issue #403, open"');
+    assert.include(html, 'aria-label="Issue #403, open"');
     assert.include(visible, "Operator desk replaces the Projects home");
     assert.include(visible, "hz-worker-1");
     assert.include(visible, "1m ago");
@@ -221,7 +221,10 @@ describe("Desk", () => {
     });
     const html = render(<WorkersLine workers={[degraded]} now={now} />);
     assert.include(text(html), "hz-worker-2 0 of 1 slot in use Preflight degraded 6h ago");
-    assert.include(html, "Docker isn&#x27;t installed");
+    assert.include(
+      html,
+      'aria-description="Docker isn&#x27;t installed, so attempts run as the SSH user"',
+    );
     assert.notInclude(html, "text-destructive");
   });
 
@@ -242,7 +245,7 @@ describe("Desk", () => {
       text(html),
       `hz-pool 2 of 3 slots in use, 2 machines 52341896: 3 attempts, 2m old Creating: 1 attempt, 2m old Preflight passed 2h ago Machine creation failed: no capacity. ${nextCreationLine(pause, now)}`,
     );
-    assert.include(html, "Hetzner Cloud has no cx33 servers in nbg1 right now");
+    assert.include(html, 'aria-description="Hetzner Cloud has no cx33 servers in nbg1 right now');
     const resumed = WorkerView.make({
       ...provisioned,
       machines: [],
@@ -266,7 +269,7 @@ describe("Desk", () => {
     });
     const html = render(<WorkersLine workers={[deferred]} now={now} />);
     assert.include(text(html), "boat-pool 0 of 2 slots in use Preflight deferred 1h ago");
-    assert.include(html, "Checked on the worker&#x27;s first machine each day");
+    assert.include(html, 'aria-description="Checked on the worker&#x27;s first machine each day"');
     assert.notInclude(html, "text-destructive");
   });
 

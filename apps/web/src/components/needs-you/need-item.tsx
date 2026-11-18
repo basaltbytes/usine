@@ -19,6 +19,7 @@ import {
   needOpenRunLabel,
   needActionsLabel,
 } from "~/lib/needs-you/strings";
+import { TextTooltip } from "~/components/text-tooltip";
 
 type NeedItemProps = {
   readonly copy: NeedCopy;
@@ -63,18 +64,21 @@ export const NeedItem = ({
   const at = since ?? run?.closedAt ?? run?.openedAt;
   const title = subject?.title ?? heading ?? copy.detail;
   const context = [loop ?? run?.loop, copy.repository].filter((part) => part != null).join(" · ");
+  const lead = context || (title === copy.detail ? null : copy.detail);
   return (
     <li className="min-w-0 px-3 py-1.5 text-sm hover:bg-muted/40">
       <div className="flex min-w-0 items-center gap-2">
-        <div className="min-w-0 flex-1" title={`${copy.title}: ${copy.detail}`}>
+        <div className="min-w-0 flex-1">
           {subject === undefined ? (
-            <p className="truncate font-medium">{title}</p>
+            <TextTooltip text={`${copy.title}: ${copy.detail}`}>
+              <p className="truncate font-medium">{title}</p>
+            </TextTooltip>
           ) : (
             <a
               href={subject.url}
               target="_blank"
               rel="noreferrer"
-              className="block rounded-sm underline-offset-4 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring/70"
+              className="block rounded-sm underline-offset-4 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring/70 focus-visible:ring-inset"
             >
               <ItemHeading
                 item={Option.some(subject)}
@@ -112,8 +116,12 @@ export const NeedItem = ({
           )}
         </div>
       </div>
-      <p className="truncate text-xs text-muted-foreground" title={copy.detail}>
-        {context || (title === copy.detail ? null : copy.detail)}
+      <p className="truncate text-xs text-muted-foreground">
+        {lead !== null && (
+          <TextTooltip text={copy.detail} repeats={lead === copy.detail}>
+            <span>{lead}</span>
+          </TextTooltip>
+        )}
         {description != null && (
           <>
             {" · "}
@@ -123,9 +131,11 @@ export const NeedItem = ({
         {at !== undefined && (
           <>
             {" · "}
-            <time dateTime={at} title={at} className="font-mono tabular-nums">
-              {agoLabel(at, now)}
-            </time>
+            <TextTooltip text={at}>
+              <time dateTime={at} className="font-mono tabular-nums">
+                {agoLabel(at, now)}
+              </time>
+            </TextTooltip>
           </>
         )}
       </p>

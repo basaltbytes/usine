@@ -22,6 +22,7 @@ import { FlowArrow, type LaneFlow } from "~/features/projects/components/flow";
 import type { BoardMoveProgress } from "~/hooks/projects/moves";
 import { useLaneFold } from "~/features/projects/hooks/fold";
 import { foldableLane } from "~/features/projects/lib/board";
+import { TextTooltip } from "~/components/text-tooltip";
 
 type LaneSourcesProps = {
   readonly sources: BoardLaneView["sources"];
@@ -51,22 +52,23 @@ type LaneRailProps = { readonly lane: BoardLaneView; readonly open: () => void }
 
 const LaneRail = ({ lane, open }: LaneRailProps) => (
   <section aria-label={`${lane.name} lane`} className="w-10 shrink-0">
-    <button
-      type="button"
-      aria-expanded={false}
-      title={`Open ${lane.name}`}
-      onClick={open}
-      className="flex h-full min-h-40 w-full items-start justify-center rounded-lg bg-card/60 ring-1 ring-border transition-colors outline-none hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring/70"
-    >
-      <span className="sticky top-0 flex flex-col-reverse items-center gap-2 py-3">
-        <span className="max-h-60 truncate text-sm font-semibold [writing-mode:vertical-rl]">
-          {lane.name}
-        </span>{" "}
-        <span className="text-sm text-muted-foreground tabular-nums">
-          {lane.totalItems ?? lane.items.length}
+    <TextTooltip text={`Open ${lane.name}`}>
+      <button
+        type="button"
+        aria-expanded={false}
+        onClick={open}
+        className="flex h-full min-h-40 w-full items-start justify-center rounded-lg bg-card/60 ring-1 ring-border transition-colors outline-none hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring/70 focus-visible:ring-inset"
+      >
+        <span className="sticky top-0 flex flex-col-reverse items-center gap-2 py-3">
+          <span className="max-h-60 truncate text-sm font-semibold [writing-mode:vertical-rl]">
+            {lane.name}
+          </span>{" "}
+          <span className="text-sm text-muted-foreground tabular-nums">
+            {lane.totalItems ?? lane.items.length}
+          </span>
         </span>
-      </span>
-    </button>
+      </button>
+    </TextTooltip>
   </section>
 );
 
@@ -146,7 +148,7 @@ export const BoardColumn = ({
       ref={setNodeRef}
       aria-label={`${lane.name} lane`}
       className={cn(
-        "flex w-68 shrink-0 flex-col gap-2 rounded-lg transition-[background-color,box-shadow]",
+        "flex w-68 shrink-0 flex-col gap-2 rounded-lg transition",
         targeted && "bg-muted/40 ring-6 ring-muted/40",
       )}
     >
@@ -190,9 +192,9 @@ export const BoardColumn = ({
         aria-label={`${lane.name} cards`}
         tabIndex={edges.above || edges.below ? 0 : undefined}
         className={cn(
-          "-mx-1 flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto overscroll-y-contain px-1 pb-1 outline-none focus-visible:ring-2 focus-visible:ring-ring/70",
-          edges.above && "mask-t-from-[calc(100%-2.5rem)]",
-          edges.below && "mask-b-from-[calc(100%-2.5rem)]",
+          "-mx-1 flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto overscroll-y-contain px-1 pb-1 outline-none [--edge-fade:calc(100%-2.5rem)] focus-visible:ring-2 focus-visible:ring-ring/70 focus-visible:ring-inset",
+          edges.above && "mask-t-from-(--edge-fade)",
+          edges.below && "mask-b-from-(--edge-fade)",
         )}
       >
         <SortableContext
@@ -206,11 +208,12 @@ export const BoardColumn = ({
           )}
           <div
             style={
-              items.length >= 50
-                ? { height: virtual.getTotalSize(), position: "relative" }
-                : undefined
+              items.length >= 50 ? { "--list-height": `${virtual.getTotalSize()}px` } : undefined
             }
-            className="flex shrink-0 flex-col gap-2"
+            className={cn(
+              "flex shrink-0 flex-col gap-2",
+              items.length >= 50 && "relative h-(--list-height)",
+            )}
           >
             {(items.length >= 50
               ? visible
@@ -225,16 +228,10 @@ export const BoardColumn = ({
                   key={item.itemKey}
                   data-index={row.index}
                   ref={items.length >= 50 ? virtual.measureElement : undefined}
-                  style={
+                  style={items.length >= 50 ? { "--row-start": `${row.start}px` } : undefined}
+                  className={
                     items.length >= 50
-                      ? {
-                          position: "absolute",
-                          top: 0,
-                          left: 0,
-                          width: "100%",
-                          transform: `translateY(${row.start}px)`,
-                          paddingBottom: 8,
-                        }
+                      ? "absolute top-0 left-0 w-full translate-y-(--row-start) pb-2"
                       : undefined
                   }
                 >

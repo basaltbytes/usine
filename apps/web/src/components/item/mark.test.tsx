@@ -41,7 +41,7 @@ describe("item mark", () => {
       assert.include(markup, `class="octicon ${icon} `, label);
       assert.match(markup, new RegExp(`^<a [^>]*class="[^"]*\\b${tone}\\b`, "u"), label);
       assert.include(markup, `aria-label="${label}"`, label);
-      assert.include(markup, `title="${label}"`, label);
+      assert.notInclude(markup, "title=", label);
       assert.strictEqual(markup.replaceAll(/<[^>]+>/gu, ""), "#1", label);
       assert.strictEqual(itemLabel(ref(kind, 1, state)), label);
     }
@@ -55,10 +55,7 @@ describe("item mark", () => {
       <ItemMark item={ref("issue", 481, "issue-closed")} linked={false} />,
     );
     assert.notInclude(plain, "<a ");
-    assert.match(
-      plain,
-      /^<span role="img" title="Issue #481, closed" aria-label="Issue #481, closed"/u,
-    );
+    assert.match(plain, /^<span role="img" aria-label="Issue #481, closed"/u);
   });
 
   it("can show the icon alone, still named in words", () => {

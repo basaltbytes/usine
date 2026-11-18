@@ -4,6 +4,7 @@ import { Link } from "@tanstack/react-router";
 import type { BoardTaskView } from "@usine/orchestrator/operator";
 
 import { taskNumber } from "~/lib/tasks/model";
+import { TextTooltip } from "~/components/text-tooltip";
 
 // The title's click area covers the whole card, so clicking anywhere opens the Task page.
 const titleClass =
@@ -18,22 +19,24 @@ type CardTitleProps = {
 export const CardTitle = ({ item, project }: CardTitleProps) => {
   const projectLinks = useProjectLinks();
   return (
-    <h3 className="text-sm/snug font-medium text-card-foreground" title={item.title}>
-      <Link
-        {...(project === undefined
-          ? {
-              ...projectLinks.task(item.repository, taskNumber(item)),
-            }
-          : {
-              to: "/projects/$project/tasks/$number",
-              params: { project, number: taskNumber(item) },
-              search: { repository: item.repository },
-            })}
-        draggable={false}
-        className={titleClass}
-      >
-        <span className="line-clamp-2">{item.title}</span>
-      </Link>
-    </h3>
+    <TextTooltip text={item.title} repeats>
+      <h3 className="text-sm/snug font-medium text-card-foreground">
+        <Link
+          {...(project === undefined
+            ? {
+                ...projectLinks.task(item.repository, taskNumber(item)),
+              }
+            : {
+                to: "/projects/$project/tasks/$number",
+                params: { project, number: taskNumber(item) },
+                search: { repository: item.repository },
+              })}
+          draggable={false}
+          className={titleClass}
+        >
+          <span className="line-clamp-2">{item.title}</span>
+        </Link>
+      </h3>
+    </TextTooltip>
   );
 };

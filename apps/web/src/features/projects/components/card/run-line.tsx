@@ -6,6 +6,7 @@ import { useNow } from "~/hooks/use-now";
 import { runLineSince } from "~/lib/projects/card";
 import { elapsedLabel } from "~/lib/strings";
 import { runLineTimeTitle } from "~/features/projects/strings";
+import { TextTooltip } from "~/components/text-tooltip";
 
 type RunLineProps = { readonly run: RunSummaryView };
 
@@ -19,13 +20,11 @@ export const RunLine = ({ run }: RunLineProps) => {
         <span className="truncate text-foreground">{run.loop}</span>
         {run.state !== "AwaitingCi" && <span className="shrink-0">{run.state}</span>}
         {since !== null && (
-          <time
-            className="shrink-0 font-mono tabular-nums"
-            dateTime={since}
-            title={runLineTimeTitle(run.state, since)}
-          >
-            {elapsedLabel(since, now)}
-          </time>
+          <TextTooltip text={runLineTimeTitle(run.state, since)}>
+            <time className="shrink-0 font-mono tabular-nums" dateTime={since}>
+              {elapsedLabel(since, now)}
+            </time>
+          </TextTooltip>
         )}
         <span className="ml-auto truncate pl-2">{run.agent}</span>
       </p>

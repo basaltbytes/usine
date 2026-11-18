@@ -17,6 +17,7 @@ import { UsineMark } from "~/components/usine-mark";
 import { agoLabel, dayTimeLabel, timestampLabel } from "~/lib/strings";
 import { nothingRunning, warningLine } from "~/features/overview/strings";
 import { EmptyLine, RunPageLink, RunRow } from "~/components/overview/section";
+import { TextTooltip } from "~/components/text-tooltip";
 
 /** Formats `instant` as a time when it is today, otherwise as a day and time. */
 const startLabel = (instant: string, now: number): string => {
@@ -91,25 +92,21 @@ const RunningRow = ({ running, overview, now }: RunningRowProps) => {
       <TableCell className="py-3 max-lg:hidden align-top">{run.agent}</TableCell>
       <TableCell className="py-3 max-lg:hidden align-top">{attempt.worker}</TableCell>
       <TableCell className="py-3 max-sm:hidden align-top">
-        <time
-          dateTime={attempt.startedAt}
-          title={timestampLabel(attempt.startedAt)}
-          className="font-mono text-xs tabular-nums"
-        >
-          {startLabel(attempt.startedAt, now)}
-        </time>
+        <TextTooltip text={timestampLabel(attempt.startedAt)}>
+          <time dateTime={attempt.startedAt} className="font-mono text-xs tabular-nums">
+            {startLabel(attempt.startedAt, now)}
+          </time>
+        </TextTooltip>
       </TableCell>
       <TableCell className="py-3 text-right align-top">
         {lastActivityAt === null ? (
           <span className="text-xs text-muted-foreground">None yet</span>
         ) : (
-          <time
-            dateTime={lastActivityAt}
-            title={timestampLabel(lastActivityAt)}
-            className="text-xs text-muted-foreground tabular-nums"
-          >
-            {agoLabel(lastActivityAt, now)}
-          </time>
+          <TextTooltip text={timestampLabel(lastActivityAt)}>
+            <time dateTime={lastActivityAt} className="text-xs text-muted-foreground tabular-nums">
+              {agoLabel(lastActivityAt, now)}
+            </time>
+          </TextTooltip>
         )}
       </TableCell>
     </RunRow>

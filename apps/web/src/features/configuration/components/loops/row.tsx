@@ -8,6 +8,7 @@ import { PauseButton } from "~/features/configuration/components/loops/pause-but
 import { OpeningRow, rowLinkClass } from "~/components/opening-row";
 import { approvalLabel } from "~/features/configuration/strings";
 import { triggerLabel } from "~/lib/strings";
+import { TextTooltip } from "~/components/text-tooltip";
 
 type LoopRowProps = {
   readonly projects: ConfigurationView["projects"];
@@ -33,7 +34,7 @@ export const LoopRow = ({ loop, pause, projects }: LoopRowProps) => {
       </TableCell>
       <TableCell className="max-w-40 whitespace-normal">
         {project === undefined ? (
-          "—"
+          <span className="text-muted-foreground">None</span>
         ) : (
           <Link
             to="/configuration/projects/$project"
@@ -47,12 +48,11 @@ export const LoopRow = ({ loop, pause, projects }: LoopRowProps) => {
       </TableCell>
       <TableCell>{triggerLabel(loop.stream)}</TableCell>
       <FillCell className="hidden lg:table-cell">
-        <code
-          className="block truncate font-mono text-xs text-muted-foreground [font-variant-ligatures:none]"
-          title={loop.condition}
-        >
-          {loop.condition}
-        </code>
+        <TextTooltip text={loop.condition} repeats>
+          <code className="block truncate font-mono text-xs text-muted-foreground ligatures-none">
+            {loop.condition}
+          </code>
+        </TextTooltip>
       </FillCell>
       <TableCell className="hidden sm:table-cell">{loop.agent}</TableCell>
       <TableCell className="hidden md:table-cell">{approvalLabel(loop.approval)}</TableCell>

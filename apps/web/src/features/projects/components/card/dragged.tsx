@@ -1,10 +1,8 @@
 import type { ProjectId } from "@usine/core/project";
 import type { BoardLaneView, BoardTaskView, StalledItemView } from "@usine/orchestrator/operator";
-import { Card } from "~/components/ui/card";
-import { cardClass } from "~/features/projects/lib/styles";
 import { CardFace } from "~/features/projects/components/card/face";
+import { CardFrame } from "~/features/projects/components/card/frame";
 import { type LabelCatalog } from "~/lib/projects/card";
-import { cn } from "~/lib/utils";
 
 type DraggedCardProps = {
   readonly project?: ProjectId | undefined;
@@ -23,7 +21,7 @@ export const DraggedCard = ({
   project,
   showRepository,
 }: DraggedCardProps) => (
-  <Card size="sm" className={cn(cardClass(item.needsYou), "cursor-grabbing shadow-raised")}>
+  <CardFrame needsYou={item.needsYou} className="cursor-grabbing shadow-raised">
     <CardFace
       project={project}
       showRepository={showRepository}
@@ -37,5 +35,5 @@ export const DraggedCard = ({
       again={null}
       progress={null}
     />
-  </Card>
+  </CardFrame>
 );

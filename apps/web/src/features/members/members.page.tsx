@@ -12,7 +12,8 @@ import { CommandButton } from "~/components/command-palette/button";
 import { PageHeading } from "~/components/page";
 import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { Button, buttonVariants } from "~/components/ui/button";
+import { ButtonLink } from "~/components/button-link";
+import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
 import { ErrorAlert } from "~/components/error-alert";
@@ -138,14 +139,14 @@ export const MembersPage = () => {
               </TableCell>
               <TableCell>
                 <div className="flex flex-wrap justify-end gap-2">
-                  <Link
+                  <ButtonLink
                     to="/configuration/bindings"
                     search={{ member: member.login }}
                     aria-label={`${addBinding} · ${member.login}`}
-                    className={buttonVariants({ variant: "outline" })}
+                    variant="outline"
                   >
                     {addBinding}
-                  </Link>
+                  </ButtonLink>
                   {removing === member.id ? (
                     <>
                       <Button

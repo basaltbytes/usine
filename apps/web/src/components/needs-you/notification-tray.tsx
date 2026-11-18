@@ -59,7 +59,7 @@ export const NotificationTray = ({ needs }: NotificationTrayProps) => {
           to="/"
           hash="desk-needs-you"
           onClick={() => setOpen(false)}
-          className="rounded-sm text-sm text-primary underline-offset-4 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring/70"
+          className="rounded-sm text-sm text-primary underline-offset-4 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring/70 focus-visible:ring-inset"
         >
           {attentionOverviewLink}
         </Link>

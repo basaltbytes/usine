@@ -5,6 +5,7 @@ import { useMessageScroller } from "~/components/ui/message-scroller";
 import { cn } from "~/lib/utils";
 import { useTranscriptDisclosure } from "~/components/runs/transcript/grouping/disclosure";
 import type { NavigableRow } from "~/lib/runs/transcript/navigation/model";
+import { TextTooltip } from "~/components/text-tooltip";
 
 /** A reader location: a row, an Attempt heading, or a tool call in a folded burst. */
 export interface ReaderTarget {
@@ -62,16 +63,17 @@ export const ErrorControls = ({
   const count = words.count(errors.length, earlier);
   return (
     <div role="group" aria-label={words.group} className="flex items-center gap-1">
-      <span
-        role="status"
-        title={words.title}
-        className={cn(
-          "mr-auto text-xs tabular-nums",
-          kind === "errors" ? "text-destructive" : "text-muted-foreground",
-        )}
-      >
-        {index < 0 ? count : `${index + 1} of ${count}`}
-      </span>
+      <TextTooltip text={words.title}>
+        <span
+          role="status"
+          className={cn(
+            "mr-auto text-xs tabular-nums",
+            kind === "errors" ? "text-destructive" : "text-muted-foreground",
+          )}
+        >
+          {index < 0 ? count : `${index + 1} of ${count}`}
+        </span>
+      </TextTooltip>
       <Button
         variant="ghost"
         size="icon-sm"

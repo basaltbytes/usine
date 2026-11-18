@@ -117,12 +117,12 @@ export const AppSidebar = ({
                 <span>Overview</span>
               </SidebarMenuButton>
               <SidebarMenuBadge className="right-2 gap-2 px-0 tabular-nums">
-                <span className="text-run-active" title="Running">
+                <span className="text-run-active">
                   {runningTotal}
                   <span className="sr-only"> running</span>
                 </span>
                 {needsYouTotal > 0 && (
-                  <span className="text-needs-you" title="Needs attention">
+                  <span className="text-needs-you">
                     {needsYouTotal}
                     <span className="sr-only"> need attention</span>
                   </span>

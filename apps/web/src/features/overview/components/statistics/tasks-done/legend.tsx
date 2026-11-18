@@ -6,7 +6,7 @@ export const TasksDoneLegend = ({ points }: TasksDoneLegendProps) => (
       <span
         aria-hidden="true"
         className={
-          points === "dot" ? "size-2 rounded-full bg-chart-1" : "size-2 rounded-[2px] bg-chart-1"
+          points === "dot" ? "size-2 rounded-full bg-chart-1" : "size-2 rounded-xs bg-chart-1"
         }
       />
       {points === "dot" ? "task" : "tasks"}

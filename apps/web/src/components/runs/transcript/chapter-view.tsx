@@ -9,6 +9,7 @@ import { type TranscriptHistory } from "~/components/runs/transcript/transcript"
 import { Button } from "~/components/ui/button";
 import { MessageScrollerItem } from "~/components/ui/message-scroller";
 import type { Chapter, ChapterRow, Speaker } from "~/lib/runs/transcript/document/model";
+import { cn } from "~/lib/utils";
 
 const rowSpeaker = (row: ChapterRow): Speaker | null =>
   Match.valueTags(row, {
@@ -21,11 +22,11 @@ const rowSpeaker = (row: ChapterRow): Speaker | null =>
     BoardMove: () => null,
   });
 
-const rowSpacing = (row: ChapterRow, previous: ChapterRow | undefined): string => {
-  if (row._tag === "Burst") return "mt-0.5";
+const rowGap = (row: ChapterRow, previous: ChapterRow | undefined): "tight" | "near" | "apart" => {
+  if (row._tag === "Burst") return "tight";
   if (row._tag === "GitHubChange")
-    return previous?._tag === "Burst" || previous?._tag === "GitHubChange" ? "mt-0.5" : "mt-2";
-  return row._tag === "Note" || row._tag === "BoardMove" ? "mt-2" : "mt-4";
+    return previous?._tag === "Burst" || previous?._tag === "GitHubChange" ? "tight" : "near";
+  return row._tag === "Note" || row._tag === "BoardMove" ? "near" : "apart";
 };
 
 type ChapterViewProps = {
@@ -80,15 +81,22 @@ export const ChapterView = ({ chapter, first, runTask, history }: ChapterViewPro
           </ReaderLine>
         </MessageScrollerItem>
       )}
-      {rows.map(({ row, speaker }, index) => (
-        <MessageScrollerItem
-          key={row.key}
-          messageId={row.key}
-          className={rowSpacing(row, rows[index - 1]?.row)}
-        >
-          <Row row={row} speaker={speaker} />
-        </MessageScrollerItem>
-      ))}
+      {rows.map(({ row, speaker }, index) => {
+        const gap = rowGap(row, rows[index - 1]?.row);
+        return (
+          <MessageScrollerItem
+            key={row.key}
+            messageId={row.key}
+            className={cn(
+              gap === "tight" && "mt-0.5",
+              gap === "near" && "mt-2",
+              gap === "apart" && "mt-4",
+            )}
+          >
+            <Row row={row} speaker={speaker} />
+          </MessageScrollerItem>
+        );
+      })}
       {chapter.live && (
         <MessageScrollerItem
           messageId={`activity:${chapter.attemptId}`}

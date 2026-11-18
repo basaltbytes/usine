@@ -19,7 +19,7 @@ export const Row = ({ row, speaker }: RowProps) =>
         <p
           data-transcript-id={note.key}
           className={cn(
-            "text-xs leading-[1.4rem] wrap-anywhere",
+            "text-xs leading-reader wrap-anywhere",
             {
               plain: "text-muted-foreground",
               warning: "text-warning",
@@ -45,7 +45,7 @@ export const Row = ({ row, speaker }: RowProps) =>
     ),
     BoardMove: ({ move }) => (
       <ReaderLine gutter={<Gutter receivedAt={move.at} />}>
-        <p className="text-xs leading-[1.4rem] wrap-anywhere text-muted-foreground">
+        <p className="text-xs leading-reader wrap-anywhere text-muted-foreground">
           You moved it from {move.fromLane} to {move.toLane} on the board
         </p>
       </ReaderLine>

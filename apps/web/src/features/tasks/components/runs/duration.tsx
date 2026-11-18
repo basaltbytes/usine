@@ -3,6 +3,7 @@ import { Option } from "effect";
 import { useNow } from "~/hooks/use-now";
 import { durationLabel } from "~/lib/strings";
 import { attemptsDuration } from "~/lib/tasks/model";
+import { TextTooltip } from "~/components/text-tooltip";
 
 type DurationProps = { readonly run: RunSummaryView };
 
@@ -11,9 +12,9 @@ export const Duration = ({ run }: DurationProps) => {
   return Option.match(attemptsDuration(run, now), {
     onNone: () => null,
     onSome: (milliseconds) => (
-      <span className="font-mono text-xs tabular-nums" title="Total attempt time">
-        {durationLabel(milliseconds)}
-      </span>
+      <TextTooltip text="Total attempt time">
+        <span className="font-mono text-xs tabular-nums">{durationLabel(milliseconds)}</span>
+      </TextTooltip>
     ),
   });
 };

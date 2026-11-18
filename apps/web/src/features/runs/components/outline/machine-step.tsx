@@ -3,6 +3,7 @@ import { Elapsed } from "~/components/runs/transcript/activity";
 import { StateMark } from "~/components/status-badge";
 import { dayTimeLabel, timestampLabel } from "~/lib/strings";
 import { preparingAttemptImage, providerLabel } from "~/lib/workers/strings";
+import { TextTooltip } from "~/components/text-tooltip";
 
 type MachineStepProps = {
   readonly machine: MachineView;
@@ -26,9 +27,9 @@ export const MachineStep = ({ machine, attemptNumber }: MachineStepProps) => (
       {attemptNumber}
     </span>
     <span className="flex justify-between gap-3 font-mono text-xs tabular-nums text-muted-foreground">
-      <time dateTime={machine.since} title={timestampLabel(machine.since)}>
-        {dayTimeLabel(machine.since)}
-      </time>
+      <TextTooltip text={timestampLabel(machine.since)}>
+        <time dateTime={machine.since}>{dayTimeLabel(machine.since)}</time>
+      </TextTooltip>
       <Elapsed since={machine.since} />
     </span>
   </div>

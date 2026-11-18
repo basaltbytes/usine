@@ -22,7 +22,7 @@ import { FoldedFacts } from "~/features/tasks/components/runs/folded-facts";
 import { Opened } from "~/features/tasks/components/runs/opened";
 import { PullRequest } from "~/features/tasks/components/runs/pull-request";
 import { RowActions } from "~/features/tasks/components/runs/actions";
-import { linkedRow, rowLink } from "~/features/tasks/components/section";
+import { LinkedRow, rowLink } from "~/features/tasks/components/section";
 import { rejectionMessage } from "~/lib/api";
 import { runDetailQuery } from "~/lib/runs/queries";
 
@@ -45,7 +45,7 @@ export const RunRow = ({ run, item, pullRequest, openRun }: RunRowProps) => {
   const [status, setStatus] = useState<ReactNode>(null);
   return (
     <>
-      <TableRow className={cn(linkedRow, "[&>td]:align-top")}>
+      <LinkedRow className="[&>td]:align-top">
         <TableCell className="hidden py-3 sm:table-cell">
           <span className="inline-flex items-center gap-2 text-foreground">
             <StateMark state={run.state} className="ml-0.75" />
@@ -92,7 +92,7 @@ export const RunRow = ({ run, item, pullRequest, openRun }: RunRowProps) => {
         <TableCell className="py-2.5">
           <RowActions run={run} onEdit={setEditing} openRun={openRun} status={setStatus} />
         </TableCell>
-      </TableRow>
+      </LinkedRow>
       {editing !== null && editApplies(run, editing) && (
         <TableRow className="hover:bg-transparent">
           <TableCell colSpan={COLUMNS} className="px-2 pt-1 pb-4 whitespace-normal">

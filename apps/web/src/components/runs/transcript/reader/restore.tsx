@@ -8,6 +8,7 @@ import {
 import { locateReadingAnchor, type ReadingRow } from "~/lib/runs/transcript/reader/anchor";
 import { VISIBLE_ROW_EDGE } from "~/components/runs/transcript/scroll-position";
 import type { ReadingAnchor } from "~/lib/runs/transcript/reader/memory";
+import { observeResize } from "~/lib/observe-resize";
 
 interface ReaderHistory {
   readonly earlier: TranscriptPageCursor | undefined;
@@ -41,9 +42,7 @@ export const RestoreReader = ({
   useLayoutEffect(() => {
     const viewport = viewportRef.current;
     if (target === null || viewport === null) return;
-    const observer = new ResizeObserver(() => setLayout((value) => value + 1));
-    observer.observe(viewport);
-    return () => observer.disconnect();
+    return observeResize([viewport], () => setLayout((value) => value + 1));
   }, [target, viewportRef]);
   const [notice, setNotice] = useState<string | null>(null);
   useEffect(() => {

@@ -5,8 +5,14 @@
     {
       "name": "usine",
       "specifier": "./tooling/oxlint/plugin.ts"
-    }
+    },
+    "@shadcn/lint"
   ],
+  "settings": {
+    "shadcn": {
+      "ui": "~/components/ui"
+    }
+  },
   "categories": {
     "correctness": "error"
   },
@@ -41,7 +47,33 @@
       "files": ["apps/web/src/**"],
       "rules": {
         "usine/web-import-direction": "error",
-        "import/no-default-export": "error"
+        "usine/no-em-dash-copy": "error",
+        "usine/no-native-title-tooltip": "error",
+        "usine/no-outset-state-indicators": "error",
+        "usine/no-raw-resize-observer": "error",
+        "import/no-default-export": "error",
+        "shadcn/no-raw-colors": "error",
+        "shadcn/no-arbitrary-values": ["error", { "allow": ["layout", "*env(safe-area-inset-*"] }],
+        "shadcn/no-inline-styles": "error",
+        "shadcn/no-unknown-classes": ["error", { "allow": ["task-diff"] }],
+        "shadcn/require-static-classes": "error"
+      }
+    },
+    {
+      "files": ["apps/web/src/components/ui/**", "apps/web/src/components/ai-elements/**"],
+      "rules": {
+        "shadcn/no-raw-colors": "off",
+        "shadcn/no-arbitrary-values": "off",
+        "shadcn/no-inline-styles": "off",
+        "shadcn/no-unknown-classes": "off",
+        "shadcn/require-static-classes": "off",
+        "usine/no-outset-state-indicators": "off"
+      }
+    },
+    {
+      "files": ["apps/web/src/lib/observe-resize.ts"],
+      "rules": {
+        "usine/no-raw-resize-observer": "off"
       }
     },
     {

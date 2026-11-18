@@ -1,4 +1,5 @@
 import { RefreshStatus } from "~/components/refresh/status";
+import { TextTooltip } from "~/components/text-tooltip";
 import type { Icon } from "@phosphor-icons/react";
 import type { ReactNode } from "react";
 import { cn } from "~/lib/utils";
@@ -101,13 +102,27 @@ export const PageHeader = ({
 type PageFactProps = {
   readonly icon: Icon;
   readonly title?: string;
+  /** Content after `children` with a tooltip of its own, such as a time, outside the fact's tooltip. */
+  readonly trailing?: ReactNode;
   readonly children: ReactNode;
 };
 
 /** Renders a fact after its Phosphor icon at text size, with `title` as tooltip, such as `Loop`. */
-export const PageFact = ({ icon: Glyph, title, children }: PageFactProps) => (
-  <span className="inline-flex items-center gap-1.5" title={title}>
-    <Glyph aria-hidden="true" className="size-[1em] shrink-0 text-faint" />
-    {children}
-  </span>
-);
+export const PageFact = ({ icon: Glyph, title, trailing, children }: PageFactProps) => {
+  const fact = (
+    <TextTooltip text={title}>
+      <span className="inline-flex items-center gap-1.5">
+        <Glyph aria-hidden="true" className="size-[1em] shrink-0 text-faint" />
+        {children}
+      </span>
+    </TextTooltip>
+  );
+  return trailing === undefined ? (
+    fact
+  ) : (
+    <span className="inline-flex items-center gap-1.5">
+      {fact}
+      {trailing}
+    </span>
+  );
+};

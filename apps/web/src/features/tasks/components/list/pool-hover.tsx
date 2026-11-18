@@ -4,7 +4,7 @@ import { PoolBreakdown } from "~/components/runs/usage";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "~/components/ui/hover-card";
 
 const usageTrigger =
-  "relative z-10 rounded-sm underline-offset-4 outline-none hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring/70 focus-visible:outline-solid";
+  "relative z-10 rounded-sm underline-offset-4 outline-none hover:underline focus-visible:outline-2 focus-visible:outline-ring/70 focus-visible:outline-solid";
 
 type PoolHoverProps = {
   readonly usage: TaskUsageView;

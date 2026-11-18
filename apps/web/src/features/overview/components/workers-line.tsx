@@ -4,6 +4,7 @@ import { StateMark } from "~/components/status-badge";
 import { machineReuseLine } from "~/features/overview/strings";
 import { agoLabel, timestampLabel } from "~/lib/strings";
 import { creationFailureTitle, nextCreationLine, workerPausedLine } from "~/lib/workers/strings";
+import { TextTooltip } from "~/components/text-tooltip";
 
 const outcome = {
   Passed: { state: "Succeeded", label: "passed", className: undefined },
@@ -19,13 +20,14 @@ const Preflight = ({ worker, now }: PreflightProps) => {
   if (preflight === null) return <span>No preflight yet</span>;
   const { state, label, className } = outcome[preflight._tag];
   return (
-    <span
-      className={className}
-      title={preflight._tag === "Passed" ? timestampLabel(preflight.checkedAt) : preflight.message}
+    <TextTooltip
+      text={preflight._tag === "Passed" ? timestampLabel(preflight.checkedAt) : preflight.message}
     >
-      <StateMark state={state} className="mr-1.5 align-middle" />
-      Preflight {label} {agoLabel(preflight.checkedAt, now)}
-    </span>
+      <span className={className}>
+        <StateMark state={state} className="mr-1.5 align-middle" />
+        Preflight {label} {agoLabel(preflight.checkedAt, now)}
+      </span>
+    </TextTooltip>
   );
 };
 
@@ -35,11 +37,13 @@ type CreationPausedProps = {
 };
 
 const CreationPaused = ({ pause, now }: CreationPausedProps) => (
-  <span className="text-destructive" title={pause.message}>
-    <StateMark state="Failed" className="mr-1.5 align-middle" />
-    {creationFailureTitle(pause)}.{" "}
-    <span className="tabular-nums">{nextCreationLine(pause, now)}</span>
-  </span>
+  <TextTooltip text={pause.message}>
+    <span className="text-destructive">
+      <StateMark state="Failed" className="mr-1.5 align-middle" />
+      {creationFailureTitle(pause)}.{" "}
+      <span className="tabular-nums">{nextCreationLine(pause, now)}</span>
+    </span>
+  </TextTooltip>
 );
 
 type WorkersLineProps = {

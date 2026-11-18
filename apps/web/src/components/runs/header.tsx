@@ -24,7 +24,9 @@ import { durationLabel } from "~/lib/strings";
 import { providerLabel, providerMachineNoun } from "~/lib/workers/strings";
 import { runStateLine } from "~/lib/runs/strings";
 import { type RunItem, runHeaderItems, runItem } from "~/lib/runs/item";
+import { cn } from "~/lib/utils";
 import { UsageFact } from "~/components/runs/usage";
+import { TextTooltip } from "~/components/text-tooltip";
 
 /** Returns the Item's title, or the Loop and repository if the Run has no Item or its title is unknown. */
 const runTitleText = (run: Pick<RunView, "loop" | "repository">, item: Option.Option<RunItem>) =>
@@ -44,21 +46,22 @@ type DurationProps = { readonly duration: RunDurationView };
 
 /** Renders the total Attempt time, which keeps counting while an Attempt runs. */
 const Duration = ({ duration }: DurationProps) => (
-  <span
-    title={
+  <TextTooltip
+    text={
       duration.unmeasured === 0
         ? "Total attempt time"
         : `${duration.unmeasured} ${duration.unmeasured === 1 ? "attempt" : "attempts"} not counted: no recorded end time`
     }
-    className="font-mono text-xs tabular-nums"
   >
-    {duration.unmeasured > 0 && "at least "}
-    {duration.runningSince === null ? (
-      durationLabel(duration.endedMillis)
-    ) : (
-      <LiveDuration endedMillis={duration.endedMillis} since={duration.runningSince} />
-    )}
-  </span>
+    <span className="font-mono text-xs tabular-nums">
+      {duration.unmeasured > 0 && "at least "}
+      {duration.runningSince === null ? (
+        durationLabel(duration.endedMillis)
+      ) : (
+        <LiveDuration endedMillis={duration.endedMillis} since={duration.runningSince} />
+      )}
+    </span>
+  </TextTooltip>
 );
 
 type AttemptMachineProps = { readonly detail: RunDetailView };
@@ -69,12 +72,11 @@ const AttemptMachine = ({ detail }: AttemptMachineProps) => {
   if (machine === null || machine.state !== "ready" || machine.id === null) return null;
   if (machine.attemptId === null || machine.attemptId !== run.attempts.at(-1)?.id) return null;
   return (
-    <span
-      className="font-mono text-xs"
-      title={`${providerLabel[machine.provider]} ${providerMachineNoun[machine.provider]} ${machine.id}`}
+    <TextTooltip
+      text={`${providerLabel[machine.provider]} ${providerMachineNoun[machine.provider]} ${machine.id}`}
     >
-      {machine.id}
-    </span>
+      <span className="font-mono text-xs">{machine.id}</span>
+    </TextTooltip>
   );
 };
 
@@ -133,8 +135,10 @@ export const RunHeader = ({
       facts={
         <>
           <span
-            className="inline-flex items-center gap-2 font-medium text-foreground"
-            style={shared ? { viewTransitionName: "run-state" } : undefined}
+            className={cn(
+              "inline-flex items-center gap-2 font-medium text-foreground",
+              shared && "[view-transition-name:run-state]",
+            )}
           >
             <StateMark state={run.state} className="ml-0.75" />
             {run.handoff !== null ? (
@@ -156,9 +160,12 @@ export const RunHeader = ({
                   <UsageFact usage={detail.usage} attempts={run.attempts} />
                 </PageFact>
               )}
-              <PageFact icon={HardDrivesIcon} title="Worker">
+              <PageFact
+                icon={HardDrivesIcon}
+                title="Worker"
+                trailing={<AttemptMachine detail={detail} />}
+              >
                 {detail.worker}
-                <AttemptMachine detail={detail} />
               </PageFact>
             </>
           )}

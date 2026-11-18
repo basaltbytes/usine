@@ -4,6 +4,7 @@ import type { RunView } from "@usine/orchestrator/operator";
 import { Option } from "effect";
 import { cn } from "~/lib/utils";
 import { dayTimeLabel, timestampLabel } from "~/lib/strings";
+import { TextTooltip } from "~/components/text-tooltip";
 
 type RunAgainLineProps = {
   readonly run: Pick<RunView, "runAgain" | "openedAt" | "repository">;
@@ -26,13 +27,11 @@ export const RunAgainLine = ({ run, source, className }: RunAgainLineProps) => {
         })}
       </span>
       {" · "}
-      <time
-        dateTime={run.openedAt}
-        title={timestampLabel(run.openedAt)}
-        className="font-mono text-xs whitespace-nowrap tabular-nums"
-      >
-        {dayTimeLabel(run.openedAt)}
-      </time>
+      <TextTooltip text={timestampLabel(run.openedAt)}>
+        <time dateTime={run.openedAt} className="font-mono text-xs whitespace-nowrap tabular-nums">
+          {dayTimeLabel(run.openedAt)}
+        </time>
+      </TextTooltip>
       {" · "}
       <span className="whitespace-nowrap">
         from run{" "}

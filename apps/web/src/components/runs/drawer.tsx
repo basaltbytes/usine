@@ -2,15 +2,13 @@ import { CiHandoffLine, CiWaitLine } from "~/components/runs/ci";
 import { useProjectLinks } from "~/hooks/use-project-links";
 import { ArrowsOutSimpleIcon } from "@phosphor-icons/react";
 import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { Link } from "@tanstack/react-router";
 import type { RunId } from "@usine/core/run";
 import type { MachineView, RunDetailView } from "@usine/orchestrator/operator";
 import { Option } from "effect";
 import { useMemo, useState } from "react";
 import { ErrorAlert } from "~/components/error-alert";
-import { buttonVariants } from "~/components/ui/button";
+import { ButtonLink } from "~/components/button-link";
 import { Tooltip, TooltipContent, TooltipTrigger } from "~/components/ui/tooltip";
-import { cn } from "~/lib/utils";
 import {
   Sheet,
   SheetContent,
@@ -42,6 +40,7 @@ import { previewText } from "~/lib/runs/transcript/document/text";
 import { projectTranscript } from "~/lib/runs/transcript/model";
 import { Outcome } from "~/components/runs/transcript/outcome";
 import { runDetailQuery } from "~/lib/runs/queries";
+import { TextTooltip } from "~/components/text-tooltip";
 
 type LiveSummaryProps = { readonly detail: RunDetailView };
 
@@ -71,13 +70,14 @@ const LiveSummary = ({ detail }: LiveSummaryProps) => {
         <section aria-label="Latest message" className="space-y-1">
           <p className="flex items-baseline gap-2 text-xs">
             <span className="font-medium">{message.speaker.name}</span>
-            <time
-              dateTime={message.receivedAt}
-              title={timestampLabel(message.receivedAt)}
-              className="font-mono tabular-nums text-muted-foreground"
-            >
-              {clockLabel(message.receivedAt)}
-            </time>
+            <TextTooltip text={timestampLabel(message.receivedAt)}>
+              <time
+                dateTime={message.receivedAt}
+                className="font-mono tabular-nums text-muted-foreground"
+              >
+                {clockLabel(message.receivedAt)}
+              </time>
+            </TextTooltip>
           </p>
           <p className="line-clamp-6 text-md wrap-anywhere">{previewText(message.text)}</p>
           {message.delivery !== null && (
@@ -218,29 +218,28 @@ export const RunDrawer = ({ runId, open, close }: RunDrawerProps) => {
           )}
           {detail.data !== undefined && <RunSummary detail={detail.data} />}
           {run !== undefined && (
-            <Link
+            <ButtonLink
               {...projectLinks.run(run.repository, run.id)}
               search={{}}
               viewTransition
-              className={buttonVariants({ variant: "outline" })}
+              variant="outline"
             >
               Open run page
-            </Link>
+            </ButtonLink>
           )}
         </div>
         {run !== undefined && (
           <Tooltip>
             <TooltipTrigger
               render={
-                <Link
+                <ButtonLink
                   {...projectLinks.run(run.repository, run.id)}
                   search={{}}
                   viewTransition
                   aria-label="Open run page"
-                  className={cn(
-                    buttonVariants({ variant: "ghost", size: "icon-sm" }),
-                    "absolute top-4 right-11",
-                  )}
+                  variant="ghost"
+                  size="icon-sm"
+                  className="absolute top-4 right-11"
                 />
               }
             >

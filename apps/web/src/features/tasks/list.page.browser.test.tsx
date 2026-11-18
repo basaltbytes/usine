@@ -15,6 +15,7 @@ import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { commands, page, userEvent } from "vitest/browser";
+import { tooltipText } from "~/lib/testing/tooltip";
 import { overviewQuery, attentionQuery, projectId } from "~/lib/overview";
 import { deskQuery } from "~/lib/desk/queries";
 import { routeTree } from "~/route-tree.gen";
@@ -274,9 +275,9 @@ it("marks the priced dollars with an asterisk while a run has no price yet, and 
       }),
     )
     .toBeVisible();
-  await expect
-    .element(page.getByText("$13.45*", { exact: true }))
-    .toHaveAttribute("title", "Some sessions have no price yet; the real figure is higher");
+  expect(await tooltipText(page.getByText("$13.45*", { exact: true }))).toBe(
+    "Some sessions have no price yet; the real figure is higher",
+  );
   const redesign = rowOf(/Redesign the Board columns/u);
   await expect.element(redesign).toMatchTextContent(/#3141 min27\.5K\$9\.95\*$/u);
   await redesign
@@ -306,14 +307,12 @@ it("marks the elapsed time with an asterisk while an attempt has no recorded tim
     )
     .toBeVisible();
   const why = "Some attempts have no recorded timing; the real figure is higher";
-  await expect
-    .element(page.getByText("1 h 26 min*", { exact: true }))
-    .toHaveAttribute("title", why);
+  expect(await tooltipText(page.getByText("1 h 26 min*", { exact: true }))).toBe(why);
   const time = rowOf(/Cache the label catalog/u)
     .getByRole("cell")
     .nth(4);
   await expect.element(time).toMatchTextContent(/^0s\*$/u);
-  await expect.element(time.getByTitle(why)).toBeVisible();
+  expect(await tooltipText(time.getByText("0s*", { exact: true }))).toBe(why);
 });
 
 it("says Needs attention for a failure no stall explains, then the last run's outcome once it is resolved", async () => {
@@ -478,7 +477,10 @@ it("updates the running count beside Overview without counting waiting or queued
     }),
   );
   await mount(list);
-  await expect.element(page.getByTitle("Running", { exact: true })).toHaveTextContent("1 running");
+  const sidebar = page.getByRole("listitem").filter({
+    has: page.getByRole("link", { name: "Overview", exact: true }),
+  });
+  await expect.element(sidebar.getByText("1 running", { exact: true })).toBeVisible();
   queryClient.setQueryData(
     overviewQuery().queryKey,
     ReadyOverview.make({
@@ -491,5 +493,5 @@ it("updates the running count beside Overview without counting waiting or queued
       ),
     }),
   );
-  await expect.element(page.getByTitle("Running", { exact: true })).toHaveTextContent("0 running");
+  await expect.element(sidebar.getByText("0 running", { exact: true })).toBeVisible();
 });

@@ -7,7 +7,7 @@ import { FillCell } from "~/components/fill-cell";
 import { Table, TableBody, TableCell, TableRow } from "~/components/ui/table";
 import { ItemMark } from "~/components/item/mark";
 import {
-  linkedRow,
+  LinkedRow,
   rowLink,
   SectionEmpty,
   SectionHeading,
@@ -30,7 +30,7 @@ export const TaskPullRequests = ({ task, project }: TaskPullRequestsProps) => {
             <TableBody className="border-t">
               {pullRequests.map((pullRequest) => (
                 <Fragment key={pullRequest.itemKey}>
-                  <TableRow className={linkedRow}>
+                  <LinkedRow>
                     <TableCell className="w-0 py-3">
                       <ItemMark item={pullRequest} linked={false} />
                     </TableCell>
@@ -54,7 +54,7 @@ export const TaskPullRequests = ({ task, project }: TaskPullRequestsProps) => {
                         <span className="text-xs text-destructive">Conflicts with base</span>
                       )}
                     </TableCell>
-                  </TableRow>
+                  </LinkedRow>
                   {project !== undefined && (
                     <TableRow className="hover:bg-transparent has-aria-expanded:bg-transparent">
                       <TableCell colSpan={3} className="max-w-0 pt-0 pb-1">

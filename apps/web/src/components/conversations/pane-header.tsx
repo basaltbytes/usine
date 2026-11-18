@@ -15,7 +15,7 @@ type PaneHeaderProps = {
 export const PaneHeader = ({ title, back, children, "aria-busy": busy }: PaneHeaderProps) => (
   <header
     aria-busy={busy}
-    className="flex min-h-16 shrink-0 items-start gap-2 border-b px-5 py-3.5 pr-[var(--inbox-controls,1.25rem)]"
+    className="flex min-h-16 shrink-0 items-start gap-2 border-b px-5 py-3.5 pr-(--inbox-controls,1.25rem)"
   >
     <Button
       variant="ghost"

@@ -2,6 +2,7 @@ import type { StalledItemView } from "@usine/orchestrator/operator";
 import type { ReactNode } from "react";
 import { useNow } from "~/hooks/use-now";
 import { stallSentence } from "~/lib/stall/strings";
+import { TextTooltip } from "~/components/text-tooltip";
 
 type StallNoteProps = {
   readonly stalled: StalledItemView;
@@ -15,10 +16,12 @@ export const StallNote = ({ stalled, named, children }: StallNoteProps) => {
   const sentence = stallSentence(stalled, now);
   return (
     <div data-slot="stall-note" className="flex flex-col items-start gap-1.5 text-xs">
-      <p className="line-clamp-3 text-muted-foreground" title={`${stalled.loop}: ${sentence}`}>
-        {named && <span className="font-medium text-foreground">{stalled.loop} </span>}
-        {sentence}
-      </p>
+      <TextTooltip text={`${stalled.loop}: ${sentence}`} repeats={named}>
+        <p className="line-clamp-3 text-muted-foreground">
+          {named && <span className="font-medium text-foreground">{stalled.loop} </span>}
+          {sentence}
+        </p>
+      </TextTooltip>
       {children}
     </div>
   );

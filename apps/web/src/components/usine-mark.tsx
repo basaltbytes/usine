@@ -1,4 +1,3 @@
-import type { CSSProperties } from "react";
 import { cn } from "~/lib/utils";
 
 /** The tiles in the order work moves through the cell, on a 64-unit grid, with their static opacity. */
@@ -11,11 +10,6 @@ const tiles = [
   { x: 44, y: 24, opacity: 0.87 },
   { x: 44, y: 4, opacity: 1 },
 ] as const;
-
-/** `--tile` is the tile's position in the flow; the running animation delays each tile by it. */
-type TileStyle = CSSProperties & { readonly "--tile": number };
-
-const tileStyle = (index: number): TileStyle => ({ "--tile": index });
 
 type UsineMarkProps = {
   /** Animates the tiles, unless the reader prefers reduced motion. */
@@ -46,7 +40,7 @@ export const UsineMark = ({ running = false, className }: UsineMarkProps) => (
         rx="4"
         fill="currentColor"
         fillOpacity={opacity}
-        style={tileStyle(index)}
+        style={{ "--tile": index }}
       />
     ))}
     <circle cx="32" cy="32" r="6" className="fill-primary" />

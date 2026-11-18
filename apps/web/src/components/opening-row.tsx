@@ -18,4 +18,4 @@ export const OpeningRow = ({ open, children }: OpeningRowProps) => (
 
 /** Classes for the link in the first cell of an `OpeningRow`. */
 export const rowLinkClass =
-  "rounded-sm font-medium whitespace-nowrap outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring/70 focus-visible:outline-solid";
+  "rounded-sm font-medium whitespace-nowrap outline-none focus-visible:outline-2 focus-visible:outline-ring/70 focus-visible:outline-solid";

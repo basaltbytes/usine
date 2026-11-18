@@ -381,7 +381,7 @@ for (const method of ["menu", "keyboard"] as const) {
     );
     await respond(paged);
     queryClient.setQueryData(overviewQuery().queryKey, paged);
-    await page.getByTitle("Open Done", { exact: true }).click();
+    await page.getByRole("region", { name: "Done lane", exact: true }).getByRole("button").click();
     await expect.element(taskIn("Done")).toBeVisible();
     if (method === "menu") {
       await move(1, "Ready");
