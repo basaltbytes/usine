@@ -47,6 +47,7 @@
       "files": ["apps/web/src/**"],
       "rules": {
         "usine/web-import-direction": "error",
+        "usine/require-react-disable-reason": "error",
         "usine/no-manual-memo": "error",
         "usine/no-unreasoned-effect": "error",
         "usine/no-em-dash-copy": "error",

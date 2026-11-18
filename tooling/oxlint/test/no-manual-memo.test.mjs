@@ -45,3 +45,28 @@ for (const [name, source] of [
     assert.equal(result.status, 0, result.stdout + result.stderr);
   });
 }
+
+for (const [name, directive] of [
+  ["bare exclusion", "// oxlint-disable-next-line usine/no-manual-memo"],
+  ["empty reason", "// oxlint-disable-next-line usine/no-manual-memo --"],
+  ["file-wide exclusion", "/* oxlint-disable usine/no-manual-memo */"],
+  ["blanket exclusion", "// oxlint-disable-next-line"],
+  ["blanket exclusion with reason", "// oxlint-disable-next-line -- Browser events."],
+  [
+    "file-wide exclusion with reason",
+    "/* oxlint-disable usine/no-manual-memo -- Browser events. */",
+  ],
+  ["same-line exclusion", "/* oxlint-disable-line usine/no-manual-memo -- Browser events. */"],
+  ["eslint exclusion without reason", "// eslint-disable-next-line usine/no-manual-memo"],
+]) {
+  test(`rejects ${name}`, () => {
+    const result = lint(
+      "hooks/example.ts",
+      `import { useMemo } from "react";
+${directive}
+export const useValue = () => useMemo(() => {}, []);`,
+    );
+    assert.equal(result.status, 1, result.stdout + result.stderr);
+    assert.match(result.stdout, /require-react-disable-reason/u);
+  });
+}

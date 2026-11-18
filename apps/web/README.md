@@ -343,6 +343,8 @@ React Compiler runs in Vite for development, browser tests, and production. `rea
 - **Let the compiler memoize.** Write plain expressions and functions instead of `useMemo`, `useCallback`, or `memo`. `usine/no-manual-memo` enforces this. The two `useVirtualizer()` components are excluded for `IncompatibleLibrary`; any manual memoization they need must carry a disable comment with that reason.
 - **Explain every effect.** Each `useEffect` and `useLayoutEffect` needs an `oxlint-disable-next-line usine/no-unreasoned-effect -- ...` comment naming the external system it synchronizes with, such as a DOM event, server subscription, or browser timer. Derive values during render and handle user actions in handlers. Subscribe to external snapshots with `useSyncExternalStore`.
 
+`usine/require-react-disable-reason` requires explicit rule names and nonempty reasons in next-line exclusions for both rules. Blanket next-line directives and file-wide exclusions of either React rule fail lint.
+
 The registry is the component library, and the theme is the only place for colors and type.
 
 - **Use a registry component first.** Everything under `src/components/ui/` came from `pnpm dlx shadcn@latest add <name>` (run inside `apps/web`; `components.json` has the preset). Compose those primitives (`Item`, `Card`, `Badge`, `Sheet`, `Message`, `Collapsible`, `Empty`, …) in screen files. The full set is installed: check it before writing a new element.

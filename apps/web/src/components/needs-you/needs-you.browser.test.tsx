@@ -4,7 +4,13 @@ import { administratorPermissions } from "@usine/core/access";
 import { PermissionsContext, sessionQuery } from "~/lib/permissions";
 import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
+import {
+  createMemoryHistory,
+  createRootRoute,
+  createRoute,
+  createRouter,
+  RouterProvider,
+} from "@tanstack/react-router";
 import { AttemptId, AttemptNumber } from "@usine/core/attempt";
 import { WorkerName } from "@usine/core/worker";
 import { AgentName } from "@usine/core/agent";
@@ -48,6 +54,7 @@ import { afterEach, beforeEach, expect, it } from "vitest";
 import { commands, page, userEvent } from "vitest/browser";
 import { overviewQuery, attentionQuery, projectId } from "~/lib/overview";
 import { routeTree } from "~/route-tree.gen";
+import { NotificationTray } from "./notification-tray";
 import "~/index.css";
 
 declare module "vitest/browser" {
@@ -794,5 +801,28 @@ it.each(["dark", "light"])(
     await userEvent.keyboard("{Escape}");
     await expect.element(tray()).not.toBeInTheDocument();
     await expect.element(bell(8)).toHaveFocus();
+  },
+);
+
+it.each([1280, 390])(
+  "closes the tray on navigation and keeps it closed on return at %ipx",
+  async (width) => {
+    await page.viewport(width, 844);
+    const rootRoute = createRootRoute({ component: () => <NotificationTray needs={[]} /> });
+    const indexRoute = createRoute({ getParentRoute: () => rootRoute, path: "/" });
+    const otherRoute = createRoute({ getParentRoute: () => rootRoute, path: "/other" });
+    const router = createRouter({
+      routeTree: rootRoute.addChildren([indexRoute, otherRoute]),
+      history: createMemoryHistory({ initialEntries: ["/"] }),
+    });
+    await router.load();
+    flushSync(() => root.render(<RouterProvider router={router} />));
+    await bell(0).click();
+    await expect.element(tray()).toBeVisible();
+    await router.navigate({ href: "/other" });
+    await expect.element(tray()).not.toBeInTheDocument();
+    await router.navigate({ to: "/" });
+    await expect.element(bell(0)).toBeVisible();
+    await expect.element(tray()).not.toBeInTheDocument();
   },
 );
