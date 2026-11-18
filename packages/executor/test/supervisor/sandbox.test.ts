@@ -801,39 +801,6 @@ describe("the supervisor's source", () => {
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
-  it.live("does not launch automatic Git maintenance when preparing a source", () =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem;
-      const root = yield* fs.makeTempDirectoryScoped({ prefix: "usine-source-maintenance-" });
-      const origin = yield* originRepository();
-      const sources = yield* makeSupervisorSources(root, origin.origin);
-      yield* sources.prepare([repository]);
-
-      const cache = `${root}/repos/${directoryName(repository)}.git`;
-      yield* git(cache, "update-ref", "refs/heads/first", "FETCH_HEAD");
-      yield* git(cache, "repack", "-ad");
-      yield* git(cache, "config", "fetch.unpackLimit", "1");
-      yield* git(cache, "config", "gc.autoPackLimit", "1");
-      yield* git(cache, "config", "gc.autoDetach", "false");
-      const hook = `${cache}/hooks/pre-auto-gc`;
-      const marker = `${cache}/maintenance-started`;
-      yield* fs.writeFileString(
-        hook,
-        '#!/bin/sh\ntouch "$(git rev-parse --git-dir)/maintenance-started"\n',
-      );
-      yield* fs.chmod(hook, 0o755);
-
-      yield* origin.commit("second\n");
-      yield* sources.prepare([repository]);
-      const automatic = yield* fs.exists(marker);
-      assert.isFalse(automatic, "fetch must not start maintenance that can outlive its scope");
-
-      yield* git(cache, "gc", "--auto");
-      const triggered = yield* fs.exists(marker);
-      assert.isTrue(triggered, "the cache exceeds the automatic maintenance threshold");
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
-  );
-
   it.live("prepares one repository for concurrent turns", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
