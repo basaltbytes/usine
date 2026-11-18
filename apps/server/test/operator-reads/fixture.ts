@@ -160,6 +160,26 @@ const instance = Effect.gen(function* () {
 const labelOf = (number: number) =>
   number % 10 === 0 ? (LABELS[(number / 10) % LABELS.length] ?? "bug") : "bug";
 
+const comments = (number: number) => ({
+  totalCount: 2,
+  nodes: [1, 2].map((comment) => ({
+    author: { login: "usine-agent[bot]" },
+    body: longBody,
+    createdAt: "2026-10-19T11:00:00Z",
+    url: `https://github.com/basaltbytes/usine/issues/${number}#issuecomment-${comment}`,
+  })),
+});
+
+const thread = (number: number) => ({
+  totalCount: 35,
+  nodes: Array.from({ length: COMMENTS }, (_, comment) => ({
+    author: { login: comment % 2 === 0 ? "usine-agent[bot]" : "PhilDL" },
+    body: commentBody(comment),
+    createdAt: `2026-10-19T11:${String(comment).padStart(2, "0")}:00Z`,
+    url: `https://github.com/basaltbytes/usine/issues/${number}#issuecomment-${comment}`,
+  })),
+});
+
 const issue = (number: number) =>
   ItemProjection.make({
     itemKey: itemKey(number),
@@ -182,15 +202,7 @@ const issue = (number: number) =>
       milestone: null,
       labels: { totalCount: 1, nodes: [{ name: labelOf(number) }] },
       assignees: { totalCount: 0, nodes: [] },
-      comments: {
-        totalCount: 35,
-        nodes: Array.from({ length: COMMENTS }, (_, comment) => ({
-          author: { login: comment % 2 === 0 ? "usine-agent[bot]" : "PhilDL" },
-          body: commentBody(comment),
-          createdAt: `2026-10-19T11:${String(comment).padStart(2, "0")}:00Z`,
-          url: `https://github.com/basaltbytes/usine/issues/${number}#issuecomment-${comment}`,
-        })),
-      },
+      comments: number === BUSY_ITEM ? thread(number) : comments(number),
       closedByPullRequestsReferences: { totalCount: 0, nodes: [] },
     },
     goneAt: Option.none(),
