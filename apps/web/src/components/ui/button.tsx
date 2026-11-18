@@ -39,7 +39,7 @@ const buttonVariants = cva(
         metadata: "h-7 gap-1 px-2 text-xs font-normal [&_svg:not([class*='size-'])]:size-3.5",
         compact: "h-6 gap-1 px-0 text-xs [&_svg:not([class*='size-'])]:size-3.5",
         inline: "h-auto gap-1 p-0 text-xs [&_svg:not([class*='size-'])]:size-3.5",
-        text: "h-auto gap-0 p-0 font-normal text-inherit [&_svg:not([class*='size-'])]:size-3.5",
+        text: "h-auto gap-0 p-0 font-normal [&_svg:not([class*='size-'])]:size-3.5",
         segment:
           "h-auto min-w-0 gap-1.5 px-2 text-sm font-normal [&_svg:not([class*='size-'])]:size-4",
         "segment-icon":

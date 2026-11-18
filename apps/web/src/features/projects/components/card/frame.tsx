@@ -2,7 +2,7 @@ import type { ComponentProps } from "react";
 import { Card } from "~/components/ui/card";
 import { cn } from "~/lib/utils";
 
-type CardFrameProps = Readonly<ComponentProps<typeof Card>> & {
+type CardFrameProps = Readonly<Omit<ComponentProps<typeof Card>, "variant" | "tone">> & {
   /** Whether the Task needs the operator, which turns the ring peach. */
   readonly needsYou: boolean;
 };

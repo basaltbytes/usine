@@ -1,7 +1,7 @@
 import type { ComponentProps, ReactNode } from "react";
 import { TableRow } from "~/components/ui/table";
 
-type LinkedRowProps = Readonly<ComponentProps<typeof TableRow>>;
+type LinkedRowProps = Readonly<Omit<ComponentProps<typeof TableRow>, "variant">>;
 
 /** Renders a table row covered by one link; hover and the link's keyboard focus highlight the row. */
 export const LinkedRow = ({ className, ...props }: LinkedRowProps) => (
