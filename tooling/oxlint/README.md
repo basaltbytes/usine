@@ -8,4 +8,6 @@ Application modules use named exports, enforced by `import/no-default-export`. V
 
 `usine/no-native-title-tooltip`, `usine/no-outset-state-indicators`, `usine/no-raw-resize-observer`, and `usine/no-em-dash-copy` check the web UI in `apps/web/src`, next to `@shadcn/lint`. "How to add UI" in [`apps/web/README.md`](../../apps/web/README.md#how-to-add-ui) describes them. `no-outset-state-indicators` skips `components/ui/` and `components/ai-elements/`.
 
+`usine/no-manual-memo` rejects React `useMemo`, `useCallback`, and `memo` calls, including aliased and namespace imports. `usine/no-unreasoned-effect` requires a disable comment explaining the external synchronization for each React `useEffect` and `useLayoutEffect`. Both rules cover registry components and resolve import bindings so unrelated or shadowed functions are unaffected.
+
 Run `pnpm --filter @usine/oxlint test` to check these rules through the oxlint CLI.
