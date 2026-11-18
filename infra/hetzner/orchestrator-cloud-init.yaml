@@ -164,7 +164,9 @@ write_files:
       chown usine:usine /home/usine/.npmrc
       runuser -l usine -c 'npm install --global @usine/server'
       install -d -o usine -g usine -m 0700 /home/usine/factory /home/usine/.ssh
-      # The docker group runs the supervisor's containers and is equivalent to root on this server.
+      # The docker group lets usine run the supervisor's containers. Its members control the Docker
+      # daemon, which runs as root, so they can start a container that mounts any host path or
+      # runs privileged: usine is equivalent to root on this server, which runs only usine.
       # usine.service starts after this, so it has the group.
       usermod --append --groups docker usine
       sysctl --system > /dev/null

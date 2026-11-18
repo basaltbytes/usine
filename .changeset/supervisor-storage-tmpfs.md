@@ -12,4 +12,4 @@ Supervisor turns run under the documented systemd unit, which sets `NoNewPrivile
 
 Startup runs a check in the background: a container with a turn's limits and in-memory home, into which usine copies a small home and back out. **Configuration > Settings** and `GET /api/conversations/status` report the supervisor as ready only after the check passes, and give the reason while it runs or after it fails. Under `NoNewPrivileges`, rootless Podman is reported as unable to run, because it needs the setuid helpers `newuidmap` and `newgidmap`.
 
-Startup removes the ext4 conversation images of earlier `next` versions with their directories and logs one line for each. The next turn of such a conversation starts a new harness session.
+Startup removes the ext4 conversation images of earlier `next` versions and every conversation directory they used, and logs one line for each. The next turn of such a conversation starts a new harness session.

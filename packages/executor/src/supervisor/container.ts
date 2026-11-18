@@ -12,6 +12,7 @@ import {
 } from "@usine/agents/supervisor";
 import type { Harness, ModelId } from "@usine/core/agent/brain";
 import { conversationKey, type ConversationKey } from "./names.ts";
+import { confinedDirectory } from "./confine.ts";
 import { bindMount, mountField } from "../bind-mount.ts";
 import { prepareImage } from "./image.ts";
 import { ConversationHomes } from "./homes/homes.ts";
@@ -527,9 +528,7 @@ const makeContainerSandbox = Effect.fn("SupervisorSandbox.make")(function* (
   const checkContainer = Effect.fn("SupervisorSandbox.checkContainer")(
     function* () {
       const paths = conversationPaths(`${options.root}/startup-check`);
-      yield* fs
-        .makeDirectory(paths.workspace, { recursive: true })
-        .pipe(Effect.mapError(unavailableBecause("create the startup check's directory")));
+      yield* confinedDirectory(fs, options.root, paths.workspace);
       const suffix = (yield* Random.nextIntBetween(0, 0xffffffff)).toString(16);
       const container = { runtime: runtime.runtime, name: `usine-supervisor-check-${suffix}` };
       yield* Effect.addFinalizer(() => cleanup(CHECK_CONVERSATION).pipe(Effect.asVoid));
@@ -752,15 +751,15 @@ const makeContainerSandbox = Effect.fn("SupervisorSandbox.make")(function* (
     }
     // The workspace, and the mount points of the sources in it, exist before they're mounted, even
     // for a turn without sources: Podman refuses a missing mount source, and Docker creates it as
-    // its daemon's user.
+    // its daemon's user. A runtime follows links in a mount source, so none is followed here.
     yield* Effect.forEach(
       [
         paths.workspace,
         ...request.sources.map(({ repository }) => `${paths.workspace}/${repository}`),
       ],
-      (directory) => fs.makeDirectory(directory, { recursive: true }),
+      (directory) => confinedDirectory(fs, options.root, directory),
       { discard: true },
-    ).pipe(Effect.mapError(unavailableBecause("create the conversation's directories")));
+    );
     const written = yield* checkWorkspaceSize(fs, paths.workspace, limits);
     const wiring = wiringOf(request.harness, paths);
     const route = yield* openRoute.pipe(

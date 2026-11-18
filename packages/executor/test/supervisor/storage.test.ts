@@ -220,6 +220,24 @@ describe("supervisor conversation storage", () => {
     ),
   );
 
+  it.live("refuses to mount a workspace through a link, before starting a container", () =>
+    withRoot((root) =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const calls: Array<ReadonlyArray<string>> = [];
+        const outside = yield* fs.makeTempDirectoryScoped({ prefix: "usine-outside-" });
+        yield* fs.makeDirectory(`${root}/conversations/${key}`, { recursive: true });
+        yield* fs.symlink(outside, `${root}/conversations/${key}/workspace`);
+        const refused = yield* Effect.gen(function* () {
+          const sandbox = yield* sandboxAt(root);
+          return yield* sandbox.open(turn).pipe(Effect.scoped, Effect.flip);
+        }).pipe(Effect.provide(podman(calls)));
+        assert.include(refused.message, "is a SymbolicLink, not a directory");
+        assert.lengthOf(turnRuns(calls), 0);
+      }),
+    ),
+  );
+
   it.live("bounds the session files that the orchestrator's own harness writes", () =>
     withRoot((root) =>
       Effect.gen(function* () {
@@ -249,52 +267,51 @@ describe("supervisor conversation storage", () => {
     ),
   );
 
-  it.live("removes each conversation image of the FUSE storage at startup, with a log line", () =>
-    withRoot((root) =>
-      Effect.gen(function* () {
-        const fs = yield* FileSystem.FileSystem;
-        const legacy = conversationKey(AgentSessionId.make("legacy"));
-        const creating = conversationKey(AgentSessionId.make("creating"));
-        const other = conversationKey(AgentSessionId.make("other"));
-        yield* fs.makeDirectory(`${root}/disks`, { recursive: true });
-        yield* fs.writeFileString(`${root}/disks/${legacy}.ext4`, "image");
-        yield* fs.writeFileString(`${root}/disks/${creating}.ext4.creating`, "image");
-        for (const directory of [legacy, creating, other])
-          yield* fs.makeDirectory(`${root}/conversations/${directory}/home`, { recursive: true });
-        const removals: Array<unknown> = [];
-        yield* sandboxAt(root).pipe(
-          Effect.provide([
-            podman([]),
-            Logger.layer([
-              Logger.make<unknown, void>(({ message }) => {
-                if (Array.isArray(message) && String(message[0]).startsWith("Removed a supervisor"))
-                  removals.push(message);
-              }),
+  it.live(
+    "removes every conversation image and directory of the FUSE storage at startup, with a log line each",
+    () =>
+      withRoot((root) =>
+        Effect.gen(function* () {
+          const fs = yield* FileSystem.FileSystem;
+          const outside = yield* fs.makeTempDirectoryScoped({ prefix: "usine-outside-" });
+          yield* fs.writeFileString(`${outside}/keep`, "outside the instance");
+          const legacy = conversationKey(AgentSessionId.make("legacy"));
+          const creating = conversationKey(AgentSessionId.make("creating"));
+          // A conversation whose image was never created, with a link that a turn's shell left.
+          const imageless = conversationKey(AgentSessionId.make("imageless"));
+          yield* fs.makeDirectory(`${root}/disks`, { recursive: true });
+          yield* fs.writeFileString(`${root}/disks/${legacy}.ext4`, "image");
+          yield* fs.writeFileString(`${root}/disks/${creating}.ext4.creating`, "image");
+          for (const directory of [legacy, creating, imageless])
+            yield* fs.makeDirectory(`${root}/conversations/${directory}/home`, { recursive: true });
+          yield* fs.symlink(outside, `${root}/conversations/${imageless}/home/link`);
+          const removals: Array<unknown> = [];
+          yield* sandboxAt(root).pipe(
+            Effect.provide([
+              podman([]),
+              Logger.layer([
+                Logger.make<unknown, void>(({ message }) => {
+                  if (Array.isArray(message) && String(message[0]).startsWith("Removed supervisor"))
+                    removals.push(message[1]);
+                }),
+              ]),
             ]),
-          ]),
-        );
-        assert.sameDeepMembers(removals, [
-          [
-            "Removed a supervisor conversation image from an earlier version",
-            {
-              image: `${root}/disks/${legacy}.ext4`,
-              directory: `${root}/conversations/${legacy}`,
-            },
-          ],
-          [
-            "Removed a supervisor conversation image from an earlier version",
-            {
-              image: `${root}/disks/${creating}.ext4.creating`,
-              directory: `${root}/conversations/${creating}`,
-            },
-          ],
-        ]);
-        const disks = yield* fs.exists(`${root}/disks`);
-        assert.isFalse(disks);
-        const conversations = yield* fs.readDirectory(`${root}/conversations`);
-        assert.deepStrictEqual(conversations, [other]);
-      }),
-    ),
+          );
+          assert.sameDeepMembers(removals, [
+            { path: `${root}/disks/${legacy}.ext4` },
+            { path: `${root}/disks/${creating}.ext4.creating` },
+            ...[legacy, creating, imageless].map((key) => ({
+              path: `${root}/conversations/${key}`,
+            })),
+          ]);
+          const disks = yield* fs.exists(`${root}/disks`);
+          assert.isFalse(disks);
+          const conversations = yield* fs.readDirectory(`${root}/conversations`);
+          assert.deepStrictEqual(conversations, []);
+          const kept = yield* fs.readFileString(`${outside}/keep`);
+          assert.strictEqual(kept, "outside the instance", "removal doesn't follow links");
+        }),
+      ),
   );
 });
 

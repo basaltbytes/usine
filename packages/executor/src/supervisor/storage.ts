@@ -90,9 +90,12 @@ export const checkWorkspaceSize = Effect.fn("SupervisorStorage.checkWorkspaceSiz
 });
 
 /**
- * Removes the conversation images of the FUSE storage that earlier versions used, with the
- * directories they were mounted at, and logs each removal. A conversation without saved state
- * starts a new harness session at its next turn.
+ * Removes the FUSE storage of earlier versions: each conversation image in `disks`, and each
+ * directory in `conversations`, which those versions mounted the images at and turns could write
+ * to. Logs each removal. Earlier versions created `disks` before any conversation directory, and
+ * this version never creates it, so `disks` marks that layout; it is removed last, so that a
+ * startup after a failed removal tries again. A conversation without saved state starts a new
+ * harness session at its next turn.
  */
 export const removeFuseStorage = Effect.fn("SupervisorStorage.removeFuseStorage")(function* (
   root: string,
@@ -100,26 +103,25 @@ export const removeFuseStorage = Effect.fn("SupervisorStorage.removeFuseStorage"
   const fs = yield* FileSystem.FileSystem;
   const disks = `${root}/disks`;
   if (!(yield* fs.exists(disks))) return;
-  for (const file of yield* fs.readDirectory(disks)) {
-    const key = /^([0-9a-f]{64})\.ext4(\.creating)?$/u.exec(file)?.[1];
-    if (key === undefined) continue;
-    const image = `${disks}/${file}`;
-    const directory = `${root}/conversations/${key}`;
-    const removed = yield* fs
-      .remove(image, { force: true })
-      .pipe(Effect.andThen(fs.remove(directory, { recursive: true, force: true })), Effect.result);
+  const conversations = `${root}/conversations`;
+  const directories = (yield* fs.exists(conversations))
+    ? (yield* fs.readDirectory(conversations)).map((name) => `${conversations}/${name}`)
+    : [];
+  const images = (yield* fs.readDirectory(disks)).map((name) => `${disks}/${name}`);
+  let failed = 0;
+  for (const path of [...directories, ...images]) {
+    const removed = yield* fs.remove(path, { recursive: true, force: true }).pipe(Effect.result);
     if (Result.isSuccess(removed))
-      yield* Effect.logInfo("Removed a supervisor conversation image from an earlier version", {
-        image,
-        directory,
+      yield* Effect.logInfo("Removed supervisor storage from an earlier version", { path });
+    else {
+      failed += 1;
+      yield* Effect.logWarning("Could not remove supervisor storage from an earlier version", {
+        path,
+        message: removed.failure.message,
       });
-    else
-      yield* Effect.logWarning(
-        "Could not remove a supervisor conversation image from an earlier version",
-        { image, directory, message: removed.failure.message },
-      );
+    }
   }
-  if ((yield* fs.readDirectory(disks)).length === 0) yield* fs.remove(disks, { recursive: true });
+  if (failed === 0) yield* fs.remove(disks, { recursive: true });
 });
 
 /**

@@ -40,7 +40,7 @@ You also need a GitHub account that can create and install a GitHub App. For HTT
    sudo usermod --append --groups docker usine
    ```
 
-   Members of the `docker` group control the Docker daemon, which runs as root, so the `usine` user is equivalent to root on this server. A running service only picks up the new group when it restarts; if `usine.service` already runs, restart it. Skip this step if you don't configure a supervisor.
+   Members of the `docker` group control the Docker daemon, which runs as root: they can start a container that mounts any path of the server or runs privileged. The `usine` user is then equivalent to root, so run usine on a server dedicated to it. Rootless Docker avoids the group, because its daemon runs as the `usine` user outside the unit; usine supports it, but it is untested. A running service only picks up the new group when it restarts; if `usine.service` already runs, restart it. Skip this step if you don't configure a supervisor.
 
 3. As an administrator, create `/etc/systemd/system/usine.service`:
 
