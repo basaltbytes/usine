@@ -264,6 +264,22 @@ To recover a saved row, the run page loads up to 20 earlier pages. If the row is
 
 Bookmarks expire after 30 days. Each browser origin keeps up to 20 runs, the 200 most recent disclosure choices per run, and at most 512,000 characters of bookmark data: identities, preferences, a row-relative position, and the acknowledged transcript sequence, but no transcript text or tool payloads. If browser storage is disabled or full, the conversation still works, but can't restore a saved place.
 
+## Supervisor conversations
+
+The supervisor inbox lists the conversations a member can read, by latest activity, beside the open conversation. The conversation icon in the page header opens it in a sheet over the current page and shows the member's unread count, with no badge at zero. **Conversations** in the sidebar opens it as a full page at `/conversations`. The root search parameter `conversation` holds the open conversation's ID, `new` for the form that starts one, or `inbox` for the list with nothing open, so a reload or a link reopens it. The sheet is 896px wide from 1024px; when the inbox has 768px or more of its own width it shows the list and the open conversation side by side, and narrower it shows one of them with a back control.
+
+Each row shows the title, the scope, who started the conversation, the time since its last activity, one line of its last message, and the last turn's state while it is queued, running, or failed. An unread row has a dot and a bold title. A conversation is unread for a member when someone else posted, the supervisor answered, or a turn failed after the member's read marker. Opening a conversation marks it read through its last message, and so does a new message or a failed turn while it is open and the page is visible; the list and the header count update at once. Marking read sends no change notice, so another tab of the same member updates on its next list read.
+
+In the list, the arrow keys or J and K move between rows, and Enter opens one. Escape goes back from a conversation to the list, then closes the sheet. When the sheet opens, focus moves to the prompt input, else to the open row, else to the first row. Opening a row while the list and the conversation share one column moves focus to the back control, and going back focuses the row again.
+
+The thread and the prompt input use the AI Elements Chat components: Message Scroller, Message, Bubble, and Input Group. A new conversation takes a scope, the instance or a project the member can operate on (the current page's project first), and a first message. Each turn shows the member's message, the turn's text and tool calls while it runs (paired by call ID), and the answer as Markdown. A turn queued behind a running one says so. Failed turns show their reason, and canceled turns name who canceled them. Members with operate access see **Cancel turn** on queued and running turns. **New conversation** shows only when the supervisor is ready and the member can operate on a scope.
+
+The prompt input sends on Enter and adds a line on Shift+Enter. A posted message shows at once as pending; if the server refuses it, the message is removed, the draft comes back, and the error shows above the input. Members without operate access, signed-out sessions, and an instance whose supervisor isn't set up (the inbox shows the reason) get no prompt input.
+
+Markdown across the app, conversations and run transcripts included, shows an image as a link to its URL, so the browser loads nothing until a click. Only `http`, `https`, and `mailto` URLs become links, they open in a new tab, and raw HTML shows as text.
+
+An open conversation reads new events after the last one it holds. A `conversation` change notice refetches that conversation, its events, and the list; nothing polls.
+
 ## Commands and refresh status
 
 The **Overview** sidebar entry shows the number of running runs beside the Needs attention count. Both counts update from the overview query.

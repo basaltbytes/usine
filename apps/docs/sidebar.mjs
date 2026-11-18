@@ -60,6 +60,7 @@ export const guideGroups = [
       { slug: "guides/approve-a-run" },
       { slug: "guides/follow-a-run" },
       { slug: "guides/message-an-agent" },
+      { slug: "guides/ask-the-supervisor" },
       { slug: "guides/answer-an-agent" },
       { slug: "guides/cancel-a-run" },
       { slug: "guides/retry-a-run" },

@@ -33,10 +33,9 @@ import {
   Facts,
   Missing,
   NotLoaded,
-  OpeningRow,
-  rowLinkClass,
   Unset,
 } from "~/features/configuration/components/section";
+import { OpeningRow, rowLinkClass } from "~/components/opening-row";
 
 const agentCounts = (configuration: ConfigurationView): string =>
   [

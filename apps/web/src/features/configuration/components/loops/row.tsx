@@ -5,7 +5,7 @@ import { TableCell } from "~/components/ui/table";
 import { LoopState } from "~/features/configuration/components/loops/state";
 import { type PauseLoop } from "~/features/configuration/components/loops/list";
 import { PauseButton } from "~/features/configuration/components/loops/pause-button";
-import { OpeningRow, rowLinkClass } from "~/features/configuration/components/section";
+import { OpeningRow, rowLinkClass } from "~/components/opening-row";
 import { approvalLabel } from "~/features/configuration/strings";
 import { triggerLabel } from "~/lib/strings";
 

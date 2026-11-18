@@ -1,7 +1,8 @@
-import { Schema } from "effect";
+import { Option, Schema } from "effect";
 import { renderToStaticMarkup } from "react-dom/server";
 import { assert, describe, it } from "vitest";
 import { presentFile } from "~/lib/runs/transcript/tool/files";
+import { presentTool } from "~/lib/runs/transcript/tool/presentation";
 import { ToolSections } from "~/components/runs/transcript/tool/content";
 
 describe("file presentation", () => {
@@ -107,5 +108,48 @@ describe("file presentation", () => {
     assert.include(markup, "The file has been updated successfully.");
     assert.isBelow(markup.indexOf("const before = 1;"), markup.indexOf("const after = 2;"));
     assert.isBelow(markup.indexOf("const after = 2;"), markup.indexOf("The file has been updated"));
+  });
+});
+
+describe("MCP tool presentation", () => {
+  it("titles a Claude MCP call by its operation and keeps the full name", () => {
+    const view = presentTool({
+      key: "call-1",
+      name: "mcp__usine__overview",
+      start: Option.some({ input: Schema.Json.make({ view: "attention" }) }),
+      state: { _tag: "Running" },
+    });
+    assert.equal(view.title, "overview");
+    assert.equal(view.name, "mcp__usine__overview");
+    assert.equal(view.subject, "1 parameter");
+  });
+
+  it("titles a Codex MCP call by its operation and names its server in the full name", () => {
+    const view = presentTool({
+      key: "call-1",
+      name: "mcpToolCall",
+      start: Option.some({
+        input: Schema.Json.make({
+          type: "mcpToolCall",
+          server: "usine",
+          tool: "overview",
+          arguments: { view: "attention" },
+        }),
+      }),
+      state: { _tag: "Running" },
+    });
+    assert.equal(view.title, "overview");
+    assert.equal(view.name, "usine · overview");
+  });
+
+  it("keeps a tool name that has no MCP prefix", () => {
+    const view = presentTool({
+      key: "call-1",
+      name: "TodoWrite",
+      start: Option.none(),
+      state: { _tag: "Running" },
+    });
+    assert.equal(view.title, "TodoWrite");
+    assert.equal(view.name, "TodoWrite");
   });
 });

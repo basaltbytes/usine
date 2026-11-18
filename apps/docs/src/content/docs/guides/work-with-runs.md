@@ -10,7 +10,8 @@ Follow work from approval through its attempts and outcome. Use these guides to 
 1. [Approve a run](/guides/approve-a-run/)
 2. [Follow a run](/guides/follow-a-run/)
 3. [Message a running agent](/guides/message-an-agent/)
-4. [Answer an agent question or blocker](/guides/answer-an-agent/)
+4. [Ask the supervisor](/guides/ask-the-supervisor/)
+5. [Answer an agent question or blocker](/guides/answer-an-agent/)
 
 ## Stop or repeat work
 

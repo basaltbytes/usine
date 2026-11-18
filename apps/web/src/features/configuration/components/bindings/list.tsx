@@ -11,11 +11,8 @@ import {
   TableRow,
 } from "~/components/ui/table";
 import { ListEmpty } from "~/features/configuration/components/list-empty";
-import {
-  ConfigurationPage,
-  OpeningRow,
-  rowLinkClass,
-} from "~/features/configuration/components/section";
+import { ConfigurationPage } from "~/features/configuration/components/section";
+import { OpeningRow, rowLinkClass } from "~/components/opening-row";
 import { bindingCopy, emptyListCopy, plural } from "~/features/configuration/strings";
 
 type Binding = ConfigurationView["bindings"][number];

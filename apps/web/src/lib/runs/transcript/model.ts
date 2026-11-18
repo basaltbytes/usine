@@ -80,6 +80,16 @@ type ToolState =
       readonly output: Schema.Json;
     };
 
+/** What presenting a tool call reads, in a run's transcript or a conversation. */
+export interface ToolCall {
+  readonly key: string;
+  readonly name: string;
+  readonly start: Option.Option<{ readonly input: Schema.Json }>;
+  readonly state:
+    | { readonly _tag: "Running" | "Stopped" }
+    | { readonly _tag: "Finished" | "Error"; readonly output: Schema.Json };
+}
+
 /** A tool call matched within its Attempt and session; `start` can come from outside the loaded page. */
 export interface TranscriptTool extends TranscriptPosition {
   readonly _tag: "Tool";

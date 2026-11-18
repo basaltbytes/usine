@@ -96,20 +96,28 @@ import {
   ConversationStatusView,
   ConversationsView,
   ConversationView,
+  MarkReadPayload,
   MessagePayload,
   PostedView,
+  ReadMarkerView,
   StartConversationPayload,
   TurnView,
 } from "../conversation/view.ts";
 export {
   ConversationEventsView,
   ConversationStatusView,
+  ConversationSummaryView,
   ConversationsView,
   ConversationView,
   EVENTS_PAGE,
+  MarkReadPayload,
   MessagePayload,
   PostedView,
+  PREVIEW_LENGTH,
+  readMarkerView,
+  ReadMarkerView,
   StartConversationPayload,
+  summaryView,
   turnView,
   TurnView,
 } from "../conversation/view.ts";
@@ -519,7 +527,7 @@ const conversationGroup = HttpApiGroup.make("conversation")
       .annotate(OpenApi.Summary, "List conversations")
       .annotate(
         OpenApi.Description,
-        "Lists the conversations that the caller can read, newest first. `anchor` selects those with that anchor key: the lowercase hex SHA-256 of the JSON array `[kind, reference]`.",
+        "Lists the conversations that the caller can read, latest activity first. Each has its latest turn, a preview of its latest message, and, for a member, whether it has activity they haven't read. `anchor` selects those with that anchor key: the lowercase hex SHA-256 of the JSON array `[kind, reference]`.",
       ),
     HttpApiEndpoint.post("startConversation", "/api/conversations", {
       payload: StartConversationPayload,
@@ -562,6 +570,16 @@ const conversationGroup = HttpApiGroup.make("conversation")
       .annotate(
         OpenApi.Description,
         "Appends a member message and queues the turn that answers it, behind the conversation's earlier turns. The turn runs with the caller's access.",
+      ),
+    HttpApiEndpoint.post("markRead", "/api/conversations/:conversation/read", {
+      params: { conversation: ConversationId },
+      payload: MarkReadPayload,
+      success: ReadMarkerView,
+    })
+      .annotate(OpenApi.Summary, "Mark a conversation read")
+      .annotate(
+        OpenApi.Description,
+        "Marks the conversation read by the calling member through the message `through`, or through its last message if `through` is later. A marker never moves back. Needs a member credential and read on the scope. It notifies no one.",
       ),
     HttpApiEndpoint.post("cancelTurn", "/api/conversations/:conversation/turns/:turn/cancel", {
       params: { conversation: ConversationId, turn: TurnId },
@@ -1107,6 +1125,7 @@ export const conversationPermissions = {
   conversation: "read",
   conversationEvents: "read",
   postMessage: "operate",
+  markRead: "read",
   cancelTurn: "operate",
 } as const satisfies Record<
   keyof typeof OperatorApi.groups.conversation.endpoints,

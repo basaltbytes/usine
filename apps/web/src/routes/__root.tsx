@@ -5,8 +5,27 @@ import { CommandPalette } from "~/components/command-palette/palette";
 import { PageCommandsProvider, PageCommandsScope } from "~/components/command-palette/context";
 import { RefreshProvider } from "~/components/refresh/provider";
 import { membersLabel, tokensPageLabel } from "~/lib/strings";
-import { WarningIcon } from "@phosphor-icons/react";
-import { useQueryClient, useSuspenseQuery, type QueryClient } from "@tanstack/react-query";
+import { ChatsCircleIcon, WarningIcon } from "@phosphor-icons/react";
+import { ConversationId } from "@usine/core/conversation";
+import { Tooltip, TooltipContent, TooltipTrigger } from "~/components/ui/tooltip";
+import { useOpenConversation } from "~/hooks/use-open-conversation";
+import {
+  conversationQuery,
+  conversationsQuery,
+  conversationStatusQuery,
+  unreadCount,
+} from "~/lib/conversations/queries";
+import {
+  conversationsTitle,
+  openConversationsLabel,
+  openConversationsWithUnread,
+} from "~/lib/conversations/strings";
+import {
+  useQuery,
+  useQueryClient,
+  useSuspenseQuery,
+  type QueryClient,
+} from "@tanstack/react-query";
 import {
   createRootRouteWithContext,
   type ErrorComponentProps,
@@ -39,6 +58,7 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "~/components/ui/breadcrumb";
+import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "~/components/ui/sidebar";
 import { ConfigurationCrumbs } from "~/components/configuration/navigation";
@@ -58,8 +78,55 @@ const RunDrawer = lazy(() =>
   import("~/components/runs/drawer").then(({ RunDrawer: drawer }) => ({ default: drawer })),
 );
 
-/** `run` is in the root search so the Run drawer can open over any route. */
-const RootSearch = Schema.toStandardSchemaV1(Schema.Struct({ run: Schema.optional(RunId) }));
+// Loaded on first open, like the Run drawer.
+const ConversationPanel = lazy(() =>
+  import("~/components/conversations/panel").then(({ ConversationPanel: panel }) => ({
+    default: panel,
+  })),
+);
+
+/**
+ * `run` and `conversation` are in the root search so the Run drawer and the supervisor inbox can
+ * open over any route. `conversation` is a conversation ID, `new` for the form that starts one,
+ * or `inbox` for the list with nothing open.
+ */
+const RootSearch = Schema.toStandardSchemaV1(
+  Schema.Struct({
+    run: Schema.optional(RunId),
+    conversation: Schema.optional(
+      Schema.Union([Schema.Literals(["inbox", "new"]), ConversationId]),
+    ),
+  }),
+);
+
+/** The header control that opens the supervisor inbox, with the member's unread count. */
+const InboxButton = () => {
+  const openConversation = useOpenConversation();
+  const { data: unread = 0 } = useQuery({ ...conversationsQuery(), select: unreadCount });
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button
+            variant="ghost"
+            className="relative h-9 shrink-0 px-2 pointer-coarse:h-11 pointer-coarse:min-w-11"
+            aria-label={openConversationsWithUnread(unread)}
+            onClick={() => openConversation("inbox")}
+          />
+        }
+      >
+        <ChatsCircleIcon aria-hidden="true" className="size-4" />
+        {unread > 0 && (
+          // Over the icon's corner, so the count appearing shifts nothing in the header.
+          <Badge className="pointer-events-none absolute top-0.5 right-0 h-4 min-w-4 bg-primary px-1 text-xs tabular-nums text-primary-foreground ring-2 ring-background">
+            {unread}
+          </Badge>
+        )}
+      </TooltipTrigger>
+      <TooltipContent side="bottom">{openConversationsLabel}</TooltipContent>
+    </Tooltip>
+  );
+};
 
 interface RouterContext {
   readonly queryClient: QueryClient;
@@ -111,6 +178,12 @@ const Crumbs = ({ view, project, runId, task }: CrumbsProps) => {
       </BreadcrumbItem>
     );
   if (view === "configuration") return <ConfigurationCrumbs />;
+  if (view === "conversations")
+    return (
+      <BreadcrumbItem>
+        <BreadcrumbPage>{conversationsTitle}</BreadcrumbPage>
+      </BreadcrumbItem>
+    );
   if (project === undefined)
     return (
       <BreadcrumbItem>
@@ -183,7 +256,7 @@ const Shell = () => {
     ...attentionQuery(),
     select: (view) => view.needsYou,
   });
-  const { run } = Route.useSearch();
+  const { run, conversation } = Route.useSearch();
   // Plain useNavigate resolves "." against the current route; Route.useNavigate would pin it to "/".
   const navigate = useNavigate();
   const params = useParams({ strict: false });
@@ -200,6 +273,13 @@ const Shell = () => {
   // Keeps the last opened Run so the Sheet stays mounted during its exit transition.
   const [shownRun, setShownRun] = useState(run);
   if (run !== undefined && run !== shownRun) setShownRun(run);
+  const closeConversation = () =>
+    void navigate({ to: ".", search: ({ conversation: _conversation, ...rest }) => rest });
+  // The conversations page shows the inbox itself, so the search param opens no sheet there.
+  const inboxPage = view === "conversations";
+  const [shownConversation, setShownConversation] = useState(conversation);
+  if (conversation !== undefined && conversation !== shownConversation)
+    setShownConversation(conversation);
   const live = data._tag !== "NeedsSetup";
   return (
     <Toaster>
@@ -238,6 +318,7 @@ const Shell = () => {
                 </BreadcrumbList>
               </Breadcrumb>
               <CommandPalette overview={data} />
+              <InboxButton />
               <NotificationTray needs={needs} />
             </header>
             <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
@@ -255,7 +336,9 @@ const Shell = () => {
                   </AlertDescription>
                 </Alert>
               )}
-              <PageCommandsScope active={run === undefined}>
+              <PageCommandsScope
+                active={run === undefined && (conversation === undefined || inboxPage)}
+              >
                 <RefreshProvider>
                   <Outlet />
                 </RefreshProvider>
@@ -273,6 +356,16 @@ const Shell = () => {
                 </Suspense>
               )}
             </PageCommandsScope>
+            {shownConversation !== undefined && !inboxPage && (
+              <Suspense fallback={null}>
+                <ConversationPanel
+                  target={shownConversation}
+                  open={conversation !== undefined}
+                  close={closeConversation}
+                  project={project === undefined ? undefined : projectId(project)}
+                />
+              </Suspense>
+            )}
           </PageCommandsProvider>
         </SidebarInset>
       </SidebarProvider>
@@ -293,17 +386,31 @@ const Root = () => {
 
 export const Route = createRootRouteWithContext<RouterContext>()({
   validateSearch: RootSearch,
-  loaderDeps: ({ search }) => ({ run: search.run }),
-  loader: async ({ context: { queryClient }, deps: { run }, location }) => {
+  loaderDeps: ({ search }) => ({ run: search.run, conversation: search.conversation }),
+  loader: async ({ context: { queryClient }, deps: { run, conversation }, location }) => {
     if (location.pathname === "/sign-in" || location.pathname === "/setup") return;
     const session = await queryClient.ensureQueryData(sessionQuery());
     if (!canReadOverview(session.permissions)) return;
+    // Starts the header's unread count early without holding the page for it.
+    void queryClient.prefetchQuery(conversationsQuery());
     await Promise.all([
       queryClient.ensureQueryData(overviewQuery()),
       queryClient.ensureQueryData(attentionQuery()),
       // A rejected drawer query is displayed inside the drawer.
       Promise.allSettled(
         run === undefined ? [] : [queryClient.ensureQueryData(runDetailQuery(queryClient, run))],
+      ),
+      // A rejected conversation query is displayed inside the panel.
+      Promise.allSettled(
+        conversation === undefined
+          ? []
+          : [
+              queryClient.ensureQueryData(conversationStatusQuery()),
+              queryClient.ensureQueryData(conversationsQuery()),
+              ...(conversation === "new" || conversation === "inbox"
+                ? []
+                : [queryClient.ensureQueryData(conversationQuery(conversation))]),
+            ],
       ),
     ]);
   },

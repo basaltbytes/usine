@@ -4,7 +4,7 @@ import type { WorkerConfigurationView } from "@usine/orchestrator/operator";
 import { FillCell } from "~/components/fill-cell";
 import { TableCell } from "~/components/ui/table";
 import { PreflightState } from "~/features/configuration/components/workers/preflight";
-import { OpeningRow, rowLinkClass } from "~/features/configuration/components/section";
+import { OpeningRow, rowLinkClass } from "~/components/opening-row";
 import { SlotCells } from "~/features/configuration/components/workers/slots";
 import { workerKindLabel, workerPlace } from "~/features/configuration/strings";
 import { useNow } from "~/hooks/use-now";

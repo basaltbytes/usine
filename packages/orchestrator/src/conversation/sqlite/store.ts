@@ -18,7 +18,9 @@ import {
   ConversationRecord,
   ConversationStore,
   ConversationStoreError,
+  ConversationSummary,
   Posted,
+  ReadMarker,
   TurnConflict,
 } from "../store.ts";
 
@@ -43,6 +45,18 @@ const decodeValues = <T>(codec: Schema.Codec<T, string>) => {
     decode(rows).pipe(Effect.map((decoded) => decoded.map(({ value }) => value)));
 };
 
+const decodeSummaries = Schema.decodeUnknownEffect(
+  Schema.Array(
+    Schema.Struct({
+      value: ConversationJson,
+      lastTurn: Schema.NullOr(TurnJson),
+      lastMessage: Schema.NullOr(MessageJson),
+      unread: Schema.Int,
+    }),
+  ),
+);
+const ReadRow = Schema.Struct({ through: Schema.Int, at: Schema.String });
+
 /**
  * Provides the conversation store on the application's `SqlClient`. Applies its migrations with
  * their own `usine_conversation_migrations` ledger, and runs each write in one `BEGIN IMMEDIATE`
@@ -64,6 +78,8 @@ export const sqliteConversationStoreLayer = Layer.effect(
           yield* sql`CREATE INDEX usine_conversation_turns_state ON usine_conversation_turns (state)`;
           yield* sql`CREATE TABLE usine_conversation_turn_events (conversation_id TEXT NOT NULL REFERENCES usine_conversations (id), sequence INTEGER NOT NULL, turn_id TEXT NOT NULL REFERENCES usine_conversation_turns (id), value TEXT NOT NULL, PRIMARY KEY (conversation_id, sequence))`;
         }),
+        // `read_at` is an ISO 8601 UTC string, which compares in time order with the stored turn ends.
+        "0002_conversation_reads": sql`CREATE TABLE usine_conversation_reads (conversation_id TEXT NOT NULL REFERENCES usine_conversations (id), member_id INTEGER NOT NULL, through INTEGER NOT NULL, read_at TEXT NOT NULL, PRIMARY KEY (conversation_id, member_id))`,
       }),
     }).pipe(Effect.orDie);
 
@@ -159,15 +175,68 @@ export const sqliteConversationStoreLayer = Layer.effect(
           Effect.catchTag(["SqlError", "SchemaError"], failure("read a conversation")),
         );
       }),
-      list: Effect.fn("ConversationStore.list")(function* (key) {
+      list: Effect.fn("ConversationStore.list")(function* (key, reader) {
+        // Without a reader, no member has ID 0, so `unread` is computed and then dropped.
+        const member = Option.getOrElse(reader, () => 0);
+        const lastTurn = sql`(SELECT t.value FROM usine_conversation_turns t WHERE t.conversation_id = c.id ORDER BY t.message_sequence DESC LIMIT 1)`;
+        const lastMessage = sql`(SELECT m.value FROM usine_conversation_messages m WHERE m.conversation_id = c.id ORDER BY m.sequence DESC LIMIT 1)`;
+        const unread = sql`(
+          EXISTS (
+            SELECT 1 FROM usine_conversation_messages m
+            LEFT JOIN usine_conversation_turns t ON t.id = json_extract(m.value, '$.turn')
+            WHERE m.conversation_id = c.id
+              AND m.sequence > coalesce(r.through, 0)
+              AND NOT (json_extract(m.value, '$.role') = 'member' AND json_extract(t.value, '$.member.id') = ${member})
+          ) OR EXISTS (
+            SELECT 1 FROM usine_conversation_turns t
+            WHERE t.conversation_id = c.id AND t.state = 'Failed'
+              AND (r.read_at IS NULL OR json_extract(t.value, '$.state.endedAt') > r.read_at)
+          )
+        )`;
+        const reads = sql`LEFT JOIN usine_conversation_reads r ON r.conversation_id = c.id AND r.member_id = ${member}`;
         const rows = yield* Option.match(key, {
           onNone: () =>
-            sql`SELECT value FROM usine_conversations ORDER BY created_at DESC, id DESC`,
+            sql`SELECT c.value AS value, ${lastTurn} AS "lastTurn", ${lastMessage} AS "lastMessage", ${unread} AS unread FROM usine_conversations c ${reads} ORDER BY c.created_at DESC, c.id DESC`,
           onSome: (anchor) =>
-            sql`SELECT value FROM usine_conversations WHERE anchor_key = ${anchor} ORDER BY created_at DESC, id DESC`,
+            sql`SELECT c.value AS value, ${lastTurn} AS "lastTurn", ${lastMessage} AS "lastMessage", ${unread} AS unread FROM usine_conversations c ${reads} WHERE c.anchor_key = ${anchor} ORDER BY c.created_at DESC, c.id DESC`,
         }).pipe(Effect.catchTag("SqlError", failure("list conversations")));
-        return yield* decodeValues(ConversationJson)(rows).pipe(
+        const decoded = yield* decodeSummaries(rows).pipe(
           Effect.catchTag("SchemaError", failure("list conversations")),
+        );
+        return decoded.map((row) =>
+          ConversationSummary.make({
+            conversation: row.value,
+            lastTurn: Option.fromNullOr(row.lastTurn),
+            lastMessage: Option.fromNullOr(row.lastMessage),
+            unread: Option.map(reader, () => row.unread === 1),
+          }),
+        );
+      }),
+      markRead: Effect.fn("ConversationStore.markRead")(function* (marker) {
+        yield* Effect.annotateCurrentSpan({ conversation: marker.conversation });
+        return yield* Effect.gen(function* () {
+          const [exists] =
+            yield* sql`SELECT id FROM usine_conversations WHERE id = ${marker.conversation}`;
+          if (exists === undefined)
+            return yield* ConversationNotFound.make({ conversation: marker.conversation });
+          yield* sql`INSERT INTO usine_conversation_reads ${sql.insert({
+            conversation_id: marker.conversation,
+            member_id: marker.member,
+            through: marker.through,
+            read_at: DateTime.formatIso(marker.at),
+          })} ON CONFLICT (conversation_id, member_id) DO UPDATE SET through = excluded.through, read_at = excluded.read_at WHERE excluded.through >= usine_conversation_reads.through`;
+          const [row] =
+            yield* sql`SELECT through, read_at AS at FROM usine_conversation_reads WHERE conversation_id = ${marker.conversation} AND member_id = ${marker.member}`;
+          const stored = yield* Schema.decodeUnknownEffect(ReadRow)(row);
+          return ReadMarker.make({
+            conversation: marker.conversation,
+            member: marker.member,
+            through: MessageSequence.make(stored.through),
+            at: DateTime.makeUnsafe(stored.at),
+          });
+        }).pipe(
+          transaction,
+          Effect.catchTag(["SqlError", "SchemaError"], failure("mark a conversation read")),
         );
       }),
       transition: Effect.fn("ConversationStore.transition")(function* (from, to) {

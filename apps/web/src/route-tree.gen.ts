@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ConfigurationRouteRouteImport } from './routes/configuration/route'
+import { Route as ConversationsRouteImport } from './routes/conversations'
 import { Route as MembersRouteImport } from './routes/members'
 import { Route as SetupRouteImport } from './routes/setup'
 import { Route as SignInRouteImport } from './routes/sign-in'
@@ -51,6 +52,11 @@ const IndexRoute = IndexRouteImport.update({
 const ConfigurationRouteRoute = ConfigurationRouteRouteImport.update({
   id: '/configuration',
   path: '/configuration',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ConversationsRoute = ConversationsRouteImport.update({
+  id: '/conversations',
+  path: '/conversations',
   getParentRoute: () => rootRouteImport,
 } as any)
 const MembersRoute = MembersRouteImport.update({
@@ -230,6 +236,7 @@ const ProjectsProjectNameTasksNumberRoute =
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/configuration': typeof ConfigurationRouteRouteWithChildren
+  '/conversations': typeof ConversationsRoute
   '/members': typeof MembersRoute
   '/setup': typeof SetupRoute
   '/sign-in': typeof SignInRoute
@@ -264,6 +271,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/conversations': typeof ConversationsRoute
   '/members': typeof MembersRoute
   '/setup': typeof SetupRoute
   '/sign-in': typeof SignInRoute
@@ -298,6 +306,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/configuration': typeof ConfigurationRouteRouteWithChildren
+  '/conversations': typeof ConversationsRoute
   '/members': typeof MembersRoute
   '/setup': typeof SetupRoute
   '/sign-in': typeof SignInRoute
@@ -335,6 +344,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/configuration'
+    | '/conversations'
     | '/members'
     | '/setup'
     | '/sign-in'
@@ -369,6 +379,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/conversations'
     | '/members'
     | '/setup'
     | '/sign-in'
@@ -402,6 +413,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/configuration'
+    | '/conversations'
     | '/members'
     | '/setup'
     | '/sign-in'
@@ -438,6 +450,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   ConfigurationRouteRoute: typeof ConfigurationRouteRouteWithChildren
+  ConversationsRoute: typeof ConversationsRoute
   MembersRoute: typeof MembersRoute
   SetupRoute: typeof SetupRoute
   SignInRoute: typeof SignInRoute
@@ -459,6 +472,13 @@ declare module '@tanstack/react-router' {
       path: '/configuration'
       fullPath: '/configuration'
       preLoaderRoute: typeof ConfigurationRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/conversations': {
+      id: '/conversations'
+      path: '/conversations'
+      fullPath: '/conversations'
+      preLoaderRoute: typeof ConversationsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/members': {
@@ -765,6 +785,7 @@ const ProjectsProjectRouteWithChildren = ProjectsProjectRoute._addFileChildren(
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   ConfigurationRouteRoute: ConfigurationRouteRouteWithChildren,
+  ConversationsRoute: ConversationsRoute,
   MembersRoute: MembersRoute,
   SetupRoute: SetupRoute,
   SignInRoute: SignInRoute,

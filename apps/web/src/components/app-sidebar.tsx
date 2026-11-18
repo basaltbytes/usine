@@ -1,5 +1,11 @@
 import { SessionMenu } from "~/components/session-menu";
-import { KanbanIcon, ListChecksIcon, SquaresFourIcon } from "@phosphor-icons/react";
+import {
+  ChatsCircleIcon,
+  KanbanIcon,
+  ListChecksIcon,
+  SquaresFourIcon,
+} from "@phosphor-icons/react";
+import { conversationsTitle } from "~/lib/conversations/strings";
 import { Link, useMatchRoute } from "@tanstack/react-router";
 import type { ProjectId } from "@usine/core/project";
 import type { ProjectView } from "@usine/orchestrator/operator";
@@ -35,10 +41,12 @@ export type OperatorView =
   | "project"
   | "configuration"
   | "members"
-  | "tokens";
+  | "tokens"
+  | "conversations";
 
 export const useOperatorView = (): OperatorView => {
   const matchRoute = useMatchRoute();
+  if (matchRoute({ to: "/conversations" }) !== false) return "conversations";
   if (matchRoute({ to: "/members" }) !== false) return "members";
   if (matchRoute({ to: "/tokens" }) !== false) return "tokens";
   if (matchRoute({ to: "/configuration", fuzzy: true }) !== false) return "configuration";
@@ -120,6 +128,15 @@ export const AppSidebar = ({
                   </span>
                 )}
               </SidebarMenuBadge>
+            </SidebarMenuItem>
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                isActive={view === "conversations"}
+                render={<Link to="/conversations" />}
+              >
+                <ChatsCircleIcon aria-hidden="true" />
+                <span>{conversationsTitle}</span>
+              </SidebarMenuButton>
             </SidebarMenuItem>
           </SidebarMenu>
         </SidebarGroupContent>

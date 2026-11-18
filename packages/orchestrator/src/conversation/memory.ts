@@ -1,3 +1,4 @@
+import type { GitHubUserId } from "@usine/core/access";
 import {
   type Conversation,
   type ConversationId,
@@ -16,7 +17,10 @@ import {
   ConversationNotFound,
   ConversationRecord,
   ConversationStore,
+  ConversationSummary,
+  isUnread,
   Posted,
+  type ReadMarker,
   TurnConflict,
 } from "./store.ts";
 
@@ -37,6 +41,9 @@ export const memoryConversationStoreLayer = Layer.effect(
   ConversationStore,
   Effect.gen(function* () {
     const state = yield* Ref.make(new Map<ConversationId, Stored>());
+    const reads = yield* Ref.make(new Map<string, ReadMarker>());
+    const readKey = (conversation: ConversationId, member: GitHubUserId) =>
+      `${conversation}:${member}`;
     const lock = yield* Semaphore.make(1);
     const serialized = lock.withPermits(1);
     const save = (stored: Stored) =>
@@ -92,10 +99,11 @@ export const memoryConversationStoreLayer = Layer.effect(
         const stored = yield* load(id);
         return Option.map(stored, record);
       }),
-      list: Effect.fn("ConversationStore.list")(function* (key) {
-        const all = [...(yield* Ref.get(state)).values()].map(({ conversation }) => conversation);
+      list: Effect.fn("ConversationStore.list")(function* (key, reader) {
+        const all = [...(yield* Ref.get(state)).values()];
+        const markers = yield* Ref.get(reads);
         return all
-          .filter((conversation) =>
+          .filter(({ conversation }) =>
             Option.match(key, {
               onNone: () => true,
               onSome: (wanted) =>
@@ -104,9 +112,38 @@ export const memoryConversationStoreLayer = Layer.effect(
           )
           .sort(
             (left, right) =>
-              DateTime.toEpochMillis(right.createdAt) - DateTime.toEpochMillis(left.createdAt) ||
-              right.id.localeCompare(left.id),
+              DateTime.toEpochMillis(right.conversation.createdAt) -
+                DateTime.toEpochMillis(left.conversation.createdAt) ||
+              right.conversation.id.localeCompare(left.conversation.id),
+          )
+          .map(({ conversation, messages, turns }) =>
+            ConversationSummary.make({
+              conversation,
+              lastTurn: Option.fromUndefinedOr(turns.at(-1)),
+              lastMessage: Option.fromUndefinedOr(messages.at(-1)),
+              unread: Option.map(reader, (member) =>
+                isUnread(
+                  member,
+                  messages,
+                  turns,
+                  Option.fromUndefinedOr(markers.get(readKey(conversation.id, member))),
+                ),
+              ),
+            }),
           );
+      }),
+      markRead: Effect.fn("ConversationStore.markRead")(function* (marker) {
+        yield* Effect.annotateCurrentSpan({ conversation: marker.conversation });
+        return yield* Effect.gen(function* () {
+          const stored = yield* load(marker.conversation);
+          if (Option.isNone(stored))
+            return yield* ConversationNotFound.make({ conversation: marker.conversation });
+          const key = readKey(marker.conversation, marker.member);
+          const current = (yield* Ref.get(reads)).get(key);
+          if (current !== undefined && current.through > marker.through) return current;
+          yield* Ref.update(reads, (all) => new Map(all).set(key, marker));
+          return marker;
+        }).pipe(serialized);
       }),
       transition: Effect.fn("ConversationStore.transition")(function* (from, to) {
         yield* Effect.annotateCurrentSpan({ turn: from.id, from: from.state._tag });
