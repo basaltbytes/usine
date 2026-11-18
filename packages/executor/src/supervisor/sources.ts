@@ -157,6 +157,7 @@ export const makeSupervisorSources = Effect.fn("SupervisorSources.make")(functio
         "--git-dir",
         cache,
         "fetch",
+        "--no-auto-maintenance",
         "--quiet",
         "--depth=1",
         "--no-tags",
