@@ -26,7 +26,7 @@ import {
   ProjectNotInstalledError,
   RepositoryId,
 } from "@usine/github/github-app";
-import { ConfigurationView, SettingsView } from "@usine/orchestrator/operator";
+import { ConfigurationView, PAGE_BYTES, SettingsView } from "@usine/orchestrator/operator";
 import { DateTime, Effect, Layer, Redacted, Schema } from "effect";
 import { HttpClient, HttpClientResponse, HttpRouter } from "effect/http";
 import { FactoryBackend } from "../src/backend.ts";
@@ -134,17 +134,21 @@ const fixture = Effect.fn(function* (
     { disableLogger: true },
   );
   yield* Effect.addFinalizer(() => Effect.promise(() => app.dispose()));
+  // Reads the full representation, as the web UI does, or the page from `offset` when given.
   const read = Effect.fn(function* (
     query: FileChangesQuery,
     repo = repository,
     projectId = project,
+    offset?: number,
   ) {
     const encoded = yield* Schema.encodeEffect(FileChangesQuery)(query);
     const search = new URLSearchParams(encoded);
+    if (offset !== undefined) search.set("offset", String(offset));
     return yield* Effect.promise(() =>
       app.handler(
         new Request(
           `http://localhost/api/projects/${projectId}/pull-requests/${encodeURIComponent(repo)}/42/files?${search}`,
+          { headers: offset === undefined ? { "x-usine-view": "full" } : {} },
         ),
       ),
     );
@@ -189,6 +193,49 @@ it.live(
       assert.strictEqual(again.status, 200);
       assert.strictEqual(app.requests.length, 4);
     }).pipe(Effect.scoped),
+);
+
+it.live("pages the files to fit one tool result and cuts a patch too long for a page", () =>
+  Effect.gen(function* () {
+    const longPatch = `@@ -1 +1,4000 @@\n${"+const changed = true;\n".repeat(4_000)}`;
+    const app = yield* fixture((url) =>
+      url.pathname.endsWith("/files")
+        ? json(
+            Array.from({ length: 60 }, (_, index) =>
+              index === 0
+                ? { ...file, filename: "pnpm-lock.yaml", additions: 4_000, patch: longPatch }
+                : { ...file, filename: `src/${index}.ts` },
+            ),
+          )
+        : json({ ...pr, changed_files: 60 }),
+    );
+    const query = PullRequestFilesQuery.make({ base, head });
+    const full = yield* app.read(query).pipe(Effect.flatMap(decode));
+    assert.lengthOf(full.files, 60);
+    assert.isUndefined(full.nextOffset);
+    const paths: Array<string> = [];
+    let offset: number | null = 0;
+    while (offset !== null) {
+      const response: Response = yield* app.read(query, repository, project, offset);
+      const text = yield* Effect.promise(() => response.text());
+      assert.isAtMost(new TextEncoder().encode(text).length, PAGE_BYTES);
+      const page = yield* Schema.decodeEffect(Schema.fromJsonString(FileChanges))(text);
+      assert.strictEqual(page.total, 60);
+      if (offset === 0) {
+        assert.lengthOf(page.files, 1);
+        const [lockfile] = page.files;
+        assert(lockfile?.patch.kind === "text");
+        assert.isTrue(lockfile.patch.truncated);
+        assert.isTrue(longPatch.startsWith(lockfile.patch.text));
+      }
+      paths.push(...page.files.map(({ path }) => path));
+      offset = page.nextOffset ?? null;
+    }
+    assert.deepStrictEqual(
+      paths,
+      full.files.map(({ path }) => path),
+    );
+  }).pipe(Effect.scoped),
 );
 
 it.live("returns truncated patches and classifies test and generated files by path", () =>
@@ -389,6 +436,7 @@ it("documents every union query parameter and the full commit constraint", () =>
       { name: "scope", required: true },
       { name: "head", required: true },
       { name: "base", required: true },
+      { name: "offset", required: false },
     ],
   );
   assert.deepStrictEqual(

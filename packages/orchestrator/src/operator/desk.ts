@@ -352,6 +352,13 @@ export class DeskView extends Schema.Class<
   workers: Schema.Array(WorkerView),
   /** The last completed poll time for each managed repository. */
   polls: Schema.Array(RepositoryPollView),
+  /**
+   * The entries of each list that a bounded representation leaves out to fit one page; absent
+   * from the full representation.
+   */
+  omitted: Schema.optionalKey(
+    Schema.Struct({ running: Schema.Int, notMoving: Schema.Int, lastOutcomes: Schema.Int }),
+  ),
 }) {}
 
 /** The desk's facts about one Loop on one matched Item. */

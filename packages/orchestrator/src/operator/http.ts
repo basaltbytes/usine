@@ -87,10 +87,12 @@ import {
 } from "./transcript.ts";
 import { FactoryOverview } from "./overview.ts";
 import { RunDetailView, EditAndRetry, SessionIntervention } from "./run.ts";
+import { RunBriefView, RunTextPageView, RunTextPart, RunTranscriptPageView } from "./run-pages.ts";
 import { RunGitHubChangesView } from "./github-changes.ts";
 import { TaskView } from "./task.ts";
 import { ItemView } from "./item.ts";
 import { ConfigurationView } from "./configuration/view.ts";
+import { ConfigurationSummaryView } from "./configuration/summary.ts";
 import { DeskView } from "./desk.ts";
 import { RunStatisticsView, StatisticsView, StatisticsWindow } from "./statistics/view.ts";
 import { AnchorKey, ConversationId, EventSequence, TurnId } from "@usine/core/conversation";
@@ -730,12 +732,12 @@ export const OperatorApi = operatorApi.add(
       HttpApiEndpoint.get("detail", "/api/runs/:runId", {
         params: runParams,
         query: transcriptQuery,
-        success: RunDetailView,
+        success: Schema.Union([RunBriefView, RunDetailView]),
       })
-        .annotate(OpenApi.Summary, "Read a run and its transcript")
+        .annotate(OpenApi.Summary, "Read a run")
         .annotate(
           OpenApi.Description,
-          "Without cursors, returns the latest transcript page. Use after for updates, or before and attempt together for earlier messages.",
+          "Returns the run's brief: its state, waits, and attempts with their outcomes and failure messages, the beginnings of its task prompt, result message, and newest kept report, and its duration and usage, without the event payload or the transcript. Read an attempt's transcript with runTranscript, newest entry first, and the whole task prompt, result message, report, or event payload with runText. `X-Usine-View: full` returns the run with its prompts, event payload, and the latest transcript page; with it, use after for updates, or before and attempt together for earlier messages.",
         )
         .annotate(OpenApi.Transform, (operation) => ({
           ...operation,
@@ -747,19 +749,19 @@ export const OperatorApi = operatorApi.add(
                 name: "after",
                 schema: TranscriptSequence,
                 description:
-                  "Return messages after this sequence. Cannot be combined with before or attempt.",
+                  "With `X-Usine-View: full`, return messages after this sequence. Cannot be combined with before or attempt.",
               },
               {
                 name: "before",
                 schema: TranscriptSequence,
                 description:
-                  "Return messages before this sequence. Requires attempt; cannot be combined with after.",
+                  "With `X-Usine-View: full`, return messages before this sequence. Requires attempt; cannot be combined with after.",
               },
               {
                 name: "attempt",
                 schema: AttemptId,
                 description:
-                  "Attempt to read earlier messages from. Requires before; cannot be combined with after.",
+                  "With `X-Usine-View: full`, the attempt to read earlier messages from. Requires before; cannot be combined with after.",
               },
             ].map(({ name, schema, description }) => ({
               name,
@@ -770,6 +772,58 @@ export const OperatorApi = operatorApi.add(
             })),
           ],
         })),
+      HttpApiEndpoint.get("runTranscript", "/api/runs/:runId/transcript", {
+        params: runParams,
+        query: {
+          attempt: Schema.optionalKey(AttemptId),
+          before: Schema.optionalKey(TranscriptSequence),
+          offset: position,
+        },
+        success: RunTranscriptPageView,
+      })
+        .annotate(
+          OpenApi.Transform,
+          describeQuery(
+            new Map([
+              ["attempt", "The attempt whose transcript to read. Defaults to the newest attempt."],
+              [
+                "before",
+                "Read the entries before this sequence, as `next.before` gives it. Defaults to the newest entry.",
+              ],
+              [
+                "offset",
+                "The position in the first entry's text to start from, as `next.offset` gives it. Defaults to 0.",
+              ],
+            ]),
+          ),
+        )
+        .annotate(OpenApi.Summary, "Read a page of an attempt's transcript")
+        .annotate(
+          OpenApi.Description,
+          "Returns an attempt's transcript entries newest first, each with its kind, such as `ToolFinished` or `Failed`, its session, and its payload as JSON text. A page ends before 20 KB of JSON and can end inside a long entry. Pass `next.attempt`, `next.before`, and `next.offset` to read the older entries, until `next` is null at the attempt's first entry.",
+        ),
+      HttpApiEndpoint.get("runText", "/api/runs/:runId/text/:part", {
+        params: { runId: RunId, part: RunTextPart },
+        query: { attempt: Schema.optionalKey(AttemptId), offset: position },
+        success: RunTextPageView,
+      })
+        .annotate(
+          OpenApi.Transform,
+          describeQuery(
+            new Map([
+              [
+                "attempt",
+                "For `report`, the attempt whose report to read. Defaults to the newest attempt that kept one.",
+              ],
+              ["offset", "The position in the text to start from, as `nextOffset` gives it."],
+            ]),
+          ),
+        )
+        .annotate(OpenApi.Summary, "Read a page of a run's text")
+        .annotate(
+          OpenApi.Description,
+          "Returns a page of one text of the run: `task`, its effective task prompt; `result`, its result message; `report`, the final report that a failed attempt kept; or `event`, the JSON text of the event that opened it. A page ends before 20 KB of JSON; pass `nextOffset` as `offset` to read on, until it is null. For an issue or pull request, item reads the current body and comments.",
+        ),
       HttpApiEndpoint.get("githubChanges", "/api/runs/:runId/github-changes", {
         params: runParams,
         success: RunGitHubChangesView,
@@ -1040,7 +1094,7 @@ export const OperatorApi = operatorApi.add(
         .annotate(OpenApi.Summary, "List configuration revisions")
         .annotate(
           OpenApi.Description,
-          "Returns a page of revisions, newest first. Pass nextBefore as before for the next page; the default limit is 50.",
+          "Returns a page of revisions, newest first. Pass nextBefore as before for the next page; the default limit is 50. A page ends before 20 KB of JSON, so it can hold fewer revisions than the limit.",
         ),
       HttpApiEndpoint.get("configurationRevision", "/api/configuration/revisions/:number", {
         params: revisionParams,
@@ -1106,11 +1160,13 @@ export const OperatorApi = operatorApi.add(
         ),
     )
     .add(
-      HttpApiEndpoint.get("configuration", "/api/configuration", { success: ConfigurationView })
+      HttpApiEndpoint.get("configuration", "/api/configuration", {
+        success: Schema.Union([ConfigurationSummaryView, ConfigurationView]),
+      })
         .annotate(OpenApi.Summary, "Read instance configuration")
         .annotate(
           OpenApi.Description,
-          "Returns stored configuration for the configuration editor.",
+          "Returns the configuration entities by kind: projects, repositories, loops with their trigger stream and pause state, agents with their harness and model, workers with their slots, label names, and settings. Prompts, personas, lanes, and preflight results are left out; read one entity with configurationEntity, with the entity's kind and its name as identifier. `X-Usine-View: full` returns the configuration as the configuration editor shows it.",
         ),
     )
     .add(
@@ -1118,7 +1174,7 @@ export const OperatorApi = operatorApi.add(
         .annotate(OpenApi.Summary, "Read overview attention and activity")
         .annotate(
           OpenApi.Description,
-          "Returns attention items, active attempts, recent runs, and worker slots.",
+          "Returns attention items, active attempts, recent runs, and worker slots. The running attempts, then the items not moving, then the last outcomes fill 20 KB of JSON; `omitted` counts the entries of each list left out. `X-Usine-View: full` returns every entry.",
         ),
     )
     .add(
@@ -1179,6 +1235,8 @@ export const operatorPermissions = {
   taskRuns: "read",
   item: "read",
   detail: "read",
+  runTranscript: "read",
+  runText: "read",
   githubChanges: "read",
   desk: "read",
   statistics: "read",

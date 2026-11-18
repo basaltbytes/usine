@@ -165,6 +165,44 @@ it("creates, reads, replaces and deletes entities with paginated and filtered re
     }).pipe(Effect.scoped),
   ));
 
+const revisionNumbers = Schema.Struct({
+  revisions: Schema.Array(Schema.Struct({ number: Schema.Int })),
+  nextBefore: Schema.NullOr(Schema.Int),
+});
+
+it("ends a page of revisions before 20 KB of JSON and continues it with nextBefore", () =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const { request } = yield* harness();
+      const message = "Rename the ready label for the review loop. ".repeat(25);
+      for (let expected = 1; expected <= 30; expected += 1) {
+        const saved = yield* request("PUT", "/entities/label/ready", {
+          expected,
+          message,
+          value: { name: "ready", color: expected.toString(16).padStart(6, "0") },
+        });
+        expect(saved.status).toBe(200);
+      }
+      const numbers: Array<number> = [];
+      let path: string | null = "/revisions";
+      let pages = 0;
+      while (path !== null) {
+        const response: { readonly status: number; readonly body: unknown } = yield* request(
+          "GET",
+          path,
+        );
+        expect(response.status).toBe(200);
+        expect(new TextEncoder().encode(jsonKey(response.body)).length).toBeLessThanOrEqual(20_000);
+        const page = yield* Schema.decodeUnknownEffect(revisionNumbers)(response.body);
+        numbers.push(...page.revisions.map(({ number }) => number));
+        pages += 1;
+        path = page.nextBefore === null ? null : `/revisions?before=${page.nextBefore}`;
+      }
+      expect(pages).toBeGreaterThan(1);
+      expect(numbers).toEqual(Array.from({ length: 31 }, (_, index) => 31 - index));
+    }).pipe(Effect.scoped),
+  ));
+
 it("refuses stale, invalid and incompatible writes without storing a revision", () =>
   Effect.runPromise(
     Effect.gen(function* () {

@@ -126,14 +126,18 @@ import {
   WorkerConfigurationView,
   CycleBudgetResetView,
   CiNotPassedError,
+  ClosedRunView,
+  configurationSummary,
+  jsonBytes,
+  PAGE_BYTES,
 } from "@usine/orchestrator/operator";
 import { OperatorApi, OperatorHttpError } from "@usine/orchestrator/operator/http";
 import { Context, DateTime, Effect, Layer, Option, Redacted, Schema, FileSystem } from "effect";
-import { HttpRouter, FetchHttpClient } from "effect/http";
+import { HttpClient, HttpClientRequest, HttpRouter, FetchHttpClient } from "effect/http";
 import { HttpApiClient } from "effect/http-api";
 import { beforeAll, afterAll, assert, describe, it } from "@effect/vitest";
 import { BackendUnavailableError, FactoryBackend, needsSetupBackendLayer } from "../src/backend.ts";
-import { projectSummary, summaryOverview, taskSummary } from "../src/changes/reads.ts";
+import { boundedDesk, projectSummary, summaryOverview, taskSummary } from "../src/changes/reads.ts";
 import { Port, SERVER_HOST } from "../src/cli.ts";
 import { apiRoutes, serverLayer, staticRoutes } from "../src/http.ts";
 import { listenForStartup } from "../src/listener.ts";
@@ -371,6 +375,9 @@ const observation: OperatorObservation["Service"] = {
   statistics: (_instance, window) => Effect.succeed(statisticsOf(window)),
   runStatistics: (_instance, window) => Effect.succeed(runStatisticsOf(window)),
   detail: () => Effect.succeed(detail),
+  brief: () => Effect.die("unused"),
+  runText: () => Effect.die("unused"),
+  transcriptPage: () => Effect.die("unused"),
   task: () => Effect.succeed(task),
   item: (_instance, repository, item) =>
     Effect.fail(BoardItemNotFoundError.make({ repository, item })),
@@ -702,6 +709,34 @@ it("publishes optional transcript cursor parameters with their domain constraint
   }
 });
 
+it("keeps the newest desk entries that fit one page and counts the ones it leaves out", () => {
+  const closed = ClosedRunView.make({
+    run: RunSummaryView.make({
+      ...run,
+      attempts: run.attempts.map((attempt) => AttemptSummaryView.make(attempt)),
+    }),
+    item: null,
+    closedAt: "2026-09-01T12:30:00.000Z",
+  });
+  const full = DeskView.make({ ...desk, lastOutcomes: Array.from({ length: 200 }, () => closed) });
+  assert.isAbove(jsonBytes(full), PAGE_BYTES);
+
+  const bounded = boundedDesk(full);
+
+  assert.isAtMost(jsonBytes(bounded), PAGE_BYTES);
+  assert.isAbove(bounded.lastOutcomes.length, 0);
+  assert.deepStrictEqual(bounded.omitted, {
+    running: 0,
+    notMoving: 0,
+    lastOutcomes: 200 - bounded.lastOutcomes.length,
+  });
+  assert.deepStrictEqual(bounded.polls, desk.polls);
+  assert.deepStrictEqual(
+    boundedDesk(desk),
+    DeskView.make({ ...desk, omitted: { running: 0, notMoving: 0, lastOutcomes: 0 } }),
+  );
+});
+
 describe("operator HTTP API", () => {
   it.live("reports the running release and validates upgrade requests before accepting them", () =>
     Effect.gen(function* () {
@@ -874,7 +909,11 @@ describe("operator HTTP API", () => {
         );
 
         const runResponse = yield* Effect.promise(() =>
-          app.handler(new Request(`http://localhost/api/runs/${runId}`)),
+          app.handler(
+            new Request(`http://localhost/api/runs/${runId}`, {
+              headers: { "x-usine-view": "full" },
+            }),
+          ),
         );
         assert.strictEqual(runResponse.status, 200);
         assert.strictEqual(
@@ -938,10 +977,22 @@ describe("operator HTTP API", () => {
           "after=2&unrelated=x",
         ]) {
           const repeated = yield* Effect.promise(() =>
-            app.handler(new Request(`http://localhost/api/runs/${runId}?${search}`)),
+            app.handler(
+              new Request(`http://localhost/api/runs/${runId}?${search}`, {
+                headers: { "x-usine-view": "full" },
+              }),
+            ),
           );
           assert.strictEqual(repeated.status, 200, search);
         }
+        const cursorBrief = yield* Effect.promise(() =>
+          app.handler(new Request(`http://localhost/api/runs/${runId}?after=2`)),
+        );
+        assert.strictEqual(cursorBrief.status, 400);
+        assert.include(
+          (yield* Effect.promise(() => cursorBrief.json())).message,
+          "Read a transcript page by page with runTranscript.",
+        );
 
         const action = yield* Effect.promise(() =>
           app.handler(
@@ -956,7 +1007,11 @@ describe("operator HTTP API", () => {
         });
 
         const configurationResponse = yield* Effect.promise(() =>
-          app.handler(new Request("http://localhost/api/configuration")),
+          app.handler(
+            new Request("http://localhost/api/configuration", {
+              headers: { "x-usine-view": "full" },
+            }),
+          ),
         );
         assert.strictEqual(configurationResponse.status, 200);
         const actual9 = yield* Effect.promise(() => configurationResponse.json());
@@ -992,6 +1047,9 @@ describe("operator HTTP API", () => {
     Effect.gen(function* () {
       let moved: BoardMove | undefined;
       const rejecting = Layer.succeed(FactoryBackend)({
+        brief: (id) => Effect.fail(RunNotFoundError.make({ runId: id })),
+        runText: () => Effect.die("unused"),
+        transcriptPage: () => Effect.die("unused"),
         runWorkerPreflight: () => Effect.die("unused"),
         resolveFailure: () => Effect.void,
         applyCiLabels: () => Effect.void,
@@ -1181,7 +1239,9 @@ describe("operator HTTP API", () => {
         const wrongAttempt = AttemptId.make("attempt-from-another-run");
         const earlier = yield* Effect.promise(() =>
           rejectingApp.handler(
-            new Request(`http://localhost/api/runs/${runId}?attempt=${wrongAttempt}&before=2`),
+            new Request(`http://localhost/api/runs/${runId}?attempt=${wrongAttempt}&before=2`, {
+              headers: { "x-usine-view": "full" },
+            }),
           ),
         );
         assert.strictEqual(earlier.status, 404);
@@ -1283,6 +1343,9 @@ describe("operator HTTP API", () => {
         });
         const inputs: Array<SessionIntervention> = [];
         const live = Layer.succeed(FactoryBackend)({
+          brief: () => Effect.die("unused"),
+          runText: () => Effect.die("unused"),
+          transcriptPage: () => Effect.die("unused"),
           runWorkerPreflight: () => Effect.die("unused"),
           resolveFailure: (id, attemptId) =>
             attemptId === "attempt/1"
@@ -1386,7 +1449,14 @@ describe("operator HTTP API", () => {
           const currentAgents = yield* client.agents();
           assert.deepStrictEqual(currentAgents, [agentName]);
           const currentConfiguration = yield* client.configuration();
-          assert.deepStrictEqual(currentConfiguration, configurationView);
+          assert.deepStrictEqual(currentConfiguration, configurationSummary(configurationView));
+          const { operator: full } = yield* HttpApiClient.make(OperatorApi, {
+            transformClient: HttpClient.mapRequest(
+              HttpClientRequest.setHeader("x-usine-view", "full"),
+            ),
+          });
+          const fullConfiguration = yield* full.configuration();
+          assert.deepStrictEqual(fullConfiguration, configurationView);
           const edit = EditAndRetry.make({
             task: AttemptTask.make("Fix the reviewed behavior"),
             agent: agentName,
@@ -1412,7 +1482,7 @@ describe("operator HTTP API", () => {
             }),
           ];
           for (const query of requests) {
-            const runDetail = yield* client.detail({ params: { runId }, query });
+            const runDetail = yield* full.detail({ params: { runId }, query });
             assert.deepStrictEqual(runDetail, detail);
           }
           assert.deepStrictEqual(observed, requests);
@@ -1530,14 +1600,14 @@ describe("operator HTTP API", () => {
           assert.strictEqual(staleReset.status, 409);
           assert.strictEqual(staleReset.error, "CycleBudgetResetRejectedError");
           const missing = yield* Effect.flip(
-            client.detail({ params: { runId: missingId }, query: ColdTranscriptRequest.make() }),
+            full.detail({ params: { runId: missingId }, query: ColdTranscriptRequest.make() }),
           );
           assert.instanceOf(missing, OperatorHttpError);
           assert.strictEqual(missing.error, "RunNotFoundError");
           assert.strictEqual(missing.status, 404);
           assert.strictEqual(missing.message, `Run ${missingId} was not found.`);
           const wrongAttempt = yield* Effect.flip(
-            client.detail({
+            full.detail({
               params: { runId },
               query: EarlierTranscriptRequest.make({
                 attemptId: AttemptId.make("other-attempt"),

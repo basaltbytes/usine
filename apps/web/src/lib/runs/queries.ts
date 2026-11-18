@@ -5,10 +5,25 @@ import {
   ColdTranscriptRequest,
   RunDetailView,
   TailTranscriptRequest,
+  type TranscriptRequest,
 } from "@usine/orchestrator/operator";
-import { api } from "~/lib/api";
+import { Effect, Schema } from "effect";
+import { api, type Client } from "~/lib/api";
 import { mergeTranscript, RUN_DETAIL_CACHE_STRUCTURAL_SHARING } from "~/lib/runs/transcript/cache";
 import { fetchRunDetail } from "~/lib/runs/transcript/fetch";
+
+/**
+ * Reads a Run's detail with `X-Usine-View: full`; without it, the server returns the Run's brief.
+ * Use it inside `api` with the `full` view.
+ */
+export const readRunDetail = (client: Client, runId: RunId, query: TranscriptRequest) =>
+  client
+    .detail({ params: { runId }, query })
+    .pipe(
+      Effect.filterOrElse(Schema.is(RunDetailView), () =>
+        Effect.die("The server returned a run brief instead of the run detail."),
+      ),
+    );
 
 export const runDetailKeys = ["run"] as const;
 export const runDetailKey = (runId: RunId) => [...runDetailKeys, runId] as const;
@@ -24,7 +39,7 @@ export const runDetailQuery = (queryClient: QueryClient, runId: RunId) => {
         cursor === undefined
           ? ColdTranscriptRequest.make()
           : TailTranscriptRequest.make({ after: cursor }),
-        (query) => api((client) => client.detail({ params: { runId }, query })),
+        (query) => api((client) => readRunDetail(client, runId, query), "full"),
       );
       const current = queryClient.getQueryData<RunDetailView>(key);
       if (cursor === undefined || current === undefined) return next;

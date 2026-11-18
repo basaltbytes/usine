@@ -81,13 +81,15 @@ export const listRuns = Effect.fn("Instance.listRuns")(function* (
 
 /**
  * Returns the environment variables with the gateways' admin tokens, which `usine up` reads at
- * startup, from `GET /api/configuration`.
+ * startup, from the `full` representation of `GET /api/configuration`.
  */
 export const gatewayTokenVariables = Effect.fn("Instance.gatewayTokenVariables")(function* (
   port: Port,
   directory: InstanceDirectory = InstanceDirectory.make(process.cwd()),
 ) {
-  const configuration = yield* getJson(port, "/api/configuration", Configuration, directory);
+  const configuration = yield* getJson(port, "/api/configuration", Configuration, directory, {
+    "x-usine-view": "full",
+  });
   return [...new Set(configuration.workers.flatMap(({ gateway }) => gateway?.adminTokenEnv ?? []))];
 });
 

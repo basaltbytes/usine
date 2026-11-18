@@ -1,8 +1,9 @@
 import { GitHubFiles } from "@usine/github/files";
+import { CommitRangeFilesQuery, PullRequestFilesQuery } from "@usine/github/file-changes";
 import { providerRoutes } from "./providers/http.ts";
 import type { ProviderLogins } from "./providers/control.ts";
 import { catalog, harnessPresentations } from "@usine/agents/harness";
-import { ItemEntryCursor, pageOf } from "@usine/orchestrator/operator";
+import { configurationSummary, ItemEntryCursor, pageOf } from "@usine/orchestrator/operator";
 import type { ItemNumber } from "@usine/core/item";
 import {
   attentionOverview,
@@ -12,6 +13,9 @@ import {
   summaryOverview,
   taskPage,
   taskSummary,
+  boundedDesk,
+  fileChangesPage,
+  revisionPage,
 } from "./changes/reads.ts";
 import { Changes } from "./changes/changes.ts";
 import { conditionalReads } from "./conditional-reads.ts";
@@ -373,7 +377,15 @@ const handlers = HttpApiBuilder.group(
                   message:
                     "Pull request changes are unavailable. Check the GitHub App credentials.",
                 });
-              return yield* files.value.read(params.repository, params.item, query).pipe(
+              const selection =
+                query._tag === "PullRequestFiles"
+                  ? PullRequestFilesQuery.make({ base: query.base, head: query.head })
+                  : CommitRangeFilesQuery.make({ base: query.base, head: query.head });
+              const view = yield* requestedView;
+              return yield* files.value.read(params.repository, params.item, selection).pipe(
+                Effect.map((changes) =>
+                  view === "full" ? changes : fileChangesPage(changes, query.offset ?? 0),
+                ),
                 Effect.tapError((error) =>
                   Effect.logWarning("Pull request files could not be read", {
                     repository: params.repository,
@@ -460,7 +472,37 @@ const handlers = HttpApiBuilder.group(
         fromBackend((backend) => backend.resetCycleBudget(payload.askId)),
       )
       .handle("detail", ({ params, query }) =>
-        fromBackend((backend) => backend.detail(params.runId, query)),
+        Effect.gen(function* () {
+          if ((yield* requestedView) === "full")
+            return yield* fromBackend((backend) => backend.detail(params.runId, query));
+          if (query._tag !== "ColdTranscriptRequest")
+            return yield* OperatorHttpError.make({
+              error: "InvalidRequestError",
+              message:
+                "The transcript cursors of detail need `X-Usine-View: full`. Read a transcript page by page with runTranscript.",
+            });
+          return yield* fromBackend((backend) => backend.brief(params.runId));
+        }),
+      )
+      .handle("runTranscript", ({ params, query }) =>
+        fromBackend((backend) =>
+          backend.transcriptPage(
+            params.runId,
+            Option.fromUndefinedOr(query.attempt),
+            Option.fromUndefinedOr(query.before),
+            query.offset ?? 0,
+          ),
+        ),
+      )
+      .handle("runText", ({ params, query }) =>
+        fromBackend((backend) =>
+          backend.runText(
+            params.runId,
+            params.part,
+            Option.fromUndefinedOr(query.attempt),
+            query.offset ?? 0,
+          ),
+        ),
       )
       .handle("githubChanges", ({ params }) =>
         fromBackend((backend) => backend.githubChanges(params.runId)),
@@ -580,7 +622,9 @@ const handlers = HttpApiBuilder.group(
         }),
       )
       .handle("configurationRevisions", ({ query }) =>
-        fromConfiguration((editor) => editor.list(ConfigurationRevisionQuery.make(query))),
+        fromConfiguration((editor) => editor.list(ConfigurationRevisionQuery.make(query))).pipe(
+          Effect.map(revisionPage),
+        ),
       )
       .handle("configurationRevision", ({ params }) =>
         fromConfigurationRevision((editor) => editor.revision(params.number)),
@@ -601,8 +645,20 @@ const handlers = HttpApiBuilder.group(
       .handle("revertConfigurationRevision", ({ params, payload }) =>
         fromConfigurationRevision((editor) => editor.revert(params.number, payload)),
       )
-      .handle("configuration", () => fromBackend((backend) => backend.configuration))
-      .handle("desk", () => fromBackend((backend) => backend.desk))
+      .handle("configuration", () =>
+        Effect.gen(function* () {
+          const configuration = yield* fromBackend((backend) => backend.configuration);
+          return (yield* requestedView) === "full"
+            ? configuration
+            : configurationSummary(configuration);
+        }),
+      )
+      .handle("desk", () =>
+        Effect.gen(function* () {
+          const desk = yield* fromBackend((backend) => backend.desk);
+          return (yield* requestedView) === "full" ? desk : boundedDesk(desk);
+        }),
+      )
       .handle("statistics", ({ query }) =>
         fromBackend((backend) => backend.statistics(query.window)),
       )
