@@ -16,7 +16,11 @@ concurrency:
 
 env:
   NODE_VERSION: ${{ github.event_name == 'pull_request' && '22' || '24' }}
+  # scripts/ci/turbo-cache.mjs reads the run summaries.
+  TURBO_RUN_SUMMARY: true
 
+# The turbo cache holds build outputs only, so every check and test runs. The
+# static job on main saves its builds, and every job restores the latest save.
 jobs:
   static:
     runs-on: ubuntu-latest
@@ -32,9 +36,9 @@ jobs:
         id: turbo
         with:
           path: .turbo
-          key: turbo-${{ runner.os }}-ci-static-node${{ env.NODE_VERSION }}-${{ github.sha }}
+          key: turbo-builds-${{ runner.os }}-${{ github.sha }}
           restore-keys: |
-            turbo-${{ runner.os }}-ci-static-node${{ env.NODE_VERSION }}-
+            turbo-builds-${{ runner.os }}-
       - run: pnpm install --frozen-lockfile
       - name: Validate changesets
         if: github.event_name == 'pull_request' && hashFiles('.changeset/*.md') != ''
@@ -52,7 +56,11 @@ jobs:
       - run: pnpm knip
       - run: pnpm build
       - run: pnpm check
+      - run: node scripts/ci/turbo-cache.mjs verify
       - run: pnpm test:scripts
+      - name: Keep this commit's builds in the turbo cache
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        run: node scripts/ci/turbo-cache.mjs prune
       - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         with:
@@ -79,7 +87,6 @@ jobs:
           - leg: server
             container: *playwright-container
             filters: --filter=@usine/server
-            args: -- --project=server
           - leg: engine
             filters: --filter=@usine/engine --filter=@usine/orchestrator --filter=@usine/durable
           - leg: rest
@@ -93,12 +100,11 @@ jobs:
           check-latest: true
           cache: pnpm
       - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        id: turbo
         with:
           path: .turbo
-          key: turbo-${{ runner.os }}-ci-${{ matrix.leg }}-node${{ env.NODE_VERSION }}-${{ github.sha }}
+          key: turbo-builds-${{ runner.os }}-${{ github.sha }}
           restore-keys: |
-            turbo-${{ runner.os }}-ci-${{ matrix.leg }}-node${{ env.NODE_VERSION }}-
+            turbo-builds-${{ runner.os }}-
       - run: pnpm install --frozen-lockfile
       # A cache saved by a pull request run is scoped to that pull request, so the
       # first main run on a new image tag misses and downloads from the mirror
@@ -172,16 +178,12 @@ jobs:
         run: |
           if [ "${{ matrix.leg }}" = server ]; then
             chown -R pwuser:pwuser "$GITHUB_WORKSPACE"
-            runuser -u pwuser -- env "PATH=$PATH" pnpm turbo run test --concurrency=1 ${{ matrix.filters }} ${{ matrix.args }}
+            runuser -u pwuser -- env "PATH=$PATH" pnpm turbo run test --concurrency=1 ${{ matrix.filters }}
           else
-            pnpm turbo run test --concurrency=1 ${{ matrix.filters }} ${{ matrix.args }}
+            pnpm turbo run test --concurrency=1 ${{ matrix.filters }}
           fi
         timeout-minutes: 10
-      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-        with:
-          path: .turbo
-          key: ${{ steps.turbo.outputs.cache-primary-key }}
+      - run: node scripts/ci/turbo-cache.mjs verify
 
   latency:
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
@@ -195,20 +197,14 @@ jobs:
           check-latest: true
           cache: pnpm
       - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        id: turbo
         with:
           path: .turbo
-          key: turbo-${{ runner.os }}-ci-latency-node${{ env.NODE_VERSION }}-${{ github.sha }}
+          key: turbo-builds-${{ runner.os }}-${{ github.sha }}
           restore-keys: |
-            turbo-${{ runner.os }}-ci-latency-node${{ env.NODE_VERSION }}-
+            turbo-builds-${{ runner.os }}-
       - run: pnpm install --frozen-lockfile
       - run: pnpm turbo run build --filter=@usine/server
       - run: pnpm --filter @usine/server exec vitest run --project=latency
-      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-        with:
-          path: .turbo
-          key: ${{ steps.turbo.outputs.cache-primary-key }}
 
   ci:
     if: always()
