@@ -299,9 +299,11 @@ describe("Board self-writes", () => {
             );
 
             const overview = yield* awaitCondition(operator.overview(fixtureInstance), (value) =>
-              value.projects.some((project) => project.runs.some((run) => run.state === "Waiting")),
+              value.projects.some((project) =>
+                (project.runs ?? []).some((run) => run.state === "Waiting"),
+              ),
             );
-            assert.strictEqual(overview.projects[0]?.runs.length, 1);
+            assert.strictEqual(overview.projects[0]?.runs?.length, 1);
             assert.strictEqual(
               overview.projects[0]?.board.lanes.find((lane) => lane.id === move.toLane)?.items[0]
                 ?.number,
@@ -312,7 +314,7 @@ describe("Board self-writes", () => {
               1,
               "a self-write fetches the moved Item without repeating conditional change detection",
             );
-            const waiting = overview.projects[0]?.runs[0];
+            const waiting = overview.projects[0]?.runs?.[0];
             assert(waiting !== undefined);
             yield* applyMove;
 

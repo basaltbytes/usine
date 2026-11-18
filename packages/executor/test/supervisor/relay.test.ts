@@ -20,6 +20,7 @@ const MAX_RELAY_BODY_BYTES = 2 * 1024 ** 2;
 const model = ModelId.make("allowed");
 const unused: GatewayModelRoute = {
   credential: () => Effect.succeedNone,
+  countTokens: () => Effect.die("the test counts no tokens"),
   request: () => Effect.die("A refused request must not reach the gateway"),
 };
 const request = (body: string) =>
@@ -83,6 +84,7 @@ describe("supervisor relay limits", () => {
       const failed = yield* relayModelRequest(
         {
           credential: () => Effect.succeedNone,
+          countTokens: () => Effect.die("the test counts no tokens"),
           request: () =>
             Effect.fail(
               GatewayModelError.make({ message: "Failed to connect to secret.gateway:3210" }),
@@ -152,6 +154,7 @@ describe("supervisor relay limits", () => {
       });
       const route: GatewayModelRoute = {
         credential: () => Effect.succeedNone,
+        countTokens: () => Effect.die("the test counts no tokens"),
         request: (_protocol, received) =>
           Effect.sync(() => {
             assert.strictEqual(received, body);
@@ -169,6 +172,57 @@ describe("supervisor relay limits", () => {
       }
     }),
   );
+
+  it.effect("forwards a token count for the configured model without a warning", () => {
+    const warnings: Array<unknown> = [];
+    const logger = Logger.layer([
+      Logger.make<unknown, void>(({ logLevel, message }) => {
+        if (logLevel === "Warn") warnings.push(message);
+      }),
+    ]);
+    return Effect.gen(function* () {
+      const counted: Array<{ body: string; headers: Readonly<Record<string, string>> }> = [];
+      const route: GatewayModelRoute = {
+        credential: () => Effect.succeedNone,
+        request: () => Effect.die("A token count must not run the model"),
+        countTokens: (body, headers) =>
+          Effect.sync(() => {
+            counted.push({ body, headers });
+            return Response.json({ input_tokens: 42 });
+          }),
+      };
+      const count = (body: string) =>
+        relayModelRequest(route, model, limits).pipe(
+          Effect.provideService(
+            HttpServerRequest.HttpServerRequest,
+            HttpServerRequest.fromWeb(
+              new Request("http://relay/anthropic-messages/v1/messages/count_tokens", {
+                method: "POST",
+                headers: { "anthropic-version": "2023-06-01", "x-api-key": "sandbox-token" },
+                body,
+              }),
+            ),
+          ),
+        );
+      const body = '{"model":"allowed","messages":[{"role":"user","content":"hi"}]}';
+      const answered = yield* count(body);
+      assert.strictEqual(answered.status, 200);
+      const text = yield* Effect.promise(() => HttpServerResponse.toWeb(answered).text());
+      assert.strictEqual(text, '{"input_tokens":42}');
+      assert.deepStrictEqual(
+        counted.map(({ body, headers }) => [
+          body,
+          headers["anthropic-version"],
+          headers["x-api-key"],
+        ]),
+        [[body, "2023-06-01", undefined]],
+      );
+      assert.deepStrictEqual(warnings, []);
+      const refused = yield* count('{"model":"other","messages":[]}');
+      assert.strictEqual(refused.status, 403);
+      assert.lengthOf(counted, 1);
+    }).pipe(Effect.provide(logger));
+  });
 
   it("drops connections above the limit", async () => {
     const server = modelRelayServer();

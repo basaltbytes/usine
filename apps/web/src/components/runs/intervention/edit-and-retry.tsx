@@ -2,7 +2,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AgentName } from "@usine/core/agent";
 import { AttemptTask } from "@usine/core/attempt";
 import type { RunId } from "@usine/core/run";
-import { EditAndRetry as Amendment, type RunView } from "@usine/orchestrator/operator";
+import {
+  EditAndRetry as Amendment,
+  type RunSummaryView,
+  type RunView,
+} from "@usine/orchestrator/operator";
 import { useId, useState } from "react";
 import { overviewQuery } from "~/lib/overview";
 import { agentsQuery } from "~/lib/configuration/queries";
@@ -34,8 +38,10 @@ const editCopy = {
 } as const satisfies Record<EditIntent, { title: string; note: string; submit: string }>;
 
 /** Returns whether the Run still allows `intent`. */
-export const editApplies = (run: RunView, intent: EditIntent): boolean =>
-  intent === "retry" ? run.canRetry : run.canRunAgain;
+export const editApplies = (
+  run: Pick<RunSummaryView, "canRetry" | "canRunAgain">,
+  intent: EditIntent,
+): boolean => (intent === "retry" ? run.canRetry : run.canRunAgain);
 
 const useRetryWith = (run: RunView, close: () => void) => {
   const queryClient = useQueryClient();

@@ -19,7 +19,9 @@ import {
   ReadyOverview,
   RunDetailView,
   RunView,
+  AttemptView,
 } from "@usine/orchestrator/operator";
+import { AttemptTask } from "@usine/core/attempt";
 import { Schema } from "effect";
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
@@ -72,6 +74,11 @@ it.each([1440, 390])(
       ...template,
       id: RunId.make("approval-run"),
       loop: LoopName.make("usine/fix-ci"),
+      task: "Do the work.",
+      resultMessage: null,
+      attempts: template.attempts.map((attempt) =>
+        AttemptView.make({ ...attempt, task: AttemptTask.make("Do the work.") }),
+      ),
     });
     const overview = ReadyOverview.make({
       ...taskOverview(),

@@ -62,7 +62,7 @@ export const TaskHeader = ({ task, project, disabled }: TaskHeaderProps) => {
       : cardLabels(placed.card, placed.lane).filter(
           (label) => pending === undefined || !laneLabels.has(label),
         );
-  const catalog: LabelCatalog = new Map(project.labels.map((label) => [label.name, label]));
+  const catalog: LabelCatalog = new Map((project.labels ?? []).map((label) => [label.name, label]));
   const movable = !disabled && !moves.isPending && pending === undefined && targets.length > 0;
   usePageCommands(
     placed !== undefined && movable

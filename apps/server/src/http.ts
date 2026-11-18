@@ -2,8 +2,17 @@ import { GitHubFiles } from "@usine/github/files";
 import { providerRoutes } from "./providers/http.ts";
 import type { ProviderLogins } from "./providers/control.ts";
 import { catalog, harnessPresentations } from "@usine/agents/harness";
-import { TaskView } from "@usine/orchestrator/operator";
-import { shellOverview, pagedBoard, attentionOverview } from "./changes/reads.ts";
+import { ItemEntryCursor, pageOf } from "@usine/orchestrator/operator";
+import type { ItemNumber } from "@usine/core/item";
+import {
+  attentionOverview,
+  pagedBoard,
+  projectSummary,
+  shellOverview,
+  summaryOverview,
+  taskPage,
+  taskSummary,
+} from "./changes/reads.ts";
 import { Changes } from "./changes/changes.ts";
 import { conditionalReads } from "./conditional-reads.ts";
 import type { StartupListener } from "./listener.ts";
@@ -220,6 +229,29 @@ const fromBackend = <A>(
   use: (backend: FactoryBackend["Service"]) => Effect.Effect<A, BackendError>,
 ) => Effect.flatMap(FactoryBackend, use).pipe(Effect.mapError(operatorFailure));
 
+/** The cards in one page of a lane. */
+const LANE_PAGE_CARDS = 50;
+/** The runs in one page of a task's runs. */
+const TASK_RUNS_PAGE = 25;
+
+/** The representation that the request names in `X-Usine-View`, if any. */
+const requestedView = Effect.map(
+  HttpServerRequest.HttpServerRequest,
+  (request) => request.headers["x-usine-view"],
+);
+
+/**
+ * Reads the task of `item` in the representation that the request names: the web UI's task page
+ * for `task`, every run and its results for `full`, and the summary otherwise.
+ */
+const taskRepresentation = (repository: RepositoryName, item: ItemNumber) =>
+  Effect.gen(function* () {
+    const view = yield* requestedView;
+    const depth = view === "task" || view === "full" ? "results" : "summary";
+    const task = yield* fromBackend((backend) => backend.task(repository, item, depth));
+    return view === "task" ? taskPage(task) : view === "full" ? task : taskSummary(task);
+  });
+
 const projectRepository = (params: { readonly owner: string; readonly repository: string }) =>
   Schema.decodeEffect(RepositoryName)(`${params.owner}/${params.repository}`).pipe(
     Effect.mapError((error) =>
@@ -276,13 +308,15 @@ const handlers = HttpApiBuilder.group(
       )
       .handle("overview", () =>
         Effect.gen(function* () {
-          const request = yield* HttpServerRequest.HttpServerRequest;
+          const view = yield* requestedView;
           const overview = yield* fromBackend((backend) => backend.overview);
-          return request.headers["x-usine-view"] === "shell"
+          return view === "shell"
             ? shellOverview(overview)
-            : request.headers["x-usine-view"] === "attention"
+            : view === "attention"
               ? attentionOverview(overview)
-              : overview;
+              : view === "full"
+                ? overview
+                : summaryOverview(overview);
         }),
       )
       .handle("project", ({ params }) =>
@@ -296,8 +330,12 @@ const handlers = HttpApiBuilder.group(
                     message: `Project ${params.project} was not found.`,
                   }),
                 )
-              : Effect.map(HttpServerRequest.HttpServerRequest, (request) =>
-                  request.headers["x-usine-view"] === "board" ? pagedBoard(project) : project,
+              : Effect.map(requestedView, (view) =>
+                  view === "board"
+                    ? pagedBoard(project)
+                    : view === "full"
+                      ? project
+                      : projectSummary(project),
                 );
           }),
         ),
@@ -315,12 +353,11 @@ const handlers = HttpApiBuilder.group(
                   message: "The project lane was not found.",
                 }),
               );
-            const offset = query.offset ?? 0;
-            const items = lane.items.slice(offset, offset + 50);
+            const page = pageOf(lane.items, query.offset ?? 0, LANE_PAGE_CARDS);
             return Effect.succeed({
-              items,
-              total: lane.items.length,
-              nextOffset: offset + items.length < lane.items.length ? offset + items.length : null,
+              items: page.entries,
+              total: page.total,
+              nextOffset: page.nextOffset,
             });
           }),
         ),
@@ -374,7 +411,7 @@ const handlers = HttpApiBuilder.group(
       )
       .handle("projectTask", ({ params, query }) =>
         requireProjectRepository(params.project, query.repository).pipe(
-          Effect.andThen(fromBackend((backend) => backend.task(query.repository, params.item))),
+          Effect.andThen(taskRepresentation(query.repository, params.item)),
         ),
       )
       .handle("moveProjectItem", ({ params, payload }) =>
@@ -478,14 +515,11 @@ const handlers = HttpApiBuilder.group(
       .handle("taskRuns", ({ params, query }) =>
         Effect.gen(function* () {
           const repository = yield* projectRepository(params);
-          const task = yield* fromBackend((backend) => backend.task(repository, params.item));
-          const offset = query.offset ?? 0;
-          const runs = task.runs.slice(offset, offset + 25);
-          return {
-            runs,
-            total: task.runs.length,
-            nextOffset: offset + runs.length < task.runs.length ? offset + runs.length : null,
-          };
+          const task = yield* fromBackend((backend) =>
+            backend.task(repository, params.item, "summary"),
+          );
+          const page = pageOf(task.runs, query.offset ?? 0, TASK_RUNS_PAGE);
+          return { runs: page.entries, total: page.total, nextOffset: page.nextOffset };
         }),
       )
       .handle(
@@ -493,21 +527,21 @@ const handlers = HttpApiBuilder.group(
         Effect.fn("Http.task")(function* ({ params }) {
           const repository = yield* projectRepository(params);
           yield* Effect.annotateCurrentSpan({ repository, item: params.item });
-          const task = yield* fromBackend((backend) => backend.task(repository, params.item));
-          const request = yield* HttpServerRequest.HttpServerRequest;
-          return request.headers["x-usine-view"] === "task"
-            ? TaskView.make({
-                ...task,
-                runsTotal: task.runs.length,
-                runs: task.runs.slice(0, 25),
-                commentRuns: task.runs.map(({ id, repository, itemKey, loop }) => ({
-                  id,
-                  repository,
-                  itemKey,
-                  loop,
-                })),
-              })
-            : task;
+          return yield* taskRepresentation(repository, params.item);
+        }),
+      )
+      .handle(
+        "item",
+        Effect.fn("Http.item")(function* ({ params, query }) {
+          const repository = yield* projectRepository(params);
+          yield* Effect.annotateCurrentSpan({ repository, item: params.item });
+          return yield* fromBackend((backend) =>
+            backend.item(
+              repository,
+              params.item,
+              ItemEntryCursor.make({ entry: query.entry ?? 0, offset: query.offset ?? 0 }),
+            ),
+          );
         }),
       )
       .handle("checkLoop", ({ payload }) =>

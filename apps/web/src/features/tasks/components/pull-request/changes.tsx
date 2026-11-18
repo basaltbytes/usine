@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ItemNumber } from "@usine/core/item";
 import type { ProjectId } from "@usine/core/project";
 import { CommitRangeFilesQuery, PullRequestFilesQuery } from "@usine/github/file-changes";
-import type { TaskItemView, TaskView } from "@usine/orchestrator/operator";
+import type { TaskAttemptChangesView, TaskItemView, TaskView } from "@usine/orchestrator/operator";
 import { OperatorHttpError } from "@usine/orchestrator/operator/http";
 import { Schema } from "effect";
 import { lazy, Suspense, useId, useState } from "react";
@@ -47,7 +47,7 @@ type PullRequestFilesProps = {
   readonly task: TaskView;
   readonly number: ItemNumber;
   readonly state: NonNullable<TaskItemView["pullRequest"]>;
-  readonly attempts: TaskView["attemptChanges"];
+  readonly attempts: ReadonlyArray<TaskAttemptChangesView>;
 };
 
 const PullRequestFiles = ({ project, task, number, state, attempts }: PullRequestFilesProps) => {
@@ -184,7 +184,7 @@ export const PullRequestChanges = ({ project, task, pullRequest }: PullRequestCh
               task={task}
               number={pullRequest.number}
               state={pullRequest.pullRequest}
-              attempts={task.attemptChanges.filter(
+              attempts={(task.attemptChanges ?? []).filter(
                 (attempt) => attempt.pullRequest === pullRequest.number,
               )}
             />

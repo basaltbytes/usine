@@ -1,6 +1,6 @@
 import { useProjectLinks } from "~/hooks/use-project-links";
 import { Link } from "@tanstack/react-router";
-import type { TaskView } from "@usine/orchestrator/operator";
+import type { TaskCommentView, TaskView } from "@usine/orchestrator/operator";
 import { FillCell } from "~/components/fill-cell";
 import { ItemMark } from "~/components/item/mark";
 import { Table, TableBody, TableCell, TableRow } from "~/components/ui/table";
@@ -16,7 +16,7 @@ import {
 
 /** Returns the posted time, else the Attempt's end time for comments recorded before posted times
  * were stored; `null` if neither is known. */
-const commentTime = (comment: TaskView["comments"][number]) => {
+const commentTime = (comment: TaskCommentView) => {
   if (comment.postedAt !== null)
     return { at: comment.postedAt, title: `Posted ${timestampLabel(comment.postedAt)}` };
   if (comment.attemptEndedAt !== null)
@@ -33,14 +33,11 @@ export const TaskComments = ({ task }: TaskCommentsProps) => {
   const projectLinks = useProjectLinks();
   const runs = new Map((task.commentRuns ?? task.runs).map((run) => [run.id, run]));
   const items = new Map(task.items.map((item) => [item.itemKey, item]));
+  const comments = task.comments ?? [];
   return (
     <section aria-labelledby="task-comments" className="flex flex-col gap-2">
-      <SectionHeading
-        id="task-comments"
-        title="Comments and reviews"
-        count={task.comments.length}
-      />
-      {task.comments.length === 0 ? (
+      <SectionHeading id="task-comments" title="Comments and reviews" count={comments.length} />
+      {comments.length === 0 ? (
         <SectionEmpty title="No comments or reviews">
           Comments and reviews an agent posts on the task's items appear here after the attempt ends
         </SectionEmpty>
@@ -48,7 +45,7 @@ export const TaskComments = ({ task }: TaskCommentsProps) => {
         <div className="-mx-2">
           <Table aria-labelledby="task-comments">
             <TableBody className="border-t">
-              {task.comments.map((comment) => {
+              {comments.map((comment) => {
                 const run = runs.get(comment.runId);
                 const item = run === undefined ? undefined : items.get(run.itemKey);
                 const time = commentTime(comment);

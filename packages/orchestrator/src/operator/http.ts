@@ -1,6 +1,8 @@
 import { pullRequestFilesRead } from "./files-http.ts";
 import { HarnessPresentation } from "@usine/agents/harness";
 import {
+  describeQuery,
+  position,
   repositoryPart,
   changesRead,
   workersRead,
@@ -87,6 +89,7 @@ import { FactoryOverview } from "./overview.ts";
 import { RunDetailView, EditAndRetry, SessionIntervention } from "./run.ts";
 import { RunGitHubChangesView } from "./github-changes.ts";
 import { TaskView } from "./task.ts";
+import { ItemView } from "./item.ts";
 import { ConfigurationView } from "./configuration/view.ts";
 import { DeskView } from "./desk.ts";
 import { RunStatisticsView, StatisticsView, StatisticsWindow } from "./statistics/view.ts";
@@ -482,6 +485,9 @@ const transcriptQuery = Schema.Union([
   ),
 ]);
 
+const taskDescription =
+  "Returns the task's items, its lane, whether it needs the operator, `runsTotal`, and its newest runs that fit 10 KB of JSON, without task prompts or result text. Read the other runs with taskRuns from offset `runs.length`, a run's prompt and transcript with detail, and an item's body and comments with item. `X-Usine-View: task` returns the first 25 runs with the comments and commit ranges of every run, and `X-Usine-View: full` returns every run with them.";
+
 const acknowledged = Schema.Struct({ ok: Schema.Literal(true) }).annotate({
   title: "Acknowledgement",
   description: "The request was accepted. An asynchronous action may still be running.",
@@ -656,7 +662,7 @@ export const OperatorApi = operatorApi.add(
         .annotate(OpenApi.Summary, "Read the instance overview")
         .annotate(
           OpenApi.Description,
-          "Returns project boards, loops, workers, and instance readiness.",
+          "Returns each project with its lanes and their card counts, the loops, the attention items, and whether the instance is set up. It has no cards, and no project runs or labels: read a lane's cards with boardLaneItems, a task with task, and the running attempts with desk. `X-Usine-View: full` returns every card, run, and label.",
         ),
       HttpApiEndpoint.post("dismissNeed", "/api/attention/dismiss", {
         payload: AttentionKey,
@@ -824,7 +830,7 @@ export const OperatorApi = operatorApi.add(
         .annotate(OpenApi.Summary, "Read a project board")
         .annotate(
           OpenApi.Description,
-          "Returns the project and its board across member repositories.",
+          "Returns the project with its lanes and their card counts across member repositories, without cards, runs, or labels. Read a lane's cards with boardLaneItems. `X-Usine-View: full` returns every card, run, and label, and `X-Usine-View: board` returns the cards of every lane except the lanes of closed and merged items, which have their counts.",
         ),
       boardLaneItemsRead,
       pullRequestFilesRead,
@@ -837,10 +843,7 @@ export const OperatorApi = operatorApi.add(
         success: TaskView,
       })
         .annotate(OpenApi.Summary, "Read a project task")
-        .annotate(
-          OpenApi.Description,
-          "Returns linked issues, pull requests, and runs for an item in a project repository.",
-        ),
+        .annotate(OpenApi.Description, `Reads a task of a project repository. ${taskDescription}`),
       HttpApiEndpoint.post("moveProjectItem", "/api/projects/:project/items/:item/lane", {
         params: {
           project: ProjectId,
@@ -931,7 +934,33 @@ export const OperatorApi = operatorApi.add(
         success: TaskView,
       })
         .annotate(OpenApi.Summary, "Read a repository task")
-        .annotate(OpenApi.Description, "Returns linked items and runs for the repository item."),
+        .annotate(OpenApi.Description, `Reads the task that contains the item. ${taskDescription}`),
+      HttpApiEndpoint.get("item", "/api/projects/:owner/:repository/items/:item", {
+        params: {
+          owner: repositoryPart,
+          repository: repositoryPart,
+          item: Schema.FiniteFromString.pipe(Schema.decodeTo(ItemNumber)),
+        },
+        query: { entry: position, offset: position },
+        success: ItemView,
+      })
+        .annotate(
+          OpenApi.Transform,
+          describeQuery(
+            new Map([
+              ["entry", "The entry to start from, as `next.entry` gives it. Defaults to 0."],
+              [
+                "offset",
+                "The position in the entry's text to start from, in UTF-16 code units, as `next.offset` gives it. Defaults to 0.",
+              ],
+            ]),
+          ),
+        )
+        .annotate(OpenApi.Summary, "Read an item's body and comments")
+        .annotate(
+          OpenApi.Description,
+          "Returns an issue or pull request of a board task as polling last stored it, with a page of its entries: the body, then the comments and reviews by time, then the review comments by thread. A page holds no more than fit 20 KB of JSON and cuts a long entry; pass `next.entry` and `next.offset` as `entry` and `offset` to read on, until `next` is null. `omitted` counts the comments and reviews that polling doesn't store; read them on GitHub at `url`.",
+        ),
     )
     .add(
       HttpApiEndpoint.post("checkLoop", "/api/configuration/loops/check", {
@@ -1148,6 +1177,7 @@ export const operatorPermissions = {
   pullRequestFiles: "read",
   task: "read",
   taskRuns: "read",
+  item: "read",
   detail: "read",
   githubChanges: "read",
   desk: "read",

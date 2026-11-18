@@ -59,7 +59,8 @@ In Claude Code, run `/mcp` and open **usine**; in Codex, run `/mcp`. The list co
 
 - Each tool call is an operator API request with the token. The instance checks the permission again, including the project in the path, and records the token's member on approvals and other actions.
 - A tool's input is one object with the operation's path parameters, query parameters, and `body` for a request body.
-- A result is the JSON response text. A result over 100 KB is cut at that size and followed by a note that names a narrower operation, such as `desk` or `project` for `overview`.
+- A result is the JSON response text. `overview`, `project`, and `task` return summaries; lists come in pages with `nextOffset`, and `item` returns an issue's or pull request's body and comments in pages with `next`. Each tool's description names the operation that reads the rest.
+- A result over 24 KB, or an error over 10 KB, is cut at that size and followed by a note that says how to read the rest.
 - A refused request returns an error result with the HTTP status and the error body. A tool outside the token's list is unknown to the server.
 - The change stream, `GET /api/changes`, has no tool.
 - The client reads the tool list when it connects. After you change the token's scopes or operations, reconnect the server in the client.

@@ -101,7 +101,7 @@ export const projectAttention = (
       ...project,
       status: [project.repository, ...project.repositories].some((name) => repositories.has(name))
         ? "needs-you"
-        : project.runs.some(({ canCancel }) => canCancel)
+        : (project.runs ?? []).some(({ canCancel }) => canCancel)
           ? "active"
           : "clear",
       board: BoardView.make({

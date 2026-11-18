@@ -29,7 +29,9 @@ export const NavigationCommands = ({ overview, select, searching }: NavigationCo
       task.items.map(({ itemKey }) => [itemKey, task] as const),
     ),
   );
-  const runs = new Map(overview.projects.flatMap(({ runs }) => runs).map((run) => [run.id, run]));
+  const runs = new Map(
+    overview.projects.flatMap(({ runs }) => runs ?? []).map((run) => [run.id, run]),
+  );
   return (
     <>
       <CommandGroup heading={paletteCopy.navigation}>

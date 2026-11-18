@@ -47,6 +47,7 @@ const getJson = <A, I>(
   path: string,
   schema: Schema.Codec<A, I>,
   directory: InstanceDirectory,
+  headers: Readonly<Record<string, string>> = {},
 ) => {
   const url = apiUrl(port, path);
   return Effect.gen(function* () {
@@ -54,7 +55,7 @@ const getJson = <A, I>(
     const client = yield* HttpClient.HttpClient;
     return yield* HttpClient.filterStatusOk(client)
       .get(url, {
-        headers: { authorization: `Bearer ${Redacted.value(token)}` },
+        headers: { ...headers, authorization: `Bearer ${Redacted.value(token)}` },
       })
       .pipe(
         Effect.flatMap(HttpClientResponse.schemaBodyJson(schema)),
@@ -64,12 +65,17 @@ const getJson = <A, I>(
   });
 };
 
-/** Lists the Runs of the instance that listens on `port`, with one `GET /api/overview`. */
+/**
+ * Lists the Runs of the instance that listens on `port`, with one `GET /api/overview` in the
+ * `shell` representation, which has the projects' runs without their boards.
+ */
 export const listRuns = Effect.fn("Instance.listRuns")(function* (
   port: Port,
   directory: InstanceDirectory = InstanceDirectory.make(process.cwd()),
 ) {
-  const overview = yield* getJson(port, "/api/overview", Overview, directory);
+  const overview = yield* getJson(port, "/api/overview", Overview, directory, {
+    "x-usine-view": "shell",
+  });
   return overview.projects.flatMap(({ runs }) => runs);
 });
 

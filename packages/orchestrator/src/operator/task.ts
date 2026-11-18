@@ -41,8 +41,8 @@ import {
   BoardLaneId,
   BoardProjectNotFoundError,
 } from "./board.ts";
-import { readRunningEvents, runSummaryView, runView, workerAccesses } from "./projection.ts";
-import { RunView } from "./run.ts";
+import { readRunningEvents, runSummaryView, workerAccesses } from "./projection.ts";
+import { RunSummaryView } from "./run.ts";
 
 /**
  * One issue or pull request of a Task, with its GitHub state as the Board card shows it.
@@ -108,8 +108,9 @@ export class TaskCommentView extends Schema.Class<
 }) {}
 
 /**
- * One Task as its page shows it (ADR 0008). Tasks have no stored identity; `number` is the
- * originating Item: the earliest issue, or else the earliest pull request.
+ * One Task (ADR 0008). Tasks have no stored identity; `number` is the originating Item: the
+ * earliest issue, or else the earliest pull request. A summary read leaves out `comments` and
+ * `attemptChanges`, and a representation can hold one page of `runs`.
  */
 export class TaskView extends Schema.Class<
   TaskView,
@@ -137,9 +138,12 @@ export class TaskView extends Schema.Class<
   needsYou: Schema.Boolean,
   /** Issues first, then pull requests, each by number; the first is the originating Item. */
   items: Schema.NonEmptyArray(TaskItemView),
-  /** Every saved Run on the Task's Items, newest first. */
-  runs: Schema.Array(RunView),
-  /** Total runs when history is read in pages. */
+  /**
+   * The saved Runs on the Task's Items, newest first, without their task prompts and result text.
+   * A paged representation holds only the newest Runs that fit its page.
+   */
+  runs: Schema.Array(RunSummaryView),
+  /** The number of saved Runs on the Task's Items. */
   runsTotal: Schema.optionalKey(Schema.Int),
   /** Run identities for comments outside the first history page. */
   commentRuns: Schema.optionalKey(
@@ -147,17 +151,23 @@ export class TaskView extends Schema.Class<
       Schema.Struct({ id: RunId, repository: RepositoryName, itemKey: ItemKey, loop: LoopName }),
     ),
   ),
-  /** The harvested comments and reviews of those Runs, newest Run first, and newest first within a Run. */
-  comments: Schema.Array(TaskCommentView),
   /**
-   * Recorded attempt commit ranges, including runs outside the first history page and attempts
-   * that pushed no new commits.
+   * The harvested comments and reviews of every Run, newest Run first, and newest first within a
+   * Run. Absent from a summary read.
    */
-  attemptChanges: Schema.Array(TaskAttemptChangesView).pipe(
-    Schema.withDecodingDefaultKey(Effect.succeed([])),
-    Schema.withConstructorDefault(Effect.succeed([])),
-  ),
+  comments: Schema.optionalKey(Schema.Array(TaskCommentView)),
+  /**
+   * Recorded attempt commit ranges of every Run, including attempts that pushed no new commits.
+   * Absent from a summary read.
+   */
+  attemptChanges: Schema.optionalKey(Schema.Array(TaskAttemptChangesView)),
 }) {}
+
+/**
+ * How much a task read returns: `summary` reads the Task's Items and Run summaries, and `results`
+ * also reads every Run's results for its comments, reviews, and attempt commit ranges.
+ */
+export type TaskReadDepth = "summary" | "results";
 
 /**
  * A task lookup failure caused by storage, an unknown repository, or an item outside the projected
@@ -210,8 +220,9 @@ const makeTaskReader = Effect.gen(function* () {
     instance: LoadedInstance,
     repository: RepositoryName,
     number: ItemNumber,
+    depth: TaskReadDepth,
   ) {
-    yield* Effect.annotateCurrentSpan({ repository, item: number });
+    yield* Effect.annotateCurrentSpan({ repository, item: number, depth });
     const managed = boardRepositories(instance.config).find(
       ({ name }) => canonicalRepositoryName(name) === canonicalRepositoryName(repository),
     );
@@ -322,19 +333,15 @@ const makeTaskReader = Effect.gen(function* () {
     if (first === undefined) {
       return yield* BoardItemNotFoundError.make({ repository: managed.name, item: number });
     }
-    const detailRuns = yield* Effect.forEach(
-      summaries.filter(({ itemKey }) => memberKeys.has(itemKey)),
-      ({ run }) => reader.inspect(run.id),
-      { concurrency: 4 },
-    );
-    const comments = detailRuns
+    const memberRuns = summaries
+      .filter(({ itemKey }) => memberKeys.has(itemKey))
       .sort(
         (a, b) =>
           DateTime.toEpochMillis(b.run.openedAt) - DateTime.toEpochMillis(a.run.openedAt) ||
           b.run.id.localeCompare(a.run.id),
-      )
-      .flatMap(harvestedComments);
-    const view = TaskView.make({
+      );
+    const runs = memberRuns.map((summary) => runSummaryView(summary, paused, access, waits));
+    const summary = TaskView.make({
       repository: managed.name,
       number: first.number,
       title: task.title,
@@ -342,22 +349,32 @@ const makeTaskReader = Effect.gen(function* () {
       lane: TaskLaneView.make({ id: lane.id, name: lane.name }),
       needsYou: task.needsYou,
       items: [first, ...rest],
-      runs: detailRuns
-        .map((summary) => runView(summary, paused, access, waits))
-        .sort((a, b) => b.openedAt.localeCompare(a.openedAt) || b.id.localeCompare(a.id)),
-      comments,
-      attemptChanges: detailRuns.flatMap(harvestedAttemptChanges),
+      runs,
+      runsTotal: runs.length,
     });
-    yield* Effect.logDebug("Read a Task", {
+    const fields = {
       repository: managed.name,
       item: number,
-      origin: view.number,
+      depth,
+      origin: summary.number,
       lane: lane.name,
-      items: view.items.length,
-      runs: view.runs.length,
-      comments: comments.length,
+      items: summary.items.length,
+      runs: runs.length,
+    };
+    if (depth === "summary") {
+      yield* Effect.logDebug("Read a Task", fields);
+      return summary;
+    }
+    const inspected = yield* Effect.forEach(memberRuns, ({ run }) => reader.inspect(run.id), {
+      concurrency: 4,
     });
-    return view;
+    const comments = inspected.flatMap(harvestedComments);
+    yield* Effect.logDebug("Read a Task", { ...fields, comments: comments.length });
+    return TaskView.make({
+      ...summary,
+      comments,
+      attemptChanges: inspected.flatMap(harvestedAttemptChanges),
+    });
   });
 
   return { read } as const;
@@ -370,13 +387,14 @@ export class TaskReader extends Context.Service<
   TaskReader,
   {
     /**
-     * Returns the Task that contains Item `item` of `repository`. Fails if the repository isn't a
-     * Project or the item isn't in the board selection.
+     * Returns the Task that contains Item `item` of `repository`, read to `depth`. Fails if the
+     * repository isn't a Project or the item isn't in the board selection.
      */
     readonly read: (
       instance: LoadedInstance,
       repository: RepositoryName,
       item: ItemNumber,
+      depth: TaskReadDepth,
     ) => Effect.Effect<TaskView, TaskReadError>;
   }
 >()("@usine/orchestrator/operator/task/TaskReader") {

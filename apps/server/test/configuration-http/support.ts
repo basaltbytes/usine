@@ -249,6 +249,7 @@ export const harness = (
       pause: () => unused,
       unpause: () => unused,
       task: () => unused,
+      item: () => unused,
       desk: Effect.die("unused"),
       statistics: () => unused,
       runStatistics: () => unused,

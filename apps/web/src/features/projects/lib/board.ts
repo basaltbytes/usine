@@ -114,5 +114,5 @@ export const runsWithoutCard = (project: ProjectView): ReadonlyArray<RunSummaryV
         items.flatMap(({ items }) => items.map(({ itemKey }) => itemKey)),
       ),
   );
-  return project.runs.filter(({ itemKey }) => !carded.has(itemKey));
+  return (project.runs ?? []).filter(({ itemKey }) => !carded.has(itemKey));
 };

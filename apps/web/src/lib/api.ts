@@ -4,7 +4,13 @@ import { Effect } from "effect";
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/http";
 import { HttpApiClient } from "effect/http-api";
 
-const makeClient = (view?: "shell" | "board" | "task" | "attention") =>
+/**
+ * A representation that a read names in `X-Usine-View`. Without one, the overview, a project,
+ * and a task are summaries.
+ */
+type View = "shell" | "board" | "task" | "attention" | "full";
+
+const makeClient = (view?: View) =>
   HttpApiClient.make(OperatorApi, {
     baseUrl: globalThis.location.origin,
     transformClient: (client) =>
@@ -40,7 +46,7 @@ const run = <A, E>(request: Effect.Effect<A, E, HttpClient.HttpClient>): Promise
 /** Runs an operator API request and returns a Promise that rejects with the decoded API error. */
 export const api = <A, E>(
   request: (client: Client["operator"]) => Effect.Effect<A, E>,
-  view?: "shell" | "board" | "task" | "attention",
+  view?: View,
 ): Promise<A> => run(Effect.flatMap(makeClient(view), (client) => request(client.operator)));
 
 /** Runs a request of the operator API's conversation group, as `api` does. */

@@ -28,6 +28,12 @@ export interface GatewayModelRoute {
     headers: Readonly<Record<string, string>>,
     signal?: AbortSignal,
   ) => Effect.Effect<Response, GatewayModelError>;
+  /** Counts the input tokens of an Anthropic Messages request, without running it. */
+  readonly countTokens: (
+    body: string,
+    headers: Readonly<Record<string, string>>,
+    signal?: AbortSignal,
+  ) => Effect.Effect<Response, GatewayModelError>;
 }
 
 /** Opens SSH forwards and a renewable anonymous attachment, and detaches it when the scope closes. */
@@ -134,17 +140,17 @@ export const gatewayModelRouteFor = Effect.fn("GatewayModelRoute.open")(
     });
     const request = Effect.fn("GatewayModelRoute.request")(function* (
       protocol: GatewayLlmProtocol,
+      path: string,
       body: string,
       headers: Readonly<Record<string, string>>,
       signal?: AbortSignal,
     ) {
-      yield* Effect.annotateCurrentSpan({ worker, protocol });
+      yield* Effect.annotateCurrentSpan({ worker, protocol, path });
       const forward = yield* modelForward.current.pipe(
         Effect.catchTag("GatewayForwardClosed", (error) => modelForward.reopen(error.generation)),
       );
-      const path = protocol === "openai-responses" ? "responses" : "messages";
       const response = yield* http.execute(
-        HttpClientRequest.post(new URL(`/${protocol}/v1/${path}`, forward.url)).pipe(
+        HttpClientRequest.post(new URL(`/${protocol}${path}`, forward.url)).pipe(
           HttpClientRequest.setHeaders(headers),
           // The gateway reads its own token header before Authorization, so no caller header stays.
           (request) =>
@@ -180,9 +186,21 @@ export const gatewayModelRouteFor = Effect.fn("GatewayModelRoute.open")(
           ),
         ),
       request: (protocol, body, headers, signal) =>
-        request(protocol, body, headers, signal).pipe(
+        request(
+          protocol,
+          protocol === "openai-responses" ? "/v1/responses" : "/v1/messages",
+          body,
+          headers,
+          signal,
+        ).pipe(
           Effect.mapError(() =>
             failed(`Can't call ${protocol} through gateway ${gateway.destination}.`),
+          ),
+        ),
+      countTokens: (body, headers, signal) =>
+        request("anthropic-messages", "/v1/messages/count_tokens", body, headers, signal).pipe(
+          Effect.mapError(() =>
+            failed(`Can't count tokens through gateway ${gateway.destination}.`),
           ),
         ),
     };

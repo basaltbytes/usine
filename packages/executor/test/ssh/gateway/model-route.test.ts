@@ -120,6 +120,17 @@ it.effect(
           assert.isUndefined(upstream[0]?.headers.authorization);
           assert.notInclude(jsonKey(upstream), "local-");
           assert.notInclude(jsonKey(upstream), "ugw1.");
+          const counted = yield* route.countTokens('{"model":"claude-sonnet-4-6"}', {
+            "x-api-key": "local-api-key-must-not-escape",
+          });
+          assert.strictEqual(counted.status, 200);
+          yield* Effect.promise(() => counted.text());
+          assert.lengthOf(upstream, 2);
+          assert.strictEqual(
+            new URL(upstream[1]?.path ?? "").pathname,
+            "/v1/messages/count_tokens",
+          );
+          assert.strictEqual(upstream[1]?.headers["x-api-key"], "sk-ant-api03-for-executor-tests");
           const [attachment] = first;
           assert(attachment !== undefined);
           yield* store.detach(attachment.id);

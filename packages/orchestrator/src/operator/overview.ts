@@ -28,7 +28,10 @@ export const ProjectStatus = Schema.Literals(["clear", "active", "needs-you"]);
 /** The project's summary status: clear, active, or needs operator attention. */
 export type ProjectStatus = typeof ProjectStatus.Type;
 
-/** A project with its runs, board, label catalog, and preflight findings. */
+/**
+ * A project with its runs, board, label catalog, and preflight findings. A summary leaves out
+ * `runs` and `labels`, and gives each lane its card count without its cards.
+ */
 export class ProjectView extends Schema.Class<
   ProjectView,
   Brand.Brand<"@usine/orchestrator/operator/overview/ProjectView">
@@ -46,12 +49,15 @@ export class ProjectView extends Schema.Class<
   repository: RepositoryName,
   /** Whether the project needs attention, has active runs, or is clear. */
   status: ProjectStatus,
-  /** Every open run and the latest 50 closed runs across the instance, newest first within each repository. */
-  runs: Schema.Array(RunSummaryView),
+  /**
+   * Every open run and the latest 50 closed runs across the instance, newest first within each
+   * repository. Absent from a summary.
+   */
+  runs: Schema.optionalKey(Schema.Array(RunSummaryView)),
   /** The task cards grouped into the project lanes. */
   board: BoardView,
-  /** The repository's label catalog, used to color badges on cards and lanes. */
-  labels: Schema.Array(LabelView),
+  /** The repository's label catalog, used to color badges on cards and lanes. Absent from a summary. */
+  labels: Schema.optionalKey(Schema.Array(LabelView)),
   /** Failures from creating this Project's declared labels, which don't block the Board. */
   preflightFindings: Schema.Array(LabelPreflightFinding),
 }) {}

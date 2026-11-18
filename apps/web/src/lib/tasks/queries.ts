@@ -30,6 +30,6 @@ export const taskHistoryQuery = (repository: RepositoryName, number: ItemNumber)
     },
     queryKey: ["task", repository, number, "history"] as const,
     queryFn: () =>
-      api((client) => client.task({ params: { owner, repository: name, item: number } })),
+      api((client) => client.task({ params: { owner, repository: name, item: number } }), "full"),
   });
 };

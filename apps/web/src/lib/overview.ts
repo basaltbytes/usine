@@ -68,7 +68,7 @@ export const projectParams = (projects: ReadonlyArray<ProjectView>, repository: 
 export const searchQuery = () =>
   queryOptions({
     queryKey: ["search"] as const,
-    queryFn: () => api((client) => client.overview()),
+    queryFn: () => api((client) => client.overview(), "full"),
     staleTime: 60_000,
     meta: {
       refreshLabel: "Search",

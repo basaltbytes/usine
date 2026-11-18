@@ -3,7 +3,7 @@ import { LabelLaneSource, LaneName, StateLaneSource } from "@usine/config/board"
 import { GitHubLabelName } from "@usine/core/label";
 import { AgentName } from "@usine/core/agent";
 import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
-import { AttemptId, AttemptNumber, AttemptTask } from "@usine/core/attempt";
+import { AttemptId, AttemptNumber } from "@usine/core/attempt";
 import { ItemNumber } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
 import { OperatorLogin } from "@usine/core/operator";
@@ -16,7 +16,6 @@ import {
   boardRunSummary,
   AgentFailureView,
   ApprovalView,
-  AttemptView,
   BoardItemLink,
   BoardLaneId,
   BoardTaskView,
@@ -27,7 +26,6 @@ import {
   ProjectView,
   ReadOnlyBoardLaneView,
   ReadyOverview,
-  RunView,
   SucceededAttemptView,
   TaskCommentView,
   TaskItemView,
@@ -74,16 +72,15 @@ const attempt = (
   runId: string,
   number: number,
   startedAt: string,
-  outcome: AttemptView["outcome"],
+  outcome: AttemptSummaryView["outcome"],
   endedAt: string | null,
 ) =>
-  AttemptView.make({
+  AttemptSummaryView.make({
     id: AttemptId.make(`${runId}/${number}`),
     number: AttemptNumber.make(number),
     worker: WorkerName.make("local"),
     workerAccess: LocalWorkerAccess.make(),
     brain,
-    task: AttemptTask.make("Do the work."),
     agent: AgentName.make("developer"),
     operatorIntervened: false,
     startedAt,
@@ -96,14 +93,14 @@ const run = (
   id: string,
   number: number,
   loop: string,
-  state: RunView["state"],
+  state: RunSummaryView["state"],
   openedAt: string,
-  attempts: ReadonlyArray<AttemptView>,
+  attempts: ReadonlyArray<AttemptSummaryView>,
   extra: Partial<
-    Pick<RunView, "approval" | "runAgain" | "pullRequestUrl" | "canResolveFailure">
+    Pick<RunSummaryView, "approval" | "runAgain" | "pullRequestUrl" | "canResolveFailure">
   > = {},
 ) =>
-  RunView.make({
+  RunSummaryView.make({
     agentBrain: brain,
     id: RunId.make(id),
     itemKey: keyOf(number),
@@ -117,11 +114,9 @@ const run = (
       state === "Succeeded" || state === "Failed" || state === "Canceled"
         ? (attempts.at(-1)?.endedAt ?? openedAt)
         : null,
-    task: "Do the work.",
     attempts,
     approval: extra.approval ?? null,
     runAgain: extra.runAgain ?? null,
-    resultMessage: null,
     pullRequestUrl: extra.pullRequestUrl ?? null,
     canApprove: state === "Waiting",
     canRetry: state === "Failed",
@@ -292,12 +287,7 @@ const card = (task: TaskView) => {
   const items = task.items.map(({ itemKey, kind, number, title, url, state }) =>
     BoardItemLink.make({ itemKey, kind, number, title, url, state }),
   );
-  const runs = task.runs.map((run) =>
-    RunSummaryView.make({
-      ...run,
-      attempts: run.attempts.map((attempt) => AttemptSummaryView.make(attempt)),
-    }),
-  );
+  const runs = task.runs;
   return BoardTaskView.make({
     repository: task.repository,
     itemKey: current.itemKey,
