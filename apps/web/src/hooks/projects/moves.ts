@@ -56,10 +56,12 @@ export const useBoardMoves = (project: ProjectView) => {
   const moves: ReadonlyArray<BoardMoveProgress> = pendingMoves.filter((move) =>
     stillSyncing(move, project.board.lanes),
   );
+  // oxlint-disable-next-line usine/no-unreasoned-effect -- Reconcile persisted move tracking in the query cache with server board updates.
   useEffect(() => {
     queryClient.setQueryData<ReadonlyArray<TrackedMove>>(moveKey(projectId(project)), (current) => {
       const remaining = current?.filter((move) => stillSyncing(move, project.board.lanes));
-      return remaining?.length === current?.length ? current : remaining;
+      if (remaining?.length === current?.length) return current;
+      return remaining;
     });
   }, [queryClient, project, project.board.lanes, pendingMoves]);
 

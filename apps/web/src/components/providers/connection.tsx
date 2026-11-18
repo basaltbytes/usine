@@ -39,7 +39,7 @@ import {
   tokenExpiryUnknown,
   tokenReplacementHelp,
   unknownTime,
-  useKey,
+  apiKeyChoice,
   working,
 } from "./strings";
 
@@ -245,7 +245,9 @@ export const ProviderConnectionRow = ({
       )}
       {!waiting && (
         <details className="space-y-3">
-          <summary className="w-fit cursor-pointer text-xs text-muted-foreground">{useKey}</summary>
+          <summary className="w-fit cursor-pointer text-xs text-muted-foreground">
+            {apiKeyChoice}
+          </summary>
           <form
             className="space-y-2"
             onSubmit={(event) => {

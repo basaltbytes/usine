@@ -47,6 +47,8 @@
       "files": ["apps/web/src/**"],
       "rules": {
         "usine/web-import-direction": "error",
+        "usine/no-manual-memo": "error",
+        "usine/no-unreasoned-effect": "error",
         "usine/no-em-dash-copy": "error",
         "usine/no-native-title-tooltip": "error",
         "usine/no-outset-state-indicators": "error",

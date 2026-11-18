@@ -13,6 +13,7 @@ export const SignInPage = ({ error }: SignInPageProps) => {
   const { data } = useSuspenseQuery(signInQuery());
   const [failure, setFailure] = useState(error);
   const [pending, setPending] = useState(false);
+  // oxlint-disable-next-line usine/no-unreasoned-effect -- Consume sign-in tokens from the browser URL and listen for hash changes.
   useEffect(() => {
     const consume = () => {
       const token = new URLSearchParams(window.location.hash.slice(1)).get("link");

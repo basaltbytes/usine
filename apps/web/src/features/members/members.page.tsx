@@ -58,9 +58,8 @@ export const MembersPage = () => {
       await queryClient.invalidateQueries(membersQuery());
     } catch (cause) {
       setError(rejectionMessage(cause));
-    } finally {
-      setPending(false);
     }
+    setPending(false);
   };
   return (
     <section className="space-y-6 p-4 md:p-5">

@@ -21,7 +21,7 @@ import type {
   StalledItemView,
 } from "@usine/orchestrator/operator";
 import { projectId, projectName } from "~/lib/overview";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useQueries } from "@tanstack/react-query";
 import { loadedLaneItemsQuery } from "~/features/projects/queries";
 import { ErrorAlert } from "~/components/error-alert";
@@ -77,19 +77,16 @@ export const ProjectBoard = ({
     queries: project.board.lanes.map((lane) => loadedLaneItemsQuery(id, lane.id)),
     combine: (results) => results.map(({ data }) => data),
   });
-  const loadedProject = useMemo(
-    () => ({
-      ...project,
-      board: {
-        ...project.board,
-        lanes: project.board.lanes.map((lane, index) => ({
-          ...lane,
-          items: lane.totalItems === undefined ? lane.items : (history[index] ?? lane.items),
-        })),
-      },
-    }),
-    [project, history],
-  );
+  const loadedProject = {
+    ...project,
+    board: {
+      ...project.board,
+      lanes: project.board.lanes.map((lane, index) => ({
+        ...lane,
+        items: lane.totalItems === undefined ? lane.items : (history[index] ?? lane.items),
+      })),
+    },
+  };
   const { moves, moveItem, isPending, error } = useBoardMoves(loadedProject);
   const uncarded = runsWithoutCard(project);
   const lanes = moves.reduce(applyMove, orderLanes(loadedProject.board.lanes));

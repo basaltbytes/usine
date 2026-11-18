@@ -107,6 +107,7 @@ type RevealTargetProps = {
 export const RevealTarget = ({ target, onRevealed }: RevealTargetProps) => {
   const { state, reveal } = useTranscriptDisclosure();
   const { scrollToMessage } = useMessageScroller();
+  // oxlint-disable-next-line usine/no-unreasoned-effect -- Reveal and scroll to the requested transcript DOM row after disclosures mount.
   useEffect(() => {
     if (target === null) return;
     // A tool can stay open after its burst is collapsed, so the burst and the tool are reopened.

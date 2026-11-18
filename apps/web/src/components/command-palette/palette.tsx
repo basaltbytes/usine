@@ -3,7 +3,7 @@ import { searchQuery } from "~/lib/overview";
 import { defaultFilter } from "cmdk";
 import { MagnifyingGlassIcon } from "@phosphor-icons/react";
 import type { FactoryOverview } from "@usine/orchestrator/operator";
-import { useContext, useEffect, useRef, useState } from "react";
+import { useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Button } from "~/components/ui/button";
 import {
   Command,
@@ -32,7 +32,10 @@ export const CommandPalette = ({ overview }: CommandPaletteProps) => {
   });
   const commands = useContext(PageCommandsContext);
   const currentCommands = useRef(commands);
-  currentCommands.current = commands;
+  // oxlint-disable-next-line usine/no-unreasoned-effect -- Keep delayed dialog-close actions synchronized with the committed command registry.
+  useLayoutEffect(() => {
+    currentCommands.current = commands;
+  }, [commands]);
   const selected = useRef<(() => void) | null>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const returnFocus = useRef<HTMLElement | null>(null);
@@ -42,6 +45,7 @@ export const CommandPalette = ({ overview }: CommandPaletteProps) => {
     setSearch("");
     setOpen(true);
   };
+  // oxlint-disable-next-line usine/no-unreasoned-effect -- Listen for the document keyboard shortcut.
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
       if (

@@ -57,6 +57,7 @@ export const Inbox = ({
   const previous = useRef(target);
   // Returning to the list focuses the row of the conversation that was open. Opening one while
   // the list is hidden moves focus to the pane, which would otherwise be left on a hidden row.
+  // oxlint-disable-next-line usine/no-unreasoned-effect -- Move DOM focus between the conversation pane and its inbox row.
   useEffect(() => {
     const was = previous.current;
     previous.current = target;

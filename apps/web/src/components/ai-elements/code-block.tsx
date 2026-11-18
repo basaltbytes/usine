@@ -99,6 +99,7 @@ const CodeBlockContent = ({
     | null
   >(null);
 
+  // oxlint-disable-next-line usine/no-unreasoned-effect -- Load the Shiki grammar and highlighter asynchronously for the displayed source.
   useEffect(() => {
     if (language === "text") return;
     let cancelled = false;

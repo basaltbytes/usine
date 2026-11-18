@@ -5,7 +5,7 @@ import type { AttemptId } from "@usine/core/attempt";
 import { ChildTarget, ParentTarget } from "@usine/core/attempt/channel";
 import type { RunDetailView } from "@usine/orchestrator/operator";
 import { Option } from "effect";
-import { useCallback, useId, useMemo, useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { cn } from "~/lib/utils";
 import { SessionComposer } from "~/components/runs/intervention/session-composer";
@@ -76,26 +76,16 @@ export const RunWorkspace = ({ detail, history }: RunWorkspaceProps) => {
   const permitted = useCanOperateRepository(run.repository);
   const outlineId = useId();
   const githubChanges = useQuery(runGitHubChangesQuery(run));
-  const document = useMemo(
-    () =>
-      withGitHubChanges(
-        readerDocument(
-          projectTranscript(detail.transcript, run.attempts, detail.sessionState),
-          run.attempts,
-          detail.transcript,
-        ),
-        new Map(githubChanges.data?.attempts.map(({ attemptId, changes }) => [attemptId, changes])),
-        new Set(detail.earlierTranscript.map(({ attemptId }) => attemptId)),
-      ),
-    [
-      detail.transcript,
-      detail.sessionState,
-      detail.earlierTranscript,
+  const document = withGitHubChanges(
+    readerDocument(
+      projectTranscript(detail.transcript, run.attempts, detail.sessionState),
       run.attempts,
-      githubChanges.data,
-    ],
+      detail.transcript,
+    ),
+    new Map(githubChanges.data?.attempts.map(({ attemptId, changes }) => [attemptId, changes])),
+    new Set(detail.earlierTranscript.map(({ attemptId }) => attemptId)),
   );
-  const tally = useMemo(() => errorTally(document), [document]);
+  const tally = errorTally(document);
   const through = detail.transcript.reduce<RunDetailView["transcript"][number]["sequence"] | null>(
     (latest, event) => (latest === null || event.sequence > latest ? event.sequence : latest),
     null,
@@ -124,15 +114,12 @@ export const RunWorkspace = ({ detail, history }: RunWorkspaceProps) => {
   const [selectedError, setSelectedError] = useState<string | null>(null);
   const [outlineOpen, setOutlineOpen] = useState(false);
   const [place, setPlace] = useState<ReadingPlace | null>(null);
-  const follow = useCallback(
-    (next: ReadingPlace) =>
-      setPlace((previous) =>
-        previous?.attemptId === next.attemptId && previous.checkpointKey === next.checkpointKey
-          ? previous
-          : next,
-      ),
-    [],
-  );
+  const follow = (next: ReadingPlace) =>
+    setPlace((previous) =>
+      previous?.attemptId === next.attemptId && previous.checkpointKey === next.checkpointKey
+        ? previous
+        : next,
+    );
 
   const live = [...document.chapters].reverse().find((chapter) => chapter.live);
   const liveSessions = live?.sessions.filter(({ status }) => status === "Live") ?? [];

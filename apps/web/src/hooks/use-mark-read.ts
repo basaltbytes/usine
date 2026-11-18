@@ -48,6 +48,7 @@ export const useMarkRead = (id: ConversationId, record: Conversation) => {
   const last = sent.at(-1)?.sequence;
   const failed = record.turns.filter(({ state }) => state._tag === "Failed").length;
   const marked = useRef<string>(undefined);
+  // oxlint-disable-next-line usine/no-unreasoned-effect -- Persist visible conversation read markers to the server.
   useEffect(() => {
     const seen = `${last}:${failed}`;
     if (!visible || member === undefined || last === undefined || marked.current === seen) return;

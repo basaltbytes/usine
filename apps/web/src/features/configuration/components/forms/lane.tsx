@@ -30,7 +30,8 @@ export const LaneFields = ({
   move,
   ...fields
 }: LaneFieldsProps) => {
-  const sortable = useSortable({ id });
+  const { setNodeRef, setActivatorNodeRef, transform, transition, attributes, listeners } =
+    useSortable({ id });
   const sources = arrayValue(fields.value.sources).map(objectValue);
   const toggle = (kind: "label" | "state", name: string, checked: boolean) =>
     fields.onChange({
@@ -46,20 +47,20 @@ export const LaneFields = ({
   );
   return (
     <div
-      ref={sortable.setNodeRef}
+      ref={setNodeRef}
       /* oxlint-disable shadcn/no-inline-styles -- dnd-kit computes the drag offset and transition. */
       style={{
-        transform: CSS.Transform.toString(sortable.transform),
-        transition: sortable.transition,
+        transform: CSS.Transform.toString(transform),
+        transition: transition,
       }}
       /* oxlint-enable shadcn/no-inline-styles */
       className="min-w-0 space-y-4 border-b py-4"
     >
       <div className="flex flex-wrap items-center gap-2">
         <Button
-          ref={sortable.setActivatorNodeRef}
-          {...sortable.attributes}
-          {...sortable.listeners}
+          ref={setActivatorNodeRef}
+          {...attributes}
+          {...listeners}
           type="button"
           variant="ghost"
           className="touch-none"

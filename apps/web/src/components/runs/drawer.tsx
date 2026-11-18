@@ -5,7 +5,7 @@ import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-quer
 import type { RunId } from "@usine/core/run";
 import type { MachineView, RunDetailView } from "@usine/orchestrator/operator";
 import { Option } from "effect";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { ErrorAlert } from "~/components/error-alert";
 import { ButtonLink } from "~/components/button-link";
 import { Tooltip, TooltipContent, TooltipTrigger } from "~/components/ui/tooltip";
@@ -45,14 +45,10 @@ import { TextTooltip } from "~/components/text-tooltip";
 type LiveSummaryProps = { readonly detail: RunDetailView };
 
 const LiveSummary = ({ detail }: LiveSummaryProps) => {
-  const document = useMemo(
-    () =>
-      readerDocument(
-        projectTranscript(detail.transcript, detail.run.attempts, detail.sessionState),
-        detail.run.attempts,
-        detail.transcript,
-      ),
-    [detail.transcript, detail.sessionState, detail.run.attempts],
+  const document = readerDocument(
+    projectTranscript(detail.transcript, detail.run.attempts, detail.sessionState),
+    detail.run.attempts,
+    detail.transcript,
   );
   const chapter = [...document.chapters].reverse().find(({ live }) => live);
   const message = document.chapters

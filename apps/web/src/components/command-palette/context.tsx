@@ -1,12 +1,4 @@
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useId,
-  useState,
-  type ReactNode,
-} from "react";
+import { createContext, useContext, useEffect, useId, useState, type ReactNode } from "react";
 
 export type PageCommand = { readonly label: string; readonly run: () => void };
 type RegisteredCommand = PageCommand & { readonly id: string };
@@ -20,7 +12,7 @@ type PageCommandsProviderProps = { readonly children: ReactNode };
 
 export const PageCommandsProvider = ({ children }: PageCommandsProviderProps) => {
   const [groups, setGroups] = useState<ReadonlyMap<string, ReadonlyArray<PageCommand>>>(new Map());
-  const register = useCallback<RegisterCommands>((id, commands) => {
+  const register: RegisterCommands = (id, commands) => {
     setGroups((current) => new Map(current).set(id, commands));
     return () =>
       setGroups((current) => {
@@ -28,7 +20,7 @@ export const PageCommandsProvider = ({ children }: PageCommandsProviderProps) =>
         next.delete(id);
         return next;
       });
-  }, []);
+  };
   const commands = [...groups].flatMap(([id, entries]) =>
     entries.map((command) => ({
       ...command,
@@ -46,6 +38,7 @@ export const PageCommandsProvider = ({ children }: PageCommandsProviderProps) =>
 export const usePageCommands = (commands: ReadonlyArray<PageCommand>) => {
   const id = useId();
   const register = useContext(RegisterContext);
+  // oxlint-disable-next-line usine/no-unreasoned-effect -- Register page actions with the command palette registry and remove them on unmount.
   useEffect(() => register(id, commands), [register, id, commands]);
 };
 

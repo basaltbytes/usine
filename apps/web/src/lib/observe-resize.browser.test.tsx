@@ -21,6 +21,7 @@ afterEach(() => {
 const Width = () => {
   const ref = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
+  // oxlint-disable-next-line usine/no-unreasoned-effect -- Observe the test element to verify DOM measurements commit before paint.
   useLayoutEffect(() => {
     const box = ref.current;
     if (box === null) return;

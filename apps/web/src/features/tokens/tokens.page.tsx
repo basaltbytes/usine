@@ -43,9 +43,8 @@ export const TokensPage = () => {
       await queryClient.invalidateQueries(tokensQuery());
     } catch (cause) {
       setError(rejectionMessage(cause));
-    } finally {
-      setPending(false);
     }
+    setPending(false);
   };
   return (
     <section className="space-y-6 p-4 md:p-5">

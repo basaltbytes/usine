@@ -1,7 +1,7 @@
 import { BellIcon } from "@phosphor-icons/react";
 import { Link, useLocation } from "@tanstack/react-router";
 import type { NeedView } from "@usine/orchestrator/operator";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { NeedsYou } from "./needs-you";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
@@ -19,9 +19,11 @@ type NotificationTrayProps = { readonly needs: ReadonlyArray<NeedView> };
 
 export const NotificationTray = ({ needs }: NotificationTrayProps) => {
   const mobile = useIsMobile();
-  const [open, setOpen] = useState(false);
   const location = useLocation({ select: ({ href }) => href });
-  useEffect(() => setOpen(false), [location]);
+  const [openedAt, setOpenedAt] = useState<string | null>(null);
+  const open = openedAt === location;
+  const setOpen = (next: boolean) => setOpenedAt(next ? location : null);
+  if (openedAt !== null && openedAt !== location) setOpenedAt(null);
   const bell = (
     <Button
       size="toolbar"
