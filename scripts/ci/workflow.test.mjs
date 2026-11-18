@@ -337,17 +337,68 @@ test("the CI matrix runs every package test task exactly once", () => {
   const actual = workflow.jobs.test.strategy.matrix.include.flatMap((leg) =>
     testTasks(
       JSON.parse(
-        execSync(
-          `corepack pnpm turbo run test --dry=json --concurrency=1 ${leg.filters} ${leg.args ?? ""}`,
-          {
-            cwd: root,
-            encoding: "utf8",
-          },
-        ),
+        execSync(`corepack pnpm turbo run test --dry=json --concurrency=1 ${leg.filters}`, {
+          cwd: root,
+          encoding: "utf8",
+        }),
       ),
     ),
   );
   assert.deepEqual(actual.sort(), expected.sort());
+});
+
+test("every test leg hashes its builds as the static job does, so the build cache applies", () => {
+  const run = workflow.jobs.test.steps.find(({ name }) => name === "Run tests").run;
+  // Arguments after `--` change the hash of every task in the run, builds included.
+  for (const command of run.match(/pnpm turbo run test[^\n]*/gu)) {
+    assert.match(command, /^pnpm turbo run test --concurrency=1 \$\{\{ matrix\.filters \}\}$/u);
+  }
+  const plan = (args) =>
+    JSON.parse(
+      execSync(`corepack pnpm turbo run ${args} --dry=json`, { cwd: root, encoding: "utf8" }),
+    );
+  const builds = new Map(plan("build").tasks.map(({ taskId, hash }) => [taskId, hash]));
+  for (const leg of workflow.jobs.test.strategy.matrix.include) {
+    for (const { taskId, task, hash } of plan(`test --concurrency=1 ${leg.filters}`).tasks) {
+      if (task === "build") assert.equal(hash, builds.get(taskId), `${leg.leg}: ${taskId}`);
+    }
+  }
+});
+
+test("the turbo cache carries builds only, and every job that runs checks or tests verifies it", () => {
+  assert.equal(workflow.env.TURBO_RUN_SUMMARY, true);
+  const turboSteps = Object.entries(workflow.jobs).flatMap(([name, job]) =>
+    (job.steps ?? [])
+      .filter(({ with: inputs }) => inputs?.path === ".turbo")
+      .map((step) => ({ name, step })),
+  );
+  const restores = turboSteps.filter(({ step }) => step.uses.startsWith("actions/cache/restore@"));
+  assert.deepEqual(restores.map(({ name }) => name).sort(), ["latency", "static", "test"]);
+  for (const { step } of restores) {
+    assert.equal(step.with.key, "turbo-builds-${{ runner.os }}-${{ github.sha }}");
+    assert.equal(step.with["restore-keys"].trim(), "turbo-builds-${{ runner.os }}-");
+  }
+  const saves = turboSteps.filter(({ step }) => step.uses.startsWith("actions/cache/save@"));
+  assert.deepEqual(
+    saves.map(({ name }) => name),
+    ["static"],
+  );
+  const steps = workflow.jobs.static.steps;
+  const save = steps.indexOf(saves[0].step);
+  const pruneStep = steps.findIndex(({ run }) => run === "node scripts/ci/turbo-cache.mjs prune");
+  assert.ok(pruneStep >= 0 && pruneStep === save - 1);
+  assert.equal(steps[pruneStep].if, saves[0].step.if);
+  assert.match(saves[0].step.if, /github\.ref == 'refs\/heads\/main'/u);
+  for (const name of ["static", "test"]) {
+    const jobSteps = workflow.jobs[name].steps;
+    const lastTurbo = jobSteps.findLastIndex(({ run }) =>
+      /pnpm (build|check)$|turbo run test/u.test(run ?? ""),
+    );
+    const verify = jobSteps.findIndex(
+      ({ run }) => run === "node scripts/ci/turbo-cache.mjs verify",
+    );
+    assert.ok(lastTurbo >= 0 && verify > lastTurbo, `${name} verifies after its last turbo run`);
+  }
 });
 
 test("the CI aggregate fails for failed or cancelled dependencies, including matrix failures", () => {
