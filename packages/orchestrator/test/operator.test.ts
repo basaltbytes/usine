@@ -50,6 +50,7 @@ import { CommitSha, RepositoryName, RepositoryRevision } from "@usine/core/repos
 import { RunId, Run } from "@usine/core/run";
 import { ApprovalSource, RunApproval } from "@usine/core/run/approval";
 import { StepName, Step } from "@usine/core/step";
+import { StepResult } from "@usine/core/step/result";
 import { SshDestination, WorkerName } from "@usine/core/worker";
 import { AgentFile, InvalidAgent } from "@usine/config/agent";
 import { ConfigFileError, InstancePath } from "@usine/config/file";
@@ -143,6 +144,8 @@ import {
 import { FailureView, LocalWorkerAccess, SshWorkerAccess } from "../src/operator/attempt.ts";
 import { PoolLimitNeed, UnconfiguredWorkerNeed, WorkerPausedNeed } from "../src/operator/need.ts";
 import { boardTaskRuns, Operator } from "../src/operator/operator.ts";
+import { jsonBytes, PAGE_BYTES } from "../src/operator/page.ts";
+import type { RunTextPageView, RunTranscriptPageView } from "../src/operator/run-pages.ts";
 import { ReadyOverview } from "../src/operator/overview.ts";
 import {
   ApprovalView,
@@ -1728,6 +1731,138 @@ describe("Operator", () => {
           assert.deepStrictEqual(detail.run.handoff, handoff);
           assert.strictEqual(detail.run.canResolveFailure, false);
         }).pipe(Effect.provide(testLayer(approved, moved, reads, revision, current)));
+      }),
+  );
+
+  it.effect(
+    "reads a failed Run's brief, its texts page by page, and its transcript newest first",
+    () =>
+      Effect.gen(function* () {
+        const fixtureInstance = yield* instance;
+        const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
+        const moved = yield* Ref.make<ItemLabelMutation | null>(null);
+        const reads = yield* Ref.make(0);
+        const revision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
+        const original = snapshot.attempts[0];
+        assert(original !== undefined);
+        const task = `Review issue 31.\n${"Check the retry path once more. ".repeat(1_500)}`;
+        const report = `The retry tests still fail.\n${'FAIL test/retry.test.ts ✗ "once"\n'.repeat(2_000)}`;
+        const failed = RunSnapshot.make({
+          ...snapshot,
+          run: Run.make({ ...snapshot.run, state: RunState.Failed.make() }),
+          task: AttemptTask.make(task),
+          attempts: [
+            Attempt.make({
+              ...original,
+              outcome: Option.some(
+                AttemptFailed.make({ failure: AgentFailure.make({ message: "The tests fail." }) }),
+              ),
+              result: Option.some(StepResult.make({ message: report, facts: [], outputs: [] })),
+            }),
+          ],
+        });
+        yield* Effect.gen(function* () {
+          const operator = yield* Operator;
+
+          const brief = yield* operator.brief(fixtureInstance, runId);
+          assert.isAtMost(jsonBytes(brief), PAGE_BYTES);
+          assert.strictEqual(brief.task.length, task.length);
+          assert.isBelow(brief.task.text.length, task.length);
+          assert.isTrue(task.startsWith(brief.task.text));
+          assert(brief.report !== null);
+          assert.strictEqual(brief.report.attemptId, attemptId);
+          assert.strictEqual(brief.report.report.length, report.length);
+          const outcome = brief.run.attempts[0]?.outcome;
+          assert(outcome?._tag === "Failed" && outcome.failure._tag === "AgentFailure");
+          assert.strictEqual(outcome.failure.message, "The tests fail.");
+          assert.strictEqual(brief.eventDedupKey, snapshot.event.dedupKey);
+
+          for (const [part, whole, pages] of [
+            ["task", task, 3],
+            ["report", report, 4],
+            ["event", jsonKey(snapshot.event.payload), 1],
+            ["result", "", 1],
+          ] as const) {
+            const read: Array<string> = [];
+            let offset: number | null = 0;
+            while (offset !== null) {
+              const page: RunTextPageView = yield* operator.runText(
+                fixtureInstance,
+                runId,
+                part,
+                Option.none(),
+                offset,
+              );
+              assert.isAtMost(jsonBytes(page), PAGE_BYTES, part);
+              assert.strictEqual(page.offset, offset);
+              read.push(page.text);
+              offset = page.nextOffset;
+            }
+            assert.strictEqual(read.join(""), whole, part);
+            assert.strictEqual(read.length, pages, part);
+          }
+          const unknownAttempt = yield* operator
+            .runText(fixtureInstance, runId, "report", Option.some(AttemptId.make("another")), 0)
+            .pipe(Effect.flip);
+          assert.strictEqual(unknownAttempt._tag, "TranscriptAttemptNotFoundError");
+
+          // Follows `next` from the newest entry to the first, one bounded page at a time.
+          const sequences: Array<number> = [];
+          let pages = 0;
+          let cursor: {
+            readonly before: Option.Option<TranscriptSequence>;
+            readonly offset: number;
+          } | null = { before: Option.none(), offset: 0 };
+          while (cursor !== null) {
+            const page: RunTranscriptPageView = yield* operator.transcriptPage(
+              fixtureInstance,
+              runId,
+              Option.some(attemptId),
+              cursor.before,
+              cursor.offset,
+            );
+            assert.isAtMost(jsonBytes(page), PAGE_BYTES);
+            assert.strictEqual(page.attemptNumber, 1);
+            sequences.push(...page.entries.map(({ sequence }) => sequence));
+            pages += 1;
+            cursor =
+              page.next === null
+                ? null
+                : { before: Option.some(page.next.before), offset: page.next.offset };
+          }
+          assert.deepStrictEqual(sequences, transcript.map(({ sequence }) => sequence).reverse());
+          assert.isAbove(pages, 2);
+          const first = yield* operator.transcriptPage(
+            fixtureInstance,
+            runId,
+            Option.none(),
+            Option.some(TranscriptSequence.make(3)),
+            0,
+          );
+          assert.deepStrictEqual(
+            first.entries.map(({ sequence, kind, session, text }) => ({
+              sequence,
+              kind,
+              session,
+              text,
+            })),
+            [
+              {
+                sequence: TranscriptSequence.make(2),
+                kind: "ToolStarted",
+                session: child.id,
+                text: jsonKey({ callId: "call-1", tool: "search", input: { issue: 31 } }),
+              },
+              {
+                sequence: TranscriptSequence.make(1),
+                kind: "TextOutput",
+                session: parent.id,
+                text: jsonKey({ text: "Parent update" }),
+              },
+            ],
+          );
+          assert.isNull(first.next);
+        }).pipe(Effect.provide(testLayer(approved, moved, reads, revision, failed)));
       }),
   );
 

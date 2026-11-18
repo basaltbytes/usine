@@ -9,6 +9,7 @@ import {
 import { LoopName } from "@usine/core/loop";
 import { CycleBudgetAskId } from "@usine/core/cycle-budget";
 import { AttemptId } from "@usine/core/attempt";
+import type { TranscriptSequence } from "@usine/engine/transcript";
 import { RunId } from "@usine/core/run";
 import { AgentName } from "@usine/core/agent";
 import type { RunAgainResult } from "@usine/engine/engine";
@@ -36,6 +37,10 @@ import {
   type StatisticsView,
   type StatisticsWindow,
   type ItemEntryCursor,
+  type RunBriefView,
+  type RunTextPageView,
+  type RunTextPart,
+  type RunTranscriptPageView,
   type ItemView,
   type TaskReadDepth,
   type TaskView,
@@ -61,6 +66,19 @@ export class FactoryBackend extends Context.Service<
       runId: RunId,
       request: TranscriptRequest,
     ) => Effect.Effect<RunDetailView, BackendError>;
+    readonly brief: (runId: RunId) => Effect.Effect<RunBriefView, BackendError>;
+    readonly runText: (
+      runId: RunId,
+      part: RunTextPart,
+      attempt: Option.Option<AttemptId>,
+      offset: number,
+    ) => Effect.Effect<RunTextPageView, BackendError>;
+    readonly transcriptPage: (
+      runId: RunId,
+      attempt: Option.Option<AttemptId>,
+      before: Option.Option<TranscriptSequence>,
+      offset: number,
+    ) => Effect.Effect<RunTranscriptPageView, BackendError>;
     readonly githubChanges: (runId: RunId) => Effect.Effect<RunGitHubChangesView, BackendError>;
     readonly approve: (runId: RunId) => Effect.Effect<void, BackendError>;
     readonly dismissNeed: (key: AttentionKey) => Effect.Effect<void, BackendError>;
@@ -145,6 +163,15 @@ export const liveBackendLayer = (
     overview: Effect.flatMap(instances.get, operator.overview),
     detail: (runId, request) =>
       Effect.flatMap(instances.get, (instance) => operator.detail(instance, runId, request)),
+    brief: (runId) => Effect.flatMap(instances.get, (instance) => operator.brief(instance, runId)),
+    runText: (runId, part, attempt, offset) =>
+      Effect.flatMap(instances.get, (instance) =>
+        operator.runText(instance, runId, part, attempt, offset),
+      ),
+    transcriptPage: (runId, attempt, before, offset) =>
+      Effect.flatMap(instances.get, (instance) =>
+        operator.transcriptPage(instance, runId, attempt, before, offset),
+      ),
     githubChanges: (runId) =>
       Effect.flatMap(instances.get, (instance) => operator.githubChanges(instance, runId)),
     approve: (runId) =>
@@ -218,6 +245,16 @@ export const needsSetupBackendLayer = (
     overview,
     detail: (runId, request) =>
       Effect.flatMap(instances.get, (instance) => observation.detail(instance, runId, request)),
+    brief: (runId) =>
+      Effect.flatMap(instances.get, (instance) => observation.brief(instance, runId)),
+    runText: (runId, part, attempt, offset) =>
+      Effect.flatMap(instances.get, (instance) =>
+        observation.runText(instance, runId, part, attempt, offset),
+      ),
+    transcriptPage: (runId, attempt, before, offset) =>
+      Effect.flatMap(instances.get, (instance) =>
+        observation.transcriptPage(instance, runId, attempt, before, offset),
+      ),
     githubChanges: fail,
     approve: fail,
     resetCycleBudget: fail,

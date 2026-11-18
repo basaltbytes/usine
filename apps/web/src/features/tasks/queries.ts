@@ -67,8 +67,10 @@ export const pullRequestFilesQuery = (
   queryOptions({
     queryKey: ["pull-request-files", project, repository, item, selection] as const,
     queryFn: () =>
-      api((client) =>
-        client.pullRequestFiles({ params: { project, repository, item }, query: selection }),
+      api(
+        (client) =>
+          client.pullRequestFiles({ params: { project, repository, item }, query: selection }),
+        "full",
       ),
     staleTime: "static",
     gcTime: Infinity,

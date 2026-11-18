@@ -31,7 +31,9 @@ const makeClient = (view?: View) =>
       ),
   });
 
-type Client = Effect.Success<ReturnType<typeof makeClient>>;
+type Clients = Effect.Success<ReturnType<typeof makeClient>>;
+/** The operator group of the operator API client. */
+export type Client = Clients["operator"];
 
 const run = <A, E>(request: Effect.Effect<A, E, HttpClient.HttpClient>): Promise<A> =>
   Effect.runPromise(
@@ -45,13 +47,13 @@ const run = <A, E>(request: Effect.Effect<A, E, HttpClient.HttpClient>): Promise
 
 /** Runs an operator API request and returns a Promise that rejects with the decoded API error. */
 export const api = <A, E>(
-  request: (client: Client["operator"]) => Effect.Effect<A, E>,
+  request: (client: Client) => Effect.Effect<A, E>,
   view?: View,
 ): Promise<A> => run(Effect.flatMap(makeClient(view), (client) => request(client.operator)));
 
 /** Runs a request of the operator API's conversation group, as `api` does. */
 export const conversationApi = <A, E>(
-  request: (client: Client["conversation"]) => Effect.Effect<A, E>,
+  request: (client: Clients["conversation"]) => Effect.Effect<A, E>,
 ): Promise<A> => run(Effect.flatMap(makeClient(), (client) => request(client.conversation)));
 
 /** Returns the message of the value an `api` request rejected with. */

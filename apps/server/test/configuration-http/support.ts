@@ -249,6 +249,9 @@ export const harness = (
       pause: () => unused,
       unpause: () => unused,
       task: () => unused,
+      brief: () => unused,
+      runText: () => unused,
+      transcriptPage: () => unused,
       item: () => unused,
       desk: Effect.die("unused"),
       statistics: () => unused,
@@ -265,7 +268,8 @@ export const harness = (
     yield* Effect.addFinalizer(() => Effect.promise(() => app.dispose()));
     const request = (method: string, path: string, body?: Schema.Json) =>
       Effect.gen(function* () {
-        const options: RequestInit = { method };
+        // These tests read the configuration as the configuration editor does.
+        const options: RequestInit = { method, headers: { "x-usine-view": "full" } };
         if (body !== undefined) options.body = jsonKey(body);
         const response = yield* Effect.promise(() =>
           app.handler(new Request(`http://localhost/api/configuration${path}`, options)),

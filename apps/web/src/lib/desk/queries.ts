@@ -5,7 +5,7 @@ import { api } from "~/lib/api";
 export const deskQuery = () =>
   queryOptions({
     queryKey: ["desk"] as const,
-    queryFn: () => api((client) => client.desk()),
+    queryFn: () => api((client) => client.desk(), "full"),
     staleTime: 30_000,
     meta: { refreshLabel: "Activity", changes: changes.kind("worker", "activity") },
   });

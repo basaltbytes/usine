@@ -29,7 +29,12 @@ import {
   poolAttentionFor,
 } from "./attention.ts";
 import { transcriptEvent } from "./projection.ts";
-import { TranscriptSessionsQuery } from "@usine/engine/transcript";
+import {
+  type TranscriptEntry,
+  TranscriptPageQuery,
+  TranscriptSequence,
+  TranscriptSessionsQuery,
+} from "@usine/engine/transcript";
 import { GitHubLabelName } from "@usine/core/label";
 import { Agent, resolveParentModel } from "@usine/core/agent";
 import { AttemptContext, AttemptId } from "@usine/core/attempt";
@@ -65,6 +70,7 @@ import {
   type ProjectionRevision,
   RunReader,
   type RunSnapshot,
+  summarizeRun,
   type RunUsageSource,
   type ItemRunHistory,
 } from "@usine/engine/run-reader";
@@ -126,9 +132,24 @@ import {
 } from "./board.ts";
 import {
   ColdTranscriptRequest,
-  type TranscriptAttemptNotFoundError,
+  TranscriptAttemptNotFoundError,
+  TranscriptPayload,
   type TranscriptRequest,
 } from "./transcript.ts";
+import {
+  AttemptReportView,
+  RunBriefView,
+  type RunTextPart,
+  RunTextPageView,
+  RunTranscriptCursor,
+  RunTranscriptPageView,
+  type TranscriptTextView,
+  runTextPage,
+  textExcerpt,
+  transcriptEntries,
+  transcriptPageBytes,
+} from "./run-pages.ts";
+import { fillText } from "./page.ts";
 import { LoopView, ProjectView, ReadyOverview } from "./overview.ts";
 import {
   RunDetailView,
@@ -196,6 +217,9 @@ export type OperatorObservationError =
   | RunStoreError
   | TranscriptAttemptNotFoundError
   | ConfigurationStoreError;
+
+/** The transcript rows that one read of a transcript page loads. */
+const TRANSCRIPT_PAGE_ROWS = 20;
 
 /** The number of closed Runs the overview keeps next to the open ones. */
 const OVERVIEW_CLOSED_RUNS = 50;
@@ -832,10 +856,10 @@ const makeOperatorObservation = Effect.gen(function* () {
     });
   });
 
-  const detail = Effect.fn("Operator.detail")(function* (
+  /** Reads a Run's snapshot and what its detail and brief show besides the transcript. */
+  const runContext = Effect.fn("Operator.runContext")(function* (
     instance: LoadedInstance,
     runId: RunId,
-    request: TranscriptRequest = ColdTranscriptRequest.make(),
   ) {
     yield* Effect.annotateCurrentSpan({ runId });
     const [snapshot, states, unconfirmedStops, inFlight, provisioning] = yield* Effect.all(
@@ -860,47 +884,243 @@ const makeOperatorObservation = Effect.gen(function* () {
             (openAttempt !== undefined && Option.contains(candidate.attemptId, openAttempt.id))),
       );
     const paused = new Set(states.filter((state) => state.paused).map((state) => state.loop));
-    const [transcript, sessionState, usage, unrecordedEnds, settled, unconfirmedStop] =
-      yield* Effect.all(
-        [
-          readTranscript(reader, snapshot, request),
-          Effect.forEach(
-            snapshot.attempts.filter((attempt) => Option.isNone(attempt.outcome)),
-            (attempt) => reader.transcript(TranscriptSessionsQuery.make({ attemptId: attempt.id })),
-            { concurrency: "unbounded" },
-          ),
-          usageReader.read(runUsageSource(snapshot)),
-          readUnrecordedEnds(reader, snapshot),
-          settledItemState(snapshot.itemKey).pipe(
-            Effect.provideService(ItemProjectionReader, itemReader),
-          ),
-          blockingStop(snapshot, unconfirmedStops),
-        ],
-        { concurrency: "unbounded" },
-      );
+    const [usage, unrecordedEnds, settled, unconfirmedStop, upgrade] = yield* Effect.all(
+      [
+        usageReader.read(runUsageSource(snapshot)),
+        readUnrecordedEnds(reader, snapshot),
+        settledItemState(snapshot.itemKey).pipe(
+          Effect.provideService(ItemProjectionReader, itemReader),
+        ),
+        blockingStop(snapshot, unconfirmedStops),
+        readUpgrade,
+      ],
+      { concurrency: "unbounded" },
+    );
     const currentAgent = instance.agents.find(({ name }) => name === snapshot.agent.name);
-    const upgrade = yield* readUpgrade;
-    return RunDetailView.make({
-      run: runView(
-        snapshot,
-        paused,
-        workerAccesses(instance.config.workers),
-        quotaWaits(provisioning),
-        upgrade,
-      ),
+    return {
+      snapshot,
+      paused,
+      access: workerAccesses(instance.config.workers),
+      waits: quotaWaits(provisioning),
+      upgrade,
       agentDefinitionChanged:
         currentAgent !== undefined && !sameAgent(snapshot.agent, currentAgent.agent),
-      eventDedupKey: snapshot.event.dedupKey,
-      eventPayload: snapshot.event.payload,
-      transcript: transcript.events,
-      sessionState: sessionState.flat().map(transcriptEvent),
-      earlierTranscript: transcript.earlier,
       worker: snapshot.attempts.at(-1)?.worker ?? null,
       settledItemState: Option.getOrNull(settled),
       duration: runDuration(snapshot.attempts, unrecordedEnds),
       usage,
       unconfirmedStop,
       machine: machine === undefined ? null : machineView(machine),
+    };
+  });
+
+  const detail = Effect.fn("Operator.detail")(function* (
+    instance: LoadedInstance,
+    runId: RunId,
+    request: TranscriptRequest = ColdTranscriptRequest.make(),
+  ) {
+    const { snapshot, paused, access, waits, upgrade, ...context } = yield* runContext(
+      instance,
+      runId,
+    );
+    const [transcript, sessionState] = yield* Effect.all(
+      [
+        readTranscript(reader, snapshot, request),
+        Effect.forEach(
+          snapshot.attempts.filter((attempt) => Option.isNone(attempt.outcome)),
+          (attempt) => reader.transcript(TranscriptSessionsQuery.make({ attemptId: attempt.id })),
+          { concurrency: "unbounded" },
+        ),
+      ],
+      { concurrency: "unbounded" },
+    );
+    return RunDetailView.make({
+      ...context,
+      run: runView(snapshot, paused, access, waits, upgrade),
+      eventDedupKey: snapshot.event.dedupKey,
+      eventPayload: snapshot.event.payload,
+      transcript: transcript.events,
+      sessionState: sessionState.flat().map(transcriptEvent),
+      earlierTranscript: transcript.earlier,
+    });
+  });
+
+  const brief = Effect.fn("Operator.brief")(function* (instance: LoadedInstance, runId: RunId) {
+    const { snapshot, paused, access, waits, upgrade, usage, ...context } = yield* runContext(
+      instance,
+      runId,
+    );
+    const report = EffectArray.findLast(snapshot.attempts, (attempt) =>
+      Option.exists(attempt.result, ({ message }) => message !== ""),
+    );
+    const view = RunBriefView.make({
+      ...context,
+      run: runSummaryView(summarizeRun(snapshot), paused, access, waits, upgrade),
+      task: textExcerpt(snapshot.task),
+      resultMessage: Option.match(snapshot.step.result, {
+        onNone: () => null,
+        onSome: ({ message }) => textExcerpt(message),
+      }),
+      report: Option.match(
+        Option.flatMap(report, (attempt) =>
+          Option.map(attempt.result, ({ message }) => ({ attempt, message })),
+        ),
+        {
+          onNone: () => null,
+          onSome: ({ attempt, message }) =>
+            AttemptReportView.make({
+              attemptId: attempt.id,
+              number: attempt.number,
+              report: textExcerpt(message),
+            }),
+        },
+      ),
+      eventDedupKey: snapshot.event.dedupKey,
+      usage: { tokens: usage.tokens, pools: usage.pools },
+    });
+    yield* Effect.logDebug("Read a Run brief", {
+      runId,
+      attempts: snapshot.attempts.length,
+      taskLength: snapshot.task.length,
+    });
+    return view;
+  });
+
+  const runText = Effect.fn("Operator.runText")(function* (
+    instance: LoadedInstance,
+    runId: RunId,
+    part: RunTextPart,
+    attempt: Option.Option<AttemptId>,
+    offset: number,
+  ) {
+    yield* Effect.annotateCurrentSpan({ runId, part, offset });
+    const snapshot = yield* reader.inspect(runId);
+    yield* requirePermission("read", repositoryScope(instance, snapshot.repository));
+    if (part !== "report") {
+      const text = Match.value(part).pipe(
+        Match.when("task", () => snapshot.task),
+        Match.when("result", () =>
+          Option.match(snapshot.step.result, {
+            onNone: () => "",
+            onSome: ({ message }) => message,
+          }),
+        ),
+        Match.when("event", () => jsonKey(snapshot.event.payload)),
+        Match.exhaustive,
+      );
+      return runTextPage(runId, part, null, text, offset);
+    }
+    const reported = Option.match(attempt, {
+      onNone: () =>
+        EffectArray.findLast(snapshot.attempts, (candidate) => Option.isSome(candidate.result)),
+      onSome: (id) => EffectArray.findFirst(snapshot.attempts, (candidate) => candidate.id === id),
+    });
+    if (Option.isSome(attempt) && Option.isNone(reported))
+      return yield* TranscriptAttemptNotFoundError.make({ runId, attemptId: attempt.value });
+    return Option.match(reported, {
+      onNone: () => runTextPage(runId, part, null, "", offset),
+      onSome: (found) =>
+        runTextPage(
+          runId,
+          part,
+          found.id,
+          Option.match(found.result, { onNone: () => "", onSome: ({ message }) => message }),
+          offset,
+        ),
+    });
+  });
+
+  const encodePayload = Schema.encodeEffect(Schema.toCodecJson(TranscriptPayload));
+  /** Returns a transcript entry's kind, session, and JSON text without either. */
+  const transcriptText = Effect.fn("Operator.transcriptText")(function* (entry: TranscriptEntry) {
+    const event = transcriptEvent(entry);
+    const encoded = yield* encodePayload(event.payload).pipe(Effect.orDie);
+    const fields = Schema.is(Schema.JsonObject)(encoded) ? encoded : {};
+    const sessionEvent = event.payload._tag === "SessionEvent" ? event.payload.event : undefined;
+    const body =
+      sessionEvent !== undefined && Schema.is(Schema.JsonObject)(fields.event)
+        ? fields.event
+        : fields;
+    const { _tag: _kind, session: _session, ...rest } = body;
+    return {
+      sequence: event.sequence,
+      receivedAt: event.receivedAt,
+      direction: event.direction,
+      kind: sessionEvent?._tag ?? event.payload._tag,
+      session: sessionEvent?.session.id ?? null,
+      text: jsonKey(rest),
+    };
+  });
+
+  const transcriptPage = Effect.fn("Operator.transcriptPage")(function* (
+    instance: LoadedInstance,
+    runId: RunId,
+    attempt: Option.Option<AttemptId>,
+    before: Option.Option<TranscriptSequence>,
+    offset: number,
+  ) {
+    yield* Effect.annotateCurrentSpan({ runId, offset });
+    const snapshot = yield* reader.inspect(runId);
+    yield* requirePermission("read", repositoryScope(instance, snapshot.repository));
+    const selected = Option.match(attempt, {
+      onNone: () => Option.fromUndefinedOr(snapshot.attempts.at(-1)),
+      onSome: (id) => EffectArray.findFirst(snapshot.attempts, (candidate) => candidate.id === id),
+    });
+    if (Option.isNone(selected)) {
+      if (Option.isSome(attempt))
+        return yield* TranscriptAttemptNotFoundError.make({ runId, attemptId: attempt.value });
+      return RunTranscriptPageView.make({
+        runId,
+        attemptId: null,
+        attemptNumber: null,
+        entries: [],
+        next: null,
+      });
+    }
+    const { id: attemptId, number } = selected.value;
+    const views: Array<TranscriptTextView> = [];
+    let used = transcriptPageBytes(runId, attemptId, number);
+    let cursor = before;
+    let start = offset;
+    let next: RunTranscriptCursor | null = null;
+    let reads = 0;
+    while (true) {
+      reads += 1;
+      const rows = yield* reader.transcript(
+        TranscriptPageQuery.make({ attemptId, before: cursor, limit: TRANSCRIPT_PAGE_ROWS }),
+      );
+      const newestFirst = [...rows].reverse();
+      const texts = yield* Effect.forEach(newestFirst, transcriptText);
+      const filled = fillText(transcriptEntries(texts), start, used, views.length > 0);
+      views.push(...filled.views);
+      used = filled.used;
+      const stopped = filled.next === null ? undefined : texts[filled.next.index];
+      if (filled.next !== null && stopped !== undefined) {
+        next = RunTranscriptCursor.make({
+          attempt: attemptId,
+          before: TranscriptSequence.make(stopped.sequence + 1),
+          offset: filled.next.offset,
+        });
+        break;
+      }
+      const oldest = rows[0];
+      if (rows.length < TRANSCRIPT_PAGE_ROWS || oldest === undefined) break;
+      cursor = Option.some(oldest.sequence);
+      start = 0;
+    }
+    yield* Effect.logDebug("Read a transcript page", {
+      runId,
+      attemptId,
+      entries: views.length,
+      reads,
+      next: next === null ? null : { before: next.before, offset: next.offset },
+    });
+    return RunTranscriptPageView.make({
+      runId,
+      attemptId,
+      attemptNumber: number,
+      entries: views,
+      next,
     });
   });
 
@@ -986,6 +1206,9 @@ const makeOperatorObservation = Effect.gen(function* () {
       overview(instance).pipe(Effect.flatMap((view) => filterOverview(instance, view))),
     task,
     item,
+    brief,
+    runText,
+    transcriptPage,
     desk,
     statistics,
     runStatistics,
@@ -1025,6 +1248,36 @@ export class OperatorObservation extends Context.Service<
       item: ItemNumber,
       depth: TaskReadDepth,
     ) => Effect.Effect<TaskView, TaskReadError | AccessDenied>;
+    /**
+     * Reads the Run without its event payload and transcript, with the beginnings of its task
+     * prompt, result message, and newest kept report.
+     */
+    readonly brief: (
+      instance: LoadedInstance,
+      runId: RunId,
+    ) => Effect.Effect<RunBriefView, OperatorObservationError>;
+    /**
+     * Reads the page of one of the Run's texts from `offset`. For `report`, reads the report of
+     * `attempt`, or of the newest Attempt that kept one.
+     */
+    readonly runText: (
+      instance: LoadedInstance,
+      runId: RunId,
+      part: RunTextPart,
+      attempt: Option.Option<AttemptId>,
+      offset: number,
+    ) => Effect.Effect<RunTextPageView, OperatorObservationError>;
+    /**
+     * Reads a page of `attempt`'s transcript, or the newest Attempt's, newest entry first: from the
+     * newest entry before `before`, starting `offset` into that entry's text.
+     */
+    readonly transcriptPage: (
+      instance: LoadedInstance,
+      runId: RunId,
+      attempt: Option.Option<AttemptId>,
+      before: Option.Option<TranscriptSequence>,
+      offset: number,
+    ) => Effect.Effect<RunTranscriptPageView, OperatorObservationError>;
     /**
      * Reads Item `item` of `repository` as polling last stored it, with the page of its body,
      * comments, and reviews from `cursor`. Fails if the Item isn't on its Project's Board.
@@ -1720,7 +1973,17 @@ export {
   BoardLaneReadOnlyError,
 } from "./board.ts";
 export { ItemEntryCursor, ItemEntryKind, ItemEntryView, ItemView } from "./item.ts";
-export { jsonBytes, PAGE_BYTES, type Page, pageOf } from "./page.ts";
+export {
+  AttemptReportView,
+  RunBriefView,
+  RunTextPageView,
+  RunTextPart,
+  RunTranscriptCursor,
+  RunTranscriptPageView,
+  TextExcerptView,
+  TranscriptTextView,
+} from "./run-pages.ts";
+export { jsonBytes, PAGE_BYTES, type Page, pageOf, textPrefix } from "./page.ts";
 export {
   TaskItemView,
   TaskLaneView,
@@ -1777,6 +2040,14 @@ export {
   ConfigurationView,
   OperatorConfiguration,
 } from "./configuration/view.ts";
+export {
+  AgentSummaryView,
+  ConfigurationSummaryView,
+  configurationSummary,
+  FileFailureView,
+  LoopSummaryView,
+  WorkerSummaryView,
+} from "./configuration/summary.ts";
 export {
   WorkerSilentView,
   ProviderRetryingView,

@@ -1,6 +1,9 @@
 import { isSettledItemState } from "@usine/config/board";
+import { ChangedFile, FileChanges } from "@usine/github/file-changes";
 import {
   BoardView,
+  DeskView,
+  jsonBytes,
   PAGE_BYTES,
   pageOf,
   ProjectView,
@@ -10,9 +13,11 @@ import {
   NeedsSetupOverview,
   ReadOnlyBoardLaneView,
   WritableBoardLaneView,
+  textPrefix,
   type FactoryOverview,
   type BoardLaneView,
 } from "@usine/orchestrator/operator";
+import { ConfigurationRevisionPage } from "@usine/orchestrator/operator/http";
 import { Struct } from "effect";
 
 const historyLane = (lane: BoardLaneView): boolean =>
@@ -121,3 +126,100 @@ export const taskPage = (task: TaskView): TaskView =>
       loop,
     })),
   });
+
+/** Returns the entries of `list` from its start whose JSON fits `bytes`, and the bytes they use. */
+const fitting = <A>(list: ReadonlyArray<A>, bytes: number) => {
+  const entries: Array<A> = [];
+  let used = 0;
+  for (const entry of list) {
+    const size = jsonBytes(entry) + 1;
+    if (used + size > bytes) break;
+    entries.push(entry);
+    used += size;
+  }
+  return { entries, used };
+};
+
+/**
+ * Returns `desk` with its running attempts, then its items not moving, then its last outcomes, as
+ * many as fit one page, and the number of entries of each list that it leaves out.
+ */
+export const boundedDesk = (desk: DeskView): DeskView => {
+  const omitted = { running: 0, notMoving: 0, lastOutcomes: 0 };
+  let remaining =
+    PAGE_BYTES -
+    jsonBytes(
+      DeskView.make({
+        ...desk,
+        running: [],
+        notMoving: [],
+        lastOutcomes: [],
+        omitted: {
+          running: desk.running.length,
+          notMoving: desk.notMoving.length,
+          lastOutcomes: desk.lastOutcomes.length,
+        },
+      }),
+    );
+  const take = <A>(list: ReadonlyArray<A>, key: keyof typeof omitted) => {
+    const { entries, used } = fitting(list, remaining);
+    remaining -= used;
+    omitted[key] = list.length - entries.length;
+    return entries;
+  };
+  return DeskView.make({
+    ...desk,
+    running: take(desk.running, "running"),
+    notMoving: take(desk.notMoving, "notMoving"),
+    lastOutcomes: take(desk.lastOutcomes, "lastOutcomes"),
+    omitted,
+  });
+};
+
+/** The most files of a page of pull request files. */
+const FILES_PAGE = 100;
+
+/**
+ * Returns the files of `changes` from `offset` that fit one page, with the total and the offset of
+ * the next page. A first file whose patch alone doesn't fit has its patch cut and marked truncated.
+ */
+export const fileChangesPage = (changes: FileChanges, offset: number): FileChanges => {
+  const total = changes.files.length;
+  const envelope = jsonBytes(FileChanges.make({ ...changes, files: [], total, nextOffset: total }));
+  // `pageOf` counts the brackets of the list, which `envelope` already counts.
+  const page = pageOf(changes.files, offset, FILES_PAGE, PAGE_BYTES - envelope + 2);
+  const [first] = page.entries;
+  const files =
+    page.entries.length === 1 &&
+    first !== undefined &&
+    first.patch.kind === "text" &&
+    envelope + jsonBytes(first) > PAGE_BYTES
+      ? [cutPatch(first, first.patch.text, PAGE_BYTES - envelope)]
+      : page.entries;
+  return FileChanges.make({ ...changes, files, total, nextOffset: page.nextOffset });
+};
+
+/** Returns `file` with the start of its patch `text` that keeps the file's JSON within `bytes`. */
+const cutPatch = (file: ChangedFile, text: string, bytes: number) => {
+  const empty = ChangedFile.make({ ...file, patch: { kind: "text", text: "", truncated: true } });
+  return ChangedFile.make({
+    ...empty,
+    patch: { kind: "text", text: textPrefix(text, bytes - jsonBytes(empty)), truncated: true },
+  });
+};
+
+/** Returns `page` with as many of its revisions as fit one page, and the cursor after the last. */
+export const revisionPage = (page: ConfigurationRevisionPage): ConfigurationRevisionPage => {
+  const [newest] = page.revisions;
+  if (newest === undefined) return page;
+  // The newest revision has the largest number, so it is the widest cursor.
+  const envelope = Math.max(
+    jsonBytes(ConfigurationRevisionPage.make({ revisions: [], nextBefore: null })),
+    jsonBytes(ConfigurationRevisionPage.make({ revisions: [], nextBefore: newest.number })),
+  );
+  const { entries } = pageOf(page.revisions, 0, page.revisions.length, PAGE_BYTES - envelope + 2);
+  const last = entries.at(-1);
+  return entries.length === page.revisions.length || last === undefined
+    ? page
+    : ConfigurationRevisionPage.make({ revisions: entries, nextBefore: last.number });
+};

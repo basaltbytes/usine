@@ -5,7 +5,7 @@ import { RepositoryName } from "@usine/core/repository";
 import type { ItemProjection } from "@usine/engine/item-projection";
 import { type Brand, Option, Schema } from "effect";
 import type { ProjectedItem } from "../board/items.ts";
-import { jsonBytes, PAGE_BYTES } from "./page.ts";
+import { fillText, jsonBytes } from "./page.ts";
 
 const Count = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
 
@@ -192,37 +192,6 @@ const entriesOf = (text: ItemText) => {
   return { entries, omitted: Math.max(0, omitted) };
 };
 
-/** The bytes that one code point takes in JSON text, escaped as `JSON.stringify` escapes it. */
-const escapedBytes = (codePoint: number) => {
-  if (codePoint === 0x22 || codePoint === 0x5c) return 2;
-  if (codePoint === 0x08 || codePoint === 0x09 || codePoint === 0x0a) return 2;
-  if (codePoint === 0x0c || codePoint === 0x0d) return 2;
-  if (codePoint < 0x20) return 6;
-  if (codePoint < 0x80) return 1;
-  if (codePoint < 0x800) return 2;
-  if (codePoint >= 0xd800 && codePoint <= 0xdfff) return 6;
-  return codePoint < 0x10000 ? 3 : 4;
-};
-
-/** Returns the position after the code point at `index` of `text`. */
-const nextCodePoint = (text: string, index: number) =>
-  index + ((text.codePointAt(index) ?? 0) > 0xffff ? 2 : 1);
-
-/**
- * Returns the end of the longest part of `text` from `start` whose escaped JSON fits `bytes`,
- * without splitting a surrogate pair.
- */
-const fittingEnd = (text: string, start: number, bytes: number) => {
-  let end = start;
-  let used = 0;
-  while (end < text.length) {
-    used += escapedBytes(text.codePointAt(end) ?? 0);
-    if (used > bytes) break;
-    end = nextCodePoint(text, end);
-  }
-  return end;
-};
-
 /**
  * Returns the stored Item as a view with the page of its entries from `cursor`. A page holds as
  * many whole or partial entries as fit `PAGE_BYTES` of JSON; an entry that doesn't fit is cut, and
@@ -254,35 +223,33 @@ export const itemPage = (
       omitted,
       next,
     });
-  const page: Array<ItemEntryView> = [];
   const widest = ItemEntryCursor.make({
     entry: entries.length,
     offset: Math.max(0, ...entries.map(({ text }) => text.length)),
   });
-  let used = jsonBytes(view([], widest));
-  for (let index = cursor.entry; index < entries.length; index += 1) {
-    const entry = entries[index];
-    if (entry === undefined) break;
-    const start = index === cursor.entry ? Math.min(cursor.offset, entry.text.length) : 0;
-    const empty = ItemEntryView.make({
-      entry: index,
-      ...entry,
-      text: "",
-      offset: start,
-      length: entry.text.length,
-    });
-    const remaining = PAGE_BYTES - used - jsonBytes(empty) - 1;
-    const fitting = fittingEnd(entry.text, start, Math.max(0, remaining));
-    const unfinished = start < entry.text.length;
-    if (fitting === start && unfinished && page.length > 0)
-      return view(page, ItemEntryCursor.make({ entry: index, offset: start }));
-    // The first entry of a page takes at least one code point, so each page moves the cursor.
-    const end = fitting === start && unfinished ? nextCodePoint(entry.text, start) : fitting;
-    const part = ItemEntryView.make({ ...empty, text: entry.text.slice(start, end) });
-    page.push(part);
-    used += jsonBytes(part) + 1;
-    if (end < entry.text.length)
-      return view(page, ItemEntryCursor.make({ entry: index, offset: end }));
-  }
-  return view(page, null);
+  const filled = fillText(
+    entries.slice(cursor.entry).map((entry, index) => ({
+      text: entry.text,
+      view: (part: string, offset: number) =>
+        ItemEntryView.make({
+          entry: cursor.entry + index,
+          ...entry,
+          text: part,
+          offset,
+          length: entry.text.length,
+        }),
+    })),
+    cursor.offset,
+    jsonBytes(view([], widest)),
+    false,
+  );
+  return view(
+    filled.views,
+    filled.next === null
+      ? null
+      : ItemEntryCursor.make({
+          entry: cursor.entry + filled.next.index,
+          offset: filled.next.offset,
+        }),
+  );
 };

@@ -57,6 +57,10 @@ export class FileChanges extends Schema.Class<
   head: CommitSha,
   files: Schema.Array(ChangedFile),
   filesTruncated: Schema.Boolean,
+  /** The number of files in all pages, when `files` is one page of them. */
+  total: Schema.optionalKey(Count),
+  /** The offset of the next page of files, or null after the last; absent when unpaged. */
+  nextOffset: Schema.optionalKey(Schema.NullOr(Count)),
 }) {}
 
 export class FileRead extends Schema.Class<FileRead, Brand.Brand<"@usine/github/files/FileRead">>(

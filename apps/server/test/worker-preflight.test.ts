@@ -255,10 +255,14 @@ it.live(
             assert.strictEqual(duplicate.status, 409);
             const updatedText = yield* duplicate.text;
             assert.include(updatedText, "already running");
-            const during = yield* client.get("/api/configuration").pipe(
-              Effect.flatMap((response) => response.text),
-              Effect.flatMap(Schema.decodeUnknownEffect(Schema.fromJsonString(ConfigurationView))),
-            );
+            const during = yield* client
+              .get("/api/configuration", { headers: { "x-usine-view": "full" } })
+              .pipe(
+                Effect.flatMap((response) => response.text),
+                Effect.flatMap(
+                  Schema.decodeUnknownEffect(Schema.fromJsonString(ConfigurationView)),
+                ),
+              );
             assert.strictEqual(
               during.workers.find(({ name }) => name === failedWorker)?.preflightRunning,
               true,

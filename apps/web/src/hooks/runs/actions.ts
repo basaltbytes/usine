@@ -19,7 +19,7 @@ import {
 import { OperatorHttpError } from "@usine/orchestrator/operator/http";
 import { overviewQuery } from "~/lib/overview";
 import { deskQuery } from "~/lib/desk/queries";
-import { runDetailKey } from "~/lib/runs/queries";
+import { readRunDetail, runDetailKey } from "~/lib/runs/queries";
 import { api } from "~/lib/api";
 
 /**
@@ -138,19 +138,18 @@ export const useRunAgain = ({
       readonly runId: RunId;
       readonly amendment: EditAndRetry | "unchanged";
     }) =>
-      api((client) =>
-        Effect.gen(function* () {
-          const payload =
-            amendment === "unchanged"
-              ? unchangedRunAgain(
-                  (yield* client.detail({
-                    params: { runId },
-                    query: ColdTranscriptRequest.make(),
-                  })).run,
-                ).amendment
-              : amendment;
-          return yield* client.runAgain({ params: { runId }, payload });
-        }),
+      api(
+        (client) =>
+          Effect.gen(function* () {
+            const payload =
+              amendment === "unchanged"
+                ? unchangedRunAgain(
+                    (yield* readRunDetail(client, runId, ColdTranscriptRequest.make())).run,
+                  ).amendment
+                : amendment;
+            return yield* client.runAgain({ params: { runId }, payload });
+          }),
+        "full",
       ),
     onSuccess: async (result, { runId }) => {
       await refresh(runId);
