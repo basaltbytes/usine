@@ -854,7 +854,7 @@ describe("operator MCP endpoint", () => {
       assert.isNotTrue(result.result.isError);
       const [kept, hint] = result.result.content;
       assert.equal(kept?.text, `"${"x".repeat(MAX_RESULT_BYTES - 1)}`);
-      assert.include(hint?.text ?? "", `truncated this result at ${MAX_RESULT_BYTES} of`);
+      assert.include(hint?.text ?? "", `cut this result at ${MAX_RESULT_BYTES} of`);
     }).pipe(Effect.scoped),
   );
 

@@ -486,7 +486,7 @@ it("updates the running count beside Overview without counting waiting or queued
       projects: overview.projects.map((project) =>
         ProjectView.make({
           ...project,
-          runs: project.runs.filter(({ state }) => state !== "Running"),
+          runs: (project.runs ?? []).filter(({ state }) => state !== "Running"),
         }),
       ),
     }),

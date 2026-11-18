@@ -1,9 +1,9 @@
-import type { RunView } from "@usine/orchestrator/operator";
+import type { RunSummaryView } from "@usine/orchestrator/operator";
 import { Option } from "effect";
 import { failureMessage, failureReason } from "~/lib/runs/strings";
 import { runFailure } from "~/lib/tasks/model";
 
-type FailureLineProps = { readonly run: RunView };
+type FailureLineProps = { readonly run: RunSummaryView };
 
 export const FailureLine = ({ run }: FailureLineProps) =>
   Option.match(runFailure(run), {

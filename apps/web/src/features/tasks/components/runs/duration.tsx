@@ -1,10 +1,10 @@
-import type { RunView } from "@usine/orchestrator/operator";
+import type { RunSummaryView } from "@usine/orchestrator/operator";
 import { Option } from "effect";
 import { useNow } from "~/hooks/use-now";
 import { durationLabel } from "~/lib/strings";
 import { attemptsDuration } from "~/lib/tasks/model";
 
-type DurationProps = { readonly run: RunView };
+type DurationProps = { readonly run: RunSummaryView };
 
 export const Duration = ({ run }: DurationProps) => {
   const now = useNow(30_000);

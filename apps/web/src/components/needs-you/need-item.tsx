@@ -49,7 +49,9 @@ export const NeedItem = ({
 }: NeedItemProps) => {
   const overview = useOverview();
   const now = useNow(15_000);
-  const run = overview?.projects.flatMap(({ runs }) => runs).find(({ id }) => id === copy.runId);
+  const run = overview?.projects
+    .flatMap(({ runs }) => runs ?? [])
+    .find(({ id }) => id === copy.runId);
   const subject =
     item ??
     Option.getOrUndefined(

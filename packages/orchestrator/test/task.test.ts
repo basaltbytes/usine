@@ -44,6 +44,8 @@ import { RunEvent, RunReader, RunSnapshot, summarizeRun } from "@usine/engine/ru
 import { DateTime, Effect, FileSystem, Layer, Option, Path, Ref, Schema } from "effect";
 import { harvestedAttemptChanges } from "../src/operator/task-changes.ts";
 import { OperatorObservation } from "../src/operator/operator.ts";
+import { ItemEntryCursor } from "../src/operator/item.ts";
+import type { TaskReadDepth } from "../src/operator/task.ts";
 import { PollingTriggers } from "../src/polling-triggers.ts";
 import { gitHubItemKey } from "../src/polling/repository-sync.ts";
 import { ScheduleTriggers } from "../src/schedule-triggers.ts";
@@ -409,6 +411,7 @@ const runs = [
 const observation = (
   requested: Ref.Ref<ReadonlyArray<string>>,
   runEvents: ReadonlyArray<RunEvent> = [],
+  inspected?: Ref.Ref<number>,
 ) => {
   const reader = Layer.succeed(RunReader)({
     runForEvent: () => Effect.die("unused"),
@@ -416,7 +419,8 @@ const observation = (
     latestPoolRateLimits: Effect.succeed([]),
     inspect: (id) => {
       const run = runs.find(({ run }) => run.id === id);
-      return run === undefined ? Effect.die("Missing run fixture") : Effect.succeed(run);
+      const counted = inspected === undefined ? Effect.void : Ref.update(inspected, (n) => n + 1);
+      return run === undefined ? Effect.die("Missing run fixture") : counted.pipe(Effect.as(run));
     },
     summary: () => Effect.die("unused"),
     evidence: () => Effect.die("unused"),
@@ -491,16 +495,59 @@ const readTask = (
   project: RepositoryName = repository,
   runEvents: ReadonlyArray<RunEvent> = [],
   loaded?: LoadedInstance,
+  depth: TaskReadDepth = "results",
 ) =>
   Effect.gen(function* () {
     const fixtureInstance = loaded ?? (yield* instance);
     const requested = yield* Ref.make<ReadonlyArray<string>>([]);
+    const inspected = yield* Ref.make(0);
     const task = yield* Effect.gen(function* () {
       const operator = yield* OperatorObservation;
-      return yield* operator.task(fixtureInstance, project, ItemNumber.make(number));
-    }).pipe(Effect.provide(observation(requested, runEvents)));
-    return { task, requested: yield* Ref.get(requested) };
+      return yield* operator.task(fixtureInstance, project, ItemNumber.make(number), depth);
+    }).pipe(Effect.provide(observation(requested, runEvents, inspected)));
+    return { task, requested: yield* Ref.get(requested), inspected: yield* Ref.get(inspected) };
   });
+
+describe("Task summary", () => {
+  it.effect("reads the Runs without reading their results, comments, or commit ranges", () =>
+    Effect.gen(function* () {
+      const results = yield* readTask(40);
+      const summary = yield* readTask(40, repository, [], undefined, "summary");
+      assert.strictEqual(results.inspected, results.task.runs.length);
+      assert.strictEqual(summary.inspected, 0);
+      assert.deepStrictEqual(summary.task.runs, results.task.runs);
+      assert.strictEqual(summary.task.runsTotal, results.task.runs.length);
+      assert.isUndefined(summary.task.comments);
+      assert.isUndefined(summary.task.attemptChanges);
+      assert.isNotEmpty(results.task.comments ?? []);
+    }),
+  );
+});
+
+describe("Item read", () => {
+  it.effect("reads a board Item's stored text and refuses an Item that isn't on the Board", () =>
+    Effect.gen(function* () {
+      const fixtureInstance = yield* instance;
+      const requested = yield* Ref.make<ReadonlyArray<string>>([]);
+      yield* Effect.gen(function* () {
+        const operator = yield* OperatorObservation;
+        const start = ItemEntryCursor.make({ entry: 0, offset: 0 });
+        const item = yield* operator.item(fixtureInstance, repository, ItemNumber.make(41), start);
+        assert.strictEqual(item.kind, "pr");
+        assert.strictEqual(item.state, "pr-merged");
+        assert.deepStrictEqual(
+          item.entries.map(({ entry, kind }) => [entry, kind]),
+          [[0, "body"]],
+        );
+        assert.isNull(item.next);
+        const missing = yield* operator
+          .item(fixtureInstance, repository, ItemNumber.make(9_999), start)
+          .pipe(Effect.flip);
+        assert.strictEqual(missing._tag, "BoardItemNotFoundError");
+      }).pipe(Effect.provide(observation(requested)));
+    }),
+  );
+});
 
 describe("Task view", () => {
   it.effect("joins an issue and its two pull requests with every Run on them, newest first", () =>
@@ -517,7 +564,7 @@ describe("Task view", () => {
         "c".repeat(40),
       );
       assert.deepStrictEqual(
-        task.attemptChanges.map(({ runId, attemptId, pullRequest, base, head }) => ({
+        (task.attemptChanges ?? []).map(({ runId, attemptId, pullRequest, base, head }) => ({
           runId,
           attemptId,
           pullRequest,
@@ -565,7 +612,7 @@ describe("Task view", () => {
       // A comment has GitHub's time if the harvest recorded one, and always its Attempt's end; a
       // Run's comments are newest first by the time they have.
       assert.deepStrictEqual(
-        task.comments.map(({ runId, kind, postedAt, attemptEndedAt }) => [
+        (task.comments ?? []).map(({ runId, kind, postedAt, attemptEndedAt }) => [
           runId,
           kind,
           postedAt,

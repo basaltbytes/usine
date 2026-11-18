@@ -35,6 +35,9 @@ import {
   type RunStatisticsView,
   type StatisticsView,
   type StatisticsWindow,
+  type ItemEntryCursor,
+  type ItemView,
+  type TaskReadDepth,
   type TaskView,
 } from "@usine/orchestrator/operator";
 import type { ItemNumber } from "@usine/core/item";
@@ -96,7 +99,13 @@ export class FactoryBackend extends Context.Service<
     readonly task: (
       repository: RepositoryName,
       item: ItemNumber,
+      depth: TaskReadDepth,
     ) => Effect.Effect<TaskView, BackendError>;
+    readonly item: (
+      repository: RepositoryName,
+      item: ItemNumber,
+      cursor: ItemEntryCursor,
+    ) => Effect.Effect<ItemView, BackendError>;
     readonly configuration: Effect.Effect<ConfigurationView, BackendError>;
     readonly desk: Effect.Effect<DeskView, BackendError>;
     readonly statistics: (window: StatisticsWindow) => Effect.Effect<StatisticsView, BackendError>;
@@ -171,8 +180,12 @@ export const liveBackendLayer = (
     unpause: (loop) =>
       loopOf(instances, loop).pipe(Effect.flatMap(operator.unpause), Effect.asVoid),
 
-    task: (repository, item) =>
-      Effect.flatMap(instances.get, (instance) => operator.task(instance, repository, item)),
+    task: (repository, item, depth) =>
+      Effect.flatMap(instances.get, (instance) => operator.task(instance, repository, item, depth)),
+    item: (repository, item, cursor) =>
+      Effect.flatMap(instances.get, (instance) =>
+        operator.item(instance, repository, item, cursor),
+      ),
     configuration: Effect.flatMap(instances.get, configuration.view),
     desk: Effect.flatMap(instances.get, operator.desk),
     statistics: (window) =>
@@ -236,8 +249,14 @@ export const needsSetupBackendLayer = (
     pause: fail,
     unpause: fail,
 
-    task: (repository, item) =>
-      Effect.flatMap(instances.get, (instance) => observation.task(instance, repository, item)),
+    task: (repository, item, depth) =>
+      Effect.flatMap(instances.get, (instance) =>
+        observation.task(instance, repository, item, depth),
+      ),
+    item: (repository, item, cursor) =>
+      Effect.flatMap(instances.get, (instance) =>
+        observation.item(instance, repository, item, cursor),
+      ),
     configuration: Effect.flatMap(instances.get, configuration.view),
     desk: Effect.flatMap(instances.get, observation.desk),
     statistics: (window) =>

@@ -5270,7 +5270,7 @@
             }
           }
         },
-        "description": "Returns project boards, loops, workers, and instance readiness.",
+        "description": "Returns each project with its lanes and their card counts, the loops, the attention items, and whether the instance is set up. It has no cards, and no project runs or labels: read a lane's cards with boardLaneItems, a task with task, and the running attempts with desk. `X-Usine-View: full` returns every card, run, and label.",
         "summary": "Read the instance overview",
         "x-usine-permission": "read"
       }
@@ -15647,7 +15647,7 @@
             }
           }
         },
-        "description": "Returns the project and its board across member repositories.",
+        "description": "Returns the project with its lanes and their card counts across member repositories, without cards, runs, or labels. Read a lane's cards with boardLaneItems. `X-Usine-View: full` returns every card, run, and label, and `X-Usine-View: board` returns the cards of every lane except the lanes of closed and merged items, which have their counts.",
         "summary": "Read a project board",
         "x-usine-permission": "read"
       }
@@ -15684,7 +15684,8 @@
               "type": "string",
               "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
             },
-            "required": false
+            "required": false,
+            "description": "The position of the first entry to return. Defaults to 0."
           }
         ],
         "security": [
@@ -16355,8 +16356,8 @@
             }
           }
         },
-        "description": "Returns up to 50 items and the next offset for a project lane.",
-        "summary": "Read the next page of board cards",
+        "description": "Returns the lane's cards from `offset`: up to 50, and no more than fit 20 KB of JSON. `total` counts the lane's cards, and `nextOffset` is the offset of the next page, or null after the last card.",
+        "summary": "Read a page of a lane's cards",
         "x-usine-permission": "read"
       }
     },
@@ -17741,7 +17742,7 @@
             }
           }
         },
-        "description": "Returns linked issues, pull requests, and runs for an item in a project repository.",
+        "description": "Reads a task of a project repository. Returns the task's items, its lane, whether it needs the operator, `runsTotal`, and its newest runs that fit 10 KB of JSON, without task prompts or result text. Read the other runs with taskRuns from offset `runs.length`, a run's prompt and transcript with detail, and an item's body and comments with item. `X-Usine-View: task` returns the first 25 runs with the comments and commit ranges of every run, and `X-Usine-View: full` returns every run with them.",
         "summary": "Read a project task",
         "x-usine-permission": "read"
       }
@@ -23428,7 +23429,8 @@
               "type": "string",
               "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
             },
-            "required": false
+            "required": false,
+            "description": "The position of the first entry to return. Defaults to 0."
           }
         ],
         "security": [
@@ -23450,7 +23452,7 @@
                     "runs": {
                       "type": "array",
                       "items": {
-                        "$ref": "#/components/schemas/_usine_orchestrator_RunViewEncoded"
+                        "$ref": "#/components/schemas/_usine_orchestrator_RunSummaryViewEncoded"
                       }
                     },
                     "total": {
@@ -24099,7 +24101,7 @@
             }
           }
         },
-        "description": "Returns up to 25 runs and the next offset for a repository task.",
+        "description": "Returns the task's runs from `offset`, newest first: up to 25, and no more than fit 20 KB of JSON. A run here has no task prompt or result text; read them with the run's detail. `total` counts the task's runs, and `nextOffset` is the offset of the next page, or null after the last run.",
         "summary": "Read a page of task runs",
         "x-usine-permission": "read"
       }
@@ -24775,8 +24777,704 @@
             }
           }
         },
-        "description": "Returns linked items and runs for the repository item.",
+        "description": "Reads the task that contains the item. Returns the task's items, its lane, whether it needs the operator, `runsTotal`, and its newest runs that fit 10 KB of JSON, without task prompts or result text. Read the other runs with taskRuns from offset `runs.length`, a run's prompt and transcript with detail, and an item's body and comments with item. `X-Usine-View: task` returns the first 25 runs with the comments and commit ranges of every run, and `X-Usine-View: full` returns every run with them.",
         "summary": "Read a repository task",
+        "x-usine-permission": "read"
+      }
+    },
+    "/api/projects/{owner}/{repository}/items/{item}": {
+      "get": {
+        "tags": [
+          "Operator"
+        ],
+        "operationId": "operator.item",
+        "parameters": [
+          {
+            "name": "owner",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_.-]+$"
+            },
+            "required": true
+          },
+          {
+            "name": "repository",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_.-]+$"
+            },
+            "required": true
+          },
+          {
+            "name": "item",
+            "in": "path",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          },
+          {
+            "name": "entry",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
+            },
+            "required": false,
+            "description": "The entry to start from, as `next.entry` gives it. Defaults to 0."
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
+            },
+            "required": false,
+            "description": "The position in the entry's text to start from, in UTF-16 code units, as `next.offset` gives it. Defaults to 0."
+          }
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "@usine/orchestrator/ItemView",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/_usine_orchestrator_ItemViewEncoded"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "enum": [
+                        "AccessDenied",
+                        "WorkerPreflightRejectedError",
+                        "UpgradeError",
+                        "ConfigurationNotFound",
+                        "ConfigurationStoreError",
+                        "SchemaError",
+                        "InvalidRequestError",
+                        "CrossSiteRequestError",
+                        "RunNotFoundError",
+                        "TranscriptAttemptNotFoundError",
+                        "BoardProjectNotFoundError",
+                        "BoardItemNotFoundError",
+                        "BoardLaneNotFoundError",
+                        "GitHubItemNotFoundError",
+                        "FileChangesNotFoundError",
+                        "PullRequestFilesChangedError",
+                        "RunOperationRejectedError",
+                        "CiNotPassedError",
+                        "RunRetryBlockedError",
+                        "RunInterventionRejectedError",
+                        "LeftoversDiscardRejectedError",
+                        "RosterAgentNotFoundError",
+                        "LoopNotFoundError",
+                        "CycleBudgetResetRejectedError",
+                        "BoardLaneReadOnlyError",
+                        "RestartRequiredError",
+                        "ReloadPreflightError",
+                        "FactoryConfigError",
+                        "EnginePersistenceError",
+                        "AttemptCancellationError",
+                        "HttpBodyError",
+                        "GitHubApiError",
+                        "InvalidGitHubResponseError",
+                        "BackendUnavailableError",
+                        "InstallationDiscoveryError",
+                        "AppPermissionError",
+                        "ProjectNotInstalledError",
+                        "GitHubRateLimitError",
+                        "ConversationNotFound",
+                        "TurnNotFound",
+                        "UnknownProject",
+                        "TurnConflict",
+                        "SupervisorNotReady",
+                        "ConversationStoreError"
+                      ],
+                      "description": "Domain failure tag that selects the HTTP status."
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Diagnostic text safe to show to the operator."
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "message"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "A valid instance token or browser session is required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "enum": [
+                        "AuthenticationError"
+                      ]
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "message"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Error Requests with an Origin header require an allowed origin. Unknown origins receive no CORS headers.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "enum": [
+                            "AccessDenied",
+                            "WorkerPreflightRejectedError",
+                            "UpgradeError",
+                            "ConfigurationNotFound",
+                            "ConfigurationStoreError",
+                            "SchemaError",
+                            "InvalidRequestError",
+                            "CrossSiteRequestError",
+                            "RunNotFoundError",
+                            "TranscriptAttemptNotFoundError",
+                            "BoardProjectNotFoundError",
+                            "BoardItemNotFoundError",
+                            "BoardLaneNotFoundError",
+                            "GitHubItemNotFoundError",
+                            "FileChangesNotFoundError",
+                            "PullRequestFilesChangedError",
+                            "RunOperationRejectedError",
+                            "CiNotPassedError",
+                            "RunRetryBlockedError",
+                            "RunInterventionRejectedError",
+                            "LeftoversDiscardRejectedError",
+                            "RosterAgentNotFoundError",
+                            "LoopNotFoundError",
+                            "CycleBudgetResetRejectedError",
+                            "BoardLaneReadOnlyError",
+                            "RestartRequiredError",
+                            "ReloadPreflightError",
+                            "FactoryConfigError",
+                            "EnginePersistenceError",
+                            "AttemptCancellationError",
+                            "HttpBodyError",
+                            "GitHubApiError",
+                            "InvalidGitHubResponseError",
+                            "BackendUnavailableError",
+                            "InstallationDiscoveryError",
+                            "AppPermissionError",
+                            "ProjectNotInstalledError",
+                            "GitHubRateLimitError",
+                            "ConversationNotFound",
+                            "TurnNotFound",
+                            "UnknownProject",
+                            "TurnConflict",
+                            "SupervisorNotReady",
+                            "ConversationStoreError"
+                          ],
+                          "description": "Domain failure tag that selects the HTTP status."
+                        },
+                        "message": {
+                          "type": "string",
+                          "description": "Diagnostic text safe to show to the operator."
+                        }
+                      },
+                      "required": [
+                        "error",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "enum": [
+                            "CrossSiteRequestError"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error",
+                        "message"
+                      ],
+                      "additionalProperties": true
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "enum": [
+                        "AccessDenied",
+                        "WorkerPreflightRejectedError",
+                        "UpgradeError",
+                        "ConfigurationNotFound",
+                        "ConfigurationStoreError",
+                        "SchemaError",
+                        "InvalidRequestError",
+                        "CrossSiteRequestError",
+                        "RunNotFoundError",
+                        "TranscriptAttemptNotFoundError",
+                        "BoardProjectNotFoundError",
+                        "BoardItemNotFoundError",
+                        "BoardLaneNotFoundError",
+                        "GitHubItemNotFoundError",
+                        "FileChangesNotFoundError",
+                        "PullRequestFilesChangedError",
+                        "RunOperationRejectedError",
+                        "CiNotPassedError",
+                        "RunRetryBlockedError",
+                        "RunInterventionRejectedError",
+                        "LeftoversDiscardRejectedError",
+                        "RosterAgentNotFoundError",
+                        "LoopNotFoundError",
+                        "CycleBudgetResetRejectedError",
+                        "BoardLaneReadOnlyError",
+                        "RestartRequiredError",
+                        "ReloadPreflightError",
+                        "FactoryConfigError",
+                        "EnginePersistenceError",
+                        "AttemptCancellationError",
+                        "HttpBodyError",
+                        "GitHubApiError",
+                        "InvalidGitHubResponseError",
+                        "BackendUnavailableError",
+                        "InstallationDiscoveryError",
+                        "AppPermissionError",
+                        "ProjectNotInstalledError",
+                        "GitHubRateLimitError",
+                        "ConversationNotFound",
+                        "TurnNotFound",
+                        "UnknownProject",
+                        "TurnConflict",
+                        "SupervisorNotReady",
+                        "ConversationStoreError"
+                      ],
+                      "description": "Domain failure tag that selects the HTTP status."
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Diagnostic text safe to show to the operator."
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "message"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "enum": [
+                        "AccessDenied",
+                        "WorkerPreflightRejectedError",
+                        "UpgradeError",
+                        "ConfigurationNotFound",
+                        "ConfigurationStoreError",
+                        "SchemaError",
+                        "InvalidRequestError",
+                        "CrossSiteRequestError",
+                        "RunNotFoundError",
+                        "TranscriptAttemptNotFoundError",
+                        "BoardProjectNotFoundError",
+                        "BoardItemNotFoundError",
+                        "BoardLaneNotFoundError",
+                        "GitHubItemNotFoundError",
+                        "FileChangesNotFoundError",
+                        "PullRequestFilesChangedError",
+                        "RunOperationRejectedError",
+                        "CiNotPassedError",
+                        "RunRetryBlockedError",
+                        "RunInterventionRejectedError",
+                        "LeftoversDiscardRejectedError",
+                        "RosterAgentNotFoundError",
+                        "LoopNotFoundError",
+                        "CycleBudgetResetRejectedError",
+                        "BoardLaneReadOnlyError",
+                        "RestartRequiredError",
+                        "ReloadPreflightError",
+                        "FactoryConfigError",
+                        "EnginePersistenceError",
+                        "AttemptCancellationError",
+                        "HttpBodyError",
+                        "GitHubApiError",
+                        "InvalidGitHubResponseError",
+                        "BackendUnavailableError",
+                        "InstallationDiscoveryError",
+                        "AppPermissionError",
+                        "ProjectNotInstalledError",
+                        "GitHubRateLimitError",
+                        "ConversationNotFound",
+                        "TurnNotFound",
+                        "UnknownProject",
+                        "TurnConflict",
+                        "SupervisorNotReady",
+                        "ConversationStoreError"
+                      ],
+                      "description": "Domain failure tag that selects the HTTP status."
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Diagnostic text safe to show to the operator."
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "message"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "enum": [
+                        "AccessDenied",
+                        "WorkerPreflightRejectedError",
+                        "UpgradeError",
+                        "ConfigurationNotFound",
+                        "ConfigurationStoreError",
+                        "SchemaError",
+                        "InvalidRequestError",
+                        "CrossSiteRequestError",
+                        "RunNotFoundError",
+                        "TranscriptAttemptNotFoundError",
+                        "BoardProjectNotFoundError",
+                        "BoardItemNotFoundError",
+                        "BoardLaneNotFoundError",
+                        "GitHubItemNotFoundError",
+                        "FileChangesNotFoundError",
+                        "PullRequestFilesChangedError",
+                        "RunOperationRejectedError",
+                        "CiNotPassedError",
+                        "RunRetryBlockedError",
+                        "RunInterventionRejectedError",
+                        "LeftoversDiscardRejectedError",
+                        "RosterAgentNotFoundError",
+                        "LoopNotFoundError",
+                        "CycleBudgetResetRejectedError",
+                        "BoardLaneReadOnlyError",
+                        "RestartRequiredError",
+                        "ReloadPreflightError",
+                        "FactoryConfigError",
+                        "EnginePersistenceError",
+                        "AttemptCancellationError",
+                        "HttpBodyError",
+                        "GitHubApiError",
+                        "InvalidGitHubResponseError",
+                        "BackendUnavailableError",
+                        "InstallationDiscoveryError",
+                        "AppPermissionError",
+                        "ProjectNotInstalledError",
+                        "GitHubRateLimitError",
+                        "ConversationNotFound",
+                        "TurnNotFound",
+                        "UnknownProject",
+                        "TurnConflict",
+                        "SupervisorNotReady",
+                        "ConversationStoreError"
+                      ],
+                      "description": "Domain failure tag that selects the HTTP status."
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Diagnostic text safe to show to the operator."
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "message"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "enum": [
+                        "AccessDenied",
+                        "WorkerPreflightRejectedError",
+                        "UpgradeError",
+                        "ConfigurationNotFound",
+                        "ConfigurationStoreError",
+                        "SchemaError",
+                        "InvalidRequestError",
+                        "CrossSiteRequestError",
+                        "RunNotFoundError",
+                        "TranscriptAttemptNotFoundError",
+                        "BoardProjectNotFoundError",
+                        "BoardItemNotFoundError",
+                        "BoardLaneNotFoundError",
+                        "GitHubItemNotFoundError",
+                        "FileChangesNotFoundError",
+                        "PullRequestFilesChangedError",
+                        "RunOperationRejectedError",
+                        "CiNotPassedError",
+                        "RunRetryBlockedError",
+                        "RunInterventionRejectedError",
+                        "LeftoversDiscardRejectedError",
+                        "RosterAgentNotFoundError",
+                        "LoopNotFoundError",
+                        "CycleBudgetResetRejectedError",
+                        "BoardLaneReadOnlyError",
+                        "RestartRequiredError",
+                        "ReloadPreflightError",
+                        "FactoryConfigError",
+                        "EnginePersistenceError",
+                        "AttemptCancellationError",
+                        "HttpBodyError",
+                        "GitHubApiError",
+                        "InvalidGitHubResponseError",
+                        "BackendUnavailableError",
+                        "InstallationDiscoveryError",
+                        "AppPermissionError",
+                        "ProjectNotInstalledError",
+                        "GitHubRateLimitError",
+                        "ConversationNotFound",
+                        "TurnNotFound",
+                        "UnknownProject",
+                        "TurnConflict",
+                        "SupervisorNotReady",
+                        "ConversationStoreError"
+                      ],
+                      "description": "Domain failure tag that selects the HTTP status."
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Diagnostic text safe to show to the operator."
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "message"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "enum": [
+                        "AccessDenied",
+                        "WorkerPreflightRejectedError",
+                        "UpgradeError",
+                        "ConfigurationNotFound",
+                        "ConfigurationStoreError",
+                        "SchemaError",
+                        "InvalidRequestError",
+                        "CrossSiteRequestError",
+                        "RunNotFoundError",
+                        "TranscriptAttemptNotFoundError",
+                        "BoardProjectNotFoundError",
+                        "BoardItemNotFoundError",
+                        "BoardLaneNotFoundError",
+                        "GitHubItemNotFoundError",
+                        "FileChangesNotFoundError",
+                        "PullRequestFilesChangedError",
+                        "RunOperationRejectedError",
+                        "CiNotPassedError",
+                        "RunRetryBlockedError",
+                        "RunInterventionRejectedError",
+                        "LeftoversDiscardRejectedError",
+                        "RosterAgentNotFoundError",
+                        "LoopNotFoundError",
+                        "CycleBudgetResetRejectedError",
+                        "BoardLaneReadOnlyError",
+                        "RestartRequiredError",
+                        "ReloadPreflightError",
+                        "FactoryConfigError",
+                        "EnginePersistenceError",
+                        "AttemptCancellationError",
+                        "HttpBodyError",
+                        "GitHubApiError",
+                        "InvalidGitHubResponseError",
+                        "BackendUnavailableError",
+                        "InstallationDiscoveryError",
+                        "AppPermissionError",
+                        "ProjectNotInstalledError",
+                        "GitHubRateLimitError",
+                        "ConversationNotFound",
+                        "TurnNotFound",
+                        "UnknownProject",
+                        "TurnConflict",
+                        "SupervisorNotReady",
+                        "ConversationStoreError"
+                      ],
+                      "description": "Domain failure tag that selects the HTTP status."
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Diagnostic text safe to show to the operator."
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "message"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "enum": [
+                        "AccessDenied",
+                        "WorkerPreflightRejectedError",
+                        "UpgradeError",
+                        "ConfigurationNotFound",
+                        "ConfigurationStoreError",
+                        "SchemaError",
+                        "InvalidRequestError",
+                        "CrossSiteRequestError",
+                        "RunNotFoundError",
+                        "TranscriptAttemptNotFoundError",
+                        "BoardProjectNotFoundError",
+                        "BoardItemNotFoundError",
+                        "BoardLaneNotFoundError",
+                        "GitHubItemNotFoundError",
+                        "FileChangesNotFoundError",
+                        "PullRequestFilesChangedError",
+                        "RunOperationRejectedError",
+                        "CiNotPassedError",
+                        "RunRetryBlockedError",
+                        "RunInterventionRejectedError",
+                        "LeftoversDiscardRejectedError",
+                        "RosterAgentNotFoundError",
+                        "LoopNotFoundError",
+                        "CycleBudgetResetRejectedError",
+                        "BoardLaneReadOnlyError",
+                        "RestartRequiredError",
+                        "ReloadPreflightError",
+                        "FactoryConfigError",
+                        "EnginePersistenceError",
+                        "AttemptCancellationError",
+                        "HttpBodyError",
+                        "GitHubApiError",
+                        "InvalidGitHubResponseError",
+                        "BackendUnavailableError",
+                        "InstallationDiscoveryError",
+                        "AppPermissionError",
+                        "ProjectNotInstalledError",
+                        "GitHubRateLimitError",
+                        "ConversationNotFound",
+                        "TurnNotFound",
+                        "UnknownProject",
+                        "TurnConflict",
+                        "SupervisorNotReady",
+                        "ConversationStoreError"
+                      ],
+                      "description": "Domain failure tag that selects the HTTP status."
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Diagnostic text safe to show to the operator."
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "message"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        },
+        "description": "Returns an issue or pull request of a board task as polling last stored it, with a page of its entries: the body, then the comments and reviews by time, then the review comments by thread. A page holds no more than fit 20 KB of JSON and cuts a long entry; pass `next.entry` and `next.offset` as `entry` and `offset` to read on, until `next` is null. `omitted` counts the comments and reviews that polling doesn't store; read them on GitHub at `url`.",
+        "summary": "Read an item's body and comments",
         "x-usine-permission": "read"
       }
     },
@@ -58224,6 +58922,196 @@
         ],
         "additionalProperties": false
       },
+      "_usine_orchestrator_ItemViewEncoded": {
+        "type": "object",
+        "properties": {
+          "itemKey": {
+            "type": "string",
+            "minLength": 1
+          },
+          "repository": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_.-]+\\/[A-Za-z0-9_.-]+$"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "issue",
+              "pr"
+            ]
+          },
+          "number": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "title": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string",
+            "minLength": 1
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "issue-open",
+              "issue-closed",
+              "pr-open",
+              "pr-closed",
+              "pr-merged"
+            ]
+          },
+          "labels": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^\\S(?:.*\\S)?$",
+              "maxLength": 50
+            }
+          },
+          "author": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/_usine_orchestrator_ItemEntryViewEncoded"
+            }
+          },
+          "entriesTotal": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "omitted": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "next": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/_usine_orchestrator_ItemEntryCursorEncoded"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "itemKey",
+          "repository",
+          "kind",
+          "number",
+          "title",
+          "url",
+          "state",
+          "labels",
+          "author",
+          "entries",
+          "entriesTotal",
+          "omitted",
+          "next"
+        ],
+        "additionalProperties": false
+      },
+      "_usine_orchestrator_ItemEntryCursorEncoded": {
+        "type": "object",
+        "properties": {
+          "entry": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "entry",
+          "offset"
+        ],
+        "additionalProperties": false
+      },
+      "_usine_orchestrator_ItemEntryViewEncoded": {
+        "type": "object",
+        "properties": {
+          "entry": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "body",
+              "comment",
+              "review",
+              "review-comment"
+            ]
+          },
+          "author": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "state": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "length": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "entry",
+          "kind",
+          "author",
+          "at",
+          "text",
+          "offset",
+          "length"
+        ],
+        "additionalProperties": false
+      },
       "_usine_orchestrator_TaskViewEncoded": {
         "type": "object",
         "properties": {
@@ -58264,7 +59152,7 @@
           "runs": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/_usine_orchestrator_RunViewEncoded"
+              "$ref": "#/components/schemas/_usine_orchestrator_RunSummaryViewEncoded"
             }
           },
           "runsTotal": {
@@ -58312,49 +59200,7 @@
           "attemptChanges": {
             "type": "array",
             "items": {
-              "type": "object",
-              "properties": {
-                "runId": {
-                  "type": "string",
-                  "minLength": 1
-                },
-                "attemptId": {
-                  "type": "string",
-                  "minLength": 1
-                },
-                "number": {
-                  "type": "integer",
-                  "minimum": 1,
-                  "maximum": 9007199254740991
-                },
-                "loop": {
-                  "type": "string",
-                  "minLength": 1
-                },
-                "pullRequest": {
-                  "type": "integer",
-                  "minimum": 1,
-                  "maximum": 9007199254740991
-                },
-                "base": {
-                  "type": "string",
-                  "pattern": "^[0-9a-f]{40}(?:[0-9a-f]{24})?$"
-                },
-                "head": {
-                  "type": "string",
-                  "pattern": "^[0-9a-f]{40}(?:[0-9a-f]{24})?$"
-                }
-              },
-              "required": [
-                "runId",
-                "attemptId",
-                "number",
-                "loop",
-                "pullRequest",
-                "base",
-                "head"
-              ],
-              "additionalProperties": false
+              "$ref": "#/components/schemas/TaskAttemptChangesViewEncoded"
             }
           }
         },
@@ -58366,8 +59212,52 @@
           "lane",
           "needsYou",
           "items",
-          "runs",
-          "comments"
+          "runs"
+        ],
+        "additionalProperties": false
+      },
+      "TaskAttemptChangesViewEncoded": {
+        "type": "object",
+        "properties": {
+          "runId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "attemptId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "number": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "loop": {
+            "type": "string",
+            "minLength": 1
+          },
+          "pullRequest": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "base": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{40}(?:[0-9a-f]{24})?$"
+          },
+          "head": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{40}(?:[0-9a-f]{24})?$"
+          }
+        },
+        "required": [
+          "runId",
+          "attemptId",
+          "number",
+          "loop",
+          "pullRequest",
+          "base",
+          "head"
         ],
         "additionalProperties": false
       },
@@ -58416,541 +59306,6 @@
           "url",
           "postedAt",
           "attemptEndedAt"
-        ],
-        "additionalProperties": false
-      },
-      "_usine_orchestrator_RunViewEncoded": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "minLength": 1
-          },
-          "itemKey": {
-            "type": "string",
-            "minLength": 1
-          },
-          "loop": {
-            "type": "string",
-            "minLength": 1
-          },
-          "repository": {
-            "type": "string",
-            "pattern": "^[A-Za-z0-9_.-]+\\/[A-Za-z0-9_.-]+$"
-          },
-          "agent": {
-            "type": "string",
-            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
-          },
-          "agentBrain": {
-            "$ref": "#/components/schemas/Agent_BrainSpecEncoded"
-          },
-          "state": {
-            "type": "string",
-            "enum": [
-              "Pending",
-              "Waiting",
-              "Queued",
-              "Running",
-              "AwaitingCi",
-              "Succeeded",
-              "HandedOff",
-              "Failed",
-              "Canceled"
-            ]
-          },
-          "ciWait": {
-            "anyOf": [
-              {
-                "type": "object",
-                "properties": {
-                  "pullRequest": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "maximum": 9007199254740991
-                  },
-                  "head": {
-                    "type": "string",
-                    "pattern": "^[0-9a-f]{40}(?:[0-9a-f]{24})?$"
-                  },
-                  "fixLoop": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "timeoutSeconds": {
-                    "type": "integer",
-                    "maximum": 86400,
-                    "exclusiveMinimum": 0
-                  },
-                  "onGreen": {
-                    "type": "array",
-                    "items": {
-                      "type": "object",
-                      "properties": {
-                        "item": {
-                          "type": "integer",
-                          "minimum": 1,
-                          "maximum": 9007199254740991
-                        },
-                        "add": {
-                          "type": "array",
-                          "items": {
-                            "type": "string",
-                            "minLength": 1
-                          },
-                          "uniqueItems": true
-                        },
-                        "remove": {
-                          "type": "array",
-                          "items": {
-                            "type": "string",
-                            "minLength": 1
-                          },
-                          "uniqueItems": true
-                        }
-                      },
-                      "required": [
-                        "item",
-                        "add",
-                        "remove"
-                      ],
-                      "additionalProperties": false
-                    }
-                  }
-                },
-                "required": [
-                  "pullRequest",
-                  "head",
-                  "fixLoop",
-                  "timeoutSeconds",
-                  "onGreen"
-                ],
-                "additionalProperties": false
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "handoff": {
-            "anyOf": [
-              {
-                "type": "object",
-                "properties": {
-                  "_tag": {
-                    "type": "string",
-                    "enum": [
-                      "HandedOff"
-                    ]
-                  },
-                  "reason": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "head": {
-                    "type": "string",
-                    "pattern": "^[0-9a-f]{40}(?:[0-9a-f]{24})?$"
-                  },
-                  "fixLoop": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "fixRunId": {
-                    "type": "string",
-                    "minLength": 1
-                  }
-                },
-                "required": [
-                  "_tag",
-                  "reason",
-                  "head",
-                  "fixLoop",
-                  "fixRunId"
-                ],
-                "additionalProperties": false
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "upgradeWait": {
-            "anyOf": [
-              {
-                "type": "object",
-                "properties": {
-                  "target": {
-                    "type": "string",
-                    "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-(?:0|[1-9]\\d*|\\d*[A-Za-z-][0-9A-Za-z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$"
-                  },
-                  "since": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "target",
-                  "since"
-                ],
-                "additionalProperties": false
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "providerRetry": {
-            "anyOf": [
-              {
-                "type": "object",
-                "properties": {
-                  "nextAttempt": {
-                    "type": "integer",
-                    "minimum": 2,
-                    "maximum": 9007199254740991
-                  },
-                  "retryAt": {
-                    "type": "string"
-                  },
-                  "message": {
-                    "type": "string",
-                    "minLength": 1
-                  }
-                },
-                "required": [
-                  "nextAttempt",
-                  "retryAt",
-                  "message"
-                ],
-                "propertyNames": {
-                  "anyOf": [
-                    {
-                      "enum": [
-                        "nextAttempt",
-                        "retryAt",
-                        "message"
-                      ]
-                    },
-                    {
-                      "type": "string"
-                    }
-                  ]
-                },
-                "additionalProperties": false
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "machineWait": {
-            "anyOf": [
-              {
-                "type": "object",
-                "properties": {
-                  "worker": {
-                    "type": "string",
-                    "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
-                  },
-                  "message": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "worker",
-                  "message"
-                ],
-                "additionalProperties": false
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "loopPaused": {
-            "type": "boolean"
-          },
-          "openedAt": {
-            "type": "string"
-          },
-          "closedAt": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "task": {
-            "type": "string"
-          },
-          "attempts": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/_usine_orchestrator_AttemptViewEncoded"
-            }
-          },
-          "approval": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/_usine_orchestrator_ApprovalViewEncoded"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "approvalReason": {
-            "anyOf": [
-              {
-                "type": "string",
-                "minLength": 1
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "runAgain": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/RunAgainEncoded"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "resultMessage": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "pullRequestUrl": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "canApprove": {
-            "type": "boolean"
-          },
-          "canRetry": {
-            "type": "boolean"
-          },
-          "canResolveFailure": {
-            "type": "boolean"
-          },
-          "canApplyCiLabels": {
-            "type": "boolean"
-          },
-          "canCancel": {
-            "type": "boolean"
-          },
-          "canRunAgain": {
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "id",
-          "itemKey",
-          "loop",
-          "repository",
-          "agent",
-          "agentBrain",
-          "state",
-          "loopPaused",
-          "openedAt",
-          "closedAt",
-          "task",
-          "attempts",
-          "approval",
-          "runAgain",
-          "resultMessage",
-          "pullRequestUrl",
-          "canApprove",
-          "canRetry",
-          "canResolveFailure",
-          "canCancel",
-          "canRunAgain"
-        ],
-        "additionalProperties": false
-      },
-      "_usine_orchestrator_AttemptViewEncoded": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "minLength": 1
-          },
-          "number": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 9007199254740991
-          },
-          "worker": {
-            "type": "string",
-            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
-          },
-          "workerAccess": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/_usine_orchestrator_LocalWorkerAccessEncoded"
-              },
-              {
-                "$ref": "#/components/schemas/_usine_orchestrator_SshWorkerAccessEncoded"
-              },
-              {
-                "$ref": "#/components/schemas/_usine_orchestrator_ProvisionedWorkerAccessEncoded"
-              },
-              {
-                "$ref": "#/components/schemas/_usine_orchestrator_SandboxWorkerAccessEncoded"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "brain": {
-            "$ref": "#/components/schemas/Agent_BrainSpecEncoded"
-          },
-          "task": {
-            "type": "string",
-            "pattern": "\\S"
-          },
-          "agent": {
-            "type": "string",
-            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
-          },
-          "operatorIntervened": {
-            "type": "boolean"
-          },
-          "startedAt": {
-            "type": "string"
-          },
-          "outcome": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/_usine_orchestrator_SucceededAttemptViewEncoded"
-              },
-              {
-                "$ref": "#/components/schemas/_usine_orchestrator_AwaitingCiAttemptViewEncoded"
-              },
-              {
-                "$ref": "#/components/schemas/_usine_orchestrator_HandedOffAttemptViewEncoded"
-              },
-              {
-                "$ref": "#/components/schemas/_usine_orchestrator_FailedAttemptViewEncoded"
-              },
-              {
-                "$ref": "#/components/schemas/_usine_orchestrator_CanceledAttemptViewEncoded"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "endedAt": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "salvage": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/AttemptSalvage_PushedEncoded"
-              },
-              {
-                "$ref": "#/components/schemas/AttemptSalvage_PartlyPushedEncoded"
-              },
-              {
-                "$ref": "#/components/schemas/AttemptSalvage_RetainedEncoded"
-              },
-              {
-                "$ref": "#/components/schemas/AttemptSalvage_RejectedEncoded"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "start": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/AttemptStart_EventEncoded"
-              },
-              {
-                "$ref": "#/components/schemas/AttemptStart_RetryEncoded"
-              },
-              {
-                "$ref": "#/components/schemas/AttemptStart_EditAndRetryEncoded"
-              },
-              {
-                "$ref": "#/components/schemas/AttemptStart_InfraRetryEncoded"
-              },
-              {
-                "$ref": "#/components/schemas/AttemptStart_ProviderRetryEncoded"
-              },
-              {
-                "$ref": "#/components/schemas/AttemptStart_AfterRestartEncoded"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "reattachedAt": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "outOfMemory": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/OutOfMemoryKillsEncoded"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "id",
-          "number",
-          "worker",
-          "workerAccess",
-          "brain",
-          "task",
-          "agent",
-          "operatorIntervened",
-          "startedAt",
-          "outcome",
-          "endedAt",
-          "salvage",
-          "start",
-          "reattachedAt",
-          "outOfMemory"
         ],
         "additionalProperties": false
       },
@@ -59613,9 +59968,7 @@
         "required": [
           "repository",
           "status",
-          "runs",
           "board",
-          "labels",
           "preflightFindings"
         ],
         "additionalProperties": false
@@ -61323,6 +61676,541 @@
         },
         "required": [
           "_tag"
+        ],
+        "additionalProperties": false
+      },
+      "_usine_orchestrator_RunViewEncoded": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "itemKey": {
+            "type": "string",
+            "minLength": 1
+          },
+          "loop": {
+            "type": "string",
+            "minLength": 1
+          },
+          "repository": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_.-]+\\/[A-Za-z0-9_.-]+$"
+          },
+          "agent": {
+            "type": "string",
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+          },
+          "agentBrain": {
+            "$ref": "#/components/schemas/Agent_BrainSpecEncoded"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "Pending",
+              "Waiting",
+              "Queued",
+              "Running",
+              "AwaitingCi",
+              "Succeeded",
+              "HandedOff",
+              "Failed",
+              "Canceled"
+            ]
+          },
+          "ciWait": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "pullRequest": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 9007199254740991
+                  },
+                  "head": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{40}(?:[0-9a-f]{24})?$"
+                  },
+                  "fixLoop": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "timeoutSeconds": {
+                    "type": "integer",
+                    "maximum": 86400,
+                    "exclusiveMinimum": 0
+                  },
+                  "onGreen": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "item": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 9007199254740991
+                        },
+                        "add": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "uniqueItems": true
+                        },
+                        "remove": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "uniqueItems": true
+                        }
+                      },
+                      "required": [
+                        "item",
+                        "add",
+                        "remove"
+                      ],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": [
+                  "pullRequest",
+                  "head",
+                  "fixLoop",
+                  "timeoutSeconds",
+                  "onGreen"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "handoff": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "_tag": {
+                    "type": "string",
+                    "enum": [
+                      "HandedOff"
+                    ]
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "head": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{40}(?:[0-9a-f]{24})?$"
+                  },
+                  "fixLoop": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "fixRunId": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "_tag",
+                  "reason",
+                  "head",
+                  "fixLoop",
+                  "fixRunId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "upgradeWait": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "target": {
+                    "type": "string",
+                    "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-(?:0|[1-9]\\d*|\\d*[A-Za-z-][0-9A-Za-z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$"
+                  },
+                  "since": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "target",
+                  "since"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "providerRetry": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "nextAttempt": {
+                    "type": "integer",
+                    "minimum": 2,
+                    "maximum": 9007199254740991
+                  },
+                  "retryAt": {
+                    "type": "string"
+                  },
+                  "message": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "nextAttempt",
+                  "retryAt",
+                  "message"
+                ],
+                "propertyNames": {
+                  "anyOf": [
+                    {
+                      "enum": [
+                        "nextAttempt",
+                        "retryAt",
+                        "message"
+                      ]
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ]
+                },
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "machineWait": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "worker": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+                  },
+                  "message": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "worker",
+                  "message"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "loopPaused": {
+            "type": "boolean"
+          },
+          "openedAt": {
+            "type": "string"
+          },
+          "closedAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "task": {
+            "type": "string"
+          },
+          "attempts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/_usine_orchestrator_AttemptViewEncoded"
+            }
+          },
+          "approval": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/_usine_orchestrator_ApprovalViewEncoded"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "approvalReason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "runAgain": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunAgainEncoded"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "resultMessage": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "pullRequestUrl": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "canApprove": {
+            "type": "boolean"
+          },
+          "canRetry": {
+            "type": "boolean"
+          },
+          "canResolveFailure": {
+            "type": "boolean"
+          },
+          "canApplyCiLabels": {
+            "type": "boolean"
+          },
+          "canCancel": {
+            "type": "boolean"
+          },
+          "canRunAgain": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "itemKey",
+          "loop",
+          "repository",
+          "agent",
+          "agentBrain",
+          "state",
+          "loopPaused",
+          "openedAt",
+          "closedAt",
+          "task",
+          "attempts",
+          "approval",
+          "runAgain",
+          "resultMessage",
+          "pullRequestUrl",
+          "canApprove",
+          "canRetry",
+          "canResolveFailure",
+          "canCancel",
+          "canRunAgain"
+        ],
+        "additionalProperties": false
+      },
+      "_usine_orchestrator_AttemptViewEncoded": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "number": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "worker": {
+            "type": "string",
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+          },
+          "workerAccess": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/_usine_orchestrator_LocalWorkerAccessEncoded"
+              },
+              {
+                "$ref": "#/components/schemas/_usine_orchestrator_SshWorkerAccessEncoded"
+              },
+              {
+                "$ref": "#/components/schemas/_usine_orchestrator_ProvisionedWorkerAccessEncoded"
+              },
+              {
+                "$ref": "#/components/schemas/_usine_orchestrator_SandboxWorkerAccessEncoded"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "brain": {
+            "$ref": "#/components/schemas/Agent_BrainSpecEncoded"
+          },
+          "task": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "agent": {
+            "type": "string",
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+          },
+          "operatorIntervened": {
+            "type": "boolean"
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "outcome": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/_usine_orchestrator_SucceededAttemptViewEncoded"
+              },
+              {
+                "$ref": "#/components/schemas/_usine_orchestrator_AwaitingCiAttemptViewEncoded"
+              },
+              {
+                "$ref": "#/components/schemas/_usine_orchestrator_HandedOffAttemptViewEncoded"
+              },
+              {
+                "$ref": "#/components/schemas/_usine_orchestrator_FailedAttemptViewEncoded"
+              },
+              {
+                "$ref": "#/components/schemas/_usine_orchestrator_CanceledAttemptViewEncoded"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "endedAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "salvage": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AttemptSalvage_PushedEncoded"
+              },
+              {
+                "$ref": "#/components/schemas/AttemptSalvage_PartlyPushedEncoded"
+              },
+              {
+                "$ref": "#/components/schemas/AttemptSalvage_RetainedEncoded"
+              },
+              {
+                "$ref": "#/components/schemas/AttemptSalvage_RejectedEncoded"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "start": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AttemptStart_EventEncoded"
+              },
+              {
+                "$ref": "#/components/schemas/AttemptStart_RetryEncoded"
+              },
+              {
+                "$ref": "#/components/schemas/AttemptStart_EditAndRetryEncoded"
+              },
+              {
+                "$ref": "#/components/schemas/AttemptStart_InfraRetryEncoded"
+              },
+              {
+                "$ref": "#/components/schemas/AttemptStart_ProviderRetryEncoded"
+              },
+              {
+                "$ref": "#/components/schemas/AttemptStart_AfterRestartEncoded"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reattachedAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "outOfMemory": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OutOfMemoryKillsEncoded"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "number",
+          "worker",
+          "workerAccess",
+          "brain",
+          "task",
+          "agent",
+          "operatorIntervened",
+          "startedAt",
+          "outcome",
+          "endedAt",
+          "salvage",
+          "start",
+          "reattachedAt",
+          "outOfMemory"
         ],
         "additionalProperties": false
       },

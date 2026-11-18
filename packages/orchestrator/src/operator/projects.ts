@@ -28,14 +28,14 @@ export const groupProjectViews = (
       repositories: project.repositories,
       repository: project.repositories[0],
       status: "clear",
-      runs: members.flatMap(({ runs }) => runs),
+      runs: members.flatMap(({ runs }) => runs ?? []),
       board: BoardView.make({
         lanes: [...lanes.values()],
         failures: members.flatMap(({ board }) => board.failures),
       }),
       labels: [
         ...new Map(
-          members.flatMap(({ labels }) => labels).map((label) => [label.name, label]),
+          members.flatMap(({ labels }) => labels ?? []).map((label) => [label.name, label]),
         ).values(),
       ],
       preflightFindings: members.flatMap(({ preflightFindings }) => preflightFindings),

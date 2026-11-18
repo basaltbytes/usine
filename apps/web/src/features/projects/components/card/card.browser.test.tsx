@@ -25,7 +25,7 @@ import {
   RunDetailView,
   FactoryOverview,
   type ReadyOverview,
-  type RunSummaryView,
+  RunSummaryView,
 } from "@usine/orchestrator/operator";
 import { Schema } from "effect";
 import { flushSync } from "react-dom";
@@ -613,13 +613,8 @@ it("loads older runs only when Run history opens and opens the selected run", as
     .flatMap(({ board }) => board.lanes.flatMap(({ items }) => items))
     .find(({ number }) => number === 18);
   if (task?.run === null || task === undefined) throw new Error("Missing canceled task");
-  const latest = RunView.make({
-    ...task.run,
-    task: "Saved task",
-    resultMessage: null,
-    attempts: [],
-  });
-  const older = RunView.make({
+  const latest = RunSummaryView.make({ ...task.run, attempts: [] });
+  const older = RunSummaryView.make({
     ...latest,
     id: RunId.make("older-implementation"),
     loop: LoopName.make("older-loop"),

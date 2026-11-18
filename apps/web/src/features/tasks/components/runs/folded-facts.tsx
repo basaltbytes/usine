@@ -1,4 +1,4 @@
-import type { RunView } from "@usine/orchestrator/operator";
+import type { RunSummaryView } from "@usine/orchestrator/operator";
 import { Option } from "effect";
 import { type ItemRef } from "~/components/item/mark";
 import { Duration } from "~/features/tasks/components/runs/duration";
@@ -8,7 +8,7 @@ import { PullRequest } from "~/features/tasks/components/runs/pull-request";
 const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ? "" : "s"}`;
 
 type FoldedFactsProps = {
-  readonly run: RunView;
+  readonly run: RunSummaryView;
   readonly pullRequest: Option.Option<ItemRef>;
 };
 

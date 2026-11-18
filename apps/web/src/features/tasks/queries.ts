@@ -11,7 +11,7 @@ import { api } from "~/lib/api";
 export const projectTasksQuery = (project: ProjectId) =>
   queryOptions({
     queryKey: ["project", project, "tasks"] as const,
-    queryFn: () => api((client) => client.project({ params: { project } })),
+    queryFn: () => api((client) => client.project({ params: { project } }), "full"),
     staleTime: 30_000,
     placeholderData: keepPreviousData,
     meta: {

@@ -34,6 +34,7 @@ const sandboxAt = (root: string, limits = SupervisorLimits.make({})) =>
     route: Option.some(
       Effect.succeed({
         credential: () => Effect.succeedNone,
+        countTokens: () => Effect.die("the test counts no tokens"),
         request: () => Effect.die("the test calls no model"),
       }),
     ),

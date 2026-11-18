@@ -133,6 +133,7 @@ import { HttpRouter, FetchHttpClient } from "effect/http";
 import { HttpApiClient } from "effect/http-api";
 import { beforeAll, afterAll, assert, describe, it } from "@effect/vitest";
 import { BackendUnavailableError, FactoryBackend, needsSetupBackendLayer } from "../src/backend.ts";
+import { projectSummary, summaryOverview, taskSummary } from "../src/changes/reads.ts";
 import { Port, SERVER_HOST } from "../src/cli.ts";
 import { apiRoutes, serverLayer, staticRoutes } from "../src/http.ts";
 import { listenForStartup } from "../src/listener.ts";
@@ -296,7 +297,13 @@ const task = TaskView.make({
       conflicting: false,
     }),
   ],
-  runs: [run],
+  runs: [
+    RunSummaryView.make({
+      ...run,
+      attempts: run.attempts.map((attempt) => AttemptSummaryView.make(attempt)),
+    }),
+  ],
+  runsTotal: 1,
   comments: [
     TaskCommentView.make({
       runId,
@@ -365,6 +372,8 @@ const observation: OperatorObservation["Service"] = {
   runStatistics: (_instance, window) => Effect.succeed(runStatisticsOf(window)),
   detail: () => Effect.succeed(detail),
   task: () => Effect.succeed(task),
+  item: (_instance, repository, item) =>
+    Effect.fail(BoardItemNotFoundError.make({ repository, item })),
 };
 const configurationView = ConfigurationView.make({
   projects: [
@@ -833,14 +842,25 @@ describe("operator HTTP API", () => {
     () =>
       Effect.gen(function* () {
         const response = yield* Effect.promise(() =>
-          app.handler(new Request("http://localhost/api/overview")),
+          app.handler(
+            new Request("http://localhost/api/overview", { headers: { "x-usine-view": "full" } }),
+          ),
         );
         assert.strictEqual(response.status, 200);
         const actual3 = yield* Effect.promise(() => response.json());
         const body = yield* Schema.decodeUnknownEffect(FactoryOverview)(actual3);
         assert.strictEqual(body._tag, "NeedsSetup");
-        assert.strictEqual(body.projects[0]?.runs[0]?.id, runId);
+        assert.strictEqual(body.projects[0]?.runs?.[0]?.id, runId);
         assert.strictEqual(body.loops[0]?.paused, true);
+        const summaryResponse = yield* Effect.promise(() =>
+          app.handler(new Request("http://localhost/api/overview")),
+        );
+        const summaryJson = yield* Effect.promise(() => summaryResponse.json());
+        const summary = yield* Schema.decodeUnknownEffect(FactoryOverview)(summaryJson);
+        assert.strictEqual(summary._tag, "NeedsSetup");
+        assert.isUndefined(summary.projects[0]?.runs);
+        assert.isUndefined(summary.projects[0]?.labels);
+        assert.deepStrictEqual(summary.needsYou, body.needsYou);
 
         const deskResponse = yield* Effect.promise(() =>
           app.handler(new Request("http://localhost/api/desk")),
@@ -863,12 +883,25 @@ describe("operator HTTP API", () => {
         );
 
         const taskResponse = yield* Effect.promise(() =>
-          app.handler(new Request("http://localhost/api/projects/basaltbytes/usine/tasks/31")),
+          app.handler(
+            new Request("http://localhost/api/projects/basaltbytes/usine/tasks/31", {
+              headers: { "x-usine-view": "full" },
+            }),
+          ),
         );
         assert.strictEqual(taskResponse.status, 200);
         const actual5 = yield* Effect.promise(() => taskResponse.json());
         const actual28 = yield* Schema.decodeUnknownEffect(TaskView)(actual5);
         assert.deepStrictEqual(actual28, task);
+        const taskSummaryResponse = yield* Effect.promise(() =>
+          app.handler(new Request("http://localhost/api/projects/basaltbytes/usine/tasks/31")),
+        );
+        const taskSummaryJson = yield* Effect.promise(() => taskSummaryResponse.json());
+        const taskSummary = yield* Schema.decodeUnknownEffect(TaskView)(taskSummaryJson);
+        assert.isUndefined(taskSummary.comments);
+        assert.isUndefined(taskSummary.attemptChanges);
+        assert.strictEqual(taskSummary.runsTotal, 1);
+        assert.deepStrictEqual(taskSummary.runs, task.runs);
 
         for (const [search, window] of [
           ["?window=7d", "7d"],
@@ -1031,6 +1064,7 @@ describe("operator HTTP API", () => {
         pause: () => Effect.void,
         unpause: () => Effect.void,
         task: (repository, item) => Effect.fail(BoardItemNotFoundError.make({ repository, item })),
+        item: (repository, item) => Effect.fail(BoardItemNotFoundError.make({ repository, item })),
         configuration: Effect.succeed(configurationView),
         desk: Effect.succeed(desk),
         statistics: (window) => Effect.succeed(statisticsOf(window)),
@@ -1335,6 +1369,8 @@ describe("operator HTTP API", () => {
             repository === repositoryName && item === 31
               ? Effect.succeed(task)
               : Effect.fail(BoardItemNotFoundError.make({ repository, item })),
+          item: (repository, item) =>
+            Effect.fail(BoardItemNotFoundError.make({ repository, item })),
           configuration: Effect.succeed(configurationView),
           desk: Effect.succeed(desk),
           statistics: (window) => Effect.succeed(statisticsOf(window)),
@@ -1346,7 +1382,7 @@ describe("operator HTTP API", () => {
         yield* Effect.gen(function* () {
           const { operator: client } = yield* HttpApiClient.make(OperatorApi);
           const currentOverview = yield* client.overview();
-          assert.deepStrictEqual(currentOverview, overview);
+          assert.deepStrictEqual(currentOverview, summaryOverview(overview));
           const currentAgents = yield* client.agents();
           assert.deepStrictEqual(currentAgents, [agentName]);
           const currentConfiguration = yield* client.configuration();
@@ -1385,16 +1421,18 @@ describe("operator HTTP API", () => {
           const currentTask = yield* client.task({
             params: { owner: "basaltbytes", repository: "usine", item: ItemNumber.make(31) },
           });
-          assert.deepStrictEqual(currentTask, task);
+          assert.deepStrictEqual(currentTask, taskSummary(task));
           const currentProject = yield* client.project({
             params: { project: ProjectId.make("workspace") },
           });
-          assert.deepStrictEqual(currentProject, overview.projects[0]);
+          const [workspace] = overview.projects;
+          assert(workspace !== undefined);
+          assert.deepStrictEqual(currentProject, projectSummary(workspace));
           const nextTask = yield* client.projectTask({
             params: { project: ProjectId.make("workspace"), item: ItemNumber.make(31) },
             query: { repository: repositoryName },
           });
-          assert.deepStrictEqual(nextTask, task);
+          assert.deepStrictEqual(nextTask, taskSummary(task));
           const unrelatedProject = yield* client
             .projectTask({
               params: { project: ProjectId.make("workspace"), item: ItemNumber.make(31) },
@@ -1869,8 +1907,8 @@ it.live("retains all linked card membership when the board read omits settled ca
       assert.deepStrictEqual(paged.board.lanes[0]?.items, []);
       assert.strictEqual(paged.board.lanes[0]?.totalItems, 1);
       assert.deepStrictEqual(
-        paged.runs.map(({ id }) => id),
-        project.runs.map(({ id }) => id),
+        paged.runs?.map(({ id }) => id),
+        project.runs?.map(({ id }) => id),
       );
     } finally {
       yield* Effect.promise(() => boardApp.dispose());

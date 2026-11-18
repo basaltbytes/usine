@@ -1,4 +1,4 @@
-import { AttemptId, AttemptNumber } from "@usine/core/attempt";
+import { AttemptId, AttemptNumber, AttemptTask } from "@usine/core/attempt";
 import { LoopName } from "@usine/core/loop";
 import { RunId } from "@usine/core/run";
 import { CommitSha } from "@usine/core/repository";
@@ -15,9 +15,12 @@ import { RepositoryName } from "@usine/core/repository";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
 import {
+  AttemptView,
   FactoryOverview,
   ProjectView,
   ReadyOverview,
+  RunDetailView,
+  RunView,
   TaskView,
 } from "@usine/orchestrator/operator";
 import { Array as EffectArray, Schema } from "effect";
@@ -170,6 +173,31 @@ globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     return json("{}", 404);
   }
   if (url.pathname === "/api/agents") return json('["developer","reviewer"]');
+  const detailOf = /^\/api\/runs\/([^/]+)$/u.exec(url.pathname)?.[1];
+  const summary = [...tasks.values()].flatMap(({ runs }) => runs).find(({ id }) => id === detailOf);
+  if (method === "GET" && summary !== undefined)
+    return json(
+      JSON.stringify(
+        Schema.encodeSync(RunDetailView)(
+          RunDetailView.make({
+            run: RunView.make({
+              ...summary,
+              task: `Saved task of ${summary.loop}`,
+              resultMessage: null,
+              attempts: summary.attempts.map((attempt) =>
+                AttemptView.make({ ...attempt, task: AttemptTask.make("Do the work.") }),
+              ),
+            }),
+            agentDefinitionChanged: false,
+            eventDedupKey: summary.id,
+            eventPayload: {},
+            transcript: [],
+            sessionState: [],
+            earlierTranscript: [],
+          }),
+        ),
+      ),
+    );
   const runHistory = /\/tasks\/(\d+)\/runs$/u.exec(url.pathname)?.[1];
   if (runHistory !== undefined) {
     const task = tasks.get(runHistory);
@@ -392,7 +420,10 @@ it("offers only the actions that apply to each Run, and never a disabled button"
   expect(await menuItems()).toEqual(["Run again", "Edit and run again"]);
   expect(document.querySelectorAll("button:disabled")).toHaveLength(0);
   await page.getByRole("menuitem", { name: "Edit and run again" }).click();
-  await expect.element(page.getByRole("form", { name: "Edit and run again" })).toBeVisible();
+  const form = page.getByRole("form", { name: "Edit and run again" });
+  await expect.element(form).toBeVisible();
+  // The task has run summaries only, so the form reads the saved task from the run's detail.
+  await expect.element(form.getByRole("textbox")).toHaveValue("Saved task of plan");
 
   await rowOf("fix-ci").getByRole("button", { name: "Approve" }).click();
   await expect
@@ -693,7 +724,7 @@ it("says when the pull request's attempts pushed no new commits", async () => {
     "40",
     TaskView.make({
       ...task,
-      attemptChanges: EffectArray.map(task.attemptChanges, (attempt) =>
+      attemptChanges: EffectArray.map(task.attemptChanges ?? [], (attempt) =>
         TaskAttemptChangesView.make({ ...attempt, base: attempt.head }),
       ),
     }),

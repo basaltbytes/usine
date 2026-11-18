@@ -59,7 +59,7 @@ import {
   type UnconfirmedStop,
   UnconfirmedStops,
 } from "@usine/engine/engine";
-import { ItemProjectionReader } from "@usine/engine/item-projection";
+import { type ItemProjection, ItemProjectionReader } from "@usine/engine/item-projection";
 import { LoopControl, type LoopRuntimeState } from "@usine/engine/loop-control";
 import {
   type ProjectionRevision,
@@ -81,11 +81,13 @@ import {
   Layer,
   Match,
   Option,
+  Result,
   Schema,
   SynchronizedRef,
 } from "effect";
 import { readBoardItems } from "../board/selection.ts";
-import { settledItemState } from "../board/items.ts";
+import { projectedItem, settledItemState } from "../board/items.ts";
+import { type ItemEntryCursor, itemPage, type ItemView } from "./item.ts";
 import { labelMutationForBoardMove, projectBoard } from "../board/projection.ts";
 import type { LabelPreflightFinding } from "../label-reconciler.ts";
 import { LoopMatches } from "../loop-matches.ts";
@@ -152,7 +154,7 @@ import {
   type RunGitHubChangesError,
   type RunGitHubChangesView,
 } from "./github-changes.ts";
-import { TaskReader, type TaskReadError, TaskView } from "./task.ts";
+import { TaskReader, type TaskReadDepth, type TaskReadError, TaskView } from "./task.ts";
 import { type DeskView, OperatorDesk } from "./desk.ts";
 import { OperatorStatistics } from "./statistics/statistics.ts";
 import type { RunStatisticsView, StatisticsView, StatisticsWindow } from "./statistics/view.ts";
@@ -910,20 +912,80 @@ const makeOperatorObservation = Effect.gen(function* () {
     instance: LoadedInstance,
     repository: RepositoryName,
     item: ItemNumber,
+    depth: TaskReadDepth,
   ) {
-    yield* Effect.annotateCurrentSpan({ repository, item });
+    yield* Effect.annotateCurrentSpan({ repository, item, depth });
     yield* requirePermission("read", repositoryScope(instance, repository));
     const [view, current] = yield* Effect.all(
-      [tasks.read(instance, repository, item), overview(instance)],
+      [tasks.read(instance, repository, item, depth), overview(instance)],
       { concurrency: "unbounded" },
     );
     return TaskView.make({ ...view, needsYou: taskNeedsAttention(view, current.needsYou) });
   });
+  const item = Effect.fn("Operator.item")(function* (
+    instance: LoadedInstance,
+    repository: RepositoryName,
+    number: ItemNumber,
+    cursor: ItemEntryCursor,
+  ) {
+    yield* Effect.annotateCurrentSpan({ repository, item: number, ...cursor });
+    yield* requirePermission("read", repositoryScope(instance, repository));
+    const current = yield* overview(instance);
+    const canonical = canonicalRepositoryName(repository);
+    const project = current.projects.find((project) =>
+      [project.repository, ...project.repositories].some(
+        (name) => canonicalRepositoryName(name) === canonical,
+      ),
+    );
+    if (project === undefined) {
+      yield* Effect.logInfo("Item read refused; the repository is not a registered Project", {
+        repository,
+        item: number,
+      });
+      return yield* BoardProjectNotFound.make({ repository });
+    }
+    const link = project.board.lanes
+      .flatMap(({ items }) => items)
+      .filter((task) => canonicalRepositoryName(task.repository) === canonical)
+      .flatMap((task) => task.items)
+      .find((link) => link.number === number);
+    const stored =
+      link === undefined ? Option.none<ItemProjection>() : yield* itemReader.get(link.itemKey);
+    if (Option.isNone(stored)) {
+      yield* Effect.logInfo("Item read found no stored Item on the Board", {
+        repository,
+        item: number,
+        onBoard: link !== undefined,
+      });
+      return yield* BoardItemNotFound.make({ repository, item: number });
+    }
+    const projected = yield* Effect.result(projectedItem(stored.value));
+    if (Result.isFailure(projected)) {
+      yield* Effect.logError("Stored Item payload doesn't decode; the Item can't be read", {
+        repository,
+        item: number,
+        message: projected.failure.message,
+      });
+      return yield* BoardItemNotFound.make({ repository, item: number });
+    }
+    const view = itemPage(stored.value, projected.success, cursor);
+    yield* Effect.logDebug("Read an Item", {
+      repository,
+      item: number,
+      entries: view.entries.length,
+      entriesTotal: view.entriesTotal,
+      omitted: view.omitted,
+      next: view.next,
+    });
+    return view;
+  });
+
   return {
     detail,
     overview: (instance: LoadedInstance) =>
       overview(instance).pipe(Effect.flatMap((view) => filterOverview(instance, view))),
     task,
+    item,
     desk,
     statistics,
     runStatistics,
@@ -953,14 +1015,26 @@ export class OperatorObservation extends Context.Service<
     ) => Effect.Effect<RunDetailView, OperatorObservationError>;
 
     /**
-     * Reads the Task that contains Item `item` of `repository`, with its Items, saved Runs, and
-     * harvested comments. Fails if the Item isn't among the Board's newest Items.
+     * Reads the Task that contains Item `item` of `repository`, with its Items and saved Runs, and
+     * at the `results` depth the comments and commit ranges of its Runs. Fails if the Item isn't
+     * among the Board's newest Items.
      */
     readonly task: (
       instance: LoadedInstance,
       repository: RepositoryName,
       item: ItemNumber,
+      depth: TaskReadDepth,
     ) => Effect.Effect<TaskView, TaskReadError | AccessDenied>;
+    /**
+     * Reads Item `item` of `repository` as polling last stored it, with the page of its body,
+     * comments, and reviews from `cursor`. Fails if the Item isn't on its Project's Board.
+     */
+    readonly item: (
+      instance: LoadedInstance,
+      repository: RepositoryName,
+      item: ItemNumber,
+      cursor: ItemEntryCursor,
+    ) => Effect.Effect<ItemView, OperatorObservationError | TaskReadError>;
     /**
      * Builds the instance's desk: running Attempts, matched Items with no running Attempt, recently
      * closed Runs, Worker slots and preflights, and poll times.
@@ -1645,11 +1719,14 @@ export {
   BoardLaneNotFoundError,
   BoardLaneReadOnlyError,
 } from "./board.ts";
+export { ItemEntryCursor, ItemEntryKind, ItemEntryView, ItemView } from "./item.ts";
+export { jsonBytes, PAGE_BYTES, type Page, pageOf } from "./page.ts";
 export {
   TaskItemView,
   TaskLaneView,
   TaskCommentView,
   TaskView,
+  type TaskReadDepth,
   type TaskReadError,
 } from "./task.ts";
 export {

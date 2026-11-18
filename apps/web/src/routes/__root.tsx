@@ -293,7 +293,7 @@ const Shell = () => {
           runningTotal={
             new Set(
               data.projects.flatMap(({ runs }) =>
-                runs.filter(({ state }) => state === "Running").map(({ id }) => id),
+                (runs ?? []).filter(({ state }) => state === "Running").map(({ id }) => id),
               ),
             ).size
           }

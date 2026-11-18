@@ -1131,7 +1131,12 @@ describe("Operator", () => {
           const decodedValue6 = yield* operator.detail(fixtureInstance, current.run.id);
           assert.strictEqual(decodedValue6.run.machineWait?.message, refusal.message);
 
-          const task = yield* operator.task(fixtureInstance, repository, ItemNumber.make(31));
+          const task = yield* operator.task(
+            fixtureInstance,
+            repository,
+            ItemNumber.make(31),
+            "results",
+          );
           assert.strictEqual(
             task.runs.find(({ id }) => id === current.run.id)?.machineWait?.message,
             refusal.message,
@@ -2792,7 +2797,7 @@ describe("Operator", () => {
 
           const overview = yield* operator.overview(fixtureInstance);
           assert(overview._tag === "Ready");
-          const run = overview.projects[0]?.runs[0];
+          const run = overview.projects[0]?.runs?.[0];
           assert(run !== undefined);
           assert.strictEqual(run.state, "Queued");
           assert.strictEqual(run.canApprove, false);
@@ -2858,7 +2863,7 @@ describe("Operator", () => {
         assert.strictEqual(updatedOverviewReadsState, 5);
         assert.strictEqual(overview.projects[0]?.status, "needs-you");
         assert.strictEqual(overview.loops[0]?.paused, true);
-        assert.strictEqual(overview.projects[0]?.runs[0]?.loopPaused, true);
+        assert.strictEqual(overview.projects[0]?.runs?.[0]?.loopPaused, true);
         assert.strictEqual(overview.projects[0]?.board.lanes[0]?.name, "Ready");
         assert.strictEqual(overview.projects[0]?.board.lanes[0]?.items[0]?.run?.id, runId);
         assert.strictEqual(overview.projects[0]?.board.lanes[0]?.items[0]?.needsYou, true);
@@ -2940,7 +2945,7 @@ describe("Operator", () => {
           .pipe(Effect.flip);
         assert.strictEqual(wrongAttempt._tag, "TranscriptAttemptNotFoundError");
 
-        assert.strictEqual(overview.projects[0]?.runs[0]?.approval, null);
+        assert.strictEqual(overview.projects[0]?.runs?.[0]?.approval, null);
         const configured = LoadedInstance.make({
           ...fixtureInstance,
           config: UsineConfig.make({
@@ -3437,7 +3442,9 @@ it.effect(
 
         const runWaits = Effect.map(operator.overview(fixtureInstance), (view) =>
           view.projects.flatMap(({ runs }) =>
-            runs.filter(({ id }) => id === current.run.id).map(({ upgradeWait }) => upgradeWait),
+            (runs ?? [])
+              .filter(({ id }) => id === current.run.id)
+              .map(({ upgradeWait }) => upgradeWait),
           ),
         );
 

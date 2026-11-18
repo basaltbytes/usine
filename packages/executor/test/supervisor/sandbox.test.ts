@@ -46,6 +46,7 @@ const runtimes = (installed: Readonly<Record<string, Answer>>) =>
 
 const unusedRoute: GatewayModelRoute = {
   credential: () => Effect.die("the test calls no model"),
+  countTokens: () => Effect.die("the test counts no tokens"),
   request: () => Effect.die("the test calls no model"),
 };
 
@@ -234,6 +235,7 @@ describe("the supervisor sandbox's container runtime", () => {
 describe("a supervisor sandbox on a container runtime", () => {
   const route: GatewayModelRoute = {
     credential: () => Effect.succeedNone,
+    countTokens: () => Effect.die("the test counts no tokens"),
     request: () => Effect.die("the test calls no model"),
   };
 
@@ -581,6 +583,7 @@ describe("the supervisor model relay", () => {
       }> = [];
       const route: GatewayModelRoute = {
         credential: () => Effect.succeedNone,
+        countTokens: () => Effect.die("the test counts no tokens"),
         request: (protocol, body, headers) =>
           Effect.sync(() => {
             sent.push({ protocol, body, headers });
@@ -629,6 +632,7 @@ describe("the supervisor model relay", () => {
     Effect.gen(function* () {
       const failing: GatewayModelRoute = {
         credential: () => Effect.succeedNone,
+        countTokens: () => Effect.die("the test counts no tokens"),
         request: () =>
           Effect.fail(GatewayModelError.make({ message: "Can't reach gateway gw-1: refused." })),
       };

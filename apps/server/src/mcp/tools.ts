@@ -6,8 +6,13 @@ import { OperationPermission, PERMISSION_EXTENSION } from "../openapi.ts";
 
 /** The OpenAPI group whose operations become tools. */
 const TOOL_GROUP = "operator";
-/** The largest tool result, in UTF-8 bytes, before it is truncated. */
-export const MAX_RESULT_BYTES = 100_000;
+/**
+ * The largest successful tool result, in UTF-8 bytes, before it is cut: less than Claude Code and
+ * Codex give the model of one result, even for JSON at 2.4 bytes per token.
+ */
+export const MAX_RESULT_BYTES = 24_000;
+/** The largest error result, in UTF-8 bytes: Claude Code cuts error text over 11,000 characters. */
+export const MAX_ERROR_BYTES = 10_000;
 
 const JsonSchema = Schema.JsonObject;
 type JsonSchema = typeof JsonSchema.Type;
@@ -411,40 +416,53 @@ export const operatorRequest = (
   });
 };
 
-/** Operations that read part of what a large result holds, by the tool that returned it. */
+/** How to read the rest of a large result, by the tool that returned it. */
 const narrower = new Map([
-  ["overview", "desk, project, or task"],
-  ["project", "boardLaneItems"],
-  ["projectTask", "taskRuns"],
-  ["task", "taskRuns"],
-  ["detail", "detail with the before and attempt cursors, or githubChanges"],
-  ["configuration", "configurationEntity"],
-  ["configurationRevisions", "configurationRevision"],
-  ["statistics", "statistics with a shorter window"],
-  ["runStatistics", "runStatistics with a shorter window"],
+  ["overview", "Read a lane's cards with boardLaneItems and one task with task."],
+  ["project", "Read a lane's cards with boardLaneItems."],
+  ["projectTask", "Read the task's runs with taskRuns and an item's text with item."],
+  ["task", "Read the task's runs with taskRuns and an item's text with item."],
+  ["detail", "Call detail with the before and attempt cursors, or call githubChanges."],
+  ["configuration", "Read one entity with configurationEntity."],
+  ["configurationRevisions", "Call configurationRevisions with a smaller limit."],
+  ["statistics", "Call statistics with a shorter window."],
+  ["runStatistics", "Call runStatistics with a shorter window."],
 ]);
+
+/** Returns how to read the rest of `tool`'s cut result. */
+const rest = (tool: OperatorTool) =>
+  narrower.get(tool.name) ??
+  (tool.queryParameters.includes("offset")
+    ? `Call ${tool.name} again from a larger offset.`
+    : "No operation reads the rest in smaller parts.");
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
-/** Returns the tool result for a response: its JSON text, cut at the result limit. */
+/**
+ * Returns the tool result for a response: its text, cut at `MAX_RESULT_BYTES`, or at
+ * `MAX_ERROR_BYTES` for an error, with a note that says how to read the rest.
+ */
 export const toolResult = (
   tool: OperatorTool,
   response: OperatorResponse,
 ): McpSchema.CallToolResult => {
   const isError = response.status < 200 || response.status >= 300;
   const text = isError ? `HTTP ${response.status}\n${response.text}` : response.text;
+  const limit = isError ? MAX_ERROR_BYTES : MAX_RESULT_BYTES;
   const bytes = encoder.encode(text);
-  if (bytes.length <= MAX_RESULT_BYTES)
+  if (bytes.length <= limit)
     return McpSchema.CallToolResult.make({ isError, content: [{ type: "text", text }] });
-  // The decoder replaces a code point split at the cut; the hint below says the text is incomplete.
-  const kept = decoder.decode(bytes.subarray(0, MAX_RESULT_BYTES));
-  const hint = `[usine truncated this result at ${MAX_RESULT_BYTES} of ${bytes.length} bytes. Call ${narrower.get(tool.name) ?? "an operation that reads a single project, task, or run"} to read less.]`;
+  // The decoder replaces a code point split at the cut; the note below says the text is incomplete.
+  const kept = decoder.decode(bytes.subarray(0, limit));
+  const note = isError
+    ? `[usine cut this error at ${limit} of ${bytes.length} bytes.]`
+    : `[usine cut this result at ${limit} of ${bytes.length} bytes, so its JSON is incomplete. ${rest(tool)}]`;
   return McpSchema.CallToolResult.make({
     isError,
     content: [
       { type: "text", text: kept },
-      { type: "text", text: hint },
+      { type: "text", text: note },
     ],
   });
 };

@@ -116,6 +116,7 @@ it.effect("keeps a connected stream idle for 30 seconds without reading projecti
       pause: unused,
       unpause: unused,
       task: unused,
+      item: unused,
       statistics: unused,
       runStatistics: unused,
     });

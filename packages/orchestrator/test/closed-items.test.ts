@@ -444,7 +444,12 @@ describe("Items no Loop acts on", () => {
               const card = project?.board.lanes
                 .flatMap(({ items }) => items)
                 .find(({ number }) => number === 470);
-              const task = yield* operator.task(instance, repository, ItemNumber.make(470));
+              const task = yield* operator.task(
+                instance,
+                repository,
+                ItemNumber.make(470),
+                "results",
+              );
               return {
                 status: project?.status,
                 ring: card?.needsYou,
@@ -472,7 +477,7 @@ describe("Items no Loop acts on", () => {
               needs: [],
             });
             const overview = yield* operator.overview(instance);
-            const run = overview.projects[0]?.runs.find(({ id }) => id === failed.run.id);
+            const run = overview.projects[0]?.runs?.find(({ id }) => id === failed.run.id);
             assert.isTrue(run?.canResolveFailure);
           }),
         );
@@ -530,7 +535,12 @@ describe("Items no Loop acts on", () => {
             assert(cards.some(({ number }) => number === 195));
             assert(!cards.some(({ number }) => number === 202));
             for (const number of [182, 195]) {
-              const task = yield* operator.task(instance, repository, ItemNumber.make(number));
+              const task = yield* operator.task(
+                instance,
+                repository,
+                ItemNumber.make(number),
+                "results",
+              );
               assert.strictEqual(task.number, number);
               assert.strictEqual(task.lane.name, "Ready");
               assert.strictEqual(task.runs[0]?.state, "Waiting");
@@ -580,7 +590,12 @@ describe("Items no Loop acts on", () => {
                 },
               }),
             );
-            const relabeled = yield* operator.task(instance, repository, ItemNumber.make(182));
+            const relabeled = yield* operator.task(
+              instance,
+              repository,
+              ItemNumber.make(182),
+              "results",
+            );
             assert.strictEqual(relabeled.lane.name, "Triage");
             assert.strictEqual(relabeled.runs[0]?.state, "Waiting");
             if (kind === "issue") {
@@ -620,7 +635,12 @@ describe("Items no Loop acts on", () => {
                   },
                 }),
               );
-              const linked = yield* operator.task(instance, repository, ItemNumber.make(702));
+              const linked = yield* operator.task(
+                instance,
+                repository,
+                ItemNumber.make(702),
+                "results",
+              );
               assert.deepStrictEqual(
                 linked.items.map(({ number }) => number),
                 [182, 702],
@@ -663,7 +683,7 @@ describe("Items no Loop acts on", () => {
               ),
             );
             const missing = yield* operator
-              .task(instance, repository, ItemNumber.make(195))
+              .task(instance, repository, ItemNumber.make(195), "results")
               .pipe(Effect.flip);
             assert.strictEqual(missing._tag, "BoardItemNotFoundError");
           }),

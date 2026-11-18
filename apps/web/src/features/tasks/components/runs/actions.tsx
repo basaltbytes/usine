@@ -2,7 +2,7 @@ import { useCanOperateRepository } from "~/lib/permissions";
 import { usePageCommands } from "~/components/command-palette/context";
 import { DotsThreeIcon } from "@phosphor-icons/react";
 import type { RunId } from "@usine/core/run";
-import type { RunView } from "@usine/orchestrator/operator";
+import type { RunSummaryView } from "@usine/orchestrator/operator";
 import { type ReactNode, useState } from "react";
 import { type EditIntent } from "~/components/runs/intervention/edit-and-retry";
 import {
@@ -23,12 +23,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "~/components/ui/dropdown-menu";
-import {
-  type RunActionRequest,
-  unchangedRunAgain,
-  useRunAction,
-  useRunAgain,
-} from "~/hooks/runs/actions";
+import { type RunActionRequest, useRunAction, useRunAgain } from "~/hooks/runs/actions";
 import { dayTimeLabel } from "~/lib/strings";
 import {
   retryDescription,
@@ -39,7 +34,7 @@ import {
 } from "~/lib/runs/strings";
 
 /** Returns the action shown as a button next to the menu, or `null` if none. */
-const primaryAction = (run: RunView): "approve" | "retry" | null =>
+const primaryAction = (run: RunSummaryView): "approve" | "retry" | null =>
   run.canApprove ? "approve" : run.canRetry && run.canResolveFailure ? "retry" : null;
 
 interface MenuEntry {
@@ -50,7 +45,7 @@ interface MenuEntry {
 }
 
 type RowActionsProps = {
-  readonly run: RunView;
+  readonly run: RunSummaryView;
   readonly onEdit: (intent: EditIntent) => void;
   readonly openRun: (runId: RunId) => void;
   readonly status: (message: ReactNode) => void;
@@ -71,15 +66,18 @@ export const RowActions = ({ run, onEdit, openRun, status }: RowActionsProps) =>
       },
     );
   const runAgain = () =>
-    again.mutate(unchangedRunAgain(run), {
-      onSuccess: (result) => {
-        if (result._tag === "Claimed") {
-          status(null);
-          openRun(result.runId);
-        } else status(<span className="text-needs-you">{runAgainBlocked}</span>);
+    again.mutate(
+      { runId: run.id, amendment: "unchanged" },
+      {
+        onSuccess: (result) => {
+          if (result._tag === "Claimed") {
+            status(null);
+            openRun(result.runId);
+          } else status(<span className="text-needs-you">{runAgainBlocked}</span>);
+        },
+        onError: (error) => status(<span className="text-destructive">{error.message}</span>),
       },
-      onError: (error) => status(<span className="text-destructive">{error.message}</span>),
-    });
+    );
   const latest = run.attempts.at(-1);
   const primary = primaryAction(run);
   const question =

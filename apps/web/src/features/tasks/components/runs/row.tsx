@@ -1,7 +1,8 @@
 import { useProjectLinks } from "~/hooks/use-project-links";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import type { RunId } from "@usine/core/run";
-import type { RunView, TaskItemView } from "@usine/orchestrator/operator";
+import type { RunSummaryView, TaskItemView } from "@usine/orchestrator/operator";
 import { Option } from "effect";
 import { type ReactNode, useState } from "react";
 import { FillCell } from "~/components/fill-cell";
@@ -22,13 +23,15 @@ import { Opened } from "~/features/tasks/components/runs/opened";
 import { PullRequest } from "~/features/tasks/components/runs/pull-request";
 import { RowActions } from "~/features/tasks/components/runs/actions";
 import { linkedRow, rowLink } from "~/features/tasks/components/section";
+import { rejectionMessage } from "~/lib/api";
+import { runDetailQuery } from "~/lib/runs/queries";
 
 import { cn } from "~/lib/utils";
 
 const COLUMNS = 8;
 
 type RunRowProps = {
-  readonly run: RunView;
+  readonly run: RunSummaryView;
   /** The Run's Item, if the Task has more than one Item and it isn't the Run's pull request. */
   readonly item: TaskItemView | null;
   /** The pull request the Run opened, with its state from the Task. */
@@ -93,17 +96,42 @@ export const RunRow = ({ run, item, pullRequest, openRun }: RunRowProps) => {
       {editing !== null && editApplies(run, editing) && (
         <TableRow className="hover:bg-transparent">
           <TableCell colSpan={COLUMNS} className="px-2 pt-1 pb-4 whitespace-normal">
-            <EditAndRetry
+            <RunEdit
               key={`${run.id}:${editing}`}
-              run={run}
+              runId={run.id}
               intent={editing}
               close={() => setEditing(null)}
               openRun={openRun}
-              className="max-w-2xl rounded-lg border p-4"
             />
           </TableCell>
         </TableRow>
       )}
     </>
+  );
+};
+
+type RunEditProps = {
+  readonly runId: RunId;
+  readonly intent: EditIntent;
+  readonly close: () => void;
+  readonly openRun: (runId: RunId) => void;
+};
+
+/** Reads the run's task and agent from its detail, then shows the edit form. */
+const RunEdit = ({ runId, intent, close, openRun }: RunEditProps) => {
+  const queryClient = useQueryClient();
+  const detail = useQuery(runDetailQuery(queryClient, runId));
+  if (detail.isPending)
+    return <p className="text-xs text-muted-foreground">Loading the run's task</p>;
+  if (detail.isError)
+    return <p className="text-xs text-destructive">{rejectionMessage(detail.error)}</p>;
+  return (
+    <EditAndRetry
+      run={detail.data.run}
+      intent={intent}
+      close={close}
+      openRun={openRun}
+      className="max-w-2xl rounded-lg border p-4"
+    />
   );
 };

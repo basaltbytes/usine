@@ -5,7 +5,9 @@ import { Effect, Result, Schema } from "effect";
 import { AuthApi } from "../../src/auth/api.ts";
 import { operatorOpenApi } from "../../src/openapi.ts";
 import { SetupApi } from "../../src/setup/api.ts";
+import { PAGE_BYTES } from "@usine/orchestrator/operator";
 import {
+  MAX_ERROR_BYTES,
   MAX_RESULT_BYTES,
   operatorRequest,
   operatorTools,
@@ -94,21 +96,91 @@ describe("operator MCP tools", () => {
     }),
   );
 
-  it.effect("truncates an overview result over the cap and names a narrower operation", () =>
+  it.effect(
+    "keeps a result at the limit and cuts one just over it, naming how to read the rest",
+    () =>
+      Effect.gen(function* () {
+        const generated = yield* tools;
+        const tool = (name: string) => {
+          const found = generated.find((tool) => tool.name === name);
+          assert(found !== undefined, name);
+          return found;
+        };
+        const texts = (result: ReturnType<typeof toolResult>) =>
+          result.content.map((part) => (part.type === "text" ? part.text : ""));
+        // Claude Code saves a result over 50,000 characters to a file, and Codex keeps about
+        // 10,000 tokens of one; JSON of IDs and timestamps takes about 2.4 bytes per token.
+        assert.isAtMost(MAX_RESULT_BYTES, 24_000);
+        const at = jsonKey({ projects: "x".repeat(MAX_RESULT_BYTES - 15) });
+        assert.equal(at.length, MAX_RESULT_BYTES);
+        assert.deepEqual(texts(toolResult(tool("overview"), { status: 200, text: at })), [at]);
+        const over = `${at} `;
+        const cases = [
+          ["overview", "Read a lane's cards with boardLaneItems and one task with task."],
+          ["task", "Read the task's runs with taskRuns and an item's text with item."],
+          ["boardLaneItems", "Call boardLaneItems again from a larger offset."],
+          ["serverVersion", "No operation reads the rest in smaller parts."],
+        ] as const;
+        for (const [name, rest] of cases) {
+          const result = toolResult(tool(name), { status: 200, text: over });
+          assert.isFalse(result.isError);
+          assert.deepEqual(texts(result), [
+            at,
+            `[usine cut this result at ${MAX_RESULT_BYTES} of ${MAX_RESULT_BYTES + 1} bytes, so its JSON is incomplete. ${rest}]`,
+          ]);
+        }
+        const cut = toolResult(tool("overview"), { status: 200, text: "x".repeat(25_000) });
+        assert.lengthOf(cut.content, 2);
+        const small = toolResult(tool("overview"), {
+          status: 403,
+          text: '{"error":"AccessDenied"}',
+        });
+        assert.isTrue(small.isError);
+        assert.lengthOf(small.content, 1);
+      }),
+  );
+
+  it.effect("cuts an error result at the error limit", () =>
     Effect.gen(function* () {
       const overview = (yield* tools).find(({ name }) => name === "overview");
-      assert.isDefined(overview);
-      if (overview === undefined) return;
-      const text = jsonKey({ projects: "x".repeat(MAX_RESULT_BYTES * 2) });
-      const result = toolResult(overview, { status: 200, text });
-      assert.isFalse(result.isError);
-      const [kept, hint] = result.content;
-      assert.equal(kept?.type, "text");
-      assert.equal(kept?.type === "text" ? kept.text : "", text.slice(0, MAX_RESULT_BYTES));
-      assert.include(hint?.type === "text" ? hint.text : "", "Call desk, project, or task");
-      const small = toolResult(overview, { status: 403, text: '{"error":"AccessDenied"}' });
-      assert.isTrue(small.isError);
-      assert.lengthOf(small.content, 1);
+      assert(overview !== undefined);
+      const text = "e".repeat(MAX_ERROR_BYTES * 2);
+      const result = toolResult(overview, { status: 500, text });
+      assert.isTrue(result.isError);
+      const [kept, note] = result.content.map((part) => (part.type === "text" ? part.text : ""));
+      assert.equal(kept, `HTTP 500\n${text}`.slice(0, MAX_ERROR_BYTES));
+      assert.equal(
+        note,
+        `[usine cut this error at ${MAX_ERROR_BYTES} of ${text.length + 9} bytes.]`,
+      );
+    }),
+  );
+
+  it.effect("fits every page of a paged read in one result and describes the paging", () =>
+    Effect.gen(function* () {
+      assert.isAtMost(PAGE_BYTES + 2_000, MAX_RESULT_BYTES);
+      const generated = yield* tools;
+      const describe = (name: string) => {
+        const tool = generated.find((tool) => tool.name === name);
+        assert(tool !== undefined, name);
+        return { description: tool.descriptor.description ?? "", tool };
+      };
+      for (const name of ["boardLaneItems", "taskRuns"]) {
+        const { description, tool } = describe(name);
+        assert.include(tool.queryParameters, "offset", name);
+        assert.include(description, "nextOffset", name);
+        assert.include(description, "20 KB", name);
+      }
+      const item = describe("item");
+      assert.sameMembers([...item.tool.queryParameters], ["entry", "offset"]);
+      assert.include(item.description, "`next.entry` and `next.offset`");
+      for (const name of ["task", "projectTask"]) {
+        const { description } = describe(name);
+        assert.include(description, "taskRuns from offset `runs.length`", name);
+        assert.include(description, "body and comments with item", name);
+      }
+      for (const name of ["overview", "project"])
+        assert.include(describe(name).description, "boardLaneItems", name);
     }),
   );
 
