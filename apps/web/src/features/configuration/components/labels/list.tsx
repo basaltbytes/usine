@@ -24,7 +24,7 @@ const LabelRow = ({ label }: LabelRowProps) => {
   const description = Option.getOrNull(label.description);
   return (
     <OpeningRow open={() => void navigate({ to: "/configuration/labels/$label", params })}>
-      <TableCell className="py-3">
+      <TableCell size="roomy">
         <Link
           to="/configuration/labels/$label"
           params={params}
@@ -61,7 +61,7 @@ export const LabelsList = ({ configuration }: LabelsListProps) => (
       <div className="-mx-2">
         <Table>
           <TableHeader>
-            <TableRow className="hover:bg-transparent">
+            <TableRow variant="static">
               <TableHead>{labelDetailCopy.label}</TableHead>
               <TableHead>{labelDetailCopy.description}</TableHead>
             </TableRow>

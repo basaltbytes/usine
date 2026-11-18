@@ -8,10 +8,7 @@ type OpeningRowProps = {
 
 /** Renders a table row that opens something on click; keyboard users use the link in its first cell. */
 export const OpeningRow = ({ open, children }: OpeningRowProps) => (
-  <TableRow
-    className="cursor-pointer hover:bg-muted/60 has-[a:focus-visible]:bg-muted/60"
-    onClick={open}
-  >
+  <TableRow variant="interactive" onClick={open}>
     {children}
   </TableRow>
 );

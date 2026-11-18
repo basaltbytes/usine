@@ -33,7 +33,7 @@ const BindingRow = ({ binding, member, project }: BindingRowProps) => {
   const params = { binding: binding.name };
   return (
     <OpeningRow open={() => void navigate({ to: "/configuration/bindings/$binding", params })}>
-      <TableCell className="py-3">
+      <TableCell size="roomy">
         <Link
           to="/configuration/bindings/$binding"
           params={params}
@@ -84,7 +84,7 @@ export const BindingsList = ({ configuration, members, initialMember }: Bindings
       <div className="-mx-2">
         <Table>
           <TableHeader>
-            <TableRow className="hover:bg-transparent">
+            <TableRow variant="static">
               <TableHead>Role binding</TableHead>
               <TableHead>{bindingCopy.member}</TableHead>
               <TableHead>{bindingCopy.role}</TableHead>

@@ -27,14 +27,14 @@ export const TaskPullRequests = ({ task, project }: TaskPullRequestsProps) => {
       ) : (
         <div className="-mx-2">
           <Table aria-labelledby="task-pull-requests">
-            <TableBody className="border-t">
+            <TableBody divided>
               {pullRequests.map((pullRequest) => (
                 <Fragment key={pullRequest.itemKey}>
                   <LinkedRow>
-                    <TableCell className="w-0 py-3">
+                    <TableCell size="roomy" className="w-0">
                       <ItemMark item={pullRequest} linked={false} />
                     </TableCell>
-                    <FillCell className="py-3 whitespace-normal">
+                    <FillCell size="roomy" className="whitespace-normal">
                       <a
                         data-row-link
                         href={pullRequest.url}
@@ -49,15 +49,15 @@ export const TaskPullRequests = ({ task, project }: TaskPullRequestsProps) => {
                         />
                       </a>
                     </FillCell>
-                    <TableCell className="py-3 text-right">
+                    <TableCell size="roomy" className="text-right">
                       {pullRequest.conflicting && (
                         <span className="text-xs text-destructive">Conflicts with base</span>
                       )}
                     </TableCell>
                   </LinkedRow>
                   {project !== undefined && (
-                    <TableRow className="hover:bg-transparent has-aria-expanded:bg-transparent">
-                      <TableCell colSpan={3} className="max-w-0 pt-0 pb-1">
+                    <TableRow variant="plain">
+                      <TableCell size="continuation" colSpan={3} className="max-w-0">
                         <PullRequestChanges
                           project={project}
                           task={task}

@@ -27,8 +27,8 @@ import { TextTooltip } from "~/components/text-tooltip";
 // 56rem, Runs and Pull request 64rem.
 const WIDE_COLUMN = "hidden @5xl:table-cell";
 const USAGE_COLUMN = "hidden @4xl:table-cell";
-const SIDE_COLUMN = "py-3 align-top whitespace-normal";
-const TOTAL_COLUMN = "py-3 text-right align-top font-mono text-xs/5 whitespace-nowrap tabular-nums";
+const SIDE_COLUMN = "align-top whitespace-normal";
+const TOTAL_COLUMN = "text-right align-top whitespace-nowrap";
 
 type RunsProps = { readonly task: BoardTaskView };
 
@@ -58,7 +58,7 @@ const Runs = ({ task }: RunsProps) => {
 
 export const TaskListHeader = () => (
   <TableHeader>
-    <TableRow className="hover:bg-transparent">
+    <TableRow variant="static">
       <TableHead>Task</TableHead>
       <TableHead>Status</TableHead>
       <TableHead className={WIDE_COLUMN}>Runs</TableHead>
@@ -86,7 +86,7 @@ export const TaskListRow = ({
   showRepository,
 }: TaskListRowProps) => (
   <LinkedRow>
-    <FillCell className="py-3 align-top">
+    <FillCell size="roomy" className="align-top">
       <Link
         data-row-link
         to="/projects/$project/tasks/$number"
@@ -108,22 +108,22 @@ export const TaskListRow = ({
         </p>
       )}
     </FillCell>
-    <TableCell className={SIDE_COLUMN}>
+    <TableCell size="roomy" className={SIDE_COLUMN}>
       <Status row={row} now={now} />
     </TableCell>
-    <TableCell className={cn("py-3 align-top", WIDE_COLUMN)}>
+    <TableCell size="roomy" className={cn("align-top", WIDE_COLUMN)}>
       <Runs task={row.task} />
     </TableCell>
-    <TableCell className={cn("py-3 text-right align-top", WIDE_COLUMN)}>
+    <TableCell size="roomy" className={cn("text-right align-top", WIDE_COLUMN)}>
       <PullRequestMarks
         pullRequests={cardIdentity(row.task).pullRequests}
         className="relative z-10 justify-end"
       />
     </TableCell>
-    <TableCell className={TOTAL_COLUMN}>
+    <TableCell size="roomy" variant="total" className={TOTAL_COLUMN}>
       <TaskTime task={row.task} now={now} />
     </TableCell>
-    <TableCell className={cn(TOTAL_COLUMN, USAGE_COLUMN)}>
+    <TableCell size="roomy" variant="total" className={cn(TOTAL_COLUMN, USAGE_COLUMN)}>
       {row.task.usage.pools.length > 0 && (
         <PoolHover
           usage={row.task.usage}
@@ -134,7 +134,7 @@ export const TaskListRow = ({
         </PoolHover>
       )}
     </TableCell>
-    <TableCell className={cn(TOTAL_COLUMN, USAGE_COLUMN)}>
+    <TableCell size="roomy" variant="total" className={cn(TOTAL_COLUMN, USAGE_COLUMN)}>
       <TaskCost usage={row.task.usage} />
     </TableCell>
   </LinkedRow>

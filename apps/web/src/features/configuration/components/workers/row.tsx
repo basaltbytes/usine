@@ -20,7 +20,7 @@ export const WorkerRow = ({ worker }: WorkerRowProps) => {
   const params = { worker: worker.name };
   return (
     <OpeningRow open={() => void navigate({ to: "/configuration/workers/$worker", params })}>
-      <TableCell className="py-3">
+      <TableCell size="roomy">
         <Link
           to="/configuration/workers/$worker"
           params={params}
@@ -31,10 +31,10 @@ export const WorkerRow = ({ worker }: WorkerRowProps) => {
         </Link>
       </TableCell>
       <TableCell>{workerKindLabel[worker.kind]}</TableCell>
-      <TableCell className="hidden font-mono text-xs @2xl:table-cell">
+      <TableCell variant="mono" className="hidden @2xl:table-cell">
         {workerPlace(worker)}
       </TableCell>
-      <TableCell className="tabular-nums">
+      <TableCell variant="count">
         {worker.slots === null ? (
           <span className="text-muted-foreground">{worker.maxConcurrentAttempts} max</span>
         ) : (

@@ -105,7 +105,7 @@ export const WorkerDetail = ({ name, configuration }: WorkerDetailProps) => {
             <div className="@container -mx-2">
               <Table>
                 <TableHeader>
-                  <TableRow className="hover:bg-transparent">
+                  <TableRow variant="static">
                     <TableHead>Check</TableHead>
                     <TableHead>Result</TableHead>
                     <TableHead className="hidden @2xl:table-cell">Checked</TableHead>

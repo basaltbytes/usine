@@ -28,7 +28,7 @@ export const WorkersList = ({ configuration }: WorkersListProps) => {
         <div className="@container -mx-2">
           <Table>
             <TableHeader>
-              <TableRow className="hover:bg-transparent">
+              <TableRow variant="static">
                 <TableHead>Worker</TableHead>
                 <TableHead>Kind</TableHead>
                 <TableHead className="hidden @2xl:table-cell">Location</TableHead>

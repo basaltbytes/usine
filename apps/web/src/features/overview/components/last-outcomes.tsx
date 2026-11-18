@@ -38,7 +38,7 @@ const OutcomeRow = ({ closed, overview, now }: OutcomeRowProps) => {
   );
   return (
     <RunRow run={run}>
-      <FillCell className="py-3 whitespace-normal">
+      <FillCell size="roomy" className="whitespace-normal">
         <RunPageLink run={run}>
           {origin === null ? (
             <span className="block truncate text-sm font-medium">
@@ -58,18 +58,20 @@ const OutcomeRow = ({ closed, overview, now }: OutcomeRowProps) => {
         )}
         <p className="mt-0.5 truncate text-xs text-muted-foreground md:hidden">{run.loop}</p>
       </FillCell>
-      <TableCell className="py-3 max-md:hidden">{run.loop}</TableCell>
-      <TableCell className="py-3">
+      <TableCell size="roomy" className="max-md:hidden">
+        {run.loop}
+      </TableCell>
+      <TableCell size="roomy">
         <StatusBadge state={run.state} />
       </TableCell>
-      <TableCell className="py-3 text-right max-sm:hidden">
+      <TableCell size="roomy" className="text-right max-sm:hidden">
         <TextTooltip text={timestampLabel(closedAt)}>
           <time dateTime={closedAt} className="text-xs text-muted-foreground tabular-nums">
             {agoLabel(closedAt, now)}
           </time>
         </TextTooltip>
       </TableCell>
-      <TableCell className="py-3 text-right">
+      <TableCell size="roomy" className="text-right">
         {run.pullRequestUrl === null ? (
           <span className="text-xs text-muted-foreground">None</span>
         ) : (
@@ -97,7 +99,7 @@ export const LastOutcomes = ({ outcomes, now }: LastOutcomesProps) => {
     <div className="-mx-2">
       <Table>
         <TableHeader>
-          <TableRow className="hover:bg-transparent">
+          <TableRow variant="static">
             <TableHead>Item</TableHead>
             <TableHead className="max-md:hidden">Loop</TableHead>
             <TableHead>Outcome</TableHead>
