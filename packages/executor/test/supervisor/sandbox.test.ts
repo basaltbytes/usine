@@ -733,11 +733,14 @@ describe("the supervisor's source", () => {
           assert.isFalse(absolute);
           assert.strictEqual(relative, "README.md");
         }
-        assert.isTrue(
-          commands
-            .filter((args) => args.includes("fetch"))
-            .every((args) => args.includes("transfer.fsckObjects=true")),
-        );
+        const fetches = commands.filter((args) => args.includes("fetch"));
+        assert.lengthOf(fetches, 2);
+        for (const args of fetches) {
+          assert.includeMembers(
+            [...args],
+            ["transfer.fsckObjects=true", "gc.autoDetach=false", "maintenance.autoDetach=false"],
+          );
+        }
         for (const repository of ["a/.", "a/.."]) {
           const failed = yield* sources
             .prepare([RepositoryName.make(repository)])
@@ -764,6 +767,42 @@ describe("the supervisor's source", () => {
       const history = yield* fs.exists(`${first.directory}/.git`);
       assert.isFalse(history, "the tree has no history");
       assert.deepStrictEqual(tokens, [repository]);
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.live("finishes automatic cache maintenance before preparation returns", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const native = yield* ChildProcessSpawner.ChildProcessSpawner;
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "usine-supervisor-" });
+      const origin = yield* originRepository();
+      const cache = `${root}/repos/${directoryName(repository)}.git`;
+      yield* git(root, "init", "--bare", "--quiet", cache);
+      yield* git(cache, "config", "gc.autoPackLimit", "1");
+      yield* git(cache, "config", "fetch.unpackLimit", "1");
+      yield* git(cache, "config", "maintenance.autoDetach", "true");
+      const trace = `${root}/git.trace`;
+      const traced = ChildProcessSpawner.make((command) =>
+        native.spawn(ChildProcess.setEnv(command, { GIT_TRACE: trace })),
+      );
+      const sources = yield* makeSupervisorSources(root, origin.origin).pipe(
+        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, traced),
+      );
+
+      for (const round of [1, 2]) {
+        yield* origin.commit(`round ${round}\n`);
+        yield* sources.prepare([repository]).pipe(Effect.scoped);
+        const packs = yield* fs.readDirectory(`${cache}/objects/pack`);
+        assert.lengthOf(
+          packs.filter((name) => name.endsWith(".pack")),
+          1,
+          "automatic maintenance consolidates the fetched packs before returning",
+        );
+      }
+      const commands = yield* fs.readFileString(trace);
+      assert.include(commands, "maintenance run --auto");
+      assert.include(commands, "git repack", "automatic maintenance repacked the fetched objects");
+      assert.notInclude(commands, "--detach", "maintenance stays inside the fetch process");
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 

@@ -138,7 +138,7 @@ Pi runs in the orchestrator process and writes its session files in the conversa
 
 Earlier `next` versions kept each conversation in an ext4 image under `.usine/supervisor/disks`, mounted in `.usine/supervisor/conversations`, where turns could write. When `.usine/supervisor/disks` exists, startup removes every image and every conversation directory, and logs one line for each. The next turn of such a conversation starts a new harness session; its messages and events stay.
 
-Source caches and exported trees use hashes of their repository names. Fetches verify received objects, and source exports remove absolute symbolic links.
+Source caches and exported trees use hashes of their repository names. Fetches verify received objects and finish automatic Git maintenance before the source is ready for a turn. Source exports remove absolute symbolic links.
 
 ## Instance metadata
 
