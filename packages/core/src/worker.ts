@@ -233,9 +233,10 @@ export class SupervisorLimits extends Schema.Class<
     Schema.withConstructorDefault(Effect.succeed(MessageSizeMib.make(32))),
     Schema.withDecodingDefaultKey(Effect.succeed(MessageSizeMib.make(32))),
   ),
+  /** The size of a conversation's home in MiB, and of its saved state on the orchestrator. */
   conversationSizeMib: ContainerScratchMib.pipe(
-    Schema.withConstructorDefault(Effect.succeed(ContainerScratchMib.make(512))),
-    Schema.withDecodingDefaultKey(Effect.succeed(ContainerScratchMib.make(512))),
+    Schema.withConstructorDefault(Effect.succeed(ContainerScratchMib.make(128))),
+    Schema.withDecodingDefaultKey(Effect.succeed(ContainerScratchMib.make(128))),
   ),
 }) {}
 

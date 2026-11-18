@@ -110,6 +110,7 @@ const seat = SupervisorSeat.make({
   cwd: WorkingDirectory.make("/conversation"),
   environment: {},
   credential: "gateway",
+  restored: true,
 });
 
 /** One scripted turn: its events, its answer, and a gate that holds the answer until opened. */
@@ -176,9 +177,11 @@ const scriptedHarness = (scripts: Array<Script>, starts: Array<Start>) => {
   );
 };
 
-const available = {
-  unavailable: Option.none(),
+const available: SupervisorSandboxService = {
+  unavailable: Effect.succeedNone,
+  checked: Effect.succeedNone,
   open: () => Effect.succeed(seat),
+  save: () => Effect.void,
 };
 
 /**
@@ -568,14 +571,70 @@ describe("conversations with the supervisor", () => {
       }).pipe(Effect.scoped),
   );
 
+  it.live(
+    "fails an answered turn whose state wasn't saved, and starts a new session without state",
+    () =>
+      Effect.gen(function* () {
+        const store = yield* memoryStore;
+        const lost =
+          "The conversation's home is larger than supervisor_limits.conversation_size_mib (128 MiB), so usine kept the state that the previous turn saved";
+        const saves = yield* Ref.make(0);
+        const opened = yield* Ref.make(0);
+        const sandbox: SupervisorSandboxService = {
+          ...available,
+          // The second turn finds no saved state, as after the removal of an old image.
+          open: () =>
+            Ref.updateAndGet(opened, (count) => count + 1).pipe(
+              Effect.map((count) => SupervisorSeat.make({ ...seat, restored: count === 1 })),
+            ),
+          save: () =>
+            Ref.updateAndGet(saves, (count) => count + 1).pipe(
+              Effect.flatMap((count) =>
+                count === 2
+                  ? Effect.fail(SupervisorUnavailable.make({ message: lost }))
+                  : Effect.void,
+              ),
+            ),
+        };
+        const { layer, starts } = yield* conversations(store, {
+          scripts: [script("first answer"), script("unsaved answer")],
+          sandbox,
+        });
+        yield* Effect.gen(function* () {
+          const service = yield* Conversations;
+          const started = yield* service.start(request("First"), as(ada));
+          const id = started.conversation.id;
+          yield* until(id, (turns) => turns[0]?.state._tag === "Succeeded");
+          yield* service.post(id, message("Second"), as(ada));
+          const done = yield* until(id, (turns) => turns[1]?.state._tag === "Failed");
+          const failed = done.turns[1]?.state;
+          assert.strictEqual(
+            failed?._tag === "Failed" && failed.failure._tag === "TurnError"
+              ? failed.failure.message
+              : failed?._tag,
+            lost,
+          );
+          assert.deepStrictEqual(
+            done.messages.map(({ role }) => role),
+            ["member", "supervisor", "member"],
+          );
+        }).pipe(asOperator, Effect.provide(layer));
+        assert.deepStrictEqual(
+          starts.map(({ _tag }) => _tag),
+          ["StartPrompt", "StartPrompt"],
+        );
+      }).pipe(Effect.scoped),
+  );
+
   it.live("reports setup required and refuses messages without a sandbox or a supervisor", () =>
     Effect.gen(function* () {
       const store = yield* memoryStore;
-      const noSandbox = {
-        unavailable: Option.some(
-          SupervisorUnavailable.make({ message: "Podman or Docker isn't installed" }),
-        ),
+      const missing = SupervisorUnavailable.make({ message: "Podman or Docker isn't installed" });
+      const noSandbox: SupervisorSandboxService = {
+        unavailable: Effect.succeedSome(missing),
+        checked: Effect.succeedSome(missing),
         open: () => Effect.die("The test opens no sandbox"),
+        save: () => Effect.die("The test opens no sandbox"),
       };
       const setups: ReadonlyArray<[Setup, string]> = [
         [{ scripts: [], sandbox: noSandbox }, "Podman or Docker isn't installed"],

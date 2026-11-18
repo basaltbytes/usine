@@ -30,6 +30,11 @@ export class SupervisorSeat extends Schema.Class<
   /** The complete environment of the harness process, with the gateway credential (ADR 0011). */
   environment: Schema.Record(Schema.String, Schema.String),
   credential: CredentialRoute,
+  /**
+   * Whether the sandbox holds the state that an earlier turn of the conversation saved. Without
+   * it, the turn starts a new harness session.
+   */
+  restored: Schema.Boolean,
 }) {}
 
 /**
@@ -80,16 +85,26 @@ export class SandboxRequest extends Schema.Class<
  * serves in band. The harness keeps its own tools; the sandbox limits what they reach.
  */
 export interface SupervisorSandboxService {
-  /** Why sessions can't run on this orchestrator, or `None` when they can. */
-  readonly unavailable: Option.Option<SupervisorUnavailable>;
+  /**
+   * Why sessions can't run on this orchestrator now, or `None` when they can. Sessions are
+   * unavailable until the sandbox's startup check passes.
+   */
+  readonly unavailable: Effect.Effect<Option.Option<SupervisorUnavailable>>;
+  /** Waits for the startup check to end, then returns `unavailable`. */
+  readonly checked: Effect.Effect<Option.Option<SupervisorUnavailable>>;
   /**
    * Starts the sandbox of one turn and returns the seat that the turn's session runs on, with the
-   * sources under its `cwd`. Closing the scope removes the sandbox; the conversation's saved
-   * sessions stay for its next turn.
+   * sources under its `cwd` and the conversation's saved state restored. Closing the scope saves
+   * that state unless `save` ran, and removes the sandbox.
    */
   readonly open: (
     request: SandboxRequest,
   ) => Effect.Effect<SupervisorSeat, SupervisorUnavailable, Scope.Scope>;
+  /**
+   * Saves the conversation's state from the sandbox of `seat` for the next turn. A failure keeps
+   * the state that an earlier turn saved.
+   */
+  readonly save: (seat: SupervisorSeat) => Effect.Effect<void, SupervisorUnavailable>;
 }
 
 const noSandbox = SupervisorUnavailable.make({
@@ -101,8 +116,10 @@ export const SupervisorSandbox = Context.Reference<SupervisorSandboxService>(
   "@usine/agents/SupervisorSandbox",
   {
     defaultValue: () => ({
-      unavailable: Option.some(noSandbox),
+      unavailable: Effect.succeedSome(noSandbox),
+      checked: Effect.succeedSome(noSandbox),
       open: () => Effect.fail(noSandbox),
+      save: () => Effect.fail(noSandbox),
     }),
   },
 );

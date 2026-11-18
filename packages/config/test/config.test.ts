@@ -1238,7 +1238,7 @@ workers:
         memoryMib: 1024,
         pids: 256,
         tmpfsSizeMib: 64,
-        conversationSizeMib: 512,
+        conversationSizeMib: 128,
         modelRequestMib: 32,
         protocolFrameMib: 4,
       });

@@ -1,29 +1,36 @@
-import { NodeFileSystem, NodeServices } from "@effect/platform-node";
+import { NodeFileSystem } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
-import { SupervisorSandbox, SandboxRequest } from "@usine/agents/supervisor";
+import { SandboxRequest, SupervisorSandbox } from "@usine/agents/supervisor";
 import { Harness, ModelId } from "@usine/core/agent/brain";
 import { AgentSessionId } from "@usine/core/agent/session";
-import { ContainerImage, SupervisorLimits } from "@usine/core/worker";
-import { Context, Effect, Fiber, FileSystem, Layer, Logger, Option, Stream } from "effect";
-import { ChildProcess, ChildProcessSpawner } from "effect/process";
-import { TestClock } from "effect/testing";
+import {
+  ContainerImage,
+  ContainerMemoryMib,
+  ContainerScratchMib,
+  SupervisorLimits,
+} from "@usine/core/worker";
+import { Context, Effect, FileSystem, Layer, Logger, Option, Stream } from "effect";
 import { containerSandboxLayer } from "../../src/supervisor/container.ts";
-import { mountConversation } from "../../src/supervisor/storage.ts";
-import { directoryName } from "../../src/supervisor/names.ts";
-import { podman, spawning, type RuntimeState } from "./runtime-fixture.ts";
+import { ConversationHomes } from "../../src/supervisor/homes/homes.ts";
+import { conversationKey } from "../../src/supervisor/names.ts";
+import { capBytes, memoryShortfall } from "../../src/supervisor/storage.ts";
+import { type Input, podman, type RuntimeState, turnRuns } from "./runtime-fixture.ts";
 
+const conversation = AgentSessionId.make("bounded");
+const key = conversationKey(conversation);
 const turn = SandboxRequest.make({
-  conversation: AgentSessionId.make("bounded"),
+  conversation,
   harness: Harness.make("codex"),
   model: ModelId.make("m"),
   sources: [],
 });
 
-const sandboxAt = (root: string) =>
+const sandboxAt = (root: string, limits = SupervisorLimits.make({})) =>
   containerSandboxLayer({
     root,
     image: ContainerImage.make("node:22-slim"),
     runtime: Option.some("podman"),
+    limits,
     route: Option.some(
       Effect.succeed({
         credential: () => Effect.succeedNone,
@@ -35,370 +42,356 @@ const sandboxAt = (root: string) =>
     Effect.map((context) => Context.get(context, SupervisorSandbox)),
   );
 
-describe("bounded supervisor storage", () => {
-  for (const stalled of ["mount", "allocation"] as const) {
-    it.effect(
-      `refuses a stalled ${stalled} within its deadline and releases the conversation`,
-      () =>
-        Effect.gen(function* () {
-          const fs = yield* FileSystem.FileSystem;
-          const root = yield* fs.makeTempDirectoryScoped();
-          const calls: Array<ReadonlyArray<string>> = [];
-          const releases: Array<ReadonlyArray<string>> = [];
-          const runtime: RuntimeState = { starts: true, [stalled]: "hang" };
-          yield* Effect.gen(function* () {
-            const sandbox = yield* sandboxAt(root);
-            const opening = yield* sandbox
-              .open(turn)
-              .pipe(Effect.scoped, Effect.flip, Effect.forkChild);
-            const command = stalled === "mount" ? "fuse2fs" : "fallocate";
-            const flag = stalled === "mount" ? "-f" : "-l";
-            yield* TestClock.withLive(
-              Effect.sleep("10 millis").pipe(
-                Effect.repeat({ until: () => calls.some(([c, f]) => c === command && f === flag) }),
-              ),
-            );
-            yield* TestClock.adjust(stalled === "mount" ? "9 seconds" : "29 seconds");
-            assert.isUndefined(opening.pollUnsafe());
-            yield* TestClock.adjust("1 second");
-            const failure = yield* Fiber.join(opening);
-            assert.include(failure.message, "Cannot mount the supervisor conversation filesystem");
-            assert.include(failure.message, stalled === "mount" ? "10s" : "30s");
-            assert.isTrue(releases.some(([c, f]) => c === command && f === flag));
-            assert.isFalse(calls.some(([c, f]) => c === "podman" && f === "run"));
-            delete runtime[stalled];
-            yield* sandbox.open(turn).pipe(Effect.scoped);
-          }).pipe(Effect.scoped, Effect.provide(podman(calls, [], runtime, true, releases)));
-        }).pipe(Effect.scoped, Effect.provide(NodeFileSystem.layer)),
-    );
-  }
+/** The saved home of the test's conversation, as text. */
+const savedHome = Effect.gen(function* () {
+  const homes = yield* ConversationHomes;
+  const saved = yield* homes.load(key);
+  return yield* Option.match(saved, {
+    onNone: () => Effect.succeedNone,
+    onSome: (archive) => archive.pipe(Stream.decodeText(), Stream.mkString, Effect.asSome),
+  });
+});
 
-  for (const keepsOutputOpen of [false, true]) {
-    it.effect(
-      `logs the mount error after process exit, with output left open: ${keepsOutputOpen}`,
-      () =>
+/** The `tar` calls of `calls` in turns' sandboxes, or in the startup check's with `check`. */
+const tars = (
+  calls: ReadonlyArray<ReadonlyArray<string>>,
+  flag: "-c" | "-x",
+  sandbox: "turn" | "check" = "turn",
+) =>
+  calls.filter(
+    (args) =>
+      args[1] === "exec" &&
+      args.includes("tar") &&
+      args.includes(flag) &&
+      args.some((arg) => arg.startsWith("usine-supervisor-check-")) === (sandbox === "check"),
+  );
+
+/** A temporary directory, provided with the Node.js file system. */
+const withRoot = <A, E, R>(test: (root: string) => Effect.Effect<A, E, R>) =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const root = yield* fs.makeTempDirectoryScoped({ prefix: "usine-storage-" });
+    return yield* test(root);
+  }).pipe(Effect.scoped, Effect.provide(NodeFileSystem.layer));
+
+describe("supervisor conversation storage", () => {
+  it("refuses limits whose in-memory files could take more than half of the memory", () => {
+    assert.deepStrictEqual(memoryShortfall(SupervisorLimits.make({})), Option.none());
+    const starved = memoryShortfall(
+      SupervisorLimits.make({
+        memoryMib: ContainerMemoryMib.make(1024),
+        conversationSizeMib: ContainerScratchMib.make(512),
+      }),
+    );
+    assert(Option.isSome(starved));
+    assert.include(starved.value, "conversation_size_mib (512) plus tmpfs_size_mib (64)");
+  });
+
+  it.effect("stops reading an archive at the first chunk past the limit", () =>
+    Effect.gen(function* () {
+      let pulled = 0;
+      const chunk = new Uint8Array(4);
+      const failure = yield* Stream.make(chunk, chunk, chunk, chunk).pipe(
+        Stream.tap(() =>
+          Effect.sync(() => {
+            pulled += 1;
+          }),
+        ),
+        capBytes(8, () => "too large" as const),
+        Stream.runDrain,
+        Effect.flip,
+      );
+      assert.strictEqual(failure, "too large");
+      assert.strictEqual(pulled, 3);
+      const exact = yield* Stream.make(chunk, chunk).pipe(
+        capBytes(8, () => "too large" as const),
+        Stream.runCollect,
+      );
+      assert.lengthOf(exact, 2);
+    }),
+  );
+
+  it.live("restores the home that the previous turn saved, and saves it when a turn ends", () =>
+    withRoot((root) =>
+      Effect.gen(function* () {
+        const calls: Array<ReadonlyArray<string>> = [];
+        const inputs: Array<Input> = [];
+        const runtime: RuntimeState = { starts: true };
+        yield* Effect.gen(function* () {
+          const sandbox = yield* sandboxAt(root);
+          const first = yield* sandbox.open(turn).pipe(Effect.scoped);
+          assert.isFalse(first.restored);
+          assert.lengthOf(tars(calls, "-x"), 0);
+          // The turn's scope closed without a save, as after a failure or a cancel.
+          const afterFirst = yield* savedHome;
+          assert.deepStrictEqual(afterFirst, Option.some("archive"));
+
+          runtime.archive = { stdout: "second archive", exitCode: 0 };
+          const saves = tars(calls, "-c").length;
+          yield* Effect.gen(function* () {
+            const second = yield* sandbox.open(turn);
+            assert.isTrue(second.restored);
+            yield* sandbox.save(second);
+          }).pipe(Effect.scoped);
+          assert.lengthOf(tars(calls, "-c"), saves + 1, "an explicit save isn't repeated");
+          const afterSecond = yield* savedHome;
+          assert.deepStrictEqual(afterSecond, Option.some("second archive"));
+        }).pipe(Effect.provide(podman(calls, [], runtime, true, [], inputs)));
+        const restored = inputs.filter(
+          ({ command }) =>
+            command.includes("-x") &&
+            !command.some((arg) => arg.startsWith("usine-supervisor-check-")),
+        );
+        assert.deepStrictEqual(
+          restored.map(({ text }) => text),
+          ["archive"],
+        );
+      }),
+    ),
+  );
+
+  for (const [name, archive, reason] of [
+    [
+      "a home larger than conversation_size_mib",
+      { stdout: Stream.make(new Uint8Array(1024 ** 2), new Uint8Array(1)), exitCode: 0 },
+      "The conversation's home is larger than supervisor_limits.conversation_size_mib (1 MiB), so usine kept the state that the previous turn saved",
+    ],
+    [
+      "a failed archive",
+      {
+        stdout: "torn",
+        stderr:
+          "tar: home/.codex/sessions: Cannot open: Permission denied\ntar: Exiting with failure status due to previous errors\n",
+        exitCode: 2,
+      },
+      "Can't save the conversation's home: tar: home/.codex/sessions: Cannot open: Permission denied",
+    ],
+  ] as const)
+    it.live(`keeps the previous saved home after ${name}, and names the cause`, () =>
+      withRoot((root) =>
         Effect.gen(function* () {
-          const fs = yield* FileSystem.FileSystem;
-          const root = yield* fs.makeTempDirectoryScoped();
-          const calls: Array<ReadonlyArray<string>> = [];
-          const warnings: Array<unknown> = [];
-          const detail =
-            "fusermount: option allow_other only allowed if 'user_allow_other' is set in /etc/fuse.conf";
-          const output = Stream.fromEffect(
-            Effect.succeed(new TextEncoder().encode(`${detail}\n`)).pipe(
-              Effect.delay("100 millis"),
-            ),
-          );
-          const runtime: RuntimeState = {
-            starts: true,
-            mount: {
-              stdout: "",
-              stderr: keepsOutputOpen ? Stream.concat(output, Stream.never) : output,
-              exitCode: 1,
-            },
+          const runtime: RuntimeState = { starts: true };
+          yield* Effect.gen(function* () {
+            const sandbox = yield* sandboxAt(
+              root,
+              SupervisorLimits.make({ conversationSizeMib: ContainerScratchMib.make(1) }),
+            );
+            yield* sandbox.open(turn).pipe(Effect.scoped);
+            runtime.archive = archive;
+            const failure = yield* Effect.gen(function* () {
+              const seat = yield* sandbox.open(turn);
+              return yield* sandbox.save(seat).pipe(Effect.flip);
+            }).pipe(Effect.scoped);
+            assert.strictEqual(failure.message, reason);
+            const kept = yield* savedHome;
+            assert.deepStrictEqual(kept, Option.some("archive"));
+          }).pipe(Effect.provide(podman([], [], runtime)));
+        }),
+      ),
+    );
+
+  it.live("refuses a turn whose saved home can't be restored, with tar's reason first", () =>
+    withRoot((root) =>
+      Effect.gen(function* () {
+        const calls: Array<ReadonlyArray<string>> = [];
+        const runtime: RuntimeState = { starts: true };
+        yield* Effect.gen(function* () {
+          const sandbox = yield* sandboxAt(root);
+          yield* sandbox.open(turn).pipe(Effect.scoped);
+          runtime.restore = {
+            stdout: "",
+            stderr: "tar: home/.codex/history.jsonl: Cannot write: No space left on device\n",
+            exitCode: 2,
           };
-          yield* Effect.gen(function* () {
-            const sandbox = yield* sandboxAt(root);
-            const opening = yield* sandbox
-              .open(turn)
-              .pipe(Effect.scoped, Effect.flip, Effect.forkChild);
-            yield* TestClock.withLive(
-              Effect.sleep("10 millis").pipe(
-                Effect.repeat({
-                  until: () => calls.some(([c, f]) => c === "fuse2fs" && f === "-f"),
-                }),
-              ),
-            );
-            yield* TestClock.adjust("100 millis");
-            if (keepsOutputOpen) yield* TestClock.adjust("900 millis");
-            const failure = yield* Fiber.join(opening);
-            assert.strictEqual(
-              failure.message,
-              `Cannot mount the supervisor conversation filesystem: fuse2fs exited with 1: ${detail}`,
-            );
-            assert.deepInclude(warnings, [
-              "Supervisor conversation mount refused",
-              {
-                directory: `${root}/conversations/${directoryName(turn.conversation)}`,
-                message: failure.message,
-              },
-            ]);
-            assert.isFalse(calls.some(([c, f]) => c === "podman" && f === "run"));
-            delete runtime.mount;
-            yield* sandbox.open(turn).pipe(Effect.scoped);
-          }).pipe(
-            Effect.scoped,
-            Effect.provide([
-              podman(calls, [], runtime),
-              Logger.layer([
-                Logger.make<unknown, void>(({ logLevel, message }) => {
-                  if (logLevel === "Warn") warnings.push(message);
-                }),
-              ]),
-            ]),
+          const failure = yield* sandbox.open(turn).pipe(Effect.scoped, Effect.flip);
+          assert.strictEqual(
+            failure.message,
+            "Can't restore the conversation's saved home: tar: home/.codex/history.jsonl: Cannot write: No space left on device",
           );
-        }).pipe(Effect.scoped, Effect.provide(NodeFileSystem.layer)),
-    );
-  }
+        }).pipe(Effect.provide(podman(calls, [], runtime)));
+        const started = turnRuns(calls).map((args) => args[args.indexOf("--name") + 1]);
+        assert.isTrue(
+          started.every((name) =>
+            calls.some(([, command, , removed]) => command === "rm" && removed === name),
+          ),
+          "each turn's container is removed",
+        );
+      }),
+    ),
+  );
 
-  it.live("keeps only the last 8,192 diagnostic characters when a mount fails", () =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem;
-      const root = yield* fs.makeTempDirectoryScoped();
-      const calls: Array<ReadonlyArray<string>> = [];
-      const detail = "DENIED: user_allow_other";
-      const encoder = new TextEncoder();
-      const failure = yield* Effect.gen(function* () {
-        const sandbox = yield* sandboxAt(root);
-        return yield* sandbox.open(turn).pipe(Effect.scoped, Effect.flip);
-      }).pipe(
-        Effect.scoped,
-        Effect.provide(
-          podman(calls, [], {
-            starts: true,
-            mount: {
-              stdout: "",
-              stderr: Stream.make(
-                encoder.encode("a".repeat(12_000)),
-                encoder.encode("b".repeat(8_192)),
-                encoder.encode(detail),
-              ),
-              exitCode: 1,
+  it.live("bounds the session files that the orchestrator's own harness writes", () =>
+    withRoot((root) =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const calls: Array<ReadonlyArray<string>> = [];
+        const sessions = `${root}/conversations/${key}/workspace/.usine/pi/sessions`;
+        const limits = SupervisorLimits.make({ conversationSizeMib: ContainerScratchMib.make(1) });
+        yield* Effect.gen(function* () {
+          const sandbox = yield* sandboxAt(root, limits);
+          const saved = yield* Effect.gen(function* () {
+            const seat = yield* sandbox.open(turn);
+            // The turn's harness process writes past the limit on the orchestrator.
+            yield* fs.makeDirectory(sessions, { recursive: true });
+            yield* fs.writeFile(`${sessions}/session.jsonl`, new Uint8Array(1024 ** 2 + 1));
+            return yield* sandbox.save(seat).pipe(Effect.flip);
+          }).pipe(Effect.scoped);
+          assert.include(saved.message, "The conversation's saved sessions use 2 MiB");
+          const runs = turnRuns(calls).length;
+          const refused = yield* sandbox.open(turn).pipe(Effect.scoped, Effect.flip);
+          assert.strictEqual(refused.message, saved.message);
+          assert.lengthOf(turnRuns(calls), runs, "a refused turn starts no container");
+          yield* fs.writeFile(`${sessions}/session.jsonl`, new Uint8Array(1024));
+          const resumed = yield* sandbox.open(turn).pipe(Effect.scoped);
+          assert.isTrue(resumed.restored);
+        }).pipe(Effect.provide(podman(calls)));
+      }),
+    ),
+  );
+
+  it.live("removes each conversation image of the FUSE storage at startup, with a log line", () =>
+    withRoot((root) =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const legacy = conversationKey(AgentSessionId.make("legacy"));
+        const creating = conversationKey(AgentSessionId.make("creating"));
+        const other = conversationKey(AgentSessionId.make("other"));
+        yield* fs.makeDirectory(`${root}/disks`, { recursive: true });
+        yield* fs.writeFileString(`${root}/disks/${legacy}.ext4`, "image");
+        yield* fs.writeFileString(`${root}/disks/${creating}.ext4.creating`, "image");
+        for (const directory of [legacy, creating, other])
+          yield* fs.makeDirectory(`${root}/conversations/${directory}/home`, { recursive: true });
+        const removals: Array<unknown> = [];
+        yield* sandboxAt(root).pipe(
+          Effect.provide([
+            podman([]),
+            Logger.layer([
+              Logger.make<unknown, void>(({ message }) => {
+                if (Array.isArray(message) && String(message[0]).startsWith("Removed a supervisor"))
+                  removals.push(message);
+              }),
+            ]),
+          ]),
+        );
+        assert.sameDeepMembers(removals, [
+          [
+            "Removed a supervisor conversation image from an earlier version",
+            {
+              image: `${root}/disks/${legacy}.ext4`,
+              directory: `${root}/conversations/${legacy}`,
             },
-          }),
-        ),
-      );
-      const prefix = "Cannot mount the supervisor conversation filesystem: fuse2fs exited with 1: ";
-      assert.lengthOf(failure.message, prefix.length + 8_192);
-      assert.strictEqual(failure.message, prefix + "b".repeat(8_192 - detail.length) + detail);
-      assert.isFalse(calls.some(([c, f]) => c === "podman" && f === "run"));
-    }).pipe(Effect.scoped, Effect.provide(NodeFileSystem.layer)),
+          ],
+          [
+            "Removed a supervisor conversation image from an earlier version",
+            {
+              image: `${root}/disks/${creating}.ext4.creating`,
+              directory: `${root}/conversations/${creating}`,
+            },
+          ],
+        ]);
+        const disks = yield* fs.exists(`${root}/disks`);
+        assert.isFalse(disks);
+        const conversations = yield* fs.readDirectory(`${root}/conversations`);
+        assert.deepStrictEqual(conversations, [other]);
+      }),
+    ),
+  );
+});
+
+describe("the supervisor's startup check", () => {
+  it.live("reports ready only after a container ran with a turn's limits and in-memory home", () =>
+    withRoot((root) =>
+      Effect.gen(function* () {
+        const calls: Array<ReadonlyArray<string>> = [];
+        yield* Effect.gen(function* () {
+          const sandbox = yield* sandboxAt(root);
+          const checked = yield* sandbox.checked;
+          assert.deepStrictEqual(checked, Option.none());
+        }).pipe(Effect.provide(podman(calls)));
+        const check = calls.find(
+          (args) =>
+            args[1] === "run" && args.includes("usine.supervisor.conversation=usine-startup-check"),
+        );
+        assert(check !== undefined);
+        assert.isTrue(check.some((arg) => arg.startsWith("type=tmpfs,")));
+        assert.include(check, "--memory");
+        assert.lengthOf(tars(calls, "-c", "check"), 1);
+        assert.lengthOf(tars(calls, "-x", "check"), 1);
+      }),
+    ),
   );
 
-  it.live("refuses an unrepaired filesystem before mounting or starting a container", () =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem;
-      const root = yield* fs.makeTempDirectoryScoped();
-      const calls: Array<ReadonlyArray<string>> = [];
-      const detail = "Filesystem errors left uncorrected; run fsck manually";
-      const failure = yield* Effect.gen(function* () {
+  it.live("refuses turns with the reason when the check fails", () =>
+    withRoot((root) =>
+      Effect.gen(function* () {
         const sandbox = yield* sandboxAt(root);
-        return yield* sandbox.open(turn).pipe(Effect.scoped, Effect.flip);
-      }).pipe(
-        Effect.scoped,
-        Effect.provide(
-          podman(calls, [], {
-            starts: true,
-            filesystemCheck: { stdout: "", stderr: detail, exitCode: 4 },
-          }),
-        ),
-      );
-      assert.strictEqual(
-        failure.message,
-        `Cannot mount the supervisor conversation filesystem: e2fsck failed: ${detail}`,
-      );
-      assert.isTrue(calls.some(([c, f]) => c === "e2fsck" && f === "-p"));
-      assert.isFalse(calls.some(([c, f]) => c === "fuse2fs" && f === "-f"));
-      assert.isFalse(calls.some(([c, f]) => c === "podman" && f === "run"));
-    }).pipe(Effect.scoped, Effect.provide(NodeFileSystem.layer)),
-  );
-
-  it.live("keeps stderr from a real mount process that writes and immediately exits", () =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem;
-      const root = yield* fs.makeTempDirectoryScoped();
-      const realSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-      const runtimeSpawner = yield* ChildProcessSpawner.ChildProcessSpawner.pipe(
-        Effect.provide(podman([])),
-      );
-      const detail =
-        "fusermount: option allow_other only allowed if 'user_allow_other' is set in /etc/fuse.conf";
-      const spawner = ChildProcessSpawner.make((command) =>
-        command._tag === "StandardCommand" &&
-        command.command === "fuse2fs" &&
-        command.args[0] === "-f"
-          ? realSpawner.spawn(
-              ChildProcess.make("/bin/sh", ["-c", 'printf "%s" "$0" >&2; exit 1', detail]),
-            )
-          : runtimeSpawner.spawn(command),
-      );
-      const failure = yield* Effect.gen(function* () {
-        const sandbox = yield* sandboxAt(root);
-        return yield* sandbox.open(turn).pipe(Effect.scoped, Effect.flip);
-      }).pipe(
-        Effect.scoped,
-        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
-      );
-      assert.include(failure.message, `fuse2fs exited with 1: ${detail}`);
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
-  );
-
-  it.effect("finishes startup after 15 seconds when checking a leftover mount stalls", () =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem;
-      const root = yield* fs.makeTempDirectoryScoped();
-      yield* fs.makeDirectory(`${root}/conversations/${directoryName(turn.conversation)}`, {
-        recursive: true,
-      });
-      const calls: Array<ReadonlyArray<string>> = [];
-      const releases: Array<ReadonlyArray<string>> = [];
-      yield* Effect.gen(function* () {
-        const starting = yield* sandboxAt(root).pipe(Effect.forkChild);
-        yield* TestClock.withLive(
-          Effect.sleep("10 millis").pipe(
-            Effect.repeat({
-              until: () => calls.some(([c, f]) => c === "mountpoint" && f === "-q"),
-            }),
+        const checked = yield* sandbox.checked;
+        assert.deepStrictEqual(
+          Option.map(checked, ({ message }) => message),
+          Option.some(
+            "The supervisor's startup check failed: Can't save the conversation's home: sh: 1: tar: not found",
           ),
         );
-        yield* TestClock.adjust("14 seconds");
-        assert.isUndefined(starting.pollUnsafe());
-        yield* TestClock.adjust("1 second");
-        const sandbox = yield* Fiber.join(starting);
-        assert(Option.isSome(sandbox.unavailable));
-        const failure = yield* sandbox.open(turn).pipe(Effect.scoped, Effect.flip);
-        assert.include(failure.message, "15s");
-        assert.isTrue(releases.some(([c, f]) => c === "mountpoint" && f === "-q"));
-        assert.isFalse(calls.some(([c, f]) => c === "podman" && f === "run"));
+        assert(Option.isSome(checked));
+        const refused = yield* sandbox.open(turn).pipe(Effect.scoped, Effect.flip);
+        assert.strictEqual(refused.message, checked.value.message);
       }).pipe(
-        Effect.scoped,
-        Effect.provide(podman(calls, [], { starts: true, mountCheck: "hang" }, true, releases)),
-      );
-    }).pipe(Effect.scoped, Effect.provide(NodeFileSystem.layer)),
-  );
-
-  it.live("refuses turns when filesystem tools are missing", () =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem;
-      const root = yield* fs.makeTempDirectoryScoped();
-      const calls: Array<ReadonlyArray<string>> = [];
-      const sandbox = yield* SupervisorSandbox.pipe(
         Effect.provide(
-          containerSandboxLayer({
-            root,
-            image: ContainerImage.make("node:22-slim"),
-            runtime: Option.some("docker"),
-            route: Option.some(
-              Effect.succeed({
-                credential: () => Effect.succeedNone,
-                request: () => Effect.die("no request reaches an unavailable sandbox"),
-              }),
-            ),
-          }).pipe(
-            Layer.provide(
-              spawning((command, args) => {
-                if (command !== "docker") return undefined;
-                return { stdout: args[0] === "info" ? "[]" : "", exitCode: 0 };
-              }, calls),
-            ),
-          ),
-        ),
-      );
-      assert(Option.isSome(sandbox.unavailable));
-      const failure = yield* sandbox.open(turn).pipe(Effect.flip);
-      assert.include(failure.message, "fuse2fs");
-      assert.isFalse(calls.some(([, command]) => command === "run"));
-    }).pipe(Effect.scoped, Effect.provide(NodeFileSystem.layer)),
-  );
-
-  it.live("removes a partial image when preallocation fails, without mounting", () =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem;
-      const root = yield* fs.makeTempDirectoryScoped();
-      const calls: Array<ReadonlyArray<string>> = [];
-      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner.pipe(
-        Effect.provide(
-          spawning(
-            (command) => ({
-              stdout: "",
-              stderr: "no space",
-              exitCode: command === "mountpoint" ? 32 : 1,
-            }),
-            calls,
-          ),
-        ),
-      );
-      const failure = yield* mountConversation(
-        fs,
-        spawner,
-        root,
-        "test",
-        SupervisorLimits.make({}),
-      ).pipe(Effect.scoped, Effect.flip);
-      assert.include(failure.message, "fallocate failed");
-      const files = yield* fs.readDirectory(`${root}/disks`);
-      assert.deepStrictEqual(files, []);
-      assert.isFalse(calls.some(([command]) => command === "fuse2fs"));
-    }).pipe(Effect.scoped, Effect.provide(NodeFileSystem.layer)),
-  );
-
-  it.live("unmounts the conversation when its turn scope ends", () =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem;
-      const root = yield* fs.makeTempDirectoryScoped();
-      const calls: Array<ReadonlyArray<string>> = [];
-      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner.pipe(
-        Effect.provide(podman(calls)),
-      );
-      yield* mountConversation(fs, spawner, root, "test", SupervisorLimits.make({})).pipe(
-        Effect.scoped,
-      );
-      assert.deepStrictEqual(
-        calls.filter(([command, flag]) => command === "fusermount" && flag === "-u"),
-        [["fusermount", "-u", `${root}/conversations/test`]],
-      );
-    }).pipe(Effect.scoped, Effect.provide(NodeFileSystem.layer)),
-  );
-
-  it.live("logs a leftover mount reset and a repaired conversation", () =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem;
-      const root = yield* fs.makeTempDirectoryScoped();
-      const logs: Array<unknown> = [];
-      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner.pipe(
-        Effect.provide(podman([], [], { starts: true, staleMount: true, repaired: true })),
-      );
-      yield* mountConversation(fs, spawner, root, "test", SupervisorLimits.make({})).pipe(
-        Effect.scoped,
-        Effect.withLogger(
-          Logger.make(({ logLevel, message }) => {
-            logs.push({ logLevel, message });
+          podman([], [], {
+            starts: true,
+            archive: { stdout: "", stderr: "sh: 1: tar: not found\n", exitCode: 127 },
           }),
         ),
-      );
-      const directory = `${root}/conversations/test`;
-      assert.deepInclude(logs, {
-        logLevel: "Info",
-        message: ["Unmounting a previous supervisor filesystem before a turn", { directory }],
-      });
-      assert.deepInclude(logs, {
-        logLevel: "Warn",
-        message: ["Repaired a supervisor conversation filesystem", { directory }],
-      });
-    }).pipe(Effect.scoped, Effect.provide(NodeFileSystem.layer)),
+      ),
+    ),
   );
 
-  it.live("refuses an existing image with the wrong size instead of growing it", () =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem;
-      const root = yield* fs.makeTempDirectoryScoped();
-      yield* fs.makeDirectory(`${root}/disks`);
-      yield* fs.writeFileString(`${root}/disks/test.ext4`, "old image");
-      const calls: Array<ReadonlyArray<string>> = [];
-      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner.pipe(
-        Effect.provide(podman(calls)),
-      );
-      const failure = yield* mountConversation(
-        fs,
-        spawner,
-        root,
-        "test",
-        SupervisorLimits.make({}),
-      ).pipe(Effect.scoped, Effect.flip);
-      assert.include(failure.message, "migrate it");
-      const contents = yield* fs.readFileString(`${root}/disks/test.ext4`);
-      assert.strictEqual(contents, "old image");
-      assert.isFalse(calls.some(([command]) => command === "fallocate" || command === "fuse2fs"));
-    }).pipe(Effect.scoped, Effect.provide(NodeFileSystem.layer)),
+  it.live("says that rootless Podman can't run under NoNewPrivileges", () =>
+    withRoot((root) =>
+      Effect.gen(function* () {
+        const node = yield* FileSystem.FileSystem;
+        const unprivileged = FileSystem.FileSystem.of({
+          ...node,
+          readFileString: (path, encoding) =>
+            path === "/proc/self/status"
+              ? Effect.succeed("Name:\tnode\nNoNewPrivs:\t1\n")
+              : node.readFileString(path, encoding),
+        });
+        const checked = yield* Effect.gen(function* () {
+          const sandbox = yield* sandboxAt(root);
+          return yield* sandbox.checked;
+        }).pipe(
+          Effect.provide(
+            podman([], [], {
+              starts: true,
+              rejectStart: "Error: cannot set up namespace using newuidmap",
+            }),
+          ),
+          Effect.provideService(FileSystem.FileSystem, unprivileged),
+        );
+        const message = Option.map(checked, ({ message }) => message);
+        assert(Option.isSome(message));
+        assert.isTrue(
+          message.value.startsWith(
+            "Supervisor sessions run in a container, and rootless Podman can't run under NoNewPrivileges, because it needs the setuid helpers newuidmap and newgidmap; use Docker.",
+          ),
+          message.value,
+        );
+        assert.include(message.value, "cannot set up namespace using newuidmap");
+      }),
+    ),
+  );
+
+  it.effect("doesn't hold the layer while the runtime check runs", () =>
+    withRoot((root) =>
+      Effect.gen(function* () {
+        const sandbox = yield* sandboxAt(root).pipe(
+          Effect.provide(podman([], [], { starts: true, image: "hang" })),
+        );
+        const unavailable = yield* sandbox.unavailable;
+        assert(Option.isSome(unavailable));
+        assert.include(unavailable.value.message, "The supervisor isn't ready yet");
+      }),
+    ),
   );
 });

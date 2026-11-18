@@ -11,16 +11,22 @@ import {
   SupervisorUnavailable,
 } from "@usine/agents/supervisor";
 import type { Harness, ModelId } from "@usine/core/agent/brain";
-import { directoryName } from "./names.ts";
-import { bindMount } from "../bind-mount.ts";
+import { conversationKey, type ConversationKey } from "./names.ts";
+import { bindMount, mountField } from "../bind-mount.ts";
 import { prepareImage } from "./image.ts";
-import { checkConversationStorage, mountConversation } from "./storage.ts";
+import { ConversationHomes } from "./homes/homes.ts";
+import {
+  archiveHome,
+  checkWorkspaceSize,
+  memoryShortfall,
+  removeFuseStorage,
+  restoreHome,
+  type SandboxContainer,
+} from "./storage.ts";
 import { type ContainerImage, SupervisorLimits, WorkerName } from "@usine/core/worker";
 import {
-  Cause,
   type Duration,
   Effect,
-  Fiber,
   FileSystem,
   Layer,
   Option,
@@ -29,12 +35,15 @@ import {
   Schedule,
   Schema,
   Stream,
+  SubscriptionRef,
 } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import { collectCommand } from "../child-command.ts";
 import { type ContainerRuntime, runtimeOptions } from "../remote/runtime.ts";
 import type { GatewayModelError, GatewayModelRoute } from "../ssh/gateway/model-route.ts";
 import { modelRelayServer, relayModelRequest } from "./model-relay.ts";
+import { noNewPrivileges, ROOTLESS_PODMAN_REFUSAL } from "./privileges.ts";
+import { detectSandboxRuntime, type SandboxRuntime } from "./detect.ts";
 
 /** The port inside the sandbox on which the model relay listens, on the loopback address. */
 export const MODEL_RELAY_PORT = 8787;
@@ -82,11 +91,17 @@ require("node:net")
   .on("error", () => process.exit(1));
 `;
 
-/** How long the runtime has to answer at startup, so that a hung daemon doesn't hold the orchestrator. */
-const DETECTION_TIMEOUT = "15 seconds";
-
 /** How long a new sandbox's model relay has to accept connections. */
 const RELAY_START_TIMEOUT = "30 seconds";
+
+/** How long a turn waits for the startup check before it asks the member to retry. */
+const READY_TIMEOUT = "30 seconds";
+
+/** How long the copy of a conversation's home out of its sandbox may take. */
+const SAVE_TIMEOUT = "2 minutes";
+
+/** How long the startup check's container may take, from its start to its removal. */
+const CHECK_TIMEOUT = "2 minutes";
 
 /** The label whose value is the sandbox root of the orchestrator that started the container. */
 const ROOT_LABEL = "usine.supervisor.root";
@@ -94,85 +109,11 @@ const ROOT_LABEL = "usine.supervisor.root";
 /** The label whose value is the conversation that the container runs a turn of. */
 const CONVERSATION_LABEL = "usine.supervisor.conversation";
 
-/** The container runtime that runs supervisor sandboxes, and whether it runs without root. */
-export interface SandboxRuntime {
-  readonly runtime: ContainerRuntime;
-  readonly rootless: boolean;
-}
+/** The value of the conversation label on the startup check's container. */
+const CHECK_CONVERSATION = "usine-startup-check";
 
-/** The output format of `<runtime> info` that says whether the runtime runs without root. */
-const rootlessFormat = {
-  podman: "{{.Host.Security.Rootless}}",
-  docker: "{{json .SecurityOptions}}",
-} satisfies Record<ContainerRuntime, string>;
-
-/**
- * Finds the container runtime for supervisor sandboxes: `preferred`, or Podman and then Docker.
- * Returns why there is none when no candidate is installed or can run containers.
- */
-export const detectSandboxRuntime = Effect.fn("SupervisorSandbox.detectRuntime")(function* (
-  preferred: Option.Option<ContainerRuntime>,
-) {
-  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-  const candidates = Option.match(preferred, {
-    onNone: () => ["podman", "docker"] as const,
-    onSome: (runtime) => [runtime] as const,
-  });
-  const problems: Array<string> = [];
-  for (const runtime of candidates) {
-    const info = yield* collectCommand(
-      spawner,
-      "preflight",
-      runtime,
-      ["info", "--format", rootlessFormat[runtime]],
-      { forceKillAfter: "2 seconds" },
-      65536,
-    ).pipe(Effect.timeout(DETECTION_TIMEOUT), Effect.result);
-    if (Result.isFailure(info)) {
-      if (Cause.isTimeoutError(info.failure)) {
-        problems.push(`${runtime} didn't answer within ${DETECTION_TIMEOUT}`);
-        yield* Effect.logInfo("Skipped a container runtime that didn't answer", {
-          runtime,
-          timeout: DETECTION_TIMEOUT,
-        });
-        continue;
-      }
-      yield* Effect.logInfo("Skipped a container runtime that isn't installed", {
-        runtime,
-        message: info.failure.message,
-      });
-      continue;
-    }
-    if (info.success.exitCode !== 0) {
-      const reason = info.success.stderr.trim().split("\n")[0] ?? "";
-      problems.push(
-        `${runtime} is installed but can't run containers${reason === "" ? "" : `: ${reason}`}`,
-      );
-      yield* Effect.logInfo("Skipped a container runtime that can't run containers", {
-        runtime,
-        exitCode: info.success.exitCode,
-        reason,
-      });
-      continue;
-    }
-    const output = info.success.stdout.trim();
-    const rootless = runtime === "podman" ? output === "true" : output.includes("rootless");
-    yield* Effect.logInfo("Found the container runtime for supervisor sandboxes", {
-      runtime,
-      rootless,
-    });
-    return Result.succeed<SandboxRuntime>({ runtime, rootless });
-  }
-  const names = candidates.map((runtime) => (runtime === "podman" ? "Podman" : "Docker"));
-  return Result.fail(
-    SupervisorUnavailable.make({
-      message:
-        problems.length > 0
-          ? `Supervisor sessions run in a container, and ${problems.join("; ")}`
-          : `Supervisor sessions run in a container, and ${names.join(" or ")} isn't installed on the orchestrator host`,
-    }),
-  );
-});
+/** The startup check container's main process, which waits until the check removes it. */
+const IDLE_SCRIPT = "setInterval(() => {}, 60_000);";
 
 /** The user that the container's processes run as, so that files they write belong to this host user. */
 const userOptions = ({ runtime, rootless }: SandboxRuntime): ReadonlyArray<string> => {
@@ -182,31 +123,41 @@ const userOptions = ({ runtime, rootless }: SandboxRuntime): ReadonlyArray<strin
   return rootless ? ["--user", "0:0", "--env", "IS_SANDBOX=1"] : ["--user", owner];
 };
 
-/** The directories of one conversation on the orchestrator, at the same paths in its sandbox. */
+/** The paths of one conversation, which are the same on the orchestrator and in its sandbox. */
 interface ConversationPaths {
-  /** Read-write: holds `home` and the PID files of the session's processes. */
+  /**
+   * In the sandbox: an in-memory filesystem of `conversation_size_mib` that holds `home` and the
+   * PID files of the session's processes.
+   */
   readonly root: string;
-  /** Read-write: the harness's home directory, with its saved sessions. */
+  /** In the sandbox: the harness's home directory, with its saved sessions. */
   readonly home: string;
-  /** Read-only: the session's working directory, with one source directory per repository. */
+  /**
+   * On the orchestrator, mounted read-only in the sandbox: the session's working directory, with
+   * one source directory per repository.
+   */
   readonly workspace: string;
 }
 
-/** The arguments of `<runtime> run` that start one turn's sandbox in the background. */
-export const sandboxRunArguments = (options: {
+const conversationPaths = (root: string): ConversationPaths => ({
+  root,
+  home: `${root}/home`,
+  workspace: `${root}/workspace`,
+});
+
+/** The arguments of `<runtime> run` that start a sandbox with `main` as its Node.js arguments. */
+const containerArguments = (options: {
   readonly name: string;
-  /** The orchestrator's sandbox root, which the container's label names. */
   readonly root: string;
   readonly conversation: string;
   readonly runtime: SandboxRuntime;
   readonly image: ContainerImage;
   readonly paths: ConversationPaths;
-  readonly sources: SandboxRequest["sources"];
-  readonly relayDirectory: string;
-  readonly limits?: SupervisorLimits;
+  readonly limits: SupervisorLimits;
+  readonly mounts: ReadonlyArray<string>;
+  readonly main: ReadonlyArray<string>;
 }): ReadonlyArray<string> => {
-  const { paths } = options;
-  const limits = options.limits ?? SupervisorLimits.make({});
+  const { paths, limits } = options;
   return [
     "run",
     "--detach",
@@ -247,25 +198,52 @@ export const sandboxRunArguments = (options: {
     "--workdir",
     paths.workspace,
     "--mount",
-    bindMount(paths.root, paths.root, "writable"),
+    [
+      "type=tmpfs",
+      mountField("destination", paths.root),
+      `tmpfs-size=${limits.conversationSizeMib * 1024 ** 2}`,
+      "tmpfs-mode=1777",
+    ].join(","),
     "--mount",
     bindMount(paths.workspace, paths.workspace, "readonly"),
-    ...options.sources.flatMap(({ repository, directory }) => [
-      "--mount",
-      bindMount(directory, `${paths.workspace}/${repository}`, "readonly"),
-    ]),
-    "--mount",
-    bindMount(options.relayDirectory, RELAY_DIRECTORY, "readonly"),
+    ...options.mounts.flatMap((mount) => ["--mount", mount]),
     "--entrypoint",
     "node",
     options.image,
-    "-e",
-    RELAY_SCRIPT,
-    String(MODEL_RELAY_PORT),
-    `${RELAY_DIRECTORY}/model.sock`,
-    String(RELAY_CHECK_INTERVAL_MILLIS),
+    ...options.main,
   ];
 };
+
+/** The arguments of `<runtime> run` that start one turn's sandbox in the background. */
+export const sandboxRunArguments = (options: {
+  readonly name: string;
+  /** The orchestrator's sandbox root, which the container's label names. */
+  readonly root: string;
+  readonly conversation: string;
+  readonly runtime: SandboxRuntime;
+  readonly image: ContainerImage;
+  readonly paths: ConversationPaths;
+  readonly sources: SandboxRequest["sources"];
+  readonly relayDirectory: string;
+  readonly limits?: SupervisorLimits;
+}): ReadonlyArray<string> =>
+  containerArguments({
+    ...options,
+    limits: options.limits ?? SupervisorLimits.make({}),
+    mounts: [
+      ...options.sources.map(({ repository, directory }) =>
+        bindMount(directory, `${options.paths.workspace}/${repository}`, "readonly"),
+      ),
+      bindMount(options.relayDirectory, RELAY_DIRECTORY, "readonly"),
+    ],
+    main: [
+      "-e",
+      RELAY_SCRIPT,
+      String(MODEL_RELAY_PORT),
+      `${RELAY_DIRECTORY}/model.sock`,
+      String(RELAY_CHECK_INTERVAL_MILLIS),
+    ],
+  });
 
 /** Runs each command line with this host's shell, which enters the sandbox with `<runtime> exec`. */
 const localTransport = (
@@ -294,7 +272,7 @@ const localTransport = (
 export interface ContainerSandboxOptions {
   /** The orchestrator directory that holds each conversation's directory. */
   readonly root: string;
-  /** The image of each sandbox, with Node.js, a POSIX shell, and the harness CLIs. */
+  /** The image of each sandbox, with Node.js, a POSIX shell, tar, and the harness CLIs. */
   readonly image: ContainerImage;
   /** Image pulls have no timeout when omitted. */
   readonly imagePullTimeout?: Duration.Duration | undefined;
@@ -323,9 +301,40 @@ const credentialRoute = (
 const unavailableBecause = (action: string) => (error: { readonly message: string }) =>
   SupervisorUnavailable.make({ message: `Can't ${action}: ${error.message}` });
 
+/** Whether turns can run: the startup check runs `step`, passed, or refused turns for `reason`. */
+type Readiness =
+  | { readonly _tag: "Preparing"; readonly step: string }
+  | { readonly _tag: "Ready" }
+  | { readonly _tag: "Refused"; readonly reason: SupervisorUnavailable };
+
+const unavailableWhile = (readiness: Readiness): Option.Option<SupervisorUnavailable> => {
+  switch (readiness._tag) {
+    case "Preparing":
+      return Option.some(
+        SupervisorUnavailable.make({
+          message: `The supervisor isn't ready yet: usine is ${readiness.step}. Retry the turn later.`,
+        }),
+      );
+    case "Ready":
+      return Option.none();
+    case "Refused":
+      return Option.some(readiness.reason);
+  }
+};
+
+/** A turn whose sandbox runs, and whether a save of its state was tried. */
+interface OpenTurn {
+  readonly conversation: SandboxRequest["conversation"];
+  readonly key: ConversationKey;
+  readonly container: SandboxContainer;
+  readonly paths: ConversationPaths;
+  saveTried: boolean;
+}
+
 /**
  * Opens the sandboxes of supervisor turns on `runtime`, with the harness's model requests sent
- * through `openRoute`.
+ * through `openRoute`. Startup removes the containers and FUSE images that earlier processes left,
+ * then prepares the image and checks a container in the background; turns wait for that check.
  */
 const makeContainerSandbox = Effect.fn("SupervisorSandbox.make")(function* (
   options: Pick<ContainerSandboxOptions, "root" | "image" | "limits" | "imagePullTimeout">,
@@ -334,6 +343,7 @@ const makeContainerSandbox = Effect.fn("SupervisorSandbox.make")(function* (
 ) {
   const fs = yield* FileSystem.FileSystem;
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+  const homes = yield* ConversationHomes;
   const transport = localTransport(spawner);
   const limits = options.limits ?? SupervisorLimits.make({});
   const runtimeCommand = (args: ReadonlyArray<string>) =>
@@ -346,96 +356,22 @@ const makeContainerSandbox = Effect.fn("SupervisorSandbox.make")(function* (
       65536,
     ).pipe(Effect.timeout("30 seconds"));
 
-  /** Whether `path` exists as a directory, without following a symbolic link at `path`. */
-  const realDirectory = Effect.fn("SupervisorSandbox.realDirectory")(function* (path: string) {
-    const info = yield* fs.lstat(path).pipe(
-      Effect.asSome,
-      Effect.catchIf(
-        (error) => error.reason._tag === "NotFound",
-        () => Effect.succeedNone,
-      ),
+  /** The harness's gateway settings, pointed at the relay, for the conversation's home. */
+  const wiringOf = (harness: Harness, paths: ConversationPaths) =>
+    Option.map(
+      Option.flatMap(catalog.get(harness), ({ worker }) => worker.credential),
+      ({ protocol, gatewayPath, gateway }) => {
+        const rendered = gateway.render(
+          `http://127.0.0.1:${MODEL_RELAY_PORT}/${gatewayPath}`,
+          `${paths.home}/.${harness}`,
+        );
+        return {
+          protocol,
+          files: rendered.files,
+          environment: { ...rendered.environment, [rendered.tokenVariable]: SANDBOX_TOKEN },
+        };
+      },
     );
-    if (Option.isSome(info) && info.value.type === "Directory") return;
-    if (Option.isSome(info)) {
-      yield* Effect.logWarning("Replaced a file in a supervisor conversation with a directory", {
-        path,
-        type: info.value.type,
-      });
-      yield* fs.remove(path);
-    }
-    yield* fs.makeDirectory(path);
-  });
-
-  /**
-   * Makes each directory from `root` down to `path` a real directory, replacing a symbolic link or
-   * other file in its place. A sandbox can write under `root`, so nothing there is followed.
-   */
-  const confinedDirectory = Effect.fn("SupervisorSandbox.confinedDirectory")(function* (
-    root: string,
-    path: string,
-  ) {
-    let current = root;
-    for (const segment of path.slice(root.length + 1).split("/")) {
-      current = `${current}/${segment}`;
-      yield* realDirectory(current);
-    }
-  });
-
-  /**
-   * Writes `contents` to `path` under `root` without following a symbolic link: to a new file
-   * beside it, which then replaces whatever `path` is.
-   */
-  const writeConfinedFile = Effect.fn("SupervisorSandbox.writeConfinedFile")(function* (
-    root: string,
-    path: string,
-    contents: string,
-  ) {
-    const directory = path.slice(0, path.lastIndexOf("/"));
-    yield* confinedDirectory(root, directory);
-    const existing = yield* fs.lstat(path).pipe(
-      Effect.asSome,
-      Effect.catchIf(
-        (error) => error.reason._tag === "NotFound",
-        () => Effect.succeedNone,
-      ),
-    );
-    if (Option.isSome(existing) && existing.value.type !== "File") {
-      // A turn's shell left a directory, link, or other entry where the settings file belongs.
-      yield* Effect.logWarning(
-        "Replaced an entry in a supervisor conversation with a settings file",
-        {
-          path,
-          type: existing.value.type,
-        },
-      );
-      if (existing.value.type === "Directory") yield* fs.remove(path, { recursive: true });
-    }
-    const suffix = (yield* Random.nextIntBetween(0, 0xffffffff)).toString(16);
-    const staged = `${path}.usine-${suffix}`;
-    // `wx` creates the file and fails on any existing entry, including a symbolic link.
-    yield* fs.writeFileString(staged, contents, { flag: "wx" });
-    yield* fs.rename(staged, path);
-  });
-
-  /** Writes the harness's gateway settings, pointed at the relay, into the conversation's home. */
-  const writeWiring = Effect.fn("SupervisorSandbox.writeWiring")(function* (
-    harness: Harness,
-    paths: ConversationPaths,
-  ) {
-    const credential = Option.flatMap(catalog.get(harness), ({ worker }) => worker.credential);
-    if (Option.isNone(credential)) return Option.none();
-    const { protocol, gatewayPath, gateway } = credential.value;
-    const rendered = gateway.render(
-      `http://127.0.0.1:${MODEL_RELAY_PORT}/${gatewayPath}`,
-      `${paths.home}/.${harness}`,
-    );
-    for (const [path, contents] of rendered.files)
-      yield* writeConfinedFile(paths.root, path, contents);
-    return Option.some({
-      protocol,
-      environment: { ...rendered.environment, [rendered.tokenVariable]: SANDBOX_TOKEN },
-    });
-  });
 
   const serveRelay = Effect.fn("SupervisorSandbox.serveRelay")(function* (
     socket: string,
@@ -500,6 +436,30 @@ const makeContainerSandbox = Effect.fn("SupervisorSandbox.make")(function* (
       ),
     );
 
+  /** Fails unless the runtime applied the configured CPU, memory, swap and PID limits to `name`. */
+  const verifyLimits = Effect.fn("SupervisorSandbox.verifyLimits")(function* (name: string) {
+    const enforced = yield* runtimeCommand([
+      "exec",
+      name,
+      "sh",
+      "-ec",
+      CONTAINER_LIMITS_SCRIPT,
+      "sh",
+      String(limits.cpus),
+      String(limits.memoryMib * 1024 ** 2),
+      String(limits.pids),
+    ]).pipe(Effect.mapError(unavailableBecause("verify supervisor resource limits")));
+    if (enforced.exitCode === 0) return;
+    yield* Effect.logWarning("The supervisor runtime did not enforce resource limits", {
+      container: name,
+      runtime: runtime.runtime,
+    });
+    return yield* SupervisorUnavailable.make({
+      message:
+        "The runtime did not enforce supervisor CPU, memory, zero-swap and PID limits; check cgroup v2 delegation",
+    });
+  });
+
   const listContainers = (conversation?: string) =>
     runtimeCommand([
       "ps",
@@ -551,22 +511,129 @@ const makeContainerSandbox = Effect.fn("SupervisorSandbox.make")(function* (
       message: "Supervisor containers from an earlier process remain; refusing new turns",
     });
   }
-  yield* checkConversationStorage(options.root);
-  const imageReady = yield* prepareImage(
-    spawner,
-    runtime.runtime,
-    options.image,
-    Option.fromUndefinedOr(options.imagePullTimeout),
-  ).pipe(
-    Effect.tapError((error) =>
-      Effect.logWarning("Supervisor image preparation failed; retrying in one minute", {
-        image: options.image,
+  yield* removeFuseStorage(options.root).pipe(
+    Effect.catch((error) =>
+      Effect.logWarning("Could not look for supervisor storage from an earlier version", {
+        root: options.root,
         message: error.message,
       }),
     ),
-    Effect.retry({ schedule: Schedule.spaced("1 minute") }),
-    Effect.forkScoped,
   );
+
+  /**
+   * Starts a container with a turn's limits and in-memory home, and copies a home into it and back
+   * out, so that a host problem fails this check and not a member's turn.
+   */
+  const checkContainer = Effect.fn("SupervisorSandbox.checkContainer")(
+    function* () {
+      const paths = conversationPaths(`${options.root}/startup-check`);
+      yield* fs
+        .makeDirectory(paths.workspace, { recursive: true })
+        .pipe(Effect.mapError(unavailableBecause("create the startup check's directory")));
+      const suffix = (yield* Random.nextIntBetween(0, 0xffffffff)).toString(16);
+      const container = { runtime: runtime.runtime, name: `usine-supervisor-check-${suffix}` };
+      yield* Effect.addFinalizer(() => cleanup(CHECK_CONVERSATION).pipe(Effect.asVoid));
+      yield* startContainer(
+        container.name,
+        containerArguments({
+          name: container.name,
+          root: options.root,
+          conversation: CHECK_CONVERSATION,
+          runtime,
+          image: options.image,
+          paths,
+          limits,
+          mounts: [],
+          main: ["-e", IDLE_SCRIPT],
+        }),
+      );
+      yield* verifyLimits(container.name);
+      yield* restoreHome(spawner, container, paths.root, Option.none(), [
+        [`${paths.home}/check`, "usine startup check\n"],
+      ]);
+      const archived = yield* Stream.runCollect(
+        archiveHome(spawner, container, paths.root, limits.conversationSizeMib),
+      );
+      yield* restoreHome(
+        spawner,
+        container,
+        paths.root,
+        Option.some(Stream.fromIterable(archived)),
+        [],
+      );
+    },
+    Effect.scoped,
+    Effect.timeoutOrElse({
+      duration: CHECK_TIMEOUT,
+      orElse: () =>
+        Effect.fail(
+          SupervisorUnavailable.make({
+            message: `the check didn't finish within ${CHECK_TIMEOUT}`,
+          }),
+        ),
+    }),
+    Effect.catch((error) =>
+      Effect.gen(function* () {
+        const rootlessPodman = runtime.runtime === "podman" && runtime.rootless;
+        return yield* SupervisorUnavailable.make({
+          message:
+            rootlessPodman && (yield* noNewPrivileges)
+              ? `Supervisor sessions run in a container, and ${ROOTLESS_PODMAN_REFUSAL}. The startup check failed: ${error.message}`
+              : `The supervisor's startup check failed: ${error.message}`,
+        });
+      }),
+    ),
+  );
+
+  const readiness = yield* SubscriptionRef.make<Readiness>({
+    _tag: "Preparing",
+    step: "preparing the supervisor image",
+  });
+  yield* Effect.gen(function* () {
+    yield* prepareImage(
+      spawner,
+      runtime.runtime,
+      options.image,
+      Option.fromUndefinedOr(options.imagePullTimeout),
+    ).pipe(
+      Effect.tapError((error) =>
+        Effect.logWarning("Supervisor image preparation failed; retrying in one minute", {
+          image: options.image,
+          message: error.message,
+        }).pipe(
+          Effect.andThen(
+            SubscriptionRef.set(readiness, {
+              _tag: "Preparing",
+              step: `preparing the supervisor image, which failed and is retried every minute (${error.message})`,
+            }),
+          ),
+        ),
+      ),
+      Effect.retry({ schedule: Schedule.spaced("1 minute") }),
+    );
+    yield* SubscriptionRef.set(readiness, {
+      _tag: "Preparing",
+      step: "checking a test container",
+    });
+    const checked = yield* checkContainer().pipe(Effect.result);
+    if (Result.isFailure(checked)) {
+      yield* Effect.logWarning(
+        "The supervisor's startup check failed; fix the cause and restart usine",
+        { runtime: runtime.runtime, message: checked.failure.message },
+      );
+      return yield* SubscriptionRef.set(readiness, { _tag: "Refused", reason: checked.failure });
+    }
+    yield* Effect.logInfo("The supervisor's startup check passed", { runtime: runtime.runtime });
+    yield* SubscriptionRef.set(readiness, { _tag: "Ready" });
+  }).pipe(Effect.forkScoped);
+
+  const unavailable = SubscriptionRef.get(readiness).pipe(Effect.map(unavailableWhile));
+  const checked = SubscriptionRef.changes(readiness).pipe(
+    Stream.filter((state) => state._tag !== "Preparing"),
+    Stream.runHead,
+    Effect.andThen(unavailable),
+  );
+
   const running = new Map<string, "active" | "cleanup failed">();
   const holdConversation = (conversation: string, directory: string) =>
     Effect.acquireRelease(
@@ -601,30 +668,80 @@ const makeContainerSandbox = Effect.fn("SupervisorSandbox.make")(function* (
         ),
     );
 
-  return Effect.fn("SupervisorSandbox.open")(function* (request: SandboxRequest) {
+  /** The turns whose sandboxes run, by container name. */
+  const turns = new Map<string, OpenTurn>();
+
+  /**
+   * Saves the home of `turn` from its sandbox, then checks the files that the orchestrator's own
+   * harness process wrote for the conversation.
+   */
+  const saveTurn = Effect.fn("SupervisorSandbox.save")(function* (turn: OpenTurn) {
+    yield* Effect.annotateCurrentSpan({
+      conversation: turn.conversation,
+      container: turn.container.name,
+    });
+    turn.saveTried = true;
+    yield* homes
+      .save(
+        turn.key,
+        archiveHome(spawner, turn.container, turn.paths.root, limits.conversationSizeMib),
+      )
+      .pipe(
+        Effect.mapError((error) =>
+          error._tag === "HomeStoreError"
+            ? SupervisorUnavailable.make({
+                message: `Can't save the conversation's home: ${error.message}`,
+              })
+            : error,
+        ),
+        Effect.timeoutOrElse({
+          duration: SAVE_TIMEOUT,
+          orElse: () =>
+            Effect.fail(
+              SupervisorUnavailable.make({
+                message: `Can't save the conversation's home: the copy didn't finish within ${SAVE_TIMEOUT}`,
+              }),
+            ),
+        }),
+      );
+    yield* checkWorkspaceSize(fs, turn.paths.workspace, limits);
+    yield* Effect.logInfo("Saved a supervisor conversation", {
+      conversation: turn.conversation,
+      container: turn.container.name,
+    });
+  });
+
+  const save = (seat: SupervisorSeat) =>
+    Option.match(Option.fromUndefinedOr(turns.get(seat.host.container.name)), {
+      onNone: () =>
+        Effect.fail(
+          SupervisorUnavailable.make({
+            message: "Can't save the conversation: its turn's sandbox is closed",
+          }),
+        ),
+      onSome: saveTurn,
+    });
+
+  const open = Effect.fn("SupervisorSandbox.open")(function* (request: SandboxRequest) {
     yield* Effect.annotateCurrentSpan({
       conversation: request.conversation,
       harness: request.harness,
       sources: request.sources.length,
     });
-    yield* Fiber.join(imageReady).pipe(
-      Effect.timeout("30 seconds"),
-      Effect.mapError(() =>
-        SupervisorUnavailable.make({
-          message: "The supervisor image is still being prepared; retry the turn later",
-        }),
-      ),
-      Effect.tapError((error) =>
-        Effect.logWarning(error.message, {
-          conversation: request.conversation,
-          image: options.image,
-        }),
-      ),
+    const notReady = yield* checked.pipe(
+      Effect.timeoutOrElse({ duration: READY_TIMEOUT, orElse: () => unavailable }),
     );
-    const segment = directoryName(request.conversation);
-    const root = `${options.root}/conversations/${segment}`;
+    if (Option.isSome(notReady)) {
+      yield* Effect.logWarning("Supervisor turn refused: the sandbox isn't ready", {
+        conversation: request.conversation,
+        reason: notReady.value.message,
+      });
+      return yield* notReady.value;
+    }
+    const key = conversationKey(request.conversation);
+    const paths = conversationPaths(`${options.root}/conversations/${key}`);
     // No sandbox of the conversation writes to its directory while this turn prepares it.
-    yield* holdConversation(request.conversation, root);
+    yield* holdConversation(request.conversation, paths.root);
     if ((yield* listContainers(request.conversation)).length !== 0) {
       yield* Effect.logWarning("A supervisor container remains; refusing a new turn", {
         conversation: request.conversation,
@@ -633,30 +750,19 @@ const makeContainerSandbox = Effect.fn("SupervisorSandbox.make")(function* (
         message: "A supervisor container remains for this conversation; refusing a new turn",
       });
     }
-    yield* mountConversation(fs, spawner, options.root, segment, limits);
-    const paths: ConversationPaths = { root, home: `${root}/home`, workspace: `${root}/workspace` };
     // The workspace, and the mount points of the sources in it, exist before they're mounted, even
     // for a turn without sources: Podman refuses a missing mount source, and Docker creates it as
     // its daemon's user.
-    yield* fs
-      .makeDirectory(root, { recursive: true })
-      .pipe(
-        Effect.andThen(
-          Effect.forEach(
-            [
-              paths.home,
-              paths.workspace,
-              ...request.sources.map(({ repository }) => `${paths.workspace}/${repository}`),
-            ],
-            (directory) => confinedDirectory(root, directory),
-            { discard: true },
-          ),
-        ),
-        Effect.mapError(unavailableBecause("create the conversation's directories")),
-      );
-    const wiring = yield* writeWiring(request.harness, paths).pipe(
-      Effect.mapError(unavailableBecause("write the harness's model settings")),
-    );
+    yield* Effect.forEach(
+      [
+        paths.workspace,
+        ...request.sources.map(({ repository }) => `${paths.workspace}/${repository}`),
+      ],
+      (directory) => fs.makeDirectory(directory, { recursive: true }),
+      { discard: true },
+    ).pipe(Effect.mapError(unavailableBecause("create the conversation's directories")));
+    const written = yield* checkWorkspaceSize(fs, paths.workspace, limits);
+    const wiring = wiringOf(request.harness, paths);
     const route = yield* openRoute.pipe(
       Effect.mapError(unavailableBecause("open the instance's model route")),
     );
@@ -672,12 +778,15 @@ const makeContainerSandbox = Effect.fn("SupervisorSandbox.make")(function* (
       Effect.mapError(unavailableBecause("serve the model relay")),
     );
     const suffix = (yield* Random.nextIntBetween(0, 0xffffffff)).toString(16);
-    const name = `usine-supervisor-${segment.slice(0, 40)}-${suffix}`;
+    const container = {
+      runtime: runtime.runtime,
+      name: `usine-supervisor-${key.slice(0, 40)}-${suffix}`,
+    };
     yield* Effect.addFinalizer(() => cleanup(request.conversation).pipe(Effect.asVoid));
     yield* startContainer(
-      name,
+      container.name,
       sandboxRunArguments({
-        name,
+        name: container.name,
         root: options.root,
         conversation: request.conversation,
         runtime,
@@ -688,36 +797,44 @@ const makeContainerSandbox = Effect.fn("SupervisorSandbox.make")(function* (
         limits,
       }),
     );
-    yield* awaitRelay(name);
-    const enforced = yield* runtimeCommand([
-      "exec",
-      name,
-      "sh",
-      "-ec",
-      CONTAINER_LIMITS_SCRIPT,
-      "sh",
-      String(limits.cpus),
-      String(limits.memoryMib * 1024 ** 2),
-      String(limits.pids),
-    ]).pipe(Effect.mapError(unavailableBecause("verify supervisor resource limits")));
-    if (enforced.exitCode !== 0) {
-      yield* Effect.logWarning("The supervisor runtime did not enforce resource limits", {
-        conversation: request.conversation,
-        container: name,
-        runtime: runtime.runtime,
-      });
-      return yield* SupervisorUnavailable.make({
-        message:
-          "The runtime did not enforce supervisor CPU, memory, zero-swap and PID limits; check cgroup v2 delegation",
-      });
-    }
+    yield* awaitRelay(container.name);
+    yield* verifyLimits(container.name);
+    const saved = yield* homes
+      .load(key)
+      .pipe(Effect.mapError(unavailableBecause("read the conversation's saved home")));
+    yield* restoreHome(
+      spawner,
+      container,
+      paths.root,
+      saved,
+      Option.match(wiring, { onNone: () => [], onSome: ({ files }) => files }),
+    );
+    const turn: OpenTurn = {
+      conversation: request.conversation,
+      key,
+      container,
+      paths,
+      saveTried: false,
+    };
+    turns.set(container.name, turn);
+    // Runs before the container's removal, which the finalizers added earlier do.
+    yield* Effect.addFinalizer(() =>
+      Effect.gen(function* () {
+        turns.delete(container.name);
+        if (turn.saveTried) return;
+        yield* saveTurn(turn).pipe(
+          Effect.catch((error) =>
+            Effect.logWarning("Could not save a supervisor conversation at the end of its turn", {
+              conversation: request.conversation,
+              message: error.message,
+            }),
+          ),
+        );
+      }),
+    );
     return SupervisorSeat.make({
       host: yield* Schema.decodeEffect(SupervisorSeat.fields.host)(
-        ExecShell.make({
-          transport,
-          destination: name,
-          container: { runtime: runtime.runtime, name },
-        }),
+        ExecShell.make({ transport, destination: container.name, container }),
       ).pipe(Effect.mapError(unavailableBecause("construct the supervisor seat"))),
       worker: WorkerName.make("supervisor"),
       protocolFrameMib: limits.protocolFrameMib,
@@ -727,8 +844,19 @@ const makeContainerSandbox = Effect.fn("SupervisorSandbox.make")(function* (
         onSome: ({ environment }) => environment,
       }),
       credential,
+      restored: Option.isSome(saved) || written > 0,
     });
   });
+
+  return { unavailable, checked, open, save } satisfies SupervisorSandboxService;
+});
+
+/** A sandbox on which every turn fails with `reason`. */
+const refusing = (reason: SupervisorUnavailable): SupervisorSandboxService => ({
+  unavailable: Effect.succeedSome(reason),
+  checked: Effect.succeedSome(reason),
+  open: () => Effect.fail(reason),
+  save: () => Effect.fail(reason),
 });
 
 /**
@@ -736,14 +864,16 @@ const makeContainerSandbox = Effect.fn("SupervisorSandbox.make")(function* (
  * The container has no network: a relay inside it forwards the harness's model requests over a
  * socket to the orchestrator, which sends them through the instance's model route with the
  * instance's credential. Each repository's source is mounted read-only under the working
- * directory, and only the conversation's own directory is writable; no instance file is mounted.
- * The conversation's directory, with the harness's saved sessions, stays after the turn. Without
- * a container runtime or a model route, every turn fails with the reason.
+ * directory. The harness's home is an in-memory filesystem of `conversation_size_mib`, which each
+ * turn restores from `ConversationHomes` and saves back when it ends; no instance file is
+ * mounted. Without a container runtime, a model route, or limits that leave the harness memory,
+ * every turn fails with the reason.
  */
 export const containerSandboxLayer = (options: ContainerSandboxOptions) =>
   Layer.effect(
     SupervisorSandbox,
     Effect.gen(function* () {
+      const limits = options.limits ?? SupervisorLimits.make({});
       const detected = yield* detectSandboxRuntime(options.runtime);
       const available = Result.flatMap(detected, (runtime) =>
         Option.match(options.route, {
@@ -754,7 +884,11 @@ export const containerSandboxLayer = (options: ContainerSandboxOptions) =>
                   "Supervisor sessions reach the model through the instance's gateway, and no worker gateway is configured",
               }),
             ),
-          onSome: (route) => Result.succeed({ runtime, route }),
+          onSome: (route) =>
+            Option.match(memoryShortfall(limits), {
+              onNone: () => Result.succeed({ runtime, route }),
+              onSome: (message) => Result.fail(SupervisorUnavailable.make({ message })),
+            }),
         }),
       );
       if (Result.isFailure(available)) {
@@ -762,10 +896,7 @@ export const containerSandboxLayer = (options: ContainerSandboxOptions) =>
         yield* Effect.logInfo("Supervisor sessions are unavailable on this orchestrator", {
           reason: reason.message,
         });
-        return {
-          unavailable: Option.some(reason),
-          open: () => Effect.fail(reason),
-        } satisfies SupervisorSandboxService;
+        return refusing(reason);
       }
       const { runtime, route } = available.success;
       const prepared = yield* makeContainerSandbox(options, runtime, route).pipe(Effect.result);
@@ -773,14 +904,8 @@ export const containerSandboxLayer = (options: ContainerSandboxOptions) =>
         yield* Effect.logWarning("Supervisor sandbox preparation failed", {
           message: prepared.failure.message,
         });
-        return {
-          unavailable: Option.some(prepared.failure),
-          open: () => Effect.fail(prepared.failure),
-        } satisfies SupervisorSandboxService;
+        return refusing(prepared.failure);
       }
-      return {
-        unavailable: Option.none(),
-        open: prepared.success,
-      } satisfies SupervisorSandboxService;
+      return prepared.success;
     }),
   );

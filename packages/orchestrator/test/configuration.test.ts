@@ -657,8 +657,10 @@ describe("Configuration view", () => {
           : ([path, content] as const),
       );
       const available = Layer.succeed(SupervisorSandbox)({
-        unavailable: Option.none(),
+        unavailable: Effect.succeedNone,
+        checked: Effect.succeedNone,
         open: () => Effect.die("the view opens no sandbox"),
+        save: () => Effect.die("the view opens no sandbox"),
       });
       const view = yield* readConfigurationOf(codexFiles, available);
       const kept = Option.flatMap(catalog.get(Harness.make("codex")), ({ capabilities }) =>

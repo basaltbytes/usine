@@ -8,6 +8,7 @@ import { SupervisorLimits, WorkerName } from "@usine/core/worker";
 import { ATTEMPT_IMAGE } from "@usine/executor/ssh";
 import {
   containerSandboxLayer,
+  fileHomesLayer,
   makeSupervisorSources,
   type SupervisorSources,
 } from "@usine/executor/supervisor";
@@ -18,23 +19,27 @@ import { CurrentInstance } from "./current-instance/current-instance.ts";
 import { instanceModelRoute } from "./parent-models.ts";
 
 /**
- * Logs a warning, with the reason, when the instance configures a supervisor that `sandbox` can't
- * run sessions for. The orchestrator starts either way.
+ * Waits for `sandbox`'s startup check, then logs a warning, with the reason, when the instance
+ * configures a supervisor that `sandbox` can't run sessions for. The orchestrator starts either
+ * way.
  */
 export const reportSupervisorAvailability = Effect.fn("Supervisor.reportAvailability")(function* (
   configured: boolean,
   sandbox: SupervisorSandboxService,
 ) {
-  if (!configured || Option.isNone(sandbox.unavailable)) return;
+  if (!configured) return;
+  const unavailable = yield* sandbox.checked;
+  if (Option.isNone(unavailable)) return;
   yield* Effect.logWarning("The configured supervisor is unavailable on this orchestrator", {
-    reason: sandbox.unavailable.value.message,
+    reason: unavailable.value.message,
   });
 });
 
 /**
  * The orchestrator's supervisor sandbox: a container per turn on this host, with the attempt
- * image, whose model requests go through the instance's gateway route. Builds without a container
- * runtime or a gateway, and then logs the reason when the instance configures a supervisor.
+ * image, whose model requests go through the instance's gateway route, and the conversations'
+ * saved homes under `.usine/supervisor/homes`. Builds without a container runtime or a gateway,
+ * and then logs the reason when the instance configures a supervisor.
  */
 export const supervisorSandboxLayer = (
   instanceDirectory: InstanceDirectory,
@@ -44,8 +49,9 @@ export const supervisorSandboxLayer = (
     Effect.gen(function* () {
       const startup = yield* (yield* CurrentInstance).get;
       const route = yield* instanceModelRoute(startup, WorkerName.make(`supervisor-${instanceId}`));
+      const root = `${instanceDirectory}/.usine/supervisor`;
       return containerSandboxLayer({
-        root: `${instanceDirectory}/.usine/supervisor`,
+        root,
         image: ATTEMPT_IMAGE,
         imagePullTimeout: startup.config.settings.supervisorImagePullTimeoutMinutes.pipe(
           Option.map(Duration.minutes),
@@ -57,11 +63,12 @@ export const supervisorSandboxLayer = (
         runtime: Option.none(),
         route,
       }).pipe(
+        Layer.provide(fileHomesLayer(`${root}/homes`)),
         Layer.tap((context) =>
           reportSupervisorAvailability(
             Option.isSome(startup.config.settings.supervisor),
             Context.get(context, SupervisorSandbox),
-          ),
+          ).pipe(Effect.forkScoped({ startImmediately: true })),
         ),
       );
     }),

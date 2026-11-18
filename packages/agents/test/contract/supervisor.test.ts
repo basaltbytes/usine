@@ -97,6 +97,7 @@ const seat = SupervisorSeat.make({
     { container },
   ),
   worker: WorkerName.make("orchestrator"),
+  restored: true,
   protocolFrameMib: MessageSizeMib.make(12),
   cwd: WorkingDirectory.make("/tmp"),
   environment: {},

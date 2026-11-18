@@ -1,223 +1,270 @@
 import { SupervisorUnavailable } from "@usine/agents/supervisor";
 import type { SupervisorLimits } from "@usine/core/worker";
-import { Effect, Fiber, FileSystem, Ref, Schedule, Stream } from "effect";
-import { ChildProcess, ChildProcessSpawner } from "effect/process";
-import { collectCommand } from "../child-command.ts";
+import { Effect, Fiber, FileSystem, Option, Result, Stream } from "effect";
+import { ChildProcess, type ChildProcessSpawner } from "effect/process";
+import type { ContainerRuntime } from "../remote/runtime.ts";
 
-/** Mounts a preallocated filesystem, so a conversation cannot grow the instance's host filesystem. */
-export const mountConversation = Effect.fn("SupervisorSandbox.mountConversation")(
-  function* (
-    fs: FileSystem.FileSystem,
-    spawner: ChildProcessSpawner.ChildProcessSpawner["Service"],
-    root: string,
-    name: string,
-    limits: SupervisorLimits,
-  ) {
-    const directory = `${root}/conversations/${name}`;
-    const image = `${root}/disks/${name}.ext4`;
-    const bytes = limits.conversationSizeMib * 1024 ** 2;
-    yield* Effect.annotateCurrentSpan({ directory, bytes });
-    const run = (command: string, args: ReadonlyArray<string>, accepted = [0]) =>
-      collectCommand(spawner, "prepare", command, args, { forceKillAfter: "2 seconds" }, 8192).pipe(
-        Effect.timeout("30 seconds"),
-        Effect.filterOrFail(
-          (result) => accepted.includes(result.exitCode),
-          (result) =>
-            SupervisorUnavailable.make({ message: `${command} failed: ${result.stderr.trim()}` }),
-        ),
+/** A running sandbox container. */
+export interface SandboxContainer {
+  readonly runtime: ContainerRuntime;
+  readonly name: string;
+}
+
+/** How long one copy of a home into or out of a sandbox may take. */
+const TRANSFER_TIMEOUT = "2 minutes";
+
+const MIB = 1024 ** 2;
+
+/** The first non-blank line of `text`, which names the cause in tar and runtime errors. */
+const firstLine = (text: string) =>
+  text
+    .split("\n")
+    .map((line) => line.trim())
+    .find((line) => line !== "") ?? "";
+
+/**
+ * Returns why `limits` leave the harness too little memory, or `None`. The home and `/tmp` are
+ * in-memory filesystems, so their files count against the container's memory limit; together
+ * they may take at most half of it.
+ */
+export const memoryShortfall = (limits: SupervisorLimits): Option.Option<string> =>
+  (limits.conversationSizeMib + limits.tmpfsSizeMib) * 2 > limits.memoryMib
+    ? Option.some(
+        `supervisor_limits.conversation_size_mib (${limits.conversationSizeMib}) plus tmpfs_size_mib (${limits.tmpfsSizeMib}) must be at most half of memory_mib (${limits.memoryMib}), because the files in a turn's home and /tmp count against its memory`,
+      )
+    : Option.none();
+
+/** Passes `stream` on until it exceeds `limit` bytes, and then fails with `exceeded()`. */
+export const capBytes =
+  <E2>(limit: number, exceeded: () => E2) =>
+  <E>(stream: Stream.Stream<Uint8Array, E>): Stream.Stream<Uint8Array, E | E2> =>
+    Stream.suspend(() => {
+      let bytes = 0;
+      return stream.pipe(
+        Stream.mapEffect((chunk) => {
+          bytes += chunk.byteLength;
+          return bytes > limit ? Effect.fail(exceeded()) : Effect.succeed(chunk);
+        }),
       );
-    yield* fs.makeDirectory(`${root}/disks`, { recursive: true });
-    yield* fs.makeDirectory(directory, { recursive: true });
-    const mounted = yield* run("mountpoint", ["-q", directory], [0, 32]);
-    if (mounted.exitCode === 0) {
-      yield* Effect.logInfo("Unmounting a previous supervisor filesystem before a turn", {
+    });
+
+/** The bytes in the regular files under `path`, without following links; 0 when it is absent. */
+const directoryBytes = Effect.fn("SupervisorStorage.directoryBytes")(function* (
+  fs: FileSystem.FileSystem,
+  path: string,
+) {
+  if (!(yield* fs.exists(path))) return 0;
+  let bytes = 0;
+  for (const entry of yield* fs.readDirectory(path, { recursive: true })) {
+    const info = yield* fs.lstat(`${path}/${entry}`);
+    if (info.type === "File") bytes += Number(info.size);
+  }
+  return bytes;
+});
+
+/**
+ * Fails when the files that the orchestrator's own harness process wrote in the conversation's
+ * working directory exceed `conversation_size_mib`.
+ */
+export const checkWorkspaceSize = Effect.fn("SupervisorStorage.checkWorkspaceSize")(function* (
+  fs: FileSystem.FileSystem,
+  workspace: string,
+  limits: SupervisorLimits,
+) {
+  const bytes = yield* directoryBytes(fs, workspace).pipe(
+    Effect.mapError((error) =>
+      SupervisorUnavailable.make({
+        message: `Can't measure the conversation's saved sessions: ${error.message}`,
+      }),
+    ),
+  );
+  if (bytes <= limits.conversationSizeMib * MIB) return bytes;
+  yield* Effect.logWarning("A supervisor conversation's saved sessions exceed their limit", {
+    workspace,
+    bytes,
+    limitMib: limits.conversationSizeMib,
+  });
+  return yield* SupervisorUnavailable.make({
+    message: `The conversation's saved sessions use ${Math.ceil(bytes / MIB)} MiB, more than supervisor_limits.conversation_size_mib (${limits.conversationSizeMib} MiB). Start a new conversation, or raise the limit and restart usine.`,
+  });
+});
+
+/**
+ * Removes the conversation images of the FUSE storage that earlier versions used, with the
+ * directories they were mounted at, and logs each removal. A conversation without saved state
+ * starts a new harness session at its next turn.
+ */
+export const removeFuseStorage = Effect.fn("SupervisorStorage.removeFuseStorage")(function* (
+  root: string,
+) {
+  const fs = yield* FileSystem.FileSystem;
+  const disks = `${root}/disks`;
+  if (!(yield* fs.exists(disks))) return;
+  for (const file of yield* fs.readDirectory(disks)) {
+    const key = /^([0-9a-f]{64})\.ext4(\.creating)?$/u.exec(file)?.[1];
+    if (key === undefined) continue;
+    const image = `${disks}/${file}`;
+    const directory = `${root}/conversations/${key}`;
+    const removed = yield* fs
+      .remove(image, { force: true })
+      .pipe(Effect.andThen(fs.remove(directory, { recursive: true, force: true })), Effect.result);
+    if (Result.isSuccess(removed))
+      yield* Effect.logInfo("Removed a supervisor conversation image from an earlier version", {
+        image,
         directory,
       });
-      yield* run("fusermount", ["-u", directory]);
-    }
-    if (!(yield* fs.exists(image))) {
-      const staging = `${image}.creating`;
-      yield* fs.remove(staging, { force: true });
-      yield* Effect.gen(function* () {
-        yield* fs.writeFile(staging, new Uint8Array(), { flag: "wx", mode: 0o600 });
-        yield* run("fallocate", ["-l", String(bytes), staging]);
-        yield* run("mkfs.ext4", [
-          "-q",
-          "-F",
-          "-E",
-          `nodiscard,root_owner=${process.getuid?.() ?? 0}:${process.getgid?.() ?? 0}`,
-          "-d",
-          directory,
-          staging,
-        ]);
-        yield* fs.rename(staging, image);
-      }).pipe(
-        Effect.ensuring(
-          fs.remove(staging, { force: true }).pipe(
-            Effect.catch((error) =>
-              Effect.logError("Could not remove an incomplete supervisor filesystem", {
-                staging,
-                message: error.message,
-              }),
-            ),
-          ),
+    else
+      yield* Effect.logWarning(
+        "Could not remove a supervisor conversation image from an earlier version",
+        { image, directory, message: removed.failure.message },
+      );
+  }
+  if ((yield* fs.readDirectory(disks)).length === 0) yield* fs.remove(disks, { recursive: true });
+});
+
+/**
+ * Runs `args` in `container` with `<runtime> exec`, feeding `stdin` to it, and returns its stdout
+ * as text. Fails with the command's first stderr line when it exits with another code than 0, and
+ * otherwise with the error of `stdin`.
+ */
+const execIn = <E extends { readonly message: string }>(
+  spawner: ChildProcessSpawner.ChildProcessSpawner["Service"],
+  container: SandboxContainer,
+  action: string,
+  args: ReadonlyArray<string>,
+  stdin: Option.Option<Stream.Stream<Uint8Array, E>>,
+) =>
+  Effect.gen(function* () {
+    const handle = yield* spawner.spawn(
+      ChildProcess.make(
+        container.runtime,
+        ["exec", ...(Option.isSome(stdin) ? ["--interactive"] : []), container.name, ...args],
+        { forceKillAfter: "2 seconds" },
+      ),
+    );
+    const fed = yield* Option.match(stdin, {
+      onNone: () => Effect.void,
+      onSome: (input) => Stream.run(input, handle.stdin),
+    }).pipe(Effect.result, Effect.forkScoped);
+    const [stdout, stderr, exitCode] = yield* Effect.all(
+      [
+        handle.stdout.pipe(Stream.decodeText(), Stream.mkString),
+        handle.stderr.pipe(Stream.decodeText(), Stream.mkString),
+        handle.exitCode,
+      ],
+      { concurrency: "unbounded" },
+    );
+    if (exitCode !== 0)
+      return yield* SupervisorUnavailable.make({
+        message: `Can't ${action}: ${firstLine(stderr) || `${args[0]} exited with code ${exitCode}`}`,
+      });
+    const input = yield* Fiber.join(fed);
+    if (Result.isFailure(input))
+      return yield* SupervisorUnavailable.make({
+        message: `Can't ${action}: ${input.failure.message}`,
+      });
+    return stdout;
+  }).pipe(
+    Effect.scoped,
+    Effect.timeout(TRANSFER_TIMEOUT),
+    Effect.mapError((error) =>
+      error._tag === "SupervisorUnavailable"
+        ? error
+        : SupervisorUnavailable.make({ message: `Can't ${action}: ${error.message}` }),
+    ),
+  );
+
+/**
+ * Prepares the home of a turn in `container`: extracts `archive`, the saved home, into `root`,
+ * creates `home` when there is none, and writes `files` into it, replacing any entry at their
+ * paths. `root` is the turn's in-memory filesystem.
+ */
+export const restoreHome = Effect.fn("SupervisorStorage.restoreHome")(function* <
+  E extends { readonly message: string },
+>(
+  spawner: ChildProcessSpawner.ChildProcessSpawner["Service"],
+  container: SandboxContainer,
+  root: string,
+  archive: Option.Option<Stream.Stream<Uint8Array, E>>,
+  files: ReadonlyArray<readonly [path: string, contents: string]>,
+) {
+  if (Option.isSome(archive))
+    yield* execIn(
+      spawner,
+      container,
+      "restore the conversation's saved home",
+      ["tar", "-x", "-f", "-", "-C", root],
+      archive,
+    );
+  yield* execIn(
+    spawner,
+    container,
+    "create the conversation's home",
+    ["mkdir", "-p", "--", `${root}/home`],
+    Option.none(),
+  );
+  const encoder = new TextEncoder();
+  for (const [path, contents] of files)
+    yield* execIn(
+      spawner,
+      container,
+      "write the harness's model settings",
+      ["sh", "-c", 'mkdir -p -- "${1%/*}" && rm -rf -- "$1" && cat > "$1"', "sh", path],
+      Option.some(Stream.make(encoder.encode(contents))),
+    );
+});
+
+/**
+ * The tar archive of `root/home` in `container`, which fails once it exceeds `limitMib` MiB, and at
+ * its end when tar fails.
+ */
+export const archiveHome = (
+  spawner: ChildProcessSpawner.ChildProcessSpawner["Service"],
+  container: SandboxContainer,
+  root: string,
+  limitMib: number,
+): Stream.Stream<Uint8Array, SupervisorUnavailable> =>
+  Stream.unwrap(
+    Effect.gen(function* () {
+      const handle = yield* spawner.spawn(
+        ChildProcess.make(
+          container.runtime,
+          ["exec", container.name, "tar", "-c", "-f", "-", "-C", root, "home"],
+          { forceKillAfter: "2 seconds" },
         ),
       );
-    }
-    const size = yield* fs.stat(image);
-    if (Number(size.size) !== bytes)
-      return yield* SupervisorUnavailable.make({
-        message:
-          "The existing conversation filesystem differs from conversation_size_mib; migrate it before changing the limit",
+      const stderr = yield* handle.stderr.pipe(
+        Stream.decodeText(),
+        Stream.runFold(
+          () => "",
+          (head, text) => (head + text).slice(0, 8192),
+        ),
+        Effect.forkScoped,
+      );
+      const ended = Effect.gen(function* () {
+        const exitCode = yield* handle.exitCode;
+        if (exitCode === 0) return;
+        const output = yield* Fiber.join(stderr);
+        const detail = firstLine(output);
+        return yield* SupervisorUnavailable.make({
+          message: `Can't save the conversation's home: ${detail || `tar exited with code ${exitCode}`}`,
+        });
       });
-    const checked = yield* run("e2fsck", ["-p", image], [0, 1]);
-    if (checked.exitCode === 1)
-      yield* Effect.logWarning("Repaired a supervisor conversation filesystem", { directory });
-    const mountedProcess = yield* spawner.spawn(
-      ChildProcess.make("fuse2fs", ["-f", "-o", "rw,nosuid,nodev,allow_other", image, directory], {
-        detached: false,
-        forceKillAfter: "2 seconds",
-      }),
-    );
-    const diagnostics = yield* Ref.make("");
-    const diagnosticsReader = yield* Stream.merge(
-      mountedProcess.stdout,
-      mountedProcess.stderr,
-    ).pipe(
-      Stream.decodeText(),
-      Stream.runForEach((text) => Ref.update(diagnostics, (tail) => (tail + text).slice(-8192))),
-      Effect.catch((error) =>
-        Effect.logWarning("Supervisor filesystem diagnostics stopped", {
-          directory,
-          message: error.message,
-        }),
-      ),
-      Effect.forkScoped,
-    );
-    yield* Effect.addFinalizer(() =>
-      run("fusermount", ["-u", directory]).pipe(
-        Effect.retry({ times: 2, schedule: Schedule.spaced("200 millis") }),
-        Effect.catch((error) =>
-          Effect.logError("Could not unmount a supervisor filesystem", {
-            directory,
-            message: error.message,
+      return handle.stdout.pipe(
+        capBytes(limitMib * MIB, () =>
+          SupervisorUnavailable.make({
+            message: `The conversation's home is larger than supervisor_limits.conversation_size_mib (${limitMib} MiB), so usine kept the state that the previous turn saved`,
           }),
         ),
-      ),
-    );
-    yield* run("mountpoint", ["-q", directory]).pipe(
-      Effect.retry({ schedule: Schedule.spaced("100 millis") }),
-      Effect.timeout("10 seconds"),
-      Effect.raceFirst(
-        mountedProcess.exitCode.pipe(
-          Effect.flatMap((code) =>
-            Effect.gen(function* () {
-              yield* Fiber.join(diagnosticsReader).pipe(
-                Effect.timeoutOrElse({
-                  duration: "1 second",
-                  orElse: () =>
-                    Effect.logWarning(
-                      "Supervisor filesystem diagnostics did not close after exit",
-                      {
-                        directory,
-                      },
-                    ),
-                }),
-              );
-              const detail = yield* Ref.get(diagnostics);
-              return yield* SupervisorUnavailable.make({
-                message: `fuse2fs exited with ${code}: ${detail.trim()}`,
-              });
-            }),
-          ),
-        ),
-      ),
-    );
-    yield* Effect.logInfo("Mounted a bounded supervisor filesystem", { directory, bytes });
-  },
-  (effect, _fs, _spawner, root, name) =>
-    effect.pipe(
-      Effect.mapError((error) =>
-        SupervisorUnavailable.make({
-          message: `Cannot mount the supervisor conversation filesystem: ${error.message}`,
-        }),
-      ),
-      Effect.tapError((error) =>
-        Effect.logWarning("Supervisor conversation mount refused", {
-          directory: `${root}/conversations/${name}`,
-          message: error.message,
-        }),
-      ),
-    ),
-);
-
-/** Checks the unprivileged filesystem tools before admitting supervisor turns. */
-export const checkConversationStorage = Effect.fn("SupervisorSandbox.checkStorage")(
-  function* (root: string) {
-    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-    const fs = yield* FileSystem.FileSystem;
-    for (const [command, flag] of [
-      ["fuse2fs", "-V"],
-      ["fusermount", "-V"],
-      ["mkfs.ext4", "-V"],
-      ["e2fsck", "-V"],
-      ["fallocate", "--version"],
-      ["mountpoint", "--version"],
-    ] as const) {
-      const result = yield* collectCommand(
-        spawner,
-        "preflight",
-        command,
-        [flag],
-        { forceKillAfter: "2 seconds" },
-        8192,
+        Stream.concat(Stream.drain(Stream.fromEffect(ended))),
       );
-      if (result.exitCode !== 0)
-        return yield* SupervisorUnavailable.make({
-          message: `Supervisor storage requires ${command}`,
-        });
-    }
-    const conversations = `${root}/conversations`;
-    if (yield* fs.exists(conversations)) {
-      for (const name of yield* fs.readDirectory(conversations)) {
-        if (!/^[0-9a-f]{64}$/u.test(name)) continue;
-        const directory = `${conversations}/${name}`;
-        const mounted = yield* collectCommand(
-          spawner,
-          "preflight",
-          "mountpoint",
-          ["-q", directory],
-          { forceKillAfter: "2 seconds" },
-          8192,
-        );
-        if (mounted.exitCode === 32) continue;
-        if (mounted.exitCode !== 0)
-          return yield* SupervisorUnavailable.make({
-            message: "Cannot inspect a previous supervisor mount",
-          });
-        const unmounted = yield* collectCommand(
-          spawner,
-          "preflight",
-          "fusermount",
-          ["-u", directory],
-          { forceKillAfter: "2 seconds" },
-          8192,
-        );
-        if (unmounted.exitCode !== 0)
-          return yield* SupervisorUnavailable.make({
-            message: `Cannot unmount a previous supervisor filesystem: ${unmounted.stderr.trim()}`,
-          });
-        yield* Effect.logInfo("Unmounted a previous supervisor filesystem", { directory });
-      }
-    }
-  },
-  (effect) =>
-    effect.pipe(
-      Effect.timeout("15 seconds"),
-      Effect.mapError((error) =>
-        SupervisorUnavailable.make({
-          message: `Supervisor storage requires fuse2fs, fusermount, e2fsprogs and fallocate: ${error.message}`,
-        }),
-      ),
+    }),
+  ).pipe(
+    Stream.mapError((error) =>
+      error._tag === "SupervisorUnavailable"
+        ? error
+        : SupervisorUnavailable.make({
+            message: `Can't save the conversation's home: ${error.message}`,
+          }),
     ),
-);
+  );
