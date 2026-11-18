@@ -154,6 +154,10 @@ export const makeSupervisorSources = Effect.fn("SupervisorSources.make")(functio
       [
         "-c",
         "transfer.fsckObjects=true",
+        "-c",
+        "gc.autoDetach=false",
+        "-c",
+        "maintenance.autoDetach=false",
         "--git-dir",
         cache,
         "fetch",

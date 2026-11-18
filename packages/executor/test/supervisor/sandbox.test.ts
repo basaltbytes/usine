@@ -767,6 +767,40 @@ describe("the supervisor's source", () => {
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
+  it.live("finishes automatic cache maintenance before preparation returns", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const native = yield* ChildProcessSpawner.ChildProcessSpawner;
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "usine-supervisor-" });
+      const origin = yield* originRepository();
+      const cache = `${root}/repos/${directoryName(repository)}.git`;
+      yield* git(root, "init", "--bare", "--quiet", cache);
+      yield* git(cache, "config", "gc.autoPackLimit", "1");
+      yield* git(cache, "config", "fetch.unpackLimit", "1");
+      const trace = `${root}/git.trace`;
+      const traced = ChildProcessSpawner.make((command) =>
+        native.spawn(ChildProcess.setEnv(command, { GIT_TRACE: trace })),
+      );
+      const sources = yield* makeSupervisorSources(root, origin.origin).pipe(
+        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, traced),
+      );
+
+      for (const round of [1, 2, 3]) {
+        yield* origin.commit(`round ${round}\n`);
+        yield* sources.prepare([repository]).pipe(Effect.scoped);
+        const packs = yield* fs.readDirectory(`${cache}/objects/pack`);
+        assert.lengthOf(
+          packs.filter((name) => name.endsWith(".pack")),
+          1,
+          "automatic maintenance consolidates the fetched packs before returning",
+        );
+      }
+      const commands = yield* fs.readFileString(trace);
+      assert.include(commands, "maintenance run --auto");
+      assert.notInclude(commands, "--detach", "maintenance stays inside the fetch process");
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
   it.live("keeps a tree while a turn holds it, however old, and removes it after", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
