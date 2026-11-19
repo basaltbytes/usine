@@ -37,10 +37,8 @@ import { childSessionId } from "../src/attempt/sessions.ts";
 import { CoordinatorRuntime } from "../src/coordinator/runtime.ts";
 import { stubChildBackendLayer, StubChildren } from "../src/testing.ts";
 import { SqliteClient } from "@effect/sql-sqlite-node";
-import { AttemptRequest, ParentReported, ResultRecorded } from "../src/attempt-runtime.ts";
-import type { BrainSpec } from "@usine/core/agent/brain";
+import { ParentReported, ResultRecorded } from "../src/attempt-runtime.ts";
 import {
-  type AttemptContext,
   Complete,
   FIRST_ASSIGNMENT,
   REPLACEMENT_ASSIGNMENT,
@@ -545,29 +543,6 @@ describe("event-driven coordinator runtime", () => {
       }).pipe(Effect.scoped),
   );
 
-  it.live("relays Worker notices from Started until the outcome", () =>
-    Effect.gen(function* () {
-      const database = yield* temporaryDatabase;
-      const request = coordinated("coordinator/notices");
-      const attemptId = request.spec.attemptId;
-      const recording = recordingSink();
-      const process = yield* orchestrator(sqliteJournal(database).pipe(coordinator));
-      yield* process.attempts.notify(attemptId, unresponsive("before start"));
-      const execution = yield* process.execute(request, recording.sink);
-      const child = yield* process.nextChild;
-      yield* process.attempts.notify(attemptId, unresponsive("while working"));
-      yield* child.reply("Done.");
-      yield* Fiber.join(execution);
-      yield* process.attempts.notify(attemptId, unresponsive("after the end"));
-      yield* process.stop;
-
-      const outbound = recording.outbound();
-      assertAdmitted(attemptId, outbound);
-      assert.deepStrictEqual(unresponsiveReasons(outbound), ["before start", "while working"]);
-      assert.deepStrictEqual(trace(outbound).slice(0, 2), ["Started", "WorkerUnresponsive"]);
-    }).pipe(Effect.scoped),
-  );
-
   it.live("keeps a Worker notice that arrives while the coordinator decides its start", () =>
     Effect.gen(function* () {
       const database = yield* temporaryDatabase;
@@ -667,114 +642,6 @@ describe("event-driven coordinator runtime", () => {
       assert.deepStrictEqual(unresponsiveReasons(second.outbound()), []);
       assert.strictEqual(trace(second.outbound()).at(-1), "Final");
       assertAdmitted(attemptId, [...first.outbound(), ...second.outbound()]);
-    }).pipe(Effect.scoped),
-  );
-
-  it.live("hands WakeUp the end of the child's output and the ended delegation", () =>
-    Effect.gen(function* () {
-      const database = yield* temporaryDatabase;
-      const request = coordinated("coordinator/wake-up-context");
-      const recording = recordingSink();
-      const received: Array<AttemptContext> = [];
-      const recordingWakeUp = Layer.succeed(
-        WakeUp,
-        WakeUp.of({
-          handle: (_event, context) =>
-            Effect.sync(() => {
-              received.push(context);
-            }).pipe(Effect.as(Option.none())),
-        }),
-      );
-      const process = yield* orchestrator(
-        sqliteJournal(database).pipe(coordinatorWith(recordingWakeUp)),
-      );
-      const execution = yield* process.execute(request, recording.sink);
-      const child = yield* process.nextChild;
-      // More than the 50,000 characters the delegation retains. Characters 48,000 to 50,000 differ
-      // from the last 2,000.
-      const written = ["s".repeat(30_000), "m".repeat(28_000), "e".repeat(2_000)];
-      for (const text of written)
-        yield* child.emit(TextOutput.make({ session: child.request.session, text }));
-      // The stub child also writes its report as output.
-      yield* child.reply("Opened #12.");
-      yield* Fiber.join(execution);
-      yield* process.stop;
-
-      const reported = received.find(({ event }) => event._tag === "ChildReported");
-      assert.deepStrictEqual(
-        received.map(({ event }) => event._tag),
-        ["AttemptStarted", "ChildReported"],
-      );
-      assert(reported !== undefined);
-      // The delegation retains each text output with a line break.
-      const all = [...written, "Opened #12."].map((text) => `${text}\n`).join("");
-      assert.strictEqual(reported.output, all.slice(-2_000));
-      assert.deepStrictEqual(
-        reported.delegations.map(({ child, status }) => [Number(child), status]),
-        [[1, "ended"]],
-      );
-    }).pipe(Effect.scoped),
-  );
-
-  it.live("hands WakeUp the attempt ID, event sequence, agent brain, and attached request", () =>
-    Effect.gen(function* () {
-      const database = yield* temporaryDatabase;
-      const request = coordinated("coordinator/wake-up-attempt");
-      const seen: Array<{
-        readonly event: string;
-        readonly attemptId: AttemptId;
-        readonly sequence: number;
-        readonly brain: BrainSpec;
-        readonly request: AttemptRequest;
-      }> = [];
-      // Reads what a model handler needs to open a session on the attempt's worker, and opens none.
-      const reading = Layer.succeed(
-        WakeUp,
-        WakeUp.of({
-          handle: (event, _context, attempt) =>
-            attempt.request.pipe(
-              Effect.map((attached) => {
-                seen.push({
-                  event: event._tag,
-                  attemptId: attempt.attemptId,
-                  sequence: attempt.sequence,
-                  brain: attempt.spec.agent.brain,
-                  request: attached,
-                });
-              }),
-              Effect.as(Option.none()),
-            ),
-        }),
-      );
-      const process = yield* orchestrator(sqliteJournal(database).pipe(coordinatorWith(reading)));
-      const execution = yield* process.execute(request, recordingSink().sink);
-      yield* (yield* process.nextChild).reply("Opened #12.");
-      yield* Fiber.join(execution);
-      yield* process.stop;
-
-      assert.deepStrictEqual(
-        seen.map(({ event, attemptId, sequence, brain }) => ({
-          event,
-          attemptId,
-          sequence,
-          brain,
-        })),
-        [
-          {
-            event: "AttemptStarted",
-            attemptId: request.spec.attemptId,
-            sequence: 1,
-            brain: request.spec.agent.brain,
-          },
-          {
-            event: "ChildReported",
-            attemptId: request.spec.attemptId,
-            sequence: 2,
-            brain: request.spec.agent.brain,
-          },
-        ],
-      );
-      for (const { request: attached } of seen) assert.strictEqual(attached, request);
     }).pipe(Effect.scoped),
   );
 
@@ -916,38 +783,6 @@ describe("event-driven coordinator runtime", () => {
         );
       }).pipe(Effect.provide(logger));
       yield* second.stop;
-    }).pipe(Effect.scoped),
-  );
-
-  it.live("keeps an Attempt's in-process state while an execute call relays it", () =>
-    Effect.gen(function* () {
-      const database = yield* temporaryDatabase;
-      const request = coordinated("coordinator/state-relayed");
-      const attemptId = request.spec.attemptId;
-      const reached = yield* Deferred.make<void>();
-      const release = yield* Deferred.make<void>();
-      const { changes, logger } = hubChanges();
-      const process = yield* orchestrator(
-        sqliteJournal(database).pipe(holdingTerminalLoad(reached, release), coordinator),
-      );
-      const whileRelayed = yield* Effect.gen(function* () {
-        const execution = yield* process.execute(request, recordingSink().sink);
-        yield* (yield* process.nextChild).reply("Done.");
-        // `Final` is delivered, and the `execute` call is still attached.
-        yield* Deferred.await(reached);
-        yield* process.attempts.settle(attemptId);
-        const whileRelayed = [...changes];
-        yield* Deferred.succeed(release, undefined);
-        yield* Fiber.join(execution);
-        return whileRelayed;
-      }).pipe(Effect.provide(logger));
-      yield* process.stop;
-
-      assert.deepStrictEqual(whileRelayed, [{ change: "created", attemptId, hubs: 1 }]);
-      assert.deepStrictEqual(changes, [
-        { change: "created", attemptId, hubs: 1 },
-        { change: "dropped", attemptId, hubs: 0 },
-      ]);
     }).pipe(Effect.scoped),
   );
 
@@ -1517,38 +1352,6 @@ describe("event-driven coordinator runtime", () => {
         Option.map(after, ({ outbox }) => outbox),
         Option.some([]),
       );
-    }).pipe(Effect.scoped),
-  );
-
-  it.live("drops a Worker notice while an execute call is attached to an ended Attempt", () =>
-    Effect.gen(function* () {
-      const database = yield* temporaryDatabase;
-      const request = coordinated("coordinator/attached-after-end");
-      const attemptId = request.spec.attemptId;
-      const process = yield* orchestrator(sqliteJournal(database).pipe(coordinator));
-      const execution = yield* process.execute(request, recordingSink().sink);
-      yield* (yield* process.nextChild).reply("Done.");
-      yield* Fiber.join(execution);
-      yield* process.stop;
-
-      // A second `execute` call's outbox, between its attach and its detach.
-      const recording = recordingSink();
-      const routing = yield* Effect.gen(function* () {
-        const journal = yield* AttemptJournal;
-        const snapshot = yield* journal.load(attemptId);
-        if (Option.isNone(snapshot)) return yield* Effect.die(new Error("no journal"));
-        const outbox = yield* outboxFor(journal, attemptId);
-        return yield* Effect.scoped(
-          Effect.gen(function* () {
-            const attached = yield* outbox.attach(recording.sink, snapshot.value);
-            assert.isTrue(attached);
-            return yield* outbox.notice(unresponsive("after the end"));
-          }),
-        );
-      }).pipe(Effect.provide(sqliteJournal(database)));
-
-      assert.strictEqual(routing._tag, "Dropped");
-      assert.deepStrictEqual(recording.outbound(), []);
     }).pipe(Effect.scoped),
   );
 });

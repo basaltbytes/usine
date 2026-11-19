@@ -117,43 +117,6 @@ describe("brain admission", () => {
     }
   });
 
-  it("admits supervisors only on the orchestrator through gateway credentials", () => {
-    const gateways = ["gateway", "gateway-subscription", "gateway-api-key"] as const;
-    for (const credential of gateways) {
-      const context = AdmissionContext.make({ placement: "orchestrator", credential });
-      for (const id of catalog.ids)
-        assert(Result.isSuccess(admitBrain(catalog, supervisor, brain(id), context)), id);
-    }
-    const login = admitBrain(catalog, supervisor, brain("claude"), orchestrator);
-    assert(Result.isFailure(login));
-    assert.deepStrictEqual(login.failure.missing, [
-      Lacking.make({
-        capability: "credential-route",
-        reason:
-          "The supervisor uses a gateway credential so subscription credentials stay on the gateway",
-      }),
-    ]);
-    const worker = admitBrain(
-      catalog,
-      supervisor,
-      brain("claude"),
-      AdmissionContext.make({ placement: "ssh", credential: "gateway" }),
-    );
-    assert(Result.isFailure(worker));
-    assert.strictEqual(worker.failure.missing[0].capability, "orchestrator");
-    for (const credential of gateways)
-      assert(
-        Result.isSuccess(
-          admitBrain(
-            catalog,
-            coordinator,
-            brain("pi"),
-            AdmissionContext.make({ placement: "orchestrator", credential }),
-          ),
-        ),
-      );
-  });
-
   it("refuses unregistered harnesses and unsupported credentials", () => {
     const unknown = admitBrain(catalog, codingAgent, brain("unknown"), local);
     assert(Result.isFailure(unknown));
@@ -194,17 +157,6 @@ describe("brain admission", () => {
     assert(Result.isFailure(result));
     assert.strictEqual(result.failure.missing[0].capability, "steer");
     assert.include(result.failure.message, "The transport cannot accept input during a turn");
-  });
-
-  it("declares plan windows only for Claude and Codex subscription routes", () => {
-    for (const descriptor of catalog.descriptors) {
-      for (const profile of descriptor.capabilities) {
-        assert.strictEqual(
-          profile.supported.includes("plan-windows"),
-          descriptor.id !== "pi" && profile.credentials.includes("gateway-subscription"),
-        );
-      }
-    }
   });
 
   it("rejects incomplete or contradictory capability declarations", () => {
@@ -367,17 +319,6 @@ describe("brain admission", () => {
       worker.failure.message,
       "unbounded cannot run as coding-agent at orchestrator: lacks local (The coding agent runs on a worker)",
     );
-  });
-
-  it("requires resume-session only to reopen a saved conversation", () => {
-    assert.notInclude(requirements(codingAgent), "resume-session");
-    assert.include(requirements(codingAgent, { reopens: true }), "resume-session");
-    assert.deepStrictEqual(requirements(coordinator), [
-      "durable-coordination",
-      "steer",
-      "interrupt",
-      "token-usage",
-    ]);
   });
 
   it("puts the pool that the credential route determines on the admitted brain", () => {

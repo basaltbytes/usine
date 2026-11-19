@@ -655,17 +655,15 @@ describe("the supervisor role", () => {
   );
 });
 
-for (const harness of supervisorProviders) {
-  it(`refuses ${harness} supervisor seats without a container`, () => {
-    for (const host of [
-      LocalProcess.make(),
-      ExecShell.make({
-        destination: "host",
-        transport: { run: () => Effect.die("must not execute") },
-      }),
-    ]) {
-      const decoded = Schema.decodeUnknownResult(SupervisorSeat)({ ...seat, host });
-      assert.isTrue(Result.isFailure(decoded));
-    }
-  });
-}
+it("refuses supervisor seats without a container", () => {
+  for (const host of [
+    LocalProcess.make(),
+    ExecShell.make({
+      destination: "host",
+      transport: { run: () => Effect.die("must not execute") },
+    }),
+  ]) {
+    const decoded = Schema.decodeUnknownResult(SupervisorSeat)({ ...seat, host });
+    assert.isTrue(Result.isFailure(decoded));
+  }
+});

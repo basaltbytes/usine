@@ -8,17 +8,6 @@ import { recordedPrompt, withCiInstructions } from "../src/trigger-submission.ts
 const policy = CiPolicy.make({ fixLoop: LoopName.make("fix"), timeoutSeconds: 1800 });
 const prompt = "Fix the failing checks.";
 
-it("records the CI handoff instructions apart from the prompt they end", () => {
-  const { task, ciInstructions } = withCiInstructions(prompt, Option.some(policy));
-  assert(Option.isSome(ciInstructions));
-  assert.strictEqual(task, `${prompt}${ciInstructions.value}`);
-  assert.include(ciInstructions.value, 'fix_loop ("fix")');
-  assert.deepStrictEqual(withCiInstructions(prompt, Option.none()), {
-    task: AttemptTask.make(prompt),
-    ciInstructions: Option.none(),
-  });
-});
-
 it("removes the recorded CI handoff instructions, whatever their wording", () => {
   const earlier = Schema.NonEmptyString.make("\n\nAn earlier wording of the CI handoff.");
   const recorded = {

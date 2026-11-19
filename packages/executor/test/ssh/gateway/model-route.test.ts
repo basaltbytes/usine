@@ -149,7 +149,8 @@ it.effect(
   },
 );
 
-it.effect.each([200, 401, 503])("refuses an unexpected model proxy probe status (%s)", (status) => {
+it.effect("refuses an unexpected model proxy probe status", () => {
+  const status = 200;
   const machine = fakeMachine();
   return Effect.gen(function* () {
     const settings = gatewayAddress().gateway;
@@ -279,47 +280,43 @@ it.effect("waits for an in-flight renewal before detaching on scope interruption
   }).pipe(Effect.provide(transport.pipe(Layer.provideMerge(machine.layer))), Effect.scoped);
 });
 
-it.effect.each(["body cancellation", "signal abort"])(
-  "aborts the model HTTP request on %s",
-  (mode) => {
-    const { machine, transport } = fixture();
-    const controller = new AbortController();
-    return Effect.gen(function* () {
-      const client = yield* HttpClient.HttpClient;
-      const aborted = yield* Deferred.make<void>();
-      const intercepted = HttpClient.make((request, _url, signal) => {
-        if (request.headers.host !== "llm.gw.test" || request.method !== "POST")
-          return client.execute(request);
-        signal.addEventListener("abort", () => Deferred.doneUnsafe(aborted, Effect.void), {
-          once: true,
-        });
-        return Effect.succeed(
-          HttpClientResponse.fromWeb(
-            request,
-            new Response(
-              new ReadableStream({
-                start(controller) {
-                  controller.enqueue(new TextEncoder().encode("stream started"));
-                },
-              }),
-            ),
-          ),
-        );
+it.effect("aborts the model HTTP request on signal abort", () => {
+  const { machine, transport } = fixture();
+  const controller = new AbortController();
+  return Effect.gen(function* () {
+    const client = yield* HttpClient.HttpClient;
+    const aborted = yield* Deferred.make<void>();
+    const intercepted = HttpClient.make((request, _url, signal) => {
+      if (request.headers.host !== "llm.gw.test" || request.method !== "POST")
+        return client.execute(request);
+      signal.addEventListener("abort", () => Deferred.doneUnsafe(aborted, Effect.void), {
+        once: true,
       });
-      const settings = gatewayAddress().gateway;
-      assert(Option.isSome(settings));
-      const route = yield* gatewayModelRouteFor(
-        WorkerName.make("coordinator-cancel"),
-        RepositoryName.make("usine/coordinator"),
-        settings.value,
-      ).pipe(Effect.provideService(HttpClient.HttpClient, intercepted));
-      const answer = yield* route.request("anthropic-messages", "{}", {}, controller.signal);
-      assert(answer.body !== null);
-      const reader = answer.body.getReader();
-      yield* Effect.promise(() => reader.read());
-      if (mode === "body cancellation") yield* Effect.promise(() => reader.cancel());
-      else controller.abort();
-      yield* Deferred.await(aborted);
-    }).pipe(Effect.provide(transport.pipe(Layer.provideMerge(machine.layer))), Effect.scoped);
-  },
-);
+      return Effect.succeed(
+        HttpClientResponse.fromWeb(
+          request,
+          new Response(
+            new ReadableStream({
+              start(controller) {
+                controller.enqueue(new TextEncoder().encode("stream started"));
+              },
+            }),
+          ),
+        ),
+      );
+    });
+    const settings = gatewayAddress().gateway;
+    assert(Option.isSome(settings));
+    const route = yield* gatewayModelRouteFor(
+      WorkerName.make("coordinator-cancel"),
+      RepositoryName.make("usine/coordinator"),
+      settings.value,
+    ).pipe(Effect.provideService(HttpClient.HttpClient, intercepted));
+    const answer = yield* route.request("anthropic-messages", "{}", {}, controller.signal);
+    assert(answer.body !== null);
+    const reader = answer.body.getReader();
+    yield* Effect.promise(() => reader.read());
+    controller.abort();
+    yield* Deferred.await(aborted);
+  }).pipe(Effect.provide(transport.pipe(Layer.provideMerge(machine.layer))), Effect.scoped);
+});

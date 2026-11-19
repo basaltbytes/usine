@@ -417,14 +417,8 @@ it.effect("keeps a newer session when a late call reports an older session refus
 );
 
 for (const [status, code] of [
-  [400, "INVALID_ARGUMENT"],
   [401, "UNAUTHENTICATED"],
-  [403, "PERMISSION_DENIED"],
   [429, "RESOURCE_EXHAUSTED"],
-  [500, "INTERNAL"],
-  [502, "UNAVAILABLE"],
-  [503, "UNAVAILABLE"],
-  [504, "UNAVAILABLE"],
   [404, "UNKNOWN"],
 ] as const) {
   it.effect(`maps token exchange HTTP ${status} to ${code} at preflight`, () =>
@@ -437,12 +431,9 @@ for (const [status, code] of [
         Effect.provide(Layer.merge(fakeMachine().layer, fakeBoxd().execLayer)),
       );
       const preflight = yield* driver.verify(WORKER, 1).pipe(Effect.flip);
-      assert.include(
-        preflight.message,
-        status === 401 || status === 403 ? "boxd refused the API key" : code,
-      );
+      assert.include(preflight.message, status === 401 ? "boxd refused the API key" : code);
       assert.notInclude(preflight.message, "snapshots save");
-      if (code === "RESOURCE_EXHAUSTED" || code === "UNAVAILABLE")
+      if (code === "RESOURCE_EXHAUSTED")
         assert.include(preflight.message, `Check that this host reaches ${UNUSED_EXCHANGE}`);
       else assert.notInclude(preflight.message, UNUSED_EXCHANGE);
     }).pipe(

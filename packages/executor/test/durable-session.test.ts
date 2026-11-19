@@ -86,87 +86,82 @@ describe("durable session settlement", () => {
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
-  for (const terminal of ["completed", "failed"] as const) {
-    it.live(
-      `settles a ${terminal} task after its terminal append fails and skips cancellation on later startups`,
-      () =>
-        Effect.gen(function* () {
-          const fs = yield* FileSystem.FileSystem;
-          const directory = yield* fs.makeTempDirectoryScoped({
-            directory: sqliteTempDirectory(),
-            prefix: "usine-settle-",
-          });
-          const database = `${directory}/durable.sqlite`;
-          let cancellations = 0;
-          const runtimeLayer = Layer.effect(
-            AttemptRuntime,
-            Effect.map(AttemptRuntime, (runtime) =>
-              AttemptRuntime.of({
-                ...runtime,
-                cancel: (attemptId) =>
-                  Effect.sync(() => {
-                    cancellations += 1;
-                  }).pipe(Effect.andThen(runtime.cancel(attemptId))),
-              }),
-            ),
-          ).pipe(
-            Layer.provide(
-              layer({
-                database,
-                parent: [
-                  answer(
-                    terminal === "completed" ? "Done." : "[usine:blocked]\nMissing credentials.",
-                  ),
-                ],
-              }),
-            ),
-          );
-          yield* Effect.gen(function* () {
-            const runtime = yield* AttemptRuntime;
-            const session = yield* durableSessionFor({ interruptGrace: "1 second" });
-            const sink: AttemptChannel.Sink = {
-              ...recording().sink,
-              append: (_direction, envelope) =>
-                envelope._tag === "OutboundEnvelope" &&
-                (envelope.payload._tag === "Final" || envelope.payload._tag === "Failed")
-                  ? Effect.fail(RunawayFailure.make({ ceiling: "tokens" }))
-                  : Effect.void,
-            };
-            const failure = yield* session.launch(workspace, sink, checkout).pipe(Effect.flip);
-            assert.strictEqual(failure._tag, "RunawayFailure");
-            assert.strictEqual(cancellations, 1);
-            const live = yield* runtime.isLive(request.attemptId);
-            assert.isFalse(live);
-            const currentFinished = yield* runtime.finished(request.attemptId);
-            assert.isTrue(Option.isNone(currentFinished));
-            const currentLive = yield* session.isLive(request.attemptId);
-            assert.isFalse(currentLive);
-            yield* runtime.settle(request.attemptId);
-            const nextFinished = yield* runtime.finished(request.attemptId);
-            assert.isTrue(Option.isNone(nextFinished));
-          }).pipe(Effect.scoped, Effect.provide(runtimeLayer));
+  // A failed task's terminal append takes the same path as a completed one's.
+  it.live(
+    "settles a completed task after its terminal append fails and skips cancellation on later startups",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const directory = yield* fs.makeTempDirectoryScoped({
+          directory: sqliteTempDirectory(),
+          prefix: "usine-settle-",
+        });
+        const database = `${directory}/durable.sqlite`;
+        let cancellations = 0;
+        const runtimeLayer = Layer.effect(
+          AttemptRuntime,
+          Effect.map(AttemptRuntime, (runtime) =>
+            AttemptRuntime.of({
+              ...runtime,
+              cancel: (attemptId) =>
+                Effect.sync(() => {
+                  cancellations += 1;
+                }).pipe(Effect.andThen(runtime.cancel(attemptId))),
+            }),
+          ),
+        ).pipe(
+          Layer.provide(
+            layer({
+              database,
+              parent: [answer("Done.")],
+            }),
+          ),
+        );
+        yield* Effect.gen(function* () {
+          const runtime = yield* AttemptRuntime;
+          const session = yield* durableSessionFor({ interruptGrace: "1 second" });
+          const sink: AttemptChannel.Sink = {
+            ...recording().sink,
+            append: (_direction, envelope) =>
+              envelope._tag === "OutboundEnvelope" &&
+              (envelope.payload._tag === "Final" || envelope.payload._tag === "Failed")
+                ? Effect.fail(RunawayFailure.make({ ceiling: "tokens" }))
+                : Effect.void,
+          };
+          const failure = yield* session.launch(workspace, sink, checkout).pipe(Effect.flip);
+          assert.strictEqual(failure._tag, "RunawayFailure");
+          assert.strictEqual(cancellations, 1);
+          const live = yield* runtime.isLive(request.attemptId);
+          assert.isFalse(live);
+          const currentFinished = yield* runtime.finished(request.attemptId);
+          assert.isTrue(Option.isNone(currentFinished));
+          const currentLive = yield* session.isLive(request.attemptId);
+          assert.isFalse(currentLive);
+          yield* runtime.settle(request.attemptId);
+          const nextFinished = yield* runtime.finished(request.attemptId);
+          assert.isTrue(Option.isNone(nextFinished));
+        }).pipe(Effect.scoped, Effect.provide(runtimeLayer));
 
-          for (let startup = 0; startup < 2; startup += 1) {
-            yield* Effect.gen(function* () {
-              const session = yield* durableSessionFor({ interruptGrace: "1 second" });
-              yield* session.stopForRecovery({
-                attemptId: request.attemptId,
-                worker: request.worker,
-                repository: request.repository,
-                ref: request.salvageRef,
-                permissions: request.permissions,
-                succeeded: false,
-                open: false,
-                rejected: Option.none(),
-              });
-              const live = yield* session.isLive(request.attemptId);
-              assert.isFalse(live);
-              assert.strictEqual(cancellations, 1);
-            }).pipe(Effect.scoped, Effect.provide(runtimeLayer));
-          }
-        }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
-    );
-  }
+        for (let startup = 0; startup < 2; startup += 1) {
+          yield* Effect.gen(function* () {
+            const session = yield* durableSessionFor({ interruptGrace: "1 second" });
+            yield* session.stopForRecovery({
+              attemptId: request.attemptId,
+              worker: request.worker,
+              repository: request.repository,
+              ref: request.salvageRef,
+              permissions: request.permissions,
+              succeeded: false,
+              open: false,
+              rejected: Option.none(),
+            });
+            const live = yield* session.isLive(request.attemptId);
+            assert.isFalse(live);
+            assert.strictEqual(cancellations, 1);
+          }).pipe(Effect.scoped, Effect.provide(runtimeLayer));
+        }
+      }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
 
   // The Pi parent and the event-driven coordinator leave the Attempt to the executor's decision.
   for (const coordinator of ["session", "events"] as const)

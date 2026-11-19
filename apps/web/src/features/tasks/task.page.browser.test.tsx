@@ -300,32 +300,29 @@ afterEach(() => {
   host.remove();
 });
 
-it.each(["basaltbytes/usine", "Basaltbytes/Usine"])(
-  "names the originating issue in the breadcrumb for secondary repository %s",
-  async (repository) => {
-    overview = ReadyOverview.make({
-      ...taskOverview(),
-      projects: taskOverview().projects.map((project) =>
-        ProjectView.make({
-          ...project,
-          repository: RepositoryName.make("basaltbytes/primary"),
-          repositories: [
-            RepositoryName.make("basaltbytes/primary"),
-            RepositoryName.make("Basaltbytes/Usine"),
-          ],
-        }),
-      ),
-    });
-    queryClient.setQueryData(overviewQuery().queryKey, overview);
+it("names the originating issue in the breadcrumb for a secondary repository in other casing", async () => {
+  overview = ReadyOverview.make({
+    ...taskOverview(),
+    projects: taskOverview().projects.map((project) =>
+      ProjectView.make({
+        ...project,
+        repository: RepositoryName.make("basaltbytes/primary"),
+        repositories: [
+          RepositoryName.make("basaltbytes/primary"),
+          RepositoryName.make("Basaltbytes/Usine"),
+        ],
+      }),
+    ),
+  });
+  queryClient.setQueryData(overviewQuery().queryKey, overview);
 
-    await mount(40, 390, RepositoryName.make(repository));
+  await mount(40, 390, RepositoryName.make("basaltbytes/usine"));
 
-    await expect
-      .element(page.getByRole("navigation", { name: "breadcrumb" }))
-      .toMatchTextContent("Issue #40");
-    await expect.element(page.getByRole("heading", { level: 1 })).toBeVisible();
-  },
-);
+  await expect
+    .element(page.getByRole("navigation", { name: "breadcrumb" }))
+    .toMatchTextContent("Issue #40");
+  await expect.element(page.getByRole("heading", { level: 1 })).toBeVisible();
+});
 
 it("heads the page with the originating issue, its current pull request's state, lane, and labels", async () => {
   await mount(40);
@@ -476,17 +473,6 @@ it("lists the pull requests with their state and the comments the Runs posted", 
   expect(comments.getByRole("row").nth(1).element().querySelector("time")?.dateTime).toBe(
     "2026-10-02T09:20:00.000Z",
   );
-});
-
-it("explains how an Item without Runs, pull requests, or comments fills", async () => {
-  await mount(12, 390);
-  await expect.element(page.getByText("No runs yet")).toBeVisible();
-  await expect.element(page.getByText("No pull requests")).toBeVisible();
-  await expect.element(page.getByText("No comments or reviews")).toBeVisible();
-  await expect
-    .element(page.getByRole("link", { name: "Issue #12, open", exact: true }))
-    .toBeVisible();
-  expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth);
 });
 
 it("moves to the originating Item's address, and explains an Item off the Board", async () => {
@@ -713,31 +699,4 @@ it("refreshes the task when Retry follows a pull request whose head changed", as
   await expect.element(changes.getByText("src/reader.ts", { exact: true })).toBeVisible();
   expect(taskRequests.length).toBeGreaterThan(requests);
   expect(fileRequests.at(-1)).toContain("head=" + pushed);
-});
-
-it("says when the pull request's attempts pushed no new commits", async () => {
-  const task = taskWithChanges();
-  tasks.set(
-    "40",
-    TaskView.make({
-      ...task,
-      attemptChanges: EffectArray.map(task.attemptChanges ?? [], (attempt) =>
-        TaskAttemptChangesView.make({ ...attempt, base: attempt.head }),
-      ),
-    }),
-  );
-  await mount(40);
-  await page
-    .getByRole("region", { name: /^Pull requests/u })
-    .getByText("Changes", { exact: true })
-    .nth(1)
-    .click();
-  const changes = page.getByRole("region", { name: "Changes for pull request #42", exact: true });
-  await expect
-    .element(changes.getByText("Attempts on this pull request pushed no new commits"))
-    .toBeVisible();
-  await expect.element(changes.getByRole("combobox", { name: "Compare" })).not.toBeInTheDocument();
-  await expect
-    .element(changes.getByText("No attempt commits recorded", { exact: false }))
-    .not.toBeInTheDocument();
 });

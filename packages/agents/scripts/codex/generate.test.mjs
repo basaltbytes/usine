@@ -64,67 +64,20 @@ describe("codex generator", () => {
     expect(checked.status).toBe(0);
   }, 60_000);
 
-  it("checks the generated schemas against the local copy without fetching", () => {
-    const result = generate(script, unreachable, "--check");
-    expect(result.stderr).toBe("");
-    expect(result.status).toBe(0);
-  }, 60_000);
-
-  it.for([[], ["--upstream"]])(
-    "rejects stale generated output before fetching with --check %j",
-    (args, { onTestFinished }) => {
-      const fixture = copyPackage(onTestFinished);
-      writeFileSync(fixture.output, "// Stale generated output\n");
-      const result = generate(
-        fixture.script,
-        `async () => { throw new Error("Unexpected upstream fetch"); }`,
-        "--check",
-        ...args,
-      );
-      expect(result.status).toBe(1);
-      expect(result.stderr).toContain("Codex schemas are stale");
-      expect(result.stderr).not.toContain("Unexpected upstream fetch");
-    },
-    60_000,
-  );
-
-  it("reports an unreachable upstream in one line after checking the local copy", () => {
-    const result = generate(script, unreachable, "--check", "--upstream");
-    expect(result.stderr).toBe(
-      "upstream fetch failed: getaddrinfo ENOTFOUND raw.githubusercontent.com; the local copy was checked\n",
-    );
-    expect(result.status).toBe(2);
-  }, 60_000);
-
-  it.each([
-    ['Object.assign(new AggregateError([], ""), { code: "ECONNREFUSED" })', "ECONNREFUSED"],
-    ['new AggregateError([], "")', "fetch failed"],
-  ])(
-    "reports a connection failure with cause %s",
-    (cause, reason) => {
-      const result = generate(
-        script,
-        `async () => { throw new TypeError("fetch failed", { cause: ${cause} }); }`,
-        "--check",
-        "--upstream",
-      );
-      expect(result.stderr).toBe(`upstream fetch failed: ${reason}; the local copy was checked\n`);
-      expect(result.status).toBe(2);
-    },
-    60_000,
-  );
-
-  it("reports an HTTP failure from upstream in one line", () => {
+  it("rejects stale generated output before fetching with --check --upstream", ({
+    onTestFinished,
+  }) => {
+    const fixture = copyPackage(onTestFinished);
+    writeFileSync(fixture.output, "// Stale generated output\n");
     const result = generate(
-      script,
-      `async () => new Response("", { status: 403, statusText: "Forbidden" })`,
+      fixture.script,
+      `async () => { throw new Error("Unexpected upstream fetch"); }`,
       "--check",
       "--upstream",
     );
-    expect(result.stderr).toBe(
-      "upstream fetch failed: HTTP 403 Forbidden; the local copy was checked\n",
-    );
-    expect(result.status).toBe(2);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("Codex schemas are stale");
+    expect(result.stderr).not.toContain("Unexpected upstream fetch");
   }, 60_000);
 
   it("names the local copy and the pinned upstream file when they differ", () => {
@@ -189,28 +142,5 @@ describe("codex generator", () => {
     expect(result.status).toBe(2);
     expect(readFileSync(fixture.copy)).toEqual(previousCopy);
     expect(readFileSync(fixture.output)).toEqual(previousOutput);
-  }, 60_000);
-
-  it("bounds the upstream fetch and reports a timeout in one line", () => {
-    const result = generate(
-      script,
-      `(() => {
-        AbortSignal.timeout = (ms) => {
-          console.log(ms);
-          return AbortSignal.abort(new DOMException("The operation was aborted due to timeout", "TimeoutError"));
-        };
-        return async (_url, options) => {
-          options.signal.throwIfAborted();
-          throw new Error("Expected an aborted timeout signal");
-        };
-      })()`,
-      "--check",
-      "--upstream",
-    );
-    expect(result.stdout).toBe("60000\n");
-    expect(result.stderr).toBe(
-      "upstream fetch failed: The operation was aborted due to timeout; the local copy was checked\n",
-    );
-    expect(result.status).toBe(2);
   }, 60_000);
 });

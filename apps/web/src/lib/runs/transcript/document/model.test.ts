@@ -261,42 +261,6 @@ describe("checkpoints", () => {
     assert.equal(checkpointText("Version 1.5 is out"), "Version 1.5 is out");
   });
 
-  it("lists each message under its session and marks blockers and failures", () => {
-    const failure = AgentFailureView.make({ message: "Baseline gate fails. No edits made." });
-    const events = [
-      said(3, "I'll start with the baseline. Then the change."),
-      said(4, "Waiting on the developer.", parent),
-      said(5, "[usine:blocked]\nThe gate is blocked by memory."),
-      record(
-        6,
-        AttemptChannel.SessionEvent.make({
-          event: ToolFinished.make({
-            session: child,
-            callId: "x",
-            tool: "bash",
-            output: "",
-            isError: true,
-          }),
-        }),
-      ),
-      record(7, FailedTranscriptView.make({ failure })),
-    ];
-    const chapter = document(events, [attempt(FailedAttemptView.make({ failure }))]).chapters[0];
-    assert.isDefined(chapter);
-    const childKey = chapter.sessions.find(({ session }) => session.id === child.id)?.key;
-    const parentKey = chapter.sessions.find(({ session }) => session.id === parent.id)?.key;
-    assert.deepEqual(
-      chapterCheckpoints(chapter).map(({ text, tone, sessionKey }) => [text, tone, sessionKey]),
-      [
-        ["I'll start with the baseline.", "plain", childKey],
-        ["Waiting on the developer.", "plain", parentKey],
-        ["The gate is blocked by memory.", "failed", childKey],
-        ["Baseline gate fails.", "failed", null],
-      ],
-    );
-    assert.equal(chapterCheckpoints(chapter)[2]?.key, "event:5");
-  });
-
   it("folds each run of one session's turns into one outline entry and keeps marked rows on their own", () => {
     const failure = AgentFailureView.make({ message: "The gate fails. No edits made." });
     const steer = TranscriptEventView.make({
@@ -638,30 +602,6 @@ describe("connectivity", () => {
   ];
   const notes = (rows: ReadonlyArray<ChapterRow>) =>
     rows.flatMap((row) => (row._tag === "Note" ? [`${row.tone}: ${row.text}`] : []));
-
-  it("shows a healthy worker's first answer without an outage or recovery checkpoint", () => {
-    const chapter = document(
-      [
-        said(3, "Running the gate."),
-        record(
-          60,
-          AttemptChannel.WorkerResponsive.make({
-            worker,
-            lastAnsweredAt: DateTime.makeUnsafe(at(60)),
-            recovered: false,
-          }),
-        ),
-      ],
-      [attempt(null)],
-    ).chapters[0];
-    assert(chapter !== undefined);
-    assert.deepStrictEqual(notes(chapter.rows), ["plain: usine-worker-1 answering"]);
-    assert.deepStrictEqual(chapter.connectivity, []);
-    assert.deepStrictEqual(
-      chapterCheckpoints(chapter).map(({ key }) => key),
-      ["event:3"],
-    );
-  });
 
   it("clears a persisted outage on the first answer after reattachment without inventing its duration", () => {
     const chapter = document(

@@ -4,7 +4,7 @@ import { Effect, Layer, Schema } from "effect";
 import { expect, it } from "vitest";
 import { harness, loopText } from "./support.ts";
 
-for (const role of ["viewer", "operator", "maintainer"] as const)
+for (const role of ["operator", "maintainer"] as const)
   it(`${role} can only read and edit its authorized configuration`, () =>
     Effect.runPromise(
       Effect.gen(function* () {
@@ -84,25 +84,24 @@ for (const role of ["viewer", "operator", "maintainer"] as const)
       }).pipe(Effect.scoped),
     ));
 
-for (const role of ["viewer", "operator", "maintainer"] as const)
-  it(`${role} cannot read another project's nested agent loop references`, () =>
-    Effect.runPromise(
-      Effect.gen(function* () {
-        const grants = RoleBinding.make({
-          name: role,
-          member: GitHubUserId.make(1),
-          role,
-          scope: ProjectScope.make({ project: ProjectId.make("acme-other") }),
-        }).permissions;
-        const { request } = yield* harness(Layer.succeed(RequestPermissions, grants));
-        const response = yield* request("GET", "");
-        expect(response).toMatchObject({
-          status: 200,
-          body: {
-            projects: [{ id: "acme-other" }],
-            loops: [],
-            agents: [{ name: "developer", loops: [] }],
-          },
-        });
-      }).pipe(Effect.scoped),
-    ));
+it("a viewer cannot read another project's nested agent loop references", () =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const grants = RoleBinding.make({
+        name: "viewer",
+        member: GitHubUserId.make(1),
+        role: "viewer",
+        scope: ProjectScope.make({ project: ProjectId.make("acme-other") }),
+      }).permissions;
+      const { request } = yield* harness(Layer.succeed(RequestPermissions, grants));
+      const response = yield* request("GET", "");
+      expect(response).toMatchObject({
+        status: 200,
+        body: {
+          projects: [{ id: "acme-other" }],
+          loops: [],
+          agents: [{ name: "developer", loops: [] }],
+        },
+      });
+    }).pipe(Effect.scoped),
+  ));

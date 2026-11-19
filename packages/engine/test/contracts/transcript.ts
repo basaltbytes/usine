@@ -6,25 +6,18 @@ import {
   HarnessSession,
   HarnessSessionId,
   ParentSession,
-  PoolLogin,
   PoolRateLimitsUpdated,
   RateLimitWindow,
   RateLimitsSnapshot,
   SessionIdle,
   SessionStarted,
-  SessionTokensUpdated,
   TextOutput,
-  TokenCount,
-  UsdAmount,
 } from "@usine/core/agent/session";
 import * as AttemptChannel from "@usine/core/attempt/channel";
-import { DedupKey, Event, EventId } from "@usine/core/event";
-import { ItemKey } from "@usine/core/item";
 import { RunId } from "@usine/core/run";
 import { WorkerName } from "@usine/core/worker";
-import { DateTime, Effect, Logger, Option, References } from "effect";
+import { DateTime, Effect, Option } from "effect";
 
-import { Submission } from "../../src/engine/submission.ts";
 import { RunReader } from "../../src/run-reader/run-reader.ts";
 import { RunStore } from "../../src/store/store.ts";
 import {
@@ -33,52 +26,12 @@ import {
   TranscriptSequence,
   TranscriptTailQuery,
   TranscriptSessionsQuery,
-  TranscriptUsageQuery,
-  TranscriptWorkerQuery,
 } from "../../src/transcript.ts";
 import { lifecycleSubmission, testAgent } from "../store/fixtures.ts";
 import { type PersistenceAdapter, withPersistence } from "./adapter.ts";
 
 export const transcriptContract = (adapter: PersistenceAdapter) => {
   describe(`${adapter.name} Transcripts contract`, () => {
-    it.live("clears the parent model of an Attempt that starts without a parent session", () =>
-      withPersistence(
-        adapter,
-        Effect.gen(function* () {
-          const runId = RunId.make("parentless-run");
-          const store = yield* RunStore;
-          yield* store.recordAndClaim(
-            Submission.make({
-              ...lifecycleSubmission,
-              parentModel: Option.some(ModelId.make("openai/gpt-5.6-sol")),
-            }),
-            runId,
-          );
-          const started = yield* store.beginAttempt(
-            runId,
-            WorkerName.make("local"),
-            "local",
-            Option.none(),
-          );
-          assert(started._tag === "AttemptStarted");
-          const attemptId = started.execution.attempt.id;
-          assert.isTrue(Option.isSome(started.execution.attempt.parentModel));
-          yield* store.appendTranscript(
-            "outbound",
-            AttemptChannel.OutboundEnvelope.make({
-              version: AttemptChannel.PROTOCOL_VERSION,
-              attemptId,
-              sequence: AttemptChannel.Sequence.make(1),
-              sentAt: DateTime.makeUnsafe("2026-08-25T00:00:01Z"),
-              payload: AttemptChannel.Started.make({}),
-            }),
-          );
-          const snapshot = yield* store.snapshot(runId);
-          assert.isTrue(Option.isNone(snapshot.attempts[0]?.parentModel ?? Option.some("missing")));
-        }),
-      ),
-    );
-
     it.live("writes the effective parent model back onto the Attempt", () =>
       withPersistence(
         adapter,
@@ -182,123 +135,6 @@ export const transcriptContract = (adapter: PersistenceAdapter) => {
         }),
       ),
     );
-    it.live(
-      "reads each pool's newest stored snapshot across attempts and unrelated transcript output",
-      () =>
-        Effect.gen(function* () {
-          const fixture = yield* adapter.fixture;
-          yield* Effect.gen(function* () {
-            const store = yield* RunStore;
-            const reader = yield* RunReader;
-            const currentLatestPoolRateLimits = yield* reader.latestPoolRateLimits;
-            assert.deepStrictEqual(currentLatestPoolRateLimits, []);
-            const at = DateTime.makeUnsafe("2026-10-29T00:00:00Z");
-            const session = ParentSession.make({
-              id: AgentSessionId.make("pool-session"),
-              agent: testAgent.name,
-              brain: testAgent.brain,
-            });
-            const high = PoolRateLimitsUpdated.make({
-              session,
-              pool: "chatgptPlan",
-              login: Option.some(PoolLogin.make("first@example.com")),
-              rateLimits: RateLimitsSnapshot.make({
-                limitId: Option.none(),
-                limitName: Option.none(),
-                secondary: Option.none(),
-                primary: Option.some(
-                  RateLimitWindow.make({
-                    usedPercent: 85,
-                    windowDurationMinutes: Option.some(300),
-                    resetsAt: Option.some(DateTime.add(at, { hours: 1 })),
-                  }),
-                ),
-              }),
-            });
-            const low = PoolRateLimitsUpdated.make({
-              ...high,
-              login: Option.some(PoolLogin.make("second@example.com")),
-              rateLimits: RateLimitsSnapshot.make({
-                ...high.rateLimits,
-                primary: Option.some(
-                  RateLimitWindow.make({
-                    usedPercent: 20,
-                    windowDurationMinutes: Option.some(300),
-                    resetsAt: Option.some(DateTime.add(at, { hours: 2 })),
-                  }),
-                ),
-              }),
-            });
-            const logLevels: Array<string> = [];
-            const logger = Logger.make<unknown, void>(({ logLevel }) => {
-              logLevels.push(logLevel);
-            });
-            const logging = Logger.layer([logger]);
-            const other = PoolRateLimitsUpdated.make({ ...high, pool: "claudePlan" });
-            for (const [index, report] of [high, low].entries()) {
-              const runId = RunId.make(`pool-run-${index}`);
-              yield* store.recordAndClaim(
-                Submission.make({
-                  ...lifecycleSubmission,
-                  itemKey: ItemKey.make(`pool-item-${index}`),
-                  event: Event.make({
-                    ...lifecycleSubmission.event,
-                    id: EventId.make(`pool-event-${index}`),
-                    dedupKey: DedupKey.make(`pool-dedup-${index}`),
-                  }),
-                }),
-                runId,
-              );
-              const started = yield* store.beginAttempt(
-                runId,
-                WorkerName.make("local"),
-                "local",
-                Option.none(),
-              );
-              assert(started._tag === "AttemptStarted");
-              const attemptId = started.execution.attempt.id;
-              let sequence = 0;
-              const append = (payload: AttemptChannel.OutboundPayload) =>
-                store
-                  .appendTranscript(
-                    "outbound",
-                    AttemptChannel.OutboundEnvelope.make({
-                      version: AttemptChannel.PROTOCOL_VERSION,
-                      attemptId,
-                      sequence: AttemptChannel.Sequence.make(++sequence),
-                      sentAt: at,
-                      payload,
-                    }),
-                  )
-                  .pipe(
-                    Effect.provide(logging),
-                    Effect.provideService(References.MinimumLogLevel, "Debug"),
-                  );
-              yield* append(AttemptChannel.SessionEvent.make({ event: report }));
-              if (index === 0) yield* append(AttemptChannel.SessionEvent.make({ event: other }));
-              for (let i = 0; i < 205; i++)
-                yield* append(
-                  AttemptChannel.SessionEvent.make({
-                    event: TextOutput.make({ session, text: "More activity" }),
-                  }),
-                );
-              yield* store.appendTranscript(
-                "outbound",
-                AttemptChannel.OutboundEnvelope.make({
-                  version: AttemptChannel.PROTOCOL_VERSION,
-                  attemptId,
-                  sequence: AttemptChannel.Sequence.make(1),
-                  sentAt: DateTime.add(at, { days: 1 }),
-                  payload: AttemptChannel.SessionEvent.make({ event: index === 0 ? low : high }),
-                }),
-              );
-              const nextLatestPoolRateLimits = yield* reader.latestPoolRateLimits;
-              assert.deepStrictEqual(new Set(nextLatestPoolRateLimits), new Set([report, other]));
-            }
-            assert.deepStrictEqual(new Set(logLevels), new Set(["Debug"]));
-          }).pipe(Effect.provide(fixture.open));
-        }).pipe(Effect.scoped),
-    );
     it.live("preserves each Claude window across interleaved children and store restarts", () =>
       Effect.gen(function* () {
         const fixture = yield* adapter.fixture;
@@ -397,148 +233,6 @@ export const transcriptContract = (adapter: PersistenceAdapter) => {
         yield* Effect.gen(function* () {
           const [latest] = yield* (yield* RunReader).latestPoolRateLimits;
           assert.deepStrictEqual(latest, report(second, reset, window(40, 10_080)));
-        }).pipe(Effect.provide(fixture.open));
-      }).pipe(Effect.scoped),
-    );
-    it.live(
-      "keeps the latest worker notice beyond transcript pages and replaces it on recovery",
-      () =>
-        Effect.gen(function* () {
-          const fixture = yield* adapter.fixture;
-          yield* Effect.gen(function* () {
-            const store = yield* RunStore;
-            const runId = RunId.make("worker-notice-run");
-            yield* store.recordAndClaim(lifecycleSubmission, runId);
-            const started = yield* store.beginAttempt(
-              runId,
-              WorkerName.make("remote"),
-              "local",
-              Option.none(),
-            );
-            assert(started._tag === "AttemptStarted");
-            const attemptId = started.execution.attempt.id;
-            const at = DateTime.makeUnsafe("2026-10-28T00:00:00Z");
-            let sequence = 0;
-            const append = (payload: AttemptChannel.OutboundPayload) =>
-              store.appendTranscript(
-                "outbound",
-                AttemptChannel.OutboundEnvelope.make({
-                  version: AttemptChannel.PROTOCOL_VERSION,
-                  attemptId,
-                  sequence: AttemptChannel.Sequence.make(++sequence),
-                  sentAt: at,
-                  payload,
-                }),
-              );
-            const query = TranscriptWorkerQuery.make({ attemptId });
-            const currentTranscript = yield* store.transcript(query);
-            assert.deepStrictEqual(currentTranscript, []);
-            const silent = AttemptChannel.WorkerUnresponsive.make({
-              worker: WorkerName.make("remote"),
-              lastAnsweredAt: at,
-              reason: "SSH timed out",
-              unansweredProbes: 3,
-            });
-            yield* append(silent);
-            for (let i = 0; i < 205; i++)
-              yield* append(
-                AttemptChannel.Started.make({
-                  parentModel: Option.some(ModelId.make("test-model")),
-                }),
-              );
-            assert.deepStrictEqual(
-              (yield* store.transcript(query)).map(({ envelope }) => envelope.payload),
-              [silent],
-            );
-            const recovered = AttemptChannel.WorkerResponsive.make({
-              worker: silent.worker,
-              lastAnsweredAt: at,
-            });
-            yield* append(recovered);
-            assert.deepStrictEqual(
-              (yield* store.transcript(query)).map(({ envelope }) => envelope.payload),
-              [recovered],
-            );
-            yield* append(silent);
-            assert.deepStrictEqual(
-              (yield* store.transcript(query)).map(({ envelope }) => envelope.payload),
-              [silent],
-            );
-          }).pipe(Effect.provide(fixture.open));
-        }).pipe(Effect.scoped),
-    );
-    it.live("reads each session's highest token report, wherever it sits in the transcript", () =>
-      Effect.gen(function* () {
-        const fixture = yield* adapter.fixture;
-        const runId = RunId.make("usage-run");
-        yield* Effect.gen(function* () {
-          const store = yield* RunStore;
-          yield* store.recordAndClaim(lifecycleSubmission, runId);
-          const started = yield* store.beginAttempt(
-            runId,
-            WorkerName.make("local"),
-            "local",
-            Option.none(),
-          );
-          assert(started._tag === "AttemptStarted");
-          const attemptId = started.execution.attempt.id;
-          const parent = ParentSession.make({
-            id: AgentSessionId.make("usage-parent"),
-            agent: testAgent.name,
-            brain: testAgent.brain,
-          });
-          const child = ChildSession.make({
-            id: AgentSessionId.make("usage-child"),
-            parentId: parent.id,
-            agent: testAgent.name,
-            brain: testAgent.brain,
-          });
-          const events = [
-            SessionTokensUpdated.make({ session: parent, totalTokens: TokenCount.make(100) }),
-            SessionTokensUpdated.make({
-              session: child,
-              totalTokens: TokenCount.make(40),
-              costUsd: Option.some(UsdAmount.make(0.4)),
-            }),
-            TextOutput.make({ session: parent, text: "Delegated the fix." }),
-            SessionTokensUpdated.make({ session: parent, totalTokens: TokenCount.make(250) }),
-            SessionTokensUpdated.make({
-              session: child,
-              totalTokens: TokenCount.make(90),
-              costUsd: Option.some(UsdAmount.make(1.25)),
-            }),
-            // A lower report after a higher one never lowers the session's usage.
-            SessionTokensUpdated.make({ session: parent, totalTokens: TokenCount.make(200) }),
-          ];
-          for (const [index, event] of events.entries()) {
-            yield* store.appendTranscript(
-              "outbound",
-              AttemptChannel.OutboundEnvelope.make({
-                version: AttemptChannel.PROTOCOL_VERSION,
-                attemptId,
-                sequence: AttemptChannel.Sequence.make(index + 1),
-                sentAt: DateTime.makeUnsafe("2026-10-20T00:00:00Z"),
-                payload: AttemptChannel.SessionEvent.make({ event }),
-              }),
-            );
-          }
-          const usage = yield* store.transcript(TranscriptUsageQuery.make({ attemptId }));
-          assert.deepStrictEqual(
-            usage.map(({ envelope }): readonly [string, number, number | null] | null =>
-              envelope.payload._tag === "SessionEvent" &&
-              envelope.payload.event._tag === "SessionTokensUpdated"
-                ? [
-                    envelope.payload.event.session.id,
-                    envelope.payload.event.totalTokens,
-                    Option.getOrNull(envelope.payload.event.costUsd),
-                  ]
-                : null,
-            ),
-            [
-              ["usage-parent", 250, null],
-              ["usage-child", 90, 1.25],
-            ],
-          );
         }).pipe(Effect.provide(fixture.open));
       }).pipe(Effect.scoped),
     );

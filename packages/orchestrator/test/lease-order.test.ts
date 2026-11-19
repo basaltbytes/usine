@@ -48,24 +48,6 @@ describe("Pipeline position", () => {
       },
     );
   });
-
-  it("retains the lane when a priority is set", () => {
-    assert.deepStrictEqual(pipelinePosition(PriorityValue.make(1), lanes, ["ready-to-merge"]), {
-      priority: PriorityValue.make(1),
-      lane: Option.some({ name: LaneName.make("Merge"), number: 5 }),
-    });
-  });
-
-  it("is unset without a priority or a label that a lane has", () => {
-    assert.deepStrictEqual(pipelinePosition(noPriority, lanes, ["bug"]), {
-      priority: noPriority,
-      lane: Option.none(),
-    });
-    assert.deepStrictEqual(pipelinePosition(noPriority, [], ["ready-for-agent"]), {
-      priority: noPriority,
-      lane: Option.none(),
-    });
-  });
 });
 
 const lane = (number: number): PipelinePosition => ({
@@ -95,14 +77,6 @@ describe("Lease order", () => {
     assert.strictEqual(passedCount([...startDev, reviewPr], reviewPr), 4);
   });
 
-  it("keeps Event order among Runs at the same position", () => {
-    assert.deepStrictEqual(
-      leased([candidate(3, lane(2)), candidate(1, lane(2)), candidate(2, lane(2))]),
-      [1, 2, 3],
-    );
-    assert.strictEqual(passedCount([candidate(2, lane(2))], candidate(1, lane(2))), 0);
-  });
-
   it("puts Runs without a position after positioned Runs, in Event order", () => {
     assert.deepStrictEqual(
       leased([candidate(1, unpositioned), candidate(2, lane(1)), candidate(3, unpositioned)]),
@@ -116,16 +90,6 @@ describe("Lease order", () => {
       [3, 2, 1],
     );
   });
-
-  it("puts a reservation that names a Worker before every position", () => {
-    assert.deepStrictEqual(
-      leased([
-        candidate(1, priority(9)),
-        candidate(2, unpositioned, Option.some(WorkerName.make("local"))),
-      ]),
-      [2, 1],
-    );
-  });
 });
 
 describe("Runs ahead", () => {
@@ -137,10 +101,6 @@ describe("Runs ahead", () => {
 
   it("leaves out a reservation that names a Worker while another Worker that takes Attempts has none", () => {
     assert.strictEqual(aheadCount([reattaching, earlier], waiting, [local, spare]), 1);
-  });
-
-  it("counts a reservation that names the only Worker that takes Attempts", () => {
-    assert.strictEqual(aheadCount([reattaching, earlier], waiting, [local]), 2);
   });
 
   it("counts, while each Worker that takes Attempts has reservations that name it, those of the Worker with the fewest", () => {

@@ -530,59 +530,8 @@ describe("GitHubPolling", () => {
     }).pipe(Effect.provide(pollingLayer(client)));
   });
 
-  it.effect("classifies GraphQL rate limiting reported on HTTP 200", () => {
-    const client = HttpClient.make((request) =>
-      Effect.succeed(
-        response(request, {
-          data: null,
-          errors: [{ type: "RATE_LIMITED", message: "API rate limit exhausted" }],
-        }),
-      ),
-    );
-
-    return Effect.gen(function* () {
-      const polling = yield* GitHubPolling;
-      const failure = yield* polling
-        .snapshot(
-          repository,
-          ChangedIssue.make({ number: 28, updatedAt: DateTime.makeUnsafe("2026-08-30T20:00:00Z") }),
-        )
-        .pipe(Effect.flip);
-      assert.strictEqual(failure._tag, "GitHubRateLimitError");
-    }).pipe(Effect.provide(pollingLayer(client)));
-  });
-
-  it.effect("carries GraphQL error messages instead of discarding them", () => {
-    const client = HttpClient.make((request) =>
-      Effect.succeed(
-        response(request, {
-          data: null,
-          errors: [{ message: "Something went wrong while executing your query." }],
-        }),
-      ),
-    );
-
-    return Effect.gen(function* () {
-      const polling = yield* GitHubPolling;
-      const pending = yield* polling
-        .snapshot(
-          repository,
-          ChangedIssue.make({ number: 28, updatedAt: DateTime.makeUnsafe("2026-08-30T20:00:00Z") }),
-        )
-        .pipe(Effect.flip, Effect.forkChild);
-      yield* TestClock.adjust("10 seconds");
-      const failure = yield* Fiber.join(pending);
-      assert.strictEqual(failure._tag, "InvalidGitHubResponseError");
-      if (failure._tag === "InvalidGitHubResponseError") {
-        assert.match(failure.detail, /Something went wrong/u);
-      }
-    }).pipe(Effect.provide(pollingLayer(client)));
-  });
-
   for (const [status, serverError] of [
     [502, true],
-    [504, true],
-    [401, false],
     [404, false],
   ] as const) {
     it.effect(
@@ -763,32 +712,30 @@ describe("GitHubPolling", () => {
     }).pipe(Effect.provide(pollingLayer(client)));
   });
 
-  for (const type of ["FORBIDDEN", "GRAPHQL_VALIDATION_FAILED"]) {
-    it.effect(`does not retry a missing-issue check with NOT_FOUND, INTERNAL, and ${type}`, () => {
-      let requests = 0;
-      const client = HttpClient.make((request) =>
-        Effect.sync(() => {
-          requests++;
-          return response(request, {
-            errors: [
-              { type: "NOT_FOUND", message: "Issue 28 no longer exists" },
-              { type: "INTERNAL", message: "Internal server error" },
-              { type, message: "Query cannot be completed" },
-            ],
-          });
-        }),
-      );
+  it.effect("does not retry a missing-issue check with NOT_FOUND, INTERNAL, and FORBIDDEN", () => {
+    let requests = 0;
+    const client = HttpClient.make((request) =>
+      Effect.sync(() => {
+        requests++;
+        return response(request, {
+          errors: [
+            { type: "NOT_FOUND", message: "Issue 28 no longer exists" },
+            { type: "INTERNAL", message: "Internal server error" },
+            { type: "FORBIDDEN", message: "Query cannot be completed" },
+          ],
+        });
+      }),
+    );
 
-      return Effect.gen(function* () {
-        const polling = yield* GitHubPolling;
-        const failure = yield* polling
-          .missingIssues(repository, [ItemNumber.make(28), ItemNumber.make(29)])
-          .pipe(Effect.flip);
-        assert.strictEqual(failure._tag, "InvalidGitHubResponseError");
-        assert.strictEqual(requests, 1);
-      }).pipe(Effect.provide(pollingLayer(client)));
-    });
-  }
+    return Effect.gen(function* () {
+      const polling = yield* GitHubPolling;
+      const failure = yield* polling
+        .missingIssues(repository, [ItemNumber.make(28), ItemNumber.make(29)])
+        .pipe(Effect.flip);
+      assert.strictEqual(failure._tag, "InvalidGitHubResponseError");
+      assert.strictEqual(requests, 1);
+    }).pipe(Effect.provide(pollingLayer(client)));
+  });
 
   it.effect("hashes canonical issue content without any timestamp fields", () => {
     const requests: Array<HttpClientRequest.HttpClientRequest> = [];

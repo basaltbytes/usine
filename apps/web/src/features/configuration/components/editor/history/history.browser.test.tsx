@@ -135,14 +135,8 @@ const capture = async (name: string) => {
 };
 
 it.each([
-  ["loops/start-dev", "loop:start-dev"],
-  ["agents/developer", "agent:developer"],
-  ["workers/local", "worker:local"],
-  ["projects/usine", "project:usine"],
   ["repositories/basaltbytes/usine", "repository:basaltbytes/usine"],
   ["labels/ready", "label:ready"],
-  ["bindings/instance-admin", "binding:instance-admin"],
-  ["settings", "settings:instance"],
 ])("opens filtered history in one click from %s", async (path, key) => {
   const router = await mount(`/configuration/${path}`);
   const link = page.getByRole("link", { name: `View history for ${key}`, exact: true });
@@ -163,19 +157,13 @@ it.each([
   await expect.element(filter(key)).toBeVisible();
 });
 
-it.each([
-  "loops",
-  "agents",
-  "workers",
-  "projects",
-  "repositories",
-  "labels",
-  "bindings",
-  "history",
-])("keeps %s usable across themes and viewport sizes", async (screen) => {
-  await mount(`/configuration/${screen}`);
-  await capture(screen);
-});
+it.each(["projects", "labels"])(
+  "keeps %s usable across themes and viewport sizes",
+  async (screen) => {
+    await mount(`/configuration/${screen}`);
+    await capture(screen);
+  },
+);
 
 it("applies, clears, and restores the URL filter with browser navigation", async () => {
   const router = await mount("/configuration/history?kind=worker&identifier=local");

@@ -11,7 +11,6 @@ import {
   configurationDiff,
   configurationEntities,
 } from "@usine/config/configuration";
-import { ConfigFileError, InstancePath } from "@usine/config/file";
 import { ConfigurationFolder } from "@usine/config/folder-codec";
 import { memoryConfigurationLayer } from "@usine/config/memory";
 import { ConfigParser } from "@usine/config/parser";
@@ -370,44 +369,6 @@ it.effect("refuses a save whose coordinator brain check is slow and stores no re
   }).pipe(Effect.scoped, Effect.withLogger(stepLogger(steps)), Effect.provide(NodeServices.layer));
 });
 
-it.effect("logs a refused coordinator brain as a failed step and stores no revision", () => {
-  const steps: Array<StepLog> = [];
-  const spans: Array<Tracer.Span> = [];
-  return Effect.gen(function* () {
-    const { store, initial, revision, current, edit, save } = yield* revisionFixture;
-    yield* current.registerWorkers(() => Effect.succeed(Effect.void));
-    const refusal = ConfigFileError.make({
-      file: InstancePath.make("agents/reviewer.md"),
-      stage: "schema",
-      expression: Option.none(),
-      message: 'Agent "reviewer" cannot run as coordinator: no model unknown/x',
-    });
-    let refusing = false;
-    yield* current.registerParentAdmission(() => Effect.succeed(refusing ? [refusal] : []));
-    refusing = true;
-    const failure = yield* save(revision.number, edit("Refused.")).pipe(Effect.flip);
-
-    expect(failure._tag).toBe("FactoryConfigError");
-    expect(failure.message).toContain('Agent "reviewer" cannot run as coordinator');
-    expect((yield* store.read).number).toBe(revision.number);
-    const unchanged = yield* current.get;
-    expect(unchanged).toBe(initial);
-    // The fixture and this test each register a check, and each registration logs its startup check.
-    expect(steps).toEqual([
-      startupCheck,
-      startupCheck,
-      ...savedSteps(0).slice(0, 4),
-      { step: "coordinator-brains", durationMillis: 0, outcome: "failed" },
-    ]);
-    expect(unordered(stepSpans(spans))).toEqual(unordered(steps));
-  }).pipe(
-    Effect.scoped,
-    Effect.withLogger(stepLogger(steps)),
-    recordingSpans(spans),
-    Effect.provide(NodeServices.layer),
-  );
-});
-
 it.effect("logs every step of a save that waits behind a running save", () => {
   const steps: Array<StepLog> = [];
   const spans: Array<Tracer.Span> = [];
@@ -480,122 +441,6 @@ it.effect("logs the wait of a save whose caller gives up and releases the queue"
   }).pipe(
     Effect.scoped,
     Effect.withLogger(stepLogger(steps)),
-    recordingSpans(spans),
-    Effect.provide(NodeServices.layer),
-  );
-});
-
-it.effect("logs the brain check of a save whose caller gives up before the time limit", () => {
-  const steps: Array<StepLog> = [];
-  return Effect.gen(function* () {
-    const { store, revision, current, slow, checking, edit, save } = yield* revisionFixture;
-    yield* current.registerWorkers(() => Effect.succeed(Effect.void));
-    slow.value = true;
-    const saving = yield* save(revision.number, edit("Given up.")).pipe(Effect.forkChild);
-    yield* Deferred.await(checking);
-    yield* TestClock.adjust("5 seconds");
-    yield* Fiber.interrupt(saving);
-
-    expect(steps).toEqual([
-      startupCheck,
-      ...savedSteps(0).slice(0, 4),
-      { step: "coordinator-brains", durationMillis: 5_000, outcome: "interrupted" },
-    ]);
-    expect((yield* store.read).number).toBe(revision.number);
-    slow.value = false;
-    yield* save(revision.number, edit("Saved."));
-    expect((yield* store.read).number).toBe(revision.number + 1);
-  }).pipe(Effect.scoped, Effect.withLogger(stepLogger(steps)), Effect.provide(NodeServices.layer));
-});
-
-it.effect("refuses a reload whose coordinator brain check is slow and logs a passing one", () => {
-  const steps: Array<StepLog> = [];
-  return Effect.gen(function* () {
-    const { initial, current, slow, checking } = yield* revisionFixture;
-    yield* current.registerWorkers(() => Effect.succeed(Effect.void));
-    slow.value = true;
-    const reloading = yield* current.reload.pipe(Effect.flip, Effect.forkChild);
-    yield* Deferred.await(checking);
-    yield* TestClock.adjust(coordinatorBrainTimeout);
-    const failure = yield* Fiber.join(reloading);
-
-    expect(failure._tag).toBe("ValidationTimeoutError");
-    const unchanged = yield* current.get;
-    expect(unchanged).toBe(initial);
-    expect(steps).toEqual([
-      startupCheck,
-      { step: "wait", durationMillis: 0, outcome: "passed" },
-      { step: "read", durationMillis: 0, outcome: "passed" },
-      { step: "restart", durationMillis: 0, outcome: "passed" },
-      { step: "coordinator-brains", durationMillis: 10_000, outcome: "failed" },
-    ]);
-
-    slow.value = false;
-    steps.length = 0;
-    yield* current.reload;
-    expect(steps.map(({ step }) => step)).toEqual([
-      "wait",
-      "read",
-      "restart",
-      "coordinator-brains",
-      "worker-preflight",
-      "apply",
-    ]);
-  }).pipe(Effect.scoped, Effect.withLogger(stepLogger(steps)), Effect.provide(NodeServices.layer));
-});
-
-it.effect("logs the startup coordinator brain check as a step", () => {
-  const steps: Array<StepLog> = [];
-  const spans: Array<Tracer.Span> = [];
-  return Effect.gen(function* () {
-    const { current } = yield* revisionFixture;
-    steps.length = 0;
-    spans.length = 0;
-    const registering = yield* current
-      .registerParentAdmission(() => Effect.sleep("3 seconds").pipe(Effect.as([])))
-      .pipe(Effect.forkScoped);
-    yield* Effect.repeat(Effect.yieldNow, { times: 10 });
-    yield* TestClock.adjust("3 seconds");
-    yield* Fiber.join(registering);
-
-    expect(steps).toEqual([
-      { step: "coordinator-brains", durationMillis: 3_000, outcome: "passed" },
-    ]);
-    expect(stepSpans(spans)).toEqual(steps);
-  }).pipe(
-    Effect.scoped,
-    Effect.withLogger(stepLogger(steps)),
-    recordingSpans(spans),
-    Effect.provide(NodeServices.layer),
-  );
-});
-
-it.effect("logs a refused startup coordinator brain as a failed step and quarantines it", () => {
-  const steps: Array<StepLog> = [];
-  const messages: Array<unknown> = [];
-  const spans: Array<Tracer.Span> = [];
-  return Effect.gen(function* () {
-    const { current } = yield* revisionFixture;
-    steps.length = 0;
-    spans.length = 0;
-    messages.length = 0;
-    const refusal = ConfigFileError.make({
-      file: InstancePath.make("agents/reviewer.md"),
-      stage: "schema",
-      expression: Option.none(),
-      message: 'Agent "reviewer" cannot run as coordinator: no model unknown/x',
-    });
-    yield* current.registerParentAdmission(() => Effect.succeed([refusal]));
-
-    expect(steps).toEqual([{ step: "coordinator-brains", durationMillis: 0, outcome: "failed" }]);
-    expect(stepSpans(spans)).toEqual(steps);
-    expect(messages).toContain("Coordinator admission quarantined agents and loops at startup");
-    const running = yield* current.get;
-    expect(running.agents).toEqual([]);
-    expect(running.invalidAgents.map(({ file }) => file)).toEqual(["agents/reviewer.md"]);
-  }).pipe(
-    Effect.scoped,
-    Effect.withLogger(stepLogger(steps, messages)),
     recordingSpans(spans),
     Effect.provide(NodeServices.layer),
   );

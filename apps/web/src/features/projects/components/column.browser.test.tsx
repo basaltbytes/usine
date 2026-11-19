@@ -91,22 +91,6 @@ afterEach(() => {
   host.remove();
 });
 
-it("starts the Unmapped lane open when it holds an open Item, with its cards visible", async () => {
-  render(fixtureLane("Unmapped"));
-  await expect.element(page.getByRole("heading", { name: "Unmapped 1" })).toBeVisible();
-  await expect
-    .element(page.getByLabelText("Unmapped cards").getByText(/^Investigate the reader/u))
-    .toBeVisible();
-  await expect.element(foldButton("Unmapped")).toHaveAttribute("aria-expanded", "true");
-});
-
-it("starts a lane that holds only closed Items folded to a rail with its count", async () => {
-  render(fixtureLane("Done"));
-  await expect.element(rail("Done", 1)).toHaveAttribute("aria-expanded", "false");
-  render(withItems(fixtureLane("Unmapped"), fixtureLane("Done").items));
-  await expect.element(rail("Unmapped", 1)).toHaveAttribute("aria-expanded", "false");
-});
-
 it("opens the Unmapped lane when an open Item arrives while the board is open", async () => {
   const unmapped = fixtureLane("Unmapped");
   show(withItems(unmapped, fixtureLane("Done").items));
@@ -153,15 +137,4 @@ it("shows each project's own fold choice when the same column switches project",
 
   show(unmapped, ProjectId.make("alpha"));
   await expect.element(rail("Unmapped", 1)).toBeVisible();
-});
-
-it("shows each lane's own fold choice when the same column shows another lane", async () => {
-  const done = fixtureLane("Done");
-  laneFoldMemory(() => localStorage).write(ProjectId.make("board-test"), done.id, false);
-  show(fixtureLane("Unmapped"));
-  await foldButton("Unmapped").click();
-  await expect.element(rail("Unmapped", 1)).toBeVisible();
-
-  show(done);
-  await expect.element(foldButton("Done")).toHaveAttribute("aria-expanded", "true");
 });

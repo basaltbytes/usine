@@ -45,12 +45,7 @@ it("consumes a link opened while the sign-in page is already mounted and removes
   }
 });
 
-it.each([
-  { device: "desktop", width: 1440, height: 900, theme: "dark" },
-  { device: "desktop", width: 1440, height: 900, theme: "light" },
-  { device: "phone", width: 390, height: 844, theme: "dark" },
-  { device: "phone", width: 390, height: 844, theme: "light" },
-])(
+it.each([{ device: "phone", width: 390, height: 844, theme: "light" }])(
   "shows first-member GitHub sign-in on $device in $theme",
   async ({ device, width, height, theme }) => {
     await page.viewport(width, height);

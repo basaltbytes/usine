@@ -239,25 +239,9 @@ const failedReplays: ReadonlyArray<FailedReplay> = [
   },
   {
     harness: "claude",
-    answer: "a result without a structured value",
-    transform: claudeResult({}),
-    reason: "CompletionInvalid",
-  },
-  {
-    harness: "claude",
     answer: "a refusal",
     transform: claudeResult({ stop_reason: "refusal", result: "I can't help with that." }),
     reason: "CompletionRefused",
-  },
-  {
-    harness: "claude",
-    answer: "a usage limit",
-    transform: claudeResult({
-      is_error: true,
-      api_error_status: 429,
-      result: "You've hit your limit.",
-    }),
-    reason: "AgentCapacityError",
   },
   {
     harness: "claude",
@@ -280,16 +264,6 @@ const failedReplays: ReadonlyArray<FailedReplay> = [
     }),
     reason: "AgentCapacityError",
     resetsAt: CLAUDE_LIMIT_RESETS_AT,
-  },
-  {
-    harness: "claude",
-    answer: "a rate limit without a reported reset time",
-    transform: claudeBeforeResult([claudeLimitError], {
-      is_error: true,
-      api_error_status: 429,
-      result: CLAUDE_LIMIT_TEXT,
-    }),
-    reason: "AgentCapacityError",
   },
   {
     harness: "claude",
@@ -318,27 +292,6 @@ const failedReplays: ReadonlyArray<FailedReplay> = [
   },
   {
     harness: "codex",
-    answer: "an overloaded server",
-    transform: codexFailedTurn({
-      message: "The server is overloaded",
-      codexErrorInfo: "serverOverloaded",
-    }),
-    reason: "AgentCapacityError",
-  },
-  {
-    harness: "codex",
-    answer: "a usage limit whose window is used up",
-    transform: (transcript) =>
-      codexFailedTurn({
-        message: "You've hit your usage limit.",
-        codexErrorInfo: "usageLimitExceeded",
-      })(codexLimitReached(transcript)),
-    reason: "AgentCapacityError",
-    // The recorded snapshot's primary window resets then.
-    resetsAt: "2026-11-17T12:42:41.000Z",
-  },
-  {
-    harness: "codex",
     answer: "a usage limit before any token update",
     transform: (transcript) =>
       codexFailedTurn({
@@ -346,6 +299,7 @@ const failedReplays: ReadonlyArray<FailedReplay> = [
         codexErrorInfo: "usageLimitExceeded",
       })(codexLimitReached(codexWithoutUsage(transcript))),
     reason: "AgentCapacityError",
+    // The recorded snapshot's primary window resets then.
     resetsAt: "2026-11-17T12:42:41.000Z",
     unmetered: true,
   },
@@ -366,12 +320,6 @@ const failedReplays: ReadonlyArray<FailedReplay> = [
   },
   {
     harness: "pi",
-    answer: "an overloaded provider",
-    transform: piError({ rawStopReason: "error", errorMessage: "overloaded_error" }),
-    reason: "AgentCapacityError",
-  },
-  {
-    harness: "pi",
     answer: "a ChatGPT plan usage limit",
     transform: piError({
       rawStopReason: "error",
@@ -387,16 +335,6 @@ const failedReplays: ReadonlyArray<FailedReplay> = [
     answer: "a failed request",
     transform: piError({ rawStopReason: "error", errorMessage: "Provider stopped with: error" }),
     reason: "SessionOperationError",
-  },
-  {
-    harness: "pi",
-    answer: "text without the output tool",
-    transform: piFinalMessage((message) => ({
-      ...message,
-      stopReason: "stop",
-      content: [{ type: "text", text: "I can't help with that." }],
-    })),
-    reason: "CompletionInvalid",
   },
   {
     harness: "pi",

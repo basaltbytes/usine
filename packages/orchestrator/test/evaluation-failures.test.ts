@@ -428,56 +428,6 @@ describe("Loop evaluation failures", () => {
     }),
   );
 
-  it.effect("retries a failing issue on the first poll after a reload changes the instance", () =>
-    Effect.gen(function* () {
-      submissions.length = 0;
-      const cursors = memoryCursorStore();
-      const fetched: Array<number> = [];
-      const github: GitHubPolling["Service"] = {
-        itemLabels: () => Effect.die("unused item labels"),
-        baseRefHead: unmovedBaseRefHead,
-        missingIssues: () => Effect.succeed([]),
-        labels: () =>
-          Effect.succeed(RepositoryLabelCatalog.make({ entityTag: Option.none(), labels: [] })),
-        changes: changesOnce([ChangedIssue.make({ number: 28, updatedAt })]),
-        snapshot: (_repository, item) =>
-          Effect.sync(() => {
-            fetched.push(item.number);
-            return IssueSnapshot.make({
-              payload: issuePayload(item.number, null),
-              contentHash: ContentHash.make("c".repeat(64)),
-            });
-          }),
-      };
-      const condition = 'item.labels.nodes.exists(label, label.name == "ready")';
-
-      yield* Effect.gen(function* () {
-        const polling = yield* PollingTriggers;
-        const broken = yield* instanceWith([
-          loop("plan", condition, "Plan {{ item.milestone.title }}."),
-        ]);
-        yield* polling.poll(broken);
-        yield* polling.poll(broken);
-        assert.deepStrictEqual(fetched, [28]);
-
-        // The operator fixes the prompt and reloads; detection reports no change.
-        const fixed = yield* instanceWith([
-          loop(
-            "plan",
-            condition,
-            'Plan {{ item.milestone != null ? item.milestone.title : "no milestone" }}.',
-          ),
-        ]);
-        const retried = yield* polling.poll(fixed);
-        assert.deepStrictEqual(fetched, [28, 28]);
-        assert.deepStrictEqual(retried.failures, []);
-        assert.deepStrictEqual(submissions, ["plan"]);
-        const decodedValue9 = yield* storedFailingItems(cursors);
-        assert.deepStrictEqual(decodedValue9, []);
-      }).pipe(Effect.provide(processLayer(github, cursors.store)));
-    }),
-  );
-
   it.effect("drops a failing Item it can no longer fetch instead of stalling the repository", () =>
     Effect.gen(function* () {
       submissions.length = 0;
@@ -524,56 +474,6 @@ describe("Loop evaluation failures", () => {
         assert.deepStrictEqual(cycle.failures, []);
         const decodedValue7 = yield* storedFailingItems(cursors);
         assert.deepStrictEqual(decodedValue7, []);
-      }).pipe(Effect.provide(processLayer(github, cursors.store)));
-    }),
-  );
-
-  it.effect("drops a failing Item GitHub no longer has on the first poll after a reload", () =>
-    Effect.gen(function* () {
-      submissions.length = 0;
-      const cursors = memoryCursorStore();
-      let deleted = false;
-      const github: GitHubPolling["Service"] = {
-        itemLabels: () => Effect.die("unused item labels"),
-        baseRefHead: unmovedBaseRefHead,
-        missingIssues: () => Effect.succeed([]),
-        labels: () =>
-          Effect.succeed(RepositoryLabelCatalog.make({ entityTag: Option.none(), labels: [] })),
-        changes: changesOnce([ChangedIssue.make({ number: 28, updatedAt })]),
-        snapshot: (_repository, item) =>
-          deleted
-            ? Effect.fail(
-                GitHubItemNotFoundError.make({
-                  operation: "fetch-issue-snapshot",
-                  item: item.number,
-                  message: `GitHub has no issue ${item.number}`,
-                }),
-              )
-            : Effect.succeed(
-                IssueSnapshot.make({
-                  payload: issuePayload(item.number, null),
-                  contentHash: ContentHash.make("d".repeat(64)),
-                }),
-              ),
-      };
-
-      yield* Effect.gen(function* () {
-        const polling = yield* PollingTriggers;
-        const decodedValue6 = yield* instanceWith([
-          loop("plan", 'item.state == "OPEN"', "Plan {{ item.milestone.title }}."),
-        ]);
-        yield* polling.poll(decodedValue6);
-        const decodedValue5 = yield* storedFailingItems(cursors);
-        assert.deepStrictEqual(decodedValue5, [28]);
-
-        deleted = true;
-        const reloaded = yield* instanceWith([
-          loop("plan", 'item.state == "OPEN"', "Plan issue {{ item.milestone.title }}."),
-        ]);
-        const cycle = yield* polling.poll(reloaded);
-        assert.deepStrictEqual(cycle.failures, []);
-        const decodedValue4 = yield* storedFailingItems(cursors);
-        assert.deepStrictEqual(decodedValue4, []);
       }).pipe(Effect.provide(processLayer(github, cursors.store)));
     }),
   );

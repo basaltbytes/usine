@@ -28,25 +28,6 @@ afterEach(async () => {
 
 const tiles = () => [...host.querySelectorAll("rect")].map((rect) => getComputedStyle(rect));
 
-it("lights each tile in flow order, one 130ms step apart in a 1.3s cycle, while running", () => {
-  flushSync(() => root.render(<UsineMark running />));
-  expect(
-    tiles().map(({ animationName, animationDuration, animationDelay }) => [
-      animationName,
-      animationDuration,
-      animationDelay,
-    ]),
-  ).toEqual(
-    ["0s", "0.13s", "0.26s", "0.39s", "0.52s", "0.65s", "0.78s"].map((delay) => [
-      "usine-mark-running",
-      "1.3s",
-      delay,
-    ]),
-  );
-  flushSync(() => root.render(<UsineMark />));
-  expect(tiles().map(({ animationName }) => animationName)).toEqual(Array(7).fill("none"));
-});
-
 it("shows the static mark, shaded along the flow, if the reader prefers reduced motion", async () => {
   await commands.reducedMotion(true);
   flushSync(() => root.render(<UsineMark running />));

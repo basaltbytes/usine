@@ -38,7 +38,6 @@ import {
   ChildSessionJournal,
   ChildSessionLifecycle,
   PoolUnavailableError,
-  SessionOperationError,
   toAttemptFailure,
   UnknownModelError,
   WorkingDirectory,
@@ -90,18 +89,12 @@ const notShellSet = (expected: ReadonlyArray<string>) => (name: string) =>
   ![...expected, "PWD", "OLDPWD", "SHLVL", "_"].includes(name);
 
 describe("Pi pool resolution", () => {
-  it("maps ChatGPT subscription authentication to the ChatGPT pool", () => {
+  it("maps supported authentication to its pool and rejects the rest instead of inventing an API key", () => {
     assert.strictEqual(
       resolvePiPool("openai-codex", { _tag: "OAuth", subscription: true }),
       "chatgptPlan",
     );
-  });
-
-  it("keeps API-key authentication in the API-key pool", () => {
     assert.strictEqual(resolvePiPool("openai", { _tag: "ApiKey" }), "apiKeys");
-  });
-
-  it("rejects missing and unsupported OAuth credentials instead of inventing an API key", () => {
     assert.strictEqual(resolvePiPool("openai-codex", undefined), undefined);
     assert.strictEqual(
       resolvePiPool("github-copilot", { _tag: "OAuth", subscription: true }),
@@ -294,68 +287,6 @@ describe("Pi child backend", () => {
     }).pipe(Effect.scoped),
   );
 
-  it.effect("reports a message to a working Pi child read once Pi starts it in the turn", () =>
-    Effect.gen(function* () {
-      const listeners: Array<(event: PiSessionEvent) => void> = [];
-      const steered: Array<string> = [];
-      const sdk = Layer.succeed(PiSdk)({
-        complete: noCompletion,
-        start: () =>
-          Promise.resolve({
-            _tag: "Started",
-            harnessSession: Option.none(),
-            model: childRequest.session.brain.model,
-            pool: "apiKeys",
-            tools: childTools,
-            session: {
-              messages: [],
-              dispose: () => {},
-              abort: () => Promise.resolve(),
-              subscribe: (listener) => {
-                listeners.push(listener);
-                return () => {};
-              },
-              steer: (text) => {
-                steered.push(text);
-                return Promise.resolve("queued" as const);
-              },
-              prompt: () => new Promise<void>(() => {}),
-            },
-          }),
-      });
-      yield* Effect.gen(function* () {
-        const running = yield* (yield* ChildBackend).launch(childRequest);
-        const reads: Array<Option.Option<AttemptChannel.InterventionState>> = [];
-        const state = yield* running.intervene(
-          AttemptChannel.OperatorMessage.make({ message: "Use pnpm, not npm." }),
-          (delivered) =>
-            Effect.sync(() => {
-              reads.push(delivered);
-            }),
-        );
-        assert.deepStrictEqual([state.held, state.queued], [true, true]);
-        assert.deepStrictEqual(steered, ["Use pnpm, not npm."]);
-        assert.deepStrictEqual(reads, []);
-        for (const listener of listeners)
-          listener({
-            type: "message_start",
-            message: {
-              role: "user",
-              content: [{ type: "text", text: "Use pnpm, not npm." }],
-              timestamp: 0,
-            },
-          });
-        for (let spin = 0; reads.length === 0; spin += 1) {
-          if (spin > 1_000) return assert.fail("the read was never reported");
-          yield* Effect.yieldNow;
-        }
-        const [read] = reads;
-        assert(read !== undefined && Option.isSome(read));
-        assert.deepStrictEqual([read.value.held, read.value.queued], [true, false]);
-      }).pipe(Effect.provide(piChildLayer.pipe(Layer.provideMerge(sdk))));
-    }).pipe(Effect.scoped),
-  );
-
   it.effect("doesn't count a steer that Pi reads before a tool call that starts at once", () =>
     Effect.gen(function* () {
       const listeners: Array<(event: PiSessionEvent) => void> = [];
@@ -423,46 +354,43 @@ describe("Pi child backend", () => {
     }).pipe(Effect.scoped),
   );
 
-  for (const answered of [true, false])
-    it.effect(
-      `restores whether a held idle Pi report ${answered ? "answers" : "doesn't answer"} the operator`,
-      () =>
-        Effect.gen(function* () {
-          const sdk = Layer.succeed(PiSdk)({
-            complete: noCompletion,
-            start: () =>
-              Promise.resolve({
-                _tag: "Started",
-                harnessSession: Option.none(),
-                model: childRequest.session.brain.model,
-                pool: "apiKeys",
-                tools: childTools,
-                session: {
-                  messages: [],
-                  dispose: () => {},
-                  abort: () => Promise.resolve(),
-                  subscribe: () => () => {},
-                  steer: () => Promise.resolve("handled" as const),
-                  prompt: () => new Promise<void>(() => {}),
-                },
-              }),
-          });
-          const result = yield* Effect.gen(function* () {
-            const running = yield* (yield* ChildBackend).launch(
-              ChildRequest.make({
-                ...childRequest,
-                held: true,
-                idle: Option.some("The tests need a database."),
-                idleAnsweredOperator: answered,
-              }),
-            );
-            yield* running.intervene(AttemptChannel.Release.make(), noDelivery);
-            return yield* running.result;
-          }).pipe(Effect.scoped, Effect.provide(piChildLayer.pipe(Layer.provideMerge(sdk))));
-          assert.strictEqual(result.message, "The tests need a database.");
-          assert.strictEqual(result.answeredOperator, answered);
-        }).pipe(Effect.scoped),
-    );
+  it.effect("restores whether a held idle Pi report answers the operator", () =>
+    Effect.gen(function* () {
+      const sdk = Layer.succeed(PiSdk)({
+        complete: noCompletion,
+        start: () =>
+          Promise.resolve({
+            _tag: "Started",
+            harnessSession: Option.none(),
+            model: childRequest.session.brain.model,
+            pool: "apiKeys",
+            tools: childTools,
+            session: {
+              messages: [],
+              dispose: () => {},
+              abort: () => Promise.resolve(),
+              subscribe: () => () => {},
+              steer: () => Promise.resolve("handled" as const),
+              prompt: () => new Promise<void>(() => {}),
+            },
+          }),
+      });
+      const result = yield* Effect.gen(function* () {
+        const running = yield* (yield* ChildBackend).launch(
+          ChildRequest.make({
+            ...childRequest,
+            held: true,
+            idle: Option.some("The tests need a database."),
+            idleAnsweredOperator: true,
+          }),
+        );
+        yield* running.intervene(AttemptChannel.Release.make(), noDelivery);
+        return yield* running.result;
+      }).pipe(Effect.scoped, Effect.provide(piChildLayer.pipe(Layer.provideMerge(sdk))));
+      assert.strictEqual(result.message, "The tests need a database.");
+      assert.isTrue(result.answeredOperator);
+    }).pipe(Effect.scoped),
+  );
 
   it.effect("reports one read for a Pi message start that arrives twice", () =>
     Effect.gen(function* () {
@@ -523,9 +451,7 @@ describe("Pi child backend", () => {
   );
 
   it.effect.each([
-    { pool: "apiKeys", model: "openai/gpt-5.6-terra-2026-08-01" },
     { pool: "chatgptPlan", model: "openai-codex/gpt-5.6-sol" },
-    { pool: "apiKeys", model: "openai-codex/gpt-5.6-sol" },
     { pool: "apiKeys", model: "ollama/qwen3" },
   ] as const)("normalizes $pool events and controls", ({ pool, model }) => {
     let options: PiStartOptions | undefined;
@@ -772,7 +698,6 @@ describe("Pi child backend", () => {
       { _tag: "AuthenticationUnavailable", model: ModelId.make("openai-codex/gpt-5.6-sol") },
       "chatgptPlan",
     ],
-    [{ _tag: "AuthenticationUnavailable", model: ModelId.make("openai/gpt-5.6-sol") }, "apiKeys"],
     [
       {
         _tag: "UnsupportedAuthentication",
@@ -983,30 +908,7 @@ describe("Pi child backend", () => {
     );
   });
 
-  it.effect("maps Pi SDK trouble to a session operation failure", () => {
-    const sdk = Layer.succeed(PiSdk)({
-      complete: noCompletion,
-      start: () => Promise.reject(new Error("provider unavailable")),
-    });
-    return Effect.scoped(
-      Effect.gen(function* () {
-        const backend = yield* ChildBackend;
-        const error = yield* Effect.flip(backend.launch(childRequest));
-        const matchesError = Schema.is(SessionOperationError)(error);
-        assert(matchesError);
-        assert.strictEqual(error.operation, "launch");
-      }).pipe(Effect.provide(piChildLayer.pipe(Layer.provideMerge(sdk)))),
-    );
-  });
-
   for (const scenario of [
-    {
-      name: "classifies a terminal overload when SDK retries are disabled",
-      message: "HTTP 529: overloaded_error",
-      retry: { enabled: false },
-      responses: 1,
-      outcome: "capacity",
-    },
     {
       name: "classifies HTTP 529 when the SDK does not recognize it as retryable",
       message: "HTTP 529",

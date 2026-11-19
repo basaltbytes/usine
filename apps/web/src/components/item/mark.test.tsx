@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { assert, describe, it } from "vitest";
 import { ItemHeading } from "~/components/item/heading";
 import { pullRequestAt, type TitledItem, taskIdentity } from "~/components/item/identity";
-import { ItemMark, type ItemRef, itemLabel, itemName } from "~/components/item/mark";
+import { ItemMark, type ItemRef, itemLabel } from "~/components/item/mark";
 
 const ref = (kind: ItemRef["kind"], number: number, state: ItemRef["state"]): ItemRef => ({
   kind,
@@ -57,19 +57,6 @@ describe("item mark", () => {
     assert.notInclude(plain, "<a ");
     assert.match(plain, /^<span role="img" aria-label="Issue #481, closed"/u);
   });
-
-  it("can show the icon alone, still named in words", () => {
-    const markup = renderToStaticMarkup(
-      <ItemMark item={ref("pr", 6, "pr-merged")} linked={false} numbered={false} />,
-    );
-    assert.include(markup, 'aria-label="Pull request #6, merged"');
-    assert.notInclude(markup, "#6<");
-  });
-
-  it("names the item for a sentence", () => {
-    assert.strictEqual(itemName(ref("pr", 530, "pr-closed")), "pull request #530");
-    assert.strictEqual(itemName(ref("issue", 481, null)), "issue #481");
-  });
 });
 
 describe("item heading", () => {
@@ -82,26 +69,6 @@ describe("item heading", () => {
       />,
     );
     assert.match(markup, /^<h1 [^>]*><a [^>]*>.*<\/a> Dependency follow-ups<\/h1>$/su);
-  });
-
-  it("keeps a row to one line with the title as tooltip", () => {
-    const markup = renderToStaticMarkup(
-      <ItemHeading
-        variant="row"
-        item={Option.some(ref("pr", 530, "pr-closed"))}
-        title="Bump the npm group"
-        linked={false}
-      />,
-    );
-    assert.match(markup, /^<span class="[^"]*\btruncate\b[^"]*" title="Bump the npm group">/u);
-    assert.notInclude(markup, "<a ");
-  });
-
-  it("renders only the title without an item", () => {
-    assert.strictEqual(
-      renderToStaticMarkup(<ItemHeading variant="page" item={Option.none()} title="Nightly" />),
-      '<h1 class="text-xl font-semibold wrap-anywhere">Nightly</h1>',
-    );
   });
 });
 

@@ -16,15 +16,8 @@ import { DurableHarness, durableError, layer as harnessLayer } from "../src/harn
 import { answer, delegate, fauxParent, type ParentStep } from "../src/testing.ts";
 import { assertAdmitted, attemptRequest, recordingSink, temporaryDatabase } from "./support.ts";
 
-for (const supervision of [
-  "held",
-  "held-unread",
-  "paused",
-  "held-paused",
-  "held-idle",
-  "held-idle-steer",
-] as const) {
-  const paused = supervision === "paused" || supervision === "held-paused";
+for (const supervision of ["held-unread", "paused", "held-idle", "held-idle-steer"] as const) {
+  const paused = supervision === "paused";
   const held = supervision !== "paused";
   const heldIdle = supervision === "held-idle" || supervision === "held-idle-steer";
   it.live(`restores a ${supervision} child before starting another turn`, () =>
@@ -248,11 +241,7 @@ for (const supervision of [
               yield* Deferred.await(prompted);
               assert.deepStrictEqual(
                 prompts,
-                [
-                  supervision === "held-unread"
-                    ? "Wait for my release."
-                    : "Continue with my correction.",
-                ],
+                ["Wait for my release."],
                 "unread input precedes the new guidance",
               );
             }

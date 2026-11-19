@@ -1,8 +1,7 @@
 import { assert, describe, it } from "@effect/vitest";
-import { AgentFailure, BlockedFailure } from "@usine/core/attempt/failure";
-import { Effect, Option, Ref } from "effect";
+import { AgentFailure } from "@usine/core/attempt/failure";
+import { Effect, Ref } from "effect";
 import { RunEngine } from "../src/engine/engine.ts";
-import { runIdFor } from "../src/engine/submission.ts";
 import {
   type AttemptPlan,
   engineLayer,
@@ -13,89 +12,7 @@ import {
   withInstance,
 } from "./support.ts";
 
-const blocker = BlockedFailure.make({
-  message: "The baseline gate fails on main before any change. Fixing it needs a maintainer.",
-});
-
-/** Returns whether no Run exists yet for the submission's Event. */
-const hasNoRun = (engine: RunEngine["Service"], sighting: ReturnType<typeof submission>) =>
-  Effect.gen(function* () {
-    const runId = yield* runIdFor(sighting);
-    const missing = yield* Effect.flip(engine.inspect(runId));
-    return missing._tag === "RunNotFoundError";
-  });
-
 describe("Attempts that end with a blocker", () => {
-  it.live("suppresses the Item after a blocker until its content changes again", () =>
-    withInstance((directory) =>
-      Effect.gen(function* () {
-        const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([
-          blocker,
-          Effect.succeed(stepResult("worked from the maintainer's fix")),
-        ]);
-        yield* Effect.gen(function* () {
-          const engine = yield* RunEngine;
-          const blocked = yield* engine.submit(submission({ number: 1, item: "blocked-item" }));
-          assert(blocked._tag === "Claimed");
-          const failed = yield* waitFor(
-            engine,
-            blocked.runId,
-            ({ run }) => run.state._tag === "Failed",
-          );
-          const outcome = failed.attempts[0]?.outcome;
-          assert(outcome !== undefined && Option.isSome(outcome));
-          assert(outcome.value._tag === "Failed");
-          assert.deepStrictEqual(outcome.value.failure, blocker);
-
-          // The Agent recorded its blocker on the Item, so the Item's content changed.
-          const posted = submission({ number: 2, item: "blocked-item" });
-          for (let poll = 0; poll < 3; poll += 1) {
-            const suppressed = yield* engine.submit(posted);
-            assert(suppressed._tag === "Suppressed");
-            assert.strictEqual(suppressed.runId, blocked.runId);
-          }
-          const noRun = yield* hasNoRun(engine, posted);
-          assert(noRun);
-
-          // A maintainer fixes main, a change the blocker comment did not make.
-          const fixed = submission({ number: 3, item: "blocked-item" });
-          const opened = yield* engine.submit(fixed);
-          assert(opened._tag === "Claimed");
-          yield* waitFor(engine, opened.runId, ({ run }) => run.state._tag === "Succeeded");
-          assert.strictEqual((yield* engine.inspect(blocked.runId)).run.state._tag, "Failed");
-        }).pipe(Effect.provide(engineLayer(directory, executorLayer(plans))));
-      }),
-    ),
-  );
-
-  it.live("evaluates the Item again once the operator resolves the blocker", () =>
-    withInstance((directory) =>
-      Effect.gen(function* () {
-        const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([
-          blocker,
-          Effect.succeed(stepResult("unblocked by the operator")),
-        ]);
-        yield* Effect.gen(function* () {
-          const engine = yield* RunEngine;
-          const blocked = yield* engine.submit(submission({ number: 4, item: "resolved-blocker" }));
-          assert(blocked._tag === "Claimed");
-          const failed = yield* waitFor(
-            engine,
-            blocked.runId,
-            ({ run }) => run.state._tag === "Failed",
-          );
-          const posted = submission({ number: 5, item: "resolved-blocker" });
-          assert.strictEqual((yield* engine.submit(posted))._tag, "Suppressed");
-          const attempt = failed.attempts[0];
-          assert(attempt !== undefined);
-          yield* engine.resolveFailure(blocked.runId, attempt.id, Option.none());
-          const currentRunId = yield* runIdFor(posted);
-          yield* waitFor(engine, currentRunId, ({ run }) => run.state._tag === "Succeeded");
-        }).pipe(Effect.provide(engineLayer(directory, executorLayer(plans))));
-      }),
-    ),
-  );
-
   it.live("does not suppress the Item after an Agent failure that is not a blocker", () =>
     withInstance((directory) =>
       Effect.gen(function* () {

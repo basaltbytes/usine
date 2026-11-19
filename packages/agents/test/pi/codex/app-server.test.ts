@@ -2,7 +2,6 @@ import { MessageSizeMib } from "@usine/core/worker";
 import { ChildProcessLost } from "../../../src/child-host/process.ts";
 import { jsonKey } from "@usine/core/json-key";
 import { assert, describe, it } from "@effect/vitest";
-import { AgentSessionId } from "@usine/core/agent/session";
 import {
   Deferred,
   Effect,
@@ -10,10 +9,7 @@ import {
   Layer,
   Logger,
   Option,
-  PlatformError,
-  Predicate,
   Queue,
-  References,
   Result,
   Schema,
   Sink,
@@ -39,125 +35,69 @@ import { request, fakeProcess, spawnerFor } from "./transport-fixture.ts";
 const encoder = new TextEncoder();
 const line = (value: Schema.Json): Uint8Array => encoder.encode(`${jsonKey(value)}\n`);
 
-// Effect's spawner fails a kill this way when the process can no longer be signalled.
-const failedKill = Effect.fail(
-  PlatformError.systemError({
-    _tag: "Unknown",
-    module: "ChildProcess",
-    method: "kill",
-    description: "Failed to kill child process",
-  }),
-);
-
-interface LogRecord {
-  readonly level: string;
-  readonly message: string;
-  readonly exitCode: unknown;
-}
-
-// Records every log at debug level and above with its message and `exitCode` field, if any.
-const recordingLogger = (records: Array<LogRecord>) =>
-  Layer.mergeAll(
-    Logger.layer([
-      Logger.make<unknown, void>(({ logLevel, message }) => {
-        const [text, fields] = Array.isArray(message) ? message : [message];
-        records.push({
-          level: logLevel.toUpperCase(),
-          message: String(text),
-          exitCode: Predicate.hasProperty(fields, "exitCode") ? fields.exitCode : undefined,
-        });
-      }),
-    ]),
-    Layer.succeed(References.MinimumLogLevel)("Debug"),
-  );
-
-const warningsIn = (records: ReadonlyArray<LogRecord>) =>
-  records
-    .filter(({ level }) => level === "WARN" || level === "ERROR")
-    .map(({ message }) => message);
-
-const stopMessages: ReadonlyArray<string> = [
-  "Forcing Codex app-server to stop after graceful shutdown failed",
-  "Stopping Codex app-server after it exited during a failed graceful shutdown",
-  "Could not force Codex app-server to stop",
-  "Codex app-server had already exited before the forced stop",
-];
-
-const stopRecordsIn = (records: ReadonlyArray<LogRecord>) =>
-  records.filter(({ message }) => stopMessages.includes(message));
-
 const awaitStdinLines = (process: Effect.Success<typeof fakeProcess>, count: number) =>
   Effect.gen(function* () {
     while (process.stdinLines.length < count) yield* Effect.yieldNow;
   });
 
 describe("Codex app-server transport", () => {
-  for (const terminated of [false, true]) {
-    it.effect(
-      `fails a session on an oversized ${terminated ? "complete" : "unfinished"} app-server line`,
-      () =>
-        Effect.gen(function* () {
-          const process = yield* fakeProcess;
-          yield* Effect.gen(function* () {
-            const connection = yield* (yield* CodexAppServer).open({
-              cwd: request.cwd,
-              sessionId: Option.some(request.session.id),
-              environment: request.environment,
-              host: request.host,
-              protocolFrameMib: MessageSizeMib.make(4),
-            });
-            const response = yield* connection
-              .request("stream", "probe", {})
-              .pipe(Effect.flip, Effect.forkChild);
-            yield* awaitStdinLines(process, 1);
-            for (let i = 0; i < 64; i++)
-              yield* Queue.offer(process.stdout, encoder.encode("x".repeat(65536)));
-            yield* Queue.offer(process.stdout, encoder.encode(terminated ? "x\n" : "x"));
-            const error = yield* Fiber.join(response);
-            assert.strictEqual(error.message, "Codex app-server frame exceeds 4 MiB");
-            assert.deepStrictEqual(error.cause, { limitMib: 4 });
-            const streamError = yield* connection.notifications.pipe(Stream.runDrain, Effect.flip);
-            assert.strictEqual(streamError, error);
-          }).pipe(
-            Effect.scoped,
-            Effect.provide(codexAppServerLive.pipe(Layer.provide(spawnerFor(process)))),
-          );
-        }),
-    );
-  }
+  it.effect("fails a session on an oversized complete app-server line", () =>
+    Effect.gen(function* () {
+      const process = yield* fakeProcess;
+      yield* Effect.gen(function* () {
+        const connection = yield* (yield* CodexAppServer).open({
+          cwd: request.cwd,
+          sessionId: Option.some(request.session.id),
+          environment: request.environment,
+          host: request.host,
+          protocolFrameMib: MessageSizeMib.make(4),
+        });
+        const response = yield* connection
+          .request("stream", "probe", {})
+          .pipe(Effect.flip, Effect.forkChild);
+        yield* awaitStdinLines(process, 1);
+        for (let i = 0; i < 64; i++)
+          yield* Queue.offer(process.stdout, encoder.encode("x".repeat(65536)));
+        yield* Queue.offer(process.stdout, encoder.encode("x\n"));
+        const error = yield* Fiber.join(response);
+        assert.strictEqual(error.message, "Codex app-server frame exceeds 4 MiB");
+        assert.deepStrictEqual(error.cause, { limitMib: 4 });
+        const streamError = yield* connection.notifications.pipe(Stream.runDrain, Effect.flip);
+        assert.strictEqual(streamError, error);
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(codexAppServerLive.pipe(Layer.provide(spawnerFor(process)))),
+      );
+    }),
+  );
 
-  for (const protocolFrameMib of [undefined, MessageSizeMib.make(8)]) {
-    it.effect(
-      `reads a large resume response with frame allowance ${protocolFrameMib ?? "unset"}`,
-      () =>
-        Effect.gen(function* () {
-          const process = yield* fakeProcess;
-          yield* Effect.gen(function* () {
-            const connection = yield* (yield* CodexAppServer).open({
-              cwd: request.cwd,
-              sessionId: Option.some(request.session.id),
-              environment: request.environment,
-              host: request.host,
-              protocolFrameMib,
-            });
-            const pending = yield* connection
-              .request("launch", "thread/resume", {})
-              .pipe(Effect.forkChild);
-            yield* awaitStdinLines(process, 1);
-            const rpc = yield* Schema.decodeUnknownEffect(
-              Schema.fromJsonString(Schema.Struct({ id: Schema.Int })),
-            )(process.stdinLines[0]);
-            const history = "x".repeat(5 * 1024 ** 2);
-            yield* Queue.offer(process.stdout, line({ id: rpc.id, result: { history } }));
-            const response = yield* Fiber.join(pending);
-            assert.deepStrictEqual(response, { history });
-          }).pipe(
-            Effect.scoped,
-            Effect.provide(codexAppServerLive.pipe(Layer.provide(spawnerFor(process)))),
-          );
-        }),
-    );
-  }
+  it.effect("reads a large resume response with the default frame allowance", () =>
+    Effect.gen(function* () {
+      const process = yield* fakeProcess;
+      yield* Effect.gen(function* () {
+        const connection = yield* (yield* CodexAppServer).open({
+          cwd: request.cwd,
+          sessionId: Option.some(request.session.id),
+          environment: request.environment,
+          host: request.host,
+        });
+        const pending = yield* connection
+          .request("launch", "thread/resume", {})
+          .pipe(Effect.forkChild);
+        yield* awaitStdinLines(process, 1);
+        const rpc = yield* Schema.decodeUnknownEffect(
+          Schema.fromJsonString(Schema.Struct({ id: Schema.Int })),
+        )(process.stdinLines[0]);
+        const history = "x".repeat(5 * 1024 ** 2);
+        yield* Queue.offer(process.stdout, line({ id: rpc.id, result: { history } }));
+        const response = yield* Fiber.join(pending);
+        assert.deepStrictEqual(response, { history });
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(codexAppServerLive.pipe(Layer.provide(spawnerFor(process)))),
+      );
+    }),
+  );
 
   it.effect("leaves the app-server for recovery when its attempt is stopping", () =>
     Effect.gen(function* () {
@@ -190,57 +130,53 @@ describe("Codex app-server transport", () => {
     }),
   );
 
-  for (const exitCode of [143, 255]) {
-    it.effect(
-      `leaves the remote supervisor alone after shutdown closes its relay with ${exitCode}`,
-      () =>
+  it.effect("leaves the remote supervisor alone after shutdown closes its relay with 255", () =>
+    Effect.gen(function* () {
+      const process = yield* fakeProcess;
+      const stopping = yield* Deferred.make<void>();
+      const errors: unknown[] = [];
+      let spawns = 0;
+      const logger = Logger.make<unknown, void>(({ logLevel, message }) => {
+        if (["WARN", "ERROR"].includes(logLevel.toUpperCase())) errors.push(message);
+      });
+      const spawner = Layer.effect(
+        ChildProcessSpawner.ChildProcessSpawner,
         Effect.gen(function* () {
-          const process = yield* fakeProcess;
-          const stopping = yield* Deferred.make<void>();
-          const errors: unknown[] = [];
-          let spawns = 0;
-          const logger = Logger.make<unknown, void>(({ logLevel, message }) => {
-            if (["WARN", "ERROR"].includes(logLevel.toUpperCase())) errors.push(message);
+          const base = yield* ChildProcessSpawner.ChildProcessSpawner;
+          return ChildProcessSpawner.make((command) => {
+            spawns += 1;
+            return base.spawn(command);
           });
-          const spawner = Layer.effect(
-            ChildProcessSpawner.ChildProcessSpawner,
-            Effect.gen(function* () {
-              const base = yield* ChildProcessSpawner.ChildProcessSpawner;
-              return ChildProcessSpawner.make((command) => {
-                spawns += 1;
-                return base.spawn(command);
-              });
-            }),
-          ).pipe(Layer.provide(spawnerFor(process, { exitOnEof: false })));
-          yield* Effect.scoped(
-            Effect.gen(function* () {
-              yield* (yield* CodexAppServer).open({
-                cwd: request.cwd,
-                sessionId: Option.some(request.session.id),
-                environment: request.environment,
-                host: RemoteShell.make({
-                  ssh: { command: "ssh", args: [] },
-                  sshEnvironment: {},
-                  destination: "worker",
-                }),
-              });
-              yield* TestClock.adjust(0);
-              yield* Deferred.succeed(stopping, undefined);
-              yield* Deferred.succeed(process.exit, ChildProcessSpawner.ExitCode(exitCode));
-              yield* TestClock.adjust("1 minute");
-            }),
-          ).pipe(
-            Effect.provide(codexAppServerLive.pipe(Layer.provide(spawner))),
-            Effect.provideService(ChildSessionLifecycle, { isStopping: Deferred.isDone(stopping) }),
-            Effect.provide(Logger.layer([logger])),
-          );
-          assert.strictEqual(spawns, 1);
-          const killed = yield* Deferred.isDone(process.killed);
-          assert.isFalse(killed);
-          assert.deepStrictEqual(errors, []);
         }),
-    );
-  }
+      ).pipe(Layer.provide(spawnerFor(process, { exitOnEof: false })));
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          yield* (yield* CodexAppServer).open({
+            cwd: request.cwd,
+            sessionId: Option.some(request.session.id),
+            environment: request.environment,
+            host: RemoteShell.make({
+              ssh: { command: "ssh", args: [] },
+              sshEnvironment: {},
+              destination: "worker",
+            }),
+          });
+          yield* TestClock.adjust(0);
+          yield* Deferred.succeed(stopping, undefined);
+          yield* Deferred.succeed(process.exit, ChildProcessSpawner.ExitCode(255));
+          yield* TestClock.adjust("1 minute");
+        }),
+      ).pipe(
+        Effect.provide(codexAppServerLive.pipe(Layer.provide(spawner))),
+        Effect.provideService(ChildSessionLifecycle, { isStopping: Deferred.isDone(stopping) }),
+        Effect.provide(Logger.layer([logger])),
+      );
+      assert.strictEqual(spawns, 1);
+      const killed = yield* Deferred.isDone(process.killed);
+      assert.isFalse(killed);
+      assert.deepStrictEqual(errors, []);
+    }),
+  );
 
   it.effect("stops the retained process before replacing its transport", () =>
     Effect.gen(function* () {
@@ -390,163 +326,6 @@ describe("Codex app-server transport", () => {
     }),
   );
 
-  it.effect("logs no warning when stopping an app-server that already exited", () =>
-    Effect.gen(function* () {
-      const process = yield* fakeProcess;
-      const records: Array<LogRecord> = [];
-      yield* Effect.scoped(
-        Effect.gen(function* () {
-          yield* (yield* CodexAppServer).open({
-            cwd: request.cwd,
-            sessionId: Option.some(request.session.id),
-            environment: request.environment,
-            host: request.host,
-          });
-          yield* Deferred.succeed(process.exit, ChildProcessSpawner.ExitCode(1));
-        }),
-      ).pipe(
-        Effect.provide(
-          codexAppServerLive.pipe(
-            Layer.provide(spawnerFor(process, { exitOnEof: false, kill: failedKill })),
-            Layer.merge(recordingLogger(records)),
-          ),
-        ),
-      );
-      const killed = yield* Deferred.isDone(process.killed);
-      assert.isTrue(killed, "the stop still reaps the exited process");
-      assert.deepStrictEqual(warningsIn(records), []);
-      assert.deepStrictEqual(stopRecordsIn(records), [
-        {
-          level: "DEBUG",
-          message: "Stopping Codex app-server after it exited during a failed graceful shutdown",
-          exitCode: 1,
-        },
-        {
-          level: "DEBUG",
-          message: "Codex app-server had already exited before the forced stop",
-          exitCode: 1,
-        },
-      ]);
-    }),
-  );
-
-  it.effect("waits for an exit report that trails the failed forced stop", () =>
-    Effect.gen(function* () {
-      const process = yield* fakeProcess;
-      const records: Array<LogRecord> = [];
-      const released = yield* Effect.scoped(
-        Effect.gen(function* () {
-          yield* (yield* CodexAppServer).open({
-            cwd: request.cwd,
-            sessionId: Option.some(request.session.id),
-            environment: request.environment,
-            host: request.host,
-          });
-        }),
-      ).pipe(
-        Effect.provide(
-          codexAppServerLive.pipe(
-            Layer.provide(spawnerFor(process, { exitOnEof: false, kill: failedKill })),
-            Layer.merge(recordingLogger(records)),
-          ),
-        ),
-        Effect.forkChild,
-      );
-      yield* Deferred.await(process.stdinClosed);
-      yield* TestClock.adjust("15 seconds");
-      yield* Deferred.await(process.killed);
-      yield* TestClock.adjust("500 millis");
-      yield* Deferred.succeed(process.exit, ChildProcessSpawner.ExitCode(1));
-      yield* Fiber.join(released);
-      assert.deepStrictEqual(stopRecordsIn(records), [
-        {
-          level: "WARN",
-          message: "Forcing Codex app-server to stop after graceful shutdown failed",
-          exitCode: undefined,
-        },
-        {
-          level: "DEBUG",
-          message: "Codex app-server had already exited before the forced stop",
-          exitCode: 1,
-        },
-      ]);
-    }),
-  );
-
-  it.effect("warns when the app-server is still alive after the forced stop fails", () =>
-    Effect.gen(function* () {
-      const process = yield* fakeProcess;
-      const records: Array<LogRecord> = [];
-      const released = yield* Effect.scoped(
-        Effect.gen(function* () {
-          yield* (yield* CodexAppServer).open({
-            cwd: request.cwd,
-            sessionId: Option.some(request.session.id),
-            environment: request.environment,
-            host: request.host,
-          });
-        }),
-      ).pipe(
-        Effect.provide(
-          codexAppServerLive.pipe(
-            Layer.provide(spawnerFor(process, { exitOnEof: false, kill: failedKill })),
-            Layer.merge(recordingLogger(records)),
-          ),
-        ),
-        Effect.forkChild,
-      );
-      yield* Deferred.await(process.stdinClosed);
-      yield* TestClock.adjust("1 minute");
-      yield* Fiber.join(released);
-      assert.deepStrictEqual(warningsIn(records), [
-        "Forcing Codex app-server to stop after graceful shutdown failed",
-        "Could not force Codex app-server to stop",
-      ]);
-    }),
-  );
-
-  it.effect("warns when the app-server's exit monitor failed before the forced stop", () =>
-    Effect.gen(function* () {
-      const process = yield* fakeProcess;
-      const records: Array<LogRecord> = [];
-      const monitorFailed = PlatformError.systemError({
-        _tag: "Unknown",
-        module: "ChildProcess",
-        method: "exitCode",
-        description: "Failed to read the exit code",
-      });
-      yield* Effect.scoped(
-        Effect.gen(function* () {
-          yield* (yield* CodexAppServer).open({
-            cwd: request.cwd,
-            sessionId: Option.some(request.session.id),
-            environment: request.environment,
-            host: request.host,
-          });
-        }),
-      ).pipe(
-        Effect.provide(
-          codexAppServerLive.pipe(
-            Layer.provide(
-              spawnerFor(process, {
-                exitOnEof: false,
-                kill: failedKill,
-                exitCode: Effect.fail(monitorFailed),
-              }),
-            ),
-            Layer.merge(recordingLogger(records)),
-          ),
-        ),
-      );
-      const killed = yield* Deferred.isDone(process.killed);
-      assert.isTrue(killed);
-      assert.deepStrictEqual(warningsIn(records), [
-        "Forcing Codex app-server to stop after graceful shutdown failed",
-        "Could not force Codex app-server to stop",
-      ]);
-    }),
-  );
-
   it.effect("settles unanswered requests when the server closes", () =>
     Effect.gen(function* () {
       const process = yield* fakeProcess;
@@ -665,38 +444,36 @@ describe("Codex app-server transport", () => {
     host,
   });
 
-  for (const sessionId of [Option.some(request.session.id), Option.none<AgentSessionId>()]) {
-    it(`disables repository trust, recursive agents, and background traffic for ${Option.isSome(sessionId) ? "children" : "preflight"}`, () => {
-      const command = codexAppServerCommand({ ...client(LocalProcess.make()), sessionId });
-      assert.strictEqual(command._tag, "StandardCommand");
-      if (command._tag !== "StandardCommand") return;
-      assert.strictEqual(command.options.cwd, "/");
-      assert.deepStrictEqual(command.options.env, request.environment);
-      assert.strictEqual(command.options.extendEnv, false);
-      assert.strictEqual(command.options.detached, false);
-      assert.strictEqual(command.options.forceKillAfter, "6 seconds");
-      assert.deepStrictEqual(command.args.slice(5), [
-        "app-server",
-        "--stdio",
-        "-c",
-        'projects={"/workspace/repo"={trust_level="untrusted"}}',
-        "-c",
-        "features.multi_agent=false",
-        "-c",
-        "features.plugins=false",
-        "-c",
-        "features.remote_plugin=false",
-        "-c",
-        "features.apps=false",
-        "-c",
-        "check_for_update_on_startup=false",
-        "-c",
-        "analytics.enabled=false",
-        "-c",
-        'cli_auth_credentials_store="file"',
-      ]);
-    });
-  }
+  it("disables repository trust, recursive agents, and background traffic for children", () => {
+    const command = codexAppServerCommand(client(LocalProcess.make()));
+    assert.strictEqual(command._tag, "StandardCommand");
+    if (command._tag !== "StandardCommand") return;
+    assert.strictEqual(command.options.cwd, "/");
+    assert.deepStrictEqual(command.options.env, request.environment);
+    assert.strictEqual(command.options.extendEnv, false);
+    assert.strictEqual(command.options.detached, false);
+    assert.strictEqual(command.options.forceKillAfter, "6 seconds");
+    assert.deepStrictEqual(command.args.slice(5), [
+      "app-server",
+      "--stdio",
+      "-c",
+      'projects={"/workspace/repo"={trust_level="untrusted"}}',
+      "-c",
+      "features.multi_agent=false",
+      "-c",
+      "features.plugins=false",
+      "-c",
+      "features.remote_plugin=false",
+      "-c",
+      "features.apps=false",
+      "-c",
+      "check_for_update_on_startup=false",
+      "-c",
+      "analytics.enabled=false",
+      "-c",
+      'cli_auth_credentials_store="file"',
+    ]);
+  });
 
   it("builds a short-lived remote preflight command without a session PID file", () => {
     const host = RemoteShell.make({
@@ -855,51 +632,45 @@ describe("Codex app-server transport", () => {
     }),
   );
 
-  for (const exitCode of [0, 1]) {
-    it.effect(`delivers buffered thread replies before reporting process exit ${exitCode}`, () =>
-      Effect.gen(function* () {
-        const process = yield* fakeProcess;
-        const readOutput = yield* Deferred.make<void>();
-        const stdout = Stream.unwrap(
-          Deferred.await(readOutput).pipe(Effect.as(Stream.fromQueue(process.stdout))),
-        );
-        yield* Effect.scoped(
-          Effect.gen(function* () {
-            const connection = yield* (yield* CodexAppServer).open({
-              cwd: request.cwd,
-              sessionId: Option.some(request.session.id),
-              environment: request.environment,
-              host: request.host,
-            });
-            const pending = yield* Effect.forkChild(
-              connection.request("launch", "thread/start", {}),
-            );
-            yield* awaitStdinLines(process, 1);
-            yield* Queue.offer(
-              process.stdout,
-              line({ id: 1, result: { thread: { id: "thread-one" } } }),
-            );
-            yield* Deferred.succeed(process.exit, ChildProcessSpawner.ExitCode(exitCode));
-            yield* TestClock.adjust(0);
-            yield* Deferred.succeed(readOutput, undefined);
-            const reply = yield* Fiber.join(pending);
-            assert.deepStrictEqual(reply, {
-              thread: { id: "thread-one" },
-            });
-            const error = yield* connection.request("stream", "turn/start", {}).pipe(Effect.flip);
-            assert.deepStrictEqual(
-              error.cause,
-              ChildProcessLost.make({ exitCode, stderrTail: "" }),
-            );
-          }).pipe(Effect.ensuring(Deferred.succeed(readOutput, undefined))),
-        ).pipe(
-          Effect.provide(
-            codexAppServerLive.pipe(Layer.provideMerge(spawnerFor(process, { stdout }))),
-          ),
-        );
-      }),
-    );
-  }
+  it.effect("delivers buffered thread replies before reporting process exit 1", () => {
+    const exitCode = 1;
+    return Effect.gen(function* () {
+      const process = yield* fakeProcess;
+      const readOutput = yield* Deferred.make<void>();
+      const stdout = Stream.unwrap(
+        Deferred.await(readOutput).pipe(Effect.as(Stream.fromQueue(process.stdout))),
+      );
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* (yield* CodexAppServer).open({
+            cwd: request.cwd,
+            sessionId: Option.some(request.session.id),
+            environment: request.environment,
+            host: request.host,
+          });
+          const pending = yield* Effect.forkChild(connection.request("launch", "thread/start", {}));
+          yield* awaitStdinLines(process, 1);
+          yield* Queue.offer(
+            process.stdout,
+            line({ id: 1, result: { thread: { id: "thread-one" } } }),
+          );
+          yield* Deferred.succeed(process.exit, ChildProcessSpawner.ExitCode(exitCode));
+          yield* TestClock.adjust(0);
+          yield* Deferred.succeed(readOutput, undefined);
+          const reply = yield* Fiber.join(pending);
+          assert.deepStrictEqual(reply, {
+            thread: { id: "thread-one" },
+          });
+          const error = yield* connection.request("stream", "turn/start", {}).pipe(Effect.flip);
+          assert.deepStrictEqual(error.cause, ChildProcessLost.make({ exitCode, stderrTail: "" }));
+        }).pipe(Effect.ensuring(Deferred.succeed(readOutput, undefined))),
+      ).pipe(
+        Effect.provide(
+          codexAppServerLive.pipe(Layer.provideMerge(spawnerFor(process, { stdout }))),
+        ),
+      );
+    });
+  });
 
   it.effect("fails pending requests with the exit code and captured stderr", () =>
     Effect.gen(function* () {

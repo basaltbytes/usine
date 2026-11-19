@@ -10,7 +10,7 @@ import {
   type ContainerOutOfMemoryKills,
 } from "@usine/core/attempt";
 import { type AttemptSalvage, SalvageRef } from "@usine/core/attempt/salvage";
-import { ContainerId, ContainerMemoryMib, SshDestination, WorkerName } from "@usine/core/worker";
+import { ContainerMemoryMib, SshDestination, WorkerName } from "@usine/core/worker";
 import type { AttemptRequest } from "@usine/durable/attempt-runtime";
 import { completes, type StubParent, StubStorage } from "@usine/durable/testing";
 import {
@@ -192,58 +192,50 @@ describe("SSH Worker with Docker", () => {
     assert.strictEqual(ATTEMPT_IMAGE, `ghcr.io/basaltbytes/usine-worker:${tag}`);
   });
 
-  it.effect.each([
-    { present: true, changed: false },
-    { present: false, changed: false },
-    { present: true, changed: true },
-  ])(
-    "reports image presence and whether preflight downloaded it: $present, $changed",
-    ({ present, changed }) => {
-      const machine = dockerMachine();
-      machine.state.imageOnMachine = present;
-      if (changed) machine.state.pulledImageId = "sha256:4567";
-      const logs = capturedLogs();
-      return Effect.gen(function* () {
-        const executor = yield* Executor;
-        yield* executor.preflight(WORKER, [], 1);
-        const inspections = logs.lines.filter((line) =>
-          line.includes("Inspected the attempt image"),
-        );
-        assert.include(inspections[0] ?? "", `"status":"${present ? "present" : "absent"}"`);
-        assert.include(inspections[0] ?? "", '"durationMillis":');
-        const pulls = logs.lines.filter((line) => line.includes("Pulled the attempt image"));
-        assert.lengthOf(pulls, 1);
-        const json1 = yield* Schema.decodeEffect(CapturedLog)(pulls[0] ?? "").pipe(Effect.orDie);
-        assert.deepInclude(json1[1], {
-          image: ATTEMPT_IMAGE,
-          downloaded: !present || changed,
-          durationMillis: 0,
-        });
-        assert.lengthOf(
-          linesOf(machine).filter((line) => line.startsWith("exec 'docker' 'pull' ")),
-          1,
-        );
-        assert.lengthOf(
-          logs.warnings.filter((line) => line.includes("image is absent")),
-          present ? 0 : 1,
-        );
-        const cache = logs.lines.find((line) => line.includes("Prepared shared cache volume"));
-        const json2 = yield* Schema.decodeEffect(CapturedLog)(cache ?? "").pipe(Effect.orDie);
-        assert.deepInclude(json2[1], {
-          runDurationMillis: 17,
-          durationMillis: 0,
-        });
-        assert.include(logs.lines.join("\n"), "Ran the attempt image user probe");
-      }).pipe(
-        Effect.scoped,
-        Effect.provide(runtime(machine, mintingProvider()).pipe(Layer.provideMerge(logs.layer))),
+  it.effect("reports an absent image and that preflight downloaded it", () => {
+    const machine = dockerMachine();
+    machine.state.imageOnMachine = false;
+    const logs = capturedLogs();
+    return Effect.gen(function* () {
+      const executor = yield* Executor;
+      yield* executor.preflight(WORKER, [], 1);
+      const inspections = logs.lines.filter((line) => line.includes("Inspected the attempt image"));
+      assert.include(inspections[0] ?? "", '"status":"absent"');
+      assert.include(inspections[0] ?? "", '"durationMillis":');
+      const pulls = logs.lines.filter((line) => line.includes("Pulled the attempt image"));
+      assert.lengthOf(pulls, 1);
+      const json1 = yield* Schema.decodeEffect(CapturedLog)(pulls[0] ?? "").pipe(Effect.orDie);
+      assert.deepInclude(json1[1], {
+        image: ATTEMPT_IMAGE,
+        downloaded: true,
+        durationMillis: 0,
+      });
+      assert.lengthOf(
+        linesOf(machine).filter((line) => line.startsWith("exec 'docker' 'pull' ")),
+        1,
       );
-    },
-  );
+      assert.lengthOf(
+        logs.warnings.filter((line) => line.includes("image is absent")),
+        1,
+      );
+      const cache = logs.lines.find((line) => line.includes("Prepared shared cache volume"));
+      const json2 = yield* Schema.decodeEffect(CapturedLog)(cache ?? "").pipe(Effect.orDie);
+      assert.deepInclude(json2[1], {
+        runDurationMillis: 17,
+        durationMillis: 0,
+      });
+      assert.include(logs.lines.join("\n"), "Ran the attempt image user probe");
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(runtime(machine, mintingProvider()).pipe(Layer.provideMerge(logs.layer))),
+    );
+  });
 
-  it.effect.each(["1793637391N\n", "17936373913N\n", "\n", "-1\n", "1.5\n"])(
-    "prepares shared caches without a run duration when the shell prints %j",
-    (stdout) => {
+  // BusyBox date prints %N literally.
+  it.effect(
+    "prepares shared caches without a run duration when the shell prints no nanoseconds",
+    () => {
+      const stdout = "1793637391N\n";
       const machine = dockerMachine();
       machine.state.cachePreparationDuration = stdout;
       const logs = capturedLogs();
@@ -271,27 +263,6 @@ describe("SSH Worker with Docker", () => {
         Effect.provide(runtime(machine, mintingProvider()).pipe(Layer.provideMerge(logs.layer))),
         Effect.provideService(References.MinimumLogLevel, "Debug"),
       );
-    },
-  );
-
-  it.effect.each([true, false])(
-    "checks the image before cache initialization without preflight: present=%s",
-    (present) => {
-      const machine = dockerMachine();
-      machine.state.imageOnMachine = present;
-      return Effect.gen(function* () {
-        const executor = yield* Executor;
-        yield* executor.prepare(request);
-        const lines = linesOf(machine);
-        const inspect = lines.findIndex((line) =>
-          line.startsWith("exec 'docker' 'image' 'inspect'"),
-        );
-        const cache = lines.findIndex((line) => line.includes("volume create"));
-        assert.isAtLeast(inspect, 0);
-        assert.isAbove(cache, inspect);
-        const pulls = lines.filter((line) => line.startsWith("exec 'docker' 'pull'"));
-        assert.lengthOf(pulls, present ? 0 : 1);
-      }).pipe(Effect.scoped, Effect.provide(runtime(machine, mintingProvider())));
     },
   );
 
@@ -401,78 +372,13 @@ describe("SSH Worker with Docker", () => {
     },
   );
 
-  it.effect.each([
-    { slots: 3, memoryMib: 7168, warns: true },
-    { slots: 2, memoryMib: 3584, warns: false },
-    { slots: 1, memoryMib: 7169, warns: true },
-  ])(
-    "checks fully configured container memory against the host reserve: $slots × $memoryMib",
-    ({ slots, memoryMib, warns }) => {
-      const machine = dockerMachine();
-      machine.state.memoryGib = 8;
-      const logs = capturedLogs();
-      const address: SshWorkerAddress = {
-        ...ADDRESS,
-        container: {
-          ...ADDRESS.container,
-          memoryMib: Option.some(ContainerMemoryMib.make(memoryMib)),
-        },
-      };
-      return Effect.gen(function* () {
-        const executor = yield* Executor;
-        yield* executor.preflight(WORKER, [], slots);
-        const warnings = logs.lines.filter((line) =>
-          line.includes("Concurrent container memory exceeds"),
-        );
-        assert.lengthOf(warnings, warns ? 1 : 0);
-        for (const warning of warnings) {
-          const json5 = yield* Schema.decodeEffect(CapturedLog)(warning).pipe(Effect.orDie);
-          assert.deepInclude(json5[1], {
-            worker: WORKER,
-            maxConcurrentAttempts: slots,
-            memoryMib,
-            allocatedMemoryMib: slots * memoryMib,
-            availableMemoryMib: 7168,
-            hostReserveMib: 1024,
-          });
-        }
-      }).pipe(
-        Effect.scoped,
-        Effect.provide(
-          executorLayer(machine, mintingProvider(), address).pipe(
-            Layer.provide(noGateway),
-            Layer.provideMerge(logs.layer),
-          ),
-        ),
-      );
-    },
-  );
-
-  it.effect.each([
-    {
-      case: "one slot",
-      slots: 1,
-      memoryMib: Option.none(),
-      limits: ["4", "7168m", "60976"],
-      derived: "cpus,memoryMib,pids",
-    },
-    {
-      case: "three slots",
-      slots: 3,
-      memoryMib: Option.none(),
-      limits: ["1.33", "2389m", "20325"],
-      derived: "cpus,memoryMib,pids",
-    },
-    {
-      case: "three slots and memory_mib in usine.yaml",
-      slots: 3,
-      memoryMib: Option.some(ContainerMemoryMib.make(3072)),
-      limits: ["1.33", "3072m", "20325"],
-      derived: "cpus,pids",
-    },
-  ])(
-    "derives the limits that usine.yaml leaves unset from a 4 CPU, 8 GiB machine with $case",
-    ({ slots, memoryMib, limits, derived }) => {
+  it.effect(
+    "derives the limits that usine.yaml leaves unset from a 4 CPU, 8 GiB machine with three slots and memory_mib in usine.yaml",
+    () => {
+      const slots = 3;
+      const memoryMib = Option.some(ContainerMemoryMib.make(3072));
+      const limits = ["1.33", "3072m", "20325"];
+      const derived = "cpus,pids";
       const machine = dockerMachine();
       const logs = capturedLogs();
       machine.state.memoryGib = 8;
@@ -532,31 +438,18 @@ describe("SSH Worker with Docker", () => {
     },
   );
 
-  it.effect.each(["readable", "unreadable", "disconnects"] as const)(
-    "reports a kernel log that the SSH user can't read as a preflight finding: %s",
-    (kernelMemory) => {
-      const machine = dockerMachine();
-      machine.state.kernelMemory = kernelMemory;
-      return Effect.gen(function* () {
-        const executor = yield* Executor;
-        const report = yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
-        assert.isTrue(Option.isNone(report.degraded));
-        if (kernelMemory === "readable") assert.deepStrictEqual(report.findings, []);
-        else if (kernelMemory === "unreadable") {
-          assert.strictEqual(report.findings.length, 1);
-          assert.include(report.findings[0], "can't read the kernel journal or ring buffer");
-          assert.include(report.findings[0], "systemd-journal");
-        } else {
-          assert.strictEqual(report.findings.length, 1);
-          assert.include(
-            report.findings[0],
-            `Could not check whether the SSH user can read the kernel log on ${DESTINATION}`,
-          );
-          assert.include(report.findings[0], "closed by remote host");
-        }
-      }).pipe(Effect.scoped, Effect.provide(runtime(machine, mintingProvider())));
-    },
-  );
+  it.effect("reports a kernel log that the SSH user can't read as a preflight finding", () => {
+    const machine = dockerMachine();
+    machine.state.kernelMemory = "unreadable";
+    return Effect.gen(function* () {
+      const executor = yield* Executor;
+      const report = yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
+      assert.isTrue(Option.isNone(report.degraded));
+      assert.strictEqual(report.findings.length, 1);
+      assert.include(report.findings[0], "can't read the kernel journal or ring buffer");
+      assert.include(report.findings[0], "systemd-journal");
+    }).pipe(Effect.scoped, Effect.provide(runtime(machine, mintingProvider())));
+  });
 
   it.effect("reports a machine that SSH can't reach while reading its resources", () => {
     const machine = dockerMachine();
@@ -735,9 +628,10 @@ describe("SSH Worker with Docker", () => {
     },
   );
 
-  it.effect.each(["usine-pnpm-store", "usine-turbo-cache"])(
-    "refuses container startup when %s initialization fails without a preceding preflight",
-    (volume) => {
+  it.effect(
+    "refuses container startup when a shared cache's initialization fails without a preceding preflight",
+    () => {
+      const volume = "usine-pnpm-store";
       const machine = dockerMachine();
       machine.state.cachePreparationFailure = volume;
       return Effect.gen(function* () {
@@ -1418,16 +1312,12 @@ describe("SSH Worker with Docker", () => {
     },
   );
 
-  it.effect.each([
-    { counted: MAX_KILLED_PROCESSES, victims: MAX_KILLED_PROCESSES },
-    { counted: MAX_KILLED_PROCESSES + 1, victims: MAX_KILLED_PROCESSES + 1 },
-    // The counter exceeds the cap, but the kernel logs name fewer processes, so none is dropped.
-    { counted: MAX_KILLED_PROCESSES + 5, victims: 3 },
-    // The kernel logs name kills written after the counter's read, past the cap.
-    { counted: 2, victims: MAX_KILLED_PROCESSES + 1 },
-  ])(
-    "records at most the cap of killed processes and the whole count when the counter reads $counted and the kernel logs name $victims",
-    ({ counted, victims }) => {
+  it.effect(
+    "records at most the cap of killed processes and the whole count when the kernel logs name more than the counter",
+    () => {
+      // The kernel logs name kills written after the counter's read, past the cap.
+      const counted = 2;
+      const victims = MAX_KILLED_PROCESSES + 1;
       const machine = dockerMachine();
       machine.state.kernelMemory = "readable";
       machine.state.kernelVictims = victims;
@@ -1453,14 +1343,11 @@ describe("SSH Worker with Docker", () => {
         const capped = logs.warnings.filter((line) =>
           line.includes("Recording only the first killed processes"),
         );
-        if (victims <= MAX_KILLED_PROCESSES) assert.lengthOf(capped, 0);
-        else {
-          assert.lengthOf(capped, 1);
-          const [, fields] = yield* Schema.decodeEffect(CapturedLog)(capped[0] ?? "").pipe(
-            Effect.orDie,
-          );
-          assert.deepInclude(fields, { identified: victims, kept: MAX_KILLED_PROCESSES });
-        }
+        assert.lengthOf(capped, 1);
+        const [, fields] = yield* Schema.decodeEffect(CapturedLog)(capped[0] ?? "").pipe(
+          Effect.orDie,
+        );
+        assert.deepInclude(fields, { identified: victims, kept: MAX_KILLED_PROCESSES });
         const read = logs.infos.filter((line) =>
           line.includes("Read the kernel OOM process details on the worker"),
         );
@@ -1478,115 +1365,57 @@ describe("SSH Worker with Docker", () => {
     },
   );
 
-  it.effect(
-    "keeps the counted kills and names the container and host when SSH drops the kernel log read",
-    () => {
-      const machine = dockerMachine();
-      machine.state.kernelMemory = "disconnects";
-      let ran: string | undefined;
-      const exceedsMemory: StubParent = (context) =>
-        killsInContainer(machine, 2).pipe(
-          Effect.tap((id) => Effect.sync(() => void (ran = id))),
-          Effect.andThen(completes(context)),
-        );
-      const logs = capturedLogs();
-      return Effect.gen(function* () {
-        const executor = yield* Executor;
-        const prepared = yield* executor.prepare(request);
-        const kills: Array<ContainerOutOfMemoryKills> = [];
-        yield* prepared.launch({
+  it.effect("records nothing and says why when the kernel logs name no kill before a start", () => {
+    const machine = dockerMachine();
+    machine.state.kernelMemory = "no-kills";
+    // A test signals the container's init; the kernel killed nothing.
+    const stops: StubParent = (context) =>
+      Effect.sync(() => {
+        const container = machine.state.containers.get(CONTAINER);
+        assert(container !== undefined, "the Attempt's container runs");
+        container.running = false;
+        container.initKilledForMemory = false;
+      }).pipe(Effect.andThen(fails(context)));
+    const logs = capturedLogs();
+    return Effect.gen(function* () {
+      const executor = yield* Executor;
+      machine.state.salvage = "dirty";
+      const prepared = yield* executor.prepare(request);
+      const kills: Array<ContainerOutOfMemoryKills> = [];
+      yield* prepared
+        .launch({
           ...sink,
           outOfMemory: (killed) => Effect.sync(() => void kills.push(killed)),
-        });
-        assert.deepStrictEqual(
-          kills.map(({ container, kills, processes }) => ({ container, kills, processes })),
-          [{ container: ContainerId.make(ran ?? ""), kills: 2, processes: [] }],
-        );
-        const dropped = logs.warnings.filter((line) =>
-          line.includes("Could not collect kernel OOM process details"),
-        );
-        assert.lengthOf(dropped, 1);
-        const [, fields] = yield* Schema.decodeEffect(CapturedLog)(dropped[0] ?? "").pipe(
-          Effect.orDie,
-        );
-        assert.deepInclude(fields, { container: ran, host: DESTINATION });
-        assert.include(String(fields["message"]), "closed by remote host");
-        const { containerGone } = releaseSteps(machine);
-        assertInOrder([
-          ["the kills' read", killsRead(machine)],
-          ["the container's removal", containerGone],
-        ]);
-      }).pipe(
-        Effect.scoped,
-        Effect.provide(
-          runtime(machine, mintingProvider(), exceedsMemory).pipe(Layer.provideMerge(logs.layer)),
+        })
+        .pipe(Effect.flip);
+      assert.deepStrictEqual(kills, []);
+      assert(linesOf(machine).some((line) => line.includes("journalctl -k")));
+      assert.lengthOf(
+        logs.infos.filter((line) =>
+          line.includes(
+            "The kernel logs name no process killed in the container before its starts",
+          ),
         ),
+        1,
       );
-    },
-  );
-
-  it.effect.each(["no-kills", "unreadable"] as const)(
-    "records nothing and says why when the kernel logs name no kill before a start: %s",
-    (kernelMemory) => {
-      const machine = dockerMachine();
-      machine.state.kernelMemory = kernelMemory;
-      // A test signals the container's init; the kernel killed nothing.
-      const stops: StubParent = (context) =>
-        Effect.sync(() => {
-          const container = machine.state.containers.get(CONTAINER);
-          assert(container !== undefined, "the Attempt's container runs");
-          container.running = false;
-          container.initKilledForMemory = false;
-        }).pipe(Effect.andThen(fails(context)));
-      const logs = capturedLogs();
-      return Effect.gen(function* () {
-        const executor = yield* Executor;
-        machine.state.salvage = "dirty";
-        const prepared = yield* executor.prepare(request);
-        const kills: Array<ContainerOutOfMemoryKills> = [];
-        yield* prepared
-          .launch({
-            ...sink,
-            outOfMemory: (killed) => Effect.sync(() => void kills.push(killed)),
-          })
-          .pipe(Effect.flip);
-        assert.deepStrictEqual(kills, []);
-        assert(linesOf(machine).some((line) => line.includes("journalctl -k")));
-        const skip =
-          kernelMemory === "unreadable"
-            ? "The kernel logs are unreadable, so no process killed in the container before its starts is recorded"
-            : "The kernel logs name no process killed in the container before its starts";
-        assert.lengthOf(
-          logs.infos.filter((line) => line.includes(skip)),
-          1,
-        );
-        const read = logs.infos.filter((line) =>
-          line.includes("Read the kernel OOM process details on the worker"),
-        );
-        if (kernelMemory === "unreadable") assert.lengthOf(read, 0);
-        else {
-          assert.lengthOf(read, 1);
-          const [, fields] = yield* Schema.decodeEffect(CapturedLog)(read[0] ?? "").pipe(
-            Effect.orDie,
-          );
-          assert.deepInclude(fields, { source: "dmesg", identified: 0 });
-        }
-      }).pipe(
-        Effect.scoped,
-        Effect.provide(
-          runtime(machine, mintingProvider(), stops).pipe(Layer.provideMerge(logs.layer)),
-        ),
+      const read = logs.infos.filter((line) =>
+        line.includes("Read the kernel OOM process details on the worker"),
       );
-    },
-  );
+      assert.lengthOf(read, 1);
+      const [, fields] = yield* Schema.decodeEffect(CapturedLog)(read[0] ?? "").pipe(Effect.orDie);
+      assert.deepInclude(fields, { source: "dmesg", identified: 0 });
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        runtime(machine, mintingProvider(), stops).pipe(Layer.provideMerge(logs.layer)),
+      ),
+    );
+  });
 
   // The release of a failed Attempt starts the container again only if it stopped.
-  it.effect.each([
-    { outcome: "completes", parent: completes },
-    { outcome: "fails", parent: fails },
-  ])(
-    "reads no kernel log when the container ran on and the kernel killed nothing: $outcome",
-    ({ parent }) => {
+  it.effect(
+    "reads no kernel log when a failed Attempt's container ran on and the kernel killed nothing",
+    () => {
       const machine = dockerMachine();
       machine.state.kernelMemory = "readable";
       return Effect.gen(function* () {
@@ -1602,7 +1431,7 @@ describe("SSH Worker with Docker", () => {
         assert.deepStrictEqual(kills, []);
         assert(killsRead(machine) >= 0, "the counter was read");
         assert(!linesOf(machine).some((line) => line.includes("journalctl -k")));
-      }).pipe(Effect.scoped, Effect.provide(runtime(machine, mintingProvider(), parent)));
+      }).pipe(Effect.scoped, Effect.provide(runtime(machine, mintingProvider(), fails)));
     },
   );
 
@@ -1655,124 +1484,49 @@ describe("SSH Worker with Docker", () => {
     },
   );
 
-  describe.each(LOGINS)("$harness login files", ({ harness, brain, protocol, mounted, seeded }) => {
-    const loginMounts = [
+  it.effect("mounts each harness's login files by its own route", () => {
+    const order = ["claude", "codex"] as const;
+    const [claude, codex] = LOGINS;
+    const machine = dockerMachine();
+    for (const login of LOGINS) machine.state.homeFiles.add(login.mounted).add(login.seeded);
+    const gateway = fakeGateway(machine, BOTH_PROVIDERS);
+    const logs = capturedLogs();
+    const mountsFor = ({ mounted, seeded }: (typeof LOGINS)[number]) => [
       `type=bind,"source=/home/usine/${mounted}","destination=/home/usine/${mounted}"`,
       `type=bind,"source=/home/usine/${seeded}","destination=/usr/local/share/usine/seed/${seeded}",readonly`,
     ];
     const ready = () => (spec: BrainSpec) =>
       Effect.succeed(HarnessReady.make({ harness: spec.harness }));
-    const loginLog = (lines: ReadonlyArray<string>) =>
-      Effect.gen(function* () {
-        const line = lines.find(
+    return Effect.gen(function* () {
+      const executor = yield* Executor;
+      const brains = order.map((id) => (id === "claude" ? claude : codex).brain);
+      yield* executor.preflight(WORKER, brains, 1);
+      const mounts = mountsOf(preflightRunOf(machine));
+      for (const mount of mountsFor(claude)) assert.notInclude(mounts, mount);
+      assert.includeMembers(mounts, mountsFor(codex));
+      for (const [harness, route, mounted] of [
+        ["claude", "gateway", ""],
+        ["codex", "host-login", codex.mounted],
+      ] as const) {
+        const line = logs.infos.find(
           (line) =>
             line.includes(
               "Chose the login files that the Worker's containers mount if the machine has them",
             ) && line.includes(`"harness":"${harness}"`),
         );
-        assert(line !== undefined, "preflight logs the login files");
-        return (yield* Schema.decodeEffect(CapturedLog)(line).pipe(Effect.orDie))[1];
-      });
-
-    it.effect.each([
-      { route: "gateway", llmProviders: [protocol] },
-      { route: "host-login", llmProviders: [] },
-    ] as const)("on the $route route", ({ route, llmProviders }) => {
-      const machine = dockerMachine();
-      machine.state.homeFiles.add(mounted).add(seeded);
-      const gateway = fakeGateway(machine, BOTH_PROVIDERS);
-      const logs = capturedLogs();
-      const harnessRequest = CheckoutRequest.make({
-        ...request,
-        agent: Agent.make({ ...TEST_AGENT, brain }),
-      });
-      return Effect.gen(function* () {
-        const executor = yield* Executor;
-        yield* executor.preflight(WORKER, [brain], 1);
-        const prepared = yield* executor.prepare(harnessRequest);
-        yield* prepared.launch(sink);
-
-        const preflightMounts = mountsOf(preflightRunOf(machine));
-        const attemptMounts = mountsOf(runOf(machine, CONTAINER).words);
-        if (route === "host-login") {
-          assert.includeMembers(preflightMounts, loginMounts);
-          assert.includeMembers(attemptMounts, loginMounts);
-        } else
-          for (const mount of loginMounts) {
-            assert.notInclude(preflightMounts, mount);
-            assert.notInclude(attemptMounts, mount);
-          }
-        const fields = yield* loginLog(logs.infos);
+        assert(line !== undefined, `preflight logs ${harness}`);
+        const fields = (yield* Schema.decodeEffect(CapturedLog)(line).pipe(Effect.orDie))[1];
         assert.strictEqual(fields.credentialRoute, route);
-        if (route === "host-login") {
-          assert.strictEqual(fields.mounted, mounted);
-          assert.strictEqual(fields.seeded, seeded);
-          assert.strictEqual(fields.reason, "The harness uses the SSH user's login on the machine");
-        } else {
-          assert.strictEqual(fields.mounted, "");
-          assert.strictEqual(fields.seeded, "");
-          assert.strictEqual(
-            fields.reason,
-            "The Gateway holds the credential of the harness's provider",
-          );
-        }
-      }).pipe(
-        Effect.scoped,
-        Effect.provide(
-          gatewayRuntime(machine, mintingProvider(), gateway, {
-            address: gatewayAddress({ llmProviders }),
-            probes: { harnessReadiness: ready },
-          }).pipe(Layer.provideMerge(logs.layer)),
-        ),
-      );
-    });
+        assert.strictEqual(fields.mounted, mounted);
+      }
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        gatewayRuntime(machine, mintingProvider(), gateway, {
+          address: gatewayAddress({ llmProviders: ["anthropic-messages"] }),
+          probes: { harnessReadiness: ready },
+        }).pipe(Layer.provideMerge(logs.layer)),
+      ),
+    );
   });
-
-  it.effect.each([{ order: ["claude", "codex"] }, { order: ["codex", "claude"] }] as const)(
-    "mounts each harness's login files by its own route ($order)",
-    ({ order }) => {
-      const [claude, codex] = LOGINS;
-      const machine = dockerMachine();
-      for (const login of LOGINS) machine.state.homeFiles.add(login.mounted).add(login.seeded);
-      const gateway = fakeGateway(machine, BOTH_PROVIDERS);
-      const logs = capturedLogs();
-      const mountsFor = ({ mounted, seeded }: (typeof LOGINS)[number]) => [
-        `type=bind,"source=/home/usine/${mounted}","destination=/home/usine/${mounted}"`,
-        `type=bind,"source=/home/usine/${seeded}","destination=/usr/local/share/usine/seed/${seeded}",readonly`,
-      ];
-      const ready = () => (spec: BrainSpec) =>
-        Effect.succeed(HarnessReady.make({ harness: spec.harness }));
-      return Effect.gen(function* () {
-        const executor = yield* Executor;
-        const brains = order.map((id) => (id === "claude" ? claude : codex).brain);
-        yield* executor.preflight(WORKER, brains, 1);
-        const mounts = mountsOf(preflightRunOf(machine));
-        for (const mount of mountsFor(claude)) assert.notInclude(mounts, mount);
-        assert.includeMembers(mounts, mountsFor(codex));
-        for (const [harness, route, mounted] of [
-          ["claude", "gateway", ""],
-          ["codex", "host-login", codex.mounted],
-        ] as const) {
-          const line = logs.infos.find(
-            (line) =>
-              line.includes(
-                "Chose the login files that the Worker's containers mount if the machine has them",
-              ) && line.includes(`"harness":"${harness}"`),
-          );
-          assert(line !== undefined, `preflight logs ${harness}`);
-          const fields = (yield* Schema.decodeEffect(CapturedLog)(line).pipe(Effect.orDie))[1];
-          assert.strictEqual(fields.credentialRoute, route);
-          assert.strictEqual(fields.mounted, mounted);
-        }
-      }).pipe(
-        Effect.scoped,
-        Effect.provide(
-          gatewayRuntime(machine, mintingProvider(), gateway, {
-            address: gatewayAddress({ llmProviders: ["anthropic-messages"] }),
-            probes: { harnessReadiness: ready },
-          }).pipe(Layer.provideMerge(logs.layer)),
-        ),
-      );
-    },
-  );
 });

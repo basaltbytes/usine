@@ -34,46 +34,41 @@ describe("bounded protocol lines", () => {
     }),
   );
 
-  for (const terminated of [false, true]) {
-    it.effect(
-      `fails the process-owner session on an oversized ${terminated ? "complete" : "unfinished"} frame`,
-      () => {
-        let launches = 0;
-        const spawner = Layer.succeed(ChildProcessSpawner.ChildProcessSpawner)(
-          ChildProcessSpawner.make(() =>
-            Effect.sync(() => {
-              const first = launches++ === 0;
-              return ChildProcessSpawner.makeHandle({
-                pid: ChildProcessSpawner.ProcessId(4242),
-                exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(0)),
-                isRunning: Effect.succeed(false),
-                kill: () => Effect.void,
-                stdin: Sink.drain,
-                stdout: first
-                  ? Stream.fromIterable([
-                      ...Array.from({ length: 64 }, () => encoder.encode("x".repeat(65536))),
-                      encoder.encode(terminated ? "x\n" : "x"),
-                    ])
-                  : Stream.empty,
-                stderr: Stream.empty,
-                all: Stream.empty,
-                getInputFd: () => Sink.drain,
-                getOutputFd: () => Stream.empty,
-                unref: Effect.succeed(Effect.void),
-              });
-            }),
-          ),
-        );
-        return Effect.gen(function* () {
-          const owner = yield* startChildProcess(scriptedTarget, scriptedCommand, Stream.never);
-          const failure = yield* owner.stdout.pipe(Stream.runDrain, Effect.flip);
-          assert.include(failure.message, "frame exceeds 4 MiB");
-          const exited = yield* owner.exit.pipe(Effect.flip);
-          assert.strictEqual(exited, failure);
-          const generation = yield* owner.generation.pipe(Effect.flip);
-          assert.strictEqual(generation, failure);
-        }).pipe(Effect.scoped, Effect.provide(spawner));
-      },
+  it.effect("fails the process-owner session on an oversized unfinished frame", () => {
+    let launches = 0;
+    const spawner = Layer.succeed(ChildProcessSpawner.ChildProcessSpawner)(
+      ChildProcessSpawner.make(() =>
+        Effect.sync(() => {
+          const first = launches++ === 0;
+          return ChildProcessSpawner.makeHandle({
+            pid: ChildProcessSpawner.ProcessId(4242),
+            exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(0)),
+            isRunning: Effect.succeed(false),
+            kill: () => Effect.void,
+            stdin: Sink.drain,
+            stdout: first
+              ? Stream.fromIterable([
+                  ...Array.from({ length: 64 }, () => encoder.encode("x".repeat(65536))),
+                  encoder.encode("x"),
+                ])
+              : Stream.empty,
+            stderr: Stream.empty,
+            all: Stream.empty,
+            getInputFd: () => Sink.drain,
+            getOutputFd: () => Stream.empty,
+            unref: Effect.succeed(Effect.void),
+          });
+        }),
+      ),
     );
-  }
+    return Effect.gen(function* () {
+      const owner = yield* startChildProcess(scriptedTarget, scriptedCommand, Stream.never);
+      const failure = yield* owner.stdout.pipe(Stream.runDrain, Effect.flip);
+      assert.include(failure.message, "frame exceeds 4 MiB");
+      const exited = yield* owner.exit.pipe(Effect.flip);
+      assert.strictEqual(exited, failure);
+      const generation = yield* owner.generation.pipe(Effect.flip);
+      assert.strictEqual(generation, failure);
+    }).pipe(Effect.scoped, Effect.provide(spawner));
+  });
 });

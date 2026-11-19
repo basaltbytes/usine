@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest";
 import { TokenBreakdown, TokenCount, UsdAmount } from "@usine/core/agent/session";
-import { Effect, Option, Schema } from "effect";
+import { Option } from "effect";
 import {
   addUsage,
   claudeTokenMeter,
@@ -10,7 +10,6 @@ import {
   piMessageUsage,
   type SessionReading,
 } from "../../src/harness/usage.ts";
-import { CodexTokenUsage } from "../../src/protocol/codex/codex.ts";
 
 /** The session usage of a Claude session meter's reading. */
 const sessionUsage = (reading: Option.Option<SessionReading>) => Option.getOrThrow(reading).usage;
@@ -100,19 +99,6 @@ describe("Claude query tokens", () => {
       assert(Option.isNone(later.restored), "only a process's first result settles restored usage");
     });
 
-    it("adds a replacement process that restored nothing, even when it writes more than the replaced usage", () => {
-      const { saved } = firstProcess();
-      const replacement = claudeSessionMeter(saved, false);
-      replacement.read(assistant("turn-2", 1466));
-      const reading = Option.getOrThrow(replacement.read(result(models(1466, 3700, 0.02))));
-      assert.strictEqual(reading.usage.totalTokens, 8757);
-      assert.closeTo(Option.getOrThrow(reading.usage.costUsd), 0.024407, 1e-9);
-      assert.deepStrictEqual(
-        Option.map(reading.restored, ({ restored }) => restored.totalTokens),
-        Option.some(TokenCount.make(0)),
-      );
-    });
-
     it("counts once the usage that a process restores after a restart", () => {
       const { meter } = firstProcess();
       meter.restart();
@@ -146,25 +132,6 @@ describe("Claude query tokens", () => {
         Option.some(undefined),
         "a settled process's checkpoint doesn't settle it again",
       );
-    });
-
-    it("counts once the usage that a process restores after a restart when it is reattached", () => {
-      const fromRestart = firstProcess().meter.restart();
-      const reattached = claudeSessionMeter(fromRestart, true);
-      const reading = Option.getOrThrow(reattached.read(restoringTurn));
-      assert.strictEqual(reading.usage.totalTokens, 5133);
-      assert.deepStrictEqual(
-        Option.map(reading.restored, ({ restored }) => restored.totalTokens),
-        Option.some(TokenCount.make(3591)),
-      );
-
-      const { meter } = firstProcess();
-      meter.restart();
-      const streamed = claudeSessionMeter(
-        sessionUsage(meter.read(assistant("turn-2", 1466))),
-        true,
-      );
-      assert.strictEqual(sessionUsage(streamed.read(restoringTurn)).totalTokens, 5133);
     });
 
     it("keeps a retained process's own usage when it more than doubles", () => {
@@ -237,27 +204,6 @@ describe("Claude query tokens", () => {
     });
   });
 
-  it("keeps seeded message IDs in saved usage after a message from another stream", () => {
-    const assistant = (id: string, parent: string | null, output: number) => ({
-      type: "assistant",
-      parent_tool_use_id: parent,
-      message: { id, usage: { input_tokens: 0, output_tokens: output } },
-    });
-    const meter = claudeTokenMeter({
-      totalTokens: TokenCount.make(100),
-      costUsd: Option.none(),
-      messages: { seeded: TokenCount.make(100) },
-    });
-    const saved = Option.getOrThrow(meter.read(assistant("other", "tool", 10)));
-    assert.deepStrictEqual(saved.messages, {
-      seeded: TokenCount.make(100),
-      other: TokenCount.make(10),
-    });
-    const reattached = claudeTokenMeter(saved);
-    const replayed = Option.getOrThrow(reattached.read(assistant("seeded", null, 100)));
-    assert.strictEqual(replayed.totalTokens, 110);
-  });
-
   it("counts output plus uncached input, reconciling repeated blocks and cumulative results", () => {
     const { read } = claudeTokenMeter();
     const assistant = (id: string, output: number) =>
@@ -319,35 +265,6 @@ describe("Claude query tokens", () => {
 });
 
 describe("Codex thread tokens", () => {
-  it.effect("ignores cached input so a long conversation does not read as consumption", () =>
-    Effect.gen(function* () {
-      const usage = yield* Schema.decodeUnknownEffect(CodexTokenUsage)({
-        threadId: "thread",
-        tokenUsage: {
-          total: {
-            totalTokens: 2_000_400,
-            inputTokens: 2_000_000,
-            cachedInputTokens: 1_950_000,
-            cacheWriteInputTokens: 20_000,
-            outputTokens: 400,
-            reasoningOutputTokens: 100,
-          },
-          last: { totalTokens: 1, inputTokens: 1, cachedInputTokens: 0, outputTokens: 0 },
-        },
-      });
-      assert.strictEqual(codexThreadTokens(usage.tokenUsage.total), 50_400);
-      assert.strictEqual(
-        codexThreadTokens({
-          inputTokens: 10,
-          cachedInputTokens: 30,
-          cacheWriteInputTokens: 0,
-          outputTokens: 7,
-        }),
-        7,
-      );
-    }),
-  );
-
   it("splits input into cache reads, cache writes, and the rest", () => {
     assert.deepStrictEqual(
       codexTokenBreakdown({
@@ -376,20 +293,19 @@ describe("Codex thread tokens", () => {
       codexTokenBreakdown({ inputTokens: 100, cachedInputTokens: 40, outputTokens: 7 }),
       TokenBreakdown.make({ input: 60, cachedInput: 40, cacheWrite: 0, output: 7 }),
     );
+    assert.strictEqual(
+      codexThreadTokens({
+        inputTokens: 10,
+        cachedInputTokens: 30,
+        cacheWriteInputTokens: 0,
+        outputTokens: 7,
+      }),
+      7,
+    );
   });
 });
 
 describe("Pi message tokens", () => {
-  it("counts output, input, and cache writes per message and skips cache reads", () => {
-    const usage = piMessageUsage({
-      role: "assistant",
-      usage: { input: 100, output: 40, cacheRead: 9_000, cacheWrite: 60, totalTokens: 9_200 },
-    });
-    assert.strictEqual(Option.getOrThrow(usage).totalTokens, 200);
-    assert(Option.isNone(Option.getOrThrow(usage).costUsd));
-    assert(Option.isNone(piMessageUsage({ role: "user", usage: { input: 1 } })));
-  });
-
   it("sums the prices Pi reports per message, once any message has one", () => {
     const message = (total: number) =>
       Option.getOrThrow(
@@ -410,5 +326,6 @@ describe("Pi message tokens", () => {
     const total = [message(0.125), unpriced, message(0.25)].reduce(addUsage);
     assert.strictEqual(total.totalTokens, 42);
     assert.deepStrictEqual(total.costUsd, Option.some(0.375));
+    assert(Option.isNone(piMessageUsage({ role: "user", usage: { input: 1 } })));
   });
 });

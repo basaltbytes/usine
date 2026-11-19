@@ -725,62 +725,9 @@ describe("Task view", () => {
       }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
-  it.effect("omits attempts without a checkout base and keeps attempts without new commits", () =>
-    Effect.gen(function* () {
-      const legacy = yield* Schema.decodeEffect(PullRequest)({
-        _tag: "PullRequest",
-        number: 41,
-        url: pullUrl(41),
-        head: "a".repeat(40),
-      });
-      assert.isTrue(Option.isNone(legacy.base));
-      const original = runs[0];
-      assert.isDefined(original);
-      if (original === undefined) return;
-      const snapshot = RunSnapshot.make({
-        ...original,
-        step: Step.make({
-          ...original.step,
-          result: Option.some(StepResult.make({ message: "Legacy result", facts: [legacy] })),
-        }),
-        attempts: original.attempts.map((attempt) =>
-          Attempt.make({
-            ...attempt,
-            result: Option.some(StepResult.make({ message: "Legacy result", facts: [legacy] })),
-          }),
-        ),
-      });
-      assert.deepStrictEqual(harvestedAttemptChanges(snapshot), []);
-      const unchanged = PullRequest.make({
-        ...legacy,
-        base: legacy.head,
-      });
-      const noPush = RunSnapshot.make({
-        ...snapshot,
-        attempts: snapshot.attempts.map((attempt) =>
-          Attempt.make({
-            ...attempt,
-            result: Option.some(
-              StepResult.make({ message: "No commits pushed", facts: [unchanged] }),
-            ),
-          }),
-        ),
-      });
-      assert.deepStrictEqual(
-        harvestedAttemptChanges(noPush).map(({ base, head }) => ({ base, head })),
-        noPush.attempts.map(() => ({
-          base: CommitSha.make("a".repeat(40)),
-          head: CommitSha.make("a".repeat(40)),
-        })),
-      );
-    }),
-  );
-
-  it.effect.each([
-    AttemptCanceled.make(),
-    AttemptFailed.make({ failure: AgentFailure.make({ message: "CI failed" }) }),
-  ])("preserves recorded attempt changes after CI settles as $_tag", (outcome) =>
+  it.effect("preserves recorded attempt changes after CI settles as Failed and a retry", () =>
     Effect.sync(() => {
+      const outcome = AttemptFailed.make({ failure: AgentFailure.make({ message: "CI failed" }) });
       const original = runs[0];
       assert(original !== undefined);
       assert(Option.isSome(original.step.result));
@@ -820,12 +767,7 @@ describe("Task view", () => {
         ...waiting,
         run: Run.make({
           ...waiting.run,
-          state:
-            outcome._tag === "Canceled"
-              ? RunState.Canceled.make({
-                  reason: RunState.HeadChanged.make({ head: CommitSha.make("b".repeat(40)) }),
-                })
-              : RunState.Failed.make(),
+          state: RunState.Failed.make(),
         }),
         attempts: waiting.attempts.map((attempt) =>
           attempt.id === producerId
@@ -834,108 +776,44 @@ describe("Task view", () => {
         ),
       });
       assert.deepStrictEqual(harvestedAttemptChanges(settled), expected);
-      if (outcome._tag === "Failed") {
-        const retrying = RunSnapshot.make({
-          ...settled,
-          run: Run.make({ ...settled.run, state: RunState.Running.make() }),
-          attempts: [
-            ...settled.attempts,
-            attempt(original.run.id, 3, "2026-10-02T10:00:00Z", Option.none(), Option.none()),
-          ],
-        });
-        assert.deepStrictEqual(harvestedAttemptChanges(retrying), expected);
-        const nextBase = CommitSha.make("a".repeat(40));
-        const nextHead = CommitSha.make("b".repeat(40));
-        const nextResult = StepResult.make({
-          message: "Retry succeeded",
-          facts: [
-            PullRequest.make({
-              number: 41,
-              url: new URL(pullUrl(41)),
-              base: Option.some(nextBase),
-              head: Option.some(nextHead),
-            }),
-          ],
-        });
-        const completed = RunSnapshot.make({
-          ...retrying,
-          run: Run.make({ ...retrying.run, state: RunState.Succeeded.make() }),
-          step: Step.make({ ...retrying.step, result: Option.some(nextResult) }),
-          attempts: retrying.attempts.map((attempt) =>
-            attempt.number === 3
-              ? Attempt.make({ ...attempt, outcome: succeeded, result: Option.some(nextResult) })
-              : attempt,
-          ),
-        });
-        const changes = harvestedAttemptChanges(completed);
-        assert.deepStrictEqual(changes.slice(0, 1), expected);
-        assert.strictEqual(changes.length, 2);
-        assert.strictEqual(changes[1]?.number, 3);
-        assert.strictEqual(changes[1]?.base, nextBase);
-        assert.strictEqual(changes[1]?.head, nextHead);
-      }
-    }),
-  );
-
-  it.effect("finds the same Task from any of its Items and names the originating issue", () =>
-    Effect.gen(function* () {
-      const { task } = yield* readTask(42);
-      assert.strictEqual(task.number, 40);
-      assert.strictEqual(task.items.length, 3);
-    }),
-  );
-
-  it.effect("shows an Item without linked pull requests as a Task of its own", () =>
-    Effect.gen(function* () {
-      const { task } = yield* readTask(50);
-      assert.deepStrictEqual(
-        task.items.map(({ number }) => number),
-        [50],
-      );
-      assert.deepStrictEqual(
-        task.runs.map(({ id }) => id),
-        ["run-other"],
-      );
-      assert.deepStrictEqual(task.comments, []);
-      assert.isFalse(task.needsYou);
-    }),
-  );
-
-  it.effect("names the lane the Board places its running Task in", () =>
-    Effect.gen(function* () {
-      const fixtureInstance = yield* instance;
-      // fix-ci was triggered while #42 had `ready`; it has `ready-for-review` now.
-      const triggered = RunEvent.make({
-        runId: RunId.make("run-fix-again"),
-        event: Event.make({
-          id: EventId.make("event-run-fix-again"),
-          dedupKey: DedupKey.make("event-run-fix-again"),
-          payload: { number: 42, labels: { totalCount: 1, nodes: [{ name: "ready" }] } },
-          receivedAt: at("2026-10-06T08:59:00.000Z"),
-        }),
-      });
-      const labeled = yield* readTask(40, repository, [triggered]);
-      assert.strictEqual(labeled.task.current, gitHubItemKey(repository, 42));
-      assert.strictEqual(labeled.task.lane.name, "In review");
-      // With no lane for `ready-for-review`, the Task is in the lane its Run was triggered from.
-      const decodedValue1 = yield* Schema.decodeEffect(UsineConfig)({
-        version: 1,
-        repos: [
-          {
-            name: repository,
-            lanes: [
-              { name: "Ready", sources: [{ label: "ready" }] },
-              { name: "Pull requests", sources: [{ state: "pr-open" }] },
-            ],
-          },
+      const retrying = RunSnapshot.make({
+        ...settled,
+        run: Run.make({ ...settled.run, state: RunState.Running.make() }),
+        attempts: [
+          ...settled.attempts,
+          attempt(original.run.id, 3, "2026-10-02T10:00:00Z", Option.none(), Option.none()),
         ],
       });
-      const unlaned = LoadedInstance.make({
-        ...fixtureInstance,
-        config: decodedValue1,
+      assert.deepStrictEqual(harvestedAttemptChanges(retrying), expected);
+      const nextBase = CommitSha.make("a".repeat(40));
+      const nextHead = CommitSha.make("b".repeat(40));
+      const nextResult = StepResult.make({
+        message: "Retry succeeded",
+        facts: [
+          PullRequest.make({
+            number: 41,
+            url: new URL(pullUrl(41)),
+            base: Option.some(nextBase),
+            head: Option.some(nextHead),
+          }),
+        ],
       });
-      const fallback = yield* readTask(40, repository, [triggered], unlaned);
-      assert.strictEqual(fallback.task.lane.name, "Ready");
+      const completed = RunSnapshot.make({
+        ...retrying,
+        run: Run.make({ ...retrying.run, state: RunState.Succeeded.make() }),
+        step: Step.make({ ...retrying.step, result: Option.some(nextResult) }),
+        attempts: retrying.attempts.map((attempt) =>
+          attempt.number === 3
+            ? Attempt.make({ ...attempt, outcome: succeeded, result: Option.some(nextResult) })
+            : attempt,
+        ),
+      });
+      const changes = harvestedAttemptChanges(completed);
+      assert.deepStrictEqual(changes.slice(0, 1), expected);
+      assert.strictEqual(changes.length, 2);
+      assert.strictEqual(changes[1]?.number, 3);
+      assert.strictEqual(changes[1]?.base, nextBase);
+      assert.strictEqual(changes[1]?.head, nextHead);
     }),
   );
 

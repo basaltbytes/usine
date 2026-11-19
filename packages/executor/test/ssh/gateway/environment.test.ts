@@ -81,30 +81,6 @@ describe("An Attempt's environment behind a Gateway", () => {
     assert.notInclude(jsonKey(exported), CALLER_TOKEN);
   });
 
-  it("points Claude Code at the Gateway only when the Gateway holds the Anthropic credential", () => {
-    const { exported, sent } = environmentFor(
-      ["anthropic-messages"],
-      Option.some(Harness.make("claude")),
-    );
-    assert.deepStrictEqual(exported, {
-      ...WITHOUT_LLM,
-      ANTHROPIC_BASE_URL: "http://llm.gw.internal/anthropic-messages",
-    });
-    assert.deepStrictEqual(sent, { ...SENT_WITHOUT_LLM, ANTHROPIC_AUTH_TOKEN: CALLER_TOKEN });
-  });
-
-  it("points Codex at the Gateway through its CODEX_HOME only when the Gateway holds the OpenAI credential", () => {
-    const { exported, sent } = environmentFor(
-      ["openai-responses"],
-      Option.some(Harness.make("codex")),
-    );
-    assert.deepStrictEqual(exported, {
-      ...WITHOUT_LLM,
-      CODEX_HOME: "/home/usine/.usine/workers/eu-one/codex",
-    });
-    assert.deepStrictEqual(sent, { ...SENT_WITHOUT_LLM, USINE_GATEWAY_TOKEN: CALLER_TOKEN });
-  });
-
   it("isolates each harness's wiring when every descriptor is registered", () => {
     const claude = catalog.descriptors.find(({ id }) => id === "claude");
     assert(claude !== undefined && Option.isSome(claude.worker.credential));

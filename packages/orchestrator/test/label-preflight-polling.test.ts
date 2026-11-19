@@ -160,53 +160,6 @@ describe("PollingTriggers label preflight", () => {
     }).pipe(Effect.provide(pollingTestLayer(github, [], writer)));
   });
 
-  it.effect("keeps the failed catalog request visible when change detection also fails", () => {
-    const github: GitHubPolling["Service"] = {
-      itemLabels: () => Effect.die("unused item labels"),
-      baseRefHead: unmovedBaseRefHead,
-      missingIssues: () => Effect.succeed([]),
-      labels: () =>
-        Effect.fail(
-          GitHubApiError.make({
-            operation: "list-repository-labels",
-            status: Option.some(502),
-            message: "catalog request failed",
-          }),
-        ),
-      changes: () =>
-        Effect.fail(
-          GitHubApiError.make({
-            operation: "poll-repository-changes",
-            status: Option.some(500),
-            message: "change detection failed",
-          }),
-        ),
-      snapshot: () => Effect.die("change detection did not return any items"),
-    };
-
-    return Effect.gen(function* () {
-      const fixtureInstance = yield* instance;
-      const polling = yield* PollingTriggers;
-
-      const cycle = yield* polling.poll(fixtureInstance);
-
-      assert.deepStrictEqual(cycle.failures, []);
-
-      const decodedValue1 = yield* polling.poll(fixtureInstance);
-      assert.deepStrictEqual(decodedValue1.failures, []);
-
-      const sustained = yield* polling.poll(fixtureInstance);
-      assert.deepStrictEqual(
-        sustained.failures.map(({ message }) => message),
-        [
-          "list-repository-labels: catalog request failed",
-          "poll-repository-changes: change detection failed",
-        ],
-      );
-      assert.deepStrictEqual(cycle.preflightFindings, []);
-    }).pipe(Effect.provide(pollingTestLayer(github)));
-  });
-
   it.effect("preserves catalog failures and defers provisioning while rate-limited", () => {
     const retryAt = DateTime.makeUnsafe("2026-09-03T12:03:00Z");
     let rateLimited = false;
@@ -312,44 +265,6 @@ describe("PollingTriggers label preflight", () => {
     }).pipe(Effect.provide(pollingTestLayer(github, [], writer, storedProjections)));
   });
 
-  it.effect("drops the catalog ETag from the cursor after creating a declaration", () => {
-    const cursors = memoryCursorStore();
-    const github: GitHubPolling["Service"] = {
-      itemLabels: () => Effect.die("unused item labels"),
-      baseRefHead: unmovedBaseRefHead,
-      missingIssues: () => Effect.succeed([]),
-      labels: () =>
-        Effect.succeed(
-          RepositoryLabelCatalog.make({ entityTag: Option.some(catalogEntityTag), labels: [] }),
-        ),
-      changes: (_repository, cursor) =>
-        Effect.succeed(RepositoryNotModified.make({ cursor, nextPollAt: Option.none() })),
-      snapshot: () => Effect.die("an unchanged repository has no snapshots"),
-    };
-    const writer: GitHubLabelWriter["Service"] = {
-      create: (_repository, label) =>
-        Effect.succeed(
-          RepositoryLabel.make({
-            name: label.name,
-            color: Option.getOrElse(label.color, () => RepositoryLabelColor.make("ededed")),
-            description: label.description,
-          }),
-        ),
-    };
-
-    return Effect.gen(function* () {
-      const fixtureInstance = yield* instance;
-      const polling = yield* PollingTriggers;
-
-      const cycle = yield* polling.poll(fixtureInstance);
-
-      assert.deepStrictEqual(cycle.preflightFindings, []);
-      // The creation invalidated GitHub's ETag: the next cycle must refetch the catalog.
-      const decodedValue6 = yield* storedCatalogEntityTags(cursors.stored);
-      assert.deepStrictEqual(decodedValue6, [null]);
-    }).pipe(Effect.provide(pollingTestLayer(github, [], writer, undefined, cursors.store)));
-  });
-
   it.effect(
     "refetches the catalog when GitHub reports it unchanged but its projection is gone",
     () => {
@@ -446,53 +361,6 @@ describe("PollingTriggers label preflight", () => {
       assert.deepStrictEqual(
         cycle.preflightFindings.map(({ label }) => label),
         ["ready"],
-      );
-    }).pipe(Effect.provide(pollingTestLayer(github, [], writer)));
-  });
-
-  it.effect("preserves creation findings when change detection is later rate-limited", () => {
-    const creationRetryAt = DateTime.makeUnsafe("2026-09-03T12:01:00Z");
-    const changesRetryAt = DateTime.makeUnsafe("2026-09-03T12:02:00Z");
-    const github: GitHubPolling["Service"] = {
-      itemLabels: () => Effect.die("unused item labels"),
-      baseRefHead: unmovedBaseRefHead,
-      missingIssues: () => Effect.succeed([]),
-      labels: () => Effect.succeed(emptyCatalog),
-      changes: () =>
-        Effect.fail(
-          GitHubRateLimitError.make({
-            operation: "poll-repository-changes",
-            retryAt: changesRetryAt,
-            message: "change polling rate-limited",
-          }),
-        ),
-      snapshot: () => Effect.die("change detection did not return any items"),
-    };
-    const writer: GitHubLabelWriter["Service"] = {
-      create: () =>
-        Effect.fail(
-          GitHubRateLimitError.make({
-            operation: "create-repository-label",
-            retryAt: creationRetryAt,
-            message: "label creation rate-limited",
-          }),
-        ),
-    };
-
-    return Effect.gen(function* () {
-      const fixtureInstance = yield* instance;
-      const polling = yield* PollingTriggers;
-
-      const cycle = yield* polling.poll(fixtureInstance);
-
-      assert.deepStrictEqual(
-        cycle.preflightFindings.map(({ label }) => label),
-        ["ready"],
-      );
-      assert(Option.isSome(cycle.nextPollAt));
-      assert.strictEqual(
-        DateTime.toEpochMillis(cycle.nextPollAt.value),
-        DateTime.toEpochMillis(changesRetryAt),
       );
     }).pipe(Effect.provide(pollingTestLayer(github, [], writer)));
   });

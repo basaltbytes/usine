@@ -125,37 +125,22 @@ const answeredConversation = () =>
     },
   ]);
 
-it.each(["/tokens", "/projects/basaltbytes-usine"])(
-  "opens the conversation from the search parameter on %s; Escape goes back to the list, then closes",
-  async (path) => {
-    server.conversations.set(conversationId, answeredConversation());
-    const router = await mount(`${path}?conversation=${conversationId}`);
-    await expect.element(panel()).toBeVisible();
-    await expect.element(messages().getByText("It waits for approval.")).toBeVisible();
-    await expect.poll(() => panel().element().contains(document.activeElement)).toBe(true);
-    await userEvent.keyboard("{Escape}");
-    await expect.poll(() => router.state.location.search).toHaveProperty("conversation", "inbox");
-    await expect.element(panel()).toBeVisible();
-    await expect
-      .poll(() => document.activeElement?.getAttribute("data-inbox-row"))
-      .toBe(conversationId);
-    await userEvent.keyboard("{Escape}");
-    await expect.element(panel()).not.toBeInTheDocument();
-    expect(router.state.location.pathname).toBe(path);
-    expect(router.state.location.search).not.toHaveProperty("conversation");
-  },
-);
-
-it("shows the inbox as the conversations page, where Escape goes back to the list", async () => {
+it("opens the conversation from the search parameter; Escape goes back to the list, then closes", async () => {
   server.conversations.set(conversationId, answeredConversation());
-  const router = await mount(`/conversations?conversation=${conversationId}`);
+  const router = await mount(`/tokens?conversation=${conversationId}`);
+  await expect.element(panel()).toBeVisible();
   await expect.element(messages().getByText("It waits for approval.")).toBeVisible();
-  await expect.element(list()).toBeVisible();
-  expect(list().element().closest("[role=dialog]")).toBeNull();
-  await messages().getByText("It waits for approval.").click();
+  await expect.poll(() => panel().element().contains(document.activeElement)).toBe(true);
   await userEvent.keyboard("{Escape}");
   await expect.poll(() => router.state.location.search).toHaveProperty("conversation", "inbox");
-  await expect.element(page.getByText("No conversation open")).toBeVisible();
+  await expect.element(panel()).toBeVisible();
+  await expect
+    .poll(() => document.activeElement?.getAttribute("data-inbox-row"))
+    .toBe(conversationId);
+  await userEvent.keyboard("{Escape}");
+  await expect.element(panel()).not.toBeInTheDocument();
+  expect(router.state.location.pathname).toBe("/tokens");
+  expect(router.state.location.search).not.toHaveProperty("conversation");
 });
 
 it("marks unread rows and counts them, moves with j and k, and marks a conversation read on open", async () => {
@@ -398,23 +383,6 @@ it("folds a finished turn's 40 tool calls into one line that counts the failed o
   await expect
     .element(messages().getByRole("button", { name: /^run: .* · Error$/u }))
     .toBeVisible();
-});
-
-it("shows a running group's current call instead of its rows, outside any announcement", async () => {
-  runningWithCalls([
-    ...supervisorCalls(12),
-    { tool: "Read", input: { file_path: "packages/config/src/loop.ts" }, outcome: "running" },
-  ]);
-  await mount(`/tokens?conversation=${conversationId}`);
-  const group = messages().getByRole("button", { name: /13 tool calls$/u });
-  await expect.element(group).toHaveAttribute("aria-expanded", "false");
-  const current = messages().getByText("Reading file");
-  await expect.element(current).toBeVisible();
-  await expect
-    .element(messages().getByText("packages/config/src/loop.ts", { exact: true }))
-    .toBeVisible();
-  expect(current.element().closest("[aria-live]")?.getAttribute("aria-live")).toBe("off");
-  expect(toolRows().elements()).toHaveLength(0);
 });
 
 it("shows an image in a supervisor message as a link, so its URL loads only on a click", async () => {

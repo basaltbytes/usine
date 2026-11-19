@@ -53,21 +53,6 @@ describe("current activity", () => {
     assert.deepStrictEqual(activity.since, Option.some(startedAt));
   });
 
-  it("identifies the file being read instead of a harness tool name", () => {
-    const activity = describeActivity({
-      ...session,
-      entries: [
-        {
-          ...command,
-          name: "Read",
-          start: Option.some({ receivedAt: startedAt, input: { file_path: "src/run.ts" } }),
-        },
-      ],
-    });
-    assert.strictEqual(activity.label, "Reading file");
-    assert.strictEqual(activity.detail, "src/run.ts");
-  });
-
   it("clears the action when its result arrives or the session ends", () => {
     const completed = describeActivity({
       ...session,

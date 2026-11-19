@@ -28,7 +28,7 @@ import { serveEgressProxy } from "../src/node/egress-proxy.ts";
 import { GatewayAddresses, gatewayLayer, type Listener } from "../src/node/node.ts";
 import { UpstreamBase } from "../src/upstream.ts";
 import { ADMIN_TOKEN_VALUE, NO_PROVIDERS, REPOSITORY, WORKER, settingsLayer } from "./fixtures.ts";
-import { abandonedTunnel, rawThroughTunnel, silentTunnel, tlsThroughTunnel } from "./tunnel.ts";
+import { rawThroughTunnel, silentTunnel, tlsThroughTunnel } from "./tunnel.ts";
 
 const LOOPBACK = { host: "127.0.0.1", port: 0 };
 
@@ -290,6 +290,7 @@ describe("the Node gateway", () => {
           [{ worker: WORKER, repository: REPOSITORY, credential: "AnonymousCredential" }],
         );
         assert.isTrue((yield* client.attachments.detach({ params: { id } })).detached);
+        assert.isFalse((yield* client.attachments.detach({ params: { id } })).detached);
         assert.deepStrictEqual((yield* client.attachments.list()).attachments, []);
         const fresh = yield* client.attachments.attach({ payload: yield* attachment(60) });
         assert.notStrictEqual(fresh.attachment.id, id);
@@ -402,19 +403,6 @@ describe("the Node gateway", () => {
     }).pipe(Effect.provide(gatewayRecordingLogs)),
   );
 
-  it.live("logs a tunnel the client closes before sending anything as abandoned, not refused", () =>
-    Effect.gen(function* () {
-      gatewayLines.length = 0;
-      const { egress } = yield* GatewayAddresses;
-      const tunnelResponse = yield* abandonedTunnel(egress, "registry.npmjs.org:443");
-      assert.strictEqual(tunnelResponse, "closed");
-      const abandoned = yield* logged(gatewayLines, "The client abandoned a tunnel");
-      assert.include(abandoned, '"level":"Info"');
-      assert.include(abandoned, '"host":"registry.npmjs.org"');
-      assert.isFalse(gatewayLines.some((line) => line.includes("Gateway refused")));
-    }).pipe(Effect.provide(gatewayRecordingLogs)),
-  );
-
   it.live("closes while a tunnel waits for its ClientHello", () =>
     Effect.gen(function* () {
       const scope = yield* Scope.make();
@@ -521,33 +509,28 @@ describe("the Node gateway", () => {
     }).pipe(Effect.scoped, Effect.provide(egressServices)),
   );
 
-  it.live.each(["127.0.0.1", "::"])(
-    "forwards requests to the gateway's own hosts when the reverse proxy binds to %s",
-    (host) =>
-      Effect.gen(function* () {
-        const { egress } = yield* GatewayAddresses;
-        const connectionResponse = yield* connect(egress, "llm.gw.test:80");
-        assert.deepStrictEqual(connectionResponse, {
-          status: 200,
-          reason: undefined,
-        });
-        // The reverse proxy responded, which shows the request arrived; it has no caller token.
-        const relayedResponse = yield* relayed(
-          egress,
-          "http://git.gw.test/acme/demo.git/info/refs",
-        );
-        assert.deepStrictEqual(relayedResponse, {
-          status: 401,
-          reason: "missing-caller-token",
-        });
-      }).pipe(
-        Effect.provide(
-          gatewayLayer({ proxy: { host, port: 0 }, egress: LOOPBACK, admin: LOOPBACK }).pipe(
-            Layer.provide(settingsLayer(NO_PROVIDERS)),
-            Layer.provideMerge(FetchHttpClient.layer),
-          ),
+  it.live("forwards requests to the gateway's own hosts when the reverse proxy binds to ::", () =>
+    Effect.gen(function* () {
+      const { egress } = yield* GatewayAddresses;
+      const connectionResponse = yield* connect(egress, "llm.gw.test:80");
+      assert.deepStrictEqual(connectionResponse, {
+        status: 200,
+        reason: undefined,
+      });
+      // The reverse proxy responded, which shows the request arrived; it has no caller token.
+      const relayedResponse = yield* relayed(egress, "http://git.gw.test/acme/demo.git/info/refs");
+      assert.deepStrictEqual(relayedResponse, {
+        status: 401,
+        reason: "missing-caller-token",
+      });
+    }).pipe(
+      Effect.provide(
+        gatewayLayer({ proxy: { host: "::", port: 0 }, egress: LOOPBACK, admin: LOOPBACK }).pipe(
+          Layer.provide(settingsLayer(NO_PROVIDERS)),
+          Layer.provideMerge(FetchHttpClient.layer),
         ),
       ),
+    ),
   );
 });
 

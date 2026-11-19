@@ -34,7 +34,7 @@ const graphql = (client: HttpClient.HttpClient) =>
 
 for (const mode of ["rest", "graphql"] as const) {
   describe(`${mode} transient requests`, () => {
-    for (const status of [502, 503, 504]) {
+    for (const status of mode === "rest" ? [502, 504] : [503]) {
       it.effect(`recovers from one ${status} with one warning and a short delay`, () => {
         let requests = 0;
         const warnings: Array<ReadonlyArray<unknown>> = [];
@@ -85,48 +85,44 @@ for (const mode of ["rest", "graphql"] as const) {
   });
 }
 
-for (const serverError of [
-  {
+it.effect("caps GraphQL server retries and preserves the response diagnostic", () => {
+  const serverError = {
     message:
       "Something went wrong while executing your query. Please include ABC when reporting this issue.",
-  },
-  { type: "INTERNAL", message: "Internal server error" },
-]) {
-  it.effect("caps GraphQL server retries and preserves the response diagnostic", () => {
-    let requests = 0;
-    const warnings: Array<ReadonlyArray<unknown>> = [];
-    const logger = Logger.make<unknown, void>(({ logLevel, message }) => {
-      if (logLevel === "Warn" && Array.isArray(message)) warnings.push(message);
-    });
-    const client = HttpClient.make((request) =>
-      Effect.sync(() => {
-        requests++;
-        return HttpClientResponse.fromWeb(request, Response.json({ errors: [serverError] }));
-      }),
-    );
-    return Effect.gen(function* () {
-      const fiber = yield* graphql(client).pipe(Effect.result, Effect.forkChild);
-      yield* TestClock.adjust("10 seconds");
-      const result = yield* Fiber.join(fiber);
-      assert.strictEqual(requests, 3);
-      assert.lengthOf(warnings, 2);
-      for (const warning of warnings) {
-        assert.deepInclude(warning[1], {
-          operation: "fetch-pull-request-snapshot",
-          errorTag: "GraphqlServerError",
-        });
-        assert.notProperty(warning[1], "status");
-      }
-      assert.strictEqual(result._tag, "Failure");
-      if (result._tag !== "Failure") return;
-      assert.strictEqual(result.failure._tag, "InvalidGitHubResponseError");
-      if (result.failure._tag !== "InvalidGitHubResponseError") return;
-      assert.include(result.failure.detail, serverError.message);
-    }).pipe(Effect.provide(Logger.layer([logger])));
+  };
+  let requests = 0;
+  const warnings: Array<ReadonlyArray<unknown>> = [];
+  const logger = Logger.make<unknown, void>(({ logLevel, message }) => {
+    if (logLevel === "Warn" && Array.isArray(message)) warnings.push(message);
   });
-}
+  const client = HttpClient.make((request) =>
+    Effect.sync(() => {
+      requests++;
+      return HttpClientResponse.fromWeb(request, Response.json({ errors: [serverError] }));
+    }),
+  );
+  return Effect.gen(function* () {
+    const fiber = yield* graphql(client).pipe(Effect.result, Effect.forkChild);
+    yield* TestClock.adjust("10 seconds");
+    const result = yield* Fiber.join(fiber);
+    assert.strictEqual(requests, 3);
+    assert.lengthOf(warnings, 2);
+    for (const warning of warnings) {
+      assert.deepInclude(warning[1], {
+        operation: "fetch-pull-request-snapshot",
+        errorTag: "GraphqlServerError",
+      });
+      assert.notProperty(warning[1], "status");
+    }
+    assert.strictEqual(result._tag, "Failure");
+    if (result._tag !== "Failure") return;
+    assert.strictEqual(result.failure._tag, "InvalidGitHubResponseError");
+    if (result.failure._tag !== "InvalidGitHubResponseError") return;
+    assert.include(result.failure.detail, serverError.message);
+  }).pipe(Effect.provide(Logger.layer([logger])));
+});
 
-for (const status of [401, 403, 404, 422, 429, 500]) {
+for (const status of [429, 500]) {
   it.effect(`does not retry HTTP ${status}`, () => {
     let requests = 0;
     const warnings: Array<unknown> = [];

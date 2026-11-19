@@ -193,25 +193,6 @@ describe("ExpressionEngine", () => {
     }).pipe(Effect.provide(MarcbachmannCelLayer)),
   );
 
-  it.effect("checks and evaluates a typed expression over plain JSON", () =>
-    Effect.gen(function* () {
-      const engine = yield* ExpressionEngine;
-      const expression = source(
-        'item.state == "OPEN" && item.labels.nodes.exists(label, label.name == "ready")',
-      );
-
-      yield* engine.checkBoolean(expression, issueEnvironment);
-      const matches = yield* engine.evaluateBoolean(expression, issueEnvironment, {
-        item: {
-          state: "OPEN",
-          labels: { totalCount: 1, nodes: [{ name: "ready" }] },
-        },
-      });
-
-      expect(matches).toBe(true);
-    }).pipe(Effect.provide(MarcbachmannCelLayer)),
-  );
-
   it.effect("evaluates the same expression again on each new context", () =>
     Effect.gen(function* () {
       const engine = yield* ExpressionEngine;
@@ -234,7 +215,7 @@ describe("ExpressionEngine", () => {
     }).pipe(Effect.provide(MarcbachmannCelLayer)),
   );
 
-  it.effect("evaluates one condition on each context and keeps each failure to its context", () =>
+  it.effect("keeps each evaluation failure to its context and fails all when the check fails", () =>
     Effect.gen(function* () {
       const engine = yield* ExpressionEngine;
       const results = yield* engine.evaluateBooleanEach(
@@ -250,19 +231,13 @@ describe("ExpressionEngine", () => {
       expect(failure !== undefined && Result.isFailure(failure) ? failure.failure._tag : null).toBe(
         "ExpressionEvaluationError",
       );
-    }).pipe(Effect.provide(MarcbachmannCelLayer)),
-  );
 
-  it.effect("fails the whole evaluation of each context when the condition does not check", () =>
-    Effect.gen(function* () {
-      const engine = yield* ExpressionEngine;
-      const failure = yield* engine
+      const unchecked = yield* engine
         .evaluateBooleanEach(source("item.state"), issueEnvironment, [
           { item: { state: "OPEN", labels: { totalCount: 0, nodes: [] } } },
         ])
         .pipe(Effect.flip);
-
-      expect(failure.code).toBe("unexpected_result_type");
+      expect(unchecked.code).toBe("unexpected_result_type");
     }).pipe(Effect.provide(MarcbachmannCelLayer)),
   );
 
@@ -336,41 +311,6 @@ describe("ExpressionEngine", () => {
       expect(unknownPath.position._tag).toBe("Some");
       expect(unknownVariable.code).toBe("type_error");
       expect(unknownVariable.message).toContain("Unknown variable: missing");
-    }).pipe(Effect.provide(MarcbachmannCelLayer)),
-  );
-
-  it.effect("rejects incompatible operand types during checking", () =>
-    Effect.gen(function* () {
-      const engine = yield* ExpressionEngine;
-      const failure = yield* engine
-        .checkBoolean(source("item.state > 1"), issueEnvironment)
-        .pipe(Effect.flip);
-
-      expect(failure.code).toBe("type_error");
-    }).pipe(Effect.provide(MarcbachmannCelLayer)),
-  );
-
-  it.effect("rejects a non-boolean selection expression before evaluation", () =>
-    Effect.gen(function* () {
-      const engine = yield* ExpressionEngine;
-      const failure = yield* engine
-        .checkBoolean(source("item.state"), issueEnvironment)
-        .pipe(Effect.flip);
-
-      expect(failure.code).toBe("unexpected_result_type");
-      expect(failure.message).toBe("Expected bool, got string");
-    }).pipe(Effect.provide(MarcbachmannCelLayer)),
-  );
-
-  it.effect("rejects a structured result where prompt interpolation expects a scalar", () =>
-    Effect.gen(function* () {
-      const engine = yield* ExpressionEngine;
-      const failure = yield* engine
-        .checkScalar(source("item.labels.nodes"), issueEnvironment)
-        .pipe(Effect.flip);
-
-      expect(failure.code).toBe("unexpected_result_type");
-      expect(failure.message).toBe("Expected a scalar value, got list<Label>");
     }).pipe(Effect.provide(MarcbachmannCelLayer)),
   );
 

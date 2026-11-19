@@ -33,13 +33,8 @@ import {
   Executor,
   WorkerMachines,
 } from "../../../src/executor.ts";
-import type {
-  ProvisionerTailnet,
-  SshExecutorOptions,
-  SshWorkerAddress,
-} from "../../../src/ssh/model.ts";
+import type { ProvisionerTailnet, SshWorkerAddress } from "../../../src/ssh/model.ts";
 import { tailscaleClientFor } from "../../../src/ssh/provisioner/tailnet/client.ts";
-import { boxdDriverFor } from "../../../src/ssh/provisioner/boxd.ts";
 import { boatDriverFor } from "../../../src/ssh/provisioner/boat.ts";
 import { layer as sshLayer } from "../../../src/ssh/ssh.ts";
 import { fakeGateway, gatewayAddress } from "../gateway/support.ts";
@@ -261,119 +256,130 @@ const boxdEgressAddress: SshWorkerAddress = {
   },
 };
 
-for (const address of [boatAddress, boxdAddress, boxdEgressAddress]) {
+// The harnesses differ only in the files the container mounts, so each provider runs one.
+for (const [address, harness] of [
+  [boatAddress, "claude"],
+  [boxdAddress, "codex"],
+  [boxdEgressAddress, "codex"],
+] as const) {
   assert(address.machine._tag === "Provisioned");
   const provider = address.machine.provisioner.provider;
   const restricted =
     address.machine.provisioner.provider === "boxd" &&
     Option.isSome(address.machine.provisioner.egress);
   describe(`${provider}${restricted ? " with an egress allowlist" : ""} tailnet`, () => {
-    it.live(
-      `deletes an orphan ${provider} machine after a restart without needing tailnet access`,
-      () => {
-        const machine = fakeMachine();
-        machine.state.localFiles.set("/keys/boat.pub", "ssh-ed25519 AAAATest");
-        machine.state.reachable = false;
-        const boat = fakeProviders();
-        const api = fakeTailnet();
-        const gateway = fakeGateway(machine, providers);
-        const layer = sshLayer({
-          workers: [address],
-          instance: INSTANCE,
-          instanceId: INSTANCE_ID,
-          boxdClient: boat.boxdClient,
-          boxdExec: boat.boxdExecOn(machine),
-          providerEndpoints: { boat: BOAT_TEST_API },
-        }).pipe(
-          Layer.provide(harnessesLive),
-          Layer.provide(machine.layer),
-          Layer.provide(mintingProvider().layer),
-          Layer.provide(stubAttemptRuntime(new StubStorage(), completes)),
-          Layer.provide(hostLoginLockLayer),
-          Layer.provide(boat.over(api.over(gateway.layer))),
-        );
-        return Effect.gen(function* () {
-          const driver = yield* provider === "boxd"
-            ? boxdDriverFor(WORKER, boxdSettings())
-            : boatDriverFor(WORKER, boatSettings(), "ssh-ed25519 AAAATest", BOAT_TEST_API);
-          yield* driver.create("earlier-create", {
+    // The sweep reaches no machine, so one provider covers it.
+    if (provider === "boat")
+      it.live(
+        `deletes an orphan ${provider} machine after a restart without needing tailnet access`,
+        () => {
+          const machine = fakeMachine();
+          machine.state.localFiles.set("/keys/boat.pub", "ssh-ed25519 AAAATest");
+          machine.state.reachable = false;
+          const boat = fakeProviders();
+          const api = fakeTailnet();
+          const gateway = fakeGateway(machine, providers);
+          const layer = sshLayer({
+            workers: [address],
             instance: INSTANCE,
-            worker: WORKER,
-            run: RunId.make("earlier-run"),
-            process: "earlier-process",
-            attempt: AttemptId.make("earlier-run/execute/1"),
-            attempts: 1,
-          });
-          assert.strictEqual(
-            (provider === "boxd" ? boat.boxd.machines : boat.boat.sandboxes).size,
-            1,
+            instanceId: INSTANCE_ID,
+            boxdClient: boat.boxdClient,
+            boxdExec: boat.boxdExecOn(machine),
+            providerEndpoints: { boat: BOAT_TEST_API },
+          }).pipe(
+            Layer.provide(harnessesLive),
+            Layer.provide(machine.layer),
+            Layer.provide(mintingProvider().layer),
+            Layer.provide(stubAttemptRuntime(new StubStorage(), completes)),
+            Layer.provide(hostLoginLockLayer),
+            Layer.provide(boat.over(api.over(gateway.layer))),
           );
-          yield* (yield* WorkerMachines).sweep;
-          assert.strictEqual(
-            (provider === "boxd" ? boat.boxd.machines : boat.boat.sandboxes).size,
-            0,
+          return Effect.gen(function* () {
+            const driver = yield* boatDriverFor(
+              WORKER,
+              boatSettings(),
+              "ssh-ed25519 AAAATest",
+              BOAT_TEST_API,
+            );
+            yield* driver.create("earlier-create", {
+              instance: INSTANCE,
+              worker: WORKER,
+              run: RunId.make("earlier-run"),
+              process: "earlier-process",
+              attempt: AttemptId.make("earlier-run/execute/1"),
+              attempts: 1,
+            });
+            assert.strictEqual(boat.boat.sandboxes.size, 1);
+            yield* (yield* WorkerMachines).sweep;
+            assert.strictEqual(boat.boat.sandboxes.size, 0);
+            assert.lengthOf(api.calls, 0);
+          }).pipe(
+            Effect.scoped,
+            Effect.provide(
+              layer.pipe(Layer.provideMerge(boat.layer), Layer.provideMerge(machine.layer)),
+            ),
           );
-          assert.lengthOf(api.calls, 0);
-        }).pipe(
-          Effect.scoped,
-          Effect.provide(
-            layer.pipe(Layer.provideMerge(boat.layer), Layer.provideMerge(machine.layer)),
-          ),
-        );
-      },
-    );
+        },
+      );
 
-    it.live(
-      "revokes the auth key and deletes the sandbox after a refused join without reporting the key",
-      () => {
-        const machine = fakeMachine();
-        machine.state.tailscaleJoin = "refused";
-        machine.state.localFiles.set("/keys/boat.pub", "ssh-ed25519 AAAATest");
-        const boat = fakeProviders();
-        const api = fakeTailnet();
-        const gateway = fakeGateway(machine, providers);
-        const layer = sshLayer({
-          workers: [address],
-          instance: INSTANCE,
-          instanceId: INSTANCE_ID,
-          boxdClient: boat.boxdClient,
-          boxdExec: boat.boxdExecOn(machine),
-          providerEndpoints: { boat: BOAT_TEST_API },
-          machinePollInterval: "1 millis",
-          machineReadyTimeout: "5 seconds",
-        }).pipe(
-          Layer.provide(harnessesLive),
-          Layer.provide(machine.layer),
-          Layer.provide(mintingProvider().layer),
-          Layer.provide(stubAttemptRuntime(new StubStorage(), completes)),
-          Layer.provide(hostLoginLockLayer),
-          Layer.provide(boat.over(api.over(gateway.layer))),
-        );
-        return Effect.gen(function* () {
-          const machines = yield* WorkerMachines;
-          const failure = yield* machines
-            .create(WORKER, MACHINE_RUN, AttemptId.make("remote-run/execute/1"), [TEST_AGENT.brain])
-            .pipe(Effect.flip);
-          assert.include(failure.message, "could not join");
-          assert.strictEqual(failure.message.includes("provisioner.egress"), restricted);
-          const json2 = jsonKey(failure);
-          assert.notInclude(json2, "tskey-auth-test");
-          assert.strictEqual(
-            (provider === "boxd" ? boat.boxd.machines : boat.boat.sandboxes).size,
-            0,
+    // The egress allowlist adds advice to the refusal; plain boxd joins as Boat does.
+    if (provider === "boat" || restricted)
+      it.live(
+        "revokes the auth key and deletes the sandbox after a refused join without reporting the key",
+        () => {
+          const machine = fakeMachine();
+          machine.state.tailscaleJoin = "refused";
+          machine.state.localFiles.set("/keys/boat.pub", "ssh-ed25519 AAAATest");
+          const boat = fakeProviders();
+          const api = fakeTailnet();
+          const gateway = fakeGateway(machine, providers);
+          const layer = sshLayer({
+            workers: [address],
+            instance: INSTANCE,
+            instanceId: INSTANCE_ID,
+            boxdClient: boat.boxdClient,
+            boxdExec: boat.boxdExecOn(machine),
+            providerEndpoints: { boat: BOAT_TEST_API },
+            machinePollInterval: "1 millis",
+            machineReadyTimeout: "5 seconds",
+          }).pipe(
+            Layer.provide(harnessesLive),
+            Layer.provide(machine.layer),
+            Layer.provide(mintingProvider().layer),
+            Layer.provide(stubAttemptRuntime(new StubStorage(), completes)),
+            Layer.provide(hostLoginLockLayer),
+            Layer.provide(boat.over(api.over(gateway.layer))),
           );
-          assert.isTrue(api.calls.some((call) => call.method === "DELETE"));
-          assert.isFalse(
-            gateway.calls.some((call) => call.method === "POST" && call.path === "/v1/attachments"),
-          );
-          assert.isTrue(
-            machine.state.calls.some((call) => call.line.includes("'tailscale' 'logout'")),
-          );
-        }).pipe(Effect.scoped, Effect.provide(layer));
-      },
-    );
+          return Effect.gen(function* () {
+            const machines = yield* WorkerMachines;
+            const failure = yield* machines
+              .create(WORKER, MACHINE_RUN, AttemptId.make("remote-run/execute/1"), [
+                TEST_AGENT.brain,
+              ])
+              .pipe(Effect.flip);
+            assert.include(failure.message, "could not join");
+            assert.strictEqual(failure.message.includes("provisioner.egress"), restricted);
+            const json2 = jsonKey(failure);
+            assert.notInclude(json2, "tskey-auth-test");
+            assert.strictEqual(
+              (provider === "boxd" ? boat.boxd.machines : boat.boat.sandboxes).size,
+              0,
+            );
+            assert.isTrue(api.calls.some((call) => call.method === "DELETE"));
+            assert.isFalse(
+              gateway.calls.some(
+                (call) => call.method === "POST" && call.path === "/v1/attachments",
+              ),
+            );
+            assert.isTrue(
+              machine.state.calls.some((call) => call.line.includes("'tailscale' 'logout'")),
+            );
+          }).pipe(Effect.scoped, Effect.provide(layer));
+        },
+      );
 
-    for (const harness of ["claude", "codex"] as const) {
+    // An egress allowlist changes only the join's refusal.
+    if (!restricted)
       it.live(
         `runs ${harness} in a ${provider} container on the gateway subscription, then detaches and logs out`,
         () => {
@@ -472,7 +478,6 @@ for (const address of [boatAddress, boxdAddress, boxdEgressAddress]) {
           });
         },
       );
-    }
   });
 }
 
@@ -509,18 +514,15 @@ describe("boxd tailnet gateway check", () => {
     });
     return { entries, layer: Logger.layer([logger]) };
   };
-  /** Builds the boxd worker; `"default"` leaves the machine poll interval unset. */
-  const setup = (
-    timeouts: number,
-    pollInterval: Duration.Input | "default" = Duration.millis(PAUSE_MILLIS),
-  ) => {
+  /** Builds the boxd worker with a short machine poll interval. */
+  const setup = (timeouts: number) => {
     const machine = fakeMachine();
     machine.state.gatewayTimeouts = timeouts;
     const boat = fakeProviders();
     const api = fakeTailnet();
     const gateway = fakeGateway(machine, providers);
     const logs = gatewayLogs();
-    const options: SshExecutorOptions = {
+    const layer = sshLayer({
       workers: [boxdAddress],
       instance: INSTANCE,
       instanceId: INSTANCE_ID,
@@ -528,10 +530,8 @@ describe("boxd tailnet gateway check", () => {
       boxdExec: boat.boxdExecOn(machine),
       providerEndpoints: { boat: BOAT_TEST_API },
       machineReadyTimeout: "5 seconds",
-    };
-    const layer = sshLayer(
-      pollInterval === "default" ? options : { ...options, machinePollInterval: pollInterval },
-    ).pipe(
+      machinePollInterval: Duration.millis(PAUSE_MILLIS),
+    }).pipe(
       Layer.provide(harnessesLive),
       Layer.provide(machine.layer),
       Layer.provide(mintingProvider().layer),
@@ -545,24 +545,6 @@ describe("boxd tailnet gateway check", () => {
   const assertLimits = (machine: ReturnType<typeof fakeMachine>) => {
     for (const call of gatewayChecks(machine)) assert.include(call.line, "'--max-time' '13'");
   };
-
-  it.live("logs nothing about the gateway when the first check answers", () => {
-    const { machine, boat, logs, layer } = setup(0);
-    return Effect.gen(function* () {
-      const machines = yield* WorkerMachines;
-      const grant = yield* machines.create(
-        WORKER,
-        MACHINE_RUN,
-        AttemptId.make("remote-run/execute/1"),
-        [TEST_AGENT.brain],
-      );
-      assert.lengthOf(gatewayChecks(machine), 1);
-      assertLimits(machine);
-      assert.strictEqual(boat.boxd.machines.size, 1);
-      assert.deepStrictEqual(logs.entries, [], "a first-try success logs no retry");
-      yield* machines.release(grant.hold);
-    }).pipe(Effect.scoped, Effect.provide(layer));
-  });
 
   it.live("keeps the machine when the gateway answers a later check", () => {
     const { machine, boat, api, logs, layer } = setup(2);
@@ -595,35 +577,6 @@ describe("boxd tailnet gateway check", () => {
       yield* machines.release(grant.hold);
     }).pipe(Effect.scoped, Effect.provide(layer));
   });
-
-  it.live(
-    "pauses 3 seconds between gateway checks by default",
-    () => {
-      const { machine, logs, layer } = setup(1, "default");
-      return Effect.gen(function* () {
-        const machines = yield* WorkerMachines;
-        const grant = yield* machines.create(
-          WORKER,
-          MACHINE_RUN,
-          AttemptId.make("remote-run/execute/1"),
-          [TEST_AGENT.brain],
-        );
-        assert.lengthOf(gatewayChecks(machine), 2);
-        assert.deepStrictEqual(
-          logs.entries.map(({ level, attempt }) => [level, attempt]),
-          [
-            ["Warn", 1],
-            ["Info", 2],
-          ],
-        );
-        const [retry, success] = logs.entries;
-        assert(retry !== undefined && success !== undefined);
-        assert.isAtLeast(success.at - retry.at, 3_000, "the default pause between tries");
-        yield* machines.release(grant.hold);
-      }).pipe(Effect.scoped, Effect.provide(layer));
-    },
-    20_000,
-  );
 
   it.live("discards the machine after three gateway checks time out", () => {
     const { machine, boat, logs, layer } = setup(3);

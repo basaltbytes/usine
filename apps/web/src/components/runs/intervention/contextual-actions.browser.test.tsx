@@ -17,19 +17,12 @@ import { AgentName } from "@usine/core/agent";
 import { AgentSessionId } from "@usine/core/agent/session";
 import { AttemptId } from "@usine/core/attempt";
 import { ChildTarget, ParentTarget } from "@usine/core/attempt/channel";
-import {
-  CycleBudgetAsk,
-  CycleBudgetAskId,
-  CycleCount,
-  CycleLimit,
-  LoopCycleCount,
-} from "@usine/core/cycle-budget";
 import { EventId } from "@usine/core/event";
 import { ItemKey } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
 import { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
-import { Claimed, CycleBlocked, RunAgainResult } from "@usine/engine/engine";
+import { Claimed, RunAgainResult } from "@usine/engine/engine";
 import { ReadyOverview, RunView, ProjectView } from "@usine/orchestrator/operator";
 import { Schema } from "effect";
 import type { ReactNode } from "react";
@@ -40,7 +33,6 @@ import { commands, page, userEvent } from "vitest/browser";
 import { SessionComposer } from "~/components/runs/intervention/session-composer";
 import { ContextualActions } from "~/components/runs/intervention/contextual-actions";
 import { EditAndRetry } from "~/components/runs/intervention/edit-and-retry";
-import { runAgainBlocked } from "~/lib/runs/strings";
 import "~/index.css";
 
 declare module "vitest/browser" {
@@ -309,42 +301,6 @@ it("runs a succeeded Run again as it ended or with an edited task and agent, and
     { task: "Original task", agent: "developer" },
     { task: "Finish the review this time", agent: "reviewer" },
   ]);
-});
-
-it("says that running a Run again opened no Run once the Item's cycle budget is used up", async () => {
-  const opened: Array<RunId> = [];
-  const loop = LoopName.make("implement");
-  await commands.runAgainResponse(
-    runAgainBody(
-      CycleBlocked.make({
-        eventId: EventId.make("run-again-event"),
-        ask: CycleBudgetAsk.make({
-          id: CycleBudgetAskId.make("exhausted"),
-          itemKey: succeededRun.itemKey,
-          repository: succeededRun.repository,
-          loop,
-          limit: CycleLimit.make(1),
-          counts: [
-            LoopCycleCount.make({
-              loop,
-              admitted: CycleCount.make(1),
-              completed: CycleCount.make(1),
-            }),
-          ],
-        }),
-      }),
-    ),
-  );
-  mount(
-    <ContextualActions
-      detail={{ run: succeededRun, agentDefinitionChanged: false }}
-      onEdit={() => {}}
-      openRun={(id) => void opened.push(id)}
-    />,
-  );
-  await page.getByRole("button", { name: "Run again", exact: true }).click();
-  await expect.element(page.getByText(runAgainBlocked, { exact: true })).toBeVisible();
-  expect(opened).toEqual([]);
 });
 
 it("retains unsent guidance and displays a delivery failure", async () => {

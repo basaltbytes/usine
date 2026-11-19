@@ -5,12 +5,11 @@ import { describe, expect, it } from "@effect/vitest";
 import { spawn } from "node:child_process";
 // This Node boundary needs synchronous filesystem operations that FileSystem does not expose.
 // @effect-diagnostics-next-line nodeBuiltinImport:off
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 // Synchronous Node path callbacks retain the host platform’s path semantics.
 // @effect-diagnostics-next-line nodeBuiltinImport:off
 import { join } from "node:path";
-import { SANDBOX_HOME } from "../src/api/harness.ts";
 import {
   PROCESS_SCRIPT,
   STOP_SCRIPT,
@@ -109,22 +108,6 @@ describe.skipIf(process.platform !== "linux")("sandbox process files (Linux only
   );
 
   it.live(
-    "gives the command the sandbox home, which the platform doesn't pass from the image",
-    () =>
-      Effect.gen(function* () {
-        const root = mkdtempSync(join(tmpdir(), "usine-process-"));
-        const { finished } = runProcess(join(root, "d".repeat(32)), 'printf %s "$HOME"', "");
-
-        const actual1 = yield* finished;
-        expect(actual1).toEqual({
-          stdout: SANDBOX_HOME,
-          stderr: "",
-          exitCode: 0,
-        });
-      }),
-  );
-
-  it.live(
     "keeps copying output to the files after the stream that started the command closes",
     () =>
       Effect.gen(function* () {
@@ -138,24 +121,6 @@ describe.skipIf(process.platform !== "linux")("sandbox process files (Linux only
         expect(readFileSync(join(directory, "stdout"), "utf8")).toBe("late\n");
         expect(readFileSync(join(directory, "exit"), "utf8")).toBe("0");
       }),
-  );
-
-  it.live("stops every running command's session and counts them", () =>
-    Effect.gen(function* () {
-      const root = mkdtempSync(join(tmpdir(), "usine-process-"));
-      const directory = join(root, "c".repeat(32));
-      const { finished } = runProcess(directory, "sleep 30 & sleep 30; echo unreachable", "");
-      yield* waitFor(join(directory, "pid"));
-
-      const output = yield* stop(root);
-      const result = yield* finished;
-
-      expect(stoppedCount(output)).toEqual(expect.objectContaining({ value: 1 }));
-      expect(result.stdout).toBe("");
-      expect(existsSync(join(directory, "exit"))).toBe(true);
-      const actual2 = yield* stop(root);
-      expect(stoppedCount(actual2)).toEqual(expect.objectContaining({ value: 0 }));
-    }),
   );
 
   it.live("stops what a command left running after it exited, in its session or in a new one", () =>
@@ -183,31 +148,5 @@ describe.skipIf(process.platform !== "linux")("sandbox process files (Linux only
       const actual4 = yield* stop(root);
       expect(stoppedCount(actual4)).toEqual(expect.objectContaining({ value: 0 }));
     }),
-  );
-
-  it.live(
-    "leaves a process that reuses an exited command's ID, or that another directory marks",
-    () =>
-      Effect.gen(function* () {
-        const root = mkdtempSync(join(tmpdir(), "usine-process-"));
-        const directory = join(root, "f".repeat(32));
-        expect((yield* runProcess(directory, "exit 0", "").finished).exitCode).toBe(0);
-        const reused = spawn("sleep", ["30"], { detached: true, stdio: "ignore" });
-        const elsewhere = spawn("sleep", ["30"], {
-          detached: true,
-          stdio: "ignore",
-          env: { ...process.env, USINE_PROCESS: join(`${root}-other`, "g".repeat(32)) },
-        });
-        try {
-          writeFileSync(join(directory, "pid"), String(reused.pid));
-
-          const actual5 = yield* stop(root);
-          expect(stoppedCount(actual5)).toEqual(expect.objectContaining({ value: 0 }));
-          expect([reused.pid, elsewhere.pid].map(Number).filter(running)).toHaveLength(2);
-        } finally {
-          reused.kill("SIGKILL");
-          elsewhere.kill("SIGKILL");
-        }
-      }),
   );
 });

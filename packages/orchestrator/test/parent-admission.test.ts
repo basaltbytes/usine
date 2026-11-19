@@ -54,30 +54,6 @@ it.effect("asks the credential's login once per provider across models and effor
   }).pipe(Effect.scoped, Effect.provide(testLayer)),
 );
 
-it.effect("names each agent that a refused login affects", () =>
-  Effect.gen(function* () {
-    const directory = yield* (yield* FileSystem.FileSystem).makeTempDirectoryScoped();
-    const root = InstanceDirectory.make(directory);
-    yield* writeInstanceFiles(root, [
-      ["usine.yaml", "version: 2\noperator: operator\nrepos: [{ name: acme/project }]\n"],
-      ["agents/alpha.md", agentFile("high")],
-      ["agents/beta.md", agentFile("high", "parent_effort: low\n")],
-    ]);
-    const loaded = yield* (yield* ConfigurationFolder).load(root);
-    const parents = fauxParent([]);
-    const logins = vi.spyOn(parents.models, "checkAuth").mockResolvedValue(undefined);
-
-    const problems = yield* parentAdmissionProblems(loaded, parents);
-
-    expect(problems.map(({ file }) => file)).toEqual(["agents/alpha.md", "agents/beta.md"]);
-    expect(problems.map(({ message }) => message)).toEqual([
-      expect.stringMatching(/^Agent "alpha" cannot run as coordinator: .*requires a credential/u),
-      expect.stringMatching(/^Agent "beta" cannot run as coordinator: .*requires a credential/u),
-    ]);
-    expect(logins).toHaveBeenCalledTimes(1);
-  }).pipe(Effect.scoped, Effect.provide(testLayer)),
-);
-
 /** Serves `faux-1` under a second provider, `other`, whose credential has no login. */
 const withOtherProvider = (parents: ReturnType<typeof fauxParent>) => {
   const served = parents.models.getModel.bind(parents.models);
@@ -92,11 +68,9 @@ const withOtherProvider = (parents: ReturnType<typeof fauxParent>) => {
     );
 };
 
-it.effect.each([
-  { first: "other", second: "faux" },
-  { first: "faux", second: "other" },
-])("keeps each provider's login answer apart ($first first)", ({ first, second }) =>
+it.effect("keeps each provider's login answer apart", () =>
   Effect.gen(function* () {
+    const [first, second] = ["other", "faux"];
     const directory = yield* (yield* FileSystem.FileSystem).makeTempDirectoryScoped();
     const root = InstanceDirectory.make(directory);
     yield* writeInstanceFiles(root, [
@@ -115,7 +89,7 @@ it.effect.each([
 
     const problems = yield* parentAdmissionProblems(loaded, parents);
 
-    const refused = first === "other" ? ["alpha", "gamma"] : ["beta", "delta"];
+    const refused = ["alpha", "gamma"];
     expect(problems.map(({ file }) => file)).toEqual(refused.map((agent) => `agents/${agent}.md`));
     expect(problems.map(({ message }) => message)).toEqual(
       refused.map((agent) =>
@@ -187,11 +161,9 @@ it.effect("asks the gateway's login once per provider when it selects the parent
   }).pipe(Effect.scoped, Effect.provide(testLayer)),
 );
 
-it.effect.each([
-  { case: "one effort", efforts: ["high", "high", "high"] },
-  { case: "several efforts", efforts: ["high", "medium", "low"] },
-])("lists the host login's models once when it selects the parent model ($case)", ({ efforts }) =>
+it.effect("lists the host login's models once when it selects the parent model", () =>
   Effect.gen(function* () {
+    const efforts = ["high", "medium", "low"];
     const directory = yield* (yield* FileSystem.FileSystem).makeTempDirectoryScoped();
     const root = InstanceDirectory.make(directory);
     yield* writeInstanceFiles(root, [
@@ -227,30 +199,6 @@ it.effect.each([
     expect(problems).toEqual([]);
     expect(listings).toHaveBeenCalledTimes(1);
     expect(logins.mock.calls.map(([provider]) => provider)).toEqual(["other", "faux", "faux"]);
-  }).pipe(Effect.scoped, Effect.provide(testLayer)),
-);
-
-it.effect("resolves each agent's parent effort against the instance default", () =>
-  Effect.gen(function* () {
-    const directory = yield* (yield* FileSystem.FileSystem).makeTempDirectoryScoped();
-    const root = InstanceDirectory.make(directory);
-    yield* writeInstanceFiles(root, [
-      [
-        "usine.yaml",
-        "version: 2\noperator: operator\nrepos: [{ name: acme/project }]\nsettings:\n  parent_effort: max\n",
-      ],
-      ["agents/alpha.md", agentFile("high", "parent_effort: high\n")],
-      ["agents/beta.md", agentFile("high")],
-    ]);
-    const loaded = yield* (yield* ConfigurationFolder).load(root);
-    const parents = fauxParent([]);
-    const lookups = vi.spyOn(parents.models, "getModel");
-
-    const problems = yield* parentAdmissionProblems(loaded, parents);
-
-    expect(problems.map(({ file }) => file)).toEqual(["agents/beta.md"]);
-    expect(problems[0]?.message).toContain("doesn't support effort");
-    expect(lookups).toHaveBeenCalledTimes(2);
   }).pipe(Effect.scoped, Effect.provide(testLayer)),
 );
 

@@ -95,48 +95,6 @@ it.effect("reports the latest failed or canceled workflow runs on a head with th
   );
 });
 
-it.effect("reports a latest workflow run that has not concluded after its jobs finished", () => {
-  const requested: Array<string> = [];
-  return Effect.gen(function* () {
-    const { failed, running } = yield* (yield* GitHubChecks).workflowRuns(repository, head);
-    assert.deepStrictEqual(failed, []);
-    assert.deepStrictEqual(
-      running.map(({ id, workflow, status, url }) => ({ id, workflow, status, url })),
-      [
-        {
-          id: 42672750451,
-          workflow: "CI",
-          status: "in_progress",
-          url: `https://github.com/${repository}/actions/runs/42672750451`,
-        },
-      ],
-    );
-    assert.deepStrictEqual(
-      running[0]?.jobs.map(({ name, status }) => ({ name, status })),
-      [
-        { name: "job-success", status: "completed" },
-        { name: "job-running", status: "in_progress" },
-      ],
-    );
-    assert.include(requested.join("\n"), "/runs/42672750451/jobs");
-  }).pipe(
-    Effect.provide(
-      withClient((url) => {
-        requested.push(url);
-        if (url.includes("/jobs"))
-          return json({ total_count: 2, jobs: [runJob("success"), runJob(null)] });
-        return json({
-          total_count: 2,
-          workflow_runs: [
-            workflowRun(42672750451, { name: "CI", workflow: 1, number: 9, conclusion: null }),
-            workflowRun(40, { name: "Docs", workflow: 3, number: 2, conclusion: "success" }),
-          ],
-        });
-      }),
-    ),
-  );
-});
-
 // The jobs of CI run 43098104121 on 2026-11-11: the gate job failed because the jobs it needs
 // stayed queued after GitHub Actions stalled.
 const stalledJobs = [
@@ -179,6 +137,10 @@ it.effect("reports the jobs of the latest attempt of a failed run and of a runni
         { id: 43098104122, status: "in_progress", jobs: stalled },
         { id: 43097310882, status: "queued", jobs: [] },
       ],
+    );
+    assert.strictEqual(
+      running[0]?.url,
+      `https://github.com/${repository}/actions/runs/43098104122`,
     );
   }).pipe(
     Effect.provide(

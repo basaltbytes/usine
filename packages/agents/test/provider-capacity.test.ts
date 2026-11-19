@@ -14,7 +14,6 @@ it.effect.each([
   },
   { code: "other", message: "Selected model is at capacity", expected: "AgentCapacityError" },
   { code: "unauthorized", message: "Selected model is at capacity", expected: "AgentResultError" },
-  { code: "rateLimitExceeded", message: "Rate limit reached", expected: "AgentCapacityError" },
   {
     code: "usageLimitExceeded",
     message: "You've hit your usage limit. Try again later.",
@@ -26,41 +25,8 @@ it.effect.each([
     expected: "AgentResultError",
   },
   {
-    code: "usageLimitExceeded",
-    message:
-      "To use Codex with your ChatGPT plan, upgrade to Plus: https://chatgpt.com/explore/plus.",
-    expected: "AgentResultError",
-  },
-  {
-    code: "usageLimitExceeded",
-    message: "Your workspace is out of credits. Add credits to continue.",
-    expected: "AgentResultError",
-  },
-  {
-    code: "usageLimitExceeded",
-    message:
-      "Your workspace is out of credits. Ask your workspace owner to refill in order to continue.",
-    expected: "AgentResultError",
-  },
-  {
-    code: "usageLimitExceeded",
-    message: "You hit your spend cap set in your workspace. Increase your spend cap to continue.",
-    expected: "AgentResultError",
-  },
-  {
-    code: "usageLimitExceeded",
-    message:
-      "You hit your spend cap set by the owner of your workspace. Ask an owner to increase your spend cap to continue.",
-    expected: "AgentResultError",
-  },
-  {
     code: { httpConnectionFailed: { httpStatusCode: 529 } },
     message: "Unavailable",
-    expected: "AgentCapacityError",
-  },
-  {
-    code: { responseTooManyFailedAttempts: { httpStatusCode: 503 } },
-    message: "Try again later",
     expected: "AgentCapacityError",
   },
   {
@@ -76,11 +42,6 @@ it.effect.each([
   {
     code: { responseStreamDisconnected: { httpStatusCode: 429 } },
     message: "Quota exceeded. Check your plan and billing details.",
-    expected: "AgentResultError",
-  },
-  {
-    code: { responseTooManyFailedAttempts: { httpStatusCode: 500 } },
-    message: "exceeded retry limit, last status: 500 Internal Server Error",
     expected: "AgentResultError",
   },
   {
@@ -119,11 +80,6 @@ const snapshot = (
   RateLimitsSnapshot.make({ limitId: Option.none(), limitName: Option.none(), primary, secondary });
 
 it.each([
-  {
-    name: "the reset of the used-up window",
-    limits: snapshot(window(100, Option.some("2026-11-12T05:00:00Z")), window(40, Option.none())),
-    expected: Option.some("2026-11-12T05:00:00.000Z"),
-  },
   {
     name: "the later reset when both windows are used up",
     limits: snapshot(

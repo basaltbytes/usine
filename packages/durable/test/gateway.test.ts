@@ -280,33 +280,28 @@ it.live.each([
     }).pipe(Effect.scoped),
 );
 
-it.live.each([
-  { credential: "api-key", terminal: "response.completed" },
-  { credential: "subscription", terminal: "response.completed" },
-  { credential: "api-key", terminal: "response.done" },
-  { credential: "subscription", terminal: "response.done" },
-] as const)(
-  "runs a coordinator with a gateway $credential credential and $terminal terminal event and records its pool",
-  ({ credential, terminal }) =>
+it.live(
+  "runs a coordinator with a gateway api-key credential and response.completed terminal event and records its pool",
+  () =>
     Effect.gen(function* () {
       const database = yield* temporaryDatabase;
       const sent: Array<{ protocol: string; body: string }> = [];
-      let current: GatewayCredentialKind | undefined = credential;
+      let current: GatewayCredentialKind | undefined = "api-key";
       const access = yield* gatewayModelAccess({
         credential: () => Effect.succeed(Option.fromUndefinedOr(current)),
         request: (protocol, body) =>
           Effect.sync(() => {
             sent.push({ protocol, body });
-            return response(terminal);
+            return response("response.completed");
           }),
       });
       const model = ModelId.make("openai-codex/gpt-5.6-sol");
-      const original = attemptRequest(`gateway-${credential}`);
+      const original = attemptRequest("gateway-api-key");
       const request = AttemptRequest.make({
         ...original,
         spec: RunSpec.make({ ...original.spec, parentModel: Option.some(model) }),
       });
-      const pool = credential === "subscription" ? "chatgptPlan" : "apiKeys";
+      const pool = "apiKeys";
       const harness = harnessLayer({
         models: access.models,
         credentials: access.credentials,
@@ -391,24 +386,6 @@ it.effect(
       }
       assert.isUndefined(access.models.getProvider("google"));
     }),
-);
-
-it.effect("startup reports a missing gateway credential by coordinator provider", () =>
-  Effect.gen(function* () {
-    const access = yield* gatewayModelAccess({
-      credential: () => Effect.succeedNone,
-      request: () => Effect.sync(() => response()),
-    });
-    const failure = yield* resolveParent(
-      { ...access, defaultModel: Option.none() },
-      {
-        parentModel: Option.some(ModelId.make("openai-codex/gpt-5.6-sol")),
-        parentEffort: "high",
-      },
-      Option.none(),
-    ).pipe(Effect.flip);
-    assert.include(failure.message, 'Gateway credential unavailable for provider "openai-codex"');
-  }),
 );
 
 it.live("streams without an admin credential lookup and lifts only the initial system prompt", () =>

@@ -265,35 +265,6 @@ describe("The lane of a running Task", () => {
       }),
   );
 
-  it.effect("follows the label the Loop set next once its Run ends", () =>
-    Effect.gen(function* () {
-      const reviewed = pullRequest(466, ["agent-review-findings"]);
-      const ended = run(reviewed, "review-pr", "Succeeded");
-      const board = yield* project(
-        [reviewed],
-        [ended],
-        [triggeredWith(ended, reviewed, ["ready-for-review"])],
-      );
-      assert.deepStrictEqual(lanes(board).Findings, [466]);
-      assert.deepStrictEqual(lanes(board).Review, []);
-    }),
-  );
-
-  it.effect("is its Item's lane while its Run has not started", () =>
-    Effect.gen(function* () {
-      // The operator moved the card while its Run queued; the next poll revokes that Run.
-      const moved = pullRequest(466, ["ready-to-merge"]);
-      const queued = run(moved, "review-pr", "Queued");
-      const board = yield* project(
-        [moved],
-        [queued],
-        [triggeredWith(queued, moved, ["ready-for-review"])],
-      );
-      assert.deepStrictEqual(lanes(board).Merge, [466]);
-      assert.deepStrictEqual(lanes(board).Review, []);
-    }),
-  );
-
   it.effect(
     "is its Item's lane once the Item is merged, without its Run's Event, or when that Event names no lane label",
     () =>

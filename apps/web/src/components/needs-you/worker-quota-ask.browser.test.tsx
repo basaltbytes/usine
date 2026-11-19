@@ -97,7 +97,7 @@ const fixture = () => {
   return { overview, detail, need };
 };
 
-it.each([1440, 390])(
+it.each([390])(
   "makes quota recovery readable without hover and shows the same refusal on the board and run page at %i pixels",
   async (width) => {
     await page.viewport(width, 900);

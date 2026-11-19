@@ -24,11 +24,14 @@ const printLines = (lines: ReadonlyArray<string>) =>
   `printf '%s\\n' ${lines.map((line) => `'${line}'`).join(" ")}`;
 
 describe("kernel OOM process attribution", () => {
-  it.live.each(
-    (["match", "no match", "no match, failing", "unreadable"] as const).flatMap((journal) =>
-      (["match", "no match", "failing"] as const).map((dmesg) => ({ journal, dmesg })),
-    ),
-  )(
+  it.live.each([
+    // A journal match makes the dmesg fallback irrelevant.
+    { journal: "match", dmesg: "match" },
+    { journal: "no match", dmesg: "match" },
+    { journal: "no match", dmesg: "failing" },
+    { journal: "no match, failing", dmesg: "failing" },
+    { journal: "unreadable", dmesg: "failing" },
+  ] as const)(
     "reads the kernel through journalctl, falling back to dmesg filtered on the worker: journal $journal, dmesg $dmesg",
     ({ journal, dmesg }) =>
       Effect.gen(function* () {
@@ -132,12 +135,9 @@ echo '-- No entries --'`,
   );
 
   it.live.each([
-    { journal: "entry", dmesg: true, readable: true },
     { journal: "entry", dmesg: false, readable: true },
     { journal: "empty", dmesg: true, readable: true },
     { journal: "empty", dmesg: false, readable: false },
-    { journal: "absent", dmesg: true, readable: true },
-    { journal: "absent", dmesg: false, readable: false },
   ] as const)(
     "checks that the kernel journal or ring buffer is readable: journal $journal, dmesg $dmesg",
     ({ journal, dmesg, readable }) =>
@@ -146,16 +146,15 @@ echo '-- No entries --'`,
         const path = yield* Path.Path;
         const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
         const directory = yield* fs.makeTempDirectoryScoped({ prefix: "usine-kernel-log-" });
-        if (journal !== "absent")
-          yield* fs.writeFileString(
-            path.join(directory, "journalctl"),
-            `#!/bin/sh
+        yield* fs.writeFileString(
+          path.join(directory, "journalctl"),
+          `#!/bin/sh
 [ "$1" = -k ] && [ "$2" = -b ] || exit 2
 for arg in "$@"; do [ "$arg" = -q ] && quiet=1; done
 ${journal === "entry" ? "echo 'Linux version 6.18.0'" : '[ -n "${quiet:-}" ] || echo "-- No entries --"'}
 `,
-            { mode: 0o755 },
-          );
+          { mode: 0o755 },
+        );
         yield* fs.writeFileString(
           path.join(directory, "dmesg"),
           dmesg

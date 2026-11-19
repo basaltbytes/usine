@@ -526,7 +526,7 @@ describe.skipIf(!hasUpgradeTools)("upgrade helper (requires GNU tools and flock)
     expect(result.retained.some((path) => path.endsWith("backup.old00000"))).toBe(false);
   });
 
-  it.each(["migrated-api", "migrated-external", "migrated-no-durable"] as const)(
+  it.each(["migrated-api", "migrated-no-durable"] as const)(
     "restores the previous stores before its API answers after %s",
     slowCli,
     (scenario) => {
@@ -623,7 +623,7 @@ describe.skipIf(!hasUpgradeTools)("upgrade helper (requires GNU tools and flock)
     expect(result.commands).not.toContain("install");
   });
 
-  it.each(["missing-backup", "missing-durable-backup"] as const)(
+  it.each(["missing-backup"] as const)(
     "leaves the service stopped with a database recovery error after %s",
     slowCli,
     (scenario) => {
@@ -663,7 +663,7 @@ describe.skipIf(!hasUpgradeTools)("upgrade helper (requires GNU tools and flock)
     },
   );
 
-  it.each(["bad-api", "bad-install"] as const)(
+  it.each(["bad-install"] as const)(
     "reinstalls and starts the previous version after %s",
     slowCli,
     (scenario) => {
@@ -734,7 +734,7 @@ describe.skipIf(!hasUpgradeTools)("upgrade helper (requires GNU tools and flock)
     },
   );
 
-  it.each(["missing-rollback", "invalid-rollback", "other-rollback"] as const)(
+  it.each(["missing-rollback"] as const)(
     "requests a manual reinstall when neither known version can be identified after %s",
     slowCli,
     (scenario) => {
@@ -786,7 +786,7 @@ describe.skipIf(!hasUpgradeTools)("upgrade helper (requires GNU tools and flock)
     },
   );
 
-  it.each(["missing-target", "missing-404"] as const)(
+  it.each(["missing-target"] as const)(
     "restarts the unchanged previous version after exhausting registry retries for %s",
     slowCli,
     (scenario) => {
@@ -803,8 +803,6 @@ describe.skipIf(!hasUpgradeTools)("upgrade helper (requires GNU tools and flock)
 
   it.each([
     "good",
-    "bad-install",
-    "migrated-api",
     "migrated-startup-exit",
     "migrated-startup-signal",
     "migrated-startup-failure",

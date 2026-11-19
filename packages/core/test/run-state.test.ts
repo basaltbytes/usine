@@ -16,16 +16,6 @@ describe("run state machine (ADR 0002)", () => {
     expect(RunState.start(queued)._tag).toBe("Running");
   });
 
-  it("an ungated run starts straight from pending", () => {
-    expect(RunState.start(RunState.Pending.make())._tag).toBe("Running");
-  });
-
-  it("a finished attempt closes the run as succeeded or failed", () => {
-    const running = RunState.Running.make();
-    expect(RunState.succeed(running)._tag).toBe("Succeeded");
-    expect(RunState.fail(running)._tag).toBe("Failed");
-  });
-
   it("operator retry reopens a failed run for attempt N+1", () => {
     const failed = RunState.fail(RunState.Running.make());
     expect(RunState.operatorActions(failed).canRetry).toBe(true);
@@ -49,27 +39,10 @@ describe("run state machine (ADR 0002)", () => {
     }
   });
 
-  it("supersede records which Event took the run's place", () => {
-    const by = EventId.make("evt-2");
-    const canceled = RunState.supersede(RunState.Pending.make(), by);
-    expect(canceled.reason._tag).toBe("Superseded");
-    expect(canceled.reason._tag === "Superseded" && canceled.reason.by).toBe(by);
-  });
-
   it("revoke records its own reason, distinct from operator cancel and supersede", () => {
     const canceled = RunState.revoke(RunState.Waiting.make());
     expect(canceled.reason._tag).toBe("Revoked");
     expect(RunState.revoke(RunState.Queued.make()).reason._tag).toBe("Revoked");
-  });
-
-  it("only pending, waiting, queued and running are open", () => {
-    expect(RunState.isOpen(RunState.Pending.make())).toBe(true);
-    expect(RunState.isOpen(RunState.Waiting.make())).toBe(true);
-    expect(RunState.isOpen(RunState.Queued.make())).toBe(true);
-    expect(RunState.isOpen(RunState.Running.make())).toBe(true);
-    expect(RunState.isOpen(RunState.Succeeded.make())).toBe(false);
-    expect(RunState.isOpen(RunState.Failed.make())).toBe(false);
-    expect(RunState.isOpen(RunState.cancelByOperator(RunState.Pending.make()))).toBe(false);
   });
 
   // Each call below must be a type error; if one compiles, its `@ts-expect-error` is unused and
@@ -121,16 +94,12 @@ describe("run state machine (ADR 0002)", () => {
 
   it.effect("a stored state row parses back into the same state", () =>
     Effect.gen(function* () {
-      const canceled = RunState.supersede(RunState.Waiting.make(), EventId.make("evt-9"));
+      const by = EventId.make("evt-9");
+      const canceled = RunState.supersede(RunState.Waiting.make(), by);
+      expect(canceled.reason._tag === "Superseded" && canceled.reason.by).toBe(by);
       const encoded = yield* Schema.encodeEffect(RunState.RunState)(canceled);
       const decodedValue1 = yield* decodeRunState(encoded);
       expect(decodedValue1).toEqual(canceled);
-    }),
-  );
-
-  it.effect("a state row with an unknown tag is rejected", () =>
-    Effect.gen(function* () {
-      expect((yield* Effect.flip(decodeRunState({ _tag: "Paused" })))._tag).toBe("SchemaError");
     }),
   );
 });

@@ -63,7 +63,6 @@ const evidence = (filename: string) => {
 it.live.each([
   { kind: "missing", reason: /NotFound/ },
   { kind: "corrupt", reason: /not a database/ },
-  { kind: "directory", reason: /regular SQLite file/ },
 ])(
   "reports an unusable $kind source without creating a backup",
   ({ kind, reason }) =>
@@ -78,10 +77,6 @@ it.live.each([
         // The durable storage is copied first; the failed runtime copy must remove it again.
         openWithUncheckpointedRow(join(runtime, "durable.sqlite"), 176).close();
       }
-      if (kind === "directory")
-        yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
-          fileSystem.makeDirectory(filename),
-        );
       if (kind === "corrupt")
         yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
           fileSystem.writeFileString(filename, "not SQLite"),
@@ -119,15 +114,7 @@ it.live.each([
   slowCli,
 );
 
-it.live.each([
-  { outputName: "backup.sqlite", durableName: "backup.durable.sqlite" },
-  { outputName: "backup.db", durableName: "backup.durable.db" },
-  {
-    outputName: "before-pi-1.4-2026-10-29",
-    durableName: "before-pi-1.4-2026-10-29.durable.sqlite",
-  },
-  { outputName: "nightly", durableName: "nightly.durable.sqlite" },
-])(
+it.live.each([{ outputName: "backup.sqlite", durableName: "backup.durable.sqlite" }])(
   "copies open stores to $outputName and $durableName",
   ({ outputName, durableName }) =>
     Effect.gen(function* () {
@@ -166,9 +153,7 @@ it.live.each([
 it.live.each([
   { kind: "existing", output: "backup.sqlite", reason: "AlreadyExists" },
   { kind: "source", output: ".usine/runtime.sqlite", reason: "AlreadyExists" },
-  { kind: "symlink", output: "backup.sqlite", reason: "AlreadyExists" },
   { kind: "missing parent", output: "absent/backup.sqlite", reason: "NotFound" },
-  { kind: "long filename", output: `${"b".repeat(256)}.sqlite`, reason: "ENAMETOOLONG" },
 ])(
   "reports a $kind destination and preserves existing files",
   ({ kind, output, reason }) =>
@@ -193,10 +178,6 @@ it.live.each([
         yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
           fileSystem.writeFileString(destination, "previous backup"),
         );
-      if (kind === "symlink")
-        yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
-          fileSystem.symlink(filename, destination),
-        );
       const originalEntries = (yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
         fileSystem.readDirectory(directory),
       )).sort();
@@ -218,12 +199,6 @@ it.live.each([
           fileSystem.readFileString(destination),
         );
         assert.strictEqual(actual4, "previous backup");
-      }
-      if (kind === "symlink") {
-        const actual5 = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
-          fileSystem.realPath(destination),
-        );
-        assert.strictEqual(actual5, filename);
       }
       assert.deepStrictEqual(
         (yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>

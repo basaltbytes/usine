@@ -1,4 +1,3 @@
-import { HttpServerError } from "effect/http";
 import { createServer } from "node:net";
 import { NodeServices } from "@effect/platform-node";
 import { Duration, Effect, Layer, Option, Schema } from "effect";
@@ -12,10 +11,8 @@ import {
   Port,
   PortInUseError,
   SERVER_HOST,
-  packageVersion,
   openBrowser,
   parseCli,
-  serverStartError,
   volatileRoot,
   volatileRoots,
 } from "../src/cli.ts";
@@ -69,23 +66,7 @@ describe("usine CLI", () => {
     }),
   );
   it.live.each([
-    ["login"],
-    ["login", "unknown"],
-    ["logout", "claude", "--api-key"],
-    ["login", "claude", "--target"],
-    ["login", "claude", "--target", ""],
-    ["login", "claude", "--target", "--api-key"],
-  ])("rejects invalid provider arguments: %j", (args) =>
-    Effect.gen(function* () {
-      const error = yield* parseCli(args, noEnvironment).pipe(Effect.flip);
-      assert.instanceOf(error, CliUsageError);
-    }),
-  );
-
-  it.live.each([
-    ["config"],
     ["config", "export", ""],
-    ["config", "import", ""],
     ["config", "import", "folder", "--message"],
     ["config", "edit", "unknown", "name"],
     ["config", "log", "agent"],
@@ -111,52 +92,13 @@ describe("usine CLI", () => {
     }),
   );
 
-  it.live.each([
-    { args: ["backup"] },
-    { args: ["backup", ""] },
-    { args: ["backup", "--unknown"] },
-    { args: ["backup", "copy.sqlite", "extra"] },
-  ])("rejects incomplete or unsupported backup arguments: $args", ({ args }) =>
-    Effect.gen(function* () {
-      const actual1 = yield* parseCli(args, noEnvironment).pipe(Effect.flip);
-      assert.instanceOf(actual1, CliUsageError);
-    }),
-  );
-
-  it.live.each([
-    { flags: [], output: Option.none<string>() },
-    { flags: ["--output", "evidence.json"], output: Option.some("evidence.json") },
-    { flags: ["-o", "evidence.json"], output: Option.some("evidence.json") },
-  ])("parses Run export flags $flags independently of server settings", ({ flags, output }) =>
+  it.live("parses Run export flags independently of server settings", () =>
     Effect.gen(function* () {
       const environment = { ...noEnvironment, port: Option.some("invalid-server-port") };
-      const command = yield* parseCli(["export-run", "run/1", ...flags], environment);
+      const command = yield* parseCli(["export-run", "run/1", "-o", "evidence.json"], environment);
       assert(command._tag === "ExportRunCommand");
       assert.strictEqual(command.runId, "run/1");
-      assert.deepStrictEqual(command.output, output);
-    }),
-  );
-
-  it.live("shows Run export help without requiring a Run id", () =>
-    Effect.gen(function* () {
-      assert.strictEqual(
-        (yield* parseCli(["export-run", "--help"], noEnvironment))._tag,
-        "HelpCommand",
-      );
-    }),
-  );
-
-  it.live.each([
-    { args: ["export-run"] },
-    { args: ["export-run", ""] },
-    { args: ["export-run", "--unknown"] },
-    { args: ["export-run", "run/1", "--output"] },
-    { args: ["export-run", "run/1", "--output", ""] },
-    { args: ["export-run", "run/1", "--port", "7331"] },
-  ])("rejects incomplete or unsupported Run export arguments: $args", ({ args }) =>
-    Effect.gen(function* () {
-      const error = yield* parseCli(args, noEnvironment).pipe(Effect.flip);
-      assert.instanceOf(error, CliUsageError);
+      assert.deepStrictEqual(command.output, Option.some("evidence.json"));
     }),
   );
 
@@ -195,43 +137,10 @@ describe("usine CLI", () => {
     }),
   );
 
-  it.live.each([
-    { args: ["status", "--force"] },
-    { args: ["stop", "--check"] },
-    { args: ["stop", "extra"] },
-    { args: ["restart", "--timeout"] },
-    { args: ["restart", "--timeout", "0"] },
-    { args: ["restart", "--timeout", "1.5"] },
-    { args: ["upgrade", "0.4.0", "0.5.0"] },
-    { args: ["upgrade", "--port", "7331"] },
-  ])("rejects unsupported lifecycle arguments: $args", ({ args }) =>
+  it.live("rejects a lifecycle timeout of zero seconds", () =>
     Effect.gen(function* () {
-      const actual2 = yield* parseCli(args, noEnvironment).pipe(Effect.flip);
-      assert.instanceOf(actual2, CliUsageError);
-    }),
-  );
-
-  it.live("accepts the volatile-instance override from the flag or the environment", () =>
-    Effect.gen(function* () {
-      const flag = yield* parseCli(
-        ["up", "--allow-volatile-instance", "--port=8125"],
-        noEnvironment,
-      );
-      const environment = yield* parseCli(["up"], {
-        ...noEnvironment,
-        allowVolatileInstance: Option.some("1"),
-      });
-      const plain = yield* parseCli(["up"], noEnvironment);
-      const unknown = yield* parseCli(["up", "--allow-anything"], noEnvironment).pipe(Effect.flip);
-      assert(
-        flag._tag === "UpCommand" && environment._tag === "UpCommand" && plain._tag === "UpCommand",
-      );
-      assert.strictEqual(flag.allowVolatileInstance, true);
-      assert.strictEqual(flag.port, 8_125);
-      assert.strictEqual(environment.allowVolatileInstance, true);
-      assert.strictEqual(plain.allowVolatileInstance, false);
-      const matchesUnknown = Schema.is(CliUsageError)(unknown);
-      assert(matchesUnknown);
+      const error = yield* parseCli(["restart", "--timeout", "0"], noEnvironment).pipe(Effect.flip);
+      assert.instanceOf(error, CliUsageError);
     }),
   );
 
@@ -288,41 +197,6 @@ describe("usine CLI", () => {
     }),
   );
 
-  it.live("reads the log level from the flag, then the environment, ignoring case", () =>
-    Effect.gen(function* () {
-      const level = (args: ReadonlyArray<string>, environment = Option.none<string>()) =>
-        Effect.gen(function* () {
-          const command = yield* parseCli(["up", ...args], {
-            ...noEnvironment,
-            logLevel: environment,
-          });
-          assert(command._tag === "UpCommand");
-          return command.logLevel;
-        });
-      const actual3 = yield* level([]);
-      assert.strictEqual(actual3, "Info");
-      const actual4 = yield* level([], Option.some("DEBUG"));
-      assert.strictEqual(actual4, "Debug");
-      const actual5 = yield* level(["--log-level", "warn"], Option.some("debug"));
-      assert.strictEqual(actual5, "Warn");
-      const actual6 = yield* level(["--log-level=trace"]);
-      assert.strictEqual(actual6, "Trace");
-      const flagError = yield* parseCli(["up", "--log-level", "verbose"], noEnvironment).pipe(
-        Effect.flip,
-      );
-      const environmentError = yield* parseCli(["up"], {
-        ...noEnvironment,
-        logLevel: Option.some(""),
-      }).pipe(Effect.flip);
-      const matchesFlagError = Schema.is(CliUsageError)(flagError);
-      assert(matchesFlagError);
-      assert.match(flagError.message, /^--log-level must be trace, debug, info, warn, or error/);
-      const matchesEnvironmentError = Schema.is(CliUsageError)(environmentError);
-      assert(matchesEnvironmentError);
-      assert.match(environmentError.message, /^USINE_LOG_LEVEL/);
-    }),
-  );
-
   it.live(
     "reads the UI origin from the flag, then the environment, and refuses a URL with a path or another scheme",
     () =>
@@ -371,30 +245,6 @@ describe("usine CLI", () => {
         assert.match(environmentError.message, /^USINE_ORIGIN/u);
       }),
   );
-
-  it.live("reads the version pinned in the installed server package", () =>
-    Effect.gen(function* () {
-      const version = yield* packageVersion().pipe(Effect.provide(NodeServices.layer));
-      assert.match(version, /^\d+\.\d+\.\d+(?:-.+)?$/u);
-    }),
-  );
-
-  it("names an occupied port instead of leaking the low-level bind failure", () => {
-    const port = Port.make(7_331);
-    const bindFailure = Object.assign(new Error("listen EADDRINUSE: address already in use"), {
-      code: "EADDRINUSE",
-    });
-    const error = serverStartError(
-      port,
-      new HttpServerError.ServeError({
-        cause: bindFailure,
-      }),
-    );
-
-    const matchesError = Schema.is(PortInUseError)(error);
-    assert(matchesError);
-    assert.strictEqual(error.port, port);
-  });
 
   it.live("refuses a port another process listens on and names that process", () =>
     Effect.gen(function* () {

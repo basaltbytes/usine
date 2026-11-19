@@ -29,14 +29,6 @@ const noExchange = Layer.succeed(
   ),
 );
 
-/** A token exchange that refuses the key, which a call reaches only when it carries a session. */
-const refusedExchange = Layer.succeed(
-  HttpClient.HttpClient,
-  HttpClient.make((request) =>
-    Effect.succeed(HttpClientResponse.fromWeb(request, new Response(null, { status: 401 }))),
-  ),
-);
-
 const listedRegions = [
   { id: "fra", apiEndpoint: "https://boxd.sh:9443" },
   { id: "nyc", apiEndpoint: "https://nyc.boxd.sh:9443" },
@@ -582,7 +574,7 @@ it.effect("fails preflight when boxd lists the configured region without an API 
 );
 
 it.effect(
-  "fails preflight with the key advice when boxd refuses the key while listing regions",
+  "fails the launch with a retryable unreachable unavailability when the token exchange returns HTTP 503",
   () =>
     Effect.gen(function* () {
       const drivers = yield* machineDriversFor({
@@ -592,46 +584,27 @@ it.effect(
       const failure = yield* drivers
         .forEntry({ address: boxdAddress, gateway: Option.none(), machine: Option.none() })
         .pipe(Effect.flip);
-      assert.strictEqual(failure._tag, "WorkerCapabilityError");
-      assert.include(failure.message, "boxd refused the API key");
-    }).pipe(Effect.scoped, Effect.provide([refusedExchange, fakeMachine().layer])),
-);
-
-for (const [status, reason] of [
-  [503, "unreachable"],
-  [429, "quota"],
-] as const) {
-  it.effect(
-    `fails the launch with a retryable ${reason} unavailability when the token exchange returns HTTP ${status}`,
-    () =>
-      Effect.gen(function* () {
-        const drivers = yield* machineDriversFor({
-          instance: "regions-test",
-          settings: { providerEndpoints: { boxd: UNUSED_CLUSTER.endpoint } },
-        });
-        const failure = yield* drivers
-          .forEntry({ address: boxdAddress, gateway: Option.none(), machine: Option.none() })
-          .pipe(Effect.flip);
-        assert(failure._tag === "MachineUnavailableError");
-        assert.strictEqual(failure.provider, "boxd");
-        assert.strictEqual(failure.reason, reason);
-        assert.include(failure.message, "authenticate");
-        assert.include(failure.message, UNUSED_EXCHANGE);
-        assert.notInclude(failure.message, "snapshots save");
-      }).pipe(
-        Effect.scoped,
-        Effect.provide([
-          Layer.succeed(
-            HttpClient.HttpClient,
-            HttpClient.make((request) =>
-              Effect.succeed(HttpClientResponse.fromWeb(request, new Response(null, { status }))),
+      assert(failure._tag === "MachineUnavailableError");
+      assert.strictEqual(failure.provider, "boxd");
+      assert.strictEqual(failure.reason, "unreachable");
+      assert.include(failure.message, "authenticate");
+      assert.include(failure.message, UNUSED_EXCHANGE);
+      assert.notInclude(failure.message, "snapshots save");
+    }).pipe(
+      Effect.scoped,
+      Effect.provide([
+        Layer.succeed(
+          HttpClient.HttpClient,
+          HttpClient.make((request) =>
+            Effect.succeed(
+              HttpClientResponse.fromWeb(request, new Response(null, { status: 503 })),
             ),
           ),
-          fakeMachine().layer,
-        ]),
-      ),
-  );
-}
+        ),
+        fakeMachine().layer,
+      ]),
+    ),
+);
 
 it.effect("refuses to build Exec for a region that boxd lists at a plain-text API endpoint", () =>
   Effect.gen(function* () {

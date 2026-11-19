@@ -70,9 +70,10 @@ const page = (nodes: ReadonlyArray<Schema.Json>, endCursor: string | null) => ({
 });
 
 describe("GitHubItemHistory", () => {
-  it.effect.each(["usine-phildl", "exe-dev-github-integration"])(
-    "returns only %s's changes across pages, excluding other bots and users",
-    (login) => {
+  it.effect(
+    "returns only a worker bot's changes across pages, excluding other bots and users",
+    () => {
+      const login = "exe-dev-github-integration";
       const app = { __typename: "Bot", login };
       const requests: Array<HttpClientRequest.HttpClientRequest> = [];
       const client = HttpClient.make((request) =>

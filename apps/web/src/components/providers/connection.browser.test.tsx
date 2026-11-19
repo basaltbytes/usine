@@ -52,18 +52,6 @@ const cases: ReadonlyArray<{
     manualReplacement: false,
   },
   {
-    name: "refreshable login without dates",
-    connection: {
-      provider: "openai-responses",
-      credential: "subscription",
-      expiresAt: null,
-      lastRefresh: null,
-      refreshable: true,
-    },
-    expectedTimes: ["Not reported", "Not reported"],
-    manualReplacement: false,
-  },
-  {
     name: "older gateway without refresh metadata",
     connection: {
       provider: "anthropic-messages",

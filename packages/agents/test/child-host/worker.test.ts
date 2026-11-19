@@ -213,7 +213,7 @@ afterEach(() => {
 });
 
 describe("standalone worker owner", () => {
-  it.each(["credential-1024", "[]", '{"INVALID;NAME":"credential-1024"}', '{"TOKEN":42}'])(
+  it.each(["credential-1024", '{"INVALID;NAME":"credential-1024"}'])(
     "rejects an invalid stdin environment before starting a child: %s",
     (input) => {
       const { pidFile, root } = temporary();

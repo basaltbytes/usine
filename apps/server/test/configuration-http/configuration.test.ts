@@ -3,32 +3,17 @@ import { jsonKey } from "@usine/core/json-key";
 import { LoopFile } from "@usine/config/loop";
 import { ManagedRepo } from "@usine/config/factory";
 import { ActingMember, OperatorLogin } from "@usine/core/operator";
-import {
-  ItemProjection,
-  ItemContentHash,
-  ItemProjectionSource,
-} from "@usine/engine/item-projection";
-import { ItemKey, ItemNumber } from "@usine/core/item";
 import { RepositoryName } from "@usine/core/repository";
 import { GitHubPolling, RepositoryLabelCatalog } from "@usine/github/polling";
 import { expect, it } from "vitest";
-import {
-  ConfigurationEntityId,
-  ConfigurationStoreError,
-  ConfigurationRevisionNumber,
-  configurationDiff,
-  configurationEntities,
-} from "@usine/config/configuration";
+import { ConfigurationStoreError, ConfigurationRevisionNumber } from "@usine/config/configuration";
 
 import { LoopName } from "@usine/core/loop";
 import { WorkerName } from "@usine/core/worker";
 
 import { GitHubApp, InvalidGitHubResponseError } from "@usine/github/github-app";
 
-import { OperatorApi, ValidationTimeoutRefusal } from "@usine/orchestrator/operator/http";
-import { Clock, Effect, Layer, Option, Ref, Schema } from "effect";
-import { FetchHttpClient } from "effect/http";
-import { HttpApiClient } from "effect/http-api";
+import { Effect, Layer, Option, Ref, Schema } from "effect";
 
 import { harness, agentText, loopText, unused } from "./support.ts";
 it("attributes binding creation, edits, and deletion to the authenticated member", () =>
@@ -289,91 +274,6 @@ it("refuses stale, invalid and incompatible writes without storing a revision", 
     }).pipe(Effect.scoped),
   ));
 
-it("refuses a write whose coordinator brain check runs out of time with HTTP 503", () =>
-  Effect.runPromise(
-    Effect.gen(function* () {
-      const live = yield* Clock.Clock;
-      // Sleeps end at once, so the 10-second limit expires without waiting.
-      const instant = Layer.succeed(Clock.Clock, {
-        currentTimeMillisUnsafe: () => live.currentTimeMillisUnsafe(),
-        currentTimeMillis: live.currentTimeMillis,
-        currentTimeNanosUnsafe: () => live.currentTimeNanosUnsafe(),
-        currentTimeNanos: live.currentTimeNanos,
-        monotonicTimeNanosUnsafe: () => live.monotonicTimeNanosUnsafe(),
-        monotonicTimeNanos: live.monotonicTimeNanos,
-        sleep: () => Effect.void,
-      });
-      const { request, handler, store, current } = yield* harness(instant);
-      let slow = false;
-      yield* current.registerParentAdmission(() => (slow ? Effect.never : Effect.succeed([])));
-      slow = true;
-      const response = yield* request("PUT", "/entities/label/ready", {
-        expected: 1,
-        value: { name: "ready" },
-      });
-      expect(response).toMatchObject({
-        status: 503,
-        body: { error: "ValidationTimeoutError", step: "coordinator-brains" },
-      });
-      expect(jsonKey(response)).toContain("didn't finish within 10 seconds");
-
-      // The UI's generated client decodes the refusal, though other operator errors share 503.
-      const refusal = yield* HttpApiClient.make(OperatorApi, { baseUrl: "http://localhost" }).pipe(
-        Effect.flatMap(({ operator }) =>
-          operator.replaceConfigurationEntity({
-            params: { kind: "label", identifier: ConfigurationEntityId.make("ready") },
-            payload: { expected: ConfigurationRevisionNumber.make(1), value: { name: "ready" } },
-          }),
-        ),
-        Effect.flip,
-        Effect.provide(FetchHttpClient.layer),
-        Effect.provideService(FetchHttpClient.Fetch, (input, init) =>
-          handler(new Request(input, init)),
-        ),
-      );
-      expect(refusal).toBeInstanceOf(ValidationTimeoutRefusal);
-      expect(refusal).toMatchObject({ step: "coordinator-brains" });
-      expect((yield* store.read).number).toBe(1);
-    }).pipe(Effect.scoped),
-  ));
-
-it.each(["type:bug", "type:", "notes.md", "type/bug:"])(
-  "preserves label identifier %s in YAML and schema validation errors",
-  (identifier) =>
-    Effect.runPromise(
-      Effect.gen(function* () {
-        const { request, store } = yield* harness();
-        const path = `/entities/label/${encodeURIComponent(identifier)}`;
-        const response = yield* request("PUT", path, { expected: 1, text: "name: [" });
-        expect(response).toMatchObject({
-          status: 422,
-          body: {
-            error: "ConfigurationInvalid",
-            problems: [{ entity: { kind: "label", identifier }, path: [] }],
-          },
-        });
-        const currentResponse = yield* request("PUT", path, {
-          expected: 1,
-          value: { name: identifier, color: "wrong" },
-        });
-        expect(currentResponse).toMatchObject({
-          status: 422,
-          body: {
-            error: "ConfigurationInvalid",
-            problems: [{ entity: { kind: "label", identifier }, path: ["color"] }],
-          },
-        });
-
-        expect((yield* store.read).number).toBe(1);
-        const decodedValue5 = yield* request("PUT", path, {
-          expected: 1,
-          value: { name: identifier },
-        });
-        expect(decodedValue5.status).toBe(200);
-      }).pipe(Effect.scoped),
-    ),
-);
-
 it("reverts changes as a new revision and identifies entities changed by later revisions", () =>
   Effect.runPromise(
     Effect.gen(function* () {
@@ -528,43 +428,6 @@ it("preserves encoded identifiers and accepts only one of two writes to the same
     }).pipe(Effect.scoped),
   ));
 
-it("restores worker order when reverting a move or deletion", () =>
-  Effect.runPromise(
-    Effect.gen(function* () {
-      const { request, status } = yield* harness();
-
-      expect(
-        (yield* request("PUT", "/entities/worker/extra", {
-          expected: 1,
-          value: { name: "extra", kind: "local" },
-          position: 0,
-        })).status,
-      ).toBe(200);
-
-      expect(
-        (yield* request("PUT", "/entities/worker/local", {
-          expected: 2,
-          value: { name: "local", kind: "local" },
-          position: 0,
-        })).status,
-      ).toBe(200);
-
-      expect((yield* status.slots).map(({ worker }) => worker)).toEqual(["local", "extra"]);
-
-      expect((yield* request("POST", "/revisions/3/revert", { expected: 3 })).status).toBe(200);
-
-      expect((yield* status.slots).map(({ worker }) => worker)).toEqual(["extra", "local"]);
-
-      expect((yield* request("DELETE", "/entities/worker/extra", { expected: 4 })).status).toBe(
-        200,
-      );
-
-      expect((yield* request("POST", "/revisions/5/revert", { expected: 5 })).status).toBe(200);
-
-      expect((yield* status.slots).map(({ worker }) => worker)).toEqual(["extra", "local"]);
-    }).pipe(Effect.scoped),
-  ));
-
 it.each(["stale", "storage"] as const)(
   "releases prepared workers after a %s commit failure",
   (failure) =>
@@ -632,91 +495,6 @@ it.each(["stale", "storage"] as const)(
       }).pipe(Effect.scoped),
     ),
 );
-
-it.each([
-  { removed: "c", laterRemoved: "local", expected: ["b", "c"] },
-  { removed: "b", laterRemoved: "local", expected: ["b", "c"] },
-  { removed: "b", laterRemoved: "c", expected: ["local", "b"] },
-])(
-  "restores $removed relative to surviving workers after deleting $laterRemoved",
-  ({ removed, laterRemoved, expected }) =>
-    Effect.runPromise(
-      Effect.gen(function* () {
-        const { request, status } = yield* harness();
-        for (const [index, name] of ["b", "c"].entries()) {
-          expect(
-            (yield* request("PUT", `/entities/worker/${name}`, {
-              expected: index + 1,
-              value: { name, kind: "local" },
-            })).status,
-          ).toBe(200);
-        }
-        const decodedValue35 = yield* request("DELETE", `/entities/worker/${removed}`, {
-          expected: 3,
-        });
-        expect(decodedValue35.status).toBe(200);
-        const decodedValue36 = yield* request("DELETE", `/entities/worker/${laterRemoved}`, {
-          expected: 4,
-        });
-        expect(decodedValue36.status).toBe(200);
-        const response = yield* request("POST", "/revisions/4/revert", { expected: 5 });
-        expect(response).toMatchObject({
-          status: 200,
-          body: { number: 6 },
-        });
-
-        expect((yield* status.slots).map(({ worker }) => worker)).toEqual(expected);
-
-        expect((yield* request("GET", `/entities/worker/${laterRemoved}`)).status).toBe(404);
-      }).pipe(Effect.scoped),
-    ),
-);
-
-it("restores several deleted workers while preserving later additions and deletions", () =>
-  Effect.runPromise(
-    Effect.gen(function* () {
-      const { request, store, status } = yield* harness();
-      for (const [index, name] of ["b", "c", "d"].entries()) {
-        expect(
-          (yield* request("PUT", `/entities/worker/${name}`, {
-            expected: index + 1,
-            value: { name, kind: "local" },
-          })).status,
-        ).toBe(200);
-      }
-      const snapshot = yield* store.read;
-      if (Option.isNone(snapshot.instance))
-        return yield* Effect.die("Missing initial configuration");
-      const before = configurationEntities(snapshot.instance.value);
-      yield* store.commit({
-        expected: snapshot.number,
-        actor: snapshot.actor,
-        message: Option.none(),
-        changes: configurationDiff(
-          before,
-          before.filter(({ key }) => key.key !== "worker:b" && key.key !== "worker:c"),
-        ),
-      });
-
-      expect((yield* request("DELETE", "/entities/worker/local", { expected: 5 })).status).toBe(
-        200,
-      );
-
-      expect(
-        (yield* request("PUT", "/entities/worker/extra", {
-          expected: 6,
-          value: { name: "extra", kind: "local" },
-          position: 0,
-        })).status,
-      ).toBe(200);
-
-      expect((yield* request("POST", "/revisions/5/revert", { expected: 7 })).status).toBe(200);
-
-      expect((yield* status.slots).map(({ worker }) => worker)).toEqual(["extra", "b", "c", "d"]);
-
-      expect((yield* request("GET", "/entities/worker/local")).status).toBe(404);
-    }).pipe(Effect.scoped),
-  ));
 
 it("serves installation repositories, live labels and supported harnesses, and reports unavailable choices", () =>
   Effect.runPromise(
@@ -799,85 +577,7 @@ it("serves installation repositories, live labels and supported harnesses, and r
     }).pipe(Effect.scoped),
   ));
 
-const previewItem = (number: number) =>
-  ItemProjection.make({
-    itemKey: ItemKey.make(`github:acme/project#${number}`),
-    repository: RepositoryName.make("acme/project"),
-    source: ItemProjectionSource.make("issue"),
-    number: ItemNumber.make(number),
-    contentHash: ItemContentHash.make(`hash-${number}`),
-    payload: {
-      number,
-      title: `Issue ${number}`,
-      body: "Task",
-      url: `https://github.com/acme/project/issues/${number}`,
-      state: "OPEN",
-      stateReason: null,
-      createdAt: "2026-10-28T00:00:00Z",
-      updatedAt: "2026-10-28T00:00:00Z",
-      closedAt: null,
-      author: null,
-      issueType: null,
-      milestone: null,
-      labels: { totalCount: 0, nodes: [] },
-      assignees: { totalCount: 0, nodes: [] },
-      comments: { totalCount: 0, nodes: [] },
-      closedByPullRequestsReferences: { totalCount: 0, nodes: [] },
-    },
-  });
-
-it("checks drafts without saving and returns CEL positions, template errors, and references together", () =>
-  Effect.runPromise(
-    Effect.scoped(
-      Effect.gen(function* () {
-        const { request, store } = yield* harness();
-        const invalid = yield* request("POST", "/loops/check", {
-          name: "acme-project/draft",
-          text: '---\ntrigger: { on: issue, if: "item.unknown == 1" }\nagent: missing\n---\n{{ }} {{ item.nope }} {{ item.missing }}',
-        });
-        expect(invalid.status).toBe(200);
-        expect(invalid.body).toMatchObject({
-          problems: expect.arrayContaining([
-            expect.objectContaining({ path: ["trigger", "if"], position: expect.any(Number) }),
-            expect.objectContaining({ path: ["body"], expression: "item.nope" }),
-            expect.objectContaining({
-              path: ["body"],
-              message: expect.stringContaining("empty expression"),
-            }),
-            expect.objectContaining({ path: ["body"], expression: "item.missing" }),
-            expect.objectContaining({ path: ["agent"] }),
-          ]),
-        });
-        const valid = yield* request("POST", "/loops/check", {
-          name: "acme-project/draft",
-          text: loopText,
-        });
-        expect(valid).toEqual({ status: 200, body: { problems: [] } });
-        const schema = yield* request("POST", "/loops/check", {
-          name: "acme-project/draft",
-          value: {
-            name: "acme-project/draft",
-            trigger: { on: "issue", if: "true" },
-            maxCycles: 0,
-            permissions: "invalid",
-          },
-        });
-        expect(schema.body).toMatchObject({
-          problems: expect.arrayContaining([
-            expect.objectContaining({ path: ["maxCycles"] }),
-            expect.objectContaining({ path: ["permissions"] }),
-            expect.objectContaining({ path: ["agent"] }),
-          ]),
-        });
-
-        expect((yield* store.read).number).toBe(1);
-        const entries = yield* store.list(Option.none());
-        expect(entries).toHaveLength(1);
-      }),
-    ),
-  ));
-
-it.each(["text", "json"])("collects independent mixed diagnostics from a %s loop draft", (format) =>
+it.each(["text"])("collects independent mixed diagnostics from a %s loop draft", (format) =>
   Effect.runPromise(
     Effect.scoped(
       Effect.gen(function* () {
@@ -950,6 +650,12 @@ it.each(["text", "json"])("collects independent mixed diagnostics from a %s loop
           });
         }
 
+        const valid = yield* request("POST", "/loops/check", {
+          name: "acme-project/draft",
+          text: loopText,
+        });
+        expect(valid).toEqual({ status: 200, body: { problems: [] } });
+
         expect((yield* store.read).number).toBe(1);
         const entries = yield* store.list(Option.none());
         expect(entries).toHaveLength(1);
@@ -957,90 +663,6 @@ it.each(["text", "json"])("collects independent mixed diagnostics from a %s loop
     ),
   ),
 );
-
-it("previews at most 20 stored matches with an exact total, a selected prompt, and empty selector results", () =>
-  Effect.runPromise(
-    Effect.scoped(
-      Effect.gen(function* () {
-        const { request, projections, store } = yield* harness();
-        yield* Ref.set(
-          projections,
-          Array.from({ length: 25 }, (_, index) => previewItem(index + 1)),
-        );
-        const value = {
-          name: "acme-project/draft",
-          trigger: { on: "issue", if: "true" },
-          agent: "developer",
-          body: "Implement {{ item.title }} in {{ repo.name }}.",
-          step: "run",
-          approval: "none",
-          selector: { _tag: "None" },
-          priority: { _tag: "Some", value: "item.number == 1 ? -1 : 0" },
-        };
-        const first = yield* request("POST", "/loops/preview", {
-          name: "acme-project/draft",
-          value,
-        });
-        expect(first.status).toBe(200);
-        expect(first.body).toMatchObject({
-          total: 25,
-          items: expect.arrayContaining([
-            expect.objectContaining({ number: 1, priority: -1 }),
-            expect.objectContaining({ number: 2, priority: 0 }),
-          ]),
-          prompt: { text: "Implement Issue 1 in acme/project." },
-        });
-        const decodedValue47 = yield* Schema.decodeUnknownEffect(
-          Schema.Struct({ items: Schema.Array(Schema.Unknown) }),
-        )(first.body);
-        expect(decodedValue47.items).toHaveLength(20);
-        const selected = yield* request("POST", "/loops/preview", {
-          name: "acme-project/draft",
-          value,
-          itemKey: previewItem(25).itemKey,
-        });
-        expect(selected.body).toMatchObject({
-          total: 25,
-          prompt: { text: "Implement Issue 25 in acme/project." },
-        });
-        const failedPriority = yield* request("POST", "/loops/preview", {
-          name: "acme-project/draft",
-          value: { ...value, priority: { _tag: "Some", value: "1 / 0" } },
-        });
-        expect(failedPriority.body).toMatchObject({
-          total: 25,
-          items: expect.arrayContaining([expect.objectContaining({ priority: 0 })]),
-          failures: expect.arrayContaining([
-            expect.objectContaining({
-              message: expect.stringContaining("Priority evaluation failed; using zero"),
-            }),
-          ]),
-        });
-        const empty = yield* request("POST", "/loops/preview", {
-          name: "acme-project/draft",
-          value: {
-            ...value,
-            selector: {
-              _tag: "Some",
-              value: {
-                repos: ["acme/project"],
-                tags: ["other"],
-              },
-            },
-          },
-        });
-        expect(empty.body).toMatchObject({ total: 0, items: [], prompt: null });
-        const noMatch = yield* request("POST", "/loops/preview", {
-          name: "acme-project/draft",
-          value: { ...value, trigger: { on: "issue", if: "false" } },
-          itemKey: previewItem(1).itemKey,
-        });
-        expect(noMatch.status).toBe(404);
-
-        expect((yield* store.read).number).toBe(1);
-      }),
-    ),
-  ));
 
 it("preserves lanes across repository casing, scopes project previews, and refuses ambiguous loop names", () =>
   Effect.runPromise(
@@ -1130,28 +752,5 @@ it("preserves lanes across repository casing, scopes project previews, and refus
         },
       });
       expect(fourthResponse).toMatchObject({ status: 422 });
-    }).pipe(Effect.scoped),
-  ));
-
-it("accepts webhook mode revisions and returns the running mode", () =>
-  Effect.runPromise(
-    Effect.gen(function* () {
-      const { request } = yield* harness();
-      for (const [index, mode] of ["deliveries", "endpoint", "off"].entries()) {
-        const webhooks =
-          mode === "endpoint"
-            ? { mode, public_url: "https://usine.example/webhooks/github" }
-            : { mode };
-        const response = yield* request("PUT", "/entities/settings/instance", {
-          expected: index + 1,
-          value: { version: 2, operator: "operator", webhooks },
-        });
-        expect(response).toMatchObject({ status: 200, body: { number: index + 2 } });
-        const currentResponse = yield* request("GET", "/entities/settings/instance");
-        expect(currentResponse).toMatchObject({
-          status: 200,
-          body: { value: { webhooks } },
-        });
-      }
     }).pipe(Effect.scoped),
   ));

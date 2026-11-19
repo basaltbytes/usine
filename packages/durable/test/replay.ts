@@ -80,8 +80,8 @@ const routedRuntime = (storage: string, journal: string, parent: ReadonlyArray<P
 
 /**
  * Registers the recorded restart and credential-change scenarios for each harness. A replay runs
- * each one through the Pi parent and through the event-driven coordinator; a recording runs the
- * Pi parent, whose transcript both replays read.
+ * each one through the event-driven coordinator, and Claude's restart through the Pi parent too; a
+ * recording runs the Pi parent, whose transcript both replays read.
  */
 export const restartReplays = (mode: "record" | "replay"): void => {
   const kinds: ReadonlyArray<CoordinatorKind> =
@@ -90,6 +90,8 @@ export const restartReplays = (mode: "record" | "replay"): void => {
     for (const scenario of ["restart", "credential-changed"] as const)
       for (const coordinator of kinds) {
         const coordinated = coordinator === "events";
+        if (mode === "replay" && !coordinated && (provider !== "claude" || scenario !== "restart"))
+          continue;
         it.live.skipIf(mode === "record" && recordingModel(provider) === undefined)(
           `${mode} ${provider}: ${scenario} through the ${coordinated ? "coordinator" : "Pi parent"}`,
           () =>

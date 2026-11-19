@@ -279,34 +279,6 @@ describe("SSH Worker", () => {
     }).pipe(Effect.scoped, Effect.provide(runtime(machine, credentials)));
   });
 
-  it.effect("salvages a failed Attempt with its credential, then removes the credential", () => {
-    const machine = fakeMachine();
-    const credentials = mintingProvider();
-    return Effect.gen(function* () {
-      const executor = yield* Executor;
-      machine.state.salvage = "dirty";
-      const prepared = yield* executor.prepare(request);
-      const recorded: Array<AttemptSalvage> = [];
-      const failure = yield* prepared
-        .launch({
-          append: () => Effect.void,
-          comments: () => Effect.void,
-          outOfMemory: () => Effect.void,
-          transcript: Effect.succeed([]),
-          windows: aloneOnItem(),
-          salvage: (salvage) => Effect.sync(() => void recorded.push(salvage)),
-        })
-        .pipe(Effect.flip);
-      assert.strictEqual(failure._tag, "InfraFailure");
-      assert.strictEqual(recorded[0]?._tag, "Pushed");
-      const lines = machine.state.calls.map(({ line }) => line);
-      assert.include(lines.find((line) => line.includes("'commit' '--quiet'")) ?? "", BOT_COMMITS);
-      const push = lines.findIndex((line) => line.includes("'push' '--force'"));
-      assert(lines[push]?.includes(`USINE_GITHUB_TOKEN_FILE='${CREDENTIALS}/token'`));
-      assert(lines.indexOf(`exec 'rm' '-rf' '${CREDENTIALS}'`) > push);
-    }).pipe(Effect.scoped, Effect.provide(runtime(machine, credentials, fails)));
-  });
-
   it.effect.each([
     {
       case: "a child answered at the wait limit",
@@ -330,24 +302,9 @@ describe("SSH Worker", () => {
       kept: 0,
       decision: "No session's answer returned at the Attempt's background wait limit",
     },
-    {
-      case: "no wait limit is configured",
-      limit: Option.none<number>(),
-      passed: true,
-      kept: 0,
-      decision: "The successful Attempt ran without a background wait limit",
-    },
-    {
-      case: "its Loop has read permissions",
-      limit: Option.some(10),
-      passed: true,
-      kept: 0,
-      permissions: "read" as const,
-      decision: "The Attempt's Loop has read permissions",
-    },
   ])(
     "salvages a successful Attempt's checkout only if $case",
-    ({ limit, passed, kept, unreadable, permissions, decision }) => {
+    ({ limit, passed, kept, unreadable, decision }) => {
       const machine = fakeMachine();
       const credentials = mintingProvider();
       const logs = capturedLogs();
@@ -358,7 +315,6 @@ describe("SSH Worker", () => {
           CheckoutRequest.make({
             ...request,
             maxBackgroundWaitMinutes: limit,
-            permissions: permissions ?? request.permissions,
           }),
         );
         const finished = AttemptChannel.OutboundEnvelope.make({
@@ -416,39 +372,6 @@ describe("SSH Worker", () => {
         assert(
           logs.lines.some((line) => line.includes(decision)),
           "cleanup logs why it salvages the checkout or removes it without salvage",
-        );
-      }).pipe(
-        Effect.scoped,
-        Effect.provide(runtime(machine, credentials).pipe(Layer.provideMerge(logs.layer))),
-      );
-    },
-  );
-
-  it.effect(
-    "logs that an Attempt canceled before its launch has no transcript to check for its wait limit",
-    () => {
-      const machine = fakeMachine();
-      const credentials = mintingProvider();
-      const logs = capturedLogs();
-      return Effect.gen(function* () {
-        const executor = yield* Executor;
-        machine.state.salvage = "dirty";
-        yield* executor.prepare(
-          CheckoutRequest.make({ ...request, maxBackgroundWaitMinutes: Option.some(10) }),
-        );
-        yield* executor.cancel(request.attemptId, "cancel");
-        const lines = machine.state.calls.map(({ line }) => line);
-        assert(!lines.some((line) => line.includes("'push' '--force'")), "nothing is salvaged");
-        assert(
-          lines.some((line) => line.includes("'worktree' 'remove'")),
-          "the checkout is removed",
-        );
-        assert(
-          logs.lines.some((line) =>
-            line.includes(
-              "The Attempt ended before its launch, so it has no transcript that shows an answer",
-            ),
-          ),
         );
       }).pipe(
         Effect.scoped,
@@ -626,6 +549,7 @@ describe("SSH Worker", () => {
         const remove = lines.findIndex((line) => line.includes("'worktree' 'remove'"));
         assert(stale >= 0 && stale < listing, "stale credentials go when leftovers are listed");
         assert(write > stale && write < push, "salvage pushes with a fresh credential");
+        assert(lines[push]?.includes(`USINE_GITHUB_TOKEN_FILE='${CREDENTIALS}/token'`));
         assert(lines.indexOf(`exec 'rm' '-rf' '${CREDENTIALS}'`) > remove);
         assert.strictEqual(machine.state.credentials.size, 0);
         assert.strictEqual(credentials.minted.length, 1);

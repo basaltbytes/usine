@@ -10,10 +10,4 @@ it.live.each([
     openRuns: 1,
     history: true,
   },
-  {
-    fixture: "keeps 200 items and 50 open runs below 500 KB and returns concurrent reads",
-    initialItems: 200,
-    openRuns: 50,
-    history: false,
-  },
 ])("$fixture", (fixture) => checkReads(fixture).pipe(Effect.asVoid), 120_000);

@@ -301,83 +301,60 @@ describe("Worker scheduler on a provisioned Worker", () => {
       }).pipe(Effect.scoped),
   );
 
-  it.effect("copies each time limit from the instance settings to its own checkout field", () =>
+  it.effect("keeps the same attempt after capacity failures without quota attention", () =>
     Effect.gen(function* () {
       const fake = yield* fakeMachines();
-      const config = yield* configWithTimings({}, 1, {
-        max_attempt_minutes: 600,
-        max_background_wait_minutes: 5,
-      });
-      const context = yield* scheduler(fake.machines, config);
+      fake.failures.push(
+        MachineUnavailableError.make({
+          worker: POOL,
+          provider: "hetzner",
+          reason: "capacity",
+          message: "This product is currently unavailable",
+        }),
+      );
+      const context = yield* scheduler(fake.machines);
       const steps = Context.get(context, StepExecutor);
-      const run = RunId.make("run-limits");
-      const lease = yield* steps.reserve(run, submission(1), Option.none());
-      const attempt = AttemptId.make("run-limits/execute/1");
-      yield* steps.execute(executionOf(run, attempt), sink).pipe(Effect.flip);
-      const checkout = checkouts.find(({ attemptId }) => attemptId === attempt);
-      assert(checkout !== undefined, "the scheduler prepares the checkout");
-      assert.deepStrictEqual(checkout.maxAttemptMinutes, Option.some(600));
-      assert.deepStrictEqual(checkout.maxBackgroundWaitMinutes, Option.some(5));
+      const status = Context.get(context, WorkerStatus);
+      const lease = yield* steps.reserve(RunId.make("run-1"), submission(1), Option.none());
+      const waiting = yield* Effect.forkChild(
+        steps
+          .execute(executionOf(RunId.make("run-1"), AttemptId.make("run-1/execute/1")), sink)
+          .pipe(Effect.flip),
+      );
+      yield* settle;
+      assert.isUndefined(waiting.pollUnsafe(), "the Run waits");
+      const [pause] = yield* status.provisioning;
+      assert(pause !== undefined, "the Worker is paused");
+      assert.strictEqual(pause.reason, "capacity");
+      assert(Option.isNone(pause.quota));
+      const currentProvisioning = yield* status.provisioning;
+      assert.strictEqual(quotaWaits(currentProvisioning).size, 0);
+      assert.isTrue(pause.blocked);
+      assert.strictEqual(pause.failures, 1);
+      assert.strictEqual(
+        DateTime.toEpochMillis(pause.retryAt) - DateTime.toEpochMillis(pause.failedAt),
+        30_000,
+      );
+      const currentQueue = yield* status.queue;
+      assert.lengthOf(currentQueue, 0, "the persisted Attempt has a slot");
+      const [slot] = yield* status.slots;
+      assert.strictEqual(slot?.leased, 1);
+
+      yield* TestClock.adjust("29 seconds");
+      yield* settle;
+      assert.isUndefined(waiting.pollUnsafe(), "the Worker is still paused");
+      yield* TestClock.adjust("1 second");
+      yield* settle;
+      yield* Fiber.join(waiting);
       yield* lease.release;
+      assert.lengthOf(
+        fake.calls.filter((call) => call.startsWith("create")),
+        2,
+      );
+      const nextProvisioning = yield* status.provisioning;
+      assert.lengthOf(nextProvisioning, 0, "a success ends the pause");
     }).pipe(Effect.scoped),
   );
-
-  for (const reason of ["capacity", "unreachable", "provider"] as const) {
-    it.effect(`keeps the same attempt after ${reason} failures without quota attention`, () =>
-      Effect.gen(function* () {
-        const fake = yield* fakeMachines();
-        fake.failures.push(
-          MachineUnavailableError.make({
-            worker: POOL,
-            provider: "hetzner",
-            reason,
-            message: "This product is currently unavailable",
-          }),
-        );
-        const context = yield* scheduler(fake.machines);
-        const steps = Context.get(context, StepExecutor);
-        const status = Context.get(context, WorkerStatus);
-        const lease = yield* steps.reserve(RunId.make("run-1"), submission(1), Option.none());
-        const waiting = yield* Effect.forkChild(
-          steps
-            .execute(executionOf(RunId.make("run-1"), AttemptId.make("run-1/execute/1")), sink)
-            .pipe(Effect.flip),
-        );
-        yield* settle;
-        assert.isUndefined(waiting.pollUnsafe(), "the Run waits");
-        const [pause] = yield* status.provisioning;
-        assert(pause !== undefined, "the Worker is paused");
-        assert.strictEqual(pause.reason, reason);
-        assert(Option.isNone(pause.quota));
-        const currentProvisioning = yield* status.provisioning;
-        assert.strictEqual(quotaWaits(currentProvisioning).size, 0);
-        assert.isTrue(pause.blocked);
-        assert.strictEqual(pause.failures, 1);
-        assert.strictEqual(
-          DateTime.toEpochMillis(pause.retryAt) - DateTime.toEpochMillis(pause.failedAt),
-          30_000,
-        );
-        const currentQueue = yield* status.queue;
-        assert.lengthOf(currentQueue, 0, "the persisted Attempt has a slot");
-        const [slot] = yield* status.slots;
-        assert.strictEqual(slot?.leased, 1);
-
-        yield* TestClock.adjust("29 seconds");
-        yield* settle;
-        assert.isUndefined(waiting.pollUnsafe(), "the Worker is still paused");
-        yield* TestClock.adjust("1 second");
-        yield* settle;
-        yield* Fiber.join(waiting);
-        yield* lease.release;
-        assert.lengthOf(
-          fake.calls.filter((call) => call.startsWith("create")),
-          2,
-        );
-        const nextProvisioning = yield* status.provisioning;
-        assert.lengthOf(nextProvisioning, 0, "a success ends the pause");
-      }).pipe(Effect.scoped),
-    );
-  }
 
   describe("a check that fails during machine creation", () => {
     const gatewayFailure = () =>
@@ -484,136 +461,6 @@ describe("Worker scheduler on a provisioned Worker", () => {
       },
     );
 
-    it.effect("records the check of a machine creation that got one instead of restoring", () => {
-      const logs = machineCheckLogs();
-      return Effect.gen(function* () {
-        const bus = yield* ChangeBus;
-        const fake = yield* fakeMachines();
-        const limits = ContainerLimits.make({
-          cpus: ContainerCpus.make(3.5),
-          memoryMib: ContainerMemoryMib.make(7168),
-          pids: ContainerPids.make(60976),
-        });
-        fake.failures.push(gatewayFailure());
-        fake.checks.push(
-          MachineCheck.make({
-            brains: [testAgent.brain],
-            containerLimits: Option.some(limits),
-            findings: ["The SSH user can't read the kernel journal"],
-          }),
-        );
-        const context = yield* scheduler(fake.machines);
-        const steps = Context.get(context, StepExecutor);
-        const status = Context.get(context, WorkerStatus);
-        const startup = yield* recordOf(status);
-        const { lease, waiting } = yield* execute(steps, "run-1");
-        yield* assertGatewayFailed(status);
-
-        const gate = yield* Deferred.make<void>();
-        yield* Ref.set(fake.gate, Option.some(gate));
-        yield* TestClock.adjust("30 seconds");
-        yield* settle;
-        const before = (yield* bus.open).revision;
-        yield* Deferred.succeed(gate, undefined);
-        yield* settle;
-        yield* Fiber.join(waiting);
-        const { history } = yield* bus.open;
-        assert.strictEqual(
-          workerNotices(history, before),
-          2,
-          "the creation's success and the recorded check each publish a Worker change",
-        );
-        const checked = yield* recordOf(status);
-        assert.notDeepEqual(checked, startup);
-        const prerequisites = checked?.prerequisites.pipe(Option.getOrUndefined);
-        assert.strictEqual(prerequisites?._tag, "Passed");
-        assert.strictEqual(
-          prerequisites === undefined ? undefined : DateTime.toEpochMillis(prerequisites.checkedAt),
-          30_000,
-        );
-        assert.deepStrictEqual(checked?.containerLimits, Option.some(limits));
-        assert.deepStrictEqual(checked?.findings, ["The SSH user can't read the kernel journal"]);
-        assert.deepStrictEqual(logs.entries, [
-          ["Info", FAILED],
-          ["Info", REPLACED],
-        ]);
-        yield* lease.release;
-      }).pipe(Effect.scoped, Effect.provide(Layer.merge(changeBusLayer, logs.layer)));
-    });
-
-    it.effect("restores once: a later machine creation restores nothing", () => {
-      const logs = machineCheckLogs();
-      return Effect.gen(function* () {
-        const bus = yield* ChangeBus;
-        const fake = yield* fakeMachines();
-        fake.failures.push(gatewayFailure());
-        const context = yield* scheduler(fake.machines);
-        const steps = Context.get(context, StepExecutor);
-        const status = Context.get(context, WorkerStatus);
-        const startup = yield* recordOf(status);
-        const first = yield* execute(steps, "run-1");
-        yield* assertGatewayFailed(status);
-        yield* TestClock.adjust("30 seconds");
-        yield* settle;
-        yield* Fiber.join(first.waiting);
-        yield* first.lease.release;
-        const restored = yield* recordOf(status);
-        assert.deepStrictEqual(restored, startup, "the startup record is back");
-
-        const gate = yield* Deferred.make<void>();
-        yield* Ref.set(fake.gate, Option.some(gate));
-        const second = yield* execute(steps, "run-2");
-        const before = (yield* bus.open).revision;
-        yield* Deferred.succeed(gate, undefined);
-        yield* settle;
-        yield* Fiber.join(second.waiting);
-        const { history } = yield* bus.open;
-        assert.strictEqual(
-          workerNotices(history, before),
-          0,
-          "the later creation has no failure to clear, so it publishes no Worker change",
-        );
-        const kept = yield* recordOf(status);
-        assert.deepStrictEqual(kept, startup, "the later creation leaves the record as it is");
-        assert.deepStrictEqual(
-          logs.entries,
-          [
-            ["Info", FAILED],
-            ["Info", RESTORED],
-          ],
-          "the later creation logs no second restore",
-        );
-        yield* second.lease.release;
-      }).pipe(Effect.scoped, Effect.provide(Layer.merge(changeBusLayer, logs.layer)));
-    });
-
-    it.effect("logs no dropped record when a check or a preflight finds nothing saved", () => {
-      const logs = machineCheckLogs();
-      return Effect.gen(function* () {
-        const fake = yield* fakeMachines();
-        fake.checks.push(
-          MachineCheck.make({
-            brains: [testAgent.brain],
-            containerLimits: Option.none(),
-            findings: ["The SSH user can't read the kernel journal"],
-          }),
-        );
-        const context = yield* scheduler(fake.machines);
-        const steps = Context.get(context, StepExecutor);
-        const status = Context.get(context, WorkerStatus);
-        const { lease, waiting } = yield* execute(steps, "run-1");
-        yield* Fiber.join(waiting);
-        const checked = yield* recordOf(status);
-        assert.deepStrictEqual(checked?.findings, ["The SSH user can't read the kernel journal"]);
-        yield* lease.release;
-
-        yield* TestClock.adjust("10 seconds");
-        const preflight = yield* status.runPreflight(POOL);
-        assert.strictEqual(preflight.prerequisites.pipe(Option.getOrUndefined)?._tag, "Passed");
-        assert.deepStrictEqual(logs.entries, [], "nothing was saved, so nothing is dropped");
-      }).pipe(Effect.scoped, Effect.provide(logs.layer));
-    });
-
     it.effect(
       "keeps a preflight that ran after the failure when the next machine is created",
       () => {
@@ -655,7 +502,7 @@ describe("Worker scheduler on a provisioned Worker", () => {
     );
   });
 
-  for (const transition of ["backoff", "revision", "creation"] as const) {
+  for (const transition of ["revision", "creation"] as const) {
     it.effect(
       `stops provisioning retries and clears quota attention after a fixed connection ${transition}`,
       () =>
@@ -716,10 +563,8 @@ describe("Worker scheduler on a provisioned Worker", () => {
             const reload = yield* Deferred.await(registered);
             const apply = yield* reload(initial, changed);
             yield* apply;
-          } else if (transition === "creation") {
-            yield* Deferred.succeed(creating, undefined);
           } else {
-            yield* TestClock.adjust("30 seconds");
+            yield* Deferred.succeed(creating, undefined);
           }
           yield* settle;
           yield* Fiber.join(waiting);

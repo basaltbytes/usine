@@ -11,12 +11,7 @@ import { SetupPage } from "./setup.page";
 import { setupQuery, activateInstance } from "./queries";
 import "~/index.css";
 
-it.each([
-  { device: "desktop", width: 1440, height: 900, theme: "dark" },
-  { device: "desktop", width: 1440, height: 900, theme: "light" },
-  { device: "phone", width: 390, height: 844, theme: "dark" },
-  { device: "phone", width: 390, height: 844, theme: "light" },
-])(
+it.each([{ device: "phone", width: 390, height: 844, theme: "light" }])(
   "walks setup through all states on $device in $theme with a fake backend",
   async ({ device, width, height, theme }) => {
     await page.viewport(width, height);

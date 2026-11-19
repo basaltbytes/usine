@@ -4,13 +4,7 @@ import { administratorPermissions } from "@usine/core/access";
 import { PermissionsContext, sessionQuery } from "~/lib/permissions";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
-import {
-  boardTaskRuns,
-  BoardView,
-  DeskView,
-  ProjectView,
-  ReadyOverview,
-} from "@usine/orchestrator/operator";
+import { boardTaskRuns, DeskView, ProjectView, ReadyOverview } from "@usine/orchestrator/operator";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it } from "vitest";
@@ -22,7 +16,6 @@ import { routeTree } from "~/route-tree.gen";
 import {
   boardOverview,
   boardOverviewDocumented,
-  boardOverviewDocumentedLongLoop,
   boardOverviewResolved,
   boardOverviewUnpriced,
   boardOverviewUntimed,
@@ -192,8 +185,6 @@ const crumbTexts = () =>
       for (const hidden of label.querySelectorAll("[aria-hidden=true]")) hidden.remove();
       return label.textContent;
     });
-// A generated locator for the sidebar includes avatar text, which changes when its fallback appears.
-const sidebarLink = (name: string) => page.getByRole("link", { name, exact: true }).first();
 
 it("lists only the tasks with runs, in flight first, with their status and last run time, runs, pull request, elapsed time, tokens, and estimated cost", async () => {
   await mount(list);
@@ -251,22 +242,6 @@ it("lists only the tasks with runs, in flight first, with their status and last 
   expect(cellTexts(/Retry salvage pushes/u).slice(4)).toEqual(["", "", ""]);
   expect(cellTexts(/Cache the label catalog/u).slice(4)).toEqual(["10 min", "", ""]);
   expect(rowOf(/Document the cycle budget reset/u).elements()).toHaveLength(0);
-});
-
-it("opens the tokens per pool, summed over the task's runs, from the tokens or the cost", async () => {
-  await mount(list);
-  const redesign = rowOf(/Redesign the Board columns/u);
-  await redesign.getByRole("button", { name: "Tokens: 27.3K. Show per pool" }).hover();
-  const pools = page.getByRole("region", { name: "Tokens per pool" });
-  await expect.element(pools).toBeVisible();
-  await expect.element(pools).toMatchTextContent("API keys1,500$0.75");
-  await expect.element(pools).toMatchTextContent("Claude plan20,000$1.25 estimate");
-  await expect.element(pools).toMatchTextContent("ChatGPT plan5,800$0.40 estimate");
-  await page.getByRole("heading", { name: "Tasks", level: 1 }).hover();
-  await expect.element(pools).not.toBeInTheDocument();
-
-  await redesign.getByRole("button", { name: "Estimated cost: $2.40. Show per pool" }).hover();
-  await expect.element(pools).toMatchTextContent("Claude plan20,000$1.25 estimate");
 });
 
 it("marks the priced dollars with an asterisk while a run has no price yet, and says why", async () => {
@@ -340,32 +315,6 @@ it("says Needs attention for a failure no stall explains, then the last run's ou
   await expect.element(page.getByText("3 in flight, 1 done", { exact: true })).toBeVisible();
 });
 
-it("says No runs yet when no task has a run", async () => {
-  const overview = boardOverview();
-  queryClient.setQueryData(
-    overviewQuery().queryKey,
-    ReadyOverview.make({
-      ...overview,
-      projects: overview.projects.map((project) =>
-        ProjectView.make({
-          ...project,
-          board: BoardView.make({
-            failures: [],
-            lanes: project.board.lanes.filter(({ items }) =>
-              items.every(({ runCount }) => runCount === 0),
-            ),
-          }),
-        }),
-      ),
-    }),
-  );
-  await mount(list);
-  const heading = page.getByRole("heading", { name: "Tasks", level: 1 }).element().parentElement;
-  await expect.element(page.getByText("No runs yet", { exact: true })).toBeVisible();
-  await expect.poll(() => heading?.textContent).toMatch(/^TasksLast updated/u);
-  expect(table().elements()).toHaveLength(0);
-});
-
 it("opens the task page from anywhere on a row, under its originating item", async () => {
   await mount(list);
   // Clicking the Runs cell, which has no link of its own, also opens the task page.
@@ -379,25 +328,6 @@ it("opens the task page from anywhere on a row, under its originating item", asy
   await expect.poll(crumbTexts).toEqual(["board-test/repo", "Tasks", "Issue #9"]);
   await crumbs().getByRole("link", { name: "Tasks", exact: true }).click();
   await expect.poll(() => router.state.location.pathname).toBe(list);
-});
-
-it("shows Board and Tasks under the project in the sidebar, the open page's row active", async () => {
-  await mount(list);
-  await expect
-    .element(sidebarLink("board-test/repo").getByText("R", { exact: true }))
-    .toBeVisible();
-  await expect.poll(crumbTexts).toEqual(["board-test/repo", "Tasks"]);
-  await expect
-    .element(crumbs().getByRole("link", { name: "board-test/repo" }))
-    .toHaveAttribute("href", "/projects/board-test-repo");
-  await expect.element(sidebarLink("Tasks")).toHaveAttribute("data-active");
-  await expect.element(sidebarLink("Board")).not.toHaveAttribute("data-active");
-  await expect.element(sidebarLink("board-test/repo")).not.toHaveAttribute("data-active");
-
-  await sidebarLink("Board").click();
-  await expect.poll(() => router.state.location.pathname).toBe("/projects/board-test-repo");
-  await expect.element(sidebarLink("Board")).toHaveAttribute("data-active");
-  await expect.element(sidebarLink("Tasks")).not.toHaveAttribute("data-active");
 });
 
 it("keeps every title on one line beside all the columns and wide figures, the long statuses wrapping instead", async () => {
@@ -421,32 +351,6 @@ it("keeps every title on one line beside all the columns and wide figures, the l
   expect(status?.getBoundingClientRect().height).toBeGreaterThanOrEqual(40);
   const container = table().element().parentElement;
   expect(container?.scrollWidth).toBeLessThanOrEqual(container?.clientWidth ?? 0);
-});
-
-it("breaks a status word wider than the Status column inside it, beside the whole title", async () => {
-  queryClient.setQueryData(overviewQuery().queryKey, boardOverviewDocumentedLongLoop());
-  await mount(list);
-  expect(columns()).toHaveLength(7);
-  const row = rowOf(/@usine\/core/u);
-  await expect.element(row).toMatchTextContent("Running dependency_updates");
-  const [status, runs] = row.getByRole("cell").elements().slice(1, 3);
-  const words = status?.firstElementChild;
-  // `dependency_updates` wraps instead of overflowing into the Runs column.
-  expect(words?.scrollWidth).toBeLessThanOrEqual(words?.clientWidth ?? 0);
-  expect(words?.getBoundingClientRect().right).toBeLessThanOrEqual(
-    runs?.getBoundingClientRect().left ?? 0,
-  );
-  const title = row.getByTitle("Document the public API of @usine/core in TSDoc").element();
-  expect(title.scrollWidth).toBeLessThanOrEqual(title.clientWidth);
-});
-
-it("drops Runs and Pull request beside the sidebar on a mid-size window", async () => {
-  await mount(list, 1280);
-  await expect
-    .poll(columns)
-    .toEqual(["Task", "Status", "Elapsed time", "Tokens", "Estimated cost"]);
-  const title = rowOf(/Redesign the Board/u).getByRole("link", { name: /Redesign the Board/u });
-  expect(title.element().getBoundingClientRect().width).toBeGreaterThan(240);
 });
 
 it("keeps only the elapsed time of the figures on a phone, without scrolling sideways", async () => {

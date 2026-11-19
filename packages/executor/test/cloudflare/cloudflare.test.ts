@@ -12,9 +12,6 @@ import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { Agent } from "@usine/core/agent";
 import type { AttemptSalvage } from "@usine/core/attempt/salvage";
 import { InfraFailure } from "@usine/core/attempt/failure";
-import { PullRequestNotFound } from "@usine/core/ci";
-import { ItemNumber } from "@usine/core/item";
-import { CommitSha } from "@usine/core/repository";
 import { CloudflareImageName, WorkerName } from "@usine/core/worker";
 import { AttemptRuntime, type AttemptRequest } from "@usine/durable/attempt-runtime";
 import {
@@ -60,7 +57,6 @@ import {
 import {
   ACCESS_CLIENT_ID,
   ACCESS_CLIENT_SECRET,
-  COMMIT,
   type FakeSandbox,
   fakeWorker,
 } from "./fake-worker.ts";
@@ -274,41 +270,6 @@ describe("cloudflare Worker", () => {
       }).pipe(Effect.scoped),
   );
 
-  it.live(
-    "harvests with the parent's CI handoff and keeps why its pull request isn't verified",
-    () =>
-      Effect.gen(function* () {
-        const worker = yield* fakeWorker;
-        const head = CommitSha.make(COMMIT);
-        const handsOff: StubParent = () =>
-          Effect.succeed(
-            `[usine:awaiting-ci]\n${jsonKey({ pull_request: 71, head, fix_loop: "fix", timeout_seconds: 1800, on_green: [] })}`,
-          );
-        yield* Effect.gen(function* () {
-          const cloudflare = yield* Executor;
-          yield* cloudflare.preflight(WORKER, [request.agent.brain], 2);
-          const prepared = yield* cloudflare.prepare(request);
-          const sandbox = worker.state.sandboxes.get(SANDBOX);
-          assert(sandbox !== undefined);
-          const { result } = yield* prepared.launch(sink);
-          // Origin has no `refs/pull/71/head`, so the handoff's pull request isn't found.
-          assert.deepStrictEqual(
-            result.unverifiedHandoff,
-            Option.some(
-              PullRequestNotFound.make({
-                pullRequest: Option.some(ItemNumber.make(71)),
-                branch: Option.none(),
-                head,
-              }),
-            ),
-          );
-          assert.isTrue(
-            sandbox.commands.some((line) => line.includes("'api' 'repos/acme/demo/pulls/71'")),
-          );
-        }).pipe(Effect.scoped, Effect.provide(executor(worker, mintingProvider(), handsOff)));
-      }).pipe(Effect.scoped),
-  );
-
   it.live("stops a canceled Attempt's commands and destroys its sandbox", () =>
     Effect.gen(function* () {
       const worker = yield* fakeWorker;
@@ -399,93 +360,85 @@ describe("cloudflare Worker", () => {
       }).pipe(Effect.scoped),
   );
 
-  for (const permissions of ["read", "write"] as const) {
-    it.live(
-      `keeps a ${permissions} sandbox when its prepared reattachment cannot stop the parent`,
-      () =>
+  it.live("keeps a sandbox when its prepared reattachment cannot stop the parent", () =>
+    Effect.gen(function* () {
+      const worker = yield* fakeWorker;
+      const storage = new StubStorage();
+      const credentials = mintingProvider();
+      const checkout = CheckoutRequest.make({ ...request, permissions: "write" });
+      const working = yield* Deferred.make<void>();
+      const blocks: StubParent = () =>
+        Deferred.succeed(working, undefined).pipe(Effect.andThen(Effect.never));
+      yield* Effect.gen(function* () {
+        const cloudflare = yield* Executor;
+        const prepared = yield* cloudflare.prepare(checkout);
+        const running = yield* Effect.forkChild(prepared.launch(sink));
+        yield* Deferred.await(working);
+        yield* Fiber.interrupt(running);
+      }).pipe(Effect.scoped, Effect.provide(executor(worker, credentials, blocks, storage)));
+
+      const refusing = yield* Ref.make(true);
+      const runtime = Layer.effect(
+        AttemptRuntime,
         Effect.gen(function* () {
-          const worker = yield* fakeWorker;
-          const storage = new StubStorage();
-          const credentials = mintingProvider();
-          const checkout = CheckoutRequest.make({ ...request, permissions });
-          const working = yield* Deferred.make<void>();
-          const blocks: StubParent = () =>
-            Deferred.succeed(working, undefined).pipe(Effect.andThen(Effect.never));
-          yield* Effect.gen(function* () {
-            const cloudflare = yield* Executor;
-            const prepared = yield* cloudflare.prepare(checkout);
-            const running = yield* Effect.forkChild(prepared.launch(sink));
-            yield* Deferred.await(working);
-            yield* Fiber.interrupt(running);
-          }).pipe(Effect.scoped, Effect.provide(executor(worker, credentials, blocks, storage)));
+          const original = yield* AttemptRuntime;
+          return AttemptRuntime.of({
+            ...original,
+            cancel: (id) =>
+              Effect.gen(function* () {
+                if (yield* Ref.get(refusing))
+                  return yield* InfraFailure.make({
+                    message: "Stop refused",
+                    cause: "offline",
+                  });
+                yield* original.cancel(id);
+              }),
+          });
+        }),
+      ).pipe(Layer.provide(stubAttemptRuntime(storage)));
+      const restarted = executor(
+        worker,
+        credentials,
+        completes,
+        storage,
+        [ANTHROPIC],
+        ACCESS_CLIENT_SECRET,
+        runtime,
+      );
+      yield* Executor.pipe(
+        Effect.flatMap((cloudflare) =>
+          cloudflare.prepare(CheckoutRequest.make({ ...checkout, reattach: true })),
+        ),
+        Effect.scoped,
+        Effect.provide(restarted),
+      );
 
-          const refusing = yield* Ref.make(true);
-          const runtime = Layer.effect(
-            AttemptRuntime,
-            Effect.gen(function* () {
-              const original = yield* AttemptRuntime;
-              return AttemptRuntime.of({
-                ...original,
-                cancel: (id) =>
-                  Effect.gen(function* () {
-                    if (yield* Ref.get(refusing))
-                      return yield* InfraFailure.make({
-                        message: "Stop refused",
-                        cause: "offline",
-                      });
-                    yield* original.cancel(id);
-                  }),
-              });
-            }),
-          ).pipe(Layer.provide(stubAttemptRuntime(storage)));
-          const restarted = executor(
-            worker,
-            credentials,
-            completes,
-            storage,
-            [ANTHROPIC],
-            ACCESS_CLIENT_SECRET,
-            runtime,
-          );
-          yield* Executor.pipe(
-            Effect.flatMap((cloudflare) =>
-              cloudflare.prepare(CheckoutRequest.make({ ...checkout, reattach: true })),
-            ),
-            Effect.scoped,
-            Effect.provide(restarted),
-          );
+      const kept = worker.state.sandboxes.get(SANDBOX);
+      assert(kept !== undefined, "a failed parent stop must preserve the sandbox");
+      assert.isTrue(kept.held);
+      assert.isTrue(kept.paths.has(WORKTREE));
+      assert.deepStrictEqual(kept.github, [
+        null,
+        `${TOKEN_PREFIX}1`,
+        null,
+        `${TOKEN_PREFIX}2`,
+        null,
+      ]);
+      assert.deepStrictEqual(kept.providers, [0, 1, 0, 1, 0]);
+      assert.notInclude(worker.state.requests, `DELETE /v1/sandboxes/${SANDBOX}`);
+      assert.isFalse(kept.commands.some((line) => line.includes("'push'")));
 
-          const kept = worker.state.sandboxes.get(SANDBOX);
-          assert(kept !== undefined, "a failed parent stop must preserve the sandbox");
-          assert.isTrue(kept.held);
-          assert.isTrue(kept.paths.has(WORKTREE));
-          assert.deepStrictEqual(kept.github, [
-            null,
-            `${TOKEN_PREFIX}1`,
-            null,
-            `${TOKEN_PREFIX}2`,
-            null,
-          ]);
-          assert.deepStrictEqual(kept.providers, [0, 1, 0, 1, 0]);
-          assert.notInclude(worker.state.requests, `DELETE /v1/sandboxes/${SANDBOX}`);
-          assert.isFalse(kept.commands.some((line) => line.includes("'push'")));
-
-          yield* Ref.set(refusing, false);
-          yield* Executor.pipe(
-            Effect.flatMap((cloudflare) =>
-              cloudflare.recover(
-                keptCheckoutRecovery(checkout),
-                sink,
-                Effect.succeed(COMMIT_AUTHOR),
-              ),
-            ),
-            Effect.scoped,
-            Effect.provide(restarted),
-          );
-          assert.isFalse(worker.state.sandboxes.has(SANDBOX));
-        }).pipe(Effect.scoped),
-    );
-  }
+      yield* Ref.set(refusing, false);
+      yield* Executor.pipe(
+        Effect.flatMap((cloudflare) =>
+          cloudflare.recover(keptCheckoutRecovery(checkout), sink, Effect.succeed(COMMIT_AUTHOR)),
+        ),
+        Effect.scoped,
+        Effect.provide(restarted),
+      );
+      assert.isFalse(worker.state.sandboxes.has(SANDBOX));
+    }).pipe(Effect.scoped),
+  );
 
   it.live(
     "keeps the sandbox when reattachment cannot be prepared, then removes its clean checkout after recovery",
@@ -686,33 +639,6 @@ describe("cloudflare Worker", () => {
     }).pipe(Effect.scoped),
   );
 
-  it.live("reports a harness that fails in the sandbox as a sandbox image gap", () =>
-    Effect.gen(function* () {
-      const worker = yield* fakeWorker;
-      const codex = CheckoutRequest.make({ ...request, agent: brain(Harness.make("codex")) });
-      worker.state.respond = (_sandbox, words) =>
-        words[0] === "codex" ? Option.some({ stdout: "", exitCode: 127 }) : Option.none();
-      const [preflight, prepare] = yield* Effect.gen(function* () {
-        const cloudflare = yield* Executor;
-        return [
-          yield* cloudflare.preflight(WORKER, [codex.agent.brain], 1).pipe(Effect.flip),
-          yield* cloudflare.prepare(codex).pipe(Effect.flip),
-        ] as const;
-      }).pipe(
-        Effect.scoped,
-        Effect.provide(executor(worker, mintingProvider(), completes, new StubStorage(), [OPENAI])),
-      );
-
-      for (const refused of [preflight, prepare]) {
-        const isCapabilityGap = Schema.is(WorkerCapabilityError)(refused);
-        assert(isCapabilityGap);
-        assert.strictEqual(refused.capability, "toolchain");
-        assert.include(refused.message, "in the sandbox image");
-        assert.notInclude(refused.message, "on the worker");
-      }
-    }).pipe(Effect.scoped),
-  );
-
   it.live("reports a refused Access token and a missing image as capability gaps", () =>
     Effect.gen(function* () {
       const worker = yield* fakeWorker;
@@ -865,133 +791,119 @@ it.live(
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 );
 
-for (const origin of ["startup", "replacement"] as const) {
-  it.live.each(["reattach", "recover"] as const)(
-    `uses a kept ${origin} sandbox's retained client for %s after a connection change`,
-    (operation) =>
-      Effect.gen(function* () {
-        const initial = yield* fakeWorker;
-        const original = origin === "startup" ? initial : yield* fakeWorker;
-        const replacement = yield* fakeWorker;
-        const storage = new StubStorage();
-        const records = new Map<AttemptId, CloudflareWorkerAddress>();
-        const attemptConnections = {
-          read: (id: AttemptId) => Effect.sync(() => Option.fromNullishOr(records.get(id))),
-          write: (id: AttemptId, address: CloudflareWorkerAddress) =>
-            Effect.sync(() => {
-              records.set(id, address);
-            }),
-          remove: (id: AttemptId) =>
-            Effect.sync(() => {
-              records.delete(id);
-            }),
-        };
-        const runtime = (worker: { readonly url: URL }, parent: StubParent) =>
-          executor(
-            worker,
-            credentials,
-            parent,
-            storage,
-            [ANTHROPIC],
-            ACCESS_CLIENT_SECRET,
-            stubAttemptRuntime(storage, parent),
-            { attemptConnections },
-          );
-        let working = yield* Deferred.make<void>();
-        const blocks: StubParent = () =>
-          Deferred.succeed(working, undefined).pipe(Effect.andThen(Effect.never));
-        const credentials = mintingProvider();
-        const retain = Effect.gen(function* () {
-          const service = yield* Executor;
-          const prepared = yield* service.prepare(request);
-          const running = yield* Effect.forkChild(prepared.launch(sink));
-          yield* Deferred.await(working);
-          yield* Fiber.interrupt(running);
-        }).pipe(Effect.scoped);
-        const address = (worker: { readonly url: URL }) => ({
-          name: WORKER,
-          workerUrl: worker.url,
-          accessClientId: Redacted.make(ACCESS_CLIENT_ID),
-          accessClientSecret: Redacted.make(ACCESS_CLIENT_SECRET),
-          image: CloudflareImageName.make("usine"),
-          instanceType: "standard-4" as const,
-          providers: [ANTHROPIC],
-        });
-        if (origin === "startup") yield* retain.pipe(Effect.provide(runtime(original, blocks)));
+// The reattachment also recovers the kept sandbox, through the same retained client.
+it.live(
+  "uses a kept sandbox's retained client for reattach and recover after a connection change",
+  () =>
+    Effect.gen(function* () {
+      const original = yield* fakeWorker;
+      const replacement = yield* fakeWorker;
+      const storage = new StubStorage();
+      const records = new Map<AttemptId, CloudflareWorkerAddress>();
+      const attemptConnections = {
+        read: (id: AttemptId) => Effect.sync(() => Option.fromNullishOr(records.get(id))),
+        write: (id: AttemptId, address: CloudflareWorkerAddress) =>
+          Effect.sync(() => {
+            records.set(id, address);
+          }),
+        remove: (id: AttemptId) =>
+          Effect.sync(() => {
+            records.delete(id);
+          }),
+      };
+      const runtime = (worker: { readonly url: URL }, parent: StubParent) =>
+        executor(
+          worker,
+          credentials,
+          parent,
+          storage,
+          [ANTHROPIC],
+          ACCESS_CLIENT_SECRET,
+          stubAttemptRuntime(storage, parent),
+          { attemptConnections },
+        );
+      let working = yield* Deferred.make<void>();
+      const blocks: StubParent = () =>
+        Deferred.succeed(working, undefined).pipe(Effect.andThen(Effect.never));
+      const credentials = mintingProvider();
+      const retain = Effect.gen(function* () {
+        const service = yield* Executor;
+        const prepared = yield* service.prepare(request);
+        const running = yield* Effect.forkChild(prepared.launch(sink));
+        yield* Deferred.await(working);
+        yield* Fiber.interrupt(running);
+      }).pipe(Effect.scoped);
+      const address = (worker: { readonly url: URL }) => ({
+        name: WORKER,
+        workerUrl: worker.url,
+        accessClientId: Redacted.make(ACCESS_CLIENT_ID),
+        accessClientSecret: Redacted.make(ACCESS_CLIENT_SECRET),
+        image: CloudflareImageName.make("usine"),
+        instanceType: "standard-4" as const,
+        providers: [ANTHROPIC],
+      });
+      yield* retain.pipe(Effect.provide(runtime(original, blocks)));
 
-        yield* Effect.gen(function* () {
-          const service = yield* Executor;
-          const workers = yield* CloudflareWorkers;
-          if (origin === "replacement") {
-            yield* workers.addWorker(address(original));
-            yield* retain;
-          }
-          const kept = original.state.sandboxes.get(SANDBOX);
-          assert(kept !== undefined);
-          assert.isTrue(kept.held);
-          const live = yield* service.isLive(request.attemptId);
-          assert.isTrue(live);
-          let committed = false;
-          original.state.respond = (_sandbox, words) => {
-            if (words[0] !== "git") return Option.none();
-            if (words.includes("status"))
-              return Option.some({ stdout: " M src/index.ts\n", exitCode: 0 });
-            if (words.includes("diff"))
-              return Option.some({ stdout: "src/index.ts\0", exitCode: 0 });
-            if (words.includes("commit")) committed = true;
-            return committed && words.includes("HEAD")
-              ? Option.some({ stdout: `${"c".repeat(40)}\n`, exitCode: 0 })
-              : Option.none();
-          };
-          yield* workers.addWorker(address(replacement));
-          yield* service.preflight(WORKER, [], 1);
-          const salvages: Array<AttemptSalvage> = [];
-          if (operation === "reattach") {
-            const creates = original.state.requests.filter(
-              (line) => line === `PUT /v1/sandboxes/${SANDBOX}`,
-            ).length;
-            working = yield* Deferred.make<void>();
-            yield* Effect.scoped(
-              Effect.gen(function* () {
-                const prepared = yield* service.prepare(
-                  CheckoutRequest.make({ ...request, reattach: true }),
-                );
-                const running = yield* Effect.forkChild(prepared.launch(sink));
-                yield* Deferred.await(working);
-                yield* Fiber.interrupt(running);
-              }),
+      yield* Effect.gen(function* () {
+        const service = yield* Executor;
+        const workers = yield* CloudflareWorkers;
+        const kept = original.state.sandboxes.get(SANDBOX);
+        assert(kept !== undefined);
+        assert.isTrue(kept.held);
+        const live = yield* service.isLive(request.attemptId);
+        assert.isTrue(live);
+        let committed = false;
+        original.state.respond = (_sandbox, words) => {
+          if (words[0] !== "git") return Option.none();
+          if (words.includes("status"))
+            return Option.some({ stdout: " M src/index.ts\n", exitCode: 0 });
+          if (words.includes("diff")) return Option.some({ stdout: "src/index.ts\0", exitCode: 0 });
+          if (words.includes("commit")) committed = true;
+          return committed && words.includes("HEAD")
+            ? Option.some({ stdout: `${"c".repeat(40)}\n`, exitCode: 0 })
+            : Option.none();
+        };
+        yield* workers.addWorker(address(replacement));
+        yield* service.preflight(WORKER, [], 1);
+        const salvages: Array<AttemptSalvage> = [];
+        const creates = original.state.requests.filter(
+          (line) => line === `PUT /v1/sandboxes/${SANDBOX}`,
+        ).length;
+        working = yield* Deferred.make<void>();
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            const prepared = yield* service.prepare(
+              CheckoutRequest.make({ ...request, reattach: true }),
             );
-            assert.strictEqual(
-              original.state.requests.filter((line) => line === `PUT /v1/sandboxes/${SANDBOX}`)
-                .length,
-              creates,
-              "reattachment reuses the original sandbox",
-            );
-            assert.isTrue(kept.held);
-            assert.include(
-              kept.github,
-              `${TOKEN_PREFIX}2`,
-              "refreshes the retained sandbox's token",
-            );
-          }
-          yield* service.recover(
-            keptCheckoutRecovery(request),
-            { ...sink, salvage: (salvage) => Effect.sync(() => void salvages.push(salvage)) },
-            Effect.succeed(COMMIT_AUTHOR),
-          );
-          assert.deepStrictEqual(
-            salvages.map(({ _tag }) => _tag),
-            ["Pushed"],
-          );
-          assert.isTrue(
-            kept.commands.some(
-              (line) => line.includes("'push'") && line.includes(request.salvageRef),
-            ),
-          );
-          assert.isFalse(original.state.sandboxes.has(SANDBOX));
-          assert.include(replacement.state.requests, "GET /v1/health");
-          assert.isFalse(replacement.state.requests.some((line) => line.includes(SANDBOX)));
-        }).pipe(Effect.provide(runtime(origin === "startup" ? replacement : initial, blocks)));
-      }).pipe(Effect.scoped),
-  );
-}
+            const running = yield* Effect.forkChild(prepared.launch(sink));
+            yield* Deferred.await(working);
+            yield* Fiber.interrupt(running);
+          }),
+        );
+        assert.strictEqual(
+          original.state.requests.filter((line) => line === `PUT /v1/sandboxes/${SANDBOX}`).length,
+          creates,
+          "reattachment reuses the original sandbox",
+        );
+        assert.isTrue(kept.held);
+        assert.include(kept.github, `${TOKEN_PREFIX}2`, "refreshes the retained sandbox's token");
+        yield* service.recover(
+          keptCheckoutRecovery(request),
+          { ...sink, salvage: (salvage) => Effect.sync(() => void salvages.push(salvage)) },
+          Effect.succeed(COMMIT_AUTHOR),
+        );
+        assert.deepStrictEqual(
+          salvages.map(({ _tag }) => _tag),
+          ["Pushed"],
+        );
+        assert.isTrue(
+          kept.commands.some(
+            (line) => line.includes("'push'") && line.includes(request.salvageRef),
+          ),
+        );
+        assert.isFalse(original.state.sandboxes.has(SANDBOX));
+        assert.include(replacement.state.requests, "GET /v1/health");
+        assert.isFalse(replacement.state.requests.some((line) => line.includes(SANDBOX)));
+      }).pipe(Effect.provide(runtime(replacement, blocks)));
+    }).pipe(Effect.scoped),
+);

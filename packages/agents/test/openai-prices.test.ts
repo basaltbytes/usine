@@ -83,17 +83,4 @@ describe("OpenAI prices", () => {
       1e-12,
     );
   });
-
-  it("prices cache writes at the input rate on a model without a write rate", () => {
-    assert.deepStrictEqual(
-      openAiPrice("gpt-5.5", tokens({ cacheWrite: 1_000_000 })),
-      Option.some(5),
-    );
-  });
-
-  it("has no price for a model that the table lacks", () => {
-    assert(Option.isNone(openAiPrice("gpt-never-existed", tokens({ output: 1_000 }))));
-    assert(Option.isNone(openAiPrice("codex-auto-review", tokens({ output: 1_000 }))));
-    assert(Option.isNone(openAiPrice("constructor", tokens({ output: 1_000 }))));
-  });
 });

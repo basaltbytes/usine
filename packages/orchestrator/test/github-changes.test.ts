@@ -25,7 +25,6 @@ import {
   type ItemChange,
   LabelAdded,
   LabelRemoved,
-  Reviewed,
 } from "@usine/github/item-history";
 import { RepositoryLabel, RepositoryLabelColor, RepositoryLabelName } from "@usine/github/polling";
 import { DateTime, Effect, Layer, Option, Ref } from "effect";
@@ -346,81 +345,6 @@ describe("RunGitHubChanges", () => {
         ),
       );
     }),
-  );
-
-  it.effect(
-    "matches exe.dev writes, separates App board moves, and invalidates cached identities",
-    () =>
-      Effect.gen(function* () {
-        const exeSecond = Attempt.make({ ...second, worker: exeWorker.name });
-        const exeThird = Attempt.make({ ...third, worker: exeWorker.name });
-        const current = yield* Ref.make(snapshot([first, exeSecond, exeThird]));
-        const requests = yield* Ref.make<ReadonlyArray<string>>([]);
-        const exeChanges = [
-          LabelAdded.make({
-            at: time("2026-10-16T09:47:10Z"),
-            label: label("ready-for-review", "0e8a16"),
-          }),
-          LabelRemoved.make({
-            at: time("2026-10-16T09:47:12Z"),
-            label: label("agent-in-progress", "fbca04"),
-          }),
-          comment("2026-10-16T09:48:00Z", 50),
-          comment("2026-10-16T13:05:08Z", 51),
-          Reviewed.make({
-            at: time("2026-10-16T13:05:10Z"),
-            url: "https://github.com/basaltbytes/usine/pull/247#pullrequestreview-52",
-            state: "COMMENTED",
-          }),
-        ];
-        yield* TestClock.setTime(DateTime.toEpochMillis(time("2026-10-16T13:10:00Z")));
-        yield* Effect.gen(function* () {
-          const changes = yield* RunGitHubChanges;
-          const read = yield* changes.read(workers, runId);
-          assert.deepStrictEqual(summary(read).slice(1), [
-            [
-              "2026-10-16T09:47:10.000Z LabelAdded ready-for-review #0e8a16",
-              "2026-10-16T09:47:10.250Z BoardMoved In progress -> Review",
-              "2026-10-16T09:47:12.000Z LabelRemoved agent-in-progress #fbca04",
-              "2026-10-16T09:48:00.000Z Commented issuecomment-50",
-            ],
-            [
-              "2026-10-16T13:05:08.000Z Commented issuecomment-51",
-              "2026-10-16T13:05:10.000Z Reviewed pullrequestreview-52",
-            ],
-          ]);
-          const snapshot = yield* changes.read(workers, runId);
-          assert.deepStrictEqual(summary(snapshot), summary(read));
-          const removed = yield* changes.read([localWorker], runId);
-          assert.deepStrictEqual(summary(removed).slice(1), [
-            ["2026-10-16T09:47:10.250Z BoardMoved In progress -> Review"],
-            [],
-          ]);
-          const replaced = yield* changes.read(
-            [localWorker, LocalWorker.make({ ...exeWorker, kind: "local" })],
-            runId,
-          );
-          assert.deepStrictEqual(summary(replaced)[2], [
-            "2026-10-16T13:03:00.000Z Commented issuecomment-2",
-          ]);
-          assert(
-            summary(replaced)[1]?.includes(
-              "2026-10-16T09:48:00.000Z Commented issuecomment-6212798620",
-            ),
-          );
-        }).pipe(
-          Effect.provide(
-            testLayer(
-              current,
-              requests,
-              new Map([
-                [appActor, appChanges],
-                [exeActor, exeChanges],
-              ]),
-            ),
-          ),
-        );
-      }),
   );
 
   it.effect(

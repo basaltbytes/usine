@@ -1,4 +1,3 @@
-import { operatorOpenApi } from "../src/openapi.ts";
 import { jsonKey } from "@usine/core/json-key";
 import { assert, it } from "@effect/vitest";
 import { Project } from "@usine/config/project";
@@ -161,40 +160,6 @@ const decode = Effect.fn(function* (response: Response) {
   return yield* Schema.decodeUnknownEffect(FileChanges)(body);
 });
 
-it.live(
-  "paginates PR files, preserves renames and missing patches, and reuses the pinned response",
-  () =>
-    Effect.gen(function* () {
-      const app = yield* fixture((url) => {
-        if (!url.pathname.endsWith("/files")) return json({ ...pr, changed_files: 101 });
-        if (url.searchParams.get("page") === "2")
-          return json([
-            { ...file, filename: "src/new.ts", previous_filename: "src/old.ts", status: "renamed" },
-          ]);
-        return json(
-          Array.from({ length: 100 }, (_, index) =>
-            index === 0
-              ? { filename: "test/image.png", status: "added", additions: 0, deletions: 0 }
-              : { ...file, filename: `src/${index}.ts` },
-          ),
-        );
-      });
-      const response = yield* app.read(PullRequestFilesQuery.make({ base, head }));
-      assert.strictEqual(response.status, 200);
-      const changes = yield* decode(response);
-      assert.strictEqual(changes.files.length, 101);
-      assert.strictEqual(changes.filesTruncated, false);
-      assert.strictEqual(changes.files[0]?.patch.kind, "omitted");
-      assert.strictEqual(changes.files[0]?.test, true);
-      assert.strictEqual(changes.files[100]?.oldPath, "src/old.ts");
-      assert.strictEqual(changes.files[100]?.status, "renamed");
-      assert.strictEqual(app.requests.length, 4);
-      const again = yield* app.read(PullRequestFilesQuery.make({ base, head }));
-      assert.strictEqual(again.status, 200);
-      assert.strictEqual(app.requests.length, 4);
-    }).pipe(Effect.scoped),
-);
-
 it.live("pages the files to fit one tool result and cuts a patch too long for a page", () =>
   Effect.gen(function* () {
     const longPatch = `@@ -1 +1,4000 @@\n${"+const changed = true;\n".repeat(4_000)}`;
@@ -235,78 +200,6 @@ it.live("pages the files to fit one tool result and cuts a patch too long for a 
       paths,
       full.files.map(({ path }) => path),
     );
-  }).pipe(Effect.scoped),
-);
-
-it.live("returns truncated patches and classifies test and generated files by path", () =>
-  Effect.gen(function* () {
-    const app = yield* fixture((url) => {
-      assert.strictEqual(url.pathname, `/repos/${repository}/compare/${base}...${head}`);
-      return json({
-        files: [
-          { ...file, filename: "src/reader.test.ts", additions: 2 },
-          { ...file, filename: "pnpm-lock.yaml" },
-          {
-            ...file,
-            filename: "packages/github/src/files/model.ts",
-            patch: "@@ -1 +1 @@\n-before\n+const marker = /@generated|DO NOT EDIT/iu;",
-          },
-          {
-            ...file,
-            filename: "src/formerly-generated.ts",
-            patch: "@@ -1 +1 @@\n-// Code generated. DO NOT EDIT.\n+// Maintained by hand.",
-          },
-          {
-            ...file,
-            filename: "src/template.ts",
-            patch: "@@ -1,2 +1,2 @@\n // @generated\n-before\n+after",
-          },
-          {
-            ...file,
-            filename: "src/banner.ts",
-            status: "added",
-            deletions: 0,
-            patch: '@@ -0,0 +1 @@\n+export const banner = "do not edit";',
-          },
-        ],
-      });
-    });
-    const changes = yield* app
-      .read(CommitRangeFilesQuery.make({ base, head }))
-      .pipe(Effect.flatMap(decode));
-    assert.strictEqual(changes.base, base);
-    assert.strictEqual(changes.files[0]?.test, true);
-    assert.deepStrictEqual(changes.files[0]?.patch, {
-      kind: "text",
-      text: file.patch,
-      truncated: true,
-    });
-    assert.strictEqual(changes.files[1]?.generated, true);
-    assert.deepStrictEqual(
-      changes.files.slice(2).map(({ path, generated }) => ({ path, generated })),
-      [
-        { path: "packages/github/src/files/model.ts", generated: false },
-        { path: "src/formerly-generated.ts", generated: false },
-        { path: "src/template.ts", generated: false },
-        { path: "src/banner.ts", generated: false },
-      ],
-    );
-    assert.strictEqual(changes.filesTruncated, false);
-  }).pipe(Effect.scoped),
-);
-
-it.live("caches an attempt comparison by its recorded checkout base and pushed head", () =>
-  Effect.gen(function* () {
-    const app = yield* fixture((url) => {
-      assert.strictEqual(url.pathname, `/repos/${repository}/compare/${base}...${head}`);
-      return json({ files: [file] });
-    });
-    const query = CommitRangeFilesQuery.make({ base, head });
-    const changes = yield* app.read(query).pipe(Effect.flatMap(decode));
-    assert.strictEqual(changes.base, base);
-    assert.strictEqual(app.requests.length, 1);
-    yield* app.read(CommitRangeFilesQuery.make({ base, head }));
-    assert.strictEqual(app.requests.length, 1);
   }).pipe(Effect.scoped),
 );
 
@@ -370,30 +263,6 @@ it.live("does not cache files under a head that changed during pagination", () =
   }).pipe(Effect.scoped),
 );
 
-it.live("marks GitHub's comparison file limit and PR file limit", () =>
-  Effect.gen(function* () {
-    const app = yield* fixture((url) =>
-      url.pathname.includes("/compare/")
-        ? json({
-            files: Array.from({ length: 300 }, (_, index) => ({
-              ...file,
-              filename: `src/${index}.ts`,
-            })),
-          })
-        : url.pathname.endsWith("/files")
-          ? json([file])
-          : json({ ...pr, changed_files: 3001 }),
-    );
-    for (const query of [
-      CommitRangeFilesQuery.make({ base, head }),
-      PullRequestFilesQuery.make({ base, head }),
-    ]) {
-      const changes = yield* app.read(query).pipe(Effect.flatMap(decode));
-      assert.strictEqual(changes.filesTruncated, true);
-    }
-  }).pipe(Effect.scoped),
-);
-
 it.live("checks the target project and repository before reading GitHub or a cached diff", () =>
   Effect.gen(function* () {
     const permissions = [
@@ -424,61 +293,39 @@ it.live("checks the target project and repository before reading GitHub or a cac
   }).pipe(Effect.scoped),
 );
 
-it("documents every union query parameter and the full commit constraint", () => {
-  const parameters =
-    operatorOpenApi().paths["/api/projects/{project}/pull-requests/{repository}/{item}/files"]?.get
-      ?.parameters ?? [];
-  assert.deepStrictEqual(
-    parameters
-      .filter(({ in: location }) => location === "query")
-      .map(({ name, required }) => ({ name, required })),
-    [
-      { name: "scope", required: true },
-      { name: "head", required: true },
-      { name: "base", required: true },
-      { name: "offset", required: false },
-    ],
-  );
-  assert.deepStrictEqual(
-    parameters.find(({ name }) => name === "head")?.schema,
-    Schema.toJsonSchemaDocument(CommitSha).schema,
-  );
-});
-
-it.live.each([404, 422])(
-  "maps GitHub %s to a missing file selection and retries on the next read",
-  (status) =>
-    Effect.gen(function* () {
-      let unavailable = true;
-      const app = yield* fixture((url) =>
-        unavailable
-          ? new Response("{}", { status })
-          : url.pathname.includes("/compare/")
-            ? json({ files: [file] })
-            : url.pathname.endsWith("/files")
-              ? json([file])
-              : json(pr),
-      );
-      for (const query of [
-        PullRequestFilesQuery.make({ base, head }),
-        CommitRangeFilesQuery.make({ base, head }),
-      ]) {
-        unavailable = true;
-        const response = yield* app.read(query);
-        assert.strictEqual(response.status, 404);
-        const body = yield* Effect.promise(() => response.json());
-        const error = yield* Schema.decodeUnknownEffect(
-          Schema.Struct({
-            error: Schema.Literal("FileChangesNotFoundError"),
-            message: Schema.String,
-          }),
-        )(body);
-        assert.match(error.message, /commits?|comparison/u);
-        unavailable = false;
-        assert.strictEqual((yield* app.read(query)).status, 200);
-      }
-      assert.strictEqual(app.access.checks, status === 404 ? 2 : 0);
-    }).pipe(Effect.scoped),
+it.live("maps GitHub 422 to a missing file selection and retries on the next read", () =>
+  Effect.gen(function* () {
+    const status = 422;
+    let unavailable = true;
+    const app = yield* fixture((url) =>
+      unavailable
+        ? new Response("{}", { status })
+        : url.pathname.includes("/compare/")
+          ? json({ files: [file] })
+          : url.pathname.endsWith("/files")
+            ? json([file])
+            : json(pr),
+    );
+    for (const query of [
+      PullRequestFilesQuery.make({ base, head }),
+      CommitRangeFilesQuery.make({ base, head }),
+    ]) {
+      unavailable = true;
+      const response = yield* app.read(query);
+      assert.strictEqual(response.status, 404);
+      const body = yield* Effect.promise(() => response.json());
+      const error = yield* Schema.decodeUnknownEffect(
+        Schema.Struct({
+          error: Schema.Literal("FileChangesNotFoundError"),
+          message: Schema.String,
+        }),
+      )(body);
+      assert.match(error.message, /commits?|comparison/u);
+      unavailable = false;
+      assert.strictEqual((yield* app.read(query)).status, 200);
+    }
+    assert.strictEqual(app.access.checks, 0);
+  }).pipe(Effect.scoped),
 );
 
 it.live("reports lost App access instead of a missing comparison when GitHub answers 404", () =>

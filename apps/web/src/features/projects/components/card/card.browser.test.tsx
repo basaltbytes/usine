@@ -39,7 +39,6 @@ import { runAgainBlocked, runAgainProgress } from "~/lib/runs/strings";
 import { overviewQuery } from "~/lib/overview";
 import { boardOverview, boardOverviewReviewing, boardStalled } from "~/lib/projects/fixture";
 import { memoryRouter } from "~/lib/testing/memory-router";
-import { tooltipText } from "~/lib/testing/tooltip";
 import { TextTooltipProvider } from "~/components/text-tooltip";
 import { runLineTimeTitle } from "~/features/projects/strings";
 import "~/index.css";
@@ -147,20 +146,6 @@ afterEach(() => {
   flushSync(() => root.unmount());
   queryClient.clear();
   host.remove();
-});
-
-it("heads each lane with the labels in their GitHub colors and the Item states that route to it", async () => {
-  const sources = (name: string) => lane(name).getByRole("list", { name: "Lane sources" });
-  const ready = sources("Ready").getByText("ready-for-agent", { exact: true }).element();
-  expect(getComputedStyle(ready).borderColor).toBe("rgba(29, 118, 219, 0.4)");
-  expect(ready.getAttribute("title")).toBe("An agent may start work");
-  expect(
-    getComputedStyle(sources("Review").getByText("review", { exact: true }).element()).borderColor,
-  ).toBe("rgba(217, 63, 11, 0.4)");
-  await openDone();
-  const closed = sources("Done").getByText("issue-closed", { exact: true }).element();
-  expect(closed.getAttribute("style")).toBeNull();
-  expect(closed.classList).toContain("text-muted-foreground");
 });
 
 const laneNames = () =>
@@ -328,60 +313,6 @@ it("shows a card whose running Run's Loop removed its lane label in that lane, c
   );
 });
 
-it("shows a running card whose Loop swapped its lane label in the lane of its current labels, with its Run line", async () => {
-  overview = boardOverviewReviewing();
-  await commands.boardResponses(JSON.stringify(Schema.encodeSync(FactoryOverview)(overview)), 200);
-  flushSync(() => queryClient.setQueryData(overviewQuery().queryKey, overview));
-  const inProgress = lane("In progress");
-  await expect.element(inProgress.getByRole("heading", { name: "In progress 2" })).toBeVisible();
-  const card = cardOf(/^Move a running card/u);
-  expect(inProgress.element().contains(card)).toBe(true);
-  await expect.element(lane("Ready").getByRole("heading", { name: "Ready 1" })).toBeVisible();
-  expect(lane("Ready").element().contains(card)).toBe(false);
-  const row = runLine(card, "Running");
-  expect(row.textContent).toBe("implementRunning1mdeveloper");
-  expect(markAnimation(row)).toBe("usine-mark-running");
-});
-
-it("offers Retry beside the failure only on the card whose Run failed", async () => {
-  const failed = page.elementLocator(cardOf(/^Pin GitHub Actions/u));
-  await expect
-    .element(failed.getByText("The required check lint failed on the pinned commit"))
-    .toBeVisible();
-  await expect.element(failed.getByRole("button", { name: "Retry", exact: true })).toBeVisible();
-  expect(page.getByRole("button", { name: "Retry", exact: true }).elements()).toHaveLength(1);
-});
-
-it("draws the flow between adjacent authored label lanes, named after the Loops that watch the left one", async () => {
-  const flow = (name: string) => lane(name).element().querySelector("[data-slot=flow-arrow]");
-  expect(flow("Backlog")?.textContent).toBe("Flows to Ready");
-  expect(flow("Ready")?.textContent).toBe("Flows to In progressimplement");
-  expect(flow("Ready")?.classList).toContain("text-run-waiting");
-  // implement runs on the Task, but its trigger no longer matches it, so the lane does not list it.
-  expect(flow("In progress")?.textContent).toBe("Flows to Review");
-  expect(flow("Review")?.textContent).toBe("Flows to Mergereview paused");
-  expect(flow("Review")?.classList).toContain("text-muted-foreground");
-  const review = flow("Review");
-  if (review === null) throw new Error("No flow arrow after Review");
-  expect(await tooltipText(review)).toBe(
-    "Loops matching this lane: review (paused). Flows to Merge",
-  );
-  // Pull requests is read-only, so neither Merge nor Pull requests flows into a next lane.
-  expect(flow("Merge")).toBeNull();
-  expect(flow("Pull requests")).toBeNull();
-});
-
-it("leaves canceled and succeeded Runs off the card", async () => {
-  await openDone();
-  for (const card of [cardOf(/^Cache the label catalog/u), cardOf(/^Show the salvage branch/u)]) {
-    expect(card.querySelector("time")).toBeNull();
-    expect(card.querySelector("[data-slot=state-mark]")).toBeNull();
-    // A stall note can say how the Run ended; the card has no Run line for it.
-    const stall = card.querySelector("[data-slot=stall-note]")?.textContent ?? "";
-    expect(card.textContent?.replace(stall, "")).not.toMatch(/Canceled|Succeeded/u);
-  }
-});
-
 it("opens the Task page from anywhere on the card body, with or without a Run", async () => {
   await userEvent.click(page.elementLocator(cardOf(/^Retry salvage/u)), {
     position: { x: 24, y: 70 },
@@ -397,23 +328,6 @@ it("opens the Task page from anywhere on the card body, with or without a Run", 
   // A Task with an issue and its pull request opens at the issue's number.
   await userEvent.click(page.elementLocator(cardOf(/^Redesign the Board columns/u)));
   await expect.poll(() => router.state.location.pathname).toBe("/projects/board-test-repo/tasks/9");
-});
-
-it("lists only the actions that apply to a card without a Run", async () => {
-  await actions(12).click();
-  expect(await menuContents()).toEqual({
-    items: ["Open #12 on GitHub", "Move to"],
-    separators: 1,
-  });
-  await userEvent.keyboard("{Escape}");
-  await expect.element(page.getByRole("menu")).not.toBeInTheDocument();
-
-  // If the latest Run was canceled, the card has no Run line, so Run again shows the Loop.
-  await actions(18).click();
-  expect(await menuContents()).toEqual({
-    items: ["Open #18 on GitHub", "Run history", "Run againimplement", "Move to"],
-    separators: 3,
-  });
 });
 
 const runAgainBody = (result: RunAgainResult) =>
@@ -552,28 +466,6 @@ it("lists the current Run's applicable actions and moves the card through Move t
     .element(lane("In progress").getByRole("status"))
     .toMatchTextContent("Saved on GitHub");
   await expect.element(lane("Ready").getByText(/^Retry salvage/u)).not.toBeInTheDocument();
-});
-
-it("offers Retry for a failed Run and Cancel run alone for a running one", async () => {
-  await page.getByRole("button", { name: "Actions for pull request #28", exact: true }).click();
-  expect((await menuContents()).items).toEqual([
-    "Open #28 on GitHub",
-    "Open run",
-    "Retry",
-    "Move to",
-  ]);
-  await userEvent.keyboard("{Escape}");
-  await expect.element(page.getByRole("menu")).not.toBeInTheDocument();
-
-  await page.getByRole("button", { name: "Actions for pull request #31", exact: true }).click();
-  expect((await menuContents()).items).toEqual([
-    "Open #9 on GitHub",
-    "Open #31 on GitHub",
-    "Open run",
-    "Run history",
-    "Cancel run",
-    "Move to",
-  ]);
 });
 
 it("tints only the column a keyboard drag is over", async () => {

@@ -533,25 +533,6 @@ export const boardOverviewDocumented = () =>
     });
   });
 
-/**
- * Returns `boardOverviewDocumented` with #9's running Run on the `dependency_updates` Loop, so its
- * status, `Running dependency_updates`, has a word wider than the Status column.
- */
-export const boardOverviewDocumentedLongLoop = () =>
-  changeTasks(boardOverviewDocumented(), (task) => {
-    if (task.itemKey !== redesignPr.itemKey) return task;
-    const runs = boardTaskRuns(task).map((run) =>
-      run.state === "Running"
-        ? RunSummaryView.make({ ...run, loop: LoopName.make("dependency_updates") })
-        : run,
-    );
-    return BoardTaskView.make({
-      ...task,
-      ...boardRunSummary(runs, runs.find(({ id }) => id === task.run?.id) ?? null, task.items),
-      run: runs.find(({ id }) => id === task.run?.id) ?? null,
-    });
-  });
-
 const reviewing = link(46, "pr", "Keep a running card in the lane its Run was triggered from");
 const starting = link(47, "issue", "Move a running card to the lane of its current labels");
 

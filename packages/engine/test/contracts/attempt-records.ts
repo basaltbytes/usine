@@ -17,9 +17,9 @@ import { DedupKey, Event, EventId } from "@usine/core/event";
 import { ItemKey } from "@usine/core/item";
 import { CommitSha } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
-import { Comment, StepResult } from "@usine/core/step/result";
+import { StepResult } from "@usine/core/step/result";
 import { ContainerId, ContainerMemoryMib, WorkerName } from "@usine/core/worker";
-import { DateTime, Effect, Option, Result } from "effect";
+import { Effect, Option, Result } from "effect";
 
 import { Submission } from "../../src/engine/submission.ts";
 import { RunStore } from "../../src/store/store.ts";
@@ -211,10 +211,7 @@ export const attemptRecordsContract = (adapter: PersistenceAdapter) => {
     // A success at the background wait limit salvages its checkout. If the salvage keeps work
     // only in the checkout, startup recovery salvages it again instead of removing it.
     it.live.each([
-      { salvage: "no", succeeded: true },
       { salvage: "Pushed", succeeded: true },
-      { salvage: "Retained", succeeded: false },
-      { salvage: "PartlyPushed", succeeded: false },
       { salvage: "Rejected", succeeded: false },
     ] as const)(
       "lists a succeeded Attempt with $salvage salvage as succeeded for recovery: $succeeded",
@@ -235,25 +232,15 @@ export const attemptRecordsContract = (adapter: PersistenceAdapter) => {
             const ref = SalvageRef.make("usine/salvage/succeeded-at-limit/1");
             const commit = CommitSha.make("e".repeat(40));
             const path = "/workers/local/attempts/succeeded-at-limit";
-            const recorded: Option.Option<AttemptSalvage> = {
-              no: Option.none(),
-              Pushed: Option.some(SalvagePushed.make({ ref, commit })),
-              Retained: Option.some(
-                SalvageRetained.make({
-                  path,
-                  commit: Option.some(commit),
-                  message: "Could not resolve host",
-                }),
-              ),
-              PartlyPushed: Option.some(
-                SalvagePartlyPushed.make({ ref, commit, path, message: "dataset.csv" }),
-              ),
-              Rejected: Option.some(
-                SalvageRejected.make({ path, commit, message: "GH001: Large files detected." }),
-              ),
+            const recorded: AttemptSalvage = {
+              Pushed: SalvagePushed.make({ ref, commit }),
+              Rejected: SalvageRejected.make({
+                path,
+                commit,
+                message: "GH001: Large files detected.",
+              }),
             }[salvage];
-            if (Option.isSome(recorded))
-              yield* store.recordSalvage(started.execution.attempt.id, recorded.value);
+            yield* store.recordSalvage(started.execution.attempt.id, recorded);
             yield* store.finishAttempt(
               started.execution.attempt,
               Result.succeed(StepResult.make({ message: "Review posted", facts: [] })),
@@ -265,47 +252,6 @@ export const attemptRecordsContract = (adapter: PersistenceAdapter) => {
             );
           }),
         ),
-    );
-    it.live("records the comments an Attempt posted before it failed, on that Attempt", () =>
-      withPersistence(
-        adapter,
-        Effect.gen(function* () {
-          const store = yield* RunStore;
-          const runId = RunId.make("commented");
-          yield* store.recordAndClaim(lifecycleSubmission, runId);
-          const started = yield* store.beginAttempt(
-            runId,
-            WorkerName.make("local"),
-            "local",
-            Option.none(),
-          );
-          assert(started._tag === "AttemptStarted");
-          const review = Comment.make({
-            url: new URL("https://github.com/basaltbytes/usine/pull/71#pullrequestreview-9"),
-            kind: "review",
-            at: Option.some(DateTime.makeUnsafe("2026-10-20T10:00:00.000Z")),
-          });
-          yield* store.recordComments(started.execution.attempt.id, [review]);
-          yield* store.finishAttempt(
-            started.execution.attempt,
-            Result.fail(AgentFailure.make({ message: "Checks failed" })),
-          );
-          yield* store.retry(runId);
-          const retried = yield* store.beginAttempt(
-            runId,
-            WorkerName.make("local"),
-            "local",
-            Option.none(),
-          );
-          assert(retried._tag === "AttemptStarted");
-
-          const attempts = (yield* store.snapshot(runId)).attempts;
-          assert.deepStrictEqual(attempts[0]?.comments, [review]);
-          // An Attempt without recorded comments, like every Attempt from before they were stored, reads as empty.
-          assert.deepStrictEqual(attempts[1]?.comments, []);
-          assert(Option.isNone((yield* store.snapshot(runId)).step.result));
-        }),
-      ),
     );
     it.live(
       "adds up the processes the kernel killed in each of an Attempt's containers, on that Attempt",

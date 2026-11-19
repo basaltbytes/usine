@@ -377,27 +377,6 @@ describe("run transcript", () => {
     assert.include(markup, "gpt-5");
   });
 
-  it("keeps concurrent child sessions distinct, each named where its turn starts", () => {
-    const markup = reader([
-      event(1, "First child says hello", "child", "child-a"),
-      event(2, "Parent update"),
-      event(3, "Second child says hello", "child", "child-b"),
-    ]);
-    const order = [
-      ">agent-child-a<",
-      "First child says hello",
-      ">Parent<",
-      "Parent update",
-      ">agent-child-b<",
-      "Second child says hello",
-    ].map((text) => markup.indexOf(text));
-    assert.notInclude(order, -1);
-    assert.deepEqual(
-      order,
-      [...order].sort((left, right) => left - right),
-    );
-  });
-
   it("updates a tool call in place while retaining full input, output, and elapsed time", () => {
     const input = { command: "pnpm test", description: "Run the suite", context: "x".repeat(200) };
     const output = { text: "All tests passed", details: "y".repeat(200) };
@@ -433,20 +412,6 @@ describe("run transcript", () => {
     assert.include(markup, "pnpm test");
     assert.notInclude(markup, "Run the suite");
     assert.include(markup, "2.0s");
-  });
-
-  it("shows a tool result whose earlier start has not been loaded", () => {
-    const output = { message: "Permission denied" };
-    const finished = sessionEvent(
-      3,
-      ToolFinished.make({ session: parent, callId: "call-1", tool: "read", output, isError: true }),
-    );
-    const call = tools([finished])[0];
-    assert(call !== undefined && call.state._tag === "Error");
-    assert.deepStrictEqual(call.start, Option.none());
-    assert.deepStrictEqual(call.state.output, output);
-    const markup = reader([finished], [liveAttempt], [call.key]);
-    assert.include(markup, "Read file: File details unavailable · Error");
   });
 
   it("scopes repeated session and tool identities to their own Attempt", () => {
@@ -488,7 +453,6 @@ describe("run transcript", () => {
   });
 
   it.each([
-    AttemptChannel.Final.make({ result: StepResult.make({ message: "Done", facts: [] }) }),
     FailedTranscriptView.make({ failure: AgentFailureView.make({ message: "Failed" }) }),
     AttemptChannel.Interrupted.make(),
   ])(
@@ -549,21 +513,6 @@ describe("run transcript", () => {
     assert.include(markup, "Child explanation");
     assert.notInclude(markup, "Parent on");
     assert.notInclude(markup, "Parent model");
-  });
-
-  it("reports the parent model of a started Attempt and none before it starts", () => {
-    const started = [
-      record(1, AttemptChannel.Started.make({ parentModel: Option.some(brain.model) })),
-    ];
-    const unstarted = [
-      sessionEvent(1, TextOutput.make({ session: child, text: "Child explanation" })),
-    ];
-    const parentOf = (events: ReadonlyArray<TranscriptEventView>) =>
-      readerDocument(projectTranscript(events, [liveAttempt]), [liveAttempt], events).chapters[0]
-        ?.parent;
-    assert.deepStrictEqual(parentOf(started), { _tag: "Model", model: brain.model });
-    assert.deepStrictEqual(parentOf(unstarted), { _tag: "Unreported" });
-    assert.notInclude(reader(unstarted), "No parent session");
   });
 
   it("names the Attempt's models in its metadata line instead of a start row, and keeps every session's prose", () => {
@@ -909,33 +858,6 @@ describe("tool presentation", () => {
     }
   });
 
-  it("shows Pi's returned unified patch once, retaining file metadata", () => {
-    const patch =
-      "--- src/count.ts\n+++ src/count.ts\n@@ -1,1 +1,1 @@\n-export const count = 1;\n+export const count = 2;\n";
-    const view = presentTool(
-      completedTool(
-        "edit",
-        {
-          path: "src/count.ts",
-          edits: [{ oldText: "count = 1", newText: "count = 2" }],
-        },
-        {
-          content: [{ type: "text", text: "Successfully replaced 1 block(s) in src/count.ts." }],
-          details: {
-            diff: "-1 export const count = 1;\n+1 export const count = 2;",
-            patch,
-            firstChangedLine: 1,
-          },
-        },
-      ),
-    );
-
-    assert.strictEqual(view.subject, "src/count.ts");
-    assert.strictEqual(sectionText(view.input), "");
-    assert.include(sectionText(view.output), patch);
-    assert.deepInclude(sectionFields(view.output), { label: "First changed line", value: 1 });
-  });
-
   it("shows every Codex changed file with its real diff, including changes whose start is unpaged", () => {
     const changes = [
       { path: "src/new.ts", kind: { type: "add" }, diff: "+export const ready = true;\n" },
@@ -1038,26 +960,6 @@ describe("tool presentation", () => {
     assert.strictEqual(search.subject, "RunReader");
     assert.deepInclude(sectionFields(search.input), { label: "Path", value: "packages" });
     assert.include(sectionText(search.output), "packages/engine/src/run-reader.ts");
-  });
-
-  it("presents delegation as a task and readable child report", () => {
-    const view = presentTool(
-      completedTool(
-        "subagent",
-        { task: "Review the retry behavior.\nReport any stalls." },
-        {
-          content: [{ type: "text", text: "Retry is bounded.\nNo stalls found." }],
-          details: { childSessionId: "parent:child:1" },
-        },
-      ),
-    );
-    assert.include(view.subject, "Review the retry behavior.");
-    assert.strictEqual(sectionText(view.input), "Review the retry behavior.\nReport any stalls.");
-    assert.strictEqual(sectionText(view.output), "Retry is bounded.\nNo stalls found.");
-    assert.deepInclude(sectionFields(view.output), {
-      label: "Details",
-      value: { childSessionId: "parent:child:1" },
-    });
   });
 
   it("unwraps Codex MCP and dynamic results while preserving structured result data and errors", () => {

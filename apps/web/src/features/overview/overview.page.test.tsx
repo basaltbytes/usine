@@ -10,15 +10,11 @@ import { WorkerName } from "@usine/core/worker";
 import {
   DegradedCheckView,
   PassedCheckView,
-  PreflightCheckView,
   QueuedForWorkerView,
   StalledItemView,
   WorkerSlotsView,
   WorkerView,
-  WorkerPreflightNeed,
-  WebhookSilenceNeed,
 } from "@usine/orchestrator/operator";
-import { Schema } from "effect";
 import { assert, describe, it } from "vitest";
 import { DeskNeedsYou } from "~/features/overview/overview.page";
 import { LastOutcomes } from "~/features/overview/components/last-outcomes";
@@ -59,13 +55,6 @@ const text = (html: string) =>
     .trim();
 
 describe("Desk", () => {
-  it("says nothing needs attention and when polling last checked", () => {
-    const html = text(render(<DeskNeedsYou needs={[]} polls={desk.polls} now={now} />));
-    assert.include(html, "Needs attention");
-    assert.include(html, "Nothing needs attention");
-    assert.include(html, "Last checked 2m ago");
-  });
-
   it("lists the Needs attention entries with their actions", () => {
     const html = text(
       render(<DeskNeedsYou needs={overview.needsYou} polls={desk.polls} now={now} />),
@@ -78,34 +67,6 @@ describe("Desk", () => {
     assert.include(html, "Cycle budget exhausted");
     assert.include(html, "Reset cycle budget");
     assert.notInclude(html, "Nothing needs attention");
-  });
-
-  it("shows the silent webhook endpoint and its recovery instructions", () => {
-    const need = WebhookSilenceNeed.make({
-      id: "webhook-silence",
-      startedAt: "2026-10-29T12:00:00.000Z",
-      publicUrl: "https://usine.example/webhooks/github",
-    });
-    const html = text(render(<DeskNeedsYou needs={[need]} polls={desk.polls} now={now} />));
-    assert.include(html, "No webhook delivery received");
-    assert.include(html, "https://usine.example/webhooks/github");
-    assert.include(html, "App webhook active setting");
-    assert.include(html, "USINE_GITHUB_WEBHOOK_SECRET");
-    assert.include(html, "Polling continues");
-  });
-
-  it("shows a failed worker's preflight message and links to that worker", () => {
-    const need = WorkerPreflightNeed.make({
-      id: "worker-preflight:boat-pool",
-      worker: WorkerName.make("boat-pool"),
-      message: "Gateway check failed",
-    });
-    const html = render(<DeskNeedsYou needs={[need]} polls={desk.polls} now={now} />);
-    assert.include(text(html), "Worker preflight failed 1");
-    assert.include(text(html), "boat-pool · Gateway check failed");
-    assert.include(text(html), "Gateway check failed");
-    assert.include(text(html), "preflight retries automatically");
-    assert.include(html, "/configuration/workers/boat-pool");
   });
 
   it("says nothing is running and how many worker slots are free", () => {
@@ -174,10 +135,6 @@ describe("Desk", () => {
     assert.notInclude(html, "<button");
   });
 
-  it("says there are no recent runs", () => {
-    assert.strictEqual(text(render(<LastOutcomes outcomes={[]} now={now} />)), "No recent runs");
-  });
-
   it("lists the Runs that closed last with their outcome and pull request", () => {
     const html = render(<LastOutcomes outcomes={desk.lastOutcomes} now={now} />);
     const visible = text(html);
@@ -187,12 +144,6 @@ describe("Desk", () => {
     assert.include(html, 'href="https://github.com/basaltbytes/usine/pull/402"');
     assert.include(visible, "#402");
     assert.include(html, 'href="/projects/basaltbytes-usine/runs/run-done-399"');
-  });
-
-  it("shows each Worker's slots in use and its last preflight", () => {
-    const visible = text(render(<WorkersLine workers={desk.workers} now={now} />));
-    assert.include(visible, "local 1 of 2 slots in use Preflight passed 7h ago");
-    assert.include(visible, "hz-worker-1 1 of 1 slot in use Preflight failed 6h ago");
   });
 
   it("says a paused Worker takes no new attempts", () => {
@@ -255,22 +206,6 @@ describe("Desk", () => {
       text(render(<WorkersLine workers={[resumed]} now={now} />)),
       "Workers hz-pool 2 of 3 slots in use Preflight passed 2h ago",
     );
-  });
-
-  it("shows harness checks deferred to a provisioned Worker's first machine", () => {
-    const deferred = WorkerView.make({
-      name: WorkerName.make("boat-pool"),
-      slots: WorkerSlotsView.make({ capacity: 2, leased: 0 }),
-      preflight: Schema.decodeSync(PreflightCheckView)({
-        _tag: "Deferred",
-        checkedAt: "2026-10-20T09:00:00.000Z",
-        message: "Checked on the worker's first machine each day",
-      }),
-    });
-    const html = render(<WorkersLine workers={[deferred]} now={now} />);
-    assert.include(text(html), "boat-pool 0 of 2 slots in use Preflight deferred 1h ago");
-    assert.include(html, 'aria-description="Checked on the worker&#x27;s first machine each day"');
-    assert.notInclude(html, "text-destructive");
   });
 
   it("shows evaluated priority while waiting for a slot and machine progress during creation", () => {

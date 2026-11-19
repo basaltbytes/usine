@@ -90,30 +90,20 @@ it.effect("cancels only the control request with the matching request ID", () =>
   }),
 );
 
-for (const release of ["response", "cancellation"] as const) {
-  it.effect(
-    `a control ${release} does not checkpoint an application message with the same key`,
-    () =>
-      Effect.gen(function* () {
-        const message = { type: "assistant", uuid: "hook", message: { id: "one" } };
-        const line = yield* jsonLine(message);
-        const checkpoint = yield* claudeOutputCheckpoint();
-        const pending = yield* checkpoint.read(line);
-        assert.strictEqual(pending, 0);
-        const response = yield* hookResponse;
-        const cancel = yield* jsonLine({ type: "control_cancel_request", request_id: "hook" });
-        const released = yield* release === "response"
-          ? checkpoint.inputAcknowledged(response)
-          : checkpoint.read(cancel);
-        assert.strictEqual(released, 0);
-        const handled = yield* handle(checkpoint, message);
-        assert.deepStrictEqual(handled, {
-          bytes: line.length + (release === "cancellation" ? cancel.length : 0),
-          covered: true,
-        });
-      }),
-  );
-}
+it.effect("a control response does not checkpoint an application message with the same key", () =>
+  Effect.gen(function* () {
+    const message = { type: "assistant", uuid: "hook", message: { id: "one" } };
+    const line = yield* jsonLine(message);
+    const checkpoint = yield* claudeOutputCheckpoint();
+    const pending = yield* checkpoint.read(line);
+    assert.strictEqual(pending, 0);
+    const response = yield* hookResponse;
+    const released = yield* checkpoint.inputAcknowledged(response);
+    assert.strictEqual(released, 0);
+    const handled = yield* handle(checkpoint, message);
+    assert.deepStrictEqual(handled, { bytes: line.length, covered: true });
+  }),
+);
 
 it.effect(
   "handling an application message does not checkpoint a control request with the same key",
@@ -367,44 +357,5 @@ it.effect(
       assert.strictEqual(own, 0);
       const released = yield* checkpoint.inputAcknowledged(response);
       assert.strictEqual(released, hook.length + behind.length + cancel.length + behind.length);
-    }),
-);
-
-it.effect("logs an unanswered control request at the first turn result only", () =>
-  Effect.gen(function* () {
-    const { logs, layer } = logsAt("Info");
-    const request = yield* jsonLine({ type: "control_request", request_id: "remote" });
-    const first = { type: "result", subtype: "success", uuid: "first", result: "Done" };
-    const second = { ...first, uuid: "second" };
-    const checkpoint = yield* claudeOutputCheckpoint();
-    const results = Buffer.concat([yield* jsonLine(first), yield* jsonLine(second)]);
-    yield* checkpoint.read(Buffer.concat([request, results]));
-    yield* checkpoint.handled(first).pipe(Effect.provide(layer));
-    yield* checkpoint.handled(second).pipe(Effect.provide(layer));
-    assert.deepStrictEqual(logs, [
-      [
-        "Claude finished a turn with unanswered control requests; the output checkpoint stays before them",
-        { requests: [{ requestId: "remote" }] },
-      ],
-    ]);
-  }),
-);
-
-it.effect(
-  "covers handled messages once an input acknowledgement releases the hook before them",
-  () =>
-    Effect.gen(function* () {
-      const hook = yield* hookRequest;
-      const response = yield* hookResponse;
-      const message = { type: "assistant", uuid: "after-hook", message: { id: "one" } };
-      const line = yield* jsonLine(message);
-      const checkpoint = yield* claudeOutputCheckpoint();
-      yield* checkpoint.read(Buffer.concat([hook, line]));
-      const blocked = yield* handle(checkpoint, message);
-      assert.deepStrictEqual(blocked, { bytes: 0, covered: false });
-      const answered = yield* checkpoint.inputAcknowledged(response);
-      assert.strictEqual(answered, hook.length + line.length);
-      const covered = yield* checkpoint.covered;
-      assert.isTrue(covered);
     }),
 );

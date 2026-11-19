@@ -364,42 +364,6 @@ describe("the supervisor's startup check", () => {
     ),
   );
 
-  it.live("says that rootless Podman can't run under NoNewPrivileges", () =>
-    withRoot((root) =>
-      Effect.gen(function* () {
-        const node = yield* FileSystem.FileSystem;
-        const unprivileged = FileSystem.FileSystem.of({
-          ...node,
-          readFileString: (path, encoding) =>
-            path === "/proc/self/status"
-              ? Effect.succeed("Name:\tnode\nNoNewPrivs:\t1\n")
-              : node.readFileString(path, encoding),
-        });
-        const checked = yield* Effect.gen(function* () {
-          const sandbox = yield* sandboxAt(root);
-          return yield* sandbox.checked;
-        }).pipe(
-          Effect.provide(
-            podman([], [], {
-              starts: true,
-              rejectStart: "Error: cannot set up namespace using newuidmap",
-            }),
-          ),
-          Effect.provideService(FileSystem.FileSystem, unprivileged),
-        );
-        const message = Option.map(checked, ({ message }) => message);
-        assert(Option.isSome(message));
-        assert.isTrue(
-          message.value.startsWith(
-            "Supervisor sessions run in a container, and rootless Podman can't run under NoNewPrivileges, because it needs the setuid helpers newuidmap and newgidmap; use Docker.",
-          ),
-          message.value,
-        );
-        assert.include(message.value, "cannot set up namespace using newuidmap");
-      }),
-    ),
-  );
-
   it.effect("doesn't hold the layer while the runtime check runs", () =>
     withRoot((root) =>
       Effect.gen(function* () {

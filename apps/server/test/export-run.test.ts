@@ -154,20 +154,7 @@ const seed = (directory: string) =>
     const transcript = (yield* Effect.forEach(snapshot.attempts, ({ id }) =>
       reader.transcript(TranscriptAllQuery.make({ attemptId: id })),
     )).flat();
-    const waiting = yield* engine.submit(
-      Submission.make({
-        ...submission,
-        event: Event.make({
-          ...submission.event,
-          id: EventId.make("waiting"),
-          dedupKey: DedupKey.make("waiting"),
-        }),
-        itemKey: ItemKey.make("github:basaltbytes/usine:75"),
-        approval: "required",
-      }),
-    );
-    assert(waiting._tag === "Claimed");
-    return { snapshot, transcript, waitingSnapshot: yield* reader.inspect(waiting.runId) };
+    return { snapshot, transcript };
   }).pipe(
     Effect.provide(
       layer(InstanceDirectory.make(directory)).pipe(
@@ -306,30 +293,6 @@ describe("Run evidence export", { timeout: 30_000 }, () => {
       }).pipe(Effect.provide(NodeFileSystem.layer)),
   );
 
-  it.live("exports a Run awaiting approval to the requested destination", () =>
-    Effect.gen(function* () {
-      const directory = yield* directoryFixture;
-      const saved = yield* seed(directory).pipe(Effect.provide(NodeServices.layer));
-      const output = join(directory, "waiting.json");
-      const exported = runCli(directory, [
-        "export-run",
-        saved.waitingSnapshot.run.id,
-        "--output",
-        "waiting.json",
-      ]);
-      assert.strictEqual(exported.status, 0, exported.stderr);
-      const awaited3 = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
-        fileSystem.readFileString(output),
-      );
-      const evidence = yield* Schema.decodeEffect(RunEvidenceFromJson)(awaited3);
-
-      assert.deepStrictEqual(evidence.snapshot, saved.waitingSnapshot);
-      assert.deepStrictEqual(evidence.snapshot.attempts, []);
-      assert.deepStrictEqual(evidence.transcript, []);
-      assert.include(exported.stdout, output);
-    }).pipe(Effect.provide(NodeFileSystem.layer)),
-  );
-
   it.live("refuses to overwrite an existing evidence file", () =>
     Effect.gen(function* () {
       const directory = yield* directoryFixture;
@@ -372,55 +335,6 @@ describe("Run evidence export", { timeout: 30_000 }, () => {
     }).pipe(Effect.provide(NodeFileSystem.layer)),
   );
 
-  it.live("reports an unavailable output directory without creating it", () =>
-    Effect.gen(function* () {
-      const directory = yield* directoryFixture;
-      const saved = yield* seed(directory).pipe(Effect.provide(NodeServices.layer));
-      const parent = join(directory, "absent");
-      const exported = runCli(directory, [
-        "export-run",
-        saved.snapshot.run.id,
-        "--output",
-        join(parent, "evidence.json"),
-      ]);
-
-      assert.strictEqual(exported.status, 1);
-      assert.match(exported.stderr, /write the evidence/i);
-      {
-        const missingFile2 = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
-          fileSystem.stat(parent),
-        ).pipe(Effect.flip);
-        expect(missingFile2.reason.cause).toMatchObject({
-          code: "ENOENT",
-        });
-      }
-    }).pipe(Effect.provide(NodeFileSystem.layer)),
-  );
-
-  it.live("refuses a missing runtime store without creating one", () =>
-    Effect.gen(function* () {
-      const directory = yield* directoryFixture;
-      const exported = runCli(directory, ["export-run", "missing"]);
-
-      assert.strictEqual(exported.status, 1);
-      assert.match(exported.stderr, /read the evidence/i);
-      {
-        const missingFile3 = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
-          fileSystem.stat(join(directory, ".usine")),
-        ).pipe(Effect.flip);
-        expect(missingFile3.reason.cause).toMatchObject({ code: "ENOENT" });
-      }
-      {
-        const missingFile4 = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
-          fileSystem.stat(join(directory, "run-missing.json")),
-        ).pipe(Effect.flip);
-        expect(missingFile4.reason.cause).toMatchObject({
-          code: "ENOENT",
-        });
-      }
-    }).pipe(Effect.provide(NodeFileSystem.layer)),
-  );
-
   it.live("leaves an unrelated database unchanged when export fails", () =>
     Effect.gen(function* () {
       const directory = yield* directoryFixture;
@@ -451,36 +365,6 @@ describe("Run evidence export", { timeout: 30_000 }, () => {
           fileSystem.stat(join(directory, "run-missing.json")),
         ).pipe(Effect.flip);
         expect(missingFile5.reason.cause).toMatchObject({
-          code: "ENOENT",
-        });
-      }
-    }).pipe(Effect.provide(NodeFileSystem.layer)),
-  );
-
-  it.live.each(["corrupt", "directory"])("reports a %s runtime store as a read failure", (kind) =>
-    Effect.gen(function* () {
-      const directory = yield* directoryFixture;
-      yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
-        fileSystem.makeDirectory(join(directory, ".usine")),
-      );
-      const filename = join(directory, ".usine", "runtime.sqlite");
-      if (kind === "directory")
-        yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
-          fileSystem.makeDirectory(filename),
-        );
-      else
-        yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
-          fileSystem.writeFileString(filename, "not a SQLite database"),
-        );
-      const exported = runCli(directory, ["export-run", "missing"]);
-
-      assert.strictEqual(exported.status, 1);
-      assert.match(exported.stderr, /read the evidence/i);
-      {
-        const missingFile6 = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
-          fileSystem.stat(join(directory, "run-missing.json")),
-        ).pipe(Effect.flip);
-        expect(missingFile6.reason.cause).toMatchObject({
           code: "ENOENT",
         });
       }

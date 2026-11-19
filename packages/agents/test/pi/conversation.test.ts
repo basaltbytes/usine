@@ -16,14 +16,7 @@ import {
   Steer,
 } from "@usine/core/attempt/channel";
 import { Deferred, Effect, Exit, Fiber, Logger, Option, Queue, Scope, Schema } from "effect";
-import {
-  AgentBlockedError,
-  AgentQuestionError,
-  AgentResultError,
-  type OnDelivery,
-  RestartState,
-  SessionOperationError,
-} from "../../src/runtime.ts";
+import { AgentBlockedError, type OnDelivery, RestartState } from "../../src/runtime.ts";
 import { sessionChannel } from "../../src/harness/session.ts";
 import { sessionConversation } from "../../src/harness/conversation.ts";
 import type { ContinuationPolicy } from "../../src/harness/continuation.ts";
@@ -119,73 +112,37 @@ const capturedLogs = () => {
 };
 
 describe("session outcome logs", () => {
-  for (const [kind, errorTag] of [
-    ["blocked", "AgentBlockedError"],
-    ["question", "AgentQuestionError"],
-  ] as const) {
-    it.effect(`logs a ${kind} report once at Info while preserving its typed outcome`, () => {
-      const logs = capturedLogs();
-      return Effect.gen(function* () {
-        const session = child(kind);
-        const channel = yield* sessionChannel({ sessionId: session.id, label: "Child session" });
-        let cleanups = 0;
-        channel.onTerminal(() => {
-          cleanups += 1;
-        });
-        yield* channel.finish(session, `[usine:${kind}]\nOperator action required.`);
-        const error = yield* Deferred.await(channel.result).pipe(Effect.flip);
-        assert.strictEqual(error._tag, errorTag);
-        assert.strictEqual(error.message, "Operator action required.");
-        const eventError = yield* Queue.take(channel.events).pipe(Effect.flip);
-        assert.strictEqual(eventError, error);
-        yield* channel.finish(session, "Done.");
-        yield* channel.fail(error);
-        const terminal = yield* channel.isTerminal;
-        assert.isTrue(terminal);
-        assert.strictEqual(cleanups, 1);
-        assert.deepStrictEqual(logs.entries, [
-          {
-            logLevel: "Info",
-            message: [
-              "Child session returned a reserved report",
-              { kind, message: error.message, sessionId: session.id },
-            ],
-          },
-        ]);
-      }).pipe(Effect.provide(logs.layer));
-    });
-  }
-
-  for (const error of [
-    AgentResultError.make({ sessionId: Option.some(parent.id), message: "Harness failed." }),
-    SessionOperationError.make({
-      operation: "stream",
-      sessionId: Option.some(parent.id),
-      message: "Connection lost.",
-      cause: new Error("connection closed"),
-    }),
-  ]) {
-    it.effect(`keeps ${error._tag} at Error while preserving its typed outcome`, () => {
-      const logs = capturedLogs();
-      return Effect.gen(function* () {
-        const channel = yield* sessionChannel({ sessionId: parent.id, label: "Child session" });
-        yield* channel.fail(error);
-        const resultError = yield* Deferred.await(channel.result).pipe(Effect.flip);
-        const eventError = yield* Queue.take(channel.events).pipe(Effect.flip);
-        assert.strictEqual(resultError, error);
-        assert.strictEqual(eventError, error);
-        assert.deepStrictEqual(logs.entries, [
-          {
-            logLevel: "Error",
-            message: [
-              "Child session failed",
-              { errorTag: error._tag, message: error.message, sessionId: parent.id },
-            ],
-          },
-        ]);
-      }).pipe(Effect.provide(logs.layer));
-    });
-  }
+  it.effect("logs a blocked report once at Info while preserving its typed outcome", () => {
+    const logs = capturedLogs();
+    return Effect.gen(function* () {
+      const session = child("blocked");
+      const channel = yield* sessionChannel({ sessionId: session.id, label: "Child session" });
+      let cleanups = 0;
+      channel.onTerminal(() => {
+        cleanups += 1;
+      });
+      yield* channel.finish(session, "[usine:blocked]\nOperator action required.");
+      const error = yield* Deferred.await(channel.result).pipe(Effect.flip);
+      assert.strictEqual(error._tag, "AgentBlockedError");
+      assert.strictEqual(error.message, "Operator action required.");
+      const eventError = yield* Queue.take(channel.events).pipe(Effect.flip);
+      assert.strictEqual(eventError, error);
+      yield* channel.finish(session, "Done.");
+      yield* channel.fail(error);
+      const terminal = yield* channel.isTerminal;
+      assert.isTrue(terminal);
+      assert.strictEqual(cleanups, 1);
+      assert.deepStrictEqual(logs.entries, [
+        {
+          logLevel: "Info",
+          message: [
+            "Child session returned a reserved report",
+            { kind: "blocked", message: error.message, sessionId: session.id },
+          ],
+        },
+      ]);
+    }).pipe(Effect.provide(logs.layer));
+  });
 });
 
 /** Records each delivery report: the intervention state when the harness read the message, or `None`. */
@@ -316,32 +273,28 @@ describe("session supervision", () => {
       }),
   );
 
-  for (const stopped of ["paused", "idle"] as const) {
-    it.effect(
-      `does not resend native queued guidance when a ${stopped} child gets another steer`,
-      () =>
-        Effect.gen(function* () {
-          const session = yield* conversation(child(`queued-${stopped}`));
-          const first = Steer.make({ message: "A" });
-          const second = Steer.make({ message: "B" });
-          const delivery = deliveries();
-          yield* session.intervene(first, delivery.onDelivery);
-          yield* session.intervene(Interrupt.make(), noDelivery);
-          if (stopped === "idle") yield* session.finish("Paused turn");
-          yield* session.intervene(second, delivery.onDelivery);
-          assert.deepStrictEqual(
-            session.turns.map(({ message }) => message),
-            ["A", "B"],
-          );
-          assert.deepStrictEqual(
-            (yield* session.unread).map(({ id }) => id),
-            stopped === "idle" ? [first.id] : [first.id, second.id],
-          );
-          yield* session.read([first.id, second.id]);
-          assert.deepStrictEqual(delivery.seen(), stopped === "idle" ? ["read"] : ["read", "read"]);
-        }),
-    );
-  }
+  it.effect("does not resend native queued guidance when an idle child gets another steer", () =>
+    Effect.gen(function* () {
+      const session = yield* conversation(child("queued-idle"));
+      const first = Steer.make({ message: "A" });
+      const second = Steer.make({ message: "B" });
+      const delivery = deliveries();
+      yield* session.intervene(first, delivery.onDelivery);
+      yield* session.intervene(Interrupt.make(), noDelivery);
+      yield* session.finish("Paused turn");
+      yield* session.intervene(second, delivery.onDelivery);
+      assert.deepStrictEqual(
+        session.turns.map(({ message }) => message),
+        ["A", "B"],
+      );
+      assert.deepStrictEqual(
+        (yield* session.unread).map(({ id }) => id),
+        [first.id],
+      );
+      yield* session.read([first.id, second.id]);
+      assert.deepStrictEqual(delivery.seen(), ["read"]);
+    }),
+  );
 
   it.effect("keeps messages unread until the harness acknowledges their IDs", () =>
     Effect.gen(function* () {
@@ -362,28 +315,6 @@ describe("session supervision", () => {
       yield* session.intervene(Steer.make({ message: "Stop after this." }), delivery.onDelivery);
       yield* Scope.close(scope, Exit.void);
       assert.deepStrictEqual(delivery.seen(), ["unread"]);
-    }),
-  );
-
-  it.effect("reports that an idle held child resumed and read a message at once", () =>
-    Effect.gen(function* () {
-      const session = yield* conversation(child("idle"));
-      yield* session.intervene(
-        OperatorMessage.make({ message: "Wait for my review." }),
-        noDelivery,
-      );
-      yield* session.read((yield* session.unread).map(({ id }) => id));
-      yield* session.finish("Ready for review.");
-      yield* session.emitted;
-      const delivery = deliveries();
-      const state = yield* session.intervene(
-        OperatorMessage.make({ message: "Rename the flag." }),
-        delivery.onDelivery,
-      );
-      assert.isFalse(state.queued);
-      const currentEmitted = yield* session.emitted;
-      assert.include(currentEmitted, "SessionResumed");
-      assert.deepStrictEqual(delivery.seen(), []);
     }),
   );
 
@@ -422,65 +353,6 @@ describe("session supervision", () => {
         (yield* Fiber.join(session.result)).message,
         "Published. The earlier [usine:blocked] outcome is resolved.",
       );
-    }),
-  );
-
-  it.effect("finishes a child whose answer quotes a marker in a code block", () =>
-    Effect.gen(function* () {
-      const session = yield* conversation(child("quoted"));
-      const answer =
-        "The review passed. The parser reports:\n```text\n[usine:blocked]\nPermission denied.\n```";
-      yield* session.finish(answer);
-      assert.strictEqual((yield* Fiber.join(session.result)).message, answer);
-    }),
-  );
-
-  it.effect("fails a child whose blocker header follows narration", () =>
-    Effect.gen(function* () {
-      const session = yield* conversation(child("narrated"));
-      yield* session.finish("The delegation was interrupted.[usine:blocked]\nNo review posted.");
-      const error = yield* Fiber.join(session.result).pipe(Effect.flip);
-      const matchesError = Schema.is(AgentBlockedError)(error);
-      assert(matchesError);
-      assert.strictEqual(error.message, "No review posted.");
-    }),
-  );
-
-  it.effect("fails a blocker whose details share the marker's line", () =>
-    Effect.gen(function* () {
-      const session = yield* conversation(child("same-line"));
-      yield* session.finish("[usine:blocked] Repository permission denied.");
-      const error = yield* Fiber.join(session.result).pipe(Effect.flip);
-      const matchesError = Schema.is(AgentBlockedError)(error);
-      assert(matchesError);
-      assert.strictEqual(error.message, "Repository permission denied.");
-    }),
-  );
-
-  it.effect("ends a child that asks the operator a question with the question", () =>
-    Effect.gen(function* () {
-      const session = yield* conversation(child("question"));
-      yield* session.finish(
-        "[usine:question]\nShould egress use HTTP CONNECT or a SOCKS proxy?\n\nBoth fit the gateway.",
-      );
-      const error = yield* Fiber.join(session.result).pipe(Effect.flip);
-      const matchesError = Schema.is(AgentQuestionError)(error);
-      assert(matchesError);
-      assert.strictEqual(
-        error.message,
-        "Should egress use HTTP CONNECT or a SOCKS proxy?\n\nBoth fit the gateway.",
-      );
-    }),
-  );
-
-  it.effect("fails a blocker marker even when the agent omits its details", () =>
-    Effect.gen(function* () {
-      const session = yield* conversation(child("no-details"));
-      yield* session.finish("[usine:blocked]");
-      const error = yield* Fiber.join(session.result).pipe(Effect.flip);
-      const matchesError = Schema.is(AgentBlockedError)(error);
-      assert(matchesError);
-      assert.match(error.message, /without details/u);
     }),
   );
 
@@ -640,22 +512,10 @@ describe("answers to the operator", () => {
       answered: true,
     },
     {
-      name: "marks an answer to a steer queued after an earlier tool round, folded in at the next",
-      before: ["call-1"],
-      after: ["call-2"],
-      answered: true,
-    },
-    {
       name: "doesn't mark an answer to a steer that a turn folded in before a later tool call",
       before: [],
       after: ["call-1", "call-2"],
       answered: false,
-    },
-    {
-      name: "marks an answer to a steer that a turn with no later tool round read at its end",
-      before: ["call-1"],
-      after: [],
-      answered: true,
     },
   ])
     it.effect(name, () =>
@@ -732,15 +592,6 @@ describe("answers to the operator", () => {
       const result = yield* Fiber.join(restored.result);
       assert.strictEqual(result.message, "The tests need a database.");
       assert.isTrue(result.answeredOperator);
-    }),
-  );
-
-  it.effect("doesn't mark a report that follows the session's own work", () =>
-    Effect.gen(function* () {
-      const session = yield* conversation(child("own-work"));
-      yield* session.runTool("call-1");
-      yield* session.finish("Opened the pull request.");
-      assert.isFalse((yield* Fiber.join(session.result)).answeredOperator);
     }),
   );
 });

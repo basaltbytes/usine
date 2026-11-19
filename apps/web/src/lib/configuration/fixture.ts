@@ -469,18 +469,6 @@ export const configurationJson = {
 export const configurationFixture = (): ConfigurationView =>
   Schema.decodeUnknownSync(ConfigurationView)(configurationJson);
 
-/** Returns the fixture with every list empty, as for a new instance folder. */
-export const emptyConfiguration = (): ConfigurationView =>
-  Schema.decodeUnknownSync(ConfigurationView)({
-    ...configurationJson,
-    loops: [],
-    quarantinedLoops: [],
-    agents: [],
-    invalidAgents: [],
-    removedWorkers: [],
-    repositories: [],
-  });
-
 export const capabilitiesFixture = () => ({
   harnesses: catalog.ids,
   efforts: EFFORTS,

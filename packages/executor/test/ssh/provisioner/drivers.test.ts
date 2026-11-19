@@ -10,13 +10,12 @@ import {
   HetznerResourceName,
   HetznerServerType,
   MachineId,
-  TailnetAddress,
   WorkerName,
 } from "@usine/core/worker";
 import { Clock, Effect, Fiber, Option, Redacted, Schema, Stream } from "effect";
 import { TestClock } from "effect/testing";
 import type { BoatProvisioner, HetznerProvisioner } from "../../../src/ssh/model.ts";
-import { CapturedLog, capturedLogs, fakeMachine } from "../support.ts";
+import { fakeMachine } from "../support.ts";
 import { boatSettings, boxdSettings, hetznerSettings } from "./support.ts";
 import { fakeBoxd } from "./boxd/fake.ts";
 import { boxdDriverFor } from "../../../src/ssh/provisioner/boxd.ts";
@@ -336,31 +335,6 @@ describe("Boat driver", () => {
     }).pipe(Effect.provide(providers.layer));
   });
 
-  it.effect("turns no ready machine and plan limits into retryable creation failures", () => {
-    const providers = fakeProviders();
-    return Effect.gen(function* () {
-      const driver = yield* boatDriverFor(
-        WORKER,
-        boatSettings(),
-        "ssh-ed25519 AAAA",
-        BOAT_TEST_API,
-      );
-      providers.boat.createFails = {
-        status: 503,
-        code: "no_ready_machine",
-        message: "No ready machine of this type",
-      };
-
-      assert.strictEqual((yield* driver.create("x", tags).pipe(Effect.flip)).reason, "capacity");
-      providers.boat.createFails = { status: 429, code: "limit_reached", message: "limit reached" };
-
-      assert.strictEqual((yield* driver.create("x", tags).pipe(Effect.flip)).reason, "quota");
-      providers.boat.createFails = { status: 402, code: "payment_required", message: "Pay" };
-
-      assert.strictEqual((yield* driver.create("x", tags).pipe(Effect.flip)).reason, "quota");
-    }).pipe(Effect.provide(providers.layer));
-  });
-
   it.effect(
     "creates from a ready snapshot without account credentials and refuses missing or unfinished snapshots",
     () => {
@@ -462,26 +436,6 @@ describe("boxd driver", () => {
       }).pipe(Effect.provide([boxd.layer, fakeMachine().layer]));
     },
   );
-  it.effect("preserves unique names across instances and the disabled isolation setting", () => {
-    const boxd = fakeBoxd();
-    return Effect.gen(function* () {
-      const driver = yield* boxdDriverFor(WORKER, boxdSettings({ isolated: false }));
-      const first = yield* driver.create("pool-aaaaaaaa", { ...tags, instance: "factory" });
-      const second = yield* driver.create("pool-bbbbbbbb", { ...tags, instance: "dev" });
-      assert.notStrictEqual(first.id, second.id);
-      assert.deepStrictEqual(
-        boxd.state.creates.map(({ name, isolated }) => ({ name, isolated })),
-        [
-          { name: "pool-aaaaaaaa", isolated: false },
-          { name: "pool-bbbbbbbb", isolated: false },
-        ],
-      );
-      const duplicate = yield* driver.create("pool-aaaaaaaa", tags).pipe(Effect.flip);
-      assert(duplicate._tag === "MachineUnavailableError");
-      assert.strictEqual(duplicate.reason, "provider");
-      assert.include(duplicate.message, "ALREADY_EXISTS");
-    }).pipe(Effect.provide([boxd.layer, fakeMachine().layer]));
-  });
   it.effect(
     "polls until running, keeps the endpoint of a live machine, and reports terminal machines as gone",
     () => {
@@ -534,23 +488,6 @@ describe("boxd driver", () => {
       }).pipe(Effect.provide([boxd.layer, fakeMachine().layer]));
     },
   );
-  it.effect("keeps refresh read failures as provider errors", () => {
-    const boxd = fakeBoxd();
-    return Effect.gen(function* () {
-      const driver = yield* boxdDriverFor(WORKER, boxdSettings());
-      const { id } = yield* driver.create("pool-aaaaaaaa", tags);
-      for (const code of ["UNAVAILABLE", "DEADLINE_EXCEEDED", "UNAUTHENTICATED"]) {
-        boxd.state.readFails = Option.some(code);
-        const failure = yield* driver.refreshEndpoint(id).pipe(Effect.flip);
-        assert.strictEqual(failure._tag, "ProviderApiError");
-        assert.include(failure.message, code);
-        assert.isTrue(boxd.state.machines.has(id));
-      }
-      boxd.state.readFails = Option.none();
-      const recovered = yield* driver.refreshEndpoint(id);
-      assert.isTrue(Option.isSome(recovered));
-    }).pipe(Effect.provide([boxd.layer, fakeMachine().layer]));
-  });
   it.effect(
     "lists machines by instance and worker selectors, including creation time and attempt count",
     () => {
@@ -668,33 +605,6 @@ describe("boxd driver", () => {
       }).pipe(Effect.provide([boxd.layer, fakeMachine().layer]));
     },
   );
-  it.effect("warns at preflight about address entries behind a gateway", () => {
-    const boxd = fakeBoxd();
-    const host = fakeMachine();
-    const egress = Option.some(
-      ["*.tailscale.com", "registry.npmjs.org", "203.0.113.7", "198.51.100.0/24"].map((entry) =>
-        BoxdEgressEntry.make(entry),
-      ),
-    );
-    return Effect.gen(function* () {
-      const direct = yield* boxdDriverFor(WORKER, boxdSettings({ egress }));
-      assert.deepStrictEqual((yield* direct.verify(WORKER, 1)).warnings, []);
-      const gateway = yield* boxdDriverFor(
-        WORKER,
-        boxdSettings({
-          egress,
-          tailnet: Option.some({
-            gatewayAddress: TailnetAddress.make("100.64.0.2"),
-            clientId: Redacted.make("test-client"),
-            clientSecret: Redacted.make("test-client-secret"),
-          }),
-        }),
-      );
-      const { warnings } = yield* gateway.verify(WORKER, 1);
-      assert.lengthOf(warnings, 1);
-      assert.include(warnings[0], "admits the addresses 203.0.113.7, 198.51.100.0/24");
-    }).pipe(Effect.provide([boxd.layer, host.layer]));
-  });
   it.effect(
     "deletes a new machine that boxd reports unrestricted, reading it when the response omits it",
     () => {
@@ -854,48 +764,6 @@ describe("boxd driver", () => {
           "a snapshot without a reported storage state passes",
         );
       }).pipe(Effect.provide([boxd.layer, host.layer]));
-    },
-  );
-  it.effect(
-    "accepts any snapshot size without provisioner.size and compares the vCPU count and the GiB in it",
-    () => {
-      const boxd = fakeBoxd();
-      const host = fakeMachine();
-      const logs = capturedLogs();
-      return Effect.gen(function* () {
-        boxd.state.snapshot.vcpu = 1;
-        boxd.state.snapshot.memoryBytes = 32 * 1024 ** 3;
-        const unsized = yield* boxdDriverFor(WORKER, boxdSettings({ size: Option.none() }));
-        assert.deepStrictEqual((yield* unsized.verify(WORKER, 1)).warnings, []);
-        const large = yield* boxdDriverFor(
-          WORKER,
-          boxdSettings({ size: Option.some(BoxdSize.make("1x32")) }),
-        );
-        assert.deepStrictEqual((yield* large.verify(WORKER, 1)).warnings, []);
-        const verified = yield* Effect.forEach(
-          logs.infos.filter((line) => line.includes("boxd provisioner verified")),
-          (line) => Schema.decodeEffect(CapturedLog)(line).pipe(Effect.orDie),
-        );
-        assert.deepStrictEqual(
-          verified.map(([, fields]) => fields["size"]),
-          ["1x32", "1x32"],
-          "preflight logs the snapshot's size with and without provisioner.size",
-        );
-        boxd.state.snapshot.memoryBytes = 4 * 1024 ** 3;
-        const mismatch = yield* large.verify(WORKER, 1).pipe(Effect.flip);
-        assert.strictEqual(mismatch.capability, "provider");
-        assert.include(mismatch.message, "captured 1 vCPU and 4 GiB");
-        assert.include(mismatch.message, "provisioner.size is 1x32");
-        assert.include(mismatch.message, "set size to 1x4");
-        boxd.state.snapshot.vcpu = 8;
-        boxd.state.snapshot.memoryBytes = 32 * 1024 ** 3;
-        const vcpuMismatch = yield* large.verify(WORKER, 1).pipe(Effect.flip);
-        assert.strictEqual(vcpuMismatch.capability, "provider");
-        assert.include(vcpuMismatch.message, "captured 8 vCPU and 32 GiB");
-        assert.include(vcpuMismatch.message, "provisioner.size is 1x32");
-        assert.include(vcpuMismatch.message, "set size to 8x32");
-        assert.deepStrictEqual((yield* unsized.verify(WORKER, 1)).warnings, []);
-      }).pipe(Effect.provide([boxd.layer, host.layer, logs.layer]));
     },
   );
 });

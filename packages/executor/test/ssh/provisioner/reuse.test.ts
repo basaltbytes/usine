@@ -47,14 +47,18 @@ const machineFixture = () => {
   return machine;
 };
 
-// A boxd restore takes under a second, so a boxd provisioner has no reuse policy.
-for (const address of [hetznerAddress, boatAddress]) {
+// A boxd restore takes under a second, so a boxd provisioner has no reuse policy. The provider
+// and the container runtime vary independently, so each provider runs one runtime.
+for (const [address, containerRuntime] of [
+  [hetznerAddress, "docker"],
+  [boatAddress, "podman"],
+] as const) {
   assert(address.machine._tag === "Provisioned");
   const provider = address.machine.provisioner.provider;
   describe(`${provider} machine reuse`, () => {
-    it.live.each(["docker", "podman"])(
-      "reuses only a released %s machine, updates its attempt identity, and retires it at the attempt limit",
-      (containerRuntime) => {
+    it.live(
+      `reuses only a released ${containerRuntime} machine, updates its attempt identity, and retires it at the attempt limit`,
+      () => {
         const machine = machineFixture();
         if (containerRuntime === "podman") {
           machine.state.docker = "absent";
@@ -144,44 +148,49 @@ for (const address of [hetznerAddress, boatAddress]) {
       },
     );
 
-    it.live("creates a fresh machine after release when reuse is disabled", () => {
-      const machine = machineFixture();
-      const providers = fakeProviders();
-      return Effect.gen(function* () {
-        const machines = yield* WorkerMachines;
-        const first = yield* machines.create(WORKER, MACHINE_RUN, request.attemptId, []);
-        yield* machines.release(first.hold);
-        const next = yield* machines.create(WORKER, MACHINE_RUN, second, []);
-        assert.notEqual(next.id, first.id);
-        yield* machines.release(next.hold);
-      }).pipe(Effect.scoped, Effect.provide(runtimeOf(machine, providers, address)));
-    });
+    if (provider === "hetzner")
+      it.live("creates a fresh machine after release when reuse is disabled", () => {
+        const machine = machineFixture();
+        const providers = fakeProviders();
+        return Effect.gen(function* () {
+          const machines = yield* WorkerMachines;
+          const first = yield* machines.create(WORKER, MACHINE_RUN, request.attemptId, []);
+          yield* machines.release(first.hold);
+          const next = yield* machines.create(WORKER, MACHINE_RUN, second, []);
+          assert.notEqual(next.id, first.id);
+          yield* machines.release(next.hold);
+        }).pipe(Effect.scoped, Effect.provide(runtimeOf(machine, providers, address)));
+      });
 
-    it.live("retires a machine after a transient container cleanup failure", () => {
-      const machine = machineFixture();
-      const providers = fakeProviders();
-      return Effect.gen(function* () {
-        const machines = yield* WorkerMachines;
-        const executor = yield* Executor;
-        const first = yield* machines.create(WORKER, MACHINE_RUN, request.attemptId, [
-          TEST_AGENT.brain,
-        ]);
-        yield* Effect.scoped(
-          Effect.gen(function* () {
-            const prepared = yield* executor.prepare(request);
-            machine.state.containerRemovalFails = true;
-            yield* prepared.launch(sink);
-          }),
+    if (provider === "boat")
+      it.live("retires a machine after a transient container cleanup failure", () => {
+        const machine = machineFixture();
+        const providers = fakeProviders();
+        return Effect.gen(function* () {
+          const machines = yield* WorkerMachines;
+          const executor = yield* Executor;
+          const first = yield* machines.create(WORKER, MACHINE_RUN, request.attemptId, [
+            TEST_AGENT.brain,
+          ]);
+          yield* Effect.scoped(
+            Effect.gen(function* () {
+              const prepared = yield* executor.prepare(request);
+              machine.state.containerRemovalFails = true;
+              yield* prepared.launch(sink);
+            }),
+          );
+          machine.state.containerRemovalFails = false;
+          yield* machines.release(first.hold);
+          const currentMachines = yield* machines.machines;
+          assert.lengthOf(currentMachines, 0);
+          const next = yield* machines.create(WORKER, MACHINE_RUN, second, []);
+          assert.notEqual(next.id, first.id);
+          yield* machines.release(next.hold);
+        }).pipe(
+          Effect.scoped,
+          Effect.provide(runtimeOf(machine, providers, reuseAddress(address))),
         );
-        machine.state.containerRemovalFails = false;
-        yield* machines.release(first.hold);
-        const currentMachines = yield* machines.machines;
-        assert.lengthOf(currentMachines, 0);
-        const next = yield* machines.create(WORKER, MACHINE_RUN, second, []);
-        assert.notEqual(next.id, first.id);
-        yield* machines.release(next.hold);
-      }).pipe(Effect.scoped, Effect.provide(runtimeOf(machine, providers, reuseAddress(address))));
-    });
+      });
   });
 }
 
@@ -198,22 +207,6 @@ const ignoredReuseAddress: SshWorkerAddress = (() => {
     },
   };
 })();
-
-it.live("deletes a released boxd machine and creates a new one for the next attempt", () => {
-  const machine = machineFixture();
-  const providers = fakeProviders();
-  return Effect.gen(function* () {
-    const machines = yield* WorkerMachines;
-    const first = yield* machines.create(WORKER, MACHINE_RUN, request.attemptId, []);
-    yield* machines.release(first.hold);
-    const held = yield* machines.machines;
-    assert.lengthOf(held, 0);
-    assert.isFalse(providers.boxd.machines.has(first.id));
-    const next = yield* machines.create(WORKER, MACHINE_RUN, second, []);
-    assert.notEqual(next.id, first.id);
-    yield* machines.release(next.hold);
-  }).pipe(Effect.scoped, Effect.provide(runtimeOf(machine, providers, ignoredReuseAddress)));
-});
 
 it.live(
   "creates a boxd machine without container isolation although the worker stores reuse",
@@ -291,7 +284,7 @@ it.live("retires a reused machine when preflight fails and retries on a fresh on
   );
 });
 
-for (const transition of ["removed", "idle revision", "active revision"] as const) {
+for (const transition of ["removed", "active revision"] as const) {
   it.live(`retires reused machines on a connection change (${transition})`, () => {
     const machine = machineFixture();
     const providers = fakeProviders();

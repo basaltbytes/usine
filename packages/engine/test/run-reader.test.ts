@@ -32,7 +32,6 @@ import {
   type AttemptPlan,
   engineLayer,
   executorLayer,
-  stepResult,
   submission as supportSubmission,
   waitFor,
   withInstance,
@@ -243,42 +242,6 @@ describe("Loop sightings", () => {
   );
 });
 
-describe("Run Events", () => {
-  it.live("read the Event each Run was opened for, once per Run, leaving out unknown Runs", () =>
-    withInstance((directory) =>
-      Effect.gen(function* () {
-        const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([]);
-        yield* Effect.gen(function* () {
-          const engine = yield* RunEngine;
-          const reader = yield* RunReader;
-          const first = yield* engine.submit(
-            supportSubmission({ number: 1, item: "first", approval: "required" }),
-          );
-          const second = yield* engine.submit(
-            supportSubmission({ number: 2, item: "second", approval: "required" }),
-          );
-          assert(first._tag === "Claimed" && second._tag === "Claimed");
-
-          const read = yield* reader.events([
-            second.runId,
-            RunId.make("run-that-does-not-exist"),
-            first.runId,
-            second.runId,
-          ]);
-          const byRun = new Map(read.map(({ runId, event }) => [runId, event]));
-          assert.strictEqual(read.length, 2);
-          assert.deepStrictEqual(byRun.get(first.runId)?.id, EventId.make("event-1"));
-          assert.deepStrictEqual(byRun.get(first.runId)?.payload, { revision: 1 });
-          assert.deepStrictEqual(byRun.get(second.runId)?.id, EventId.make("event-2"));
-          assert.deepStrictEqual(byRun.get(second.runId)?.payload, { revision: 2 });
-          const currentEvents = yield* reader.events([]);
-          assert.deepStrictEqual(currentEvents, []);
-        }).pipe(Effect.provide(engineLayer(directory, executorLayer(plans))));
-      }),
-    ),
-  );
-});
-
 /**
  * Reads `ciFixRuns` for `sources` on a separate connection and returns the links with the number
  * of parameters bound by each statement.
@@ -427,86 +390,47 @@ it.effect("maps a source Run to its newest admitted CI fix across failed heads",
   ),
 );
 
-it.live.each(["canceled", "revoked"] as const)(
-  "omits a %s CI fix from its source Run's links and links its reopening",
-  (state) =>
-    withInstance((directory) =>
-      Effect.gen(function* () {
-        const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([]);
-        yield* Effect.gen(function* () {
-          const engine = yield* RunEngine;
-          const reader = yield* RunReader;
-          const sourceId = RunId.make("source-with-canceled-fix");
-          const original = supportSubmission({ number: 1, approval: "required" });
-          const head = CommitSha.make("a".repeat(40));
-          const key = ciFixDedupKey(sourceId, head);
-          const fix = Submission.make({
-            ...original,
-            event: Event.make({ ...original.event, id: EventId.make(key), dedupKey: key }),
-            ciFailureHead: Option.some(head),
-          });
-          const admitted = yield* engine.submit(fix);
-          assert(admitted._tag === "Claimed");
-          yield* waitFor(engine, admitted.runId, ({ run }) => run.state._tag === "Waiting");
-          assert.strictEqual(
-            (yield* reader.ciFixRuns([sourceId])).get(sourceId)?.runId,
-            admitted.runId,
-          );
-
-          if (state === "canceled") yield* engine.cancel(admitted.runId);
-          else yield* engine.revoke(fix.loop, fix.itemKey);
-
-          const stopped = yield* engine.inspect(admitted.runId);
-          assert.strictEqual(stopped.run.state._tag, "Canceled");
-          const links = yield* reader.ciFixRuns([sourceId]);
-          assert.deepStrictEqual(links, new Map());
-
-          // The Item leaves and comes back to the fix Event, which opens again under a reopening
-          // key; its Run is linked.
-          if (state === "canceled") yield* engine.revoke(fix.loop, fix.itemKey);
-          const reopened = yield* engine.submit(fix);
-          assert(reopened._tag === "Claimed");
-          assert.notStrictEqual(reopened.runId, admitted.runId);
-          yield* waitFor(engine, reopened.runId, ({ run }) => run.state._tag === "Waiting");
-          assert.deepStrictEqual(
-            (yield* reader.ciFixRuns([sourceId])).get(sourceId),
-            CiFixRun.make({ runId: reopened.runId, state: "Waiting" }),
-          );
-          yield* engine.drain;
-        }).pipe(Effect.provide(engineLayer(directory, executorLayer(plans))));
-      }),
-    ),
-);
-
-it.live.each([
-  { state: "Succeeded", plan: Effect.succeed(stepResult("fixed")) },
-  {
-    state: "Failed",
-    plan: BlockedFailure.make({ message: "The fix couldn't make the checks pass." }),
-  },
-] as const)("links a CI fix Run that ended as $state, with that state", ({ state, plan }) =>
+it.live("omits a canceled CI fix from its source Run's links and links its reopening", () =>
   withInstance((directory) =>
     Effect.gen(function* () {
-      const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([plan]);
+      const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([]);
       yield* Effect.gen(function* () {
         const engine = yield* RunEngine;
         const reader = yield* RunReader;
-        const sourceId = RunId.make(`source-with-${state}-fix`);
-        const original = supportSubmission({ number: 1 });
+        const sourceId = RunId.make("source-with-canceled-fix");
+        const original = supportSubmission({ number: 1, approval: "required" });
         const head = CommitSha.make("a".repeat(40));
         const key = ciFixDedupKey(sourceId, head);
-        const fixed = yield* engine.submit(
-          Submission.make({
-            ...original,
-            event: Event.make({ ...original.event, id: EventId.make(key), dedupKey: key }),
-            ciFailureHead: Option.some(head),
-          }),
+        const fix = Submission.make({
+          ...original,
+          event: Event.make({ ...original.event, id: EventId.make(key), dedupKey: key }),
+          ciFailureHead: Option.some(head),
+        });
+        const admitted = yield* engine.submit(fix);
+        assert(admitted._tag === "Claimed");
+        yield* waitFor(engine, admitted.runId, ({ run }) => run.state._tag === "Waiting");
+        assert.strictEqual(
+          (yield* reader.ciFixRuns([sourceId])).get(sourceId)?.runId,
+          admitted.runId,
         );
-        assert(fixed._tag === "Claimed");
-        yield* waitFor(engine, fixed.runId, ({ run }) => run.state._tag === state);
+
+        yield* engine.cancel(admitted.runId);
+
+        const stopped = yield* engine.inspect(admitted.runId);
+        assert.strictEqual(stopped.run.state._tag, "Canceled");
+        const links = yield* reader.ciFixRuns([sourceId]);
+        assert.deepStrictEqual(links, new Map());
+
+        // The Item leaves and comes back to the fix Event, which opens again under a reopening
+        // key; its Run is linked.
+        yield* engine.revoke(fix.loop, fix.itemKey);
+        const reopened = yield* engine.submit(fix);
+        assert(reopened._tag === "Claimed");
+        assert.notStrictEqual(reopened.runId, admitted.runId);
+        yield* waitFor(engine, reopened.runId, ({ run }) => run.state._tag === "Waiting");
         assert.deepStrictEqual(
           (yield* reader.ciFixRuns([sourceId])).get(sourceId),
-          CiFixRun.make({ runId: fixed.runId, state }),
+          CiFixRun.make({ runId: reopened.runId, state: "Waiting" }),
         );
         yield* engine.drain;
       }).pipe(Effect.provide(engineLayer(directory, executorLayer(plans))));

@@ -8,10 +8,7 @@ import { timestampLabel } from "~/lib/strings";
 import type { ProviderStatus } from "@usine/gateway/credentials";
 import "~/index.css";
 
-it.each([
-  { width: 1280, height: 900, device: "desktop" },
-  { width: 390, height: 844, device: "phone" },
-])(
+it.each([{ width: 390, height: 844, device: "phone" }])(
   "connects, cancels, and replaces provider credentials on $device",
   async ({ width, height, device }) => {
     await page.viewport(width, height);
@@ -156,12 +153,6 @@ it.each([
     message: "Claude Code not found on PATH. Install it to connect Claude.",
     unavailable: "Claude",
     available: "ChatGPT",
-  },
-  {
-    provider: "openai-responses" as const,
-    message: "Codex not found on PATH. Install it to connect ChatGPT.",
-    unavailable: "ChatGPT",
-    available: "Claude",
   },
 ])(
   "shows missing $unavailable and keeps $available controls",

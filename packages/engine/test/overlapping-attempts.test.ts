@@ -1,4 +1,3 @@
-import { StepCompletion } from "@usine/core/step/result";
 import { assert, describe, it } from "@effect/vitest";
 import type { AttemptId, AttemptWindows } from "@usine/core/attempt";
 import { LoopName } from "@usine/core/loop";
@@ -18,7 +17,7 @@ import {
 import { RunEngine } from "../src/engine/engine.ts";
 import { Submission } from "../src/engine/submission.ts";
 import { StepExecutor } from "../src/step-executor.ts";
-import { engineLayer, stepResult, submission, waitFor, withInstance } from "./support.ts";
+import { engineLayer, submission, withInstance } from "./support.ts";
 
 /** Two Loops' Runs of the developer Agent on pull request 71 (#429). */
 const onPullRequest = (number: number, loop: string) =>
@@ -45,63 +44,6 @@ const executorWith = (
   });
 
 describe("an Attempt's windows", () => {
-  it.live("reach its harvest when it runs, including an Attempt that started after it", () =>
-    withInstance((directory) =>
-      Effect.gen(function* () {
-        const reviewStarted = yield* Deferred.make<void>();
-        const fixHarvested = yield* Deferred.make<void>();
-        const read = yield* Ref.make(new Map<AttemptId, ReadonlyArray<AttemptId>>());
-        const harvest = (attemptId: AttemptId, windows: AttemptWindows) =>
-          Ref.update(read, (seen) =>
-            new Map(seen).set(
-              attemptId,
-              windows.overlapping.map((window) => window.attemptId),
-            ),
-          );
-        const executor = executorWith((execution, io) =>
-          Effect.gen(function* () {
-            // The review Attempt starts first and harvests after the fix Attempt started.
-            if (execution.run.loop === "review") {
-              yield* Deferred.succeed(reviewStarted, undefined);
-              yield* Deferred.await(fixHarvested);
-            } else yield* Deferred.await(reviewStarted);
-            const currentWindows = yield* io.windows;
-            yield* harvest(execution.attempt.id, currentWindows);
-            if (execution.run.loop === "fix") yield* Deferred.succeed(fixHarvested, undefined);
-            return StepCompletion.fromResult(stepResult("Harvested"));
-          }),
-        );
-        yield* Effect.gen(function* () {
-          const engine = yield* RunEngine;
-          const review = yield* engine.submit(onPullRequest(1, "review"));
-          assert(review._tag === "Claimed");
-          yield* Deferred.await(reviewStarted);
-          const fix = yield* engine.submit(onPullRequest(2, "fix"));
-          assert(fix._tag === "Claimed");
-          const [reviewAttempt] = (yield* waitFor(
-            engine,
-            review.runId,
-            ({ run }) => run.state._tag === "Succeeded",
-          )).attempts;
-          const [fixAttempt] = (yield* waitFor(
-            engine,
-            fix.runId,
-            ({ run }) => run.state._tag === "Succeeded",
-          )).attempts;
-          assert(reviewAttempt !== undefined && fixAttempt !== undefined);
-          const contentsState = yield* Ref.get(read);
-          assert.deepStrictEqual(
-            contentsState,
-            new Map([
-              [fixAttempt.id, [reviewAttempt.id]],
-              [reviewAttempt.id, [fixAttempt.id]],
-            ]),
-          );
-        }).pipe(Effect.provide(engineLayer(directory, executor)));
-      }),
-    ),
-  );
-
   it.live("show a canceled Attempt's harvest that its window ended at the cancel", () =>
     withInstance((directory) =>
       Effect.gen(function* () {

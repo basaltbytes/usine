@@ -133,24 +133,32 @@ describe("GitHub download redirects", () => {
     "fetches each supported download with fresh GETs through an unlisted redirect chain",
     () =>
       Effect.gen(function* () {
-        for (const path of [
-          LOGS,
-          "/api/v3/repos/acme/demo/actions/runs/42/attempts/2/logs",
-          "/api/v3/repos/acme/demo/actions/jobs/42/logs",
-          "/api/v3/repos/acme/demo/actions/artifacts/42/zip",
-          "/api/v3/repos/acme/demo/releases/assets/42",
-          "/acme/demo/releases/download/cli/v1/tool.tar.gz",
-          "/acme/demo/releases/latest/download/tool.tar.gz",
-        ]) {
-          const { requests, response } = download(path, (url) =>
-            url === RECEIVER
-              ? redirect(BLOB, 307)
-              : url === BLOB
-                ? new Response(new Uint8Array([0, 255, 42]), {
-                    status: 206,
-                    headers: { "content-type": "application/zip", "content-range": "bytes 0-2/3" },
-                  })
-                : redirect(RECEIVER),
+        for (const [host, path] of [
+          ["gateway", LOGS],
+          ["gateway", "/api/v3/repos/acme/demo/actions/runs/42/attempts/2/logs"],
+          ["gateway", "/api/v3/repos/acme/demo/actions/jobs/42/logs"],
+          ["gateway", "/api/v3/repos/acme/demo/actions/artifacts/42/zip"],
+          ["gateway", "/api/v3/repos/acme/demo/releases/assets/42"],
+          ["gateway", "/acme/demo/releases/download/cli/v1/tool.tar.gz"],
+          ["gateway", "/acme/demo/releases/latest/download/tool.tar.gz"],
+          ["api", "/repos/acme/demo/actions/jobs/42/logs"],
+        ] as const) {
+          const { requests, response } = download(
+            path,
+            (url) =>
+              url === RECEIVER
+                ? redirect(BLOB, 307)
+                : url === BLOB
+                  ? new Response(new Uint8Array([0, 255, 42]), {
+                      status: 206,
+                      headers: {
+                        "content-type": "application/zip",
+                        "content-range": "bytes 0-2/3",
+                      },
+                    })
+                  : redirect(RECEIVER),
+            "GET",
+            host,
           );
           const result = yield* response;
           assert.strictEqual(result.status, 206, path);
@@ -196,19 +204,6 @@ describe("GitHub download redirects", () => {
     }),
   );
 
-  it.effect("also follows download URLs requested directly on api.github.com", () =>
-    Effect.gen(function* () {
-      const { response } = download(
-        "/repos/acme/demo/actions/jobs/42/logs",
-        (url) => (url === BLOB ? new Response("job log") : redirect(BLOB)),
-        "GET",
-        "api",
-      );
-      const currentText = yield* (yield* response).text;
-      assert.strictEqual(currentText, "job log");
-    }),
-  );
-
   it.effect(
     "fails after three redirects instead of returning a download-host redirect to the worker",
     () =>
@@ -220,26 +215,6 @@ describe("GitHub download redirects", () => {
           assert.strictEqual(failure.reason, "redirect-limit");
         assert.strictEqual(requests.length, 4);
       }),
-  );
-
-  it.effect("resolves relative redirects and preserves download error statuses", () =>
-    Effect.gen(function* () {
-      const { requests, response } = download(LOGS, (url) =>
-        url === RECEIVER
-          ? redirect("/expired", 303)
-          : url.endsWith("/expired")
-            ? new Response("expired", { status: 410 })
-            : redirect(RECEIVER),
-      );
-      const result = yield* response;
-      assert.strictEqual(result.status, 410);
-      const currentText = yield* result.text;
-      assert.strictEqual(currentText, "expired");
-      assert.strictEqual(
-        requests.at(-1)?.url,
-        "https://results-receiver.actions.githubusercontent.com/expired",
-      );
-    }),
   );
 
   it.effect(

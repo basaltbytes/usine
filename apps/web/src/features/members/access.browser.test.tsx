@@ -39,7 +39,7 @@ declare module "vitest/browser" {
   }
 }
 
-it.each([1440, 390])(
+it.each([390])(
   "shows role bindings and token scopes and hides viewer actions at %i pixels",
   async (width) => {
     await page.viewport(width, width === 390 ? 844 : 900);

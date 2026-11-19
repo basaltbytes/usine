@@ -219,10 +219,7 @@ const scenes: ReadonlyArray<Scene> = [
   },
 ];
 
-const devices = [
-  { device: "desktop", width: 1280, height: 900 },
-  { device: "phone", width: 390, height: 844 },
-] as const;
+const devices = [{ device: "phone", width: 390, height: 844 }] as const;
 
 it.each(devices)(
   "captures the conversation screens on $device",

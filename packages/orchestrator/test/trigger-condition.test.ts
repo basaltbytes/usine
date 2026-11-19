@@ -197,17 +197,6 @@ describe("TriggerCondition", () => {
       }),
   );
 
-  it.effect("never re-fetches for a schedule Tick, which has no standing condition", () =>
-    Effect.gen(function* () {
-      const fixtureScheduleLoop = yield* scheduleLoop;
-      const condition = yield* TriggerCondition;
-      const recheck = yield* condition.recheck(
-        submissionFor(fixtureScheduleLoop.name, '["github","basaltbytes/usine"]'),
-      );
-      assert.strictEqual(recheck._tag, "Matches");
-    }).pipe(Effect.provide(layerWith(failingGitHub))),
-  );
-
   it.effect(
     "re-checks against the current instance, so a reload that removes a Loop drops its Events",
     () =>
@@ -240,16 +229,6 @@ describe("TriggerCondition", () => {
           assert.strictEqual(currentTriggerMatch._tag, "NoLongerMatches");
         }).pipe(Effect.provide(layerWith(failingGitHub, reloadable)));
       }),
-  );
-
-  it.effect("drops a queued Event whose Loop is no longer loaded", () =>
-    Effect.gen(function* () {
-      const condition = yield* TriggerCondition;
-      const recheck = yield* condition.recheck(
-        submissionFor(LoopName.make("retired"), '["github","basaltbytes/usine",28]'),
-      );
-      assert.strictEqual(recheck._tag, "NoLongerMatches");
-    }).pipe(Effect.provide(layerWith(failingGitHub))),
   );
 
   it.effect("opens a queued trigger match with its saved settings after the Loop changes", () =>

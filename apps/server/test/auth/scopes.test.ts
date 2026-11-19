@@ -89,56 +89,52 @@ it.live(
     }).pipe(Effect.scoped),
 );
 
-for (const initialRole of ["none", "viewer"] as const)
-  it.live(
-    `updates the same browser session when a ${initialRole} member gains an operator binding`,
-    () =>
-      Effect.gen(function* () {
-        const alpha = ProjectScope.make({ project: ProjectId.make("alpha") });
-        const binding = RoleBinding.make({
-          name: "alice-alpha",
-          member: alice.id,
-          role: "operator",
-          scope: alpha,
-        });
-        let grants: ReadonlyArray<PermissionGrant> =
-          initialRole === "none"
-            ? []
-            : RoleBinding.make({ ...binding, role: "viewer" }).permissions;
-        const { authentication: auth, store } = yield* authFixture([alice], alice, () => grants);
-        const started = yield* auth.startWeb(false);
-        const session = yield* auth.finishWeb(Redacted.value(started.state), "code");
-        const secret = Redacted.value(session.secret);
-        assert.isFalse(permits((yield* auth.authenticate(secret)).permissions, "operate", alpha));
-        grants = binding.permissions;
-        assert.isTrue(permits((yield* auth.authenticate(secret)).permissions, "operate", alpha));
-        const device = yield* auth.createToken(secret, deviceToken("Operator", grants));
-        assert.isTrue(
-          permits(
-            (yield* auth.authenticate(Redacted.value(device.secret))).permissions,
-            "operate",
-            alpha,
-          ),
-        );
-        grants = RoleBinding.make({ ...binding, role: "maintainer" }).permissions;
-        assert.isFalse(
-          permits(
-            (yield* auth.authenticate(Redacted.value(device.secret))).permissions,
-            "maintain",
-            alpha,
-          ),
-        );
-        const browser = (yield* store.tokens(alice.id)).find(({ kind }) => kind === "session");
-        assert.isDefined(browser);
-        if (browser === undefined) return;
-        assert.equal(
-          (yield* auth
-            .setScopes(secret, browser.id, [], OperationCeilingChange.Keep())
-            .pipe(Effect.flip)).status,
-          400,
-        );
-      }).pipe(Effect.scoped),
-  );
+it.live(
+  "updates the same browser session when a member without a binding gains an operator binding",
+  () =>
+    Effect.gen(function* () {
+      const alpha = ProjectScope.make({ project: ProjectId.make("alpha") });
+      const binding = RoleBinding.make({
+        name: "alice-alpha",
+        member: alice.id,
+        role: "operator",
+        scope: alpha,
+      });
+      let grants: ReadonlyArray<PermissionGrant> = [];
+      const { authentication: auth, store } = yield* authFixture([alice], alice, () => grants);
+      const started = yield* auth.startWeb(false);
+      const session = yield* auth.finishWeb(Redacted.value(started.state), "code");
+      const secret = Redacted.value(session.secret);
+      assert.isFalse(permits((yield* auth.authenticate(secret)).permissions, "operate", alpha));
+      grants = binding.permissions;
+      assert.isTrue(permits((yield* auth.authenticate(secret)).permissions, "operate", alpha));
+      const device = yield* auth.createToken(secret, deviceToken("Operator", grants));
+      assert.isTrue(
+        permits(
+          (yield* auth.authenticate(Redacted.value(device.secret))).permissions,
+          "operate",
+          alpha,
+        ),
+      );
+      grants = RoleBinding.make({ ...binding, role: "maintainer" }).permissions;
+      assert.isFalse(
+        permits(
+          (yield* auth.authenticate(Redacted.value(device.secret))).permissions,
+          "maintain",
+          alpha,
+        ),
+      );
+      const browser = (yield* store.tokens(alice.id)).find(({ kind }) => kind === "session");
+      assert.isDefined(browser);
+      if (browser === undefined) return;
+      assert.equal(
+        (yield* auth
+          .setScopes(secret, browser.id, [], OperationCeilingChange.Keep())
+          .pipe(Effect.flip)).status,
+        400,
+      );
+    }).pipe(Effect.scoped),
+);
 
 it.live("uses current bindings for a browser session with a stored scope ceiling", () =>
   Effect.gen(function* () {

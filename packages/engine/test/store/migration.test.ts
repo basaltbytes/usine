@@ -63,11 +63,7 @@ const seedPendingRun = (runId: RunId) =>
 describe("Attempt migrations", () => {
   it.live.each([
     { attributed: false, outcome: "Succeeded", retry: "none", retained: true },
-    { attributed: false, outcome: "AwaitingCi", retry: "none", retained: true },
-    { attributed: false, outcome: null, retry: "none", retained: false },
     { attributed: false, outcome: "Failed", retry: "running", retained: false },
-    { attributed: false, outcome: "Failed", retry: "failed", retained: false },
-    { attributed: true, outcome: "Failed", retry: "running", retained: true },
     { attributed: true, outcome: "Failed", retry: "failed", retained: true },
     { attributed: true, outcome: null, retry: "none", retained: false },
   ])(

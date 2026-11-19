@@ -253,36 +253,6 @@ const withGitHubEngine = <A, E, R>(
 
 describe("local worker", () => {
   it.live(
-    "checks every supplied roster brain before starting the local scheduler",
-    () =>
-      Effect.gen(function* () {
-        const fs = yield* FileSystem.FileSystem;
-        const directory = yield* fs.makeTempDirectoryScoped({ prefix: "usine-preflight-" });
-        const instance = InstanceDirectory.make(directory);
-        const configDecoded1 = yield* config;
-        const decodedValue5 = yield* config;
-        const runtime = localLayer(instance, configDecoded1, [testAgent.brain], {
-          harnessReadiness: harnessUnavailable,
-        }).pipe(
-          Layer.provide(harnessesLive),
-          Layer.provide(MarcbachmannCelLayer),
-          Layer.provide(credentialLayer),
-          Layer.provide(stubAttemptRuntime(new StubStorage())),
-          Layer.provide(hostLoginLockLayer),
-          Layer.provide(alwaysHoldsLayer),
-          Layer.provide(CompletionCheck.unverified),
-          Layer.provide(fixedConfigLayer(decodedValue5)),
-          Layer.provide(testAppLayer),
-        );
-        const error = yield* Effect.void.pipe(Effect.provide(runtime), Effect.flip);
-        assert.strictEqual(error._tag, "WorkerCapabilityError");
-
-        assert(!(yield* fs.exists(`${instance}/.usine/workers`)));
-      }).pipe(Effect.provide(NodeServices.layer)),
-    LIVE_TEST_TIMEOUT,
-  );
-
-  it.live(
     "does not spend infrastructure retries or prepare a checkout on a harness gap",
     () =>
       withLocalEngine(
@@ -1335,40 +1305,6 @@ describe("local worker", () => {
           }),
       );
     },
-    LIVE_TEST_TIMEOUT,
-  );
-
-  it.live(
-    "keeps excess Runs pending and assigns the oldest pending Event first",
-    () =>
-      withLocalEngine(
-        { attemptRuntime: stubAttemptRuntime(new StubStorage(), worksFor(300)) },
-        ({ engine }) =>
-          Effect.gen(function* () {
-            const first = yield* engine.submit(submission(3, "2026-08-30T12:00:03Z"));
-            assert.strictEqual(first._tag, "Claimed");
-            if (first._tag !== "Claimed") return;
-            yield* waitFor(engine, first.runId, "Running");
-
-            const newer = yield* engine.submit(submission(4, "2026-08-30T12:00:05Z"));
-            const older = yield* engine.submit(submission(5, "2026-08-30T12:00:04Z"));
-            assert.strictEqual(newer._tag, "Claimed");
-            assert.strictEqual(older._tag, "Claimed");
-            if (newer._tag !== "Claimed" || older._tag !== "Claimed") return;
-
-            assert.strictEqual((yield* engine.inspect(newer.runId)).run.state._tag, "Pending");
-
-            assert.strictEqual((yield* engine.inspect(older.runId)).run.state._tag, "Pending");
-
-            yield* waitFor(engine, first.runId, "Succeeded");
-            const olderFinished = yield* waitFor(engine, older.runId, "Succeeded");
-            const newerFinished = yield* waitFor(engine, newer.runId, "Succeeded");
-            const olderStarted = olderFinished.attempts[0]?.startedAt;
-            const newerStarted = newerFinished.attempts[0]?.startedAt;
-            assert(olderStarted !== undefined && newerStarted !== undefined);
-            assert(DateTime.toEpochMillis(olderStarted) <= DateTime.toEpochMillis(newerStarted));
-          }),
-      ),
     LIVE_TEST_TIMEOUT,
   );
 

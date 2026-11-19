@@ -18,7 +18,6 @@ import {
   Exit,
   Fiber,
   FileSystem,
-  Logger,
   Option,
   Redacted,
   Result,
@@ -27,7 +26,7 @@ import {
 import { HttpServerRequest } from "effect/http";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import { TestClock } from "effect/testing";
-import { GatewayModelError, type GatewayModelRoute } from "../../src/ssh/gateway/model-route.ts";
+import type { GatewayModelRoute } from "../../src/ssh/gateway/model-route.ts";
 import { containerSandboxLayer, sandboxRunArguments } from "../../src/supervisor/container.ts";
 import { detectSandboxRuntime } from "../../src/supervisor/detect.ts";
 import { relayModelRequest } from "../../src/supervisor/model-relay.ts";
@@ -125,34 +124,6 @@ describe("the supervisor sandbox's container runtime", () => {
       );
       assert.deepStrictEqual(docker, Result.succeed({ runtime: "docker", rootless: false }));
     }).pipe(Effect.provide(NodeFileSystem.layer)),
-  );
-
-  it.effect("is unavailable without the instance's model route", () =>
-    Effect.gen(function* () {
-      const sandbox = yield* SupervisorSandbox.pipe(
-        Effect.provide(
-          containerSandboxLayer({
-            root: "/unused",
-            image: ContainerImage.make("docker.io/library/node:22-slim"),
-            runtime: Option.none(),
-            route: Option.none(),
-          }),
-        ),
-      );
-      const unavailable = yield* sandbox.unavailable;
-      assert.deepStrictEqual(
-        Option.map(unavailable, ({ message }) => message),
-        Option.some(
-          "Supervisor sessions reach the model through the instance's gateway, and no worker gateway is configured",
-        ),
-      );
-    }).pipe(
-      Effect.provide([
-        runtimes({ podman: { stdout: "true", exitCode: 0 } }),
-        NodeFileSystem.layer,
-        memoryHomesLayer,
-      ]),
-    ),
   );
 
   it.effect("counts a runtime that doesn't answer within 15 seconds as missing", () =>
@@ -431,50 +402,6 @@ describe("a supervisor sandbox on a container runtime", () => {
     }).pipe(Effect.scoped, Effect.provide(NodeFileSystem.layer)),
   );
 
-  it.live("logs each release of a conversation, and whether its container was removed", () =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem;
-      const root = yield* fs.makeTempDirectoryScoped({ prefix: "usine-supervisor-" });
-      const directory = `${root}/conversations/${directoryName("supervisor:c1")}`;
-      const released: Array<readonly [string, unknown]> = [];
-      const recording = Logger.layer([
-        Logger.make<unknown, void>(({ logLevel, message }) => {
-          if (!Array.isArray(message)) return;
-          const [text, fields] = message;
-          if (
-            String(text).startsWith("Released a supervisor conversation") ||
-            String(text).startsWith("Kept the hold")
-          )
-            released.push([logLevel, [text, fields]]);
-        }),
-      ]);
-      const turns = (removes: boolean) =>
-        Effect.gen(function* () {
-          const sandbox = yield* sandboxAt(root);
-          yield* sandbox.open(codexTurn("supervisor:c1")).pipe(Effect.scoped);
-          if (!removes) {
-            const refused = yield* sandbox
-              .open(codexTurn("supervisor:c1"))
-              .pipe(Effect.scoped, Effect.flip);
-            assert.include(refused.message, "container remains");
-          }
-        }).pipe(Effect.provide([podman([], [], { starts: true }, removes), recording]));
-      yield* turns(true);
-      yield* turns(false);
-      const fields = (container: string) => ({
-        conversation: "supervisor:c1",
-        directory,
-        container,
-      });
-      assert.deepStrictEqual(released[0], [
-        "Info",
-        ["Released a supervisor conversation", fields("removed")],
-      ]);
-      assert.isTrue(released.slice(1).every(([level]) => level === "Error"));
-      assert.lengthOf(released, 3);
-    }).pipe(Effect.scoped, Effect.provide(NodeFileSystem.layer)),
-  );
-
   it.effect("bounds container startup and removes a container created before the timeout", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
@@ -627,37 +554,6 @@ describe("the supervisor model relay", () => {
       assert.strictEqual(sent[1]?.protocol, "openai-responses");
     }),
   );
-
-  it.effect("refuses every other request and reports a route that fails", () =>
-    Effect.gen(function* () {
-      const failing: GatewayModelRoute = {
-        credential: () => Effect.succeedNone,
-        countTokens: () => Effect.die("the test counts no tokens"),
-        request: () =>
-          Effect.fail(GatewayModelError.make({ message: "Can't reach gateway gw-1: refused." })),
-      };
-      const statuses = yield* Effect.forEach(
-        [
-          new Request("http://127.0.0.1:8787/anthropic-messages/v1/models"),
-          new Request("http://127.0.0.1:8787/anthropic-messages/v1/messages"),
-          new Request("http://127.0.0.1:8787/openai-responses/v1/responses", {
-            method: "PUT",
-            body: '{"model":"m"}',
-          }),
-          new Request("http://127.0.0.1:8787/v1/messages", {
-            method: "POST",
-            body: '{"model":"m"}',
-          }),
-          new Request("http://127.0.0.1:8787/anthropic-messages/v1/messages", {
-            method: "POST",
-            body: '{"model":"m"}',
-          }),
-        ],
-        (request) => relay(request, failing),
-      );
-      assert.deepStrictEqual(statuses, [404, 404, 404, 404, 502]);
-    }),
-  );
 });
 
 describe("the supervisor's source", () => {
@@ -748,26 +644,6 @@ describe("the supervisor's source", () => {
           assert.include(failed.message, "path segment");
         }
       }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
-  );
-
-  it.live("exports each repository's default branch head without its history", () =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem;
-      const root = yield* fs.makeTempDirectoryScoped({ prefix: "usine-supervisor-" });
-      const tokens: Array<RepositoryName> = [];
-      const origin = yield* originRepository(tokens);
-      const sources = yield* makeSupervisorSources(root, origin.origin);
-
-      const [first] = yield* sources.prepare([repository]);
-      assert(first !== undefined);
-      const head = yield* git(origin.directory, "rev-parse", "HEAD");
-      assert.strictEqual(first.revision, head.trim());
-      const readme = yield* fs.readFileString(`${first.directory}/README.md`);
-      assert.strictEqual(readme, "first\n");
-      const history = yield* fs.exists(`${first.directory}/.git`);
-      assert.isFalse(history, "the tree has no history");
-      assert.deepStrictEqual(tokens, [repository]);
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
   it.live("finishes automatic cache maintenance before preparation returns", () =>

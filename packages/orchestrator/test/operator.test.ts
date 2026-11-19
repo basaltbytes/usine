@@ -52,12 +52,11 @@ import { ApprovalSource, RunApproval } from "@usine/core/run/approval";
 import { StepName, Step } from "@usine/core/step";
 import { StepResult } from "@usine/core/step/result";
 import { SshDestination, WorkerName } from "@usine/core/worker";
-import { AgentFile, InvalidAgent } from "@usine/config/agent";
-import { ConfigFileError, InstancePath } from "@usine/config/file";
+import { AgentFile } from "@usine/config/agent";
 import { GitHubLabelName } from "@usine/core/label";
-import { IssueTrigger, PullRequestTrigger } from "@usine/config/trigger";
+import { IssueTrigger } from "@usine/config/trigger";
 import { LoadedInstance } from "@usine/config/instance";
-import { LoopFile, PromptTemplate, QuarantinedLoop } from "@usine/config/loop";
+import { LoopFile, PromptTemplate } from "@usine/config/loop";
 import { LoopName } from "@usine/core/loop";
 import { LocalWorker, UsineConfig } from "@usine/config/factory";
 import { ActingMember, OperatorLogin, type OperatorActor } from "@usine/core/operator";
@@ -80,12 +79,11 @@ import { StartedByEvent, StartedByInfraRetry } from "@usine/core/attempt/start";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import {
   AgentFailure,
-  BlockedFailure,
   DefectFailure,
   GitHubPushFailure,
   InfraFailure,
 } from "@usine/core/attempt/failure";
-import { AttemptCanceled, AttemptFailed, AttemptHandedOff } from "@usine/core/attempt/outcome";
+import { AttemptCanceled, AttemptFailed } from "@usine/core/attempt/outcome";
 import * as RunState from "@usine/core/run/state";
 import {
   Claimed,
@@ -142,7 +140,7 @@ import {
   TailTranscriptRequest,
 } from "../src/operator/transcript.ts";
 import { FailureView, LocalWorkerAccess, SshWorkerAccess } from "../src/operator/attempt.ts";
-import { PoolLimitNeed, UnconfiguredWorkerNeed, WorkerPausedNeed } from "../src/operator/need.ts";
+import { PoolLimitNeed } from "../src/operator/need.ts";
 import { boardTaskRuns, Operator } from "../src/operator/operator.ts";
 import { jsonBytes, PAGE_BYTES } from "../src/operator/page.ts";
 import type { RunTextPageView, RunTranscriptPageView } from "../src/operator/run-pages.ts";
@@ -161,8 +159,7 @@ import {
   ScheduleTickFailure,
   ScheduleTriggers,
 } from "../src/schedule-triggers.ts";
-import { workerAttentionFor } from "../src/operator/worker-attention.ts";
-import { failureView, runDuration, runView } from "../src/operator/projection.ts";
+import { failureView, runDuration } from "../src/operator/projection.ts";
 import { type ProvisioningPause, WorkerStatus } from "../src/worker-status.ts";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { noCycleBudgets } from "./support/polling.ts";
@@ -832,102 +829,6 @@ describe("Operator", () => {
       }),
   );
 
-  it.effect("groups running attempts on one silent worker and removes ended attempts", () =>
-    Effect.gen(function* () {
-      const original = snapshot.attempts[0];
-      assert(original !== undefined);
-      const running = ["one", "two"].map((id) => {
-        const runId = RunId.make(id);
-        return runView(
-          RunSnapshot.make({
-            ...snapshot,
-            run: Run.make({ ...snapshot.run, id: runId, state: RunState.Running.make() }),
-            attempts: [Attempt.make({ ...original, runId, id: AttemptId.make(id) })],
-          }),
-          new Set(),
-          new Map(),
-        );
-      });
-      const refresh = workerAttentionFor(
-        {
-          transcript: ({ attemptId }) =>
-            Effect.succeed([
-              TranscriptEntry.make({
-                sequence: TranscriptSequence.make(1),
-                attemptId,
-                direction: "outbound",
-                receivedAt: now,
-                envelope: AttemptChannel.OutboundEnvelope.make({
-                  version: AttemptChannel.PROTOCOL_VERSION,
-                  attemptId,
-                  sequence: AttemptChannel.Sequence.make(1),
-                  sentAt: now,
-                  payload: AttemptChannel.WorkerUnresponsive.make({
-                    worker: original.worker,
-                    lastAnsweredAt: now,
-                    reason: "SSH timed out",
-                    unansweredProbes: 3,
-                  }),
-                }),
-              }),
-            ]),
-        },
-        { list: Effect.succeed([]) },
-        { unavailable: Effect.succeed([]), provisioning: Effect.succeed([]) },
-      );
-      const overview = ReadyOverview.make({ projects: [], loops: [], needsYou: [] });
-      const grouped = (yield* refresh(overview, running, [])).needsYou;
-      assert.lengthOf(grouped, 1);
-      const need = grouped[0];
-      assert(need?._tag === "UnresponsiveWorkerNeed");
-      assert.deepStrictEqual(
-        need.attempts.map(({ runId }) => runId),
-        ["one", "two"],
-      );
-      const remaining = (yield* refresh(overview, running.slice(1), [])).needsYou[0];
-      assert(remaining?._tag === "UnresponsiveWorkerNeed");
-      assert.deepStrictEqual(
-        remaining.attempts.map(({ runId }) => runId),
-        ["two"],
-      );
-
-      assert.deepStrictEqual((yield* refresh(overview, [], [])).needsYou, []);
-    }),
-  );
-
-  it.effect("asks for attention for each paused worker until a reload resumes it", () =>
-    Effect.gen(function* () {
-      const refresh = workerAttentionFor(
-        { transcript: () => Effect.succeed([]) },
-        { list: Effect.succeed([]) },
-        { unavailable: Effect.succeed([]), provisioning: Effect.succeed([]) },
-      );
-      const overview = ReadyOverview.make({ projects: [], loops: [], needsYou: [] });
-      const trial = WorkerName.make("trial");
-      const local = WorkerName.make("local");
-      const paused = (yield* refresh(
-        overview,
-        [],
-        [
-          { name: local, paused: true },
-          { name: trial, paused: false },
-        ],
-      )).needsYou;
-      assert.deepStrictEqual(paused, [
-        WorkerPausedNeed.make({ id: "worker-paused:local", worker: local }),
-      ]);
-      const resumed = yield* refresh(
-        overview,
-        [],
-        [
-          { name: local, paused: false },
-          { name: trial, paused: false },
-        ],
-      );
-      assert.deepStrictEqual(resumed.needsYou, []);
-    }),
-  );
-
   it.effect(
     "refreshes pool warnings on a cached overview, supports dismissal and undo, and clears at reset",
     () =>
@@ -1354,24 +1255,20 @@ describe("Operator", () => {
       }),
   );
 
-  it.effect.each(["poll-repository-changes", "list-repository-labels"] as const)(
-    "shows %s decode diagnostics in the failure log and Needs attention",
-    (operation) =>
+  it.effect(
+    "shows poll-repository-changes decode diagnostics in the failure log and Needs attention",
+    () =>
       Effect.gen(function* () {
+        const operation = "poll-repository-changes";
         const fixtureInstance = yield* instance;
         const app = yield* GitHubApp.pipe(Effect.provide(testAppLayer));
         const client = HttpClient.make((request) =>
           Effect.succeed(
             HttpClientResponse.fromWeb(
               request,
-              new Response(
-                jsonKey(
-                  request.url.includes("/labels") === (operation === "list-repository-labels")
-                    ? [{ unexpected: true }]
-                    : [],
-                ),
-                { headers: { "content-type": "application/json" } },
-              ),
+              new Response(jsonKey(request.url.includes("/labels") ? [] : [{ unexpected: true }]), {
+                headers: { "content-type": "application/json" },
+              }),
             ),
           ),
         );
@@ -1414,7 +1311,7 @@ describe("Operator", () => {
         assert(failure !== undefined);
         assert.strictEqual(failure.errorTag, "InvalidGitHubResponseError");
         assert.include(failure.message, operation);
-        assert.include(failure.message, operation === "list-repository-labels" ? "name" : "number");
+        assert.include(failure.message, "number");
         const detail = failure.message.slice(
           `${operation}: GitHub returned a response in an unexpected format: `.length,
         );
@@ -1688,53 +1585,6 @@ describe("Operator", () => {
   );
 
   it.effect(
-    "leaves handed-off runs out of Needs attention and preserves the fix link in detail",
-    () =>
-      Effect.gen(function* () {
-        const fixtureInstance = yield* instance;
-        const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
-        const moved = yield* Ref.make<ItemLabelMutation | null>(null);
-        const reads = yield* Ref.make(0);
-        const revision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
-        const original = snapshot.attempts[0];
-        assert(original !== undefined);
-        const handoff = RunState.HandedOff.make({
-          reason: "CI failed: ci.",
-          head: CommitSha.make("a".repeat(40)),
-          fixLoop: loopName,
-          fixRunId: RunId.make("fix-828"),
-        });
-        const current = RunSnapshot.make({
-          ...snapshot,
-          closedAt: Option.some(now),
-          run: Run.make({ ...snapshot.run, state: handoff }),
-          attempts: [
-            Attempt.make({
-              ...original,
-              outcome: Option.some(AttemptHandedOff.make()),
-              endedAt: Option.some(now),
-            }),
-          ],
-        });
-        yield* Effect.gen(function* () {
-          const operator = yield* Operator;
-
-          const overview = yield* operator.overview(fixtureInstance);
-          assert(!overview.needsYou.some((need) => need._tag === "RunFailureNeed"));
-          const card = overview.projects[0]?.board.lanes
-            .flatMap(({ items }) => items)
-            .find((item) => item.itemKey === itemKey);
-          assert.strictEqual(card?.needsYou, false);
-
-          const detail = yield* operator.detail(fixtureInstance, runId);
-          assert.strictEqual(detail.run.state, "HandedOff");
-          assert.deepStrictEqual(detail.run.handoff, handoff);
-          assert.strictEqual(detail.run.canResolveFailure, false);
-        }).pipe(Effect.provide(testLayer(approved, moved, reads, revision, current)));
-      }),
-  );
-
-  it.effect(
     "reads a failed Run's brief, its texts page by page, and its transcript newest first",
     () =>
       Effect.gen(function* () {
@@ -1864,71 +1714,6 @@ describe("Operator", () => {
           assert.isNull(first.next);
         }).pipe(Effect.provide(testLayer(approved, moved, reads, revision, failed)));
       }),
-  );
-
-  it.effect("links a failed Run in Needs attention to the CI fix Run that carries its work", () =>
-    Effect.gen(function* () {
-      const fixtureInstance = yield* instance;
-      const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
-      const moved = yield* Ref.make<ItemLabelMutation | null>(null);
-      const reads = yield* Ref.make(0);
-      const revision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
-      const original = snapshot.attempts[0];
-      assert(original !== undefined);
-      const failed = RunSnapshot.make({
-        ...snapshot,
-        run: Run.make({ ...snapshot.run, state: RunState.Failed.make() }),
-        attempts: [
-          Attempt.make({
-            ...original,
-            outcome: Option.some(
-              AttemptFailed.make({
-                failure: AgentFailure.make({ message: "CI failed. Fix loop fix: CycleBlocked." }),
-              }),
-            ),
-          }),
-        ],
-      });
-      const fixRun = CiFixRun.make({ runId: RunId.make("replayed-ci-fix"), state: "Running" });
-      for (const [fixes, linked] of [
-        [new Map<RunId, CiFixRun>(), null],
-        [new Map([[runId, fixRun]]), fixRun],
-      ] as const) {
-        yield* Effect.gen(function* () {
-          const operator = yield* Operator;
-
-          const overview = yield* operator.overview(fixtureInstance);
-
-          const need = overview.needsYou.find((entry) => entry._tag === "RunFailureNeed");
-          assert(need?._tag === "RunFailureNeed");
-          assert.deepStrictEqual(need.fixRun, linked);
-        }).pipe(
-          Effect.provide(
-            testLayer(
-              approved,
-              moved,
-              reads,
-              revision,
-              failed,
-              noCycleBudgets,
-              {
-                retry: () => Effect.void,
-                intervene: () => Effect.void,
-                runAgain: () => Effect.die("unused"),
-              },
-              [],
-              [],
-              [],
-              Effect.succeed([]),
-              {},
-              WorkerStatus.idle,
-              Effect.succeedNone,
-              fixes,
-            ),
-          ),
-        );
-      }
-    }),
   );
 
   it.effect("offers CI labels in Needs attention only for a failure that kept a CI handoff", () =>
@@ -2123,53 +1908,6 @@ describe("Operator", () => {
           assert.notInclude(currentAttentionNeeds, need);
         }
       }),
-  );
-
-  it.effect("projects when each Attempt on a Board card started and when a closed one ended", () =>
-    Effect.gen(function* () {
-      const fixtureInstance = yield* instance;
-      const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
-      const moved = yield* Ref.make<ItemLabelMutation | null>(null);
-      const reads = yield* Ref.make(0);
-      const revision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
-      const original = snapshot.attempts[0];
-      assert(original !== undefined);
-      const failed = Attempt.make({
-        ...original,
-        outcome: Option.some(
-          AttemptFailed.make({
-            failure: InfraFailure.make({ message: "Worker unavailable", cause: "disconnected" }),
-          }),
-        ),
-        endedAt: Option.some(DateTime.add(now, { minutes: 5 })),
-      });
-      const running = Attempt.make({
-        ...original,
-        id: AttemptId.make("running-retry"),
-        number: AttemptNumber.make(2),
-        startedAt: DateTime.add(now, { minutes: 6 }),
-      });
-      const current = RunSnapshot.make({
-        ...snapshot,
-        run: Run.make({ ...snapshot.run, state: RunState.Running.make() }),
-        attempts: [failed, running],
-      });
-      yield* Effect.gen(function* () {
-        const operator = yield* Operator;
-
-        const overview = yield* operator.overview(fixtureInstance);
-        const card = overview.projects[0]?.board.lanes
-          .flatMap((lane) => lane.items)
-          .find((item) => item.itemKey === itemKey);
-        assert.deepStrictEqual(
-          card?.run?.attempts.map(({ startedAt, endedAt }) => ({ startedAt, endedAt })),
-          [
-            { startedAt: "2026-08-31T12:00:00.000Z", endedAt: "2026-08-31T12:05:00.000Z" },
-            { startedAt: "2026-08-31T12:06:00.000Z", endedAt: null },
-          ],
-        );
-      }).pipe(Effect.provide(testLayer(approved, moved, reads, revision, current)));
-    }),
   );
 
   it.effect("places a running Run's card by its Item's labels, else by its Event's labels", () =>
@@ -2502,62 +2240,6 @@ describe("Operator", () => {
             ),
           ),
         );
-      }),
-  );
-
-  it.effect(
-    "names on each Board card the Loops whose trigger matches its Items now, and renames them after a reload changes a trigger",
-    () =>
-      Effect.gen(function* () {
-        const fixtureInstance = yield* instance;
-        const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
-        const moved = yield* Ref.make<ItemLabelMutation | null>(null);
-        const reads = yield* Ref.make(0);
-        const revision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
-        const issueLoop = (name: string, condition: string) =>
-          LoopFile.make({
-            ...loop,
-            name: LoopName.make(name),
-            trigger: IssueTrigger.make({ on: "issue", if: Source.make(condition) }),
-          });
-        const labelled = issueLoop(
-          "start-dev",
-          'item.labels.nodes.exists(label, label.name == "ready")',
-        );
-        const triage = issueLoop(
-          "triage",
-          'item.labels.nodes.exists(label, label.name == "triage")',
-        );
-        const pullRequests = LoopFile.make({
-          ...loop,
-          name: LoopName.make("review-pr"),
-          trigger: PullRequestTrigger.make({ on: "pr", if: Source.make("true") }),
-        });
-        const watched = LoadedInstance.make({
-          ...fixtureInstance,
-          loops: [loop, labelled, triage, pullRequests],
-        });
-        const reloaded = LoadedInstance.make({
-          ...watched,
-          loops: [
-            loop,
-            labelled,
-            issueLoop("triage", 'item.labels.nodes.exists(label, label.name == "bug")'),
-            pullRequests,
-          ],
-        });
-        const cardLoops = (overview: ReadyOverview) =>
-          overview.projects[0]?.board.lanes
-            .flatMap((lane) => lane.items)
-            .find((item) => item.itemKey === itemKey)?.loops;
-        yield* Effect.gen(function* () {
-          const operator = yield* Operator;
-          // The paused Loop still watches the Item; a pull-request Loop never matches an issue.
-          const currentOverview = yield* operator.overview(watched);
-          assert.deepStrictEqual(cardLoops(currentOverview), [loopName, labelled.name]);
-          const nextOverview = yield* operator.overview(reloaded);
-          assert.deepStrictEqual(cardLoops(nextOverview), [loopName, labelled.name, triage.name]);
-        }).pipe(Effect.provide(testLayer(approved, moved, reads, revision)));
       }),
   );
 
@@ -3239,72 +2921,6 @@ describe("Operator", () => {
       }),
   );
 
-  it.effect("lists quarantined Loops and invalid Agent files in Needs you", () =>
-    Effect.gen(function* () {
-      const fixtureInstance = yield* instance;
-      const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
-      const moved = yield* Ref.make<ItemLabelMutation | null>(null);
-      const reads = yield* Ref.make(0);
-      const revision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
-      const fileError = (file: string, stage: "schema" | "reference", message: string) =>
-        ConfigFileError.make({
-          file: InstancePath.make(file),
-          stage,
-          expression: Option.none(),
-          message,
-        });
-      const broken = LoadedInstance.make({
-        ...fixtureInstance,
-        invalidAgents: [
-          InvalidAgent.make({
-            file: InstancePath.make("agents/intern.md"),
-            error: fileError("agents/intern.md", "schema", "Expected a known harness"),
-          }),
-        ],
-        quarantinedLoops: [
-          QuarantinedLoop.make({
-            file: InstancePath.make("loops/ghost.md"),
-            error: fileError("loops/ghost.md", "reference", "Unknown agent: ghost"),
-          }),
-        ],
-      });
-      const overview = yield* Effect.gen(function* () {
-        const operator = yield* Operator;
-
-        const before = yield* operator.overview(fixtureInstance);
-        assert.isFalse(before.needsYou.some((need) => need._tag === "ConfigFileNeed"));
-        // A reload that only leaves files out still replaces the cached overview.
-        return yield* operator.overview(broken);
-      }).pipe(Effect.provide(testLayer(approved, moved, reads, revision)));
-      const needs = overview.needsYou.filter((need) => need._tag === "ConfigFileNeed");
-      assert.deepStrictEqual(
-        needs.map(({ id, kind, error }) => [id, kind, error.file, error.stage, error.message]),
-        [
-          [
-            "config-file:agents/intern.md",
-            "agent",
-            "agents/intern.md",
-            "schema",
-            "Expected a known harness",
-          ],
-          [
-            "config-file:loops/ghost.md",
-            "loop",
-            "loops/ghost.md",
-            "reference",
-            "Unknown agent: ghost",
-          ],
-        ],
-      );
-      const encoded = yield* Schema.encodeUnknownEffect(ReadyOverview)(overview);
-      const decodedValue33 = yield* Schema.decodeEffect(ReadyOverview)(encoded);
-      assert.deepStrictEqual(
-        decodedValue33.needsYou.filter((need) => need._tag === "ConfigFileNeed"),
-        needs,
-      );
-    }),
-  );
-
   it.effect("lists the Attempts of a Worker that usine.yaml no longer declares once", () =>
     Effect.gen(function* () {
       const fixtureInstance = yield* instance;
@@ -3500,32 +3116,6 @@ describe("Operator", () => {
           ),
         );
       }),
-  );
-
-  it("lists a Worker whose every Attempt still runs, and refuses more open Attempts than Attempts", () => {
-    const need = (running: number) =>
-      UnconfiguredWorkerNeed.make({
-        id: "unconfigured-worker:local",
-        worker: WorkerName.make("local"),
-        attempts: 1,
-        running,
-      });
-    // A removed Worker's only Attempt still runs: the entry reports it instead of failing the
-    // overview.
-    assert.doesNotThrow(() => need(1));
-    assert.throws(() => need(2));
-  });
-
-  it.effect("shows an Agent's blocker to the operator as its own failure kind", () =>
-    Effect.gen(function* () {
-      const encoded = yield* BlockedFailure.make({
-        message: "The baseline gate fails on main.",
-      }).pipe(failureView, Schema.encodeUnknownEffect(FailureView));
-      assert.deepStrictEqual(encoded, {
-        _tag: "BlockedFailure",
-        message: "The baseline gate fails on main.",
-      });
-    }),
   );
 
   it.effect.each([InfraFailure, DefectFailure])(

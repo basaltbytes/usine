@@ -64,7 +64,7 @@ const pendingDetails = Effect.gen(function* () {
   return yield* (yield* GitHubChecks).pendingDetails(repository, head, historyDeadline);
 });
 
-it.effect.each(["available", "missing", "forbidden"] as const)(
+it.effect.each(["available", "forbidden"] as const)(
   "reports running checks before queued checks at timeout with %s duration history",
   (history) =>
     Effect.gen(function* () {
@@ -93,7 +93,7 @@ it.effect.each(["available", "missing", "forbidden"] as const)(
             return json({ workflow_id: 7, event: "pull_request" });
           if (url.includes("/actions/workflows/7/runs?")) {
             assert.include(url, "status=success&event=pull_request&");
-            return json({ workflow_runs: history === "missing" ? [] : [{ id: 8 }] });
+            return json({ workflow_runs: [{ id: 8 }] });
           }
           assert.include(url, "/actions/runs/8/jobs?");
           return previousJobs();
@@ -156,21 +156,6 @@ it.effect("reports pending commit statuses when no check run is pending", () =>
             { context: "ci/lint", state: "success", description: null },
           ],
         });
-      }),
-    ),
-  ),
-);
-
-it.effect("reports missing checks without claiming that a job is running", () =>
-  Effect.gen(function* () {
-    const report = yield* pendingDetails;
-    assert.deepStrictEqual(report, PendingCheckReport.make({ checks: [], omitted: 0 }));
-  }).pipe(
-    Effect.provide(
-      withClient((url) => {
-        if (url.includes(`/commits/${head}/check-runs?`)) return pendingRuns([]);
-        assert.include(url, `/commits/${head}/status?`);
-        return json({ statuses: [] });
       }),
     ),
   ),

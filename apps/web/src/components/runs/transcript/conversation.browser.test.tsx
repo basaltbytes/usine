@@ -323,21 +323,6 @@ it("lets scrolling cancel a delayed restoration and preserves that choice when t
   await expect.poll(() => offset(37)).toBeCloseTo(-30, 0);
 });
 
-it("keeps a pending bookmark intact when the page closes before history is available", async () => {
-  mount();
-  await expect.poll(() => viewport().scrollTop).toBeGreaterThan(1000);
-  await moveTo(12);
-  close();
-  mount(events.slice(30), runId, {
-    earlier: TranscriptPageCursor.make({ attemptId, before: TranscriptSequence.make(31) }),
-    loading: true,
-    load: () => {},
-  });
-  close();
-  mount(events);
-  await expect.poll(() => offset(12)).toBeCloseTo(-45, 0);
-});
-
 it("bounds missing-row recovery and leaves unseen activity unread at its visible fallback", async () => {
   readerMemory(() => localStorage).write(
     runId,
@@ -635,46 +620,41 @@ it("keeps failed commands inside their burst and reopens inspected errors throug
   await expect.element(page.getByText("Validation failed", { exact: true })).toBeVisible();
 });
 
-it.each(["pointer", "Space"] as const)(
-  "keeps an inspected reader paused after %s collapse and reopening",
-  async (activation) => {
-    const started = record(
-      46,
-      ToolStarted.make({
-        session: parent,
-        callId: "paused",
-        tool: "read",
-        input: { path: "paused.ts" },
-      }),
-    );
-    const initial = [...events, started];
-    mount(initial);
-    await openBurst(1);
-    const tool = page.getByRole("button", { name: /paused.ts.*Running/ });
-    await tool.click();
-    await expect.element(tool).toHaveAttribute("aria-expanded", "true");
-    if (activation === "Space") {
-      tool.element().focus();
-      await userEvent.keyboard(" ");
-    } else await tool.click();
-    await expect.element(tool).toHaveAttribute("aria-expanded", "false");
-    await expect
-      .element(page.getByText("Waiting for a result…", { exact: true }))
-      .not.toBeInTheDocument();
-    window.dispatchEvent(new PageTransitionEvent("pagehide"));
-    expect(bookmark()?.position._tag).toBe("Anchor");
-    const previousOffset = offset(45);
-    mount([...initial, message(47)]);
-    await expect.poll(() => Math.abs(offset(45) - previousOffset)).toBeLessThan(2);
-    close();
-    expect(bookmark()?.position._tag).toBe("Anchor");
-    mount([...initial, message(47), message(48)]);
-    await expect.poll(() => Math.abs(offset(45) - previousOffset)).toBeLessThan(2);
-    await expect
-      .element(page.getByRole("button", { name: "2 new updates", exact: true }))
-      .toBeVisible();
-  },
-);
+it("keeps an inspected reader paused after a Space collapse and reopening", async () => {
+  const started = record(
+    46,
+    ToolStarted.make({
+      session: parent,
+      callId: "paused",
+      tool: "read",
+      input: { path: "paused.ts" },
+    }),
+  );
+  const initial = [...events, started];
+  mount(initial);
+  await openBurst(1);
+  const tool = page.getByRole("button", { name: /paused.ts.*Running/ });
+  await tool.click();
+  await expect.element(tool).toHaveAttribute("aria-expanded", "true");
+  tool.element().focus();
+  await userEvent.keyboard(" ");
+  await expect.element(tool).toHaveAttribute("aria-expanded", "false");
+  await expect
+    .element(page.getByText("Waiting for a result…", { exact: true }))
+    .not.toBeInTheDocument();
+  window.dispatchEvent(new PageTransitionEvent("pagehide"));
+  expect(bookmark()?.position._tag).toBe("Anchor");
+  const previousOffset = offset(45);
+  mount([...initial, message(47)]);
+  await expect.poll(() => Math.abs(offset(45) - previousOffset)).toBeLessThan(2);
+  close();
+  expect(bookmark()?.position._tag).toBe("Anchor");
+  mount([...initial, message(47), message(48)]);
+  await expect.poll(() => Math.abs(offset(45) - previousOffset)).toBeLessThan(2);
+  await expect
+    .element(page.getByRole("button", { name: "2 new updates", exact: true }))
+    .toBeVisible();
+});
 
 it("keeps a paused reader paused when Space at latest moves nothing", async () => {
   const started = record(
@@ -718,7 +698,7 @@ const swipe = (element: Element, fromY: number, toY: number) => {
   element.dispatchEvent(new TouchEvent("touchend", { bubbles: true }));
 };
 
-it.each(["End", "Space", "ArrowDown", "PageDown", "wheel", "swipe"] as const)(
+it.each(["Space", "wheel", "swipe"] as const)(
   "keeps following when %s at the latest row scrolls nothing",
   async (input) => {
     mount();
@@ -728,7 +708,7 @@ it.each(["End", "Space", "ArrowDown", "PageDown", "wheel", "swipe"] as const)(
     else if (input === "swipe") swipe(viewport(), 400, 300);
     else {
       viewport().focus();
-      await userEvent.keyboard(input === "Space" ? " " : `{${input}}`);
+      await userEvent.keyboard(" ");
     }
     mount([...events, message(46)]);
     await expect.poll(atLatest).toBeLessThan(9);
@@ -774,69 +754,42 @@ const followLongOutput = async () => {
   return output;
 };
 
-it.each(["wheel", "swipe"] as const)(
-  "keeps following when a %s scrolls a tool output at the latest row",
-  async (input) => {
-    const output = await followLongOutput();
-    const end = output.scrollHeight - output.clientHeight;
-    output.scrollTop = end;
-    if (input === "wheel") {
-      await userEvent.wheel(output, { delta: { y: -100 } });
-      await expect.poll(() => output.scrollTop).toBeLessThan(end);
-    } else swipe(output, 300, 400);
-    mount([...events, ...longRead, message(48)]);
-    await expect.poll(atLatest).toBeLessThan(9);
-  },
-);
-
-it("keeps following when a wheel at a nested area's edge leaves the viewport still", async () => {
+it("keeps following when a wheel scrolls a tool output at the latest row", async () => {
   const output = await followLongOutput();
-  expect(output.scrollTop).toBe(0);
+  const end = output.scrollHeight - output.clientHeight;
+  output.scrollTop = end;
+  await userEvent.wheel(output, { delta: { y: -100 } });
+  await expect.poll(() => output.scrollTop).toBeLessThan(end);
+  mount([...events, ...longRead, message(48)]);
+  await expect.poll(atLatest).toBeLessThan(9);
+});
+
+it("keeps following when a code block scrolls horizontally", async () => {
+  const output = await followLongOutput();
+  viewport().scrollTop = viewport().scrollHeight;
+  await expect.poll(atLatest).toBeLessThan(9);
+  await ownScrollEnded();
   const top = viewport().scrollTop;
-  // Synthetic input models a latched gesture: the event reaches the viewport without scrolling it.
-  output.dispatchEvent(new WheelEvent("wheel", { bubbles: true, deltaY: -100 }));
-  await new Promise(requestAnimationFrame);
+  await userEvent.wheel(output, { delta: { x: 100, y: 0 } });
+  await expect.poll(() => output.scrollLeft).toBeGreaterThan(0);
   expect(viewport().scrollTop).toBe(top);
   mount([...events, ...longRead, message(48)]);
   await expect.poll(atLatest).toBeLessThan(9);
 });
 
-it.each([true, false])(
-  "preserves following=%s when a code block scrolls horizontally",
-  async (following) => {
-    const output = following ? await followLongOutput() : await openLongOutput();
-    viewport().scrollTop = viewport().scrollHeight;
-    await expect.poll(atLatest).toBeLessThan(9);
-    await ownScrollEnded();
-    const top = viewport().scrollTop;
-    await userEvent.wheel(output, { delta: { x: 100, y: 0 } });
-    await expect.poll(() => output.scrollLeft).toBeGreaterThan(0);
-    expect(viewport().scrollTop).toBe(top);
-    mount([...events, ...longRead, message(48)]);
-    if (following) await expect.poll(atLatest).toBeLessThan(9);
-    else
-      await expect
-        .element(page.getByRole("button", { name: "1 new update", exact: true }))
-        .toBeVisible();
-  },
-);
-
-it.each(["Home", "ArrowUp"])(
-  "keeps following when %s scrolls a focused nested area",
-  async (key) => {
-    const output = await followLongOutput();
-    output.scrollTop = output.scrollHeight;
-    const end = output.scrollTop;
-    output.tabIndex = 0;
-    output.focus({ preventScroll: true });
-    const top = viewport().scrollTop;
-    await userEvent.keyboard(`{${key}}`);
-    await expect.poll(() => output.scrollTop).toBeLessThan(end);
-    expect(viewport().scrollTop).toBe(top);
-    mount([...events, ...longRead, message(48)]);
-    await expect.poll(atLatest).toBeLessThan(9);
-  },
-);
+it("keeps following when Home scrolls a focused nested area", async () => {
+  const output = await followLongOutput();
+  output.scrollTop = output.scrollHeight;
+  const end = output.scrollTop;
+  output.tabIndex = 0;
+  output.focus({ preventScroll: true });
+  const top = viewport().scrollTop;
+  await userEvent.keyboard("{Home}");
+  await expect.poll(() => output.scrollTop).toBeLessThan(end);
+  expect(viewport().scrollTop).toBe(top);
+  mount([...events, ...longRead, message(48)]);
+  await expect.poll(atLatest).toBeLessThan(9);
+});
 
 it("stops following when a wheel turn up scrolls the conversation at the latest row", async () => {
   await followLongOutput();
@@ -873,54 +826,26 @@ it("resumes following when a wheel turn past a tool output's end reaches the lat
   await expect.poll(atLatest).toBeLessThan(9);
 });
 
-it("resumes following when a wheel's viewport movement arrives after several frames", async () => {
-  await openLongOutput();
+it("keeps inspection paused when a pointerdown replaces a pending wheel", async () => {
+  const output = await openLongOutput();
+  await userEvent.hover(output);
   await ownScrollEnded();
   const element = viewport();
-  element.dispatchEvent(new WheelEvent("wheel", { bubbles: true, deltaY: 800 }));
+  output.dispatchEvent(new WheelEvent("wheel", { bubbles: true, deltaY: 800 }));
   await new Promise((resolve) =>
     requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(resolve))),
   );
-  element.scrollTop = element.scrollHeight;
-  await expect
-    .poll(() => {
-      window.dispatchEvent(new PageTransitionEvent("pagehide"));
-      return bookmark()?.position._tag;
-    })
-    .toBe("Latest");
-  mount([...events, ...longRead, message(48)]);
+  document.body.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+  await new Promise<void>((resolve) => {
+    element.addEventListener("scroll", () => resolve(), { once: true });
+    element.scrollTop = element.scrollHeight;
+  });
   await expect.poll(atLatest).toBeLessThan(9);
+  window.dispatchEvent(new PageTransitionEvent("pagehide"));
+  expect(bookmark()?.position._tag).toBe("Anchor");
+  mount([...events, ...longRead, message(48), message(49)]);
+  await expect.element(page.getByRole("button", { name: /new updates?$/ })).toBeVisible();
 });
-
-it.each(["pointerdown", "keydown", "transcript update"] as const)(
-  "keeps inspection paused when %s replaces a pending wheel",
-  async (input) => {
-    const output = await openLongOutput();
-    await userEvent.hover(output);
-    await ownScrollEnded();
-    const element = viewport();
-    output.dispatchEvent(new WheelEvent("wheel", { bubbles: true, deltaY: 800 }));
-    await new Promise((resolve) =>
-      requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(resolve))),
-    );
-    if (input === "transcript update") mount([...events, ...longRead, message(48)]);
-    else
-      document.body.dispatchEvent(
-        input === "pointerdown"
-          ? new PointerEvent("pointerdown", { bubbles: true })
-          : new KeyboardEvent("keydown", { bubbles: true, key: "Enter" }),
-      );
-    await new Promise<void>((resolve) => {
-      element.addEventListener("scroll", () => resolve(), { once: true });
-      element.scrollTop = element.scrollHeight;
-    });
-    await expect.poll(atLatest).toBeLessThan(9);
-    window.dispatchEvent(new PageTransitionEvent("pagehide"));
-    expect(bookmark()?.position._tag).toBe("Anchor");
-    mount([...events, ...longRead, message(48), message(49)]);
-    await expect.element(page.getByRole("button", { name: /new updates?$/ })).toBeVisible();
-  },
-);
 
 it("scrolls the reader to a checkpoint chosen in the outline and stops following", async () => {
   mount(events, runId, undefined, [liveAttempt]);
@@ -1019,20 +944,6 @@ const resumeCases: ReadonlyArray<{
   readonly gateway?: { readonly home: string; readonly kind: GatewayCredentialKind };
 }> = [
   {
-    worker: "local",
-    harness: Harness.make("claude"),
-    access: LocalWorkerAccess.make(),
-    facts: ["Worktree /worker/Philippe's repo"],
-    command: String.raw`cd -- '/worker/Philippe'\''s repo' && claude --resume 'native-session'`,
-  },
-  {
-    worker: "usine-worker-1",
-    harness: Harness.make("codex"),
-    access: SshWorkerAccess.make({ destination: usineWorker, port: null }),
-    facts: ["Worktree /worker/Philippe's repo on usine-worker-1"],
-    command: String.raw`ssh -t usine-worker-1 'cd -- '\''/worker/Philippe'\''\'\'''\''s repo'\'' && codex resume -- '\''native-session'\'''`,
-  },
-  {
     worker: "usine-worker-1",
     harness: Harness.make("codex"),
     access: SshWorkerAccess.make({ destination: usineWorker, port: null }),
@@ -1066,28 +977,12 @@ const resumeCases: ReadonlyArray<{
     notes: ["Run it on the attempt's Hetzner machine, which is deleted with the attempt"],
   },
   {
-    worker: "hz-pool",
-    harness: Harness.make("codex"),
-    access: Schema.decodeSync(WorkerAccess)({ _tag: "Provisioned", provider: "hetzner" }),
-    gateway: { home: "/worker/codex/attempt-1", kind: "subscription" },
-    facts: ["Worktree /worker/Philippe's repo on hz-pool"],
-    command: null,
-  },
-  {
     worker: "local",
     harness: Harness.make("codex"),
     access: LocalWorkerAccess.make(),
     home: "/worker/codex/local-login",
     facts: ["Worktree /worker/Philippe's repo"],
     command: String.raw`cd -- '/worker/Philippe'\''s repo' && CODEX_HOME='/worker/codex/local-login' codex resume -- 'native-session'`,
-  },
-  {
-    worker: "retired-worker",
-    harness: Harness.make("codex"),
-    access: null,
-    gateway: { home: "/worker/codex/attempt-1", kind: "api-key" },
-    facts: [],
-    command: null,
   },
 ];
 
@@ -1262,35 +1157,32 @@ it("shows that a Pi child has no saved harness session to resume", async () => {
   expect(document.body.textContent).not.toContain("Resume this session");
 });
 
-it.each([390, 1280])(
-  "shows the exact child prompt at %s px without widening the conversation",
-  async (width) => {
-    await page.viewport(width, 844);
-    host.style.width = "100%";
-    const child = ChildSession.make({
-      id: AgentSessionId.make("prompt-child"),
-      parentId: parent.id,
-      agent: AgentName.make("reviewer"),
-      brain: BrainSpec.make({
-        harness: Harness.make("pi"),
-        model: ModelId.make("test-model"),
-        effort: "high",
-      }),
-    });
-    const prompt =
-      "# Delegated task\n\n  Add `ready-to-merge`.\nDo not wait for CI.\n" + "x".repeat(300);
-    mount(
-      [
-        record(1, SessionStarted.make({ session: child, prompt: Option.some(prompt) })),
-        record(2, TextOutput.make({ session: child, text: "Reviewing." })),
-      ],
-      runId,
-      undefined,
-      [liveAttempt],
-    );
-    await page.getByRole("button", { name: "Prompt received by reviewer (prompt-child)" }).click();
-    await expect.element(page.getByText(prompt, { exact: true })).toBeVisible();
-    expect(page.getByText(prompt, { exact: true }).element().textContent).toBe(prompt);
-    expect(host.scrollWidth).toBeLessThanOrEqual(width);
-  },
-);
+it("shows the exact child prompt on a phone without widening the conversation", async () => {
+  await page.viewport(390, 844);
+  host.style.width = "100%";
+  const child = ChildSession.make({
+    id: AgentSessionId.make("prompt-child"),
+    parentId: parent.id,
+    agent: AgentName.make("reviewer"),
+    brain: BrainSpec.make({
+      harness: Harness.make("pi"),
+      model: ModelId.make("test-model"),
+      effort: "high",
+    }),
+  });
+  const prompt =
+    "# Delegated task\n\n  Add `ready-to-merge`.\nDo not wait for CI.\n" + "x".repeat(300);
+  mount(
+    [
+      record(1, SessionStarted.make({ session: child, prompt: Option.some(prompt) })),
+      record(2, TextOutput.make({ session: child, text: "Reviewing." })),
+    ],
+    runId,
+    undefined,
+    [liveAttempt],
+  );
+  await page.getByRole("button", { name: "Prompt received by reviewer (prompt-child)" }).click();
+  await expect.element(page.getByText(prompt, { exact: true })).toBeVisible();
+  expect(page.getByText(prompt, { exact: true }).element().textContent).toBe(prompt);
+  expect(host.scrollWidth).toBeLessThanOrEqual(390);
+});

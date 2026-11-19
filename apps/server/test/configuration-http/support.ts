@@ -1,6 +1,6 @@
 import { jsonKey } from "@usine/core/json-key";
 import { sqliteTempDirectory } from "../../../../tooling/test/sqlite.mts";
-import { ItemProjectionReader, ItemProjection } from "@usine/engine/item-projection";
+import { ItemProjectionReader } from "@usine/engine/item-projection";
 import { NodeServices } from "@effect/platform-node";
 import { localSqliteLayer } from "@usine/engine/local-sqlite";
 
@@ -46,7 +46,6 @@ export const harness = (
   catalog: Layer.Layer<GitHubApp | GitHubPolling> | Layer.Layer<never> = Layer.empty,
 ) =>
   Effect.gen(function* () {
-    const projections = yield* Ref.make<readonly ItemProjection[]>([]);
     const states = yield* Ref.make(new Map<LoopName, LoopRuntimeState>());
     const setPause = (loop: LoopName, paused: boolean) =>
       Ref.modify(states, (previous) => {
@@ -203,10 +202,7 @@ export const harness = (
           Layer.succeed(ItemProjectionReader, {
             get: () => unused,
             openIssues: () => unused,
-            list: (repository) =>
-              Ref.get(projections).pipe(
-                Effect.map((items) => items.filter((item) => item.repository === repository)),
-              ),
+            list: () => Effect.succeed([]),
           }),
         ),
         Layer.provide(currentLayer),
@@ -280,7 +276,6 @@ export const harness = (
     return {
       request,
       handler: app.handler,
-      projections,
       store,
       current,
       controls,

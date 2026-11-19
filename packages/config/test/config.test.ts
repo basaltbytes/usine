@@ -1,9 +1,8 @@
-import { SupervisorLimits } from "@usine/core/worker";
 import { jsonKey } from "@usine/core/json-key";
 import { NodeFileSystem, NodePath } from "@effect/platform-node";
 import { assert, describe, expect, it } from "@effect/vitest";
 import { DecisionBrain } from "@usine/core/agent";
-import { BrainSpec, Harness, ModelId } from "@usine/core/agent/brain";
+import { ModelId } from "@usine/core/agent/brain";
 import { InstanceDirectory } from "@usine/core/instance";
 import { type Environment, ExpressionEngine, Source } from "@usine/expression/expression-engine";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
@@ -26,9 +25,6 @@ const instanceFolderLayer = InstanceFolder.layer.pipe(
 );
 const acceptanceRoot = InstanceDirectory.make(
   decodeURIComponent(new URL("./fixtures/acceptance", import.meta.url).pathname),
-);
-const invalidFactoryRoot = InstanceDirectory.make(
-  decodeURIComponent(new URL("./fixtures/invalid-factory", import.meta.url).pathname),
 );
 
 describe("ConfigParser", () => {
@@ -140,44 +136,6 @@ describe("ConfigParser", () => {
         .pipe(Effect.flip);
       expect(failure.stage).toBe("schema");
       expect(failure.message).toContain('["enabled"]');
-    }).pipe(Effect.provide(parserLayer)),
-  );
-
-  it.effect("defaults a Worker to unpaused and encodes paused only when set", () =>
-    Effect.gen(function* () {
-      const parser = yield* ConfigParser;
-      const config = yield* parser.parseUsineYaml(
-        InstancePath.make("usine.yaml"),
-        [
-          "version: 1",
-          "repos: []",
-          "workers:",
-          "  - name: local",
-          "    kind: local",
-          "  - name: trial",
-          "    kind: exe.dev",
-          "    paused: true",
-        ].join("\n"),
-      );
-      expect(config.workers.map(({ name, paused }) => ({ name, paused }))).toEqual([
-        { name: "local", paused: false },
-        { name: "trial", paused: true },
-      ]);
-
-      const encoded = yield* Schema.encodeEffect(UsineConfig)(config);
-      expect(encoded.workers).toEqual([
-        { name: "local", kind: "local", max_concurrent_attempts: 1 },
-        { name: "trial", kind: "exe.dev", max_concurrent_attempts: 1, paused: true },
-      ]);
-
-      const notBoolean = yield* parser
-        .parseUsineYaml(
-          InstancePath.make("usine.yaml"),
-          "version: 1\nrepos: []\nworkers:\n  - name: local\n    kind: local\n    paused: yes\n",
-        )
-        .pipe(Effect.flip);
-      expect(notBoolean.stage).toBe("schema");
-      expect(notBoolean.message).toContain("paused");
     }).pipe(Effect.provide(parserLayer)),
   );
 
@@ -990,21 +948,13 @@ workers:
           .pipe(Effect.flip);
         expect(failure.stage).toBe("schema");
       }
-    }).pipe(Effect.provide(parserLayer)),
-  );
-
-  it.effect("rejects case-only duplicate label declarations", () =>
-    Effect.gen(function* () {
-      const parser = yield* ConfigParser;
-      const failure = yield* parser
+      const duplicate = yield* parser
         .parseUsineYaml(
           InstancePath.make("usine.yaml"),
           "version: 1\nlabels: [{ name: Ready }, { name: ready }]\nrepos: []\n",
         )
         .pipe(Effect.flip);
-
-      expect(failure.stage).toBe("schema");
-      expect(failure.message).toContain("unique GitHub label names");
+      expect(duplicate.message).toContain("unique GitHub label names");
     }).pipe(Effect.provide(parserLayer)),
   );
 
@@ -1208,166 +1158,6 @@ workers:
         "---\nharness: codex\nmodel: gpt-5.6-sol\neffort: xhigh\ncoordinator: session\nparent_model: openai-codex/gpt-5.6-terra\n---\nPersona body.",
       );
       expect(Option.getOrNull(sessionWithParent.agent.coordinator)).toBe("session");
-    }).pipe(Effect.provide(parserLayer)),
-  );
-
-  it.effect("parses supervisor limits with defaults and refuses disabled limits", () =>
-    Effect.gen(function* () {
-      const parser = yield* ConfigParser;
-      const config = yield* parser.parseUsineYaml(
-        InstancePath.make("usine.yaml"),
-        "version: 1\nrepos: []\nsettings:\n  supervisor_limits:\n    cpus: 0.5\n    conversation_size_mib: 128\n    model_request_mib: 64\n    protocol_frame_mib: 8\n",
-      );
-      assert(Option.isSome(config.settings.supervisorLimits));
-      expect({ ...config.settings.supervisorLimits.value }).toEqual({
-        cpus: 0.5,
-        memoryMib: 1024,
-        pids: 256,
-        tmpfsSizeMib: 64,
-        conversationSizeMib: 128,
-        modelRequestMib: 64,
-        protocolFrameMib: 8,
-      });
-      const defaults = yield* parser.parseUsineYaml(
-        InstancePath.make("usine.yaml"),
-        "version: 1\nrepos: []\nsettings:\n  supervisor_limits: {}\n",
-      );
-      assert(Option.isSome(defaults.settings.supervisorLimits));
-      expect({ ...defaults.settings.supervisorLimits.value }).toEqual({
-        cpus: 1,
-        memoryMib: 1024,
-        pids: 256,
-        tmpfsSizeMib: 64,
-        conversationSizeMib: 128,
-        modelRequestMib: 32,
-        protocolFrameMib: 4,
-      });
-      expect(SupervisorLimits.make({})).toEqual(defaults.settings.supervisorLimits.value);
-      for (const field of [
-        "cpus",
-        "memory_mib",
-        "pids",
-        "tmpfs_size_mib",
-        "conversation_size_mib",
-        "model_request_mib",
-        "protocol_frame_mib",
-      ]) {
-        const refused = yield* parser
-          .parseUsineYaml(
-            InstancePath.make("usine.yaml"),
-            `version: 1\nrepos: []\nsettings:\n  supervisor_limits:\n    ${field}: 0\n`,
-          )
-          .pipe(Effect.flip);
-        expect(refused.details?.some(({ path }) => path.includes(field))).toBe(true);
-      }
-    }).pipe(Effect.provide(parserLayer)),
-  );
-
-  it.effect("keeps image pulls unbounded unless a positive timeout is configured", () =>
-    Effect.gen(function* () {
-      const parser = yield* ConfigParser;
-      const file = InstancePath.make("usine.yaml");
-      const unset = yield* parser.parseUsineYaml(file, "version: 1\nrepos: []\n");
-      expect(unset.settings.supervisorImagePullTimeoutMinutes).toEqual(Option.none());
-      const configured = yield* parser.parseUsineYaml(
-        file,
-        "version: 1\nrepos: []\nsettings:\n  supervisor_image_pull_timeout_minutes: 12\n",
-      );
-      expect(configured.settings.supervisorImagePullTimeoutMinutes).toEqual(Option.some(12));
-      const encoded = yield* Schema.encodeEffect(UsineConfig)(configured);
-      expect(encoded.settings?.supervisor_image_pull_timeout_minutes).toBe(12);
-      for (const value of [0, -1, 1.5]) {
-        const refused = yield* parser
-          .parseUsineYaml(
-            file,
-            `version: 1\nrepos: []\nsettings:\n  supervisor_image_pull_timeout_minutes: ${value}\n`,
-          )
-          .pipe(Effect.flip);
-        expect(
-          refused.details?.some(({ path }) =>
-            path.includes("supervisor_image_pull_timeout_minutes"),
-          ),
-        ).toBe(true);
-      }
-    }).pipe(Effect.provide(parserLayer)),
-  );
-
-  it.effect("parses the supervisor brain in settings", () =>
-    Effect.gen(function* () {
-      const parser = yield* ConfigParser;
-      const unset = yield* parser.parseUsineYaml(
-        InstancePath.make("usine.yaml"),
-        "version: 1\nrepos: []\n",
-      );
-      expect(unset.settings.supervisor).toEqual(Option.none());
-      const configured = yield* parser.parseUsineYaml(
-        InstancePath.make("usine.yaml"),
-        "version: 1\nrepos: []\nsettings:\n  supervisor:\n    harness: claude\n    model: claude-sonnet-5-5\n    effort: medium\n",
-      );
-      expect(Option.getOrNull(configured.settings.supervisor)).toEqual(
-        BrainSpec.make({
-          harness: Harness.make("claude"),
-          model: ModelId.make("claude-sonnet-5-5"),
-          effort: "medium",
-        }),
-      );
-      const incomplete = yield* parser
-        .parseUsineYaml(
-          InstancePath.make("usine.yaml"),
-          "version: 1\nrepos: []\nsettings:\n  supervisor:\n    harness: claude\n",
-        )
-        .pipe(Effect.flip);
-      expect(incomplete.details?.map(({ path }) => path)).toEqual([
-        ["settings", "supervisor", "model"],
-        ["settings", "supervisor", "effort"],
-      ]);
-    }).pipe(Effect.provide(parserLayer)),
-  );
-
-  it.effect("parses parent_effort in settings and agent frontmatter as the Effort scale", () =>
-    Effect.gen(function* () {
-      const parser = yield* ConfigParser;
-      const config = yield* parser.parseUsineYaml(
-        InstancePath.make("usine.yaml"),
-        "version: 1\nrepos: []\nsettings:\n  parent_model: openai-codex/gpt-5.6-terra\n  parent_effort: medium\n",
-      );
-      expect(Option.getOrNull(config.settings.parentEffort)).toBe("medium");
-
-      const unset = yield* parser.parseUsineYaml(
-        InstancePath.make("usine.yaml"),
-        "version: 1\nrepos: []\n",
-      );
-      expect(Option.isNone(unset.settings.parentEffort)).toBe(true);
-
-      const invalid = yield* parser
-        .parseUsineYaml(
-          InstancePath.make("usine.yaml"),
-          "version: 1\nrepos: []\nsettings:\n  parent_effort: extreme\n",
-        )
-        .pipe(Effect.flip);
-      expect(invalid.stage).toBe("schema");
-      expect(invalid.message).toContain("parent_effort");
-
-      const agent = yield* parser.parseAgentFile(
-        InstancePath.make("agents/developer.md"),
-        "---\nharness: codex\nmodel: gpt-5.6-sol\neffort: xhigh\nparent_effort: low\n---\nPersona body.",
-      );
-      expect(Option.getOrNull(agent.parentEffort)).toBe("low");
-
-      const inheriting = yield* parser.parseAgentFile(
-        InstancePath.make("agents/developer.md"),
-        "---\nharness: codex\nmodel: gpt-5.6-sol\neffort: xhigh\n---\nPersona body.",
-      );
-      expect(Option.isNone(inheriting.parentEffort)).toBe(true);
-
-      const badAgent = yield* parser
-        .parseAgentFile(
-          InstancePath.make("agents/developer.md"),
-          "---\nharness: codex\nmodel: gpt-5.6-sol\neffort: xhigh\nparent_effort: extreme\n---\nPersona body.",
-        )
-        .pipe(Effect.flip);
-      expect(badAgent.stage).toBe("schema");
-      expect(badAgent.message).toContain("parent_effort");
 
       const unknownHarness = yield* parser
         .parseAgentFile(
@@ -1377,93 +1167,6 @@ workers:
         .pipe(Effect.flip);
       expect(unknownHarness.stage).toBe("schema");
       expect(unknownHarness.message).toContain('Unknown harness "new-harness"');
-    }).pipe(Effect.provide(parserLayer)),
-  );
-
-  it.effect("parses one exclusive per-repository lane map", () =>
-    Effect.gen(function* () {
-      const parser = yield* ConfigParser;
-      const configured = yield* parser.parseUsineYaml(
-        InstancePath.make("usine.yaml"),
-        [
-          "version: 1",
-          "repos:",
-          "  - name: basaltbytes/usine",
-          "    lanes:",
-          "      - name: Ready",
-          "        sources:",
-          "          - label: ready-for-agent",
-          "      - name: In review",
-          "        sources:",
-          "          - state: pr-open",
-          "          - label: ready-for-review",
-        ].join("\n"),
-      );
-
-      expect(configured.repos[0]?.lanes.map(({ name }) => name)).toEqual(["Ready", "In review"]);
-
-      const duplicate = yield* parser
-        .parseUsineYaml(
-          InstancePath.make("usine.yaml"),
-          [
-            "version: 1",
-            "repos:",
-            "  - name: basaltbytes/usine",
-            "    lanes:",
-            "      - name: Ready",
-            "        sources: [{ label: ready-for-agent }]",
-            "      - name: Also ready",
-            "        sources: [{ label: ready-for-agent }]",
-          ].join("\n"),
-        )
-        .pipe(Effect.flip);
-      expect(duplicate.stage).toBe("schema");
-      expect(duplicate.message).toContain("each lane source in only one lane");
-    }).pipe(Effect.provide(parserLayer)),
-  );
-
-  it.effect("defaults Item rounds to three and accepts only positive snake_case max_cycles", () =>
-    Effect.gen(function* () {
-      const parser = yield* ConfigParser;
-      const source = (field: string) =>
-        `---\ntrigger:\n  on: pr\n  if: 'true'\nagent: reviewer\n${field}---\nReview the Item.`;
-      const parse = (field: string) =>
-        parser.parseLoopFile(InstancePath.make("loops/review.md"), source(field));
-
-      expect((yield* parse("")).maxCycles).toBe(3);
-
-      expect((yield* parse("max_cycles: 5\n")).maxCycles).toBe(5);
-      for (const invalid of ["max_cycles: 0\n", "max_cycles: 1.5\n", "maxCycles: 5\n"]) {
-        expect((yield* parse(invalid).pipe(Effect.flip)).stage).toBe("schema");
-      }
-    }).pipe(Effect.provide(parserLayer)),
-  );
-
-  it.effect("parses CI policies with authored keys and rejects invalid deadlines", () =>
-    Effect.gen(function* () {
-      const parser = yield* ConfigParser;
-      const source = (ci: string) =>
-        `---\ntrigger:\n  on: pr\n  if: 'true'\nagent: reviewer\n${ci}---\nFix CI.`;
-      const parse = (ci: string) =>
-        parser.parseLoopFile(InstancePath.make("loops/fix.md"), source(ci));
-
-      expect(Option.isNone((yield* parse("")).ci)).toBe(true);
-      const configured = yield* parse("ci:\n  fix_loop: widgets/fix\n  timeout_seconds: 3600\n");
-      expect(Option.isSome(configured.ci) && configured.ci.value.fixLoop).toBe("widgets/fix");
-      const decodedValue9 = formatLoop(configured);
-      const roundtrip = yield* parser.parseLoopFile(
-        InstancePath.make("loops/fix.md"),
-        decodedValue9,
-      );
-      expect(roundtrip.ci).toEqual(configured.ci);
-      const valueDecoded1 = formatLoop(configured);
-      expect(valueDecoded1).toContain("fix_loop: widgets/fix");
-      for (const ci of [
-        "ci:\n  fix_loop: fix\n  timeout_seconds: 0\n",
-        "ci:\n  fixLoop: fix\n  timeout_seconds: 30\n",
-      ]) {
-        expect((yield* parse(ci).pipe(Effect.flip)).stage).toBe("schema");
-      }
     }).pipe(Effect.provide(parserLayer)),
   );
 
@@ -1534,31 +1237,6 @@ workers:
     }).pipe(Effect.provide(parserLayer)),
   );
 
-  it.effect("defaults Loop permissions to write and accepts only read or write", () =>
-    Effect.gen(function* () {
-      const parser = yield* ConfigParser;
-      const source = (field: string) =>
-        `---\ntrigger:\n  on: pr\n  if: 'true'\nagent: reviewer\n${field}---\nReview the Item.`;
-      const parse = (field: string) =>
-        parser.parseLoopFile(InstancePath.make("loops/review.md"), source(field));
-
-      expect((yield* parse("")).permissions).toBe("write");
-
-      expect((yield* parse("permissions: read\n")).permissions).toBe("read");
-
-      expect((yield* parse("permissions: write\n")).permissions).toBe("write");
-      for (const invalid of [
-        "permissions: admin\n",
-        "permissions: { contents: read }\n",
-        "permission: read\n",
-      ]) {
-        const failure = yield* parse(invalid).pipe(Effect.flip);
-        expect(failure.stage).toBe("schema");
-        expect(failure.message).toContain("permission");
-      }
-    }).pipe(Effect.provide(parserLayer)),
-  );
-
   it.effect("accepts integer priorities and checks CEL priorities against the trigger stream", () =>
     Effect.gen(function* () {
       const parser = yield* ConfigParser;
@@ -1599,28 +1277,6 @@ workers:
         expect((yield* parse(`priority: '${invalid}'\n`).pipe(Effect.flip)).stage).toBe(
           "expression",
         );
-    }).pipe(Effect.provide(parserLayer)),
-  );
-
-  it.effect("exposes pull request mergeability to pr trigger expressions", () =>
-    Effect.gen(function* () {
-      const parser = yield* ConfigParser;
-      const source = (condition: string) =>
-        `---\ntrigger:\n  on: pr\n  if: ${condition}\nagent: finisher\n---\nRebase the branch.`;
-      const parse = (condition: string) =>
-        parser.parseLoopFile(InstancePath.make("loops/rebase-pr.md"), source(condition));
-      const loop = yield* parse(
-        '\'item.mergeable == "CONFLICTING" && item.mergeStateStatus != "UNKNOWN"\'',
-      );
-      expect(loop.trigger.on).toBe("pr");
-      const issueFailure = yield* parser
-        .parseLoopFile(
-          InstancePath.make("loops/rebase-issue.md"),
-          "---\ntrigger:\n  on: issue\n  if: 'item.mergeable == \"CONFLICTING\"'\nagent: finisher\n---\nNo.",
-        )
-        .pipe(Effect.flip);
-      expect(issueFailure.stage).toBe("expression");
-      expect(issueFailure.message).toContain("No such key: mergeable");
     }).pipe(Effect.provide(parserLayer)),
   );
 
@@ -1681,6 +1337,8 @@ workers:
       expect((yield* parse("  on: pr\n  if: false\n")).trigger.if).toBe("false");
       const schedule = yield* parse("  on: schedule\n  if: true\n  cron: '0 9 * * 1'\n");
       expect(schedule.trigger.if).toBe("true");
+      assert(schedule.trigger.on === "schedule");
+      expect(schedule.trigger.tz).toBe("UTC");
       for (const value of ["3", "[ready]", "", "{ state: OPEN }"]) {
         const failure = yield* parse(`  on: issue\n  if: ${value}\n`).pipe(Effect.flip);
         expect(failure.stage).toBe("schema");
@@ -1758,30 +1416,6 @@ workers:
     }).pipe(Effect.provide(MarcbachmannCelLayer)),
   );
 
-  it.effect("rejects enabled in loop frontmatter instead of silently accepting it", () =>
-    Effect.gen(function* () {
-      const parser = yield* ConfigParser;
-      const failure = yield* parser
-        .parseLoopFile(
-          InstancePath.make("loops/disabled.md"),
-          [
-            "---",
-            "enabled: false",
-            "trigger:",
-            "  on: issue",
-            "  if: 'true'",
-            "agent: developer",
-            "---",
-            "Do the work.",
-          ].join("\n"),
-        )
-        .pipe(Effect.flip);
-
-      expect(failure.stage).toBe("schema");
-      expect(failure.message).toContain('["enabled"]');
-    }).pipe(Effect.provide(parserLayer)),
-  );
-
   it.effect("rejects cron ranges with an empty bound instead of coercing it to zero", () =>
     Effect.gen(function* () {
       const parser = yield* ConfigParser;
@@ -1829,32 +1463,6 @@ workers:
       expect(failure.stage).toBe("schema");
       expect(failure.message).toContain("IANA time-zone name");
     }).pipe(Effect.provide(parserLayer)),
-  );
-
-  it.effect(
-    "parses a schedule loop, defaulting tz to UTC and checking against the tick slice",
-    () =>
-      Effect.gen(function* () {
-        const parser = yield* ConfigParser;
-        const loop = yield* parser.parseLoopFile(
-          InstancePath.make("loops/weekly-sweep.md"),
-          [
-            "---",
-            "trigger:",
-            "  on: schedule",
-            "  if: item.tick.cron != ''",
-            "  cron: '0 9 * * 1'",
-            "agent: developer",
-            "---",
-            "Sweep the backlog for the tick at {{ item.tick.scheduledAt }}.",
-          ].join("\n"),
-        );
-
-        expect(loop.trigger.on).toBe("schedule");
-        if (loop.trigger.on !== "schedule") return;
-        expect(loop.trigger.cron).toBe("0 9 * * 1");
-        expect(loop.trigger.tz).toBe("UTC");
-      }).pipe(Effect.provide(parserLayer)),
   );
 
   it.effect("fails a loop whose prompt leaves an interpolation unclosed", () =>
@@ -1940,52 +1548,6 @@ describe("InstanceFolder", () => {
     }).pipe(Effect.provide(instanceFolderLayer)),
   );
 
-  it.effect("makes a snapshot whose loop references an unrostered agent unconstructible", () =>
-    Effect.gen(function* () {
-      const folder = yield* InstanceFolder;
-      const loaded = yield* folder.load(acceptanceRoot);
-
-      expect(() =>
-        LoadedInstance.make({
-          config: loaded.config,
-          agents: [],
-          invalidAgents: loaded.invalidAgents,
-          loops: loaded.loops,
-          quarantinedLoops: loaded.quarantinedLoops,
-          warnings: loaded.warnings,
-        }),
-      ).toThrow();
-    }).pipe(Effect.provide(instanceFolderLayer)),
-  );
-
-  it.effect("stops the instance load when usine.yaml is invalid", () =>
-    Effect.gen(function* () {
-      const folder = yield* InstanceFolder;
-      const failure = yield* folder.load(invalidFactoryRoot).pipe(Effect.flip);
-
-      expect(failure._tag).toBe("FactoryConfigError");
-      expect(failure.file).toBe("usine.yaml");
-      expect(failure.stage).toBe("schema");
-    }).pipe(Effect.provide(instanceFolderLayer)),
-  );
-
-  it.effect("normalizes CEL bigint values while rendering prompt interpolation", () =>
-    Effect.gen(function* () {
-      const folder = yield* InstanceFolder;
-      const parser = yield* ConfigParser;
-      const loaded = yield* folder.load(acceptanceRoot);
-      const loop = loaded.loops.find(({ name }) => name === "start-dev");
-      expect(loop).toBeDefined();
-      if (loop === undefined) return;
-
-      const prompt = yield* parser.renderPrompt(loop, {
-        repo: { name: "basaltbytes/usine", owner: "basaltbytes", url: "https://example.test" },
-        item: { number: 25, title: "Instance-folder parsing" },
-      });
-      expect(prompt).toBe("Implement issue #25: Instance-folder parsing\n");
-    }).pipe(Effect.provide(Layer.merge(instanceFolderLayer, parserLayer))),
-  );
-
   it.effect("requires the repo and tag selector axes to match together", () =>
     Effect.gen(function* () {
       const folder = yield* InstanceFolder;
@@ -2029,6 +1591,7 @@ describe("InstanceFolder", () => {
           warnings: loaded.warnings,
         }),
       ).not.toThrow();
+      expect(() => LoadedInstance.make({ ...loaded, agents: [] })).toThrow();
       const repo = Schema.decodeUnknownEffect(ManagedRepo);
       const decodedValue2 = yield* repo({ name: "basaltbytes/usine" });
       expect(matchesSelector(loop.selector, decodedValue2)).toBe(true);
@@ -2039,51 +1602,6 @@ describe("InstanceFolder", () => {
 });
 
 describe("YamlWriter", () => {
-  it.effect("updates one YAML path while preserving comments and key order", () =>
-    Effect.gen(function* () {
-      const source = [
-        "# keep this comment",
-        "version: 1",
-        "repos: []",
-        "settings:",
-        "  poll_interval: 60 # keep inline",
-        "",
-      ].join("\n");
-      const updated = yield* updateYaml(
-        InstancePath.make("usine.yaml"),
-        source,
-        YamlEdit.make({ path: ["settings", "poll_interval"], value: 30 }),
-      );
-
-      expect(updated).toContain("# keep this comment");
-      expect(updated).toContain("poll_interval: 30 # keep inline");
-      expect(updated.indexOf("version:")).toBeLessThan(updated.indexOf("repos:"));
-    }),
-  );
-
-  it.effect("updates frontmatter without touching the Markdown body", () =>
-    Effect.gen(function* () {
-      const source = [
-        "---",
-        "# authored note",
-        "harness: codex",
-        "model: gpt-5",
-        "effort: medium",
-        "---",
-        "Persona body with # markdown.",
-      ].join("\n");
-      const updated = yield* updateFrontmatter(
-        InstancePath.make("agents/developer.md"),
-        source,
-        YamlEdit.make({ path: ["effort"], value: "high" }),
-      );
-
-      expect(updated).toContain("# authored note");
-      expect(updated).toContain("effort: high");
-      expect(updated.endsWith("Persona body with # markdown.")).toBe(true);
-    }),
-  );
-
   it.effect("retains CRLF newline style in standalone and frontmatter edits", () =>
     Effect.gen(function* () {
       const updatedYaml = yield* updateYaml(

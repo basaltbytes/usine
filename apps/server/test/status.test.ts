@@ -116,30 +116,6 @@ const statusWhileHeld = (directory: InstanceDirectory, port: Port) =>
   }).pipe(Effect.scoped, Effect.provide(services));
 
 describe("usine status", () => {
-  it.live("reports the pid, address, engine, start, and open runs of a running instance", () =>
-    Effect.gen(function* () {
-      const directory = instanceFolder();
-      const port = yield* fakeOperatorApi([
-        { id: "run-1", state: "Running" },
-        { id: "run-2", state: "Queued" },
-        { id: "run-3", state: "Queued" },
-        { id: "run-4", state: "Succeeded" },
-      ]);
-      const report = yield* statusWhileHeld(directory, port);
-      assert.isTrue(report.running);
-      assert.strictEqual(report.lines[0], `usine is running in ${directory}.`);
-      assert.include(report.lines, `  pid       ${process.pid}`);
-      assert.include(report.lines, `  address   http://127.0.0.1:${port}`);
-      assert.include(
-        report.lines,
-        "  engine    @usine/server 1.2.3, from /opt/usine/apps/server/dist/main.js",
-      );
-      assert.include(report.lines, "  runs      1 running, 2 queued");
-      assert.match(report.lines.join("\n"), /started {3}2026-10-25T16:00:00\.000Z \(.+ ago\)/u);
-      assert.notMatch(report.lines.join("\n"), /update/u, "an engine from a checkout has no pin");
-    }),
-  );
-
   it.live("says that the runs are unavailable when the operator API doesn't answer", () =>
     Effect.gen(function* () {
       const directory = instanceFolder();

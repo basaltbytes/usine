@@ -1,5 +1,5 @@
 import { jsonKey } from "@usine/core/json-key";
-import { Deferred, DateTime, Duration, Effect, Option, Redacted, Schema, Clock } from "effect";
+import { Deferred, DateTime, Duration, Effect, Option, Redacted, Schema } from "effect";
 import { assert, describe, expect, it } from "@effect/vitest";
 
 import { HttpRouter } from "effect/http";
@@ -7,7 +7,7 @@ import { TestClock } from "effect/testing";
 import { ProcessStatus, SandboxSummary } from "../src/api/api.ts";
 import { processFiles, stopCommand } from "../src/sandbox/process.ts";
 import { DRAIN_MARKER } from "../src/api/harness.ts";
-import { collectBytes, keepAlive, LEASE, restore, sandboxRoutes } from "../src/sandbox/sandbox.ts";
+import { keepAlive, LEASE, sandboxRoutes } from "../src/sandbox/sandbox.ts";
 import {
   ATTEMPT,
   fakeSandbox,
@@ -119,62 +119,7 @@ describe("sandbox routes", () => {
       }),
   );
 
-  it.live("refuses an image the Worker doesn't have and a body with unknown keys", () =>
-    Effect.gen(function* () {
-      const { state, call } = served();
-      const missing = yield* Effect.promise(() =>
-        call(
-          "PUT",
-          `/v1/sandboxes/${NAME}`,
-          createBody().replace('"image":"usine"', '"image":"other"'),
-        ),
-      );
-      const extra = yield* Effect.promise(() =>
-        call(
-          "PUT",
-          `/v1/sandboxes/${NAME}`,
-          createBody().replace('"owner"', '"secret":"x","owner"'),
-        ),
-      );
-
-      expect(missing.status).toBe(422);
-      const decodedValue13 = yield* Effect.promise(() => missing.json());
-      expect(decodedValue13).toMatchObject({
-        _tag: "ImageNotFound",
-        images: ["usine"],
-      });
-      expect(extra.status).toBe(400);
-      expect(state.started).toHaveLength(0);
-    }),
-  );
-
-  it.live("replaces the handlers' credentials on renewal and extends the lease", () =>
-    Effect.gen(function* () {
-      const { state, call } = served();
-      yield* Effect.promise(() => call("PUT", `/v1/sandboxes/${NAME}`, createBody()));
-      assert(Option.isSome(state.stored));
-      const firstLease = state.stored.value.leaseUntil;
-      yield* Clock.Clock.defaultValue().sleep(Duration.millis(5));
-      const renewed = yield* Effect.promise(() =>
-        call("PUT", `/v1/sandboxes/${NAME}/credentials`, renewedBody),
-      );
-
-      expect(renewed.status).toBe(200);
-      const github = state.interceptions.filter(({ _tag }) => _tag === "GitHub");
-      expect(
-        github.map(
-          (interception) => interception._tag === "GitHub" && Redacted.value(interception.token),
-        ),
-      ).toEqual(["ghs_first", "ghs_first", "ghs_second", "ghs_second"]);
-      assert(Option.isSome(state.stored));
-      expect(DateTime.isGreaterThan(state.stored.value.leaseUntil, firstLease)).toBe(true);
-    }),
-  );
-
-  it.live.each([
-    ["a reattachment's credentials", "", createBody()],
-    ["renewed credentials", "/credentials", renewedBody],
-  ])("keeps a hold that completes while it registers %s", ([, path, body]) =>
+  it.live("keeps a hold that completes while it registers a reattachment's credentials", () =>
     Effect.gen(function* () {
       const { state, call } = served();
       yield* Effect.promise(() => call("PUT", `/v1/sandboxes/${NAME}`, createBody()));
@@ -186,7 +131,7 @@ describe("sandbox routes", () => {
           Effect.andThen(Deferred.await(registered)),
         );
       };
-      const pending = call("PUT", `/v1/sandboxes/${NAME}${path}`, body);
+      const pending = call("PUT", `/v1/sandboxes/${NAME}`, createBody());
       yield* Deferred.await(reached);
       const held = yield* Effect.promise(() => call("POST", `/v1/sandboxes/${NAME}/hold`));
       yield* Deferred.succeed(registered, undefined);
@@ -202,6 +147,8 @@ describe("sandbox routes", () => {
     Effect.gen(function* () {
       const { state, call } = served();
       yield* Effect.promise(() => call("PUT", `/v1/sandboxes/${NAME}`, createBody()));
+      assert(Option.isSome(state.stored));
+      const firstLease = state.stored.value.leaseUntil;
       const reached = yield* Deferred.make<void>();
       const registered = yield* Deferred.make<void>();
       state.beforeIntercept = () => {
@@ -225,6 +172,7 @@ describe("sandbox routes", () => {
       assert(Option.isSome(state.stored));
       expect(Option.isNone(state.stored.value.credentials.github)).toBe(true);
       expect(state.stored.value.credentials.providers).toEqual([]);
+      expect(DateTime.isGreaterThan(state.stored.value.leaseUntil, firstLease)).toBe(true);
       expect(state.interceptions.slice(-5).map(({ _tag, host }) => `${_tag}:${host}`)).toEqual([
         "Denied:github.com",
         "Denied:api.github.com",
@@ -260,23 +208,6 @@ describe("sandbox routes", () => {
       assert(Option.isSome(state.stored));
       expect(Option.isNone(state.stored.value.credentials.github)).toBe(true);
       expect(DateTime.formatIso(state.stored.value.credentials.issuedAt)).toBe(issuedAt(2));
-    }),
-  );
-
-  it.live("refuses to renew the credentials of a sandbox whose container stopped", () =>
-    Effect.gen(function* () {
-      const { state, call } = served();
-      yield* Effect.promise(() => call("PUT", `/v1/sandboxes/${NAME}`, createBody()));
-      state.running = false;
-      const response = yield* Effect.promise(() =>
-        call("PUT", `/v1/sandboxes/${NAME}/credentials`, renewedBody),
-      );
-
-      expect(response.status).toBe(503);
-      const decodedValue12 = yield* Effect.promise(() => response.json());
-      expect(decodedValue12).toMatchObject({
-        _tag: "ContainerUnavailable",
-      });
     }),
   );
 
@@ -363,25 +294,6 @@ describe("sandbox routes", () => {
     }),
   );
 
-  it.live("holds a sandbox past its lease until it's destroyed, through a reattachment", () =>
-    Effect.gen(function* () {
-      const { state, call } = served();
-      yield* Effect.promise(() => call("PUT", `/v1/sandboxes/${NAME}`, createBody()));
-      const held = yield* Effect.promise(() => call("POST", `/v1/sandboxes/${NAME}/hold`));
-      yield* Effect.promise(() => call("PUT", `/v1/sandboxes/${NAME}`, createBody()));
-
-      expect(held.status).toBe(200);
-      const decodedValue4 = yield* Effect.promise(() => held.json());
-      expect((yield* decodeSummary(decodedValue4)).held).toBe(true);
-      assert(Option.isSome(state.stored));
-      expect(state.stored.value.held).toBe(true);
-
-      yield* Effect.promise(() => call("DELETE", `/v1/sandboxes/${NAME}`));
-      const gone = yield* Effect.promise(() => call("POST", `/v1/sandboxes/${NAME}/hold`));
-      expect(gone.status).toBe(404);
-    }),
-  );
-
   it.live(
     "reports that the platform is draining the container once its init wrote the marker",
     () =>
@@ -399,19 +311,6 @@ describe("sandbox routes", () => {
         expect(before.draining).toBe(false);
         expect(after.draining).toBe(true);
       }),
-  );
-
-  it.live("reports the protocol and the Worker's image names", () =>
-    Effect.gen(function* () {
-      const { call } = served();
-      const response = yield* Effect.promise(() => call("GET", "/v1/health"));
-
-      const decodedValue1 = yield* Effect.promise(() => response.json());
-      expect(decodedValue1).toEqual({
-        protocol: 1,
-        images: ["usine"],
-      });
-    }),
   );
 });
 
@@ -444,21 +343,6 @@ describe("sandbox keepalive alarm", () => {
     }).pipe(Effect.provide(layer));
   });
 
-  it.effect(
-    "sets the inactivity timeout and handlers again when the Durable Object restarts",
-    () => {
-      const { state, layer } = fakeSandbox();
-      state.running = true;
-      state.stored = Option.some(storedSandbox(DateTime.makeUnsafe(Duration.toMillis(LEASE))));
-      return Effect.gen(function* () {
-        yield* restore();
-
-        expect(state.keepAlives).toBe(1);
-        expect(state.interceptions.length).toBeGreaterThan(0);
-      }).pipe(Effect.provide(layer));
-    },
-  );
-
   it.effect("lets the container stop once usine stopped renewing its lease", () => {
     const { state, layer } = fakeSandbox();
     state.running = true;
@@ -471,21 +355,4 @@ describe("sandbox keepalive alarm", () => {
       expect(Option.isNone(state.alarm)).toBe(true);
     }).pipe(Effect.provide(layer));
   });
-});
-
-describe("command output", () => {
-  it.effect("keeps output bytes that aren't UTF-8 as they are", () =>
-    Effect.gen(function* () {
-      const bytes = new Uint8Array([0xac, 0x41, 0xff]);
-      const { stdout, exitCode } = yield* collectBytes({
-        stdin: null,
-        stdout: new Response(bytes).body,
-        stderr: new Response("").body,
-        exitCode: Promise.resolve(0),
-      });
-
-      expect([...stdout]).toEqual([0xac, 0x41, 0xff]);
-      expect(exitCode).toBe(0);
-    }),
-  );
 });

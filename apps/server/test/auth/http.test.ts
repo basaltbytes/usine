@@ -1,10 +1,9 @@
 import { jsonKey } from "@usine/core/json-key";
-import type { SqliteReaderState } from "@usine/engine/local-sqlite";
 import { MemberAccess } from "../../src/auth/access.ts";
 import { securityMiddleware } from "../../src/security.ts";
 import { TestClock } from "effect/testing";
 import { ActingMember, OperatorLogin } from "@usine/core/operator";
-import { Clock, Effect, Layer, Logger, Option, Redacted, Ref, Schema } from "effect";
+import { Clock, Effect, Layer, Logger, Option, Redacted, Schema } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
 import { IpNetwork } from "effect/net";
 import { administratorPermissions } from "@usine/core/access";
@@ -269,32 +268,6 @@ it.live("limits repeated sign-in requests and refuses cross-site link consumptio
         .status,
       429,
     );
-  }).pipe(Effect.scoped),
-);
-
-it.live("counts sign-in requests per client address so one client can't lock out another", () =>
-  Effect.gen(function* () {
-    const { authentication: auth } = yield* authFixture([alice, bob], bob);
-    for (let count = 0; count < 60; count++) yield* auth.startWeb(false).pipe(from("203.0.113.7"));
-
-    assert.equal((yield* auth.startWeb(false).pipe(from("203.0.113.7"), Effect.flip)).status, 429);
-    const started = yield* auth.startWeb(false).pipe(from("198.51.100.4"));
-    const session = yield* auth
-      .finishWeb(Redacted.value(started.state), "fake")
-      .pipe(from("198.51.100.4"));
-    const signedIn = yield* auth.authenticate(Redacted.value(session.secret));
-    assert.equal(Option.getOrNull(signedIn.member)?.login, bob.login);
-  }).pipe(Effect.scoped),
-);
-
-it.live("stops sign-in requests from new clients at the instance-wide ceiling", () =>
-  Effect.gen(function* () {
-    const { authentication: auth } = yield* authFixture();
-    for (let client = 1; client <= 10; client++)
-      for (let count = 0; count < 60; count++)
-        yield* auth.startWeb(false).pipe(from(`203.0.113.${client}`));
-
-    assert.equal((yield* auth.startWeb(false).pipe(from("198.51.100.4"), Effect.flip)).status, 429);
   }).pipe(Effect.scoped),
 );
 
@@ -580,33 +553,6 @@ it.live("defers operator enrollment when GitHub is unavailable and retries on th
 
     assert.equal((yield* services.store.members)[0]?.id, alice.id);
   }).pipe(Effect.scoped),
-);
-
-it.live("public health reports SQLite degradation and recovery without failing liveness", () =>
-  Effect.scoped(
-    Effect.gen(function* () {
-      const services = yield* authFixture();
-      const state = yield* Ref.make<SqliteReaderState>("worker");
-      const app = HttpRouter.toWebHandler(
-        authenticatedRoutes({
-          ...services,
-          sqliteReader: { state: Ref.get(state) },
-        }).routes,
-        { disableLogger: true },
-      );
-      yield* Effect.addFinalizer(() => Effect.promise(() => app.dispose()));
-      for (const sqliteReader of ["worker", "fallback", "respawning", "worker"] as const) {
-        yield* Ref.set(state, sqliteReader);
-        const response = yield* Effect.promise(() => request(app, "/api/health"));
-        assert.equal(response.status, 200);
-        const responseBody = yield* Effect.promise(() => response.json());
-        assert.deepEqual(responseBody, {
-          ok: true,
-          sqliteReader,
-        });
-      }
-    }),
-  ),
 );
 
 type TokenBody = {

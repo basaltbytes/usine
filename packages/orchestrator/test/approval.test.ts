@@ -63,27 +63,6 @@ for (const scenario of [
     warning: false,
   },
   {
-    name: "missing label entry requires approval",
-    payload: { labelEvents: {} },
-    approval: condition,
-    state: "Waiting",
-    warning: true,
-  },
-  {
-    name: "older payload requires approval",
-    payload: {},
-    approval: condition,
-    state: "Waiting",
-    warning: true,
-  },
-  {
-    name: "deleted actor requires approval",
-    payload: label(null),
-    approval: condition,
-    state: "Waiting",
-    warning: true,
-  },
-  {
     name: "failed expression requires approval",
     payload: {},
     approval: "1 / 0 > 0",

@@ -29,7 +29,7 @@ const encodeLine = Schema.encodeEffect(Schema.fromJsonString(Schema.Json));
 
 // Supervisor frames wrap JSON-RPC bytes in base64. Store the decoded bytes so path and token
 // redaction also applies inside those frames. Incomplete UTF-8 uses a lossless byte string.
-export const decodeWire = (line: string) =>
+const decodeWire = (line: string) =>
   Effect.gen(function* () {
     const payload = yield* decodeLine(line).pipe(Effect.orElseSucceed(() => line));
     if (!isJsonObject(payload)) return payload;

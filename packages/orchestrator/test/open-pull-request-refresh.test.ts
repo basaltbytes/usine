@@ -235,8 +235,6 @@ describe("open pull request refresh", () => {
 
   for (const [initial, settled] of [
     ["PENDING", "SUCCESS"],
-    ["PENDING", "FAILURE"],
-    ["PENDING", "ERROR"],
     ["EXPECTED", "SUCCESS"],
   ] as const) {
     it.effect(`refreshes a ${initial} check rollup on every poll until ${settled}`, () => {

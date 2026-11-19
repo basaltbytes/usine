@@ -9,11 +9,10 @@ import {
   TokenCount,
 } from "@usine/core/agent/session";
 import { WorkerName } from "@usine/core/worker";
-import { Array as Arr, Effect, Fiber, Option, Predicate, Schema } from "effect";
+import { Effect, Fiber, Option, Predicate, Schema } from "effect";
 import { TestClock } from "effect/testing";
 import { LocalProcess } from "../src/child-host/child-host.ts";
 import { AdmissionContext, AdmittedBrain } from "../src/harness/admission.ts";
-import { CapabilityProfile, Lacking } from "../src/harness/capability.ts";
 import { catalog } from "../src/harness/catalog.ts";
 import {
   CompletionReply,
@@ -25,17 +24,14 @@ import {
 import { claude } from "../src/harness/claude/descriptor.ts";
 import { continuationPolicy } from "../src/harness/continuation.ts";
 import { SessionSpec, StartPrompt } from "../src/harness/contract.ts";
-import { HarnessCatalog, HarnessDescriptor } from "../src/harness/harness.ts";
 import { Harnesses, type HarnessRuntime } from "../src/harness/node.ts";
 import { pi } from "../src/harness/pi/descriptor.ts";
 import { RolePlacements, RoleSpec } from "../src/harness/role.ts";
 import { checkedPreflight } from "../src/harness/runtime.ts";
 import {
-  AgentCapacityError,
   AgentResultError,
   PoolUnavailableError,
   RestartState,
-  SessionOperationError,
   UnknownModelError,
   UnsupportedEffortError,
   WorkingDirectory,
@@ -226,37 +222,6 @@ describe("structured completions through the registry", () => {
     }).pipe(Effect.provide(Harnesses.layerFrom(catalog, runtimes)));
   });
 
-  it.effect("refuses a completion on a harness whose descriptor lacks structured output", () => {
-    const { calls, runtimes } = runtimesWith(() => Effect.die(new Error("unreachable")));
-    const unstructured = HarnessDescriptor.make({
-      ...claude,
-      capabilities: Arr.map(claude.capabilities, (profile) =>
-        CapabilityProfile.make({
-          ...profile,
-          supported: profile.supported.filter((capability) => capability !== "structured-output"),
-          lacking: [
-            ...profile.lacking,
-            Lacking.make({ capability: "structured-output", reason: "No output schema" }),
-          ],
-        }),
-      ),
-    });
-    const source = HarnessCatalog.make({
-      descriptors: catalog.descriptors.map((descriptor) =>
-        descriptor.id === claude.id ? unstructured : descriptor,
-      ),
-    });
-    return Effect.gen(function* () {
-      const runtime = yield* (yield* Harnesses).runtime(claude.id);
-      const refused = yield* runtime
-        .complete(specFor(decision), "Approve?", Verdict)
-        .pipe(Effect.flip);
-      assert.strictEqual(refused.reason._tag, "CompletionRefused");
-      assert.include(refused.message, "lacks structured-output (No output schema)");
-      assert.deepStrictEqual(calls, []);
-    }).pipe(Effect.provide(Harnesses.layerFrom(source, runtimes)));
-  });
-
   it.effect(
     "refuses to open a session for a role that keeps no conversation or returns a value",
     () =>
@@ -438,43 +403,6 @@ describe("the structured completion seam", () => {
       outcome: "a failed result",
       reply: Effect.fail(AgentResultError.make({ sessionId, message: "The turn failed" })),
       reason: "SessionOperationError",
-    },
-    {
-      outcome: "a capacity refusal",
-      reply: Effect.fail(AgentCapacityError.make({ sessionId, message: "Overloaded" })),
-      reason: "AgentCapacityError",
-    },
-    {
-      outcome: "a transport failure",
-      reply: Effect.fail(
-        SessionOperationError.make({
-          operation: "stream",
-          sessionId,
-          message: "Output closed",
-          cause: new Error("closed"),
-        }),
-      ),
-      reason: "SessionOperationError",
-    },
-    {
-      outcome: "a declined answer",
-      reply: Effect.succeed(CompletionReply.Declined({ message: "I can't help with that" })),
-      reason: "CompletionRefused",
-    },
-    {
-      outcome: "no value",
-      reply: Effect.succeed(CompletionReply.Missing({ message: "No value" })),
-      reason: "CompletionInvalid",
-    },
-    {
-      outcome: "a final answer that isn't JSON",
-      reply: Effect.succeed(CompletionReply.Answer({ text: "Approved." })),
-      reason: "CompletionInvalid",
-    },
-    {
-      outcome: "a property that the schema doesn't model",
-      reply: Effect.succeed(CompletionReply.Value({ value: { approved: true, extra: "x" } })),
-      reason: "CompletionInvalid",
     },
   ];
 

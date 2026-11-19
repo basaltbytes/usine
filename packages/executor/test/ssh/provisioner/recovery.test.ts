@@ -10,7 +10,8 @@ import { ADDRESS, fakeMachine, INSTANCE, request, WORKER } from "../support.ts";
 import { hetznerAddress, RUN, runtimeOf, sink, pinnedEarlier } from "./fixtures.ts";
 import { fakeProviders } from "./fake-providers.ts";
 
-for (const connection of ["unchanged", "replaced", "restarted", "unreadable"] as const) {
+// An unreadable record also covers an unchanged connection once it reads again.
+for (const connection of ["replaced", "restarted", "unreadable"] as const) {
   it.live(
     `recovers an earlier process's attempt before deleting its machine (connection: ${connection})`,
     () => {

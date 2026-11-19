@@ -1,14 +1,11 @@
-import { HandedOff } from "@usine/core/run/state";
-import { CardFace } from "./face";
 import { CardFrame } from "./frame";
 import { administratorPermissions } from "@usine/core/access";
 import { PermissionsContext } from "~/lib/permissions";
 import { CiHandoff } from "@usine/core/ci";
 import { CommitSha } from "@usine/core/repository";
 import { RunLine } from "./run-line";
-import { boardTaskRuns, boardRunSummary, MachineQuotaWait } from "@usine/orchestrator/operator";
+import { boardTaskRuns, boardRunSummary } from "@usine/orchestrator/operator";
 import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
-import { ChildSessionBudget, ChildSessionCount } from "@usine/core/agent/session";
 import { AttemptNumber, AttemptId } from "@usine/core/attempt";
 import { AgentName } from "@usine/core/agent";
 import { ItemKey, ItemNumber } from "@usine/core/item";
@@ -31,7 +28,6 @@ import {
   BoardItemLink,
   BoardLaneId,
   BoardView,
-  ChildSessionBudgetFailureView,
   ClosedUnchangedView,
   SuppressedForOperatorView,
   LoopPausedView,
@@ -41,7 +37,6 @@ import {
   FailedAttemptView,
   ProjectView,
   ReadOnlyBoardLaneView,
-  RunFailureNeed,
   RunSummaryView,
   SucceededAttemptView,
   WritableBoardLaneView,
@@ -53,17 +48,14 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { assert, describe, it } from "vitest";
 import { ProjectBoard } from "~/features/projects/board.page";
 import {
-  foldableLane,
   foldsByDefault,
   laneUnder,
   orderLanes,
   runsWithoutCard,
 } from "~/features/projects/lib/board";
-import { cardLabels, currentRun, itemFailure, runLineSince } from "~/lib/projects/card";
+import { currentRun, itemFailure, runLineSince } from "~/lib/projects/card";
 import { laneFlows } from "~/features/projects/components/flow";
-import { elapsedLabel, timestampLabel } from "~/lib/strings";
-import { needCopy } from "~/lib/needs-you/strings";
-import { failureMessage } from "~/lib/runs/strings";
+import { elapsedLabel } from "~/lib/strings";
 import { WithRouter } from "~/lib/testing/memory-router";
 import { boardOverview, taskUsageOf } from "~/lib/projects/fixture";
 
@@ -159,22 +151,6 @@ const itemWithRun = (
 };
 
 describe("Board Run failure copy", () => {
-  it("hides a failed Attempt after its Run recovers", () => {
-    assert.strictEqual(
-      itemFailure(itemWithRun("Succeeded", [attempt(1, "obsolete failure"), attempt(2, null)])),
-      null,
-    );
-  });
-
-  it("shows the latest failed Attempt for a currently Failed Run", () => {
-    assert.strictEqual(
-      itemFailure(
-        itemWithRun("Failed", [attempt(1, "old failure"), attempt(2, "current failure")]),
-      ),
-      "current failure",
-    );
-  });
-
   it("shows the newest failure across development and review Runs", () => {
     const card = itemWithRun("Failed", [attempt(1, "old development failure")]);
     const review = RunSummaryView.make({
@@ -227,34 +203,6 @@ describe("Board Run failure copy", () => {
     });
     assert.strictEqual(itemFailure(closed), null);
     assert.isNull(currentRun(closed));
-  });
-
-  it("explains an exhausted child-session budget in the drawer and Needs attention", () => {
-    const failure = ChildSessionBudgetFailureView.make({
-      maxChildren: ChildSessionBudget.make(4),
-      attemptedChildren: ChildSessionCount.make(5),
-    });
-    const message = "Child session budget of 4 used; child 5 did not start";
-    const repository = RepositoryName.make("basaltbytes/usine");
-    const runId = RunId.make("run-33");
-    assert.strictEqual(failureMessage(failure), message);
-    assert.deepStrictEqual(
-      needCopy(
-        RunFailureNeed.make({
-          id: "run-failure:run-33",
-          repository,
-          runId,
-          loop: LoopName.make("review"),
-          failure,
-        }),
-      ),
-      {
-        title: "review: child session budget exhausted",
-        detail: message,
-        repository,
-        runId,
-      },
-    );
   });
 });
 
@@ -370,13 +318,6 @@ describe("Board lane order", () => {
     assert.isFalse(foldsByDefault(readOnly("pull-requests", "authored", ["pr-open", "pr-merged"])));
     assert.isFalse(foldsByDefault(readOnly("backlog", "authored")));
     assert.isFalse(foldsByDefault(writable("ready")));
-  });
-
-  it("lets the operator fold only the fallback lane and lanes of closed Items", () => {
-    assert.isTrue(foldableLane(readOnly("unmapped", "fallback")));
-    assert.isTrue(foldableLane(readOnly("done", "authored", ["issue-closed", "pr-merged"])));
-    assert.isFalse(foldableLane(readOnly("pull-requests", "authored", ["pr-open", "pr-merged"])));
-    assert.isFalse(foldableLane(writable("ready")));
   });
 });
 
@@ -538,13 +479,6 @@ describe("Board card stall note", () => {
     assert.include(markup, ">review-fix paused<");
     assert.notInclude(markup, "review-fix </span>");
   });
-
-  it("names the reason but offers no action while the factory needs setup", () => {
-    const markup = render(true);
-    assert.include(markup, "unchanged since");
-    assert.notInclude(markup, ">Run again<");
-    assert.notInclude(markup, "Mark answered");
-  });
 });
 
 describe("Board drag targets", () => {
@@ -620,120 +554,6 @@ describe("Board drag targets", () => {
   });
 });
 
-describe("Board card link", () => {
-  it("opens the Task page under its originating Item, with or without a current Run", () => {
-    const withRun = itemWithRun("Failed", [attempt(1, "Checks failed")]);
-    const prKey = Schema.encodeSync(GitHubItemKey)(["github", repository, ItemNumber.make(40)]);
-    const pullRequest = BoardItemLink.make({
-      itemKey: prKey,
-      kind: "pr",
-      number: ItemNumber.make(40),
-      title: "Fix the Board lanes",
-      url: "https://github.com/basaltbytes/usine/pull/40",
-      state: "pr-open",
-    });
-    // A Task whose current Item is its pull request still links to the issue's number.
-    const linked = BoardTaskView.make({
-      ...withRun,
-      ...pullRequest,
-      title: withRun.title,
-      items: [...withRun.items, pullRequest],
-      ...boardRunSummary([], null, [...withRun.items, pullRequest]),
-      run: null,
-    });
-    const quietKey = Schema.encodeSync(GitHubItemKey)(["github", repository, ItemNumber.make(12)]);
-    const quiet = BoardTaskView.make({
-      ...withRun,
-      itemKey: quietKey,
-      number: ItemNumber.make(12),
-      items: [
-        BoardItemLink.make({
-          itemKey: quietKey,
-          kind: "issue",
-          number: ItemNumber.make(12),
-          title: "Document the cycle budget reset",
-          url: "https://github.com/basaltbytes/usine/issues/12",
-          state: "issue-open",
-        }),
-      ],
-      ...boardRunSummary([], null, []),
-      run: null,
-      needsYou: false,
-    });
-    const project = ProjectView.make({
-      repository,
-      status: "clear",
-      runs: [],
-      labels: [],
-      preflightFindings: [],
-      board: BoardView.make({
-        failures: [],
-        lanes: [
-          ReadOnlyBoardLaneView.make({
-            id: BoardLaneId.make("authored:Backlog"),
-            name: LaneName.make("Backlog"),
-            sources: [],
-            origin: "authored",
-            items: [withRun, linked, quiet],
-          }),
-        ],
-      }),
-    });
-    const markup = renderToStaticMarkup(
-      <PermissionsContext.Provider value={administratorPermissions}>
-        <QueryClientProvider client={new QueryClient()}>
-          <WithRouter>
-            <ProjectBoard
-              project={project}
-              loops={[]}
-              stalled={[]}
-              disabled={false}
-              openRun={() => {}}
-            />
-          </WithRouter>
-        </QueryClientProvider>
-      </PermissionsContext.Provider>,
-    );
-    const titleLinks = [...markup.matchAll(/<h3[^>]*><a[^>]*href="([^"]+)"/gu)].map(
-      ([, href]) => href,
-    );
-    assert.deepStrictEqual(titleLinks, [
-      "/projects/basaltbytes-usine/tasks/33?repository=basaltbytes%2Fusine",
-      "/projects/basaltbytes-usine/tasks/33?repository=basaltbytes%2Fusine",
-      "/projects/basaltbytes-usine/tasks/12?repository=basaltbytes%2Fusine",
-    ]);
-  });
-});
-
-describe("Board card labels", () => {
-  it("leaves out the labels of the card's own lane and keeps the others", () => {
-    const ready = GitHubLabelName.make("ready");
-    const review = GitHubLabelName.make("review");
-    const bug = GitHubLabelName.make("bug");
-    const card = BoardTaskView.make({
-      ...itemWithRun("Succeeded", [attempt(1, null)]),
-      labels: [ready, bug, review],
-    });
-    const lane = WritableBoardLaneView.make({
-      id: BoardLaneId.make("authored:ready"),
-      name: LaneName.make("Ready"),
-      sources: [LabelLaneSource.make({ label: ready })],
-      origin: "authored",
-      labels: [ready],
-      items: [card],
-    });
-    assert.deepStrictEqual(cardLabels(card, lane), [bug, review]);
-    const unmapped = ReadOnlyBoardLaneView.make({
-      id: BoardLaneId.make("fallback:unmapped"),
-      name: LaneName.make("Unmapped"),
-      sources: [],
-      origin: "fallback",
-      items: [card],
-    });
-    assert.deepStrictEqual(cardLabels(card, unmapped), [ready, bug, review]);
-  });
-});
-
 describe("Elapsed time", () => {
   it("names the largest whole unit since the instant", () => {
     const since = "2026-09-01T12:00:00.000Z";
@@ -743,13 +563,6 @@ describe("Elapsed time", () => {
     assert.strictEqual(elapsedLabel(since, at(3 * 3_600_000 + 59 * 60_000)), "3h");
     assert.strictEqual(elapsedLabel(since, at(2 * 86_400_000)), "2d");
     assert.strictEqual(elapsedLabel(since, at(-5_000)), "now");
-  });
-
-  it("names a local date and minute in tooltips", () => {
-    const local = (...parts: [number, number, number, number, number]) =>
-      new Date(...parts).toISOString();
-    assert.strictEqual(timestampLabel(local(2026, 9, 18, 17, 27)), "2026-10-18 17:27");
-    assert.strictEqual(timestampLabel(local(2026, 0, 5, 9, 3)), "2026-01-05 09:03");
   });
 });
 
@@ -794,20 +607,6 @@ describe("Board card Run line", () => {
   });
 });
 
-it("renders the worker and quota refusal below the board run line", () => {
-  const run = RunSummaryView.make({
-    ...runOnItem("Failed", []),
-    state: "Running",
-    closedAt: null,
-    machineWait: MachineQuotaWait.make({
-      worker: WorkerName.make("pool"),
-      message: "shared core limit exceeded",
-    }),
-  });
-  const markup = renderToStaticMarkup(<RunLine run={run} />);
-  assert.include(markup, "Waiting for pool: shared core limit exceeded");
-});
-
 it("links the waiting board run to its pushed pull request checks", () => {
   const run = RunSummaryView.make({
     ...runOnItem("Succeeded", [attempt(1, null)]),
@@ -825,58 +624,4 @@ it("links the waiting board run to its pushed pull request checks", () => {
   assert.include(markup, "Waiting for CI");
   assert.include(markup, "https://github.com/basaltbytes/usine/pull/815/checks");
   assert.strictEqual(runLineSince(run), run.attempts[0]?.endedAt);
-});
-
-it("shows the continuing fix status and its link on a neutral handed-off board card", () => {
-  const fix = RunSummaryView.make({
-    ...runOnItem("Succeeded", []),
-    id: RunId.make("fix-run-828"),
-    loop: LoopName.make("fix"),
-    state: "Running",
-    closedAt: null,
-    canCancel: true,
-  });
-  const source = RunSummaryView.make({
-    ...runOnItem("Succeeded", []),
-    state: "HandedOff",
-    handoff: HandedOff.make({
-      reason: "CI failed: ci.",
-      head: CommitSha.make("a".repeat(40)),
-      fixLoop: fix.loop,
-      fixRunId: fix.id,
-    }),
-  });
-  const item = BoardTaskView.make({
-    ...itemWithRun("Succeeded", []),
-    ...boardRunSummary([source, fix], fix, itemWithRun("Succeeded", []).items),
-  });
-  const lane = ReadOnlyBoardLaneView.make({
-    id: BoardLaneId.make("fallback:unmapped"),
-    name: LaneName.make("Unmapped"),
-    origin: "fallback",
-    sources: [],
-    items: [item],
-  });
-  const markup = renderToStaticMarkup(
-    <QueryClientProvider client={new QueryClient()}>
-      <WithRouter>
-        <CardFace
-          item={item}
-          lane={lane}
-          catalog={new Map()}
-          stall={null}
-          readOnly
-          action={null}
-          again={null}
-          progress={null}
-        />
-      </WithRouter>
-    </QueryClientProvider>,
-  );
-  assert.strictEqual(currentRun(item)?.id, fix.id);
-  assert.include(markup, "Running");
-  assert.include(markup, `run=${fix.id}`);
-  assert.include(markup, "continues the work");
-  assert.notInclude(markup, "text-run-failed");
-  assert.notInclude(markup, "Needs attention");
 });

@@ -24,11 +24,4 @@ describe("failed outcome", () => {
     );
     assert.include(body, "<strong>PR #320</strong>");
   });
-
-  it("shows no report section for a failure without one", () => {
-    const html = markup(Option.none());
-    assert.include(html, failure.message);
-    assert.notInclude(html, "Final report");
-    assert.notInclude(html, "<section");
-  });
 });

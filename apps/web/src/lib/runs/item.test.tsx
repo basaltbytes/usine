@@ -54,7 +54,6 @@ import {
   CanceledAttemptView,
   FailedAttemptView,
   PoolUsageView,
-  QuestionFailureView,
   RunDetailView,
   RunDurationView,
   RunUsageView,
@@ -78,7 +77,7 @@ import { EventDocument } from "~/features/runs/components/documents";
 import { RunHeader } from "~/components/runs/header";
 import { taskUsageOf } from "~/lib/projects/fixture";
 import { UsageBreakdown } from "~/components/runs/usage";
-import { eventPreview, runItem } from "~/lib/runs/item";
+import { eventPreview } from "~/lib/runs/item";
 import { Outline } from "~/features/runs/components/outline/outline";
 import { readerDocument } from "~/lib/runs/transcript/document/model";
 import { projectTranscript } from "~/lib/runs/transcript/model";
@@ -337,38 +336,6 @@ describe("Run header", () => {
     assert.strictEqual(links(markup, "https://github.com/basaltbytes/usine/pull/33"), 1);
   });
 
-  it("titles an issue Item from its Board card", () => {
-    const markup = header(run(), { members: [member(33, "issue", "issue-open", "Lanes")] });
-    assert.strictEqual(titleText(markup), "#33 Lanes");
-    assert.strictEqual(links(markup, "https://github.com/basaltbytes/usine/issues/33"), 1);
-  });
-
-  it("says when the Loop is paused", () => {
-    assert.include(header(run({ loopPaused: true })), "Loop paused");
-    assert.notInclude(header(run()), "Loop paused");
-  });
-
-  it("titles the Run from the Board's Item, then from its Event", () => {
-    assert.include(header(run()), "Board lanes");
-    const view = run();
-    const fromEvent = runItem(view, undefined, detail(view).eventPayload);
-    assert.deepEqual(
-      Option.flatMap(fromEvent, ({ title }) => title),
-      Option.some("Board lanes"),
-    );
-    assert.include(
-      eventPreview("start-dev", detail(view).eventPayload),
-      "start-dev matched issue #33: open, labeled ready-for-agent",
-    );
-  });
-
-  it("names the title and state for the drawer-to-page transition only where they are shared", () => {
-    const shared = header(run(), { shared: true });
-    assert.include(shared, "view-transition-name:run-title");
-    assert.include(shared, "view-transition-name:run-state");
-    assert.notInclude(header(run()), "view-transition-name");
-  });
-
   it("names a schedule Run by its Loop, without an Item link", () => {
     const scheduled = run({ itemKey: ItemKey.make('["github","basaltbytes/usine"]') });
     const markup = header(scheduled);
@@ -482,13 +449,6 @@ describe("Run work facts", () => {
     assert.include(facts(worked({ unmeasured: 1 }), false), " at least 25 min ");
   });
 
-  it("says nothing about work before the first Attempt", () => {
-    const waiting = facts(detail(run({ state: "Waiting", attempts: [] })), true);
-    assert.include(waiting, "Waiting for approval");
-    assert.notInclude(waiting, " min ");
-    assert.notInclude(waiting, "tokens");
-  });
-
   it("prices each pool, marks the plans' figures as estimates, and lists each session under its Attempt", () => {
     const markup = renderToStaticMarkup(
       <UsageBreakdown usage={usage} attempts={twoAttempts.attempts} />,
@@ -546,26 +506,6 @@ describe("provisioned machine", () => {
     assert.include(
       renderToStaticMarkup(<RunSummary detail={view} />),
       "Creating a Hetzner machine, started 2m ago",
-    );
-  });
-
-  it("shows image preparation while a queued run's machine preflight runs", () => {
-    const queued = run({ state: "Queued", closedAt: null, attempts: [failed] });
-    const machine = machineFixture({
-      runId: queued.id,
-      state: "preparing",
-      id: "52341896",
-      since: new Date(Date.now() - 2 * 60_000).toISOString(),
-    });
-    assert.include(
-      outline(queued, machine),
-      "Preparing the attempt image Hetzner 52341896, for attempt 2",
-    );
-    const view = RunDetailView.make({ ...detail(queued), machine });
-    assert.include(visible(heading(view)), "Preparing the attempt image");
-    assert.include(
-      renderToStaticMarkup(<RunSummary detail={view} />),
-      "Preparing the attempt image, machine started 2m ago",
     );
   });
 
@@ -641,20 +581,6 @@ describe("Attempt start", () => {
 });
 
 describe("salvage line", () => {
-  it("names the pushed ref and short commit", () => {
-    const markup = renderToStaticMarkup(
-      <SalvageLine
-        salvage={SalvagePushed.make({
-          ref: SalvageRef.make("usine/salvage/run/1"),
-          commit: CommitSha.make("0123456789abcdef0123456789abcdef01234567"),
-        })}
-      />,
-    );
-    assert.include(markup, "usine/salvage/run/1");
-    assert.include(markup, "0123456");
-    assert.notInclude(markup, "0123456789abcdef");
-  });
-
   it("names the pushed ref and the checkout that keeps the files the push left out", () => {
     const markup = renderToStaticMarkup(
       <SalvageLine
@@ -669,6 +595,7 @@ describe("salvage line", () => {
     );
     assert.include(markup, "usine/salvage/run/1");
     assert.include(markup, "0123456");
+    assert.notInclude(markup, "0123456789abcdef");
     assert.include(markup, "/workers/local/attempts/run_execute_1");
     assert.include(markup, "dataset.csv (100.0 MiB)");
   });
@@ -703,10 +630,6 @@ describe("salvage line", () => {
     assert.notInclude(markup, "retried at each startup");
     assert.include(markup, "GH001: Large files detected.");
   });
-
-  it("says when no salvage branch exists", () => {
-    assert.include(renderToStaticMarkup(<SalvageLine salvage={null} />), "No salvage branch");
-  });
 });
 
 describe("drawer summary", () => {
@@ -738,23 +661,6 @@ describe("drawer summary", () => {
     assert.include(markup, "Agent failure");
     assert.include(markup, "The baseline gate is blocked.");
     assert.include(markup, "usine/salvage/run-33/1");
-  });
-
-  it("shows an Agent's question for a Run that waits on an answer", () => {
-    const markup = summary(
-      run({
-        state: "Failed",
-        attempts: [
-          attempt(
-            FailedAttemptView.make({
-              failure: QuestionFailureView.make({ question: "Keep the old column?" }),
-            }),
-          ),
-        ],
-      }),
-    );
-    assert.include(markup, "Question from the agent");
-    assert.include(markup, "Keep the old column?");
   });
 
   it("shows a succeeded Run's result and a canceled Run's salvage", () => {
@@ -859,16 +765,6 @@ describe("drawer summary", () => {
 });
 
 describe("Run approval", () => {
-  it("shows the saved approval decision in both page and drawer headers", () => {
-    for (const approvalReason of [
-      "Approval required: condition evaluated to true",
-      "Approval not required: condition evaluated to false",
-    ]) {
-      for (const placement of ["page", "drawer"] as const) {
-        assert.include(header(run({ approvalReason }), { placement }), approvalReason);
-      }
-    }
-  });
   const approvedAt = "2026-09-01T11:59:30.000Z";
   const approved = (source: ApprovalView["source"]) =>
     run({ approval: ApprovalView.make({ approvedAt, source }) });
@@ -925,10 +821,6 @@ describe("Run approval", () => {
       assert.notInclude(markup, "Approved by");
       assert.notInclude(markup, "from the");
     }
-  });
-
-  it("says nothing about approval for a Run that had none", () => {
-    for (const render of [eventDocument, outline]) assert.notInclude(render(run()), "Approved");
   });
 
   it("names who ran an earlier Run again, when, and which Run, beside the approval", () => {

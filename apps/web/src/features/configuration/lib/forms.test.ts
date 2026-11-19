@@ -3,11 +3,13 @@ import { Result } from "effect";
 import { entityKey } from "./entities";
 import { formText, readForm, withField } from "./forms";
 
-it.each(
-  ["10", "-1", "'item.tick.cron == \"0 9 * * *\" ? -1 : 0'"].flatMap((priority) =>
-    ["", "ci: { fix_loop: widgets/fix, timeout_seconds: 3600 }\n"].map((ci) => ({ priority, ci })),
-  ),
-)(
+const ciPolicy = "ci: { fix_loop: widgets/fix, timeout_seconds: 3600 }\n";
+
+it.each([
+  { priority: "10", ci: "" },
+  { priority: "-1", ci: ciPolicy },
+  { priority: "'item.tick.cron == \"0 9 * * *\" ? -1 : 0'", ci: ciPolicy },
+])(
   "preserves priority $priority and CI policy '$ci' when switching between form and text",
   ({ priority, ci }) => {
     const key = entityKey("loop", "daily-check");

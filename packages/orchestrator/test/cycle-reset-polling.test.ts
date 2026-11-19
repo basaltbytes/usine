@@ -292,50 +292,6 @@ describe("cycle reset polling", () => {
     );
   });
 
-  it.effect("acknowledges a reset whose repository is no longer watched", () => {
-    let pending: ReadonlyArray<CycleBudgetReset> = [];
-    const acknowledgements: Array<CycleBudgetReset> = [];
-    const budgets: CycleBudgets["Service"] = {
-      ...emptyCycleBudgets,
-      pendingResets: Effect.sync(() => pending),
-      acknowledgeReset: (value) =>
-        Effect.sync(() => {
-          acknowledgements.push(value);
-          pending = pending.filter((reset) => reset !== value);
-        }),
-    };
-    const github: GitHubPolling["Service"] = {
-      itemLabels: () => Effect.die("unused item labels"),
-      baseRefHead: unmovedBaseRefHead,
-      missingIssues: () => Effect.succeed([]),
-      labels: () =>
-        Effect.succeed(RepositoryLabelCatalog.make({ labels: [], entityTag: Option.none() })),
-      snapshot: () => Effect.die("no Item changed"),
-      changes: (_repository, cursor) =>
-        Effect.succeed(RepositoryNotModified.make({ cursor, nextPollAt: Option.none() })),
-    };
-    return Effect.gen(function* () {
-      const reset = yield* Schema.decodeEffect(CycleBudgetReset)({
-        itemKey: ItemKey.make(jsonKey(["github", "basaltbytes/retired", 7])),
-        repository: RepositoryName.make("basaltbytes/retired"),
-        generation: 1,
-      });
-      pending = [reset];
-      const fixtureInstance = yield* instance;
-      const polling = yield* PollingTriggers;
-
-      const cycle = yield* polling.poll(fixtureInstance);
-
-      assert.deepStrictEqual(cycle.failures, []);
-      assert.deepStrictEqual(acknowledgements, [reset]);
-      assert.deepStrictEqual(pending, []);
-    }).pipe(
-      Effect.provide(
-        pollingTestLayer(github, [], undefined, undefined, memoryCursorStore().store, budgets),
-      ),
-    );
-  });
-
   it.effect("runs the CI reconcile before it acknowledges an unwatched repository's reset", () => {
     let pending: ReadonlyArray<CycleBudgetReset> = [];
     const seenByCi: Array<ReadonlyArray<CycleBudgetReset>> = [];

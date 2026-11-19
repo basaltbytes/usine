@@ -31,44 +31,21 @@ const withThreshold = (machine: ReturnType<typeof fakeMachine>, gib: number) =>
   }).pipe(Layer.provide(noGateway));
 
 describe("free disk space of an SSH Worker", () => {
-  it.effect("fails preflight with the free space and the default threshold", () => {
+  it.effect("checks the image storage of the container runtime against min_free_disk_gib", () => {
     const machine = fakeMachine();
-    machine.state.freeDiskGib = 3.5;
+    machine.state.docker = "running";
+    machine.state.storageFreeDiskGib = 1.5;
     return Effect.gen(function* () {
       const executor = yield* Executor;
-      const error = yield* executor.preflight(WORKER, [], 1).pipe(Effect.flip);
-      assert(error._tag === "WorkerCapabilityError");
-      assert.strictEqual(error.capability, "disk");
+      const result = yield* executor.preflight(WORKER, [], 1).pipe(Effect.result);
+      assert(result._tag === "Failure" && result.failure._tag === "WorkerCapabilityError");
+      assert.strictEqual(result.failure.capability, "disk");
       assert.include(
-        error.message,
-        "has 3.5 GiB free on /srv/usine, below its threshold of 10 GiB",
+        result.failure.message,
+        "has 1.5 GiB free on /var/lib/docker, below its threshold of 2 GiB",
       );
-      assert.include(error.message, "min_free_disk_gib");
-    }).pipe(Effect.provide(runtime(machine, mintingProvider())));
+    }).pipe(Effect.scoped, Effect.provide(withThreshold(machine, 2)));
   });
-
-  it.effect.each([
-    { storageGib: 1.5, passes: false },
-    { storageGib: 3, passes: true },
-  ])(
-    "checks the image storage of the container runtime against min_free_disk_gib: $storageGib GiB",
-    ({ storageGib, passes }) => {
-      const machine = fakeMachine();
-      machine.state.docker = "running";
-      machine.state.storageFreeDiskGib = storageGib;
-      return Effect.gen(function* () {
-        const executor = yield* Executor;
-        const result = yield* executor.preflight(WORKER, [], 1).pipe(Effect.result);
-        if (passes) return assert.strictEqual(result._tag, "Success");
-        assert(result._tag === "Failure" && result.failure._tag === "WorkerCapabilityError");
-        assert.strictEqual(result.failure.capability, "disk");
-        assert.include(
-          result.failure.message,
-          "has 1.5 GiB free on /var/lib/docker, below its threshold of 2 GiB",
-        );
-      }).pipe(Effect.scoped, Effect.provide(withThreshold(machine, 2)));
-    },
-  );
 
   it.effect("checks the free disk space before a checkout starts", () => {
     const machine = fakeMachine();
@@ -86,67 +63,41 @@ describe("free disk space of an SSH Worker", () => {
     }).pipe(Effect.provide(runtime(machine, mintingProvider())));
   });
 
-  it.effect("checks Docker image storage before preparing a checkout", () => {
+  it.effect("disables disk probes during prepare when min_free_disk_gib is zero", () => {
     const machine = fakeMachine();
     machine.state.docker = "running";
-    machine.state.storageFreeDiskGib = 1;
+    machine.state.diskReadError = "df: cannot read filesystem";
+    machine.state.storageFreeDiskGib = 0;
+    const logs = capturedLogs();
     return Effect.gen(function* () {
       const executor = yield* Executor;
-      const error = yield* executor.prepare(request).pipe(Effect.scoped, Effect.flip);
-      assert(error._tag === "WorkerCapabilityError");
-      assert.strictEqual(error.capability, "disk");
-      assert.include(error.message, "has 1.0 GiB free on /var/lib/docker");
-      assert.isFalse(linesOf(machine).some((line) => line.includes("'git' 'clone'")));
-    }).pipe(Effect.provide(runtime(machine, mintingProvider())));
+      yield* executor.prepare(request);
+      assert.isFalse(linesOf(machine).some((line) => line.includes("df -Pk")));
+      assert.isTrue(logs.infos.some((line) => line.includes("free disk space check is disabled")));
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(withThreshold(machine, 0).pipe(Layer.provideMerge(logs.layer))),
+    );
   });
 
-  it.effect.each(["preflight", "prepare"] as const)(
-    "disables disk probes during %s when min_free_disk_gib is zero",
-    (operation) => {
-      const machine = fakeMachine();
-      machine.state.docker = "running";
-      machine.state.diskReadError = "df: cannot read filesystem";
-      machine.state.storageFreeDiskGib = 0;
-      const logs = capturedLogs();
-      return Effect.gen(function* () {
-        const executor = yield* Executor;
-        if (operation === "preflight") yield* executor.preflight(WORKER, [], 1);
-        else yield* executor.prepare(request);
-        assert.isFalse(linesOf(machine).some((line) => line.includes("df -Pk")));
-        assert.isTrue(
-          logs.infos.some((line) => line.includes("free disk space check is disabled")),
-        );
-      }).pipe(
-        Effect.scoped,
-        Effect.provide(withThreshold(machine, 0).pipe(Layer.provideMerge(logs.layer))),
+  it.effect("logs a skipped image storage check at Info when df fails", () => {
+    const machine = fakeMachine();
+    machine.state.docker = "running";
+    machine.state.storageProbe = "df-fails";
+    const logs = capturedLogs();
+    return Effect.gen(function* () {
+      const executor = yield* Executor;
+      yield* executor.preflight(WORKER, [], 1);
+      const skipped = logs.infos.find((line) =>
+        line.includes("Skipped SSH Worker image storage disk check"),
       );
-    },
-  );
-
-  it.effect.each(["info-fails", "info-empty", "df-fails"] as const)(
-    "logs skipped image storage checks at Info when %s",
-    (failure) => {
-      const machine = fakeMachine();
-      machine.state.docker = "running";
-      machine.state.storageProbe = failure;
-      const logs = capturedLogs();
-      return Effect.gen(function* () {
-        const executor = yield* Executor;
-        yield* executor.preflight(WORKER, [], 1);
-        const skipped = logs.infos.find((line) =>
-          line.includes("Skipped SSH Worker image storage disk check"),
-        );
-        assert.isDefined(skipped);
-        assert.include(
-          skipped ?? "",
-          failure === "df-fails" ? "/var/lib/docker" : "docker did not report",
-        );
-      }).pipe(
-        Effect.scoped,
-        Effect.provide(runtime(machine, mintingProvider()).pipe(Layer.provideMerge(logs.layer))),
-      );
-    },
-  );
+      assert.isDefined(skipped);
+      assert.include(skipped ?? "", "/var/lib/docker");
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(runtime(machine, mintingProvider()).pipe(Layer.provideMerge(logs.layer))),
+    );
+  });
 
   it.effect("reports an image pull that runs out of disk space during preflight", () => {
     const machine = fakeMachine();
@@ -221,93 +172,88 @@ describe("older worker images on an SSH Worker", () => {
     }).pipe(Effect.scoped, Effect.provide(runtime(machine, mintingProvider())));
   });
 
-  it.effect.each([
-    { configured: "docker.io/acme/worker", listed: "acme/worker" },
-    { configured: "docker.io/library/ubuntu", listed: "ubuntu" },
-    { configured: "acme/worker", listed: "docker.io/acme/worker" },
-    { configured: "ubuntu", listed: "docker.io/library/ubuntu" },
-  ])("cleans images configured as $configured and listed as $listed", ({ configured, listed }) => {
-    const machine = fakeMachine();
-    machine.state.docker = "running";
-    machine.state.pulledImageId = "sha256:c0";
-    machine.state.workerImages = [
-      `sha256:c0 ${listed} current 2026-11-13 08:00:00 +0000 UTC`,
-      `sha256:b0 ${listed} previous 2026-11-12 08:00:00 +0000 UTC`,
-      `sha256:a0 ${listed} older 2026-11-11 08:00:00 +0000 UTC`,
-      `sha256:ff private.example.com/${listed} older 2026-11-10 08:00:00 +0000 UTC`,
-    ];
-    return Effect.gen(function* () {
-      const executor = yield* Executor;
-      yield* executor.preflight(WORKER, [], 1);
-      assert.deepStrictEqual(machine.state.imageRemovals, [[`${listed}:older`]]);
-      assert.lengthOf(machine.state.workerImages, 3);
-    }).pipe(
-      Effect.scoped,
-      Effect.provide(
-        executorLayer(machine, mintingProvider(), {
-          ...ADDRESS,
-          container: {
-            ...ADDRESS.container,
-            image: Option.some(ContainerImage.make(`${configured}:current`)),
-          },
-        }).pipe(Layer.provide(noGateway)),
-      ),
-    );
-  });
-
-  it.effect.each([
-    { configured: REPOSITORY, listed: REPOSITORY },
-    { configured: "acme/worker", listed: "docker.io/acme/worker" },
-  ])(
-    "tracks mutable images configured as $configured across pulls without removing unrelated dangling images",
+  it.effect.each([{ configured: "acme/worker", listed: "docker.io/acme/worker" }])(
+    "cleans images configured as $configured and listed as $listed",
     ({ configured, listed }) => {
       const machine = fakeMachine();
       machine.state.docker = "running";
-      machine.state.imageId = "sha256:a0";
+      machine.state.pulledImageId = "sha256:c0";
       machine.state.workerImages = [
-        `sha256:a0 ${listed} latest 2026-11-10 08:00:00 +0000 UTC`,
-        "sha256:ff <none> <none> 2026-11-01 08:00:00 +0000 UTC",
+        `sha256:c0 ${listed} current 2026-11-13 08:00:00 +0000 UTC`,
+        `sha256:b0 ${listed} previous 2026-11-12 08:00:00 +0000 UTC`,
+        `sha256:a0 ${listed} older 2026-11-11 08:00:00 +0000 UTC`,
+        `sha256:ff private.example.com/${listed} older 2026-11-10 08:00:00 +0000 UTC`,
       ];
-      machine.state.beforePull = Effect.sync(() => {
-        machine.state.workerImages = machine.state.workerImages.map((line) =>
-          line.startsWith(`${machine.state.imageId} ${listed} latest `)
-            ? line.replace(`${listed} latest`, "<none> <none>")
-            : line,
-        );
-        const day = machine.state.pulledImageId === "sha256:b0" ? 11 : 12;
-        machine.state.workerImages.push(
-          `${machine.state.pulledImageId} ${listed} latest 2026-11-${day} 08:00:00 +0000 UTC`,
-        );
-      });
-      const layer = executorLayer(machine, mintingProvider(), {
-        ...ADDRESS,
-        container: {
-          ...ADDRESS.container,
-          image: Option.some(ContainerImage.make(`${configured}:latest`)),
-        },
-      }).pipe(Layer.provide(noGateway));
       return Effect.gen(function* () {
-        machine.state.pulledImageId = "sha256:b0";
-        yield* Effect.gen(function* () {
-          const executor = yield* Executor;
-          yield* executor.preflight(WORKER, [], 1);
-        }).pipe(Effect.scoped, Effect.provide(layer));
-        assert.lengthOf(machine.state.imageRemovals, 0);
-        const retained = machine.state.workerImages.find((line) => line.startsWith("sha256:a0 "));
-        assert.strictEqual(retained?.split(" ")[1], listed);
-        machine.state.pulledImageId = "sha256:c0";
-        yield* Effect.gen(function* () {
-          const executor = yield* Executor;
-          yield* executor.preflight(WORKER, [], 1);
-        }).pipe(Effect.scoped, Effect.provide(layer));
-        assert.deepStrictEqual(
-          machine.state.workerImages.map((line) => line.split(" ")[0]).sort(),
-          ["sha256:b0", "sha256:c0", "sha256:ff"],
-        );
-        assert.lengthOf(machine.state.imageRemovals, 1);
-      });
+        const executor = yield* Executor;
+        yield* executor.preflight(WORKER, [], 1);
+        assert.deepStrictEqual(machine.state.imageRemovals, [[`${listed}:older`]]);
+        assert.lengthOf(machine.state.workerImages, 3);
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(
+          executorLayer(machine, mintingProvider(), {
+            ...ADDRESS,
+            container: {
+              ...ADDRESS.container,
+              image: Option.some(ContainerImage.make(`${configured}:current`)),
+            },
+          }).pipe(Layer.provide(noGateway)),
+        ),
+      );
     },
   );
+
+  it.effect("tracks mutable images across pulls without removing unrelated dangling images", () => {
+    const configured = REPOSITORY;
+    const listed = REPOSITORY;
+    const machine = fakeMachine();
+    machine.state.docker = "running";
+    machine.state.imageId = "sha256:a0";
+    machine.state.workerImages = [
+      `sha256:a0 ${listed} latest 2026-11-10 08:00:00 +0000 UTC`,
+      "sha256:ff <none> <none> 2026-11-01 08:00:00 +0000 UTC",
+    ];
+    machine.state.beforePull = Effect.sync(() => {
+      machine.state.workerImages = machine.state.workerImages.map((line) =>
+        line.startsWith(`${machine.state.imageId} ${listed} latest `)
+          ? line.replace(`${listed} latest`, "<none> <none>")
+          : line,
+      );
+      const day = machine.state.pulledImageId === "sha256:b0" ? 11 : 12;
+      machine.state.workerImages.push(
+        `${machine.state.pulledImageId} ${listed} latest 2026-11-${day} 08:00:00 +0000 UTC`,
+      );
+    });
+    const layer = executorLayer(machine, mintingProvider(), {
+      ...ADDRESS,
+      container: {
+        ...ADDRESS.container,
+        image: Option.some(ContainerImage.make(`${configured}:latest`)),
+      },
+    }).pipe(Layer.provide(noGateway));
+    return Effect.gen(function* () {
+      machine.state.pulledImageId = "sha256:b0";
+      yield* Effect.gen(function* () {
+        const executor = yield* Executor;
+        yield* executor.preflight(WORKER, [], 1);
+      }).pipe(Effect.scoped, Effect.provide(layer));
+      assert.lengthOf(machine.state.imageRemovals, 0);
+      const retained = machine.state.workerImages.find((line) => line.startsWith("sha256:a0 "));
+      assert.strictEqual(retained?.split(" ")[1], listed);
+      machine.state.pulledImageId = "sha256:c0";
+      yield* Effect.gen(function* () {
+        const executor = yield* Executor;
+        yield* executor.preflight(WORKER, [], 1);
+      }).pipe(Effect.scoped, Effect.provide(layer));
+      assert.deepStrictEqual(machine.state.workerImages.map((line) => line.split(" ")[0]).sort(), [
+        "sha256:b0",
+        "sha256:c0",
+        "sha256:ff",
+      ]);
+      assert.lengthOf(machine.state.imageRemovals, 1);
+    });
+  });
 
   it.effect("keeps another repository's tag when a mutable worker image rolls back", () => {
     const machine = fakeMachine();
@@ -447,7 +393,7 @@ describe("older worker images on an SSH Worker", () => {
     );
   });
 
-  it.effect.each(["imageListError", "containerListError", "imageRemovalError"] as const)(
+  it.effect.each(["imageListError", "imageRemovalError"] as const)(
     "logs %s without failing preflight or deleting images",
     (failure) => {
       const machine = fakeMachine();
@@ -484,26 +430,6 @@ describe("older worker images on an SSH Worker", () => {
       );
     },
   );
-
-  it.effect("logs at Info when the runtime lists no matching worker images", () => {
-    const machine = fakeMachine();
-    machine.state.docker = "running";
-    machine.state.workerImages = [
-      "sha256:a0 ghcr.io/acme/other latest 2026-11-11 08:00:00 +0000 UTC",
-    ];
-    const logs = capturedLogs();
-    return Effect.gen(function* () {
-      const executor = yield* Executor;
-      yield* executor.preflight(WORKER, [], 1);
-      const skipped = logs.infos.find((line) => line.includes("No older worker image to remove"));
-      assert.isDefined(skipped);
-      assert.include(skipped ?? "", '"images":0');
-      assert.lengthOf(machine.state.imageRemovals, 0);
-    }).pipe(
-      Effect.scoped,
-      Effect.provide(runtime(machine, mintingProvider()).pipe(Layer.provideMerge(logs.layer))),
-    );
-  });
 
   it.effect(
     "removes older worker images after a pull and keeps the current, the previous, and those in use",

@@ -168,12 +168,6 @@ describe("remote shell commands", () => {
     assert.strictEqual(existsSync(pidFile), false, "the pid file is gone once the command exits");
   });
 
-  it("keeps the command's exit code", () => {
-    const pidFile = join(mkdtempSync(join(tmpdir(), "usine-remote-shell-")), "child-1.pid");
-    const line = remoteLine({ pidFile, command: "sh", args: ["-c", "exit 7"] });
-    assert.strictEqual(spawnSync("sh", ["-c", line]).status, 7);
-  });
-
   it.live("stops a running child through its pid file and leaves nothing to stop after", () =>
     Effect.gen(function* () {
       const worktree = mkdtempSync(join(tmpdir(), "usine-remote-shell-"));

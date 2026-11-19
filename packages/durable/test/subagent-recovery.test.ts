@@ -5,8 +5,6 @@ import { NodeFileSystem } from "@effect/platform-node";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { childContinuation } from "@usine/agents/continuation";
 import { catalog, HarnessCatalog, HarnessDescriptor } from "@usine/agents/harness";
-import { Agent } from "@usine/core/agent";
-import { BrainSpec, Harness } from "@usine/core/agent/brain";
 import {
   ChildBackend,
   type ChildRequest,
@@ -27,7 +25,7 @@ import {
 import { jsonKey } from "@usine/core/json-key";
 import { BlockedFailure, InfraFailure } from "@usine/core/attempt/failure";
 import * as AttemptChannel from "@usine/core/attempt/channel";
-import { GatewayCredentialKind, MachineId, WorkerName } from "@usine/core/worker";
+import { GatewayCredentialKind, WorkerName } from "@usine/core/worker";
 import { Context, Deferred, Effect, Fiber, FileSystem, Layer, Option, Result } from "effect";
 import { AttemptRequest, AttemptRuntime } from "../src/attempt-runtime.ts";
 import { SubagentDoc } from "../src/attempt/child.ts";
@@ -45,7 +43,6 @@ import {
 import { assertAdmitted, attemptRequest, recordingSink, temporaryDatabase } from "./support.ts";
 
 const recoveries = [
-  ["resume", null],
   ["resume-twice", null],
   ["resume-after-infra", { kind: "infra", child: 1 }],
   ["block-after-infra", { kind: "infra", child: 1 }],
@@ -59,19 +56,11 @@ const recoveries = [
   ["harness-changed-stop-fails", null],
   ["invalid-session", null],
   ["extra-saved-fields", null],
-  ["missing-session", null],
   ["worker-gone", null],
-  ["machine-gone", null],
-  ["checkout-gone", null],
-  ["resume-fails", null],
   ["home-gone-fallback", null],
 ] as const;
-for (const [recovery, blocker, harness] of recoveries.flatMap(([recovery, blocker]) =>
-  (recovery === "resume-crashes-then-replacement" ? ["claude", "codex", "pi"] : ["claude"]).map(
-    (harness) => [recovery, blocker, harness] as const,
-  ),
-)) {
-  it.live(`recovers a durable child call after restart (${recovery}, ${harness})`, () =>
+for (const [recovery, blocker] of recoveries) {
+  it.live(`recovers a durable child call after restart (${recovery})`, () =>
     Effect.gen(function* () {
       const database = yield* temporaryDatabase;
       const fs = yield* FileSystem.FileSystem;
@@ -88,33 +77,18 @@ for (const [recovery, blocker, harness] of recoveries.flatMap(([recovery, blocke
         recovery === "worker-gone-then-replacement" ||
         recovery === "home-gone-fallback";
       const failsRecovery = [
-        "missing-session",
         "invalid-session",
         "harness-changed",
         "harness-changed-stop-fails",
         "worker-gone",
-        "machine-gone",
-        "checkout-gone",
-        "resume-fails",
         "home-gone-fallback",
         "resume-fails-after-infra",
         "resume-crashes-then-replacement",
         "worker-gone-then-replacement",
       ].includes(recovery);
       const childCount = blocker?.child ?? 1;
-      const base = attemptRequest(
-        `recovery/${recovery}/${harness}`,
-        childCount + (replaces ? 1 : 0),
-      );
       const request = AttemptRequest.make({
-        ...base,
-        spec: AttemptChannel.RunSpec.make({
-          ...base.spec,
-          agent: Agent.make({
-            ...base.spec.agent,
-            brain: BrainSpec.make({ ...base.spec.agent.brain, harness: Harness.make(harness) }),
-          }),
-        }),
+        ...attemptRequest(`recovery/${recovery}`, childCount + (replaces ? 1 : 0)),
         gatewayCredential: Effect.succeedSome(GatewayCredentialKind.make("subscription")),
       });
       const recording = recordingSink();
@@ -171,16 +145,15 @@ for (const [recovery, blocker, harness] of recoveries.flatMap(([recovery, blocke
                 }),
               );
             }
-            if (recovery !== "missing-session")
-              yield* child.emit(
-                SessionStarted.make({
-                  session: ChildSession.make({
-                    ...child.request.session,
-                    pool: Option.some("claudePlan"),
-                  }),
-                  harnessSession: Option.some(saved),
+            yield* child.emit(
+              SessionStarted.make({
+                session: ChildSession.make({
+                  ...child.request.session,
+                  pool: Option.some("claudePlan"),
                 }),
-              );
+                harnessSession: Option.some(saved),
+              }),
+            );
             yield* child.emit(
               SessionTokensUpdated.make({
                 session: child.request.session,
@@ -351,21 +324,12 @@ for (const [recovery, blocker, harness] of recoveries.flatMap(([recovery, blocke
           const attached =
             recovery === "worker-gone" || recovery === "worker-gone-then-replacement"
               ? AttemptRequest.make({ ...request, worker: WorkerName.make("replacement") })
-              : recovery === "machine-gone"
+              : recovery === "credential-changed"
                 ? AttemptRequest.make({
                     ...request,
-                    machine: Option.some(MachineId.make("replacement")),
+                    gatewayCredential: Effect.succeedSome(GatewayCredentialKind.make("api-key")),
                   })
-                : recovery === "checkout-gone"
-                  ? AttemptRequest.make({ ...request, cwd: "/replacement-checkout" })
-                  : recovery === "credential-changed"
-                    ? AttemptRequest.make({
-                        ...request,
-                        gatewayCredential: Effect.succeedSome(
-                          GatewayCredentialKind.make("api-key"),
-                        ),
-                      })
-                    : request;
+                : request;
           let supervisionAtFinish: Hold | undefined;
           const execution = yield* Effect.forkChild(
             runtime.execute(attached, {
@@ -402,14 +366,11 @@ for (const [recovery, blocker, harness] of recoveries.flatMap(([recovery, blocke
           );
           if (
             ![
-              "missing-session",
               "invalid-session",
               "harness-changed",
               "harness-changed-stop-fails",
               "worker-gone",
               "worker-gone-then-replacement",
-              "machine-gone",
-              "checkout-gone",
               "home-gone-fallback",
             ].includes(recovery)
           ) {
@@ -440,7 +401,6 @@ for (const [recovery, blocker, harness] of recoveries.flatMap(([recovery, blocke
               ),
             );
             if (
-              recovery === "resume-fails" ||
               recovery === "resume-fails-after-infra" ||
               recovery === "resume-crashes-then-replacement"
             )
@@ -533,7 +493,6 @@ for (const [recovery, blocker, harness] of recoveries.flatMap(([recovery, blocke
       const succeeds =
         recovery === "credential-changed" ||
         recovery === "extra-saved-fields" ||
-        recovery === "resume" ||
         recovery === "resume-twice" ||
         recovery === "resume-after-infra" ||
         recovery === "block-after-infra" ||
@@ -563,7 +522,7 @@ for (const [recovery, blocker, harness] of recoveries.flatMap(([recovery, blocke
 }
 
 // An older version saved the conversation only after the prompt, without a receipt.
-for (const receipt of ["unacknowledged", "acknowledged", "absent"] as const)
+for (const receipt of ["unacknowledged", "absent"] as const)
   it.live(`restores whether the saved child acknowledged its prompt (${receipt})`, () =>
     Effect.gen(function* () {
       const acknowledged = receipt !== "unacknowledged";

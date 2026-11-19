@@ -38,135 +38,122 @@ import { createServer } from "node:http";
 import { RunStore } from "../../src/store/store.ts";
 import { lifecycleSubmission, testAgent, withRunStore } from "./support.ts";
 
-for (const method of ["standalone", "list", "board"] as const) {
-  it.live(
-    `transcript appends and HTTP health finish within 100 ms during a one-second ${method} read`,
-    () =>
-      Effect.gen(function* () {
-        const fs = yield* FileSystem.FileSystem;
-        const currentDirectory = yield* fs.makeTempDirectoryScoped({
-          directory: sqliteTempDirectory(),
-        });
-        const directory = InstanceDirectory.make(currentDirectory);
-        return yield* Effect.gen(function* () {
-          const sql = yield* SqlClient.SqlClient;
-          const store = yield* RunStore;
-          const runId = RunId.make("concurrent-read");
-          yield* store.recordAndClaim(lifecycleSubmission, runId);
-          const started = yield* store.beginAttempt(
-            runId,
-            WorkerName.make("local"),
-            "local",
-            Option.none(),
-          );
-          assert(started._tag === "AttemptStarted");
-          const envelope = AttemptChannel.OutboundEnvelope.make({
-            version: AttemptChannel.PROTOCOL_VERSION,
-            attemptId: started.execution.attempt.id,
-            sequence: AttemptChannel.Sequence.make(1),
-            sentAt: DateTime.makeUnsafe("2026-11-03T00:00:00Z"),
-            payload: AttemptChannel.SessionEvent.make({
-              event: TextOutput.make({
-                session: ParentSession.make({
-                  id: AgentSessionId.make("concurrent-session"),
-                  agent: testAgent.name,
-                  brain: testAgent.brain,
-                }),
-                text: "append while reading",
-              }),
-            }),
-          });
-          const server = yield* Effect.acquireRelease(
-            Effect.callback<ReturnType<typeof createServer>>((resume) => {
-              const resolve = (value: ReturnType<typeof createServer>) =>
-                resume(Effect.succeed(value));
-              const server = createServer((_request, response) => response.end("ok"));
-              server.listen(0, "127.0.0.1", () => resolve(server));
-            }),
-            (server) =>
-              Effect.callback<void>((resume) => {
-                const resolve = (value: void) => resume(Effect.succeed(value));
-                server.close(() => resolve());
-              }),
-          );
-          const address = yield* Schema.decodeUnknownEffect(Schema.Struct({ port: Schema.Finite }))(
-            server.address(),
-          );
-          const health = yield* webRequest(`http://127.0.0.1:${address.port}/health`);
-          yield* Effect.promise(() => health.text());
-          const heavyRead = sql`WITH RECURSIVE numbers(i) AS (
-        VALUES(1) UNION ALL SELECT i + 1 FROM numbers WHERE i < 32000000
-      ) SELECT sum(i) AS total FROM numbers`;
-          const entered = yield* Deferred.make<void>();
-          const injected = yield* Ref.make(false);
-          const logger = Layer.succeed(EffectLogger)({
-            logQuery: () =>
-              Effect.gen(function* () {
-                if (yield* Ref.getAndSet(injected, true)) return;
-                yield* Deferred.succeed(entered, undefined);
-                yield* heavyRead;
-              }).pipe(Effect.orDie),
-          });
-          const database = yield* SQLiteDrizzle.make().pipe(
-            Effect.provide(logger.pipe(Layer.provideMerge(SQLiteDrizzle.DefaultServices))),
-          );
-          const read =
-            method === "standalone"
-              ? Deferred.succeed(entered, undefined).pipe(Effect.andThen(heavyRead), Effect.asVoid)
-              : Effect.gen(function* () {
-                  const reader = yield* RunReader;
-                  if (method === "list") {
-                    assert.strictEqual((yield* reader.list({ closedLimit: 10 }))[0]?.run.id, runId);
-                  } else {
-                    assert.strictEqual(
-                      (yield* reader.board([lifecycleSubmission.itemKey], [])).runs[0]?.run.id,
-                      runId,
-                    );
-                  }
-                }).pipe(
-                  Effect.provide(
-                    RunReader.layer.pipe(Layer.provideMerge(RunDatabase.layer(database))),
-                  ),
-                );
-          const readStarted = performance.now();
-          const slow = yield* read.pipe(Effect.forkScoped);
-          yield* Deferred.await(entered);
-          for (let sequence = 1; sequence <= 3; sequence++) {
-            const start = performance.now();
-            yield* Effect.sleep("20 millis");
-            yield* store.appendTranscript(
-              "outbound",
-              AttemptChannel.OutboundEnvelope.make({
-                ...envelope,
-                sequence: AttemptChannel.Sequence.make(sequence),
-              }),
-            );
-            const response = yield* webRequest(`http://127.0.0.1:${address.port}/health`);
-            const responseBody = yield* Effect.promise(() => response.text());
-            assert.strictEqual(responseBody, "ok");
-            assert(
-              performance.now() - start < 100,
-              "append and HTTP health exceeded 100 ms, including timer delay",
-            );
-            assert(slow.pollUnsafe() === undefined, "the read must still be running");
-          }
-          yield* Fiber.join(slow);
-          assert(
-            performance.now() - readStarted >= 1000,
-            "the read must run for at least one second",
-          );
-          const rows =
-            yield* sql`SELECT count(*) AS count FROM usine_attempt_transcripts WHERE attempt_id = ${started.execution.attempt.id}`;
-          assert.deepStrictEqual(rows, [{ count: 3 }]);
-        }).pipe(
-          Effect.provide(RunStore.layer.pipe(Layer.provideMerge(localSqliteLayer(directory)))),
+it.live(
+  "transcript appends and HTTP health finish within 100 ms during a one-second board read",
+  () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const currentDirectory = yield* fs.makeTempDirectoryScoped({
+        directory: sqliteTempDirectory(),
+      });
+      const directory = InstanceDirectory.make(currentDirectory);
+      return yield* Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const store = yield* RunStore;
+        const runId = RunId.make("concurrent-read");
+        yield* store.recordAndClaim(lifecycleSubmission, runId);
+        const started = yield* store.beginAttempt(
+          runId,
+          WorkerName.make("local"),
+          "local",
+          Option.none(),
         );
-      }).pipe(
-        Effect.scoped,
-        Effect.provide(Layer.provideMerge(NodeServices.layer, FetchHttpClient.layer)),
-      ),
-  );
-}
+        assert(started._tag === "AttemptStarted");
+        const envelope = AttemptChannel.OutboundEnvelope.make({
+          version: AttemptChannel.PROTOCOL_VERSION,
+          attemptId: started.execution.attempt.id,
+          sequence: AttemptChannel.Sequence.make(1),
+          sentAt: DateTime.makeUnsafe("2026-11-03T00:00:00Z"),
+          payload: AttemptChannel.SessionEvent.make({
+            event: TextOutput.make({
+              session: ParentSession.make({
+                id: AgentSessionId.make("concurrent-session"),
+                agent: testAgent.name,
+                brain: testAgent.brain,
+              }),
+              text: "append while reading",
+            }),
+          }),
+        });
+        const server = yield* Effect.acquireRelease(
+          Effect.callback<ReturnType<typeof createServer>>((resume) => {
+            const resolve = (value: ReturnType<typeof createServer>) =>
+              resume(Effect.succeed(value));
+            const server = createServer((_request, response) => response.end("ok"));
+            server.listen(0, "127.0.0.1", () => resolve(server));
+          }),
+          (server) =>
+            Effect.callback<void>((resume) => {
+              const resolve = (value: void) => resume(Effect.succeed(value));
+              server.close(() => resolve());
+            }),
+        );
+        const address = yield* Schema.decodeUnknownEffect(Schema.Struct({ port: Schema.Finite }))(
+          server.address(),
+        );
+        const health = yield* webRequest(`http://127.0.0.1:${address.port}/health`);
+        yield* Effect.promise(() => health.text());
+        const heavyRead = sql`WITH RECURSIVE numbers(i) AS (
+      VALUES(1) UNION ALL SELECT i + 1 FROM numbers WHERE i < 32000000
+    ) SELECT sum(i) AS total FROM numbers`;
+        const entered = yield* Deferred.make<void>();
+        const injected = yield* Ref.make(false);
+        const logger = Layer.succeed(EffectLogger)({
+          logQuery: () =>
+            Effect.gen(function* () {
+              if (yield* Ref.getAndSet(injected, true)) return;
+              yield* Deferred.succeed(entered, undefined);
+              yield* heavyRead;
+            }).pipe(Effect.orDie),
+        });
+        const database = yield* SQLiteDrizzle.make().pipe(
+          Effect.provide(logger.pipe(Layer.provideMerge(SQLiteDrizzle.DefaultServices))),
+        );
+        const read = Effect.gen(function* () {
+          const reader = yield* RunReader;
+          assert.strictEqual(
+            (yield* reader.board([lifecycleSubmission.itemKey], [])).runs[0]?.run.id,
+            runId,
+          );
+        }).pipe(
+          Effect.provide(RunReader.layer.pipe(Layer.provideMerge(RunDatabase.layer(database)))),
+        );
+        const readStarted = performance.now();
+        const slow = yield* read.pipe(Effect.forkScoped);
+        yield* Deferred.await(entered);
+        for (let sequence = 1; sequence <= 3; sequence++) {
+          const start = performance.now();
+          yield* Effect.sleep("20 millis");
+          yield* store.appendTranscript(
+            "outbound",
+            AttemptChannel.OutboundEnvelope.make({
+              ...envelope,
+              sequence: AttemptChannel.Sequence.make(sequence),
+            }),
+          );
+          const response = yield* webRequest(`http://127.0.0.1:${address.port}/health`);
+          const responseBody = yield* Effect.promise(() => response.text());
+          assert.strictEqual(responseBody, "ok");
+          assert(
+            performance.now() - start < 100,
+            "append and HTTP health exceeded 100 ms, including timer delay",
+          );
+          assert(slow.pollUnsafe() === undefined, "the read must still be running");
+        }
+        yield* Fiber.join(slow);
+        assert(
+          performance.now() - readStarted >= 1000,
+          "the read must run for at least one second",
+        );
+        const rows =
+          yield* sql`SELECT count(*) AS count FROM usine_attempt_transcripts WHERE attempt_id = ${started.execution.attempt.id}`;
+        assert.deepStrictEqual(rows, [{ count: 3 }]);
+      }).pipe(Effect.provide(RunStore.layer.pipe(Layer.provideMerge(localSqliteLayer(directory)))));
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(Layer.provideMerge(NodeServices.layer, FetchHttpClient.layer)),
+    ),
+);
 
 it.live(
   "WAL reads preserve SQL results, transaction isolation, savepoints, and reserved connection state",

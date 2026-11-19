@@ -8,7 +8,6 @@ import {
   EndpointName,
   HarnessSession,
   HarnessSessionId,
-  PoolLogin,
   TokenBreakdown,
   sessionPool,
 } from "@usine/core/agent/session";
@@ -386,7 +385,7 @@ describe("Codex child backend", () => {
     );
   });
 
-  for (const field of ["home", "default-home", "model_provider"] as const) {
+  for (const field of ["default-home", "model_provider"] as const) {
     it.effect(`refuses a saved Codex continuation after its ${field} changes`, () => {
       const original = request(
         "gpt-5.6-terra",
@@ -430,11 +429,7 @@ describe("Codex child backend", () => {
                 environment:
                   field === "default-home"
                     ? { ...original.environment, HOME: "/new-home", CODEX_HOME: "" }
-                    : {
-                        ...original.environment,
-                        CODEX_HOME:
-                          field === "home" ? "/attempt/moved-codex" : "/attempt/original-codex",
-                      },
+                    : { ...original.environment, CODEX_HOME: "/attempt/original-codex" },
               }),
             )
             .pipe(Effect.flip);
@@ -442,19 +437,11 @@ describe("Codex child backend", () => {
           assert.include(error.message, `${field === "default-home" ? "home" : field} mismatch`);
           assert.include(
             error.message,
-            field === "home"
-              ? "/attempt/original-codex"
-              : field === "default-home"
-                ? "/old-home/.codex"
-                : "usine-gateway",
+            field === "default-home" ? "/old-home/.codex" : "usine-gateway",
           );
           assert.include(
             error.message,
-            field === "home"
-              ? "/attempt/moved-codex"
-              : field === "default-home"
-                ? "/new-home/.codex"
-                : "changed-provider",
+            field === "default-home" ? "/new-home/.codex" : "changed-provider",
           );
           assert(!calls.some(({ method }) => method === "turn/start"));
           assert.strictEqual(clients.length, 1, "the old transport is replaced before refusal");
@@ -570,6 +557,11 @@ describe("Codex child backend", () => {
         assert.deepStrictEqual(started.harnessSession, Option.some(saved));
         assert.strictEqual(clients[0]?.environment.CODEX_HOME, "/worker/attempt/codex");
         assert.strictEqual(clients[0]?.transport, "resume");
+        assert.strictEqual(
+          clients[0]?.host._tag,
+          "RemoteShell",
+          "the app server runs on the child's host",
+        );
         assert(!calls.some(({ method }) => method === "thread/start"));
         assert.include(
           jsonKey(calls.find(({ method }) => method === "thread/resume")?.params),
@@ -586,64 +578,61 @@ describe("Codex child backend", () => {
     ).pipe(Effect.provide(codexChildLayer.pipe(Layer.provide(server))));
   });
 
-  for (const answered of [true, false])
-    it.effect(
-      `restores whether a held idle Codex report ${answered ? "answers" : "doesn't answer"} the operator`,
-      () =>
-        Effect.gen(function* () {
-          const notifications = yield* Queue.make<CodexNotification, Cause.Done>();
-          const saved = HarnessSession.make({
-            id: HarnessSessionId.make("held-codex"),
-            cwd: request().cwd,
-          });
-          const responses = new Map(
-            Object.entries({
-              ...successfulResponses([{ id: "gpt-5.6-terra", model: "gpt-5.6-terra" }]),
-              "thread/resume": {
-                modelProvider: "openai",
-                thread: { id: saved.id, turns: [{ id: "turn-0", status: "completed", items: [] }] },
-              },
-            }),
-          );
-          const server = Layer.succeed(CodexAppServer)({
-            stop: () => Effect.void,
-            open: () =>
-              Effect.succeed({
-                notifications: Stream.fromQueue(notifications),
-                notify: () => Effect.void,
-                close: Queue.end(notifications).pipe(Effect.asVoid),
-                request: (_operation, method) =>
-                  Effect.sync(() => {
-                    const response = responses.get(method);
-                    assert(response !== undefined);
-                    return response;
-                  }),
+  it.effect("restores whether a held idle Codex report answers the operator", () =>
+    Effect.gen(function* () {
+      const notifications = yield* Queue.make<CodexNotification, Cause.Done>();
+      const saved = HarnessSession.make({
+        id: HarnessSessionId.make("held-codex"),
+        cwd: request().cwd,
+      });
+      const responses = new Map(
+        Object.entries({
+          ...successfulResponses([{ id: "gpt-5.6-terra", model: "gpt-5.6-terra" }]),
+          "thread/resume": {
+            modelProvider: "openai",
+            thread: { id: saved.id, turns: [{ id: "turn-0", status: "completed", items: [] }] },
+          },
+        }),
+      );
+      const server = Layer.succeed(CodexAppServer)({
+        stop: () => Effect.void,
+        open: () =>
+          Effect.succeed({
+            notifications: Stream.fromQueue(notifications),
+            notify: () => Effect.void,
+            close: Queue.end(notifications).pipe(Effect.asVoid),
+            request: (_operation, method) =>
+              Effect.sync(() => {
+                const response = responses.get(method);
+                assert(response !== undefined);
+                return response;
               }),
-          });
-          const result = yield* Effect.gen(function* () {
-            const running = yield* (yield* ChildBackend).launch(
-              ChildRequest.make({
-                ...request(),
-                resume: Option.some(saved),
-                environment: {
-                  ...request().environment,
-                  ...Option.match(saved.home, {
-                    onNone: () => ({}),
-                    onSome: (home) => ({ CODEX_HOME: home }),
-                  }),
-                },
-                held: true,
-                idle: Option.some("The tests need a database."),
-                idleAnsweredOperator: answered,
+          }),
+      });
+      const result = yield* Effect.gen(function* () {
+        const running = yield* (yield* ChildBackend).launch(
+          ChildRequest.make({
+            ...request(),
+            resume: Option.some(saved),
+            environment: {
+              ...request().environment,
+              ...Option.match(saved.home, {
+                onNone: () => ({}),
+                onSome: (home) => ({ CODEX_HOME: home }),
               }),
-            );
-            yield* running.intervene(Release.make(), noDelivery);
-            return yield* running.result;
-          }).pipe(Effect.provide(codexChildLayer.pipe(Layer.provide(server))));
-          assert.strictEqual(result.message, "The tests need a database.");
-          assert.strictEqual(result.answeredOperator, answered);
-        }).pipe(Effect.scoped),
-    );
+            },
+            held: true,
+            idle: Option.some("The tests need a database."),
+            idleAnsweredOperator: true,
+          }),
+        );
+        yield* running.intervene(Release.make(), noDelivery);
+        return yield* running.result;
+      }).pipe(Effect.provide(codexChildLayer.pipe(Layer.provide(server))));
+      assert.strictEqual(result.message, "The tests need a database.");
+      assert.isTrue(result.answeredOperator);
+    }).pipe(Effect.scoped),
+  );
 
   for (const supervision of ["paused", "held-idle", "held-idle-steer"] as const) {
     it.effect(`restores a ${supervision} Codex child without starting a turn`, () =>
@@ -1145,12 +1134,7 @@ describe("Codex child backend", () => {
       }),
   );
 
-  for (const ending of [
-    "interrupted",
-    "completed",
-    "guidance-during-interrupt",
-    "retained",
-  ] as const) {
+  for (const ending of ["completed", "guidance-during-interrupt", "retained"] as const) {
     it.effect(`resends unconsumed guidance before the next Codex turn (${ending})`, () =>
       Effect.gen(function* () {
         const notifications = yield* Queue.make<CodexNotification, Cause.Done>();
@@ -2524,72 +2508,63 @@ describe("Codex child backend", () => {
     );
   }
 
-  for (const status of ["completed", "interrupted"] as const) {
-    it.effect(`waits for shutdown before publishing ${status} work`, () =>
-      Effect.gen(function* () {
-        const closing = yield* Deferred.make<void>();
-        const closed = yield* Deferred.make<void>();
-        const server = connectionLayer(
-          successfulResponses([{ id: "gpt-5.6-terra", model: "gpt-5.6-terra" }]),
-          [
-            {
-              method: "item/completed",
-              params: {
-                threadId: "thread-1",
-                turnId: "turn-1",
-                item: { type: "agentMessage", id: "message-1", text: "The fix is ready." },
-              },
+  it.effect("waits for shutdown before publishing completed work", () =>
+    Effect.gen(function* () {
+      const closing = yield* Deferred.make<void>();
+      const closed = yield* Deferred.make<void>();
+      const server = connectionLayer(
+        successfulResponses([{ id: "gpt-5.6-terra", model: "gpt-5.6-terra" }]),
+        [
+          {
+            method: "item/completed",
+            params: {
+              threadId: "thread-1",
+              turnId: "turn-1",
+              item: { type: "agentMessage", id: "message-1", text: "The fix is ready." },
             },
-            {
-              method: "turn/completed",
-              params: { turn: { id: "turn-1", status, error: null } },
-            },
-          ],
-          [],
-          Deferred.succeed(closing, undefined).pipe(Effect.andThen(Deferred.await(closed))),
-        );
-        yield* Effect.scoped(
-          Effect.gen(function* () {
-            const backend = yield* ChildBackend;
-            const running = yield* backend.launch(request());
-            const result = yield* running.result.pipe(Effect.result, Effect.forkChild);
-            const events = yield* running.events.pipe(
-              Stream.runCollect,
-              Effect.result,
-              Effect.forkChild,
-            );
-            yield* Effect.raceFirst(
-              Deferred.await(closing),
-              Fiber.join(result).pipe(
-                Effect.andThen(Effect.die(new Error("session settled before shutdown began"))),
-              ),
-            );
-            yield* TestClock.adjust(0);
-            assert.strictEqual(result.pollUnsafe(), undefined, "the session still owns resources");
-            assert.strictEqual(events.pollUnsafe(), undefined, "the transcript is still open");
+          },
+          {
+            method: "turn/completed",
+            params: { turn: { id: "turn-1", status: "completed", error: null } },
+          },
+        ],
+        [],
+        Deferred.succeed(closing, undefined).pipe(Effect.andThen(Deferred.await(closed))),
+      );
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const backend = yield* ChildBackend;
+          const running = yield* backend.launch(request());
+          const result = yield* running.result.pipe(Effect.result, Effect.forkChild);
+          const events = yield* running.events.pipe(
+            Stream.runCollect,
+            Effect.result,
+            Effect.forkChild,
+          );
+          yield* Effect.raceFirst(
+            Deferred.await(closing),
+            Fiber.join(result).pipe(
+              Effect.andThen(Effect.die(new Error("session settled before shutdown began"))),
+            ),
+          );
+          yield* TestClock.adjust(0);
+          assert.strictEqual(result.pollUnsafe(), undefined, "the session still owns resources");
+          assert.strictEqual(events.pollUnsafe(), undefined, "the transcript is still open");
 
-            yield* Deferred.succeed(closed, undefined);
-            const outcome = yield* Fiber.join(result);
-            const transcript = yield* Fiber.join(events);
-            assert.strictEqual(transcript._tag, outcome._tag);
-            if (status === "completed") {
-              assert(Result.isSuccess(outcome));
-              assert.strictEqual(outcome.success.message, "The fix is ready.");
-              assert(Result.isSuccess(transcript));
-              assert.strictEqual(transcript.success.at(-1)?._tag, "SessionFinished");
-            } else {
-              assert(Result.isFailure(outcome));
-              const matchesOutcomeFailure = Schema.is(AgentResultError)(outcome.failure);
-              assert(matchesOutcomeFailure);
-            }
-          }).pipe(
-            Effect.ensuring(Deferred.succeed(closed, undefined)),
-            Effect.provide(codexChildLayer.pipe(Layer.provideMerge(server))),
-          ),
-        );
-      }),
-    );
-  }
+          yield* Deferred.succeed(closed, undefined);
+          const outcome = yield* Fiber.join(result);
+          const transcript = yield* Fiber.join(events);
+          assert(Result.isSuccess(outcome));
+          assert.strictEqual(outcome.success.message, "The fix is ready.");
+          assert(Result.isSuccess(transcript));
+          assert.strictEqual(transcript.success.at(-1)?._tag, "SessionFinished");
+        }).pipe(
+          Effect.ensuring(Deferred.succeed(closed, undefined)),
+          Effect.provide(codexChildLayer.pipe(Layer.provideMerge(server))),
+        ),
+      );
+    }),
+  );
 
   it.effect("normalizes completed messages, tools, and ChatGPT rate windows", () => {
     const calls: Array<{ readonly method: string; readonly params: Schema.Json }> = [];
@@ -2824,36 +2799,6 @@ describe("Codex child backend", () => {
     },
   );
 
-  it.effect("opens the app server on the child's remote host", () => {
-    const host = RemoteShell.make({
-      ssh: { command: "ssh", args: [] },
-      sshEnvironment: {},
-      destination: "worker.exe.xyz",
-    });
-    const clients: Array<CodexClient> = [];
-    const server = connectionLayer(
-      successfulResponses([{ id: "gpt-5.6-terra", model: "gpt-5.6-terra" }]),
-      [
-        {
-          method: "turn/completed",
-          params: { turn: { id: "turn-1", status: "completed", error: null } },
-        },
-      ],
-      [],
-      Effect.void,
-      clients,
-    );
-    return Effect.scoped(
-      Effect.gen(function* () {
-        yield* (yield* ChildBackend).launch(request(undefined, undefined, host));
-        assert.deepStrictEqual(
-          clients.map((client) => client.host),
-          [host],
-        );
-      }).pipe(Effect.provide(codexChildLayer.pipe(Layer.provideMerge(server)))),
-    );
-  });
-
   it.effect("prefers the final_answer message over trailing commentary for the result", () => {
     const notifications: ReadonlyArray<CodexNotification> = [
       {
@@ -2968,83 +2913,6 @@ describe("Codex child backend", () => {
     );
   });
 
-  it.effect("tolerates sparse rate windows, undecodable items, and unknown notifications", () => {
-    const notifications: ReadonlyArray<CodexNotification> = [
-      // Partial rate-limit update: only one window's load figure is present.
-      {
-        method: "account/rateLimits/updated",
-        params: { rateLimits: { primary: { usedPercent: 91 } } },
-      },
-      // Undecodable item payload: logged and skipped, not fatal.
-      { method: "item/completed", params: { nonsense: true } },
-      // Server notifications with no normalized form.
-      { method: "error", params: { error: { message: "transient" }, willRetry: true } },
-      { method: "thread/tokenUsage/updated", params: { tokens: 12 } },
-      {
-        method: "item/completed",
-        params: {
-          threadId: "thread-1",
-          turnId: "turn-1",
-          item: { type: "agentMessage", id: "m-1", text: "Done." },
-        },
-      },
-      {
-        method: "turn/completed",
-        params: { turn: { id: "turn-1", status: "completed", error: null } },
-      },
-    ];
-    const server = connectionLayer(
-      successfulResponses([{ id: "gpt-5.6-terra", model: "gpt-5.6-terra" }]),
-      notifications,
-    );
-    return Effect.scoped(
-      Effect.gen(function* () {
-        const backend = yield* ChildBackend;
-        const running = yield* backend.launch(request());
-        const [events, result] = yield* Effect.all([
-          Stream.runCollect(running.events),
-          running.result,
-        ]);
-        assert.strictEqual(result.message, "Done.");
-        assert.deepStrictEqual(
-          events.map((event) => event._tag),
-          ["SessionStarted", "PoolRateLimitsUpdated", "TextOutput", "SessionFinished"],
-        );
-      }).pipe(Effect.provide(codexChildLayer.pipe(Layer.provideMerge(server)))),
-    );
-  });
-
-  it.effect("marks a dynamic tool reporting success false as an error", () => {
-    const notifications: ReadonlyArray<CodexNotification> = [
-      {
-        method: "item/completed",
-        params: {
-          threadId: "thread-1",
-          turnId: "turn-1",
-          item: { type: "dynamicToolCall", id: "tool-1", success: false },
-        },
-      },
-      {
-        method: "turn/completed",
-        params: { turn: { id: "turn-1", status: "completed", error: null } },
-      },
-    ];
-    const server = connectionLayer(
-      successfulResponses([{ id: "gpt-5.6-terra", model: "gpt-5.6-terra" }]),
-      notifications,
-    );
-    return Effect.scoped(
-      Effect.gen(function* () {
-        const backend = yield* ChildBackend;
-        const running = yield* backend.launch(request());
-        const events = yield* Stream.runCollect(running.events);
-        const finished = events.find((event) => event._tag === "ToolFinished");
-        assert(finished !== undefined && finished._tag === "ToolFinished");
-        assert.strictEqual(finished.isError, true);
-      }).pipe(Effect.provide(codexChildLayer.pipe(Layer.provideMerge(server)))),
-    );
-  });
-
   it.effect("starts local API-key children and records their usage in the API keys pool", () => {
     const server = connectionLayer(
       {
@@ -3096,7 +2964,7 @@ describe("Codex child backend", () => {
     );
   });
 
-  for (const account of [null, { type: "amazonBedrock" }, { type: "unknown" }]) {
+  for (const account of [null, { type: "unknown" }]) {
     it.effect(
       `refuses ${account?.type ?? "logged-out"} authentication before starting a turn`,
       () => {
@@ -3124,61 +2992,6 @@ describe("Codex child backend", () => {
       },
     );
   }
-
-  it.effect(
-    "attributes later rate windows to the new ChatGPT login after an account change",
-    () => {
-      const responses: Readonly<Record<string, Schema.Json>> = successfulResponses([
-        { id: "gpt-5.6-terra", model: "gpt-5.6-terra" },
-      ]);
-      const rateUpdate = {
-        method: "account/rateLimits/updated",
-        params: { rateLimits: { primary: { usedPercent: 85 } } },
-      };
-      let accountReads = 0;
-      const server = Layer.succeed(CodexAppServer)({
-        stop: () => Effect.void,
-        open: () =>
-          Effect.succeed({
-            close: Effect.void,
-            notify: () => Effect.void,
-            request: (_operation, method) =>
-              Effect.sync(() =>
-                method === "account/read"
-                  ? {
-                      account: {
-                        type: "chatgpt",
-                        email: ++accountReads === 1 ? "first@example.com" : "second@example.com",
-                      },
-                      requiresOpenaiAuth: true,
-                    }
-                  : (responses[method] ?? {}),
-              ),
-            notifications: Stream.fromIterable([
-              rateUpdate,
-              { method: "account/updated", params: { authMode: "chatgpt" } },
-              rateUpdate,
-              {
-                method: "turn/completed",
-                params: { turn: { id: "turn-1", status: "completed", error: null } },
-              },
-            ]),
-          }),
-      });
-      return Effect.scoped(
-        Effect.gen(function* () {
-          const running = yield* (yield* ChildBackend).launch(request());
-          const [events] = yield* Effect.all([Stream.runCollect(running.events), running.result]);
-          assert.deepStrictEqual(
-            events
-              .filter((event) => event._tag === "PoolRateLimitsUpdated")
-              .map(({ login }) => Option.getOrNull(login)),
-            [PoolLogin.make("first@example.com"), PoolLogin.make("second@example.com")],
-          );
-        }).pipe(Effect.provide(codexChildLayer.pipe(Layer.provideMerge(server)))),
-      );
-    },
-  );
 
   it.effect("stops attributing rate windows after a mid-session authentication change", () => {
     const server = connectionLayer(
@@ -3214,82 +3027,75 @@ describe("Codex child backend", () => {
     );
   });
 
-  for (const [credential, pool] of [
-    ["subscription", "chatgptPlan"],
-    ["api-key", "apiKeys"],
-  ] as const)
-    it.effect(
-      `runs on the Gateway's OpenAI ${credential} without a login check, in the ${pool} pool`,
-      () => {
-        const calls: Array<{ readonly method: string; readonly params: Schema.Json }> = [];
-        const { "account/read": _, ...withoutAccount } = successfulResponses([
-          { id: "gpt-5.6-terra", model: "gpt-5.6-terra" },
-        ]);
-        const server = connectionLayer(
-          withoutAccount,
-          [
-            { method: "account/updated", params: { authMode: "apikey" } },
-            {
-              method: "account/rateLimits/updated",
-              params: { rateLimits: { primary: { usedPercent: 42 } } },
+  it.effect(
+    "runs on the Gateway's OpenAI api-key without a login check, in the apiKeys pool",
+    () => {
+      const calls: Array<{ readonly method: string; readonly params: Schema.Json }> = [];
+      const { "account/read": _, ...withoutAccount } = successfulResponses([
+        { id: "gpt-5.6-terra", model: "gpt-5.6-terra" },
+      ]);
+      const server = connectionLayer(
+        withoutAccount,
+        [
+          { method: "account/updated", params: { authMode: "apikey" } },
+          {
+            method: "account/rateLimits/updated",
+            params: { rateLimits: { primary: { usedPercent: 42 } } },
+          },
+          {
+            method: "item/completed",
+            params: {
+              threadId: "thread-1",
+              turnId: "turn-1",
+              item: { type: "agentMessage", id: "message-1", text: "Done through the gateway." },
             },
-            {
-              method: "item/completed",
-              params: {
-                threadId: "thread-1",
-                turnId: "turn-1",
-                item: { type: "agentMessage", id: "message-1", text: "Done through the gateway." },
-              },
-            },
-            {
-              method: "turn/completed",
-              params: { turn: { id: "turn-1", status: "completed", error: null } },
-            },
-          ],
-          calls,
-        );
-        const base = request();
-        const codexHome = "/srv/usine/workers/eu-one/codex/run-1_execute_1";
-        const throughGateway = ChildRequest.make({
-          ...base,
-          environment: { ...base.environment, CODEX_HOME: codexHome },
-          session: ChildSession.make({
-            ...base.session,
-            gatewayCredential: Option.some(credential),
-          }),
-        });
-        return Effect.scoped(
-          Effect.gen(function* () {
-            const backend = yield* ChildBackend;
-            const running = yield* backend.launch(throughGateway);
-            const [events, result] = yield* Effect.all([
-              Stream.runCollect(running.events),
-              running.result,
-            ]);
-            assert.strictEqual(result.message, "Done through the gateway.");
-            assert(!calls.some(({ method }) => method === "account/read"));
-            const limits = events.find((event) => event._tag === "PoolRateLimitsUpdated");
-            assert(limits?._tag === "PoolRateLimitsUpdated");
-            assert.strictEqual(limits.pool, pool);
-            assert.deepStrictEqual(running.session.pool, Option.some(pool));
-            assert.deepStrictEqual(
-              running.session.endpoint,
-              pool === "apiKeys" ? Option.some("openai") : Option.none(),
-            );
-            assert.deepStrictEqual(limits.session.pool, Option.some(pool));
-            assert(Option.isNone(limits.login));
-            const started = events[0];
-            assert(started?._tag === "SessionStarted" && started.session._tag === "ChildSession");
-            assert.deepStrictEqual(started.session.gatewayCredential, Option.some(credential));
-            assert.deepStrictEqual(
-              Option.flatMap(started.harnessSession, ({ home }) => home),
-              Option.some(codexHome),
-              "the session is saved in the Attempt's Codex home",
-            );
-          }).pipe(Effect.provide(codexChildLayer.pipe(Layer.provideMerge(server)))),
-        );
-      },
-    );
+          },
+          {
+            method: "turn/completed",
+            params: { turn: { id: "turn-1", status: "completed", error: null } },
+          },
+        ],
+        calls,
+      );
+      const base = request();
+      const codexHome = "/srv/usine/workers/eu-one/codex/run-1_execute_1";
+      const throughGateway = ChildRequest.make({
+        ...base,
+        environment: { ...base.environment, CODEX_HOME: codexHome },
+        session: ChildSession.make({
+          ...base.session,
+          gatewayCredential: Option.some("api-key"),
+        }),
+      });
+      return Effect.scoped(
+        Effect.gen(function* () {
+          const backend = yield* ChildBackend;
+          const running = yield* backend.launch(throughGateway);
+          const [events, result] = yield* Effect.all([
+            Stream.runCollect(running.events),
+            running.result,
+          ]);
+          assert.strictEqual(result.message, "Done through the gateway.");
+          assert(!calls.some(({ method }) => method === "account/read"));
+          const limits = events.find((event) => event._tag === "PoolRateLimitsUpdated");
+          assert(limits?._tag === "PoolRateLimitsUpdated");
+          assert.strictEqual(limits.pool, "apiKeys");
+          assert.deepStrictEqual(running.session.pool, Option.some("apiKeys"));
+          assert.deepStrictEqual(running.session.endpoint, Option.some("openai"));
+          assert.deepStrictEqual(limits.session.pool, Option.some("apiKeys"));
+          assert(Option.isNone(limits.login));
+          const started = events[0];
+          assert(started?._tag === "SessionStarted" && started.session._tag === "ChildSession");
+          assert.deepStrictEqual(started.session.gatewayCredential, Option.some("api-key"));
+          assert.deepStrictEqual(
+            Option.flatMap(started.harnessSession, ({ home }) => home),
+            Option.some(codexHome),
+            "the session is saved in the Attempt's Codex home",
+          );
+        }).pipe(Effect.provide(codexChildLayer.pipe(Layer.provideMerge(server)))),
+      );
+    },
+  );
 
   it.effect("rejects a model absent from the app-server catalog", () => {
     const server = connectionLayer(

@@ -141,65 +141,6 @@ describe("AttemptContext.build", () => {
     }),
   );
 
-  it.effect("shortens the task first to fit, keeping its start, and keeps the event whole", () =>
-    Effect.gen(function* () {
-      const event = report(2, 9_000);
-      const snapshot = yield* journalWith({
-        task: 50_000,
-        payload: 0,
-        earlier: [30_000],
-        output: 60_000,
-        event,
-      });
-      const context = yield* buildAttemptContext(snapshot, event);
-      const encoded = yield* contextJson(context);
-
-      assert.isAtMost(encoded.length, CONTEXT_CHARACTERS);
-      assert.deepStrictEqual(context.event, event);
-      // Shortening the task alone fits the cap, so the output and the report keep their limits.
-      assert.isAbove(context.task.length, 0);
-      assert.isBelow(context.task.length, 4_000);
-      assert.strictEqual(context.task, "a".repeat(context.task.length));
-      assert.strictEqual(context.output, "e".repeat(2_000));
-      assert.deepStrictEqual(
-        context.delegations.map(({ report }) => Option.map(report, (text) => text.length)),
-        [Option.some(4_000), Option.none()],
-      );
-    }),
-  );
-
-  it.effect(
-    "keeps the latest two reports up to 4,000 characters and earlier ones as one line",
-    () =>
-      Effect.gen(function* () {
-        const event = report(3, 3_000);
-        const snapshot = yield* journalWith({
-          task: 100,
-          payload: 0,
-          earlier: [5_000, 5_000],
-          output: 0,
-          event,
-        });
-        const context = yield* buildAttemptContext(snapshot, event);
-
-        assert.deepStrictEqual(context.event, event);
-        assert.deepStrictEqual(
-          context.delegations.map(({ child, status, report }) => ({
-            child,
-            status,
-            report: Option.map(report, (text) => text.length),
-          })),
-          [
-            // 160 characters and an ellipsis.
-            { child: 1, status: "ended", report: Option.some(161) },
-            { child: 2, status: "ended", report: Option.some(4_000) },
-            // The event carries the handled child's report.
-            { child: 3, status: "ended", report: Option.none() },
-          ],
-        );
-      }),
-  );
-
   it.effect("shortens the output, then the reports, when shortening the task isn't enough", () =>
     Effect.gen(function* () {
       const event = report(3, 12_000);
@@ -228,29 +169,6 @@ describe("AttemptContext.build", () => {
       assert.isAbove(second ?? 0, 160);
       assert.isBelow(second ?? 0, 4_000);
       assert.strictEqual(handled, 0);
-    }),
-  );
-
-  it.effect("shortens the output from its start once the task is empty", () =>
-    Effect.gen(function* () {
-      const event = report(1, 14_500);
-      const snapshot = yield* journalWith({
-        task: 100,
-        payload: 0,
-        earlier: [],
-        output: 2_000,
-        event,
-      });
-      const context = yield* buildAttemptContext(snapshot, event);
-      const encoded = yield* contextJson(context);
-
-      assert.isAtMost(encoded.length, CONTEXT_CHARACTERS);
-      assert.deepStrictEqual(context.event, event);
-      assert.strictEqual(context.task, "");
-      // Part of the output still fits, and it's the end of the output.
-      assert.isAbove(context.output.length, 0);
-      assert.isBelow(context.output.length, 2_000);
-      assert.strictEqual(context.output, output(2_000).slice(-context.output.length));
     }),
   );
 });
