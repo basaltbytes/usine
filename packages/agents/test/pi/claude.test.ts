@@ -3139,6 +3139,50 @@ describe("Claude child backend", () => {
       message: "API request failed without a response (rate_limit); retry 1 of 10 in 5s",
     },
     {
+      name: "a rate limit while the session's reports show a window used up",
+      messages: [
+        {
+          type: "rate_limit_event",
+          rate_limit_info: {
+            status: "allowed_warning",
+            rateLimitType: "seven_day",
+            utilization: 1,
+            resetsAt: 1_794_373_200,
+          },
+        },
+        {
+          type: "rate_limit_event",
+          rate_limit_info: {
+            status: "allowed_warning",
+            rateLimitType: "five_hour",
+            utilization: 0.4,
+            resetsAt: 1_794_300_000,
+          },
+        },
+        limitError,
+        limitResult,
+      ],
+      resetsAt: Option.some("2026-11-11T05:00:00.000Z"),
+    },
+    {
+      name: "a rate limit after a used-up window was reported below its allowance again",
+      messages: [
+        { ...rejected, rate_limit_info: { ...rejected.rate_limit_info, status: "allowed" } },
+        {
+          type: "rate_limit_event",
+          rate_limit_info: {
+            status: "allowed",
+            rateLimitType: "five_hour",
+            utilization: 0.1,
+            resetsAt: 1_794_390_000,
+          },
+        },
+        limitError,
+        limitResult,
+      ],
+      resetsAt: Option.none(),
+    },
+    {
       name: "an overload during a usage-limit warning",
       messages: [
         {

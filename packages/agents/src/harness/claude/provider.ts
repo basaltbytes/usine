@@ -1,5 +1,5 @@
 import type { AgentSessionId } from "@usine/core/agent/session";
-import { type DateTime, Option, Schema } from "effect";
+import { DateTime, Option, Schema } from "effect";
 import { AgentCapacityError, type AgentResultError } from "../../runtime.ts";
 import {
   apiErrorRefusal,
@@ -11,7 +11,7 @@ import {
   isAssistantMessage,
   resultFailure,
 } from "./codec.ts";
-import { isRateLimitEvent, rejectedUntil } from "./rate-limits.ts";
+import { isRateLimitEvent, rejectedUntil, reportedWindow } from "./rate-limits.ts";
 
 /** What one Claude message reported about its provider. */
 export interface ProviderReport {
@@ -25,24 +25,44 @@ export interface ProviderReport {
  * Tracks what a Claude turn's messages report about its provider, and classifies the turn's
  * failed result with it. A session and a completion read each message through `read`, so both
  * fail a result the same way. A capacity refusal while the latest rate-limit report rejects
- * requests carries the limit's reset time.
+ * requests carries the limit's reset time. Without one, it carries the latest reset time of the
+ * allowance windows that the session's latest reports show used up.
  */
 export const claudeProviderFailures = (sessionId: AgentSessionId) => {
   let failure = Option.none<AgentCapacityError | AgentResultError>();
   let limitResetsAt = Option.none<DateTime.Utc>();
-  const withReset = (refusal: AgentCapacityError): AgentCapacityError =>
-    Option.isSome(limitResetsAt)
+  // The reset time of each allowance window whose latest report shows it used up.
+  const usedUp = new Map<string, DateTime.Utc>();
+  const withReset = (refusal: AgentCapacityError): AgentCapacityError => {
+    const resetsAt = Option.orElse(limitResetsAt, () =>
+      Option.fromUndefinedOr(
+        [...usedUp.values()].reduce<DateTime.Utc | undefined>(
+          (latest, at) => (latest === undefined ? at : DateTime.max(latest, at)),
+          undefined,
+        ),
+      ),
+    );
+    return Option.isSome(resetsAt)
       ? AgentCapacityError.make({
           sessionId: refusal.sessionId,
           message: refusal.message,
-          resetsAt: limitResetsAt,
+          resetsAt,
         })
       : refusal;
+  };
   return {
     /** Records what `message` reports: a provider retry, an assistant error, or a rate limit. */
     read: (message: Schema.Json): ProviderReport => {
       const rejected = isRateLimitEvent(message) ? rejectedUntil(message) : Option.none();
-      if (isRateLimitEvent(message)) limitResetsAt = rejected;
+      if (isRateLimitEvent(message)) {
+        limitResetsAt = rejected;
+        const window = reportedWindow(message);
+        if (Option.isSome(window)) {
+          const { window: name, usedUpUntil } = window.value;
+          if (Option.isSome(usedUpUntil)) usedUp.set(name, usedUpUntil.value);
+          else usedUp.delete(name);
+        }
+      }
       const retry = decodeApiRetry(message);
       if (Option.isSome(retry)) failure = apiRetryFailure(sessionId, retry.value);
       else if (isAssistantMessage(message)) failure = assistantFailure(sessionId, message, failure);

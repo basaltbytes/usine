@@ -100,3 +100,25 @@ export const rejectedUntil = (message: Schema.Json): Option.Option<DateTime.Utc>
     Option.flatMap(({ rate_limit_info: info }) => Option.fromUndefinedOr(info.resetsAt)),
     Option.map(DateTime.fromEpochSeconds),
   );
+
+/**
+ * Returns the allowance window that a rate-limit report names, with its reset time if the report
+ * shows the window used up, or `None` if the report names no window or doesn't decode.
+ */
+export const reportedWindow = (
+  message: Schema.Json,
+): Option.Option<{
+  readonly window: string;
+  readonly usedUpUntil: Option.Option<DateTime.Utc>;
+}> =>
+  decodeRateLimitOption(message).pipe(
+    Option.flatMap(({ rate_limit_info: info }) =>
+      Option.map(Option.fromUndefinedOr(info.rateLimitType), (window) => ({
+        window,
+        usedUpUntil:
+          (info.utilization ?? 0) >= 1
+            ? Option.map(Option.fromUndefinedOr(info.resetsAt), DateTime.fromEpochSeconds)
+            : Option.none(),
+      })),
+    ),
+  );
