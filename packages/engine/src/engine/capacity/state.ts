@@ -122,7 +122,7 @@ const byEnd = Order.mapInput(DateTime.Order, ({ endedAt }: CapacityRefusal) => e
  * A refusal lengthens the wait only if its Attempt started after an earlier refusal ended, so
  * Attempts that were already running when the limit started count once.
  */
-export const scheduleOf = (refusals: EffectArray.NonEmptyReadonlyArray<CapacityRefusal>) => {
+const scheduleOf = (refusals: EffectArray.NonEmptyReadonlyArray<CapacityRefusal>) => {
   const [first, ...rest] = refusals;
   let steps = 1;
   let latest = first.endedAt;
@@ -287,7 +287,7 @@ export const answered = (
  * What a Run may do in a group: start an Attempt because the group isn't at capacity (`Free`),
  * start the Attempt that tests it (`Probe`), or wait without an Attempt (`Wait`).
  */
-export type CapacityClaim = "Free" | "Probe" | "Wait";
+type CapacityClaim = "Free" | "Probe" | "Wait";
 
 /**
  * How a Run's wait for its capacity group ended: its turn came or it waited for no group (`Due`),
