@@ -124,8 +124,8 @@ export class Permissions extends Context.Service<
   Permissions,
   {
     /**
-     * Runs a running turn's `call` under a standing grant that covers it, or stores a waiting
-     * request, and returns the request. A conversation on a project can request only calls in
+     * Runs a running turn's `call` under a standing grant that covers it, if the turn's poster
+     * could make the call, or stores a waiting request, and returns the request. A conversation on a project can request only calls in
      * that project: an operation outside a project, or on another project, fails.
      */
     readonly gate: (
@@ -265,11 +265,24 @@ export const permissionsLayer = Layer.effect(
       return yield* ConversationNotFound.make({ conversation: id });
     });
 
-    /** The first grant that covers `call` and whose member's access permits it now. */
+    /**
+     * The first grant that covers `call` and whose member's access permits it now. A grant runs
+     * the call in `turn`, so it applies only when the access of the turn's poster permits the call.
+     */
     const applicableGrant = Effect.fn("Permissions.applicableGrant")(function* (
+      turn: RunningTurn,
       call: OperationCall,
     ) {
       if (!isGrantable(call)) return Option.none<StandingGrant>();
+      const poster = yield* accessOf({ member: turn.member, credential: turn.credential });
+      if (!Option.exists(poster, (access) => access.permits(call))) {
+        yield* Effect.logInfo("Standing grants skipped: the turn's poster can't make the call", {
+          turn: turn.id,
+          member: turn.member.login,
+          operation: call.operation,
+        });
+        return Option.none<StandingGrant>();
+      }
       const candidates = (yield* store.grants).filter((grant) => covers(grant, call));
       for (const grant of candidates) {
         const access = yield* accessOf(actorOf(grant));
@@ -470,7 +483,7 @@ export const permissionsLayer = Layer.effect(
           call,
           requestedAt: yield* now,
         };
-        const grant = yield* applicableGrant(call);
+        const grant = yield* applicableGrant(turn, call);
         if (Option.isSome(grant)) {
           const request = covered(
             fields,

@@ -139,8 +139,10 @@ const fixture = (hold: Effect.Effect<void> = Effect.void) =>
     return { access, ran, open };
   });
 
-/** Stores a conversation in `scope` and returns it with its first turn, running. */
-const running = (id: string, scope: AccessScope) =>
+/**
+ * Stores a conversation in `scope` and returns it with its first turn, posted by `poster`, running.
+ */
+const running = (id: string, scope: AccessScope, poster: TurnMember = ada) =>
   Effect.gen(function* () {
     const store = yield* ConversationStore;
     const conversation = Conversation.make({
@@ -148,7 +150,7 @@ const running = (id: string, scope: AccessScope) =>
       title: ConversationTitle.make("Retry run 1"),
       scope,
       anchor: Option.none(),
-      createdBy: ada.login,
+      createdBy: poster.login,
       createdAt: at,
     });
     const record = yield* store.create(
@@ -156,7 +158,7 @@ const running = (id: string, scope: AccessScope) =>
       MemberPost.make({
         conversation: conversation.id,
         turn: TurnId.make(`${id}-t1`),
-        member: ada,
+        member: poster,
         credential: PostedWithSession.make({}),
         format: defaultFormat,
         body: MessageBody.make("Retry run 1"),
@@ -224,6 +226,33 @@ describe("supervisor permissions", () => {
           .pipe(Effect.flip);
         assert.strictEqual(instanceWide._tag, "CallOutsideScope");
         assert.lengthOf(ran, 2);
+      }).pipe(Effect.provide(open));
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("doesn't apply a grant to a call that the turn's poster can't make", () =>
+    Effect.gen(function* () {
+      const { ran, open } = yield* fixture();
+      yield* Effect.gen(function* () {
+        const permissions = yield* Permissions;
+        const byAda = yield* running("c1", factory);
+        const first = yield* permissions.gate(
+          byAda.conversation,
+          byAda.turn,
+          retry(factory),
+          Option.none(),
+        );
+        yield* permissions.answer(byAda.conversation.id, first.id, "always", as(ada), noWake);
+        // grace reads the project but can't operate in it.
+        const byGrace = yield* running("c2", factory, grace);
+        const call = yield* permissions.gate(
+          byGrace.conversation,
+          byGrace.turn,
+          retry(factory),
+          Option.none(),
+        );
+        assert.strictEqual(call.state._tag, "Waiting");
+        assert.lengthOf(ran, 1, "only the answered call ran");
       }).pipe(Effect.provide(open));
     }).pipe(Effect.scoped),
   );
