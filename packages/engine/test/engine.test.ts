@@ -87,7 +87,6 @@ describe("durable run engine", () => {
           const executed: Array<{
             readonly task: string;
             readonly agent: Agent;
-            readonly parentModel: Option.Option<ModelId>;
           }> = [];
           const amended = AttemptContext.make({
             task: AttemptTask.make("Fix the reviewed edge case"),
@@ -101,7 +100,6 @@ describe("durable run engine", () => {
                 effort: "medium",
               }),
             }),
-            parentModel: Option.some(ModelId.make("openai/changed-parent")),
           });
           const executor = Layer.succeed(StepExecutor)({
             workers: Effect.succeed([WorkerName.make("local")]),
@@ -121,11 +119,7 @@ describe("durable run engine", () => {
               }),
             execute: (execution) =>
               Effect.gen(function* () {
-                executed.push({
-                  task: execution.task,
-                  agent: execution.agent,
-                  parentModel: execution.parentModel,
-                });
+                executed.push({ task: execution.task, agent: execution.agent });
                 if (executed.length === 1)
                   return yield* AgentFailure.make({ message: "Needs a correction" });
                 if (executed.length === 2)
@@ -171,11 +165,7 @@ describe("durable run engine", () => {
             );
             assert.deepStrictEqual(
               executed.slice(1),
-              [amended, amended].map(({ task, agent, parentModel }) => ({
-                task,
-                agent,
-                parentModel,
-              })),
+              [amended, amended].map(({ task, agent }) => ({ task, agent })),
             );
             assert.deepStrictEqual(
               finished.attempts.map(({ task, agent }) => ({ task, agent })),

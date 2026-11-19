@@ -73,8 +73,6 @@ const developer = AgentFile.make({
   harness: Harness.make("codex"),
   model: ModelId.make("gpt-6-astra"),
   effort: "medium",
-  parentModel: Option.none(),
-  parentEffort: Option.none(),
   persona: AgentPersona.make("Work on the Item."),
 });
 const startDev = (approval: "none" | "required") =>

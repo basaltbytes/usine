@@ -39,8 +39,6 @@ const summary = (id: string, item: string, loop: string, state: RunState.RunStat
         effort: "high",
       }),
       persona: AgentPersona.make("Work."),
-      parentModel: Option.none(),
-      parentEffort: Option.none(),
     }),
   });
 };

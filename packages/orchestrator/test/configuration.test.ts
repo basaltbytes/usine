@@ -71,7 +71,6 @@ repos:
   - name: basaltbytes/site
 settings:
   poll_interval: 30
-  parent_model: gpt-5.6-sol
 webhooks:
   mode: endpoint
   public_url: https://factory.example/webhooks
@@ -100,7 +99,6 @@ workers:
 harness: codex
 model: gpt-5.6-sol
 effort: high
-parent_effort: medium
 ---
 Implement the issue, then open a pull request.
 `,
@@ -111,7 +109,6 @@ Implement the issue, then open a pull request.
 harness: claude
 model: claude-opus-4-1
 effort: xhigh
-parent_model: claude-sonnet-4-5
 ---
 Review the pull request.
 `,
@@ -122,7 +119,6 @@ Review the pull request.
 harness: codex
 model: gpt-5.6-sol
 effort: low
-coordinator: events
 ---
 Label the issue.
 `,
@@ -363,17 +359,14 @@ const warningsIn = (warnings: Array<unknown>) =>
     if (logLevel === "Warn") warnings.push(message);
   });
 
-/**
- * The instance files with `settings.coordinator: events` in place of `settings.parent_model`, and
- * with both time limits set.
- */
-const eventsFiles = files.map(([path, content]) =>
+/** The instance files with both time limits set. */
+const limitFiles = files.map(([path, content]) =>
   path === "usine.yaml"
     ? ([
         path,
         content.replace(
-          "  parent_model: gpt-5.6-sol\n",
-          "  coordinator: events\n  max_attempt_minutes: 600\n  max_background_wait_minutes: 5\n",
+          "  poll_interval: 30\n",
+          "  poll_interval: 30\n  max_attempt_minutes: 600\n  max_background_wait_minutes: 5\n",
         ),
       ] as const)
     : ([path, content] as const),
@@ -384,8 +377,8 @@ const supervisorFiles = files.map(([path, content]) =>
     ? ([
         path,
         content.replace(
-          "  parent_model: gpt-5.6-sol\n",
-          "  parent_model: gpt-5.6-sol\n  supervisor:\n    harness: claude\n    model: claude-sonnet-5-5\n    effort: medium\n",
+          "  poll_interval: 30\n",
+          "  poll_interval: 30\n  supervisor:\n    harness: claude\n    model: claude-sonnet-5-5\n    effort: medium\n",
         ),
       ] as const)
     : ([path, content] as const),
@@ -456,25 +449,10 @@ describe("Configuration view", () => {
         [developer.harness, developer.model, developer.effort],
         ["codex", "gpt-5.6-sol", "high"],
       );
-      assert.isNull(developer.parentModel);
-      assert.strictEqual(developer.resolvedParentModel, "gpt-5.6-sol");
-      assert.strictEqual(developer.parentEffort, "medium");
-      assert.strictEqual(developer.resolvedParentEffort, "medium");
       assert.strictEqual(developer.persona, "Implement the issue, then open a pull request.\n");
       assert.deepStrictEqual([...developer.loops].sort(), ["nightly", "start-dev"]);
 
-      assert.strictEqual(reviewer.resolvedParentModel, "claude-sonnet-4-5");
-      assert.strictEqual(reviewer.resolvedParentEffort, "xhigh");
       assert.deepStrictEqual(reviewer.loops, ["review"]);
-
-      const triager = view.agents.find(({ name }) => name === "triager");
-      assert.deepStrictEqual(
-        [developer, triager].map((agent) => [agent?.coordinator, agent?.resolvedCoordinator]),
-        [
-          [null, "session"],
-          ["events", "events"],
-        ],
-      );
 
       assert.deepStrictEqual(
         view.invalidAgents.map(({ name, file }) => [name, file]),
@@ -670,20 +648,11 @@ describe("Configuration view", () => {
       }),
   );
 
-  it.effect("shows the instance's coordinator and resolves Agents that don't set one to it", () =>
+  it.effect("shows each limit's own setting", () =>
     Effect.gen(function* () {
-      const view = yield* readConfigurationOf(eventsFiles);
-      assert.strictEqual(view.settings.coordinator, "events");
-      // Each limit shows its own setting.
+      const view = yield* readConfigurationOf(limitFiles);
       assert.strictEqual(view.settings.maxAttemptMinutes, 600);
       assert.strictEqual(view.settings.maxBackgroundWaitMinutes, 5);
-      assert.isNull(view.settings.parentModel);
-      const developer = view.agents.find(({ name }) => name === "developer");
-      assert(developer !== undefined, "developer loads");
-      assert.deepStrictEqual(
-        [developer.coordinator, developer.resolvedCoordinator],
-        [null, "events"],
-      );
     }),
   );
 

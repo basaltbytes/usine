@@ -29,7 +29,6 @@ import { GitHubPolling } from "@usine/github/polling";
 import { Effect, Layer } from "effect";
 import type { SqlClient } from "effect/sql";
 import { gitHubCredentialLayer } from "./credentials.ts";
-import { parentAdmissionLayer } from "./current-instance/parents.ts";
 import { CurrentInstance } from "./current-instance/current-instance.ts";
 import { externalHttpClientLayer } from "./http-client.ts";
 import { supervisorSandboxLayer, supervisorSourcesLayer } from "./supervisor-sandbox.ts";
@@ -119,7 +118,6 @@ export const runtimeLayer = (
       return durableAttemptRuntimeLayer(instanceDirectory, access);
     }),
   ).pipe(
-    (runtime) => parentAdmissionLayer.pipe(Layer.provideMerge(runtime)),
     Layer.provideMerge(harnessesLive),
     Layer.provideMerge(hostLoginLockLayer),
     // The event-driven coordinator keeps its attempt journal in the runtime database.

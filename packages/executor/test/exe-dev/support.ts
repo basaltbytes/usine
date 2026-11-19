@@ -78,8 +78,6 @@ export const TEST_AGENT = Agent.make({
     model: ModelId.make("claude-sonnet-4-6"),
     effort: "high",
   }),
-  parentModel: Option.none(),
-  parentEffort: Option.none(),
   persona: AgentPersona.make("Implement the task."),
 });
 const INTEGRATION = IntegrationName.make("usine-acme-demo");
@@ -330,11 +328,9 @@ export const request = CheckoutRequest.make({
   payload: { issue: { number: 42 } },
   task: TASK,
   agent: TEST_AGENT,
-  parentModel: Option.none(),
   maxChildren: ChildSessionBudget.make(4),
   maxAttemptMinutes: Option.some(60),
   maxAttemptTokens: Option.some(10000000),
-  parentEffort: "high",
   salvageRef: SalvageRef.make("usine/salvage/remote-run/1"),
   resume: Option.none(),
   requiresCi: false,

@@ -109,8 +109,6 @@ it.effect(
               payload: {},
               task: AttemptTask.make("Work"),
               agent: testAgent,
-              parentModel: Option.none(),
-              parentEffort: "high",
               maxChildren: ChildSessionBudget.make(4),
               maxAttemptMinutes: Option.none(),
               maxAttemptTokens: Option.none(),

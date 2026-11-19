@@ -55,7 +55,6 @@ export const EventRouteRow = Schema.Struct({
   revision: RepositoryRevision,
   task: AttemptTask,
   agent: Agent,
-  parentModel: Schema.NullOr(ModelId),
 });
 export type EventRouteRow = typeof EventRouteRow.Type;
 
@@ -65,7 +64,6 @@ export const RunRow = Schema.Struct({
   revision: RepositoryRevision,
   task: AttemptTask,
   agent: Agent,
-  parentModel: Schema.NullOr(ModelId),
   runId: RunId,
   eventId: EventId,
   loop: LoopName,
@@ -110,7 +108,7 @@ export const AttemptRow = Schema.Struct({
 export type AttemptRow = typeof AttemptRow.Type;
 
 export const RunSummaryRow = Schema.Struct({
-  ...Struct.omit(RunRow.fields, ["task", "result", "revision", "parentModel", "stepName", "agent"]),
+  ...Struct.omit(RunRow.fields, ["task", "result", "revision", "stepName", "agent"]),
   agent: RunSummary.fields.agent,
   pullRequestUrl: Schema.NullOr(Schema.String),
 });
@@ -229,7 +227,6 @@ export const submissionFromRow = (row: EventRouteRow): Submission =>
     revision: row.revision,
     task: row.task,
     agent: row.agent,
-    parentModel: Option.fromNullishOr(row.parentModel),
   });
 
 export const runFromRow = (

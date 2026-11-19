@@ -36,7 +36,6 @@ const request = (fields: Partial<ConstructorParameters<typeof RunAgainRequest>[0
     context: AttemptContext.make({
       task: AttemptTask.make("Finish the review"),
       agent: testAgent,
-      parentModel: Option.none(),
     }),
     requestedBy: Option.some(operator),
     ...fields,

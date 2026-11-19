@@ -136,14 +136,13 @@ const makeInstance = (options: {
   readonly issueNumber: number;
   readonly kick: string;
   readonly marker: string;
-  readonly parentModel: ModelId;
   readonly repository: RepositoryName;
 }) =>
   Effect.gen(function* () {
     const config = yield* Schema.decodeEffect(UsineConfig)({
       version: 1,
       repos: [{ name: options.repository, tags: ["integration"] }],
-      settings: { parent_model: options.parentModel, poll_interval: 15 },
+      settings: { poll_interval: 15 },
       workers: [{ name: "local", kind: "local", max_concurrent_attempts: 1 }],
     });
     const agent = AgentFile.make({
@@ -151,8 +150,6 @@ const makeInstance = (options: {
       harness: Harness.make("claude"),
       model: options.childModel,
       effort: "low",
-      parentModel: Option.none(),
-      parentEffort: Option.none(),
       persona: AgentPersona.make(
         "Act conservatively. Perform only the requested GitHub operation and report its result.",
       ),
@@ -307,7 +304,6 @@ describe("live agent loop", () => {
             PositiveIntFromString,
             "USINE_GITHUB_INTEGRATION_ISSUE_NUMBER",
           ),
-          parentModel: Config.String("USINE_AGENT_INTEGRATION_PARENT_MODEL"),
           repository: Config.String("USINE_GITHUB_INTEGRATION_REPO"),
         });
         const repository = RepositoryName.make(settings.repository);
@@ -320,7 +316,6 @@ describe("live agent loop", () => {
           issueNumber: settings.issueNumber,
           kick,
           marker,
-          parentModel: ModelId.make(settings.parentModel),
           repository,
         });
         const fileSystem = yield* FileSystem.FileSystem;
@@ -398,8 +393,6 @@ describe("live agent loop", () => {
               assert.strictEqual(attempt.brain.harness, "claude");
               assert.strictEqual(attempt.brain.model, settings.childModel);
               assert.strictEqual(attempt.brain.effort, "low");
-              assert(Option.isSome(attempt.parentModel));
-              assert.strictEqual(attempt.parentModel.value, settings.parentModel);
               const payload = yield* Schema.decodeUnknownEffect(IssuePayload)(
                 snapshot.event.payload,
               );

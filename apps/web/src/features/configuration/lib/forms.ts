@@ -70,15 +70,8 @@ export const formText = (key: ConfigurationEntityKey, value: Schema.JsonObject):
     return `---\n${writeYaml(frontmatter)}---\n${stringValue(body)}`;
   }
   if (key.kind !== "agent") return writeYaml(value);
-  const { name: _name, persona, parentModel, parentEffort, ...frontmatter } = value;
-  let authored = frontmatter;
-  const model = objectValue(parentModel);
-  const effort = objectValue(parentEffort);
-  if (model._tag === "Some" && model.value !== undefined)
-    authored = { ...authored, parent_model: model.value };
-  if (effort._tag === "Some" && effort.value !== undefined)
-    authored = { ...authored, parent_effort: effort.value };
-  return `---\n${writeYaml(authored)}---\n${stringValue(persona)}`;
+  const { name: _name, persona, ...frontmatter } = value;
+  return `---\n${writeYaml(frontmatter)}---\n${stringValue(persona)}`;
 };
 
 export const hasForm = (key: ConfigurationEntityKey) => Schema.is(ConfigurationFormKind)(key.kind);

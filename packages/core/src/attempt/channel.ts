@@ -52,7 +52,7 @@ export class RunSpec extends Schema.Class<
   task: AttemptTask,
   /** The selected agent definition, including its standing instructions and child brain. */
   agent: Agent,
-  /** The requested Pi parent model, or `None` to let Pi select it. */
+  /** The Pi parent model of a `session` Attempt, or `None` to let Pi select it. */
   parentModel: Schema.OptionFromNullOr(ModelId),
   /** The total child sessions the parent may start, including sequential starts. */
   maxChildren: ChildSessionBudget,
@@ -66,7 +66,7 @@ export class RunSpec extends Schema.Class<
     Schema.withDecodingDefaultKey(Effect.succeed(null)),
     Schema.withConstructorDefault(Effect.succeed(Option.none<number>())),
   ),
-  /** The resolved reasoning effort for the Pi parent session. */
+  /** The reasoning effort of a `session` Attempt's Pi parent session. */
   parentEffort: Effort,
   /**
    * What coordinates the Attempt's children. A reattached Attempt keeps the coordinator it started

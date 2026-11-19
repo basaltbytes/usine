@@ -4,7 +4,6 @@ import type {
   RecoverySink,
 } from "@usine/core/attempt/salvage";
 import { Agent } from "@usine/core/agent";
-import { ModelId } from "@usine/core/agent/brain";
 import { Attempt, AttemptTask, type AttemptId, type StopReason } from "@usine/core/attempt";
 import { SalvagePushed } from "@usine/core/attempt/salvage";
 import { Event } from "@usine/core/event";
@@ -40,8 +39,6 @@ export class StepExecution extends Schema.Class<
   task: AttemptTask,
   /** The agent definition for this attempt, including its persona and brain spec. */
   agent: Agent,
-  /** The Pi parent model override, or `None` to use the runtime default. */
-  parentModel: Schema.Option(ModelId),
   /** The Attempt's access to `repository`, from the Run's Loop (ADR 0011). */
   permissions: LoopPermissions,
   /** The newest pushed salvage of an earlier Attempt of the Run, which the checkout resumes from. */

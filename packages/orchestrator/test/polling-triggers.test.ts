@@ -115,7 +115,7 @@ const config = Schema.decodeEffect(UsineConfig)({
     { name: watchedRepository, tags: ["active"] },
     { name: "basaltbytes/unwatched", tags: ["inactive"] },
   ],
-  settings: { poll_interval: 60, parent_model: "anthropic/instance-parent" },
+  settings: { poll_interval: 60 },
 });
 
 const agent = AgentFile.make({
@@ -123,8 +123,6 @@ const agent = AgentFile.make({
   harness: Harness.make("codex"),
   model: ModelId.make("gpt-5.6-sol"),
   effort: "high",
-  parentModel: Option.none(),
-  parentEffort: Option.none(),
   persona: AgentPersona.make("Implement the issue."),
 });
 
@@ -1185,10 +1183,6 @@ describe("PollingTriggers", () => {
           projectedLabels.value.labels.map(({ name }) => name),
           ["unused-repository-label"],
         );
-        assert.deepStrictEqual(
-          originalSnapshot.parentModel,
-          Option.some(ModelId.make("anthropic/instance-parent")),
-        );
         const initialCursor = (yield* Ref.get(seenCursors))[0];
         assert(initialCursor !== undefined && Option.isNone(initialCursor.entityTag));
 
@@ -1225,10 +1219,6 @@ describe("PollingTriggers", () => {
         const restoredSnapshot = yield* secondEngine.inspect(originalRun);
         assert.strictEqual(restoredSnapshot.task, "Implement issue 28.");
         assert.strictEqual(restoredSnapshot.agent.name, "developer");
-        assert.deepStrictEqual(
-          restoredSnapshot.parentModel,
-          Option.some(ModelId.make("anthropic/instance-parent")),
-        );
         const restoredCursors = yield* Ref.get(seenCursors);
         const restartCursor = restoredCursors[2];
         assert(restartCursor !== undefined && Option.isSome(restartCursor.entityTag));

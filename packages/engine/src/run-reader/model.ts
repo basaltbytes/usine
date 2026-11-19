@@ -1,6 +1,5 @@
 import { CiPolicy } from "@usine/core/ci";
 import { Agent } from "@usine/core/agent";
-import { ModelId } from "@usine/core/agent/brain";
 import { Attempt, AttemptId, AttemptTask } from "@usine/core/attempt";
 import { Event, EventId } from "@usine/core/event";
 import { ItemKey } from "@usine/core/item";
@@ -54,8 +53,6 @@ export class RunSnapshot extends Schema.Class<
   task: AttemptTask,
   /** The effective agent definition, including the latest edit-and-retry amendment. */
   agent: Agent,
-  /** The effective Pi parent model, or `None` to use the runtime default. */
-  parentModel: Schema.Option(ModelId),
   /** The repository access of the Run's Attempts, from the Loop at match time. */
   permissions: LoopPermissions,
   /** The loop CI policy saved when the event matched. */

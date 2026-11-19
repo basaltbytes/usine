@@ -9,6 +9,7 @@ import { LoopFile } from "../loop.ts";
 import { type ConfigParser, formatAgent } from "../parser.ts";
 import { writeYaml } from "../yaml/writer.ts";
 import { AgentJson, configurationDiff, configurationEntities } from "./entities.ts";
+import { withoutRemovedKeys } from "./upgrade.ts";
 import {
   Configuration,
   ConfigurationChange,
@@ -258,8 +259,10 @@ export const replay = (
     const seen = new Set<string>();
     const problems: Array<ConfigFileError> = [];
     for (const change of changes) {
+      // Revisions stored by earlier versions can hold keys that usine ignores.
+      const stored = (value: Schema.Json) => withoutRemovedKeys(change.key.kind, value);
       const previous = Option.fromUndefinedOr(entities.get(change.key.key)?.value);
-      if (seen.has(change.key.key) || !Equal.equals(previous, change.before)) {
+      if (seen.has(change.key.key) || !Equal.equals(previous, Option.map(change.before, stored))) {
         problems.push(
           problem(
             change.key.key,
@@ -272,7 +275,7 @@ export const replay = (
       else
         entities.set(
           change.key.key,
-          ConfigurationEntity.make({ key: change.key, value: change.after.value }),
+          ConfigurationEntity.make({ key: change.key, value: stored(change.after.value) }),
         );
     }
     if (Arr.isArrayNonEmpty(problems)) return yield* ConfigurationInvalid.make({ problems });

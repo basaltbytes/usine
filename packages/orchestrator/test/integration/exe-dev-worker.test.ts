@@ -88,8 +88,6 @@ describe("live exe.dev Worker", () => {
           model: ModelId.make("gpt-5.6-sol"),
           effort: "high",
         }),
-        parentModel: Option.none(),
-        parentEffort: Option.none(),
         persona: AgentPersona.make("Verify the remote Worker transport."),
       });
       const config = yield* Schema.decodeEffect(UsineConfig)({
@@ -148,7 +146,6 @@ describe("live exe.dev Worker", () => {
             revision,
             task: AttemptTask.make("Verify the exe.dev Worker transport"),
             agent,
-            parentModel: Option.none(),
           }),
         );
         assert.strictEqual(accepted._tag, "Claimed");
