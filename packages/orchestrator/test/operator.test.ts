@@ -3284,9 +3284,8 @@ it.effect(
           ),
         );
         const backoff = DateTime.toEpochMillis(DateTime.add(refusedAt, { minutes: 5 }));
-        assert.deepStrictEqual(yield* retries, [
-          { retryAt: Option.some(backoff), canRetry: true },
-        ]);
+        const own = yield* retries;
+        assert.deepStrictEqual(own, [{ retryAt: Option.some(backoff), canRetry: true }]);
 
         // Other Runs' refusals lengthened the group's wait past the Run's own backoff.
         const nextTryAt = DateTime.add(refusedAt, { minutes: 50 });

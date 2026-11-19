@@ -59758,6 +59758,9 @@
               },
               {
                 "$ref": "#/components/schemas/Agent_ProviderRecoveredEncoded"
+              },
+              {
+                "$ref": "#/components/schemas/Agent_ProviderAnsweredEncoded"
               }
             ]
           }
@@ -59767,6 +59770,35 @@
           "sequence",
           "turn",
           "event"
+        ],
+        "additionalProperties": false
+      },
+      "Agent_ProviderAnsweredEncoded": {
+        "type": "object",
+        "properties": {
+          "_tag": {
+            "type": "string",
+            "enum": [
+              "ProviderAnswered"
+            ]
+          },
+          "session": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Agent_ParentSessionEncoded"
+              },
+              {
+                "$ref": "#/components/schemas/Agent_ChildSessionEncoded"
+              },
+              {
+                "$ref": "#/components/schemas/Agent_RoleSessionEncoded"
+              }
+            ]
+          }
+        },
+        "required": [
+          "_tag",
+          "session"
         ],
         "additionalProperties": false
       },
@@ -69906,6 +69938,9 @@
               },
               {
                 "$ref": "#/components/schemas/Agent_ProviderRecoveredEncoded"
+              },
+              {
+                "$ref": "#/components/schemas/Agent_ProviderAnsweredEncoded"
               }
             ]
           }
@@ -71920,8 +71955,8 @@
           "id": {
             "type": "string"
           },
-          "pool": {
-            "$ref": "#/components/schemas/_usine_engine_CapacityPoolEncoded"
+          "group": {
+            "$ref": "#/components/schemas/_usine_engine_CapacityGroupEncoded"
           },
           "message": {
             "type": "string",
@@ -71942,7 +71977,7 @@
         "required": [
           "_tag",
           "id",
-          "pool",
+          "group",
           "message",
           "since",
           "nextTryAt",
@@ -71950,7 +71985,7 @@
         ],
         "additionalProperties": false
       },
-      "_usine_engine_CapacityPoolEncoded": {
+      "_usine_engine_CapacityGroupEncoded": {
         "type": "object",
         "properties": {
           "harness": {
