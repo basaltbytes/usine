@@ -18,7 +18,7 @@ import { ProjectId } from "@usine/core/project";
 import { RepositoryName } from "@usine/core/repository";
 import { LoopName } from "@usine/core/loop";
 import { CurrentInstance } from "@usine/orchestrator/current-instance";
-import { Deferred, Effect, Fiber, Layer, Schema, Stream } from "effect";
+import { Deferred, Effect, Exit, Fiber, Layer, Schema, Scope, Stream } from "effect";
 import { HttpServerRequest } from "effect/http";
 import { TestClock } from "effect/testing";
 import { FactoryBackend } from "../src/backend.ts";
@@ -250,6 +250,105 @@ it.effect("revalidates credentials before a write can reveal an identifier", () 
       assert.notInclude(frames.join(""), "hidden-after-revocation");
     }).pipe(Effect.provide((yield* live).pipe(Layer.provideMerge(changeBusLayer))), Effect.scoped);
   }),
+);
+
+it.effect("ends open streams before the routes close and the member store follows", () =>
+  Effect.gen(function* () {
+    let storeOpen = true;
+    let checks = 0;
+    const verify = Effect.suspend(() => {
+      checks++;
+      return storeOpen
+        ? Effect.void
+        : Effect.fail(AuthError.make({ status: 500, message: "The member store is unavailable." }));
+    });
+    const routes = yield* Scope.make();
+    const layer = yield* live;
+    const changes = yield* Layer.buildWithScope(layer, routes);
+    const stream = yield* open().pipe(
+      Effect.provideService(ChangeAccess, verify),
+      Effect.provideContext(changes),
+    );
+    const reader = yield* stream.pipe(Stream.runCollect, Effect.forkChild);
+    yield* TestClock.adjust("15 seconds");
+    const opened = checks;
+
+    yield* Scope.close(routes, Exit.void);
+    storeOpen = false;
+    yield* TestClock.adjust("30 seconds");
+
+    const exit = yield* Fiber.await(reader);
+    assert.strictEqual(exit._tag, "Success");
+    assert.isAbove(opened, 0);
+    assert.strictEqual(checks, opened);
+  }).pipe(Effect.provide(changeBusLayer)),
+);
+
+it.effect("waits for a running credential check before the routes close", () =>
+  Effect.gen(function* () {
+    const started = yield* Deferred.make<void>();
+    const release = yield* Deferred.make<void>();
+    let checks = 0;
+    const verify = Effect.suspend(() =>
+      ++checks === 2
+        ? Deferred.succeed(started, undefined).pipe(Effect.andThen(Deferred.await(release)))
+        : Effect.void,
+    );
+    const routes = yield* Scope.make();
+    const layer = yield* live;
+    const changes = yield* Layer.buildWithScope(layer, routes);
+    const stream = yield* open().pipe(
+      Effect.provideService(ChangeAccess, verify),
+      Effect.provideContext(changes),
+    );
+    const reader = yield* stream.pipe(Stream.runCollect, Effect.forkChild);
+    yield* TestClock.adjust("15 seconds");
+    yield* Deferred.await(started);
+
+    const closed = yield* Scope.close(routes, Exit.void).pipe(Effect.forkChild);
+    yield* TestClock.adjust("1 minute");
+    assert.isUndefined(closed.pollUnsafe());
+    yield* Deferred.succeed(release, undefined);
+    yield* Fiber.join(closed);
+
+    const exit = yield* Fiber.await(reader);
+    assert.strictEqual(exit._tag, "Success");
+    assert.strictEqual(checks, 2);
+  }).pipe(Effect.provide(changeBusLayer)),
+);
+
+it.effect("closes the routes without waiting for a stream whose reader stopped reading", () =>
+  Effect.gen(function* () {
+    let checks = 0;
+    const verify = Effect.sync(() => {
+      checks++;
+    });
+    const routes = yield* Scope.make();
+    const layer = yield* live;
+    const changes = yield* Layer.buildWithScope(layer, routes);
+    const entered = yield* Deferred.make<void>();
+    const stream = yield* open().pipe(
+      Effect.provideService(ChangeAccess, verify),
+      Effect.provideContext(changes),
+    );
+    let frames = 0;
+    yield* stream.pipe(
+      Stream.tap(() =>
+        ++frames === 2
+          ? Deferred.succeed(entered, undefined).pipe(Effect.andThen(Effect.never))
+          : Effect.void,
+      ),
+      Stream.runDrain,
+      Effect.forkChild,
+    );
+    yield* TestClock.adjust("15 seconds");
+    yield* Deferred.await(entered);
+
+    yield* Scope.close(routes, Exit.void);
+    const closed = checks;
+    yield* TestClock.adjust("1 minute");
+    assert.strictEqual(checks, closed);
+  }).pipe(Effect.provide(changeBusLayer)),
 );
 
 it.effect("resets a live subscriber whose queue drops committed writes", () =>

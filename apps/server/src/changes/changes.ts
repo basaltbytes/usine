@@ -4,17 +4,74 @@ import type { PermissionGrant } from "@usine/core/access";
 import { ChangeBus, type ScopedChange, type ChangeTarget } from "@usine/core/changes";
 import { CurrentInstance } from "@usine/orchestrator/current-instance";
 import { ChangeNotice } from "@usine/orchestrator/operator/http";
-import { Context, Effect, Layer, Option, Ref, Schedule, Stream, Schema } from "effect";
+import {
+  Cause,
+  Context,
+  Deferred,
+  Effect,
+  Layer,
+  Option,
+  Ref,
+  Stream,
+  Schema,
+  SubscriptionRef,
+} from "effect";
 import { HttpServerRequest, HttpServerResponse } from "effect/http";
+
+interface Checks {
+  readonly closed: boolean;
+  /** The credential checks in progress. */
+  readonly running: number;
+}
 
 const makeChanges = Effect.gen(function* () {
   const bus = yield* ChangeBus;
   const instances = yield* Effect.serviceOption(CurrentInstance);
+  const closing = yield* Deferred.make<void>();
+  const checks = yield* SubscriptionRef.make<Checks>({ closed: false, running: 0 });
+  const endStreams = Effect.fn("Http.changes.endStreams")(function* () {
+    const { running } = yield* SubscriptionRef.getAndUpdate(checks, (current) => ({
+      ...current,
+      closed: true,
+    }));
+    yield* Deferred.succeed(closing, undefined);
+    yield* Effect.annotateCurrentSpan({ checksInProgress: running });
+    yield* SubscriptionRef.changes(checks).pipe(
+      Stream.filter((current) => current.running === 0),
+      Stream.take(1),
+      Stream.runDrain,
+    );
+    yield* Effect.logInfo("Change streams stopped because their routes closed", {
+      checksInProgress: running,
+    });
+  });
+  // When the routes close, streams stop checking credentials and end, before the stores that
+  // `ChangeAccess` reads close.
+  yield* Effect.addFinalizer(() => endStreams());
   const stream = Effect.fn("Http.changes")(function* (
     request: HttpServerRequest.HttpServerRequest,
     grants: ReadonlyArray<PermissionGrant>,
   ) {
-    const verify = yield* ChangeAccess;
+    const access = yield* ChangeAccess;
+    // Succeeds with `false`, without a check, once the routes have closed.
+    const verify = Effect.acquireUseRelease(
+      SubscriptionRef.modify(checks, (current): [boolean, Checks] =>
+        current.closed ? [false, current] : [true, { ...current, running: current.running + 1 }],
+      ),
+      (admitted) =>
+        admitted
+          ? Effect.as(access, true)
+          : Effect.logDebug(
+              "Change stream skipped a credential check after its routes closed",
+            ).pipe(Effect.as(false)),
+      (admitted) =>
+        admitted
+          ? SubscriptionRef.update(checks, (current) => ({
+              ...current,
+              running: current.running - 1,
+            }))
+          : Effect.void,
+    );
     const targets = Effect.fn("Http.changes.authorizedTargets")(function* (
       changes: ReadonlyArray<ScopedChange>,
     ) {
@@ -50,7 +107,7 @@ const makeChanges = Effect.gen(function* () {
           const previous = yield* Ref.get(cursor);
           if (notice.revision <= previous) return "";
           yield* Effect.annotateCurrentSpan({ revision: notice.revision });
-          yield* verify;
+          if (!(yield* verify)) return "";
           const gap = notice.revision > previous + 1;
           yield* Ref.set(cursor, notice.revision);
           const changes = gap ? [] : yield* targets(notice.changes);
@@ -66,7 +123,7 @@ const makeChanges = Effect.gen(function* () {
         });
         const initial = reset
           ? Effect.gen(function* () {
-              yield* verify;
+              if (!(yield* verify)) return "";
               yield* Ref.set(cursor, revision);
               yield* Effect.logDebug("Change stream reset", {
                 revision,
@@ -81,13 +138,22 @@ const makeChanges = Effect.gen(function* () {
               history.filter((notice) => notice.revision > suppliedCursor),
               send,
             ).pipe(Effect.map((frames) => frames.join("") + ": heartbeat\n\n"));
-        const heartbeat = Stream.fromEffectSchedule(
-          verify.pipe(Effect.as(": heartbeat\n\n")),
-          Schedule.spaced("15 seconds"),
-        ).pipe(Stream.drop(1));
+        // Ends when the routes close, which ends the merge with `live`.
+        const heartbeat = Stream.fromEffectRepeat(
+          Deferred.await(closing).pipe(
+            Effect.andThen(Cause.done()),
+            Effect.timeoutOrElse({
+              duration: "15 seconds",
+              orElse: () =>
+                Effect.flatMap(verify, (admitted) =>
+                  admitted ? Effect.succeed(": heartbeat\n\n") : Cause.done(),
+                ),
+            }),
+          ),
+        );
         return Stream.concat(
           Stream.fromEffect(initial),
-          Stream.merge(live.pipe(Stream.mapEffect(send)), heartbeat),
+          Stream.merge(live.pipe(Stream.mapEffect(send)), heartbeat, { haltStrategy: "right" }),
         );
       }),
     ).pipe(
