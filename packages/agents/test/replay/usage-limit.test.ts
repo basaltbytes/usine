@@ -116,7 +116,7 @@ describe("recorded usage limits", () => {
       Effect.gen(function* () {
         const failure = yield* loggedUsageLimit(harness, { transform: withoutReset }, undefined);
         assert.deepStrictEqual(failure.resetsAt, Option.none());
-        assert.deepStrictEqual(retryAt(failure), Option.some("2026-11-12T03:02:00.000Z"));
+        assert.deepStrictEqual(retryAt(failure), Option.some("2026-11-12T03:05:00.000Z"));
       }),
     );
   }

@@ -94,7 +94,7 @@ Envelopes include `PROTOCOL_VERSION` (7), which the transcript store uses to rea
 
 `ProvisionerTimings` in `/worker` validates provisioner waits and check intervals in seconds, including ordered creation backoff bounds. Defaults are 600 seconds for SSH, 30 to 600 seconds for backoff, and 86400 seconds between machine checks.
 
-`ProviderCapacityFailure` records a temporary model provider refusal. It permits an automatic retry under the same attempt cap as `InfraFailure`. `pendingProviderRetry` derives the next attempt number, provider message, and earliest start from a running run's last failed attempt: two minutes after attempt 1 and five after attempt 2, or the failure's `resetsAt`, the provider's usage-limit reset time, if that is later. `StartedByProviderRetry` distinguishes these starts from infrastructure retries.
+`ProviderCapacityFailure` records a temporary model provider refusal. It always permits an automatic retry, and `shouldAutoRetry` leaves such attempts out of the cap on `InfraFailure` retries. `pendingProviderRetry` derives the next attempt number, provider message, and earliest start from a running run's consecutive refusals: `capacityBackoff` of their count after the latest one (5, 15, and 30 minutes, then 60), or the latest `resetsAt` they report, the provider's usage-limit reset time, if that is later. `StartedByProviderRetry` distinguishes these starts from infrastructure retries.
 
 ## Project identities
 
