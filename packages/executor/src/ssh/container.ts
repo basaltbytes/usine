@@ -254,8 +254,8 @@ export const sshContainersFor = Effect.fn("SshExecutor.containersFor")(function*
   });
 
   /**
-   * Checks the machine's runtime for preflight, pulls the Attempt image if `pull` is `pull`,
-   * checks that the image's user has the SSH user's ID, so the containers can write the
+   * Checks the machine's runtime for preflight, pulls the Attempt image if `preflightImage` is
+   * `pull`, checks that the image's user has the SSH user's ID, so the containers can write the
    * checkouts, and finds the limits of each container when `slots` Attempts run on the machine at
    * once. With `defer`, a machine without the image skips the checks that run it, and the next
    * Attempt pulls it. Only a machine without runtime runs attempts as the SSH user, which the
@@ -264,12 +264,12 @@ export const sshContainersFor = Effect.fn("SshExecutor.containersFor")(function*
   const verify = Effect.fn("SshExecutor.verifyContainers")(function* (
     machine: SshMachine,
     slots: number,
-    pull: PreflightImage,
+    preflightImage: PreflightImage,
   ) {
     const worker = machine.address.name;
     const host = machine.shell.destination;
     const image = imageFor(machine);
-    yield* Effect.annotateCurrentSpan({ worker, host, image, slots, pull });
+    yield* Effect.annotateCurrentSpan({ worker, host, image, slots, preflightImage });
     const selected = yield* detectRuntime(commands, machine);
     if (Option.isNone(selected)) {
       yield* recordSharedUser(machine);
@@ -279,7 +279,7 @@ export const sshContainersFor = Effect.fn("SshExecutor.containersFor")(function*
           "Neither Podman nor Docker is installed, so attempts run as the SSH user and can read each other's credentials. Install rootless Podman or Docker to run each attempt in its own container.",
       } satisfies ContainerCheck;
     }
-    if (pull === "pull")
+    if (preflightImage === "pull")
       yield* prepareAttemptImage(commands, machine, image, selected.value, "preflight");
     else if (!(yield* findAttemptImage(commands, machine, image, selected.value))) {
       // The next Attempt's cache preparation pulls the image.

@@ -77,13 +77,14 @@ const entitiesOf = (configuration: Configuration) =>
 export class ConfigurationEditor extends Context.Service<
   ConfigurationEditor,
   {
+    /** Reads the number of the stored revision, which a write expects to replace. */
+    readonly head: Effect.Effect<ConfigurationRevisionNumber, ConfigurationEditorError>;
+    /** Lists the configuration saves that run now, with the step that each runs. */
+    readonly writes: Effect.Effect<ReadonlyArray<ConfigurationWriteProgress>>;
     /**
      * Validates the JSON or Markdown in `input` against the current configuration and returns
      * problems without writing.
      */
-    readonly head: Effect.Effect<ConfigurationRevisionNumber, ConfigurationEditorError>;
-    /** Lists the configuration saves that run now, with the step that each runs. */
-    readonly writes: Effect.Effect<ReadonlyArray<ConfigurationWriteProgress>>;
     readonly checkLoop: (input: LoopDraft) => Effect.Effect<LoopCheck, ConfigurationEditorError>;
     /**
      * Evaluates `input` against stored items and optionally renders a prompt. It does not submit
