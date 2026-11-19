@@ -240,6 +240,8 @@ interface FakeMachineState {
   pullError: string | undefined;
   imageOnMachine: boolean;
   imageInspectFailure: { readonly exitCode: number; readonly stderr: string } | undefined;
+  /** Whether `docker manifest inspect` finds the image in its registry. */
+  imageInRegistry: boolean;
   imageId: string;
   pulledImageId: string;
   beforePull: Effect.Effect<void>;
@@ -421,6 +423,7 @@ export const fakeMachine = () => {
     pullError: undefined,
     imageOnMachine: true,
     imageInspectFailure: undefined,
+    imageInRegistry: true,
     resourcesDisconnect: false,
     imageId: "sha256:0123",
     pulledImageId: "sha256:0123",
@@ -596,6 +599,10 @@ PATH="$probe_dir:$PATH" sh -c "$1" sh "$2"
       state.imageId = state.pulledImageId;
       return oneShotHandle("", 0);
     }
+    if (line.startsWith("exec 'docker' 'manifest' 'inspect' "))
+      return state.imageInRegistry
+        ? oneShotHandle('{"schemaVersion":2}\n', 0)
+        : oneShotHandle("", 1, "no such manifest\n");
     if (line.startsWith("exec 'docker' 'image' 'inspect' ")) {
       if (state.imageInspectFailure !== undefined)
         return oneShotHandle(

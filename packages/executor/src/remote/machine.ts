@@ -11,6 +11,7 @@ import type {
   CredentialUnavailableError,
   ExecutorError,
   ExecutorOperation,
+  PreflightImage,
   PreflightReport,
 } from "../executor.ts";
 import type { HarnessProbe } from "../harness-preflight.ts";
@@ -123,6 +124,7 @@ export interface RemoteWorker<M extends RemoteMachine> {
     worker: WorkerName,
     brains: ReadonlyArray<BrainSpec>,
     maxConcurrentAttempts: number,
+    image?: PreflightImage,
   ) => Effect.Effect<PreflightReport, ExecutorError>;
   /** Returns the probe of a brain's binary and login through `shell`, on `machine` or in a container on it. */
   readonly harnessProbe: (machine: M, shell: RemoteHost) => HarnessProbe;

@@ -1,4 +1,4 @@
-import { prepareAttemptImage } from "./image.ts";
+import { findAttemptImage, prepareAttemptImage } from "./image.ts";
 import { reclaimOnceFor } from "../remote/reclaim.ts";
 import { detectRuntime, verifyPodmanLimits } from "./runtime.ts";
 import { type ContainerRuntime, runtimeOptions } from "../remote/runtime.ts";
@@ -10,7 +10,7 @@ import { safeSegment } from "@usine/core/repository";
 import { ContainerImage, ContainerScratchMib, type WorkerName } from "@usine/core/worker";
 import { Duration, Effect, Option, Random, Schema } from "effect";
 import { unreachableHost } from "../child-command.ts";
-import { WorkerCapabilityError } from "../executor.ts";
+import { type PreflightImage, WorkerCapabilityError } from "../executor.ts";
 import { keyedLockFor } from "../keyed-lock.ts";
 import type { RemoteCommands } from "../remote/commands.ts";
 import {
@@ -67,6 +67,15 @@ type ContainerCheck =
   /** Each Attempt runs in its own container from `settings`. */
   | {
       readonly _tag: "Container";
+      readonly settings: ContainerSettings;
+      readonly limits: ResolvedLimits;
+    }
+  /**
+   * Each Attempt runs in its own container from `settings`, and the machine doesn't have the
+   * image yet: the next Attempt pulls it.
+   */
+  | {
+      readonly _tag: "ImageDeferred";
       readonly settings: ContainerSettings;
       readonly limits: ResolvedLimits;
     }
@@ -245,20 +254,22 @@ export const sshContainersFor = Effect.fn("SshExecutor.containersFor")(function*
   });
 
   /**
-   * Checks the machine's runtime for preflight, pulls the Attempt image, checks that the image's
-   * user has the SSH user's ID, so the containers can write the checkouts, and finds the limits
-   * of each container when `slots` Attempts run on the machine at once. Only a machine without
-   * runtime runs attempts as the SSH user, which the result reports as degraded; with a runtime, any
-   * failure fails the preflight.
+   * Checks the machine's runtime for preflight, pulls the Attempt image if `pull` is `pull`,
+   * checks that the image's user has the SSH user's ID, so the containers can write the
+   * checkouts, and finds the limits of each container when `slots` Attempts run on the machine at
+   * once. With `defer`, a machine without the image skips the checks that run it, and the next
+   * Attempt pulls it. Only a machine without runtime runs attempts as the SSH user, which the
+   * result reports as degraded; with a runtime, any failure fails the preflight.
    */
   const verify = Effect.fn("SshExecutor.verifyContainers")(function* (
     machine: SshMachine,
     slots: number,
+    pull: PreflightImage,
   ) {
     const worker = machine.address.name;
     const host = machine.shell.destination;
     const image = imageFor(machine);
-    yield* Effect.annotateCurrentSpan({ worker, host, image, slots });
+    yield* Effect.annotateCurrentSpan({ worker, host, image, slots, pull });
     const selected = yield* detectRuntime(commands, machine);
     if (Option.isNone(selected)) {
       yield* recordSharedUser(machine);
@@ -268,7 +279,14 @@ export const sshContainersFor = Effect.fn("SshExecutor.containersFor")(function*
           "Neither Podman nor Docker is installed, so attempts run as the SSH user and can read each other's credentials. Install rootless Podman or Docker to run each attempt in its own container.",
       } satisfies ContainerCheck;
     }
-    yield* prepareAttemptImage(commands, machine, image, selected.value, "preflight");
+    if (pull === "pull")
+      yield* prepareAttemptImage(commands, machine, image, selected.value, "preflight");
+    else if (!(yield* findAttemptImage(commands, machine, image, selected.value))) {
+      // The next Attempt's cache preparation pulls the image.
+      preparedCaches.delete(machine);
+      const { settings, limits } = yield* recordContainer(machine, selected.value, slots);
+      return { _tag: "ImageDeferred", settings, limits } satisfies ContainerCheck;
+    }
     const [probeDuration, ids] = yield* commands
       .inspect("preflight", machine.shell, "sh", [
         "-c",

@@ -231,6 +231,90 @@ describe("SSH Worker with Docker", () => {
     );
   });
 
+  it.effect(
+    "defers the pull of an absent image to the next Attempt, which pulls it and checks the harness",
+    () => {
+      const machine = dockerMachine();
+      const logs = capturedLogs();
+      const pulls = () =>
+        linesOf(machine).filter((line) => line.startsWith("exec 'docker' 'pull' ")).length;
+      return Effect.gen(function* () {
+        const executor = yield* Executor;
+        yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
+        assert.strictEqual(pulls(), 1);
+        machine.state.imageOnMachine = false;
+        const before = machine.state.calls.length;
+
+        const report = yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1, "defer");
+
+        const deferred = machine.state.calls.slice(before).map(({ line }) => line);
+        assert.include(deferred, `exec 'docker' 'manifest' 'inspect' '${ATTEMPT_IMAGE}'`);
+        assert.strictEqual(pulls(), 1, "the deferred preflight pulls nothing");
+        assert.isFalse(
+          deferred.some((line) => line.includes("'usine-preflight-")),
+          "no container runs the absent image",
+        );
+        assert.isTrue(Option.isSome(report.deferred));
+        assert.isTrue(Option.isSome(report.containerLimits));
+        assert.include(
+          logs.lines.join("\n"),
+          "The worker doesn't have the attempt image, and the registry has it; the next attempt pulls it",
+        );
+
+        const prepared = yield* executor.prepare(request);
+        yield* prepared.launch(sink);
+
+        assert.strictEqual(pulls(), 2, "the next Attempt pulls the image");
+        assert.isTrue(machine.state.imageOnMachine);
+        assert(
+          machine.state.calls.some(
+            ({ container, line }) =>
+              container === CONTAINER && line.includes("'claude' 'auth' 'status'"),
+          ),
+          "the Attempt checks the harness in its container",
+        );
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(runtime(machine, mintingProvider()).pipe(Layer.provideMerge(logs.layer))),
+      );
+    },
+  );
+
+  it.effect("checks the image that the machine has without pulling it when deferred", () => {
+    const machine = dockerMachine();
+    return Effect.gen(function* () {
+      const executor = yield* Executor;
+      const report = yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1, "defer");
+
+      const lines = linesOf(machine);
+      assert.isFalse(lines.some((line) => line.startsWith("exec 'docker' 'pull' ")));
+      assert.isFalse(lines.some((line) => line.startsWith("exec 'docker' 'manifest' ")));
+      assert.isTrue(Option.isNone(report.deferred));
+      assert.include(preflightRunOf(machine), ATTEMPT_IMAGE);
+      assert(machine.state.calls.some(({ line }) => line.includes("'claude' 'auth' 'status'")));
+    }).pipe(Effect.scoped, Effect.provide(runtime(machine, mintingProvider())));
+  });
+
+  it.effect(
+    "fails a deferred preflight when neither the machine nor the registry has the image",
+    () => {
+      const machine = dockerMachine();
+      machine.state.imageOnMachine = false;
+      machine.state.imageInRegistry = false;
+      return Effect.gen(function* () {
+        const executor = yield* Executor;
+        const error = yield* executor
+          .preflight(WORKER, [TEST_AGENT.brain], 1, "defer")
+          .pipe(Effect.flip);
+
+        assert(error._tag === "WorkerCapabilityError");
+        assert.strictEqual(error.capability, "container");
+        assert.include(error.message, "can't find it in the registry");
+        assert.isFalse(linesOf(machine).some((line) => line.startsWith("exec 'docker' 'pull' ")));
+      }).pipe(Effect.scoped, Effect.provide(runtime(machine, mintingProvider())));
+    },
+  );
+
   // BusyBox date prints %N literally.
   it.effect(
     "prepares shared caches without a run duration when the shell prints no nanoseconds",
