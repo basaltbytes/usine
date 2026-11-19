@@ -86,6 +86,10 @@ const appServerArgs = (cwd: string) => [
   "--stdio",
   "-c",
   repositoryTrustOverride(cwd),
+  // Every thread sets its own sandbox, so the default only skips the startup check of the Linux
+  // sandbox, which warns on each start in a container without user namespaces.
+  "-c",
+  'sandbox_mode="danger-full-access"',
   ...codexConfigArgs,
 ];
 

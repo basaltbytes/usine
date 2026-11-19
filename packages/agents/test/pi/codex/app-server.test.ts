@@ -444,7 +444,7 @@ describe("Codex app-server transport", () => {
     host,
   });
 
-  it("disables repository trust, recursive agents, and background traffic for children", () => {
+  it("disables repository trust, the sandbox startup check, recursive agents, and background traffic for children", () => {
     const command = codexAppServerCommand(client(LocalProcess.make()));
     assert.strictEqual(command._tag, "StandardCommand");
     if (command._tag !== "StandardCommand") return;
@@ -458,6 +458,8 @@ describe("Codex app-server transport", () => {
       "--stdio",
       "-c",
       'projects={"/workspace/repo"={trust_level="untrusted"}}',
+      "-c",
+      'sandbox_mode="danger-full-access"',
       "-c",
       "features.multi_agent=false",
       "-c",
@@ -491,7 +493,7 @@ describe("Codex app-server transport", () => {
       "BatchMode=yes",
       "worker.exe.xyz",
       "--",
-      `cd '/' && exec 'codex' 'app-server' '--stdio' '-c' 'projects={"/workspace/repo"={trust_level="untrusted"}}' '-c' 'features.multi_agent=false' '-c' 'features.plugins=false' '-c' 'features.remote_plugin=false' '-c' 'features.apps=false' '-c' 'check_for_update_on_startup=false' '-c' 'analytics.enabled=false'`,
+      `cd '/' && exec 'codex' 'app-server' '--stdio' '-c' 'projects={"/workspace/repo"={trust_level="untrusted"}}' '-c' 'sandbox_mode="danger-full-access"' '-c' 'features.multi_agent=false' '-c' 'features.plugins=false' '-c' 'features.remote_plugin=false' '-c' 'features.apps=false' '-c' 'check_for_update_on_startup=false' '-c' 'analytics.enabled=false'`,
     ]);
     assert.deepStrictEqual(command.options.env, host.sshEnvironment);
     assert.strictEqual(command.options.extendEnv, false);
