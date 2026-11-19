@@ -122,6 +122,8 @@ const reason = (failure: { readonly _tag: string }): string => {
       return "the attachment ID belongs to another worker or repository";
     case "SchemaError":
       return "the admin API response doesn't match its schema";
+    case "ProviderCredentialError":
+      return "the admin API returned status 503: the gateway has no usable provider credential store";
     default:
       return `the request failed with ${failure._tag}`;
   }
@@ -282,7 +284,11 @@ export const gatewayAdminFor = Effect.fn("SshExecutor.gatewayAdminFor")(function
         Effect.catchIf(unknownRoute, () => Effect.succeed(false)),
         Effect.catchIf(
           (failure) => !unanswered(failure),
-          () => Effect.succeed(true),
+          (failure) =>
+            Effect.logWarning(
+              "The Gateway's provider-credentials admin API answered with an error; the Gateway serves it, so it counts as current",
+              { worker, gateway: forward.gateway, reason: reason(failure) },
+            ).pipe(Effect.as(true)),
         ),
       ),
     ),

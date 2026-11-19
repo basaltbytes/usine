@@ -30,7 +30,6 @@ import {
   type ProviderStatus,
   type ProviderTarget,
 } from "@usine/gateway/credentials";
-import { gatewayRelease } from "../cli.ts";
 
 const quoteCurl = Schema.encodeEffect(Schema.fromJsonString(Schema.String));
 const Json = Schema.fromJsonString(Schema.Record(Schema.String, Schema.Json));
@@ -43,6 +42,7 @@ const localFailure = () =>
   failed("Could not read or save the local harness login. Check its directory permissions.");
 const makeProviderTargets = Effect.fn("ProviderTargets.make")(function* (
   workers: Effect.Effect<readonly Worker[]>,
+  release: Option.Option<ReleaseVersion>,
 ) {
   const configuration = yield* ConfigurationStore;
   const fs = yield* FileSystem.FileSystem;
@@ -60,13 +60,6 @@ const makeProviderTargets = Effect.fn("ProviderTargets.make")(function* (
   const path = yield* Config.String("PATH").pipe(
     Config.withDefault("/usr/local/bin:/usr/bin:/bin"),
     Effect.orDie,
-  );
-  const release = yield* gatewayRelease().pipe(
-    Effect.catchTag("CliVersionError", (error) =>
-      Effect.logWarning("Could not read the gateway release this server was published with", {
-        cause: error.cause,
-      }).pipe(Effect.as(Option.none<ReleaseVersion>())),
-    ),
   );
   const olderGateway = (destination: string) =>
     failed(
@@ -576,6 +569,12 @@ export class ProviderTargets extends Context.Service<
     ) => Effect.Effect<void, ProviderCredentialError>;
   }
 >()("@usine/server/providers/targets/ProviderTargets") {
-  static readonly layer = (workers: Effect.Effect<readonly Worker[]>) =>
-    Layer.effect(ProviderTargets, makeProviderTargets(workers));
+  /**
+   * Returns the provider targets of `workers`. `release` is the `@usine/gateway` release that an
+   * older gateway is told to install, or `None` when this server isn't a published release.
+   */
+  static readonly layer = (
+    workers: Effect.Effect<readonly Worker[]>,
+    release: Option.Option<ReleaseVersion>,
+  ) => Layer.effect(ProviderTargets, makeProviderTargets(workers, release));
 }

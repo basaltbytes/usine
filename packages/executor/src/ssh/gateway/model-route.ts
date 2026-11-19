@@ -61,38 +61,33 @@ export const gatewayModelRouteFor = Effect.fn("GatewayModelRoute.open")(
     const opened = yield* modelForward.current.pipe(
       Effect.catchTag("GatewayForwardClosed", (error) => modelForward.reopen(error.generation)),
     );
-    /** Returns whether the model proxy serves `prefixes`: it refuses a request without a caller token. */
-    const serves = Effect.fn("GatewayModelRoute.probe")(function* (prefixes: GatewayLlmPrefixes) {
-      yield* Effect.annotateCurrentSpan({ worker, llmPrefixes: prefixes });
-      const probe = yield* http
-        .get(new URL(`/${llmPrefixOf("openai-responses", prefixes)}/v1/models`, opened.url), {
-          headers: { host: `llm.${gateway.domain}` },
-        })
-        .pipe(
-          Effect.timeoutOrElse({
-            duration: "30 seconds",
-            orElse: () =>
-              GatewayModelError.make({
-                message: `The model proxy on gateway ${gateway.destination} did not answer within 30 seconds.`,
-              }),
-          }),
-        );
-      return (
-        probe.status === 401 && probe.headers["x-usine-gateway-refusal"] === "missing-caller-token"
+    const probe = yield* http
+      .get(new URL("/openai-responses/v1/models", opened.url), {
+        headers: { host: `llm.${gateway.domain}` },
+      })
+      .pipe(
+        Effect.timeoutOrElse({
+          duration: "30 seconds",
+          orElse: () =>
+            GatewayModelError.make({
+              message: `The model proxy on gateway ${gateway.destination} did not answer within 30 seconds.`,
+            }),
+        }),
       );
-    });
-    // A gateway from before protocol slots refuses the protocol prefixes as unsupported paths.
-    const llmPrefixes: Option.Option<GatewayLlmPrefixes> = (yield* serves("protocol"))
-      ? Option.some("protocol")
-      : (yield* serves("provider"))
-        ? Option.some("provider")
-        : Option.none();
-    if (Option.isNone(llmPrefixes)) {
+    if (
+      probe.status !== 401 ||
+      probe.headers["x-usine-gateway-refusal"] !== "missing-caller-token"
+    ) {
       return yield* GatewayModelError.make({
         message: `The coordinator can't reach the model proxy on gateway ${gateway.destination}.`,
       });
     }
-    const prefixes = llmPrefixes.value;
+    const reported = yield* admin.providers;
+    // A Gateway that predates the provider report also predates protocol path prefixes.
+    const prefixes: GatewayLlmPrefixes = Option.match(reported, {
+      onNone: () => "provider",
+      onSome: (reported) => reported.prefixes,
+    });
     if (prefixes === "provider")
       yield* Effect.logWarning(
         "The gateway predates protocol path prefixes; the orchestrator model route uses its provider prefixes until @usine/gateway is upgraded on it",

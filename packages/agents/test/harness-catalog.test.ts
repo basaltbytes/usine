@@ -73,6 +73,29 @@ describe("harness catalog", () => {
     );
   });
 
+  it("accepts a gateway path that is its protocol or starts with it, and rejects any other", () => {
+    assert(Option.isSome(codex.worker.credential));
+    const credential = codex.worker.credential.value;
+    assert.strictEqual(credential.protocol, "openai-responses");
+    for (const gatewayPath of ["openai-responses/v1", "openai-responses"])
+      assert(
+        Option.isSome(HarnessCredential.makeOption({ ...credential, gatewayPath })),
+        `accepts ${gatewayPath}`,
+      );
+    for (const gatewayPath of [
+      "openai-responsesx/v1",
+      "v1",
+      "anthropic-messages/v1",
+      "openai/v1",
+      "openai-responses-v1",
+      "/openai-responses/v1",
+    ])
+      assert(
+        Option.isNone(HarnessCredential.makeOption({ ...credential, gatewayPath })),
+        `rejects ${gatewayPath}`,
+      );
+  });
+
   it("generates both Dockerfiles, cloud-init, and the published image tag from the descriptors", () => {
     const read = (path: string) =>
       readFileSync(new URL(`../../../${path}`, import.meta.url), "utf8");

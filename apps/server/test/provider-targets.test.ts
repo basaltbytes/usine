@@ -45,6 +45,7 @@ import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { ProviderLogins } from "../src/providers/control.ts";
 import { ProviderLoginRunner } from "../src/providers/runner.ts";
 import { ProviderTargets } from "../src/providers/targets.ts";
+import { ReleaseVersion } from "@usine/core/upgrade";
 import type { ProviderTarget } from "@usine/gateway/credentials";
 
 const credentialOf = (connection: ProviderTarget["providers"][number] | undefined) =>
@@ -135,27 +136,29 @@ ${["missing-token", "unreachable", "outdated", "older-gateway"]
           if (command._tag === "StandardCommand") destinations.push(command.args[5] ?? "");
           return native.spawn(ChildProcess.setEnv(command, { PATH: `${directory}:/usr/bin:/bin` }));
         });
-        const targetsLayer = ProviderTargets.layer(
-          store.read.pipe(
-            Effect.orDie,
-            Effect.map(({ instance }) =>
-              Option.isSome(instance) ? instance.value.config.workers : [],
+        const targetsLayerWith = (release: Option.Option<ReleaseVersion>) =>
+          ProviderTargets.layer(
+            store.read.pipe(
+              Effect.orDie,
+              Effect.map(({ instance }) =>
+                Option.isSome(instance) ? instance.value.config.workers : [],
+              ),
             ),
-          ),
-        ).pipe(
-          Layer.provide(Layer.succeed(ConfigurationStore, store)),
-          Layer.provide(Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, transport)),
-          Layer.provide(
-            Layer.succeed(
-              ConfigProvider.ConfigProvider,
-              ConfigProvider.fromUnknown({
-                HOME: directory,
-                TEST_GATEWAY_ADMIN_TOKEN: Redacted.value(settings.adminToken),
-              }),
+            release,
+          ).pipe(
+            Layer.provide(Layer.succeed(ConfigurationStore, store)),
+            Layer.provide(Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, transport)),
+            Layer.provide(
+              Layer.succeed(
+                ConfigProvider.ConfigProvider,
+                ConfigProvider.fromUnknown({
+                  HOME: directory,
+                  TEST_GATEWAY_ADMIN_TOKEN: Redacted.value(settings.adminToken),
+                }),
+              ),
             ),
-          ),
-        );
-        const context = yield* Layer.build(targetsLayer);
+          );
+        const context = yield* Layer.build(targetsLayerWith(Option.none()));
         const targets = Context.get(context, ProviderTargets);
         let starts = 0;
         const loginContext = yield* Layer.build(
@@ -192,6 +195,15 @@ ${["missing-token", "unreachable", "outdated", "older-gateway"]
           assert.strictEqual(
             older.error,
             "Gateway older-gateway is older than this orchestrator: it has no provider-credentials admin API. Install the @usine/gateway release that matches this orchestrator on it.",
+          );
+          const releasedContext = yield* Layer.build(
+            targetsLayerWith(Option.some(ReleaseVersion.make("0.3.1"))),
+          );
+          const released = Context.get(releasedContext, ProviderTargets);
+          const named = yield* released.get("older-gateway").pipe(Effect.flip);
+          assert.strictEqual(
+            named.message,
+            "Gateway older-gateway is older than this orchestrator: it has no provider-credentials admin API. Install @usine/gateway@0.3.1 on it.",
           );
           const before = destinations.length;
           const login = yield* logins.begin("test-gateway", "chatgpt");
@@ -306,7 +318,7 @@ ${["missing-token", "unreachable", "outdated", "older-gateway"]
           );
         });
         const localContext = yield* Layer.build(
-          ProviderTargets.layer(Effect.succeed([])).pipe(
+          ProviderTargets.layer(Effect.succeed([]), Option.none()).pipe(
             Layer.provide(Layer.succeed(ConfigurationStore, store)),
             Layer.provide(Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, claudeStatus)),
             Layer.provide(
@@ -392,7 +404,7 @@ it.live("manages ChatGPT on a local host without Claude Code", () =>
       const directory = yield* fs.makeTempDirectoryScoped();
       const store = yield* ConfigurationStore;
       const targetsContext = yield* Layer.build(
-        ProviderTargets.layer(Effect.succeed([])).pipe(
+        ProviderTargets.layer(Effect.succeed([]), Option.none()).pipe(
           Layer.provide(Layer.succeed(ConfigurationStore, store)),
           Layer.provide(
             Layer.succeed(
@@ -480,7 +492,7 @@ it.live("logs local provider availability changes once at info across repeated p
       yield* fs.writeFileString(`${directory}/codex`, "#!/bin/sh\nexit 0\n", { mode: 0o700 });
       const store = yield* ConfigurationStore;
       const context = yield* Layer.build(
-        ProviderTargets.layer(Effect.succeed([])).pipe(
+        ProviderTargets.layer(Effect.succeed([]), Option.none()).pipe(
           Layer.provide(Layer.succeed(ConfigurationStore, store)),
           Layer.provide(
             Layer.succeed(

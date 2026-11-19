@@ -313,6 +313,44 @@ describe("Provisioned SSH Worker behind a Gateway", () => {
       });
     },
   );
+  it.live(
+    "reports a Gateway from before protocol slots in the Worker's preflight and in the first machine check",
+    () => {
+      const machine = fakeMachine();
+      const providers = fakeProviders();
+      const gateway = fakeGateway(machine);
+      gateway.switches.beforeProtocolSlots = true;
+      const olderGateway = (upgrade: Option.Option<string>) =>
+        assert(
+          Option.isSome(upgrade) &&
+            upgrade.value.startsWith("Gateway usine-gateway is older than this orchestrator: "),
+          "the report says why the Gateway needs an upgrade",
+        );
+      return Effect.gen(function* () {
+        const executor = yield* Executor;
+        const machines = yield* WorkerMachines;
+        const report = yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
+        assert.isTrue(Option.isSome(report.deferred));
+        olderGateway(report.gatewayUpgrade);
+        const grant = yield* machines.create(WORKER, MACHINE_RUN, request.attemptId, [
+          TEST_AGENT.brain,
+        ]);
+        assert(Option.isSome(grant.checked), "the first machine of the day is checked");
+        olderGateway(grant.checked.value.gatewayUpgrade);
+        yield* machines.release(grant.hold);
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(
+          gatewayRuntimeOf(
+            machine,
+            providers,
+            gateway,
+            gatewayHetznerAddress(["anthropic-messages"]),
+          ),
+        ),
+      );
+    },
+  );
 });
 
 describe("Provisioned SSH Worker", () => {

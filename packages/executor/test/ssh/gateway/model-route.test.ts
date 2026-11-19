@@ -38,9 +38,11 @@ const fixture = () => {
         if (request.headers.host !== "llm.gw.test") return admin.execute(request);
         const path = new URL(request.url).pathname;
         llm.push(path);
-        // A Gateway from before protocol slots refuses their path prefixes.
+        // A Gateway from before protocol slots authenticates the caller, then refuses their
+        // path prefixes, so a request without a caller token gets a 401 on every path.
         if (
           gateway.switches.beforeProtocolSlots &&
+          request.headers.authorization !== undefined &&
           /^\/(?:anthropic-messages|openai-responses)\//u.test(path)
         )
           return Effect.succeed(
@@ -200,11 +202,7 @@ it.effect("uses the provider prefixes of a gateway from before protocol slots", 
     const answer = yield* route.request("anthropic-messages", '{"model":"claude-sonnet-4-6"}', {});
     const text = yield* Effect.promise(() => answer.text());
     assert.strictEqual(text, "gateway model answer");
-    assert.deepStrictEqual(llm, [
-      "/openai-responses/v1/models",
-      "/openai/v1/models",
-      "/anthropic/v1/messages",
-    ]);
+    assert.deepStrictEqual(llm, ["/openai-responses/v1/models", "/anthropic/v1/messages"]);
     assert.strictEqual(new URL(upstream[0]?.path ?? "").pathname, "/v1/messages");
   }).pipe(Effect.provide(transport.pipe(Layer.provideMerge(machine.layer))), Effect.scoped);
 });
