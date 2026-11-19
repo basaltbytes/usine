@@ -19,7 +19,7 @@ import {
   validateForm,
   type FormProblem,
 } from "~/features/configuration/lib/forms";
-import { useConfigurationWrite } from "~/features/configuration/queries";
+import { newConfigurationSaveId, useConfigurationWrite } from "~/features/configuration/queries";
 import { editorCopy, formCopy } from "~/features/configuration/strings";
 import { Conflict } from "./conflict";
 import { WriteFailure } from "./failure";
@@ -93,10 +93,11 @@ export const ConfigurationEditorForm = ({
           }
         }
         setProblems([]);
+        const save = newConfigurationSaveId();
         const payload =
           editor.mode === "text"
-            ? { text, expected: base.number, message }
-            : { value: editor.value, expected: base.number, message };
+            ? { text, expected: base.number, message, save }
+            : { value: editor.value, expected: base.number, message, save };
         write.mutate({ action: "save", key: entity, payload }, { onSuccess: onSaved });
       }}
     >
@@ -196,7 +197,11 @@ export const ConfigurationEditorForm = ({
           {editorCopy.cancel}
         </CommandButton>
       </div>
-      {write.isPending && <SaveProgress expected={base.number} />}
+      {write.isPending &&
+        write.variables.action === "save" &&
+        write.variables.payload.save !== undefined && (
+          <SaveProgress save={write.variables.payload.save} />
+        )}
       {draft !== null && <SourceEditor label={editorCopy.draft} value={draft} />}
     </form>
   );

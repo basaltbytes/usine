@@ -174,7 +174,7 @@ export class ConfigurationEditor extends Context.Service<
         );
       const save = (
         snapshot: Configuration,
-        input: Pick<ConfigurationWrite, "expected" | "message">,
+        input: Pick<ConfigurationWrite, "expected" | "message" | "save">,
         changes: ReadonlyArray<ConfigurationChange>,
       ) =>
         Effect.gen(function* () {
@@ -201,6 +201,7 @@ export class ConfigurationEditor extends Context.Service<
             changes,
             actor: yield* requestActor(snapshot.actor),
             message: Option.fromUndefinedOr(input.message),
+            save: Option.fromUndefinedOr(input.save),
           });
         });
       const resolveKey = (snapshot: Configuration, key: ConfigurationEntityKey) =>

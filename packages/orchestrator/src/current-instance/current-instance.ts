@@ -47,7 +47,19 @@ import {
   type RestartChange,
   restartChanges,
 } from "./changes.ts";
-import { afterRunning, ConfigurationWriteProgress, RevisionStep, timedStep } from "./steps.ts";
+import {
+  afterRunning,
+  type ConfigurationSaveId,
+  ConfigurationWriteProgress,
+  RevisionStep,
+  timedStep,
+} from "./steps.ts";
+
+/** A configuration save, with the ID that its client gave it. */
+export interface ConfigurationSave extends ConfigurationCommit {
+  /** The ID of the save in `CurrentInstance.writes`, or `None` if its client gave none. */
+  readonly save: Option.Option<ConfigurationSaveId>;
+}
 
 /** A reload changed `usine.yaml` in a way that needs a restart, so the running instance is kept. */
 export class RestartRequiredError extends Schema.TaggedError<
@@ -240,7 +252,7 @@ export class CurrentInstance extends Context.Service<
      * interrupts it before the `store` step stores nothing.
      */
     readonly commit: (
-      request: ConfigurationCommit,
+      request: ConfigurationSave,
     ) => Effect.Effect<
       ConfigurationRevision,
       InstanceReloadError | ConfigurationInvalid | ConfigurationStoreError | StaleRevision
@@ -414,14 +426,19 @@ export class CurrentInstance extends Context.Service<
           ).pipe(Effect.scoped);
 
         const commitRevision = Effect.fn("CurrentInstance.commit")(
-          function* (request: ConfigurationCommit) {
+          function* (request: ConfigurationSave) {
             const expected = request.expected;
             yield* Effect.annotateCurrentSpan({ expectedRevision: expected });
+            if (Option.isSome(request.save))
+              yield* Effect.annotateCurrentSpan({ save: request.save.value });
             const id = yield* Ref.getAndUpdate(writeCount, (count) => count + 1);
+            const progressAt = (step: RevisionStep) =>
+              Option.match(request.save, {
+                onNone: () => ConfigurationWriteProgress.make({ expected, step }),
+                onSome: (save) => ConfigurationWriteProgress.make({ save, expected, step }),
+              });
             const track = (step: RevisionStep) =>
-              Ref.update(writes, (current) =>
-                new Map(current).set(id, ConfigurationWriteProgress.make({ expected, step })),
-              );
+              Ref.update(writes, (current) => new Map(current).set(id, progressAt(step)));
             const step = trackedStep(track);
             const interrupted = Effect.gen(function* () {
               const at = (yield* Ref.get(writes)).get(id)?.step ?? "wait";

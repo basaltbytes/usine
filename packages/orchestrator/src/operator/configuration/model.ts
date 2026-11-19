@@ -6,6 +6,7 @@ import {
 } from "@usine/config/configuration";
 import { OperatorActor } from "@usine/core/operator";
 import { type Brand, Option, Schema } from "effect";
+import { ConfigurationSaveId } from "../../current-instance/steps.ts";
 
 export class ConfigurationEntityRequest extends Schema.Class<
   ConfigurationEntityRequest,
@@ -31,6 +32,8 @@ export class ConfigurationWrite extends Schema.Class<
   expected: ConfigurationRevisionNumber,
   /** An optional operator explanation stored with the revision. */
   message: Schema.optionalKey(Schema.String),
+  /** An optional ID that lists the write among the running saves, so its client finds its step. */
+  save: Schema.optionalKey(ConfigurationSaveId),
 }) {}
 
 /**

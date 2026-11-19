@@ -31442,7 +31442,7 @@
             }
           }
         },
-        "description": "Returns each configuration save that runs now, by the revision it expects, with the step it runs: `wait` while another configuration change runs, then `read`, `parse`, `restart`, `coordinator-brains`, `worker-preflight`, `store`, and `apply`.",
+        "description": "Returns each configuration save that runs now, by the `save` ID that its client sent with the write and the revision it expects, with the step it runs: `wait` while another configuration change runs, then `read`, `parse`, `restart`, `coordinator-brains`, `worker-preflight`, `store`, and `apply`.",
         "summary": "List running configuration saves",
         "x-usine-permission": "read"
       }
@@ -36631,6 +36631,10 @@
                       "message": {
                         "type": "string"
                       },
+                      "save": {
+                        "type": "string",
+                        "pattern": "^[\\w-]{8,64}$"
+                      },
                       "value": {},
                       "text": {
                         "not": {}
@@ -36657,6 +36661,10 @@
                       },
                       "message": {
                         "type": "string"
+                      },
+                      "save": {
+                        "type": "string",
+                        "pattern": "^[\\w-]{8,64}$"
                       },
                       "text": {
                         "type": "string"
@@ -67302,6 +67310,10 @@
           },
           "message": {
             "type": "string"
+          },
+          "save": {
+            "type": "string",
+            "pattern": "^[\\w-]{8,64}$"
           }
         },
         "required": [
@@ -67517,6 +67529,10 @@
       "_usine_orchestrator_ConfigurationWriteProgressEncoded": {
         "type": "object",
         "properties": {
+          "save": {
+            "type": "string",
+            "pattern": "^[\\w-]{8,64}$"
+          },
           "expected": {
             "type": "integer",
             "minimum": 0,

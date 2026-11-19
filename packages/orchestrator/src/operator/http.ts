@@ -77,7 +77,11 @@ import {
 } from "effect/http-api";
 import { RestartBlock } from "../current-instance/changes.ts";
 import { ConfigurationWriteProgress, RevisionStep } from "../current-instance/steps.ts";
-export { ConfigurationWriteProgress, RevisionStep } from "../current-instance/steps.ts";
+export {
+  ConfigurationSaveId,
+  ConfigurationWriteProgress,
+  RevisionStep,
+} from "../current-instance/steps.ts";
 import type { InstanceReloadError } from "../current-instance/current-instance.ts";
 import { BoardLaneId } from "./board.ts";
 import { CycleBudgetResetView } from "./need.ts";
@@ -1115,7 +1119,7 @@ export const OperatorApi = operatorApi.add(
         .annotate(OpenApi.Summary, "List running configuration saves")
         .annotate(
           OpenApi.Description,
-          "Returns each configuration save that runs now, by the revision it expects, with the step it runs: `wait` while another configuration change runs, then `read`, `parse`, `restart`, `coordinator-brains`, `worker-preflight`, `store`, and `apply`.",
+          "Returns each configuration save that runs now, by the `save` ID that its client sent with the write and the revision it expects, with the step it runs: `wait` while another configuration change runs, then `read`, `parse`, `restart`, `coordinator-brains`, `worker-preflight`, `store`, and `apply`.",
         ),
       HttpApiEndpoint.get("configurationCapabilities", "/api/configuration/capabilities", {
         success: Schema.Struct({

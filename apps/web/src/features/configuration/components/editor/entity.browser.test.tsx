@@ -215,18 +215,22 @@ it("keeps invalid text and lists every field problem under the editor before sav
   });
 });
 
-it("names the step that a save runs once the save takes a few seconds", async () => {
+it("names the step of its own save once the save has run for 3 seconds", async () => {
   await mount();
-  await commands.delayConfigurationSave("worker-preflight");
+  await commands.delayConfigurationSave("wait");
   await editText();
   await page
     .getByRole("textbox", { name: "Configuration text" })
     .fill("name: local\nkind: local\nmax_concurrent_attempts: 3\n");
+  const clicked = performance.now();
   await button("Save").click();
-  const step = page
-    .getByRole("status")
-    .filter({ hasText: "Still saving: checking the workers (worker-preflight)." });
+  expect(page.getByText(/Still saving/u).query()).toBeNull();
+  const step = page.getByRole("status").filter({
+    hasText: "Still saving: waiting for another configuration change to finish (wait).",
+  });
   await expect.element(step, { timeout: 10_000 }).toBeVisible();
+  expect(performance.now() - clicked).toBeGreaterThanOrEqual(3000);
+  expect(page.getByText(/worker-preflight/u).query(), "another save's step").toBeNull();
   await commands.releaseConfigurationSave();
   await expect.element(page.getByRole("status").filter({ hasText: "Saved" })).toBeVisible();
   await expect.element(step).not.toBeInTheDocument();

@@ -20,11 +20,22 @@ export const RevisionStep = Schema.Literals([
 /** A step of a configuration save or reload. */
 export type RevisionStep = typeof RevisionStep.Type;
 
+/**
+ * The ID that a client gives a configuration save, so that it finds the save among the running
+ * ones: 8 to 64 letters, digits, `-`, or `_`.
+ */
+export const ConfigurationSaveId = Schema.String.check(Schema.isPattern(/^[\w-]{8,64}$/u)).pipe(
+  Schema.brand("ConfigurationSaveId"),
+);
+export type ConfigurationSaveId = typeof ConfigurationSaveId.Type;
+
 /** A configuration save that runs now, and its step. */
 export class ConfigurationWriteProgress extends Schema.Class<
   ConfigurationWriteProgress,
   Brand.Brand<"@usine/orchestrator/current-instance/steps/ConfigurationWriteProgress">
 >("@usine/orchestrator/ConfigurationWriteProgress")({
+  /** The ID that the save's client gave it. Absent if the client gave none. */
+  save: Schema.optionalKey(ConfigurationSaveId),
   /** The revision that the save expects to replace. */
   expected: ConfigurationRevisionNumber,
   /** The step that runs now: `wait` while another configuration change runs. */
