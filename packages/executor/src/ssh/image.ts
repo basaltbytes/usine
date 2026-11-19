@@ -56,7 +56,7 @@ const inspectAttemptImage = Effect.fn("SshExecutor.inspectAttemptImage")(functio
 /**
  * Checks the attempt image without pulling it, for a `defer` preflight. Returns `true` if the
  * machine has `image`. Otherwise checks with a manifest request that the registry has it, so
- * that the next Attempt can pull it, and returns `false`.
+ * that a `pull` preflight can download it, and returns `false`.
  */
 export const findAttemptImage = Effect.fn("SshExecutor.findAttemptImage")(function* (
   commands: RemoteCommands,
@@ -95,7 +95,7 @@ export const findAttemptImage = Effect.fn("SshExecutor.findAttemptImage")(functi
     );
   }
   yield* Effect.logInfo(
-    "The worker doesn't have the attempt image, and the registry has it; the next attempt pulls it",
+    "The worker doesn't have the attempt image, and the registry has it; a pull preflight downloads it",
     manifestFields,
   );
   return false;

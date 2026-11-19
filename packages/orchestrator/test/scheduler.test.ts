@@ -17,7 +17,7 @@ import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
 import { Run, RunId } from "@usine/core/run";
 import * as RunState from "@usine/core/run/state";
 import { Step, StepName } from "@usine/core/step";
-import { type WorkerKind, WorkerName } from "@usine/core/worker";
+import { ContainerImage, type WorkerKind, WorkerName } from "@usine/core/worker";
 import { Submission } from "@usine/engine/engine";
 import { StepExecution, StepExecutor } from "@usine/engine/step-executor";
 import {
@@ -187,7 +187,8 @@ describe("Worker scheduler startup", () => {
           Effect.gen(function* () {
             const failing = ["local"];
             const calls: Array<string> = [];
-            const context = yield* schedulerContext(calls, { failing });
+            const images: Array<PreflightImage | undefined> = [];
+            const context = yield* schedulerContext(calls, { failing, images });
             const steps = Context.get(context, StepExecutor);
             const status = Context.get(context, WorkerStatus);
             const agent = yield* developer;
@@ -212,6 +213,7 @@ describe("Worker scheduler startup", () => {
             const recovered = yield* Fiber.join(waiting);
             assert.strictEqual(recovered.worker, "local");
             assert.lengthOf(calls, 3);
+            assert.deepStrictEqual(images, ["pull", "pull", "pull"], "a retry pulls the image");
             const checks = yield* status.preflights;
             assert.strictEqual(
               Option.getOrNull(
@@ -468,9 +470,10 @@ const startScheduler = (...args: Parameters<typeof schedulerContext>) =>
 
 /**
  * Returns an executor of `kind` whose preflight records `worker xN: model` for each check, and
- * its image mode in `images` if given, and fails for the Workers in `failing`. With
- * `coordinators`, its preparation records the coordinator of each request, then fails. With
- * `prepareFailure`, its preparation fails with it.
+ * its image mode in `images` if given, and fails for the Workers in `failing`. A `defer`
+ * preflight of a Worker in `missingImage` reports `MISSING_IMAGE`, and a `pull` preflight of one
+ * runs `pulling` first. With `coordinators`, its preparation records the coordinator of each
+ * request, then fails. With `prepareFailure`, its preparation fails with it.
  */
 const recordingExecutor = (
   preflighted: Array<string>,
@@ -480,6 +483,8 @@ const recordingExecutor = (
     readonly coordinators?: Array<CoordinatorKind>;
     readonly prepareFailure?: WorkerCapabilityError;
     readonly images?: Array<PreflightImage | undefined>;
+    readonly missingImage?: ReadonlyArray<string>;
+    readonly pulling?: Effect.Effect<void>;
   },
 ) =>
   Layer.succeed(Executor)({
@@ -512,6 +517,8 @@ const recordingExecutor = (
           `${worker} x${maxConcurrentAttempts}: ${brains.map(({ model }) => model).join(",")}`,
         );
         options.images?.push(image);
+        const missing = options.missingImage?.includes(worker) === true;
+        if (missing && image === "pull") yield* options.pulling ?? Effect.void;
         if (options.failing?.includes(worker) === true)
           return yield* WorkerCapabilityError.make({
             worker,
@@ -519,9 +526,17 @@ const recordingExecutor = (
             message: "The machine has 2 GiB of memory, less than 1.5 GiB per Attempt.",
             cause: "MemTotal: 2097152 kB",
           });
-        return fullPreflight;
+        return missing && image === "defer"
+          ? {
+              ...fullPreflight,
+              deferred: Option.some("Checked by the preflight that pulls the attempt image."),
+              missingImage: Option.some(MISSING_IMAGE),
+            }
+          : fullPreflight;
       }),
   });
+
+const MISSING_IMAGE = ContainerImage.make("ghcr.io/basaltbytes/usine-worker:next");
 
 const runOf = (second: number) => RunId.make(`run-${second}`);
 
@@ -1160,9 +1175,90 @@ describe("Worker scheduler on reload", () => {
           const report = yield* instances.reload;
           assert.deepStrictEqual(report.workers.added, [spare]);
           assert.deepStrictEqual(preflighted, ["spare x2: gpt-5.6-sol"]);
-          assert.deepStrictEqual(images, ["pull", "defer"], "a reload leaves pulls to attempts");
+          assert.deepStrictEqual(images, ["pull", "defer"], "a reload pulls no image");
 
           assert.strictEqual((yield* leaseOf(waiting)).worker, spare);
+        }).pipe(Effect.scoped),
+      ),
+  );
+
+  it.effect(
+    "keeps a Worker that a reload found without its image out of scheduling until a pull preflight passes",
+    () =>
+      withWorkers(localWorkers([["local", 1]]), (root) =>
+        Effect.gen(function* () {
+          const instances = yield* CurrentInstance;
+          const preflighted: Array<string> = [];
+          const images: Array<PreflightImage | undefined> = [];
+          const failing: Array<string> = [];
+          const pulling = yield* Deferred.make<void>();
+          const release = yield* Deferred.make<void>();
+          const context = yield* schedulerContext(preflighted, {
+            images,
+            failing,
+            missingImage: ["spare"],
+            pulling: Deferred.succeed(pulling, undefined).pipe(
+              Effect.andThen(Deferred.await(release)),
+            ),
+          });
+          const scheduler = Context.get(context, StepExecutor);
+          const status = Context.get(context, WorkerStatus);
+          const agent = yield* developer;
+          const first = yield* scheduler.reserve(runOf(1), submission(agent, 1), Option.none());
+          const waiting = yield* Effect.forkChild(
+            scheduler.reserve(runOf(2), submission(agent, 2), Option.none()),
+          );
+          yield* writeInstanceFiles(root, [
+            [
+              "usine.yaml",
+              usineYaml(
+                localWorkers([
+                  ["local", 1],
+                  ["spare", 1],
+                ]),
+              ),
+            ],
+          ]);
+
+          const report = yield* instances.reload;
+
+          assert.deepStrictEqual(report.workers.added, [spare]);
+          yield* Deferred.await(pulling);
+          assert.deepStrictEqual(images, ["pull", "defer", "pull"]);
+          const pullingMessages = yield* status.unavailable;
+          assert.deepStrictEqual(pullingMessages, [
+            {
+              worker: spare,
+              message: `The worker doesn't have the attempt image ${MISSING_IMAGE}; it takes attempts once a preflight pulls and checks it.`,
+            },
+          ]);
+          assert.isUndefined(waiting.pollUnsafe(), "no Run leases the Worker during the pull");
+
+          failing.push("spare");
+          yield* Deferred.succeed(release, undefined);
+          const failed = yield* status.unavailable.pipe(
+            Effect.repeat({
+              until: (unavailable) => unavailable[0]?.message.includes("2 GiB") === true,
+            }),
+          );
+          assert.deepStrictEqual(
+            failed.map(({ worker }) => worker),
+            [spare],
+          );
+          assert.isUndefined(waiting.pollUnsafe(), "a failed pull preflight keeps the Worker out");
+          yield* TestClock.adjust("1 minute");
+          assert.deepStrictEqual(images, ["pull", "defer", "pull", "pull"], "the retry pulls");
+
+          failing.length = 0;
+          yield* TestClock.adjust("2 minutes");
+          const lease = yield* Fiber.join(waiting);
+          assert.strictEqual(lease.worker, spare);
+          assert.deepStrictEqual(images, ["pull", "defer", "pull", "pull", "pull"]);
+          yield* lease.release;
+          yield* first.release;
+
+          yield* status.runPreflight(spare);
+          assert.strictEqual(images.at(-1), "pull", "an on-demand preflight pulls the image");
         }).pipe(Effect.scoped),
       ),
   );
@@ -1320,10 +1416,13 @@ const startSshScheduler = (
     readonly added?: Array<SshWorkerAddress>;
     readonly environment?: Record<string, string>;
     readonly failing?: ReadonlyArray<string>;
+    readonly images?: Array<PreflightImage | undefined>;
+    readonly missingImage?: ReadonlyArray<string>;
   } = {},
 ) =>
   Effect.gen(function* () {
     const { config, agents } = yield* (yield* CurrentInstance).get;
+    const { added: _added, environment: _environment, failing, ...executorOptions } = options;
     const machines = Layer.succeed(SshWorkers)({
       addWorker: (address) =>
         Effect.sync(() => {
@@ -1341,7 +1440,9 @@ const startSshScheduler = (
         agents.map(({ agent }) => agent.brain),
       ).pipe(
         Layer.provide(MarcbachmannCelLayer),
-        Layer.provide(recordingExecutor(events, { kind: "ssh", failing: options.failing ?? [] })),
+        Layer.provide(
+          recordingExecutor(events, { ...executorOptions, kind: "ssh", failing: failing ?? [] }),
+        ),
         Layer.provide(machines),
         Layer.provide(testAppLayer),
         Layer.provide(
@@ -1541,6 +1642,38 @@ describe("SSH Workers on reload", () => {
         assert.deepStrictEqual(currentWorkers, [build1]);
       }).pipe(Effect.scoped),
     ),
+  );
+
+  it.live(
+    "preflights an SSH Worker whose connection changed without pulling, then pulls the missing image",
+    () =>
+      withWorkers(sshWorker("build-1", 1), (root) =>
+        Effect.gen(function* () {
+          const instances = yield* CurrentInstance;
+          const images: Array<PreflightImage | undefined> = [];
+          const scheduler = yield* startSshScheduler([], {
+            images,
+            missingImage: ["build-1"],
+          });
+          assert.deepStrictEqual(images, ["pull"], "startup pulls the image");
+
+          yield* writeInstanceFiles(root, [
+            ["usine.yaml", usineYaml(sshWorker("build-1", 1, "usine@replacement-host"))],
+          ]);
+          const report = yield* instances.reload;
+          assert.deepStrictEqual(report.workers.changed, [build1]);
+          const agent = yield* developer;
+          const lease = yield* scheduler.reserve(runOf(1), submission(agent, 1), Option.none());
+
+          assert.strictEqual(lease.worker, build1);
+          assert.deepStrictEqual(
+            images,
+            ["pull", "defer", "pull"],
+            "the changed connection's preflight defers the image, and a later preflight pulls it",
+          );
+          yield* lease.release;
+        }).pipe(Effect.scoped),
+      ),
   );
 
   it.live("takes a removed SSH Worker away from the executor once its last Attempt ends", () =>

@@ -969,6 +969,7 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
           ? "Checked before every attempt while machine reuse is enabled."
           : `Checked on the first machine, then every ${provisioner.value.timings.machineCheckInterval} seconds when a machine is created.`,
       ),
+      missingImage: Option.none(),
       containerLimits: Option.none(),
       findings: [],
     } satisfies PreflightReport;

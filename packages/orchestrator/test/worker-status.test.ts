@@ -3,6 +3,7 @@ import { BrainSpec, Harness, ModelId } from "@usine/core/agent/brain";
 import { HarnessUnavailableError } from "@usine/core/agent/capability";
 import {
   ContainerCpus,
+  ContainerImage,
   ContainerLimits,
   ContainerMemoryMib,
   ContainerPids,
@@ -77,7 +78,7 @@ describe("Worker preflight record", () => {
     assert.deepStrictEqual(fixed.findings, []);
   });
 
-  it("records the limits and findings of a machine check that deferred the harnesses", () => {
+  it("records the limits and findings of a machine check that deferred a missing image", () => {
     const limits = ContainerLimits.make({
       cpus: ContainerCpus.make(2),
       memoryMib: ContainerMemoryMib.make(4096),
@@ -90,7 +91,8 @@ describe("Worker preflight record", () => {
       at(9),
       Result.succeed({
         degraded: Option.none(),
-        deferred: Option.some("Checked in the next attempt's container."),
+        deferred: Option.some("Checked by the preflight that pulls the attempt image."),
+        missingImage: Option.some(ContainerImage.make("ghcr.io/basaltbytes/usine-worker:next")),
         containerLimits: Option.some(limits),
         findings: [finding],
       }),

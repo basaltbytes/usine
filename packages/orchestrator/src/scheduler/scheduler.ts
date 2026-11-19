@@ -12,7 +12,7 @@ import { salvageRefFor } from "@usine/core/attempt/salvage";
 import type { ItemKey } from "@usine/core/item";
 import type { LoopName } from "@usine/core/loop";
 import type { RunId } from "@usine/core/run";
-import { WorkerName } from "@usine/core/worker";
+import { type ContainerImage, WorkerName } from "@usine/core/worker";
 import {
   CheckoutRequest,
   Executor,
@@ -430,8 +430,9 @@ export const stepExecutorLayer = (
         declared: ReadonlyArray<ConfigWorker>,
         roster: ReadonlyArray<BrainSpec>,
         checked: ReadonlySet<WorkerName>,
+        missing: ReadonlyMap<WorkerName, ContainerImage>,
       ) {
-        yield* preflight.accept(declared, roster, checked);
+        yield* preflight.accept(declared, roster, checked, missing);
         yield* preflight.refresh(change.updated);
         yield* Ref.set(declaredWorkers, declared);
         for (const worker of change.updated) {
@@ -527,14 +528,16 @@ export const stepExecutorLayer = (
                 ? [{ worker, brains: blocked.has(worker.name) ? roster : newBrains }]
                 : [],
           );
-          const apply = preflight.exclusive.withPermit(
-            applyWorkers(
-              change,
-              loaded.config.workers,
-              roster,
-              new Set(checks.map(({ worker }) => worker.name)),
-            ),
-          );
+          const apply = (missing: ReadonlyMap<WorkerName, ContainerImage>) =>
+            preflight.exclusive.withPermit(
+              applyWorkers(
+                change,
+                loaded.config.workers,
+                roster,
+                new Set(checks.map(({ worker }) => worker.name)),
+                missing,
+              ),
+            );
           yield* Effect.annotateCurrentSpan({ agents: agentNames, workers: [...wholeRoster] });
           if (checks.length === 0) {
             yield* Effect.logDebug(
@@ -542,7 +545,7 @@ export const stepExecutorLayer = (
             );
             // The caller applies this worker reload after preflight succeeds.
             // @effect-diagnostics-next-line returnEffectInGen:off
-            return apply;
+            return apply(new Map());
           }
           const added = new Set(change.added.map(({ name }) => name));
           yield* Effect.acquireRelease(
@@ -560,17 +563,26 @@ export const stepExecutorLayer = (
             workers: [...wholeRoster],
           });
           // Add the Worker to the executor first, so its preflight can connect to its machine.
-          // A configuration save waits for this preflight, so it leaves image pulls to attempts.
-          yield* Effect.forEach(
+          // A configuration save waits for this preflight, so it leaves image pulls to a
+          // preflight that runs after the save applies.
+          const reports = yield* Effect.forEach(
             checks,
-            ({ worker, brains }) => preflight.check(worker, brains, "defer"),
-            { concurrency: "unbounded", discard: true },
+            ({ worker, brains }) =>
+              preflight
+                .check(worker, brains, "defer")
+                .pipe(Effect.map(({ missingImage }) => [worker.name, missingImage] as const)),
+            { concurrency: "unbounded" },
           ).pipe(
             Effect.mapError((cause) => reloadPreflightFailed(agentNames, [...wholeRoster], cause)),
           );
+          const missing = new Map(
+            reports.flatMap(([worker, image]) =>
+              Option.isSome(image) ? [[worker, image.value] as const] : [],
+            ),
+          );
           // The caller applies this worker reload after preflight succeeds.
           // @effect-diagnostics-next-line returnEffectInGen:off
-          return apply;
+          return apply(missing);
         },
         (effect) => preflight.exclusive.withPermit(effect),
       );

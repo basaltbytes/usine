@@ -2,7 +2,7 @@ import { InstanceScope } from "@usine/core/access";
 import { ChangeBus } from "@usine/core/changes";
 import type { Worker } from "@usine/config/factory";
 import type { BrainSpec } from "@usine/core/agent/brain";
-import type { WorkerName } from "@usine/core/worker";
+import type { ContainerImage, WorkerName } from "@usine/core/worker";
 import {
   type Executor,
   ExecutorOperationError,
@@ -52,6 +52,19 @@ interface PreflightConfiguration {
   readonly workers: ReadonlyArray<Worker>;
   readonly roster: ReadonlyArray<BrainSpec>;
 }
+
+/**
+ * What a Worker needs after a preflight that retried it: nothing, more retries, or a `pull`
+ * preflight of the Attempt `image` that a `defer` preflight found missing.
+ */
+type Recovery =
+  | { readonly _tag: "Recovered" }
+  | { readonly _tag: "Failing" }
+  | { readonly _tag: "ImageMissing"; readonly image: ContainerImage };
+
+/** Why a Worker takes no Attempt while a preflight pulls its Attempt `image`. */
+const pullingMessage = (image: ContainerImage) =>
+  `The worker doesn't have the attempt image ${image}; it takes attempts once a preflight pulls and checks it.`;
 
 export const preflightFor = Effect.fn("WorkerScheduler.preflightFor")(function* (
   executor: Pick<Executor["Service"], "preflight">,
@@ -233,17 +246,15 @@ export const preflightFor = Effect.fn("WorkerScheduler.preflightFor")(function* 
     );
   });
 
-  const recover = Effect.fn("WorkerScheduler.retryPreflight")(function* (
+  /**
+   * Records `result`, a preflight that retried the blocked Worker `name`. A passed preflight
+   * resumes scheduling on the Worker, unless it found its Attempt image missing.
+   */
+  const settle = Effect.fn("WorkerScheduler.settlePreflight")(function* (
     name: WorkerName,
-    image: PreflightImage,
+    result: Result.Result<PreflightReport, ExecutorError>,
   ) {
-    yield* Effect.annotateCurrentSpan({ worker: name, image });
-
-    if (!(yield* TxRef.get(blocked)).has(name)) return false;
-    const { workers, roster } = yield* Ref.get(configuration);
-    const worker = workers.find((worker) => worker.name === name);
-    if (worker === undefined) return false;
-    const result = yield* check(worker, roster, image).pipe(Effect.result);
+    yield* Effect.annotateCurrentSpan({ worker: name });
     if (Result.isFailure(result)) {
       yield* TxRef.update(blocked, (current) => new Map(current).set(name, result.failure.message));
       yield* Effect.logWarning("Worker preflight still fails; scheduling stays disabled", {
@@ -252,7 +263,15 @@ export const preflightFor = Effect.fn("WorkerScheduler.preflightFor")(function* 
         message: result.failure.message,
       });
       yield* changed(name);
-      return true;
+      return { _tag: "Failing" } satisfies Recovery;
+    }
+    const missing = result.success.missingImage;
+    if (Option.isSome(missing)) {
+      yield* TxRef.update(blocked, (current) =>
+        new Map(current).set(name, pullingMessage(missing.value)),
+      );
+      yield* changed(name);
+      return { _tag: "ImageMissing", image: missing.value } satisfies Recovery;
     }
     yield* TxRef.update(
       blocked,
@@ -260,7 +279,21 @@ export const preflightFor = Effect.fn("WorkerScheduler.preflightFor")(function* 
     );
     yield* changed(name);
     yield* Effect.logInfo("Worker preflight passed; scheduling resumed", { worker: name });
-    return false;
+    return { _tag: "Recovered" } satisfies Recovery;
+  });
+
+  const recover = Effect.fn("WorkerScheduler.retryPreflight")(function* (
+    name: WorkerName,
+    image: PreflightImage,
+  ) {
+    yield* Effect.annotateCurrentSpan({ worker: name, image });
+    const recovered: Recovery = { _tag: "Recovered" };
+    if (!(yield* TxRef.get(blocked)).has(name)) return recovered;
+    const { workers, roster } = yield* Ref.get(configuration);
+    const worker = workers.find((worker) => worker.name === name);
+    if (worker === undefined) return recovered;
+    const result = yield* check(worker, roster, image).pipe(Effect.result);
+    return yield* settle(name, result);
   });
 
   const retry = (worker: WorkerName) =>
@@ -273,10 +306,47 @@ export const preflightFor = Effect.fn("WorkerScheduler.preflightFor")(function* 
           retryAfterMinutes: minutes,
         });
         yield* Effect.sleep(Duration.minutes(minutes));
-        if (!(yield* exclusive.withPermit(recover(worker, "pull")))) return;
+        const recovery = yield* exclusive.withPermit(recover(worker, "pull"));
+        if (recovery._tag === "Recovered") return;
         failures += 1;
       }
     });
+
+  /**
+   * Runs a `pull` preflight of the blocked Worker `name` now, which downloads and checks the
+   * Attempt image that a `defer` preflight found missing, then retries it while it fails. The
+   * download runs outside `exclusive`, so a configuration save doesn't wait for it; a save that
+   * checks the Worker again or removes it interrupts this preflight first.
+   */
+  const pullImage = Effect.fn("WorkerScheduler.pullAttemptImage")(function* (name: WorkerName) {
+    yield* Effect.annotateCurrentSpan({ worker: name });
+    const { workers, roster } = yield* Ref.get(configuration);
+    const worker = workers.find((worker) => worker.name === name);
+    if (worker === undefined)
+      return yield* Effect.logInfo(
+        "The worker left the configuration; no preflight pulls its attempt image",
+        { worker: name },
+      );
+    const result = yield* check(worker, roster, "pull").pipe(Effect.result);
+    const recovery = yield* exclusive.withPermit(settle(name, result));
+    if (recovery._tag !== "Recovered") yield* retry(name);
+  });
+
+  /**
+   * Starts the `pull` preflight of the Attempt `image` that a `defer` preflight of `worker` found
+   * missing. The caller has blocked the Worker with `pullingMessage`.
+   */
+  const pullLater = Effect.fn("WorkerScheduler.pullAttemptImageLater")(function* (
+    worker: WorkerName,
+    image: ContainerImage,
+  ) {
+    yield* Effect.annotateCurrentSpan({ worker, image });
+    yield* Effect.logInfo(
+      "The worker doesn't have its attempt image; a preflight pulls and checks it, and the worker takes no attempt until it passes",
+      { worker, image },
+    );
+    yield* FiberMap.run(retries, worker, pullImage(worker));
+  });
 
   const start = Effect.fn("WorkerScheduler.preflight")(function* (
     workers: ReadonlyArray<Worker>,
@@ -390,18 +460,28 @@ export const preflightFor = Effect.fn("WorkerScheduler.preflightFor")(function* 
     );
   });
 
+  /**
+   * Applies the preflights of a configuration save: resumes scheduling on each Worker in
+   * `checked`, except the ones in `missing`, which wait for a preflight that pulls the Attempt
+   * image that the save's preflight found missing.
+   */
   const accept = Effect.fn("WorkerScheduler.acceptPreflight")(function* (
     declared: ReadonlyArray<Worker>,
     roster: ReadonlyArray<BrainSpec>,
     checked: ReadonlySet<WorkerName>,
+    missing: ReadonlyMap<WorkerName, ContainerImage>,
   ) {
     yield* Ref.set(configuration, { workers: declared, roster });
     const names = new Set(declared.map(({ name }) => name));
     const previous = yield* TxRef.get(blocked);
-    const next = new Map(
-      [...previous].filter(([worker]) => names.has(worker) && !checked.has(worker)),
-    );
+    const next = new Map([
+      ...[...previous].filter(([worker]) => names.has(worker) && !checked.has(worker)),
+      ...[...missing].map(([worker, image]) => [worker, pullingMessage(image)] as const),
+    ]);
     yield* TxRef.set(blocked, next);
+    yield* Effect.forEach(missing, ([worker, image]) => pullLater(worker, image), {
+      discard: true,
+    });
     yield* Effect.forEach(
       [...previous.keys()].filter((worker) => !next.has(worker)),
       (worker) =>
@@ -421,7 +501,7 @@ export const preflightFor = Effect.fn("WorkerScheduler.preflightFor")(function* 
 
   /**
    * Preflights the Workers whose connection a configuration save changed, without pulling their
-   * Attempt images, and retries the ones that fail.
+   * Attempt images. Retries the ones that fail, and pulls the images that the machines lack.
    */
   const refresh = Effect.fn("WorkerScheduler.refreshPreflight")(function* (
     workers: ReadonlyArray<Worker>,
@@ -443,8 +523,10 @@ export const preflightFor = Effect.fn("WorkerScheduler.preflightFor")(function* 
           yield* Effect.logInfo("Worker connection changed; running attempts keep their machine", {
             worker: worker.name,
           });
-          if (yield* recover(worker.name, "defer"))
+          const recovery = yield* recover(worker.name, "defer");
+          if (recovery._tag === "Failing")
             yield* FiberMap.run(retries, worker.name, retry(worker.name));
+          else if (recovery._tag === "ImageMissing") yield* pullLater(worker.name, recovery.image);
         }),
       { concurrency: "unbounded", discard: true },
     );

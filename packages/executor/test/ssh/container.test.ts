@@ -232,7 +232,7 @@ describe("SSH Worker with Docker", () => {
   });
 
   it.effect(
-    "defers the pull of an absent image to the next Attempt, which pulls it and checks the harness",
+    "defers the pull of an absent image, and an Attempt that starts first pulls it and checks the harness",
     () => {
       const machine = dockerMachine();
       const logs = capturedLogs();
@@ -254,11 +254,12 @@ describe("SSH Worker with Docker", () => {
           deferred.some((line) => line.includes("'usine-preflight-")),
           "no container runs the absent image",
         );
+        assert.deepStrictEqual(report.missingImage, Option.some(ATTEMPT_IMAGE));
         assert.isTrue(Option.isSome(report.deferred));
         assert.isTrue(Option.isSome(report.containerLimits));
         assert.include(
           logs.lines.join("\n"),
-          "The worker doesn't have the attempt image, and the registry has it; the next attempt pulls it",
+          "The worker doesn't have the attempt image, and the registry has it; a pull preflight downloads it",
         );
 
         const prepared = yield* executor.prepare(request);
@@ -290,6 +291,7 @@ describe("SSH Worker with Docker", () => {
       assert.isFalse(lines.some((line) => line.startsWith("exec 'docker' 'pull' ")));
       assert.isFalse(lines.some((line) => line.startsWith("exec 'docker' 'manifest' ")));
       assert.isTrue(Option.isNone(report.deferred));
+      assert.isTrue(Option.isNone(report.missingImage));
       assert.include(preflightRunOf(machine), ATTEMPT_IMAGE);
       assert(machine.state.calls.some(({ line }) => line.includes("'claude' 'auth' 'status'")));
     }).pipe(Effect.scoped, Effect.provide(runtime(machine, mintingProvider())));
@@ -312,6 +314,66 @@ describe("SSH Worker with Docker", () => {
         assert.include(error.message, "can't find it in the registry");
         assert.isFalse(linesOf(machine).some((line) => line.startsWith("exec 'docker' 'pull' ")));
       }).pipe(Effect.scoped, Effect.provide(runtime(machine, mintingProvider())));
+    },
+  );
+
+  it.effect(
+    "fails the pull preflight after a deferred one when the image's user differs from the SSH user",
+    () => {
+      const machine = dockerMachine();
+      machine.state.imageOnMachine = false;
+      machine.state.hostUserId = "2345";
+      const userProbes = () =>
+        linesOf(machine).filter((line) => line.includes("image_ids=")).length;
+      return Effect.gen(function* () {
+        const executor = yield* Executor;
+        const report = yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1, "defer");
+        assert.deepStrictEqual(report.missingImage, Option.some(ATTEMPT_IMAGE));
+        assert.strictEqual(userProbes(), 0, "the deferred preflight runs nothing from the image");
+
+        const error = yield* executor
+          .preflight(WORKER, [TEST_AGENT.brain], 1, "pull")
+          .pipe(Effect.flip);
+
+        assert(error._tag === "WorkerCapabilityError", error._tag);
+        assert.strictEqual(error.capability, "container");
+        assert.include(error.message, "Build the image with --build-arg USINE_UID=2345.");
+        assert.strictEqual(userProbes(), 1);
+        assert.isTrue(machine.state.imageOnMachine, "the pull preflight downloads the image");
+      }).pipe(Effect.scoped, Effect.provide(runtime(machine, mintingProvider())));
+    },
+  );
+
+  it.effect(
+    "checks the kernel log, memory, and image storage of a machine without the image when deferred",
+    () => {
+      const machine = dockerMachine();
+      machine.state.imageOnMachine = false;
+      machine.state.kernelMemory = "unreadable";
+      const logs = capturedLogs();
+      return Effect.gen(function* () {
+        const executor = yield* Executor;
+        const report = yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1, "defer");
+
+        assert.isTrue(Option.isSome(report.missingImage));
+        assert.strictEqual(report.findings.length, 1);
+        assert.include(report.findings[0], "can't read the kernel journal or ring buffer");
+        assert.isTrue(
+          logs.infos.some((line) => line.includes("Concurrent container memory fits the host")),
+          "the deferred preflight checks the memory of the concurrent containers",
+        );
+
+        machine.state.storageFreeDiskGib = 1;
+        const error = yield* executor
+          .preflight(WORKER, [TEST_AGENT.brain], 1, "defer")
+          .pipe(Effect.flip);
+        assert(error._tag === "WorkerCapabilityError", error._tag);
+        assert.strictEqual(error.capability, "disk");
+        assert.include(error.message, "free on /var/lib/docker");
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(runtime(machine, mintingProvider()).pipe(Layer.provideMerge(logs.layer))),
+      );
     },
   );
 
