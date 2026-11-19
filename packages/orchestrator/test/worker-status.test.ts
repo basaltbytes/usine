@@ -1,7 +1,13 @@
 import { assert, describe, it } from "@effect/vitest";
 import { BrainSpec, Harness, ModelId } from "@usine/core/agent/brain";
 import { HarnessUnavailableError } from "@usine/core/agent/capability";
-import { WorkerName } from "@usine/core/worker";
+import {
+  ContainerCpus,
+  ContainerLimits,
+  ContainerMemoryMib,
+  ContainerPids,
+  WorkerName,
+} from "@usine/core/worker";
 import { fullPreflight, WorkerCapabilityError } from "@usine/executor";
 import { DateTime, Option, Result } from "effect";
 import { recordPreflight, unchecked, type WorkerPreflight } from "../src/worker-status.ts";
@@ -69,6 +75,32 @@ describe("Worker preflight record", () => {
     assert.deepStrictEqual(failed.findings, [finding]);
     const fixed = recordPreflight(failed, [codex], at(11), Result.succeed(fullPreflight));
     assert.deepStrictEqual(fixed.findings, []);
+  });
+
+  it("records the limits and findings of a machine check that deferred the harnesses", () => {
+    const limits = ContainerLimits.make({
+      cpus: ContainerCpus.make(2),
+      memoryMib: ContainerMemoryMib.make(4096),
+      pids: ContainerPids.make(4096),
+    });
+    const finding = "The SSH user can't read the kernel journal";
+    const record = recordPreflight(
+      unchecked(worker),
+      [codex],
+      at(9),
+      Result.succeed({
+        degraded: Option.none(),
+        deferred: Option.some("Checked in the next attempt's container."),
+        containerLimits: Option.some(limits),
+        findings: [finding],
+      }),
+    );
+    assert.deepStrictEqual(summary(record), {
+      prerequisites: "Passed 2026-10-20T09:00:00.000Z",
+      harnesses: ["codex Deferred 2026-10-20T09:00:00.000Z"],
+    });
+    assert.deepStrictEqual(record.containerLimits, Option.some(limits));
+    assert.deepStrictEqual(record.findings, [finding]);
   });
 
   it("fails an unavailable harness, passes the ones checked before it, and keeps the rest", () => {

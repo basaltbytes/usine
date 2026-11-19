@@ -183,9 +183,10 @@ const withHarnesses = (
 /**
  * Returns `previous` updated with one preflight of `brains`. A degraded report passes every
  * harness and records the prerequisites as degraded, and a deferred report records every
- * harness as deferred and keeps the container limits, since it checked no machine. An
- * unavailable harness fails that harness and passes the ones checked before it; any other
- * failure fails only the prerequisites.
+ * harness as deferred. A deferred report without container limits checked no machine, so it
+ * keeps the container limits and findings of `previous`. An unavailable harness fails that
+ * harness and passes the ones checked before it; any other failure fails only the
+ * prerequisites.
  */
 export const recordPreflight = (
   previous: WorkerPreflight,
@@ -196,6 +197,8 @@ export const recordPreflight = (
   const harnesses = Arr.dedupe(brains.map(({ harness }) => harness));
   if (Result.isSuccess(outcome)) {
     const passed: PreflightCheck = { _tag: "Passed", checkedAt };
+    const checkedMachine =
+      Option.isNone(outcome.success.deferred) || Option.isSome(outcome.success.containerLimits);
     return {
       worker: previous.worker,
       prerequisites: Option.some(
@@ -212,12 +215,8 @@ export const recordPreflight = (
           onSome: (message): PreflightCheck => ({ _tag: "Deferred", checkedAt, message }),
         }),
       ),
-      containerLimits: Option.isSome(outcome.success.deferred)
-        ? previous.containerLimits
-        : outcome.success.containerLimits,
-      findings: Option.isSome(outcome.success.deferred)
-        ? previous.findings
-        : outcome.success.findings,
+      containerLimits: checkedMachine ? outcome.success.containerLimits : previous.containerLimits,
+      findings: checkedMachine ? outcome.success.findings : previous.findings,
     };
   }
   const error = outcome.failure;

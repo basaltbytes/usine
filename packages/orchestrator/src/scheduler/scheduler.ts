@@ -560,10 +560,12 @@ export const stepExecutorLayer = (
             workers: [...wholeRoster],
           });
           // Add the Worker to the executor first, so its preflight can connect to its machine.
-          yield* Effect.forEach(checks, ({ worker, brains }) => preflight.check(worker, brains), {
-            concurrency: "unbounded",
-            discard: true,
-          }).pipe(
+          // A configuration save waits for this preflight, so it leaves image pulls to attempts.
+          yield* Effect.forEach(
+            checks,
+            ({ worker, brains }) => preflight.check(worker, brains, "defer"),
+            { concurrency: "unbounded", discard: true },
+          ).pipe(
             Effect.mapError((cause) => reloadPreflightFailed(agentNames, [...wholeRoster], cause)),
           );
           // The caller applies this worker reload after preflight succeeds.

@@ -25,6 +25,7 @@ import {
   ExecutorOperationError,
   WorkerCapabilityError,
   fullPreflight,
+  type PreflightImage,
 } from "@usine/executor";
 import { type SshWorkerAddress, SshWorkers } from "@usine/executor/ssh";
 import {
@@ -445,12 +446,7 @@ const withWorkers = <A, E>(
 /** Builds the scheduler on the current instance with a `recordingExecutor`. */
 const schedulerContext = (
   preflighted: Array<string>,
-  options: {
-    readonly kind?: WorkerKind;
-    readonly failing?: ReadonlyArray<string>;
-    readonly coordinators?: Array<CoordinatorKind>;
-    readonly prepareFailure?: WorkerCapabilityError;
-  } = {},
+  options: Parameters<typeof recordingExecutor>[1] = {},
 ) =>
   Effect.gen(function* () {
     const { config, agents } = yield* (yield* CurrentInstance).get;
@@ -471,9 +467,10 @@ const startScheduler = (...args: Parameters<typeof schedulerContext>) =>
   Effect.map(schedulerContext(...args), (context) => Context.get(context, StepExecutor));
 
 /**
- * Returns an executor of `kind` whose preflight records `worker xN: model` for each check and fails
- * for the Workers in `failing`. With `coordinators`, its preparation records the coordinator of
- * each request, then fails. With `prepareFailure`, its preparation fails with it.
+ * Returns an executor of `kind` whose preflight records `worker xN: model` for each check, and
+ * its image mode in `images` if given, and fails for the Workers in `failing`. With
+ * `coordinators`, its preparation records the coordinator of each request, then fails. With
+ * `prepareFailure`, its preparation fails with it.
  */
 const recordingExecutor = (
   preflighted: Array<string>,
@@ -482,6 +479,7 @@ const recordingExecutor = (
     readonly failing?: ReadonlyArray<string>;
     readonly coordinators?: Array<CoordinatorKind>;
     readonly prepareFailure?: WorkerCapabilityError;
+    readonly images?: Array<PreflightImage | undefined>;
   },
 ) =>
   Layer.succeed(Executor)({
@@ -508,11 +506,12 @@ const recordingExecutor = (
     cancel: unused,
     intervene: unused,
     sweep: Effect.void,
-    preflight: (worker, brains, maxConcurrentAttempts) =>
+    preflight: (worker, brains, maxConcurrentAttempts, image) =>
       Effect.gen(function* () {
         preflighted.push(
           `${worker} x${maxConcurrentAttempts}: ${brains.map(({ model }) => model).join(",")}`,
         );
+        options.images?.push(image);
         if (options.failing?.includes(worker) === true)
           return yield* WorkerCapabilityError.make({
             worker,
@@ -1137,12 +1136,14 @@ describe("Worker scheduler on reload", () => {
         Effect.gen(function* () {
           const instances = yield* CurrentInstance;
           const preflighted: Array<string> = [];
-          const scheduler = yield* startScheduler(preflighted);
+          const images: Array<PreflightImage | undefined> = [];
+          const scheduler = yield* startScheduler(preflighted, { images });
           const agent = yield* developer;
           yield* scheduler.reserve(runOf(1), submission(agent, 1), Option.none());
           const waiting = yield* Effect.forkChild(
             scheduler.reserve(runOf(2), submission(agent, 2), Option.none()),
           );
+          assert.deepStrictEqual(images, ["pull"], "startup pulls the attempt image");
           preflighted.length = 0;
 
           yield* writeInstanceFiles(root, [
@@ -1159,6 +1160,7 @@ describe("Worker scheduler on reload", () => {
           const report = yield* instances.reload;
           assert.deepStrictEqual(report.workers.added, [spare]);
           assert.deepStrictEqual(preflighted, ["spare x2: gpt-5.6-sol"]);
+          assert.deepStrictEqual(images, ["pull", "defer"], "a reload leaves pulls to attempts");
 
           assert.strictEqual((yield* leaseOf(waiting)).worker, spare);
         }).pipe(Effect.scoped),
