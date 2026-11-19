@@ -17,6 +17,7 @@ import { Route as SetupRouteImport } from './routes/setup'
 import { Route as SignInRouteImport } from './routes/sign-in'
 import { Route as TokensRouteImport } from './routes/tokens'
 import { Route as ConfigurationIndexRouteImport } from './routes/configuration/index'
+import { Route as ConfigurationGrantsRouteImport } from './routes/configuration/grants'
 import { Route as ConfigurationHistoryRouteImport } from './routes/configuration/history'
 import { Route as ConfigurationSettingsRouteImport } from './routes/configuration/settings'
 import { Route as ProjectsProjectRouteImport } from './routes/projects/$project'
@@ -82,6 +83,11 @@ const TokensRoute = TokensRouteImport.update({
 const ConfigurationIndexRoute = ConfigurationIndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => ConfigurationRouteRoute,
+} as any)
+const ConfigurationGrantsRoute = ConfigurationGrantsRouteImport.update({
+  id: '/grants',
+  path: '/grants',
   getParentRoute: () => ConfigurationRouteRoute,
 } as any)
 const ConfigurationHistoryRoute = ConfigurationHistoryRouteImport.update({
@@ -241,6 +247,7 @@ export interface FileRoutesByFullPath {
   '/setup': typeof SetupRoute
   '/sign-in': typeof SignInRoute
   '/tokens': typeof TokensRoute
+  '/configuration/grants': typeof ConfigurationGrantsRoute
   '/configuration/history': typeof ConfigurationHistoryRoute
   '/configuration/settings': typeof ConfigurationSettingsRoute
   '/projects/$project': typeof ProjectsProjectRouteWithChildren
@@ -276,6 +283,7 @@ export interface FileRoutesByTo {
   '/setup': typeof SetupRoute
   '/sign-in': typeof SignInRoute
   '/tokens': typeof TokensRoute
+  '/configuration/grants': typeof ConfigurationGrantsRoute
   '/configuration/history': typeof ConfigurationHistoryRoute
   '/configuration/settings': typeof ConfigurationSettingsRoute
   '/configuration': typeof ConfigurationIndexRoute
@@ -311,6 +319,7 @@ export interface FileRoutesById {
   '/setup': typeof SetupRoute
   '/sign-in': typeof SignInRoute
   '/tokens': typeof TokensRoute
+  '/configuration/grants': typeof ConfigurationGrantsRoute
   '/configuration/history': typeof ConfigurationHistoryRoute
   '/configuration/settings': typeof ConfigurationSettingsRoute
   '/projects/$project': typeof ProjectsProjectRouteWithChildren
@@ -349,6 +358,7 @@ export interface FileRouteTypes {
     | '/setup'
     | '/sign-in'
     | '/tokens'
+    | '/configuration/grants'
     | '/configuration/history'
     | '/configuration/settings'
     | '/projects/$project'
@@ -384,6 +394,7 @@ export interface FileRouteTypes {
     | '/setup'
     | '/sign-in'
     | '/tokens'
+    | '/configuration/grants'
     | '/configuration/history'
     | '/configuration/settings'
     | '/configuration'
@@ -418,6 +429,7 @@ export interface FileRouteTypes {
     | '/setup'
     | '/sign-in'
     | '/tokens'
+    | '/configuration/grants'
     | '/configuration/history'
     | '/configuration/settings'
     | '/projects/$project'
@@ -514,6 +526,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/configuration/'
       preLoaderRoute: typeof ConfigurationIndexRouteImport
+      parentRoute: typeof ConfigurationRouteRoute
+    }
+    '/configuration/grants': {
+      id: '/configuration/grants'
+      path: '/grants'
+      fullPath: '/configuration/grants'
+      preLoaderRoute: typeof ConfigurationGrantsRouteImport
       parentRoute: typeof ConfigurationRouteRoute
     }
     '/configuration/history': {
@@ -702,6 +721,7 @@ declare module '@tanstack/react-router' {
 }
 
 interface ConfigurationRouteRouteChildren {
+  ConfigurationGrantsRoute: typeof ConfigurationGrantsRoute
   ConfigurationHistoryRoute: typeof ConfigurationHistoryRoute
   ConfigurationSettingsRoute: typeof ConfigurationSettingsRoute
   ConfigurationIndexRoute: typeof ConfigurationIndexRoute
@@ -722,6 +742,7 @@ interface ConfigurationRouteRouteChildren {
 }
 
 const ConfigurationRouteRouteChildren: ConfigurationRouteRouteChildren = {
+  ConfigurationGrantsRoute: ConfigurationGrantsRoute,
   ConfigurationHistoryRoute: ConfigurationHistoryRoute,
   ConfigurationSettingsRoute: ConfigurationSettingsRoute,
   ConfigurationIndexRoute: ConfigurationIndexRoute,

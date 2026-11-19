@@ -32,7 +32,7 @@ export const readOnlyNote = (scope: string) =>
 export const signInToPost = "Read only. Posting needs a member sign-in";
 export const noScopeToPost = "Read only. Posting needs operate access on a project";
 export const readOnlyNotice =
-  "Answers come from read-only access to runs, tasks, and the source. Nothing is changed.";
+  "Answers come from read access to runs, tasks, and the source. A change runs only after a member allows it.";
 
 export const scopeLabel = "Scope";
 export const messageLabel = "Message";
@@ -59,5 +59,28 @@ export const unsentLabel = "Not sent";
 
 export const emptyListTitle = "No conversations";
 export const emptyListDescription =
-  "A conversation asks the supervisor about runs, tasks, and the source, in the instance or one project. Answers come from read-only access.";
+  "A conversation asks the supervisor about runs, tasks, and the source, in the instance or one project. A change runs only after a member allows it.";
 export const emptyConversation = "No messages yet";
+
+export const outcomesSpeaker = "usine";
+export const outcomesLabel = "Outcomes of permission requests";
+export const permissionRequestLabel = (summary: string) => `Permission request: ${summary}`;
+export const allowOnceLabel = "Allow once";
+export const allowAlwaysLabel = (project: string) => `Allow always for ${project}`;
+export const denyLabel = "Deny";
+export const waitingAnswerLabel = "Waiting for an answer";
+export const answerNeedsLabel = (permission: string, scope: string) =>
+  `Answering needs ${permission} access on ${scope}`;
+export const instanceSubject = "the instance";
+export const allowedOnceLabel = (by: string) => `Allowed once by ${by}`;
+export const allowedAlwaysLabel = (project: string, by: string) =>
+  `Allowed always for ${project} by ${by}`;
+export const coveredByGrantLabel = (by: string) => `Allowed by a standing grant from ${by}`;
+export const deniedLabel = (by: string) => `Denied by ${by}`;
+export const callRunningLabel = "Running";
+export const callRanLabel = "Ran";
+export const callFailedLabel = "Failed";
+export const callInterruptedLabel = "Interrupted by a restart, outcome unknown";
+export const argumentsLabel = "Arguments";
+export const resultLabel = "Result";
+export const noArgumentsLabel = "No arguments";

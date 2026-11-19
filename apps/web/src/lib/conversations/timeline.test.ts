@@ -8,12 +8,17 @@ import {
   supervisorCalls,
   turnEvents,
 } from "~/lib/conversations/fixture";
+import { messageRequest, retryRequest } from "~/lib/conversations/request-fixture";
 import { burstSummary, currentCall } from "~/lib/runs/transcript/grouping/summary";
 import { conversationTimeline, type TurnStep } from "./timeline";
 
 const stepStates = (steps: ReadonlyArray<TurnStep> | undefined) =>
   steps?.map((step) =>
-    step._tag === "Tools" ? step.calls.map((call) => call.state._tag) : step.text,
+    step._tag === "Tools"
+      ? step.calls.map((call) => call.state._tag)
+      : step._tag === "Request"
+        ? `request ${step.request.id}`
+        : step.text,
   );
 
 it("pairs each tool call's result by call ID and keeps a running call open", () => {
@@ -63,6 +68,28 @@ it("groups the tool calls between two texts and keeps a group's key as calls joi
     stepEvents("t-1", 1, [...steps, { tool: "Grep", input: { pattern: "gate" } }]),
   );
   expect(grown?.activity.map((step) => step.key)).toEqual(entry?.activity.map((step) => step.key));
+});
+
+it("places a permission request at the call that made it, between the calls around it", () => {
+  const record = conversationOf([
+    { turn: "t-1", member: ada, text: "Retry it", minute: 1, state: answered(1), answer: "Asked." },
+  ]);
+  const steps = [
+    ...supervisorCalls(1),
+    { tool: "mcp__usine__retry", input: { runId: "run-7431" } },
+    ...supervisorCalls(2),
+  ];
+  const elsewhere = messageRequest({ toolCall: null });
+  const [entry] = conversationTimeline(
+    { ...record, requests: [retryRequest(), elsewhere] },
+    stepEvents("t-1", 1, steps),
+  );
+  expect(stepStates(entry?.activity)).toEqual([
+    ["Finished"],
+    "request r-1",
+    ["Finished", "Finished"],
+    "request r-2",
+  ]);
 });
 
 it("shows a turn of 40 calls as one group that counts its failures and names its running call", () => {

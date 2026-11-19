@@ -609,6 +609,39 @@ export const preflightSetupReason = "Available after GitHub App setup";
 export const preflightRunningReason = "A preflight is already running";
 export const preflightCommand = (worker: string) => `Run preflight on ${worker}`;
 
+export const grantCopy = {
+  title: "Standing grants",
+  description:
+    "A standing grant runs a supervisor call of its operation in its project without a permission request, while the member who allowed it has the access.",
+  operation: "Operation",
+  project: "Project",
+  grantedBy: "Allowed by",
+  created: "Created",
+  lastUsed: "Last used",
+  never: "Never",
+  inactive: "Inactive",
+  inactiveHint: (member: string) => `${member} lacks the access that this operation needs`,
+  revoke: "Revoke",
+  confirmRevoke: "Confirm revocation",
+  keep: "Keep grant",
+  empty: {
+    title: "No standing grants",
+    description:
+      "Allow always on a permission request in a conversation to let supervisor calls of that operation in that project run without a request.",
+  },
+  calls: "Allowed calls",
+  callsDescription:
+    "Calls that supervisor turns ran after a member allowed them or a standing grant covered them, latest first.",
+  call: "Call",
+  allowed: "Allowed",
+  outcome: "Outcome",
+  conversation: "Conversation",
+  open: "Open",
+  openConversation: "Open conversation",
+  noCalls: "No allowed calls",
+  instance: "Instance",
+};
+
 export const bindingCopy = {
   title: "Role bindings",
   member: "Member",
