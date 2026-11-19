@@ -2,12 +2,14 @@ import {
   AgentSessionId,
   RateLimitsSnapshot,
   RateLimitWindow as CoreRateLimitWindow,
+  usedUpUntil,
 } from "@usine/core/agent/session";
-import { DateTime, Effect, Option, Schema } from "effect";
+import { Array as Arr, DateTime, Effect, Option, Schema } from "effect";
 import {
   AgentMessageItem,
   ErrorNotification,
   isCodexErrorCode,
+  ModelItemType,
   type RateLimitsUpdated,
   type RateLimitWindow,
   ToolItem,
@@ -86,6 +88,8 @@ const ToolKindItem = Schema.Struct({ type: ToolItem.fields.type });
 export const AgentMessageKindItem = Schema.Struct({ type: AgentMessageItem.fields.type });
 /** Matches a thread item of the user message kind, whether or not it decodes. */
 export const UserMessageKindItem = Schema.Struct({ type: UserMessageItem.fields.type });
+/** Matches a thread item that only the model produces, whether or not it decodes. */
+export const ModelKindItem = Schema.Struct({ type: ModelItemType });
 const MessageKindItem = Schema.Union([AgentMessageKindItem, UserMessageKindItem]);
 const ItemKind = Schema.Struct({ type: Schema.String });
 
@@ -158,20 +162,9 @@ export const rateLimitsSnapshot = (
     secondary: Option.fromNullishOr(snapshot.secondary).pipe(Option.map(rateLimitWindow)),
   });
 
-/**
- * Returns the latest reset time among the snapshot's used-up windows, or `None` if no window is
- * used up or a used-up window has no reset time.
- */
-export const exhaustedUntil = (snapshot: RateLimitsSnapshot): Option.Option<DateTime.Utc> => {
-  const exhausted = [snapshot.primary, snapshot.secondary].flatMap((window) =>
-    Option.isSome(window) && window.value.usedPercent >= 100 ? [window.value.resetsAt] : [],
-  );
-  return Option.all(exhausted).pipe(
-    Option.flatMap(([first, ...rest]) =>
-      first === undefined ? Option.none() : Option.some(rest.reduce(DateTime.max, first)),
-    ),
-  );
-};
+/** Returns when the snapshot's used-up windows reset, as `usedUpUntil` dates them. */
+export const exhaustedUntil = (snapshot: RateLimitsSnapshot): Option.Option<DateTime.Utc> =>
+  usedUpUntil(Arr.getSomes([snapshot.primary, snapshot.secondary]));
 
 const decodeHttpStatus = Schema.decodeUnknownOption(
   Schema.Struct({ httpStatusCode: Schema.NullOr(Schema.Finite) }),

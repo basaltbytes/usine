@@ -248,6 +248,10 @@ _Avoid_: structured call, one-shot
 The billing source for an attempt's usage: API keys, the Claude plan, or the ChatGPT plan.
 _Avoid_: budget, account, quota
 
+**Capacity group**:
+The harness and model of an attempt's children on one worker, which a provider capacity refusal applies to. Runs that need a group at capacity wait without an attempt, and one attempt at a time tests it.
+_Avoid_: pool, billing pool, quota
+
 **Runaway guard**:
 Optional per-attempt limits on wall-clock time and tokens, set in `usine.yaml`. Exceeding a limit fails the attempt without an automatic retry.
 _Avoid_: budget, timeout, kill switch

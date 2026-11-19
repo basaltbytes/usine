@@ -2,6 +2,7 @@ import {
   type Brand,
   Array as EffectArray,
   DateTime,
+  Duration,
   Effect,
   Option,
   Schema,
@@ -16,7 +17,7 @@ import { RunId } from "../run/run.ts";
 import { Comment, StepResult } from "../step/result.ts";
 import { StepName } from "../step/step.ts";
 import { ContainerId, ContainerMemoryMib, WorkerKind, WorkerName } from "../worker.ts";
-import { AttemptFailure, isAutoRetryableFailure } from "./failure.ts";
+import { AttemptFailure, isAutoRetryableFailure, ProviderCapacityFailure } from "./failure.ts";
 import { AttemptOutcome } from "./outcome.ts";
 import { AttemptSalvage } from "./salvage.ts";
 import { AttemptStart } from "./start.ts";
@@ -30,7 +31,10 @@ export const AttemptNumber = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)).
 );
 export type AttemptNumber = typeof AttemptNumber.Type;
 
-/** The total attempt cap for automatic retries, including the first try. */
+/**
+ * The total attempt cap for automatic retries, including the first try. Attempts that a provider
+ * refused for capacity don't count.
+ */
 export const MAX_AUTO_ATTEMPTS = AttemptNumber.make(3);
 
 /** The task text for the agent: the interpolated loop prompt or the operator's edit-and-retry text. */
@@ -300,27 +304,84 @@ export class AttemptWindows extends Schema.Class<
   overlapping: Schema.Array(AttemptWindow),
 }) {}
 
+/** Returns the capacity refusal that ended `attempt`, or `None`. */
+export const capacityRefusal = (
+  attempt: Pick<Attempt, "outcome">,
+): Option.Option<ProviderCapacityFailure> =>
+  Option.flatMap(attempt.outcome, (outcome) =>
+    outcome._tag === "Failed" && outcome.failure._tag === "ProviderCapacityFailure"
+      ? Option.some(outcome.failure)
+      : Option.none(),
+  );
+
 /**
- * Returns whether `failure` is retryable and the failed Attempt's `number` is below
- * `maxAutoAttempts`, which counts the first try (ADR 0002).
+ * Returns the Attempts of `attempts`, ordered oldest to newest, that a capacity wait follows, newest
+ * first: the consecutive capacity refusals since the last Attempt that the provider didn't refuse,
+ * in the capacity group of the newest one, its Worker and child harness and model. A refusal in
+ * another group neither moves the wait nor lengthens its backoff.
+ */
+export const capacityRefusalStreak = <A extends Pick<Attempt, "outcome" | "worker" | "brain">>(
+  attempts: ReadonlyArray<A>,
+): ReadonlyArray<A> => {
+  const streak = EffectArray.takeWhile(EffectArray.reverse(attempts), (attempt) =>
+    Option.isSome(capacityRefusal(attempt)),
+  );
+  const [newest] = streak;
+  if (newest === undefined) return [];
+  return streak.filter(
+    ({ worker, brain }) =>
+      worker === newest.worker &&
+      brain.harness === newest.brain.harness &&
+      brain.model === newest.brain.model,
+  );
+};
+
+/**
+ * Returns whether `failure` permits an automatic retry (ADR 0002). A capacity refusal always
+ * does. Another retryable failure does while the failed Attempt and the `earlier` ones, without
+ * those that a provider refused for capacity, are fewer than `maxAutoAttempts`.
  */
 export const shouldAutoRetry = (options: {
   readonly failure: AttemptFailure;
-  readonly number: AttemptNumber;
+  readonly earlier: ReadonlyArray<Pick<Attempt, "outcome">>;
   readonly maxAutoAttempts: AttemptNumber;
-}): boolean => isAutoRetryableFailure(options.failure) && options.number < options.maxAutoAttempts;
+}): boolean => {
+  if (options.failure._tag === "ProviderCapacityFailure") return true;
+  if (!isAutoRetryableFailure(options.failure)) return false;
+  const counted = options.earlier.filter((attempt) => Option.isNone(capacityRefusal(attempt)));
+  return counted.length + 1 < options.maxAutoAttempts;
+};
 
-/** The next attempt after a provider capacity refusal, with its earliest start time. */
+/** The waits after consecutive capacity refusals; the last one repeats. */
+const CAPACITY_BACKOFF = [
+  Duration.minutes(5),
+  Duration.minutes(15),
+  Duration.minutes(30),
+  Duration.minutes(60),
+] as const;
+
+/**
+ * Returns the wait after `refusals` consecutive capacity refusals: 5, 15, and 30 minutes, then 60
+ * minutes for every later one.
+ */
+export const capacityBackoff = (refusals: number): Duration.Duration =>
+  CAPACITY_BACKOFF[Math.min(Math.max(refusals, 1), CAPACITY_BACKOFF.length) - 1] ??
+  Duration.minutes(60);
+
+/**
+ * The next attempt of a run that waits for model provider capacity, after its own capacity refusal
+ * or another run's, with its earliest start time.
+ */
 export class ProviderRetry extends Schema.Class<
   ProviderRetry,
   Brand.Brand<"@usine/core/attempt/attempt/ProviderRetry">
 >("ProviderRetry")(
   closedStruct({
-    /** The 1-based number of the attempt to start after the refusal. */
-    nextAttempt: AttemptNumber.check(Schema.isGreaterThanOrEqualTo(2)),
+    /** The 1-based number of the attempt to start when the wait ends. */
+    nextAttempt: AttemptNumber,
     /** The earliest permitted retry time after the provider backoff. */
     retryAt: Schema.DateTimeUtcFromString,
-    /** The provider capacity refusal reported by the previous attempt. */
+    /** The provider's latest capacity refusal. */
     message: Schema.NonEmptyString,
   }),
 ) {}
@@ -328,35 +389,29 @@ export class ProviderRetry extends Schema.Class<
 /**
  * Returns a pending capacity retry from persisted state, including after an orchestrator restart.
  * `attempts` must be ordered oldest to newest. Returns `None` unless the run is running and its
- * latest attempt has a recorded end time and a capacity failure below the automatic retry cap.
- * The retry starts no earlier than two minutes after attempt 1 or five minutes after attempt 2,
- * and no earlier than the usage-limit reset time that the failure reports.
+ * latest attempt has a recorded end time and a capacity failure. The retry starts no earlier than
+ * `capacityBackoff` of the refusals of `capacityRefusalStreak` after the latest one ended, and no
+ * earlier than the latest usage-limit reset time that those refusals report.
  */
 export const pendingProviderRetry = (
   state: RunState,
-  attempts: ReadonlyArray<Pick<Attempt, "number" | "outcome" | "endedAt">>,
+  attempts: ReadonlyArray<Pick<Attempt, "number" | "outcome" | "endedAt" | "worker" | "brain">>,
 ): Option.Option<ProviderRetry> => {
   if (state._tag !== "Running") return Option.none();
   const last = attempts.at(-1);
-  if (
-    last === undefined ||
-    last.number >= MAX_AUTO_ATTEMPTS ||
-    Option.isNone(last.outcome) ||
-    Option.isNone(last.endedAt)
-  )
-    return Option.none();
-  const outcome = last.outcome.value;
-  if (outcome._tag !== "Failed" || outcome.failure._tag !== "ProviderCapacityFailure")
-    return Option.none();
-  const backoff = DateTime.add(last.endedAt.value, { minutes: last.number === 1 ? 2 : 5 });
+  if (last === undefined || Option.isNone(last.endedAt)) return Option.none();
+  const refusal = capacityRefusal(last);
+  if (Option.isNone(refusal)) return Option.none();
+  const streak = capacityRefusalStreak(attempts);
+  const backoff = DateTime.addDuration(last.endedAt.value, capacityBackoff(streak.length));
+  const resets = streak.flatMap((attempt) =>
+    Option.toArray(Option.flatMap(capacityRefusal(attempt), ({ resetsAt }) => resetsAt)),
+  );
   return Option.some(
     ProviderRetry.make({
       nextAttempt: AttemptNumber.make(last.number + 1),
-      retryAt: Option.match(outcome.failure.resetsAt, {
-        onNone: () => backoff,
-        onSome: (resetsAt) => DateTime.max(backoff, resetsAt),
-      }),
-      message: outcome.failure.message,
+      retryAt: resets.reduce(DateTime.max, backoff),
+      message: refusal.value.message,
     }),
   );
 };

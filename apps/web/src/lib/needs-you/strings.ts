@@ -7,7 +7,7 @@ import type {
   UnresponsiveWorkerNeed,
 } from "@usine/orchestrator/operator";
 import { DateTime, Match, Option } from "effect";
-import { poolLabel } from "~/lib/strings";
+import { poolLabel, timestampLabel } from "~/lib/strings";
 import { failureMessage, failureReason } from "~/lib/runs/strings";
 import { workerPausedDetail } from "~/lib/workers/strings";
 
@@ -27,6 +27,12 @@ export const needCopy = (need: NeedView): NeedCopy =>
     UpgradeDrainNeed: ({ wait, deferredRuns }) => ({
       title: `Upgrade to ${wait.target} is deferring runs`,
       detail: `${deferredRuns} ${deferredRuns === 1 ? "run waits" : "runs wait"} for the upgrade restart. Cancel the pending upgrade in Settings to resume attempts.`,
+      repository: null,
+      runId: null,
+    }),
+    ProviderCapacityNeed: ({ group, message, since, nextTryAt, waitingRuns }) => ({
+      title: `${group.harness} ${group.model} on ${group.worker}: at capacity since ${timestampLabel(since)}`,
+      detail: `Next try at ${timestampLabel(nextTryAt)}. ${waitingRuns} ${waitingRuns === 1 ? "run waits" : "runs wait"} without failing; retry a run to try now. ${message}`,
       repository: null,
       runId: null,
     }),
@@ -171,6 +177,7 @@ export const attentionBellLabel = (count: number) => `Needs attention (${count})
 export const needKindLabel = {
   WebhookSilenceNeed: "Webhook endpoint silent",
   UpgradeDrainNeed: "Upgrade waiting",
+  ProviderCapacityNeed: "Provider at capacity",
   PoolLimitNeed: "Pool rate window",
   ApprovalNeed: "Approval needed",
   CycleBudgetNeed: "Cycle budget exhausted",

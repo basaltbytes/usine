@@ -214,6 +214,11 @@ export const runScenario = (
       );
       assert.strictEqual(events.at(-1)?._tag, "SessionFinished");
       assert(events.some((event) => event._tag === "TextOutput" && event.text.includes(expected)));
+      assert.lengthOf(
+        events.filter((event) => event._tag === "ProviderAnswered"),
+        1,
+        "the session reports the provider's first answer once",
+      );
       if (scenario === "interrupt-guidance") {
         yield* fs.remove(`${base.cwd}/release`);
         const interrupted = yield* backend.launch(request);
@@ -264,6 +269,10 @@ export const runUsageLimit = (request: ChildRequest) =>
       assert.deepStrictEqual(failure.sessionId, Option.some(request.session.id));
       assert.strictEqual(events[0]?._tag, "SessionStarted");
       assert(!events.some((event) => event._tag === "SessionFinished"));
+      assert(
+        !events.some((event) => event._tag === "ProviderAnswered"),
+        "a usage-limit refusal is no answer from the provider",
+      );
       return failure;
     }),
   );

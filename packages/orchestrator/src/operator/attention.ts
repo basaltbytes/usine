@@ -27,8 +27,9 @@ const encodeNeed = Schema.encodeSync(NeedView);
 const encodeRunFailure = Schema.encodeSync(RunFailureNeed);
 
 /**
- * Identifies the condition to dismiss. Pool usage is grouped into threshold bands, and a failed
- * Run's revision leaves out its CI fix Run, which changes while the failure stays the same.
+ * Identifies the condition to dismiss. Pool usage is grouped into threshold bands, a failed Run's
+ * revision leaves out its CI fix Run, which changes while the failure stays the same, and a
+ * capacity group at capacity keeps its revision until it stops refusing.
  */
 export const attentionKey = (need: NeedView): AttentionKey => {
   const content = Match.value(need).pipe(
@@ -42,6 +43,8 @@ export const attentionKey = (need: NeedView): AttentionKey => {
       ),
     })),
     Match.tag("RunFailureNeed", (failure) => Struct.omit(encodeRunFailure(failure), ["fixRun"])),
+    // A dismissal holds while the group keeps refusing, through each test and new refusal.
+    Match.tag("ProviderCapacityNeed", ({ id, since }) => ({ id, since })),
     Match.orElse(encodeNeed),
   );
   return AttentionKey.make({
@@ -70,6 +73,7 @@ export const needRepositories = (need: NeedView) =>
     PoolLimitNeed: () => [],
     WebhookSilenceNeed: () => [],
     UpgradeDrainNeed: () => [],
+    ProviderCapacityNeed: () => [],
     UnresponsiveWorkerNeed: ({ attempts }) => attempts.map(({ repository }) => repository),
   });
 

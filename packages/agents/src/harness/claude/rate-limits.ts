@@ -18,6 +18,7 @@ const AllowanceType = Schema.Literals([
   "seven_day_sonnet",
   "seven_day_overage_included",
 ]);
+export type AllowanceType = typeof AllowanceType.Type;
 const ClaudeRateLimit = Schema.Struct({
   rate_limit_info: Schema.Struct({
     status: Schema.Literals(["allowed", "allowed_warning", "rejected"]),
@@ -36,20 +37,31 @@ const ClaudeRateLimit = Schema.Struct({
 const decodeRateLimit = Schema.decodeUnknownEffect(ClaudeRateLimit);
 const decodeRateLimitOption = Schema.decodeUnknownOption(ClaudeRateLimit);
 
-/** Emits only the allowance window included in the provider report. */
+/** The allowance window that one Claude plan rate-limit report shows. */
+export interface AllowanceReport {
+  readonly allowance: AllowanceType;
+  readonly window: RateLimitWindow;
+  /** The pool update that reports only this window. */
+  readonly update: PoolRateLimitsUpdated;
+}
+
+/**
+ * Reads the allowance window that a Claude plan's rate-limit report shows. Returns `None` for
+ * other messages, an API-key session, and a report without a supported allowance's utilization.
+ */
 export const claudeRateLimits = (session: AgentSession) => {
   const pool = sessionPool(session);
 
   return Effect.fn("ClaudeRateLimits.read")(
     function* (message: Schema.Json) {
       yield* Effect.annotateCurrentSpan({ sessionId: session.id, pool });
-      if (!isRateLimitEvent(message)) return Option.none<PoolRateLimitsUpdated>();
+      if (!isRateLimitEvent(message)) return Option.none<AllowanceReport>();
       if (pool !== "claudePlan") {
         yield* Effect.logDebug("Skipping Claude plan windows for an API-key session", {
           sessionId: session.id,
           pool,
         });
-        return Option.none<PoolRateLimitsUpdated>();
+        return Option.none<AllowanceReport>();
       }
       const { rate_limit_info: info } = yield* decodeRateLimit(message);
       if (!Schema.is(AllowanceType)(info.rateLimitType) || info.utilization === undefined) {
@@ -58,7 +70,7 @@ export const claudeRateLimits = (session: AgentSession) => {
           rateLimitType: info.rateLimitType,
           status: info.status,
         });
-        return Option.none<PoolRateLimitsUpdated>();
+        return Option.none<AllowanceReport>();
       }
       const field = info.rateLimitType === "five_hour" ? "primary" : "secondary";
       const window = RateLimitWindow.make({
@@ -79,13 +91,17 @@ export const claudeRateLimits = (session: AgentSession) => {
         usedPercent: window.usedPercent,
         resetsAt: window.resetsAt,
       });
-      return Option.some(PoolRateLimitsUpdated.make({ session, pool, rateLimits: snapshot }));
+      return Option.some<AllowanceReport>({
+        allowance: info.rateLimitType,
+        window,
+        update: PoolRateLimitsUpdated.make({ session, pool, rateLimits: snapshot }),
+      });
     },
     Effect.catchTag("SchemaError", () =>
       Effect.logWarning("Skipping an invalid Claude rate-limit report", {
         sessionId: session.id,
         pool,
-      }).pipe(Effect.as(Option.none<PoolRateLimitsUpdated>())),
+      }).pipe(Effect.as(Option.none<AllowanceReport>())),
     ),
   );
 };

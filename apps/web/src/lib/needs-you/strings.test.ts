@@ -8,6 +8,7 @@ import { RunId } from "@usine/core/run";
 import { WorkerName } from "@usine/core/worker";
 import {
   PoolLimitNeed,
+  ProviderCapacityNeed,
   QuestionFailureView,
   RunFailureNeed,
   UnconfiguredWorkerNeed,
@@ -18,6 +19,8 @@ import { DateTime, Option } from "effect";
 import { assert, describe, it } from "vitest";
 import { needsYouByProject } from "~/lib/overview";
 import { CiFixRun } from "@usine/engine/run-reader";
+import { CapacityGroup } from "@usine/engine/engine";
+import { Harness, ModelId } from "@usine/core/agent/brain";
 import { fixRunStatus, needCopy } from "~/lib/needs-you/strings";
 
 describe("operator question copy in Needs attention", () => {
@@ -129,4 +132,24 @@ it("words a failed run's CI fix link by the fix run's state", () => {
   assert.strictEqual(fix("Succeeded"), "fix run 1a2b3c4d finished the work");
   assert.strictEqual(fix("HandedOff"), "fix run 1a2b3c4d handed the work to another fix run");
   assert.strictEqual(fix("Failed"), "fix run 1a2b3c4d failed too");
+});
+
+it("shows a capacity group at capacity once, with its next try and waiting runs, outside any project", () => {
+  const need = ProviderCapacityNeed.make({
+    id: "provider-capacity:local",
+    group: CapacityGroup.make({
+      harness: Harness.make("claude"),
+      model: ModelId.make("claude-sonnet-4-6"),
+      worker: WorkerName.make("local"),
+    }),
+    message: "This request would exceed your account's rate limit.",
+    since: "2026-11-13T23:44:00.000Z",
+    nextTryAt: "2026-11-14T00:44:00.000Z",
+    waitingRuns: 4,
+  });
+  const copy = needCopy(need);
+  assert.include(copy.title, "claude claude-sonnet-4-6 on local: at capacity since");
+  assert.include(copy.detail, "4 runs wait without failing");
+  assert.include(copy.detail, "exceed your account's rate limit");
+  assert.deepStrictEqual([...needsYouByProject([need], [])], []);
 });

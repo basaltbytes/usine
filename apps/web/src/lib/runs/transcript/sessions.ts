@@ -19,7 +19,7 @@ interface RecordedSessionEvent {
   readonly event: Exclude<
     AgentSessionEvent,
     {
-      readonly _tag: "PoolRateLimitsUpdated" | "SessionTokensUpdated";
+      readonly _tag: "PoolRateLimitsUpdated" | "SessionTokensUpdated" | "ProviderAnswered";
     }
   >;
 }
@@ -58,7 +58,12 @@ export const indexSessions = (
     const payload = record.payload;
     if (payload._tag !== "SessionEvent") continue;
     const event = payload.event;
-    if (event._tag === "PoolRateLimitsUpdated" || event._tag === "SessionTokensUpdated") continue;
+    if (
+      event._tag === "PoolRateLimitsUpdated" ||
+      event._tag === "SessionTokensUpdated" ||
+      event._tag === "ProviderAnswered"
+    )
+      continue;
     const id = key(record.attemptId, event.session.id);
     let group = groups.get(id);
     if (group === undefined) {

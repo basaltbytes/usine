@@ -1,7 +1,7 @@
 import { GitHubItemKey } from "@usine/core/item";
 import { StepOutputContext, StepOutputStore } from "../step-outputs/store.ts";
 import { ChangeBus } from "@usine/core/changes";
-import { type Attempt, type AttemptId, pendingProviderRetry } from "@usine/core/attempt";
+import type { Attempt, AttemptId } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { type AttemptFailure, DefectFailure, InfraFailure } from "@usine/core/attempt/failure";
 import type { RunId } from "@usine/core/run";
@@ -30,6 +30,7 @@ import { LoopControl } from "../loop-control/loop-control.ts";
 import { TranscriptAllQuery } from "../transcript.ts";
 import { savedSettings, TriggerCondition } from "../trigger-condition.ts";
 import { AttemptAdmission } from "./admission.ts";
+import { type CapacityObserver, type CapacityTurn, ProviderCapacity } from "./capacity/capacity.ts";
 import { checkoutRecoveryFor, without } from "./checkout-recovery.ts";
 import type {
   EnginePersistenceError,
@@ -184,6 +185,7 @@ export class RunDriver extends Context.Service<
       const completionCheck = yield* CompletionCheck;
       const outputs = yield* StepOutputStore;
       const admission = yield* AttemptAdmission;
+      const capacity = yield* ProviderCapacity;
       const condition = yield* TriggerCondition;
       const controls = yield* LoopControl;
       const items = yield* ItemProjectionWriter;
@@ -225,6 +227,7 @@ export class RunDriver extends Context.Service<
           fibers,
           runId,
           drive(runId).pipe(
+            Effect.ensuring(capacity.leave(runId)),
             // Logged inside the Run's span: the launch span has ended by the time drive fails.
             Effect.tapCause((cause) =>
               Cause.hasInterruptsOnly(cause)
@@ -558,40 +561,17 @@ export class RunDriver extends Context.Service<
       });
 
       /**
-       * Runs one Attempt of the Run of `submission` on the reserved Worker and returns the
-       * resulting decision tag. `current` reads the open Attempt once the slot is held.
+       * Begins the Run's Attempt on the reserved Worker, or reattaches `open`, and runs it.
+       * Returns the Attempt and its result, or the decision tag if no Attempt started.
        */
-      const executeAttempt = Effect.fn("RunDriver.attempt")(function* (
+      const runAttempt = Effect.fn("RunDriver.runAttempt")(function* (
         runId: RunId,
         submission: Submission,
         lease: WorkerLease,
-        current: Effect.Effect<Option.Option<OpenAttempt>, RunStoreError>,
+        open: Option.Option<OpenAttempt>,
+        observe: CapacityObserver,
       ) {
         const { worker } = lease;
-        yield* Effect.annotateCurrentSpan({ runId, worker });
-        const open = yield* current;
-        if (Option.isNone(reattaching(open))) {
-          const blockingStop = yield* stopBlocking(submission);
-          if (Option.isSome(blockingStop)) {
-            yield* Effect.logInfo(
-              "Run waits for an unconfirmed stop after reserving a worker slot",
-              {
-                runId,
-                worker,
-                itemKey: submission.itemKey,
-              },
-            );
-            return "WaitingForStop";
-          }
-        }
-        if (Option.isSome(open) && open.value._tag === "Finished") {
-          const finished = yield* finishCompletion(
-            open.value.attempt,
-            open.value.result,
-            submission,
-          );
-          return finished._tag;
-        }
         const started = yield* store
           .beginAttempt(
             runId,
@@ -600,14 +580,19 @@ export class RunDriver extends Context.Service<
             Option.map(reattaching(open), ({ id }) => id),
           )
           .pipe(retryingStore(runId, "begin the attempt"));
-        if (started._tag === "AttemptRecoveryFailed") return "RunFailed";
-        if (started._tag === "RunClosed") return "Unchanged";
+        if (started._tag === "AttemptRecoveryFailed") return Result.fail("RunFailed" as const);
+        if (started._tag === "RunClosed") return Result.fail("Unchanged" as const);
 
         // An executor defect becomes a `DefectFailure`, which isn't retried automatically.
         const result = yield* executor
           .execute(started.execution, {
             append: (direction, envelope) =>
-              store.appendTranscript(direction, envelope).pipe(asAttemptFailure),
+              store
+                .appendTranscript(direction, envelope)
+                .pipe(
+                  asAttemptFailure,
+                  Effect.andThen(observe(started.execution.attempt, envelope)),
+                ),
             salvage: (salvage) =>
               store.recordSalvage(started.execution.attempt.id, salvage).pipe(asAttemptFailure),
             comments: (comments) =>
@@ -678,30 +663,62 @@ export class RunDriver extends Context.Service<
               worker,
             }),
           );
-        const finished = yield* finishCompletion(started.execution.attempt, result, submission);
-        return finished._tag;
+        return Result.succeed({ attempt: started.execution.attempt, result });
       });
 
-      const awaitProviderRetry = Effect.fn("RunDriver.awaitProviderRetry")(function* (
+      /**
+       * Runs one Attempt of the Run of `submission` on the reserved Worker and returns the
+       * resulting decision tag. `current` reads the open Attempt once the slot is held. A new
+       * Attempt claims its capacity group first: while the group is at capacity, the Run starts no
+       * Attempt and returns `WaitingForCapacity`, unless its `turn` came.
+       */
+      const executeAttempt = Effect.fn("RunDriver.attempt")(function* (
         runId: RunId,
+        submission: Submission,
+        lease: WorkerLease,
+        current: Effect.Effect<Option.Option<OpenAttempt>, RunStoreError>,
+        turn: CapacityTurn,
       ) {
-        yield* Effect.annotateCurrentSpan({ runId });
-        const snapshot = yield* store
-          .snapshot(runId)
-          .pipe(retryingStore(runId, "read the retry delay"));
-        const retry = pendingProviderRetry(snapshot.run.state, snapshot.attempts);
-        if (Option.isNone(retry)) return;
-        const { retryAt, nextAttempt, message } = retry.value;
-        const observedAt = yield* DateTime.now;
-        const delayMillis = DateTime.toEpochMillis(retryAt) - DateTime.toEpochMillis(observedAt);
-        yield* Effect.logInfo("Run waits before retrying provider capacity", {
+        const { worker } = lease;
+        yield* Effect.annotateCurrentSpan({ runId, worker });
+        const open = yield* current;
+        if (Option.isNone(reattaching(open))) {
+          const blockingStop = yield* stopBlocking(submission);
+          if (Option.isSome(blockingStop)) {
+            yield* Effect.logInfo(
+              "Run waits for an unconfirmed stop after reserving a worker slot",
+              {
+                runId,
+                worker,
+                itemKey: submission.itemKey,
+              },
+            );
+            return "WaitingForStop";
+          }
+        }
+        const ended = Option.flatMap(open, (found) =>
+          found._tag === "Finished" ? Option.some(Result.succeed(found)) : Option.none(),
+        );
+        const brain = store.snapshot(runId).pipe(
+          Effect.map(({ agent }) => agent.brain),
+          retryingStore(runId, "read the agent"),
+        );
+        const ran = yield* capacity.gate(
           runId,
-          nextAttempt,
-          message,
-          retryAt: DateTime.formatIso(retryAt),
-          delayMillis: Math.max(0, delayMillis),
-        });
-        if (delayMillis > 0) yield* Effect.sleep(delayMillis);
+          Option.isNone(ended) && Option.isNone(reattaching(open))
+            ? Option.some({ loop: submission.loop, worker, turn, brain })
+            : Option.none(),
+          (observe) =>
+            Option.match(ended, {
+              onNone: () => runAttempt(runId, submission, lease, open, observe),
+              onSome: Effect.succeed,
+            }),
+        );
+        if (Option.isNone(ran)) return "WaitingForCapacity" as const;
+        if (Result.isFailure(ran.value)) return ran.value.failure;
+        const { attempt, result } = ran.value.success;
+        const finished = yield* finishCompletion(attempt, result, submission);
+        return finished._tag;
       });
 
       // `launch` traces it as the root span of the Run's own trace.
@@ -724,9 +741,12 @@ export class RunDriver extends Context.Service<
           return;
         }
 
-        let outcome: FinishDecision["_tag"] | "WaitingForStop";
+        let outcome: FinishDecision["_tag"] | "WaitingForStop" | "WaitingForCapacity";
         do {
-          yield* awaitProviderRetry(runId);
+          const { attempts } = yield* store
+            .snapshot(runId)
+            .pipe(retryingStore(runId, "read the run's attempts"));
+          const turn = yield* capacity.awaitTurn({ runId, loop: submission.loop, attempts });
           // A reattached Attempt uses a slot on the Worker it started on (#177).
           const open = yield* openAttempt(runId);
           if (Option.isSome(open) && open.value._tag !== "Live") {
@@ -776,9 +796,9 @@ export class RunDriver extends Context.Service<
                 ({ lease }) => releaseSlot(runId, lease),
               ),
             ),
-            ({ lease, open: current }) => executeAttempt(runId, submission, lease, current),
+            ({ lease, open: current }) => executeAttempt(runId, submission, lease, current, turn),
           );
-        } while (outcome === "RetryAttempt");
+        } while (outcome === "RetryAttempt" || outcome === "WaitingForCapacity");
 
         // Cancel, supersede, and revoke handle the Item's queued Events themselves and can
         // interrupt this fiber at any point.

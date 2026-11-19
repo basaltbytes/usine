@@ -60421,6 +60421,9 @@
               },
               {
                 "$ref": "#/components/schemas/Agent_ProviderRecoveredEncoded"
+              },
+              {
+                "$ref": "#/components/schemas/Agent_ProviderAnsweredEncoded"
               }
             ]
           }
@@ -60430,6 +60433,35 @@
           "sequence",
           "turn",
           "event"
+        ],
+        "additionalProperties": false
+      },
+      "Agent_ProviderAnsweredEncoded": {
+        "type": "object",
+        "properties": {
+          "_tag": {
+            "type": "string",
+            "enum": [
+              "ProviderAnswered"
+            ]
+          },
+          "session": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Agent_ParentSessionEncoded"
+              },
+              {
+                "$ref": "#/components/schemas/Agent_ChildSessionEncoded"
+              },
+              {
+                "$ref": "#/components/schemas/Agent_RoleSessionEncoded"
+              }
+            ]
+          }
+        },
+        "required": [
+          "_tag",
+          "session"
         ],
         "additionalProperties": false
       },
@@ -62861,7 +62893,7 @@
                 "properties": {
                   "nextAttempt": {
                     "type": "integer",
-                    "minimum": 2,
+                    "minimum": 1,
                     "maximum": 9007199254740991
                   },
                   "retryAt": {
@@ -70451,6 +70483,9 @@
               },
               {
                 "$ref": "#/components/schemas/Agent_ProviderRecoveredEncoded"
+              },
+              {
+                "$ref": "#/components/schemas/Agent_ProviderAnsweredEncoded"
               }
             ]
           }
@@ -70705,7 +70740,7 @@
                 "properties": {
                   "nextAttempt": {
                     "type": "integer",
-                    "minimum": 2,
+                    "minimum": 1,
                     "maximum": 9007199254740991
                   },
                   "retryAt": {
@@ -71560,6 +71595,9 @@
                   "$ref": "#/components/schemas/_usine_orchestrator_UpgradeDrainNeedEncoded"
                 },
                 {
+                  "$ref": "#/components/schemas/_usine_orchestrator_ProviderCapacityNeedEncoded"
+                },
+                {
                   "$ref": "#/components/schemas/_usine_orchestrator_WebhookSilenceNeedEncoded"
                 },
                 {
@@ -71619,6 +71657,9 @@
               "anyOf": [
                 {
                   "$ref": "#/components/schemas/_usine_orchestrator_UpgradeDrainNeedEncoded"
+                },
+                {
+                  "$ref": "#/components/schemas/_usine_orchestrator_ProviderCapacityNeedEncoded"
                 },
                 {
                   "$ref": "#/components/schemas/_usine_orchestrator_WebhookSilenceNeedEncoded"
@@ -72481,6 +72522,71 @@
         ],
         "additionalProperties": false
       },
+      "_usine_orchestrator_ProviderCapacityNeedEncoded": {
+        "type": "object",
+        "properties": {
+          "_tag": {
+            "type": "string",
+            "enum": [
+              "ProviderCapacityNeed"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "group": {
+            "$ref": "#/components/schemas/_usine_engine_CapacityGroupEncoded"
+          },
+          "message": {
+            "type": "string",
+            "minLength": 1
+          },
+          "since": {
+            "type": "string"
+          },
+          "nextTryAt": {
+            "type": "string"
+          },
+          "waitingRuns": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "_tag",
+          "id",
+          "group",
+          "message",
+          "since",
+          "nextTryAt",
+          "waitingRuns"
+        ],
+        "additionalProperties": false
+      },
+      "_usine_engine_CapacityGroupEncoded": {
+        "type": "object",
+        "properties": {
+          "harness": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+          },
+          "model": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "worker": {
+            "type": "string",
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+          }
+        },
+        "required": [
+          "harness",
+          "model",
+          "worker"
+        ],
+        "additionalProperties": false
+      },
       "_usine_orchestrator_UpgradeDrainNeedEncoded": {
         "type": "object",
         "properties": {
@@ -72698,6 +72804,9 @@
                   "$ref": "#/components/schemas/_usine_orchestrator_UpgradeDrainNeedEncoded"
                 },
                 {
+                  "$ref": "#/components/schemas/_usine_orchestrator_ProviderCapacityNeedEncoded"
+                },
+                {
                   "$ref": "#/components/schemas/_usine_orchestrator_WebhookSilenceNeedEncoded"
                 },
                 {
@@ -72757,6 +72866,9 @@
               "anyOf": [
                 {
                   "$ref": "#/components/schemas/_usine_orchestrator_UpgradeDrainNeedEncoded"
+                },
+                {
+                  "$ref": "#/components/schemas/_usine_orchestrator_ProviderCapacityNeedEncoded"
                 },
                 {
                   "$ref": "#/components/schemas/_usine_orchestrator_WebhookSilenceNeedEncoded"

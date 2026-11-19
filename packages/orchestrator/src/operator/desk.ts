@@ -51,7 +51,7 @@ import {
 import { AttemptSummaryView } from "./attempt.ts";
 import { BoardItemLink } from "./board.ts";
 import { checkView, PreflightCheckView, WorkerSlotsView } from "./configuration/view.ts";
-import { runSummaryView, workerAccesses } from "./projection.ts";
+import { readEngineWaits, runSummaryView, workerAccesses } from "./projection.ts";
 import { RunSummaryView, UnconfirmedStopView } from "./run.ts";
 
 /** The number of newest transcript rows the desk reads per running Attempt. */
@@ -573,10 +573,7 @@ const makeDesk = Effect.gen(function* () {
   const workerStatus = yield* WorkerStatus;
   const stops = yield* UnconfirmedStops;
   const engine = yield* Effect.serviceOption(RunEngine);
-  const readUpgrade = Option.match(engine, {
-    onNone: () => Effect.succeed(null),
-    onSome: (runs) => Effect.map(runs.upgradeDrain, Option.getOrNull),
-  });
+  const readWaits = readEngineWaits(engine);
 
   const recentActivity = Effect.fn("Operator.desk.recentActivity")(function* (
     attempt: AttemptSummaryView,
@@ -638,7 +635,7 @@ const makeDesk = Effect.gen(function* () {
       ] as const,
       { concurrency: "unbounded" },
     );
-    const upgrade = yield* readUpgrade;
+    const engineWaits = yield* readWaits;
     const waits = quotaWaits(pauses);
     const machineViews = inFlight.map(machineView);
     const creating = new Map(
@@ -681,7 +678,7 @@ const makeDesk = Effect.gen(function* () {
     const runs = new Map(
       [...summaries, ...history].map((summary) => [
         summary.run.id,
-        runSummaryView(summary, paused, access, waits, upgrade),
+        runSummaryView(summary, paused, access, waits, engineWaits),
       ]),
     );
     const newestFirst = [...runs.values()].sort(
@@ -779,7 +776,7 @@ const makeDesk = Effect.gen(function* () {
     const lastOutcomes = closed
       .filter((summary) => visible(summary.repository) && !replacedBeforeStart(summary))
       .map((summary) => {
-        const run = runSummaryView(summary, paused, access, waits, upgrade);
+        const run = runSummaryView(summary, paused, access, waits, engineWaits);
         return ClosedRunView.make({
           run,
           item: links.get(run.itemKey) ?? null,
@@ -801,7 +798,7 @@ const makeDesk = Effect.gen(function* () {
       return WorkerView.make({
         name,
         paused: instance.config.workers.some((worker) => worker.name === name && worker.paused),
-        upgradeWait: upgrade?.wait ?? null,
+        upgradeWait: engineWaits.upgrade?.wait ?? null,
         slots: WorkerSlotsView.make({
           capacity:
             slot?.capacity ??

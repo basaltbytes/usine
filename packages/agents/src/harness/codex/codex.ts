@@ -22,6 +22,7 @@ import { HarnessCatalog } from "../harness.ts";
 import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import {
   PoolRateLimitsUpdated,
+  ProviderAnswered,
   ProviderRecovered,
   ProviderRetries,
   ProviderRetrying,
@@ -50,7 +51,6 @@ import {
   ThreadResumeParams,
   ThreadResumeResponse,
   ThreadStartResponse,
-  TurnActivity,
   TurnCompleted,
   TurnStartParams,
   TurnInterruptParams,
@@ -70,6 +70,7 @@ import {
   failedTurn,
   DIAGNOSTIC_METHODS,
   decodeRetry,
+  ModelKindItem,
   rateLimitsSnapshot,
   UserMessageKindItem,
 } from "./codec.ts";
@@ -104,8 +105,6 @@ import {
 } from "./account.ts";
 
 export { CodexAppServer, codexAppServerLive, type CodexConnection } from "./app-server.ts";
-
-const isTurnActivity = Schema.is(TurnActivity);
 
 type RestoredTurn = (typeof ThreadResumeResponse.Type.thread.turns)[number];
 
@@ -349,6 +348,8 @@ const makeCodexSessions = Effect.gen(function* () {
     let retrying = false;
     // The account's latest rate-limit snapshot, which dates a usage limit's reset.
     let rateLimits = Option.none<RateLimitsSnapshot>();
+    // Whether the model answered since the current app-server process started.
+    let answered = false;
     const startTurn = Effect.fn("CodexRuntime.startTurn")(function* (
       message: string,
       id?: OperatorMessageId,
@@ -414,6 +415,18 @@ const makeCodexSessions = Effect.gen(function* () {
       yield* channel.emit(
         ProviderRecovered.make({ session, retries: ProviderRetries.make(retries) }),
       );
+    });
+    /** Reports model output in the current turn: a recovery after retries, and a first answer. */
+    const reportModelOutput = Effect.fn("CodexRuntime.reportModelOutput")(function* () {
+      yield* Effect.annotateCurrentSpan({ sessionId: session.id, turnId });
+      if (retrying) yield* reportRecovery();
+      if (answered) return;
+      answered = true;
+      yield* Effect.logInfo(
+        "Codex child got its provider's first answer since the process started",
+        { sessionId: session.id, turnId },
+      );
+      yield* channel.emit(ProviderAnswered.make({ session }));
     });
     const interruptTurn = Effect.fn("CodexRuntime.interruptTurn")(function* () {
       yield* Effect.annotateCurrentSpan({ sessionId: session.id });
@@ -616,6 +629,7 @@ const makeCodexSessions = Effect.gen(function* () {
             sessionId: Option.some(session.id),
             transport: "replace",
           });
+          answered = false;
           yield* initializeCodex(connection, initialization);
           billing = yield* codexChildAccount(connection, spec.session.brain, spec.admitted.pool);
           return yield* resumeThread(connection, client, spec, harnessSession);
@@ -649,8 +663,6 @@ const makeCodexSessions = Effect.gen(function* () {
             const retry = decodeRetry(params);
             if (Option.isSome(retry) && retry.value.willRetry)
               return yield* reportRetry(retry.value);
-          } else if (retrying && isTurnActivity(params) && params.turnId === turnId) {
-            yield* reportRecovery();
           }
           if (method === "thread/tokenUsage/updated") {
             const usage = yield* decodeNotification(
@@ -689,6 +701,7 @@ const makeCodexSessions = Effect.gen(function* () {
                 turnId: notification.value.turnId,
               });
             }
+            if (Schema.is(ModelKindItem)(item)) yield* reportModelOutput();
             const tool = yield* decodeNotifiedToolItem(session.id, item);
             if (Option.isNone(tool)) return;
             toolsInFlight.set(tool.value.id, tools.toolName(tool.value));
@@ -716,6 +729,7 @@ const makeCodexSessions = Effect.gen(function* () {
               });
             }
             const item = notification.value.item;
+            if (Schema.is(ModelKindItem)(item)) yield* reportModelOutput();
             if (Schema.is(AgentMessageKindItem)(item)) {
               const message = yield* decodeItem(
                 AgentMessageItem,
@@ -806,8 +820,7 @@ const makeCodexSessions = Effect.gen(function* () {
                 turnId: completed.turn.id,
               });
             }
-            if (retrying && isTurnStatus(completed.turn.status, "completed"))
-              yield* reportRecovery();
+            if (isTurnStatus(completed.turn.status, "completed")) yield* reportModelOutput();
             turnActive = false;
             const wasInterrupted = interrupting;
             interrupting = false;

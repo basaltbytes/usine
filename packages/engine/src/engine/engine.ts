@@ -14,7 +14,17 @@ import type { OperatorActor } from "@usine/core/operator";
 import { RunId } from "@usine/core/run";
 import { ApprovalSource } from "@usine/core/run/approval";
 import type { WorkerName } from "@usine/core/worker";
-import { Context, Crypto, type Duration, Effect, Layer, Match, Option, Result } from "effect";
+import {
+  Array as EffectArray,
+  Context,
+  Crypto,
+  type Duration,
+  Effect,
+  Layer,
+  Match,
+  Option,
+  Result,
+} from "effect";
 import { RunDatabase } from "../database/database.ts";
 import {
   AttemptCancellationError,
@@ -48,6 +58,7 @@ import { LoopControl } from "../loop-control/loop-control.ts";
 import { CycleBudgets } from "../cycle-budget/cycle-budget.ts";
 import { BoardMoves } from "../board-moves/board-moves.ts";
 import { AttemptAdmission } from "./admission.ts";
+import { type CapacityWait, ProviderCapacity } from "./capacity/capacity.ts";
 import { RunDriver } from "./run-driver.ts";
 import { UnconfirmedStop, UnconfirmedStops } from "./unconfirmed-stops.ts";
 
@@ -63,6 +74,7 @@ const makeRunEngine = Effect.gen(function* () {
   const store = yield* RunStore;
   const driver = yield* RunDriver;
   const admission = yield* AttemptAdmission;
+  const capacity = yield* ProviderCapacity;
   const stepExecutor = yield* StepExecutor;
   const crypto = yield* Crypto.Crypto;
 
@@ -107,8 +119,17 @@ const makeRunEngine = Effect.gen(function* () {
     runId: RunId,
     request: RetryRequest = plainRetry,
   ) {
-    if (yield* store.retry(runId, request)) {
+    const waits = yield* capacity.waits;
+    const wait = EffectArray.findFirst(waits, ({ runIds }) => runIds.includes(runId));
+    const outcome = yield* store.retry(runId, request, wait);
+    if (outcome === "Reopened") {
       yield* driver.resume(runId);
+      return;
+    }
+    if (outcome === "Forced") {
+      // A fiber that doesn't wait now takes the retry at its next claim; `launch` keeps it.
+      yield* capacity.force(runId);
+      yield* driver.launch(runId);
       return;
     }
     yield* Effect.logDebug("Retry changed nothing; the Run already waits for its next Attempt", {
@@ -321,6 +342,7 @@ const makeRunEngine = Effect.gen(function* () {
     waitForUpgrade: admission.waitForUpgrade,
     cancelUpgrade: admission.cancelUpgrade,
     upgradeDrain: admission.upgradeDrain,
+    capacityWaits: capacity.waits,
     inspect,
     intervene,
     reconcile: driver.reconcile,
@@ -354,6 +376,8 @@ export class RunEngine extends Context.Service<
     readonly cancelUpgrade: Effect.Effect<void>;
     /** The pending upgrade and the runs it defers in this process. */
     readonly upgradeDrain: Effect.Effect<Option.Option<UpgradeDrain>>;
+    /** The capacity groups at capacity in this process and the Runs that wait for them. */
+    readonly capacityWaits: Effect.Effect<ReadonlyArray<CapacityWait>>;
     /** Records the approval Event and its source, and opens the Run's approval gate. A repeated approval keeps the first source. */
     readonly approve: (
       runId: RunId,
@@ -409,7 +433,9 @@ export class RunEngine extends Context.Service<
     ) => Effect.Effect<void, RunEngineError>;
     /**
      * Requests another Attempt for a failed Run with its existing Event, applying the request's
-     * task and Agent if set. The Attempt records the request as its start reason.
+     * task and Agent if set. A Run that waits after a capacity refusal, or that waits for its
+     * capacity group without an Attempt, starts its next Attempt now, which tests the group. The
+     * Attempt records the request as its start reason.
      */
     readonly retry: (runId: RunId, request?: RetryRequest) => Effect.Effect<void, RunEngineError>;
     /**
@@ -472,6 +498,7 @@ export const layerWithDatabase = <DatabaseError, DatabaseRequirements>(
   const driver = RunDriver.layer.pipe(
     Layer.provideMerge(store),
     Layer.provideMerge(AttemptAdmission.layer),
+    Layer.provideMerge(ProviderCapacity.layer),
     Layer.provide(itemWriter),
     Layer.provide(controls),
     Layer.provide(database),
@@ -531,3 +558,4 @@ export {
 } from "./error.ts";
 
 export { UpgradeDrain, UpgradeWait } from "./upgrade.ts";
+export { CapacityGroup, capacityGroupKey, CapacityWait } from "./capacity/capacity.ts";

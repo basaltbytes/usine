@@ -11,7 +11,11 @@ import { DateTime, Option } from "effect";
 import { assert, it } from "@effect/vitest";
 import { GitHubLabelName } from "@usine/core/label";
 import { RepositoryName } from "@usine/core/repository";
+import { RunId } from "@usine/core/run";
+import { WorkerName } from "@usine/core/worker";
+import { CapacityGroup, CapacityWait } from "@usine/engine/engine";
 import { LabelPreflightFinding } from "../src/label-reconciler.ts";
+import { capacityNeeds } from "../src/operator/capacity.ts";
 import { PoolLimitNeed, PreflightFindingNeed } from "../src/operator/need.ts";
 import { attentionKey, partitionNeeds, poolLimitNeeds } from "../src/operator/attention.ts";
 
@@ -132,4 +136,33 @@ it("keeps pool warnings dismissed within each threshold band and separates pools
       });
     }
   }
+});
+
+it("shows one entry per capacity group and keeps it dismissed while the group refuses", () => {
+  const group = CapacityGroup.make({
+    harness: Harness.make("claude"),
+    model: ModelId.make("claude-sonnet-4-6"),
+    worker: WorkerName.make("local"),
+  });
+  const wait = (nextTryAt: string, runIds: ReadonlyArray<string>) =>
+    CapacityWait.make({
+      group,
+      message: "This request would exceed your account's rate limit.",
+      since: DateTime.makeUnsafe("2026-11-13T23:44:00Z"),
+      refusals: 1,
+      nextTryAt: DateTime.makeUnsafe(nextTryAt),
+      probes: [RunId.make("probe")],
+      runIds: runIds.map((id) => RunId.make(id)),
+    });
+  const [first] = capacityNeeds([wait("2026-11-13T23:49:00Z", ["a", "b", "c"])]);
+  assert(first !== undefined);
+  assert.strictEqual(first.waitingRuns, 4);
+  assert.strictEqual(first.since, "2026-11-13T23:44:00.000Z");
+  assert.strictEqual(first.nextTryAt, "2026-11-13T23:49:00.000Z");
+  const [later] = capacityNeeds([wait("2026-11-14T00:04:00Z", ["a", "b"])]);
+  assert(later !== undefined);
+  assert.deepStrictEqual(partitionNeeds([later], [attentionKey(first)]), {
+    needsYou: [],
+    dismissedNeeds: [later],
+  });
 });

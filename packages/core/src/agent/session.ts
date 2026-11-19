@@ -1,4 +1,4 @@
-import { type Brand, Effect, Option, Schema } from "effect";
+import { Array as Arr, type Brand, DateTime, Effect, Option, Schema } from "effect";
 import { GatewayCredentialKind } from "../worker.ts";
 import { AgentName } from "./agent.ts";
 import { BrainSpec } from "./brain.ts";
@@ -341,6 +341,22 @@ export class RateLimitWindow extends Schema.Class<
   resetsAt: Schema.OptionFromNullOr(Schema.DateTimeUtcFromString),
 }) {}
 
+/**
+ * Returns the latest reset time among the used-up windows in `windows`, those at 100 percent or
+ * more. Returns `None` if no window is used up or a used-up window has no reset time.
+ */
+export const usedUpUntil = (windows: Iterable<RateLimitWindow>): Option.Option<DateTime.Utc> =>
+  Option.all(
+    Arr.filter(windows, ({ usedPercent }) => usedPercent >= 100).map(({ resetsAt }) => resetsAt),
+  ).pipe(
+    Option.flatMap(
+      Arr.match({
+        onEmpty: Option.none,
+        onNonEmpty: (resets) => Option.some(Arr.max(resets, DateTime.Order)),
+      }),
+    ),
+  );
+
 /** The rate-limit windows from one provider report; a window is `None` if not reported. */
 export class RateLimitsSnapshot extends Schema.Class<
   RateLimitsSnapshot,
@@ -408,6 +424,19 @@ export class ProviderRecovered extends Schema.TaggedClass<
   retries: ProviderRetries,
 }) {}
 
+/**
+ * The first answer from the model provider since the harness process started: the provider
+ * accepted a request. A harness doesn't report its own synthetic answers, such as a usage-limit
+ * notice, as one.
+ */
+export class ProviderAnswered extends Schema.TaggedClass<
+  ProviderAnswered,
+  Brand.Brand<"@usine/core/agent/session/ProviderAnswered">
+>("Agent/ProviderAnswered")("ProviderAnswered", {
+  /** The session whose model provider answered. */
+  session: AgentSession,
+}) {}
+
 /** A normalized session activity or usage report for storage in an attempt transcript. */
 export const AgentSessionEvent = Schema.Union([
   SessionStarted,
@@ -421,5 +450,6 @@ export const AgentSessionEvent = Schema.Union([
   SessionTokensUpdated,
   ProviderRetrying,
   ProviderRecovered,
+  ProviderAnswered,
 ]);
 export type AgentSessionEvent = typeof AgentSessionEvent.Type;

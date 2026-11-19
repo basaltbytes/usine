@@ -2,6 +2,7 @@ import {
   AgentSession,
   AgentSessionEvent,
   AgentSessionId,
+  ProviderAnswered,
   ProviderRecovered,
   ProviderRetries,
   ProviderRetrying,
@@ -279,8 +280,9 @@ const sessionEventFrom = (
 
 /**
  * Subscribes to `piSession` and queues normalized events synchronously, so none arrive after the
- * prompt resolves. Provider retries are counted per turn and reset on `agent_settled`. `toolName`
- * maps the name that Pi reports for a tool to the name that events carry.
+ * prompt resolves. Provider retries are counted per turn and reset on `agent_settled`. The first
+ * assistant message that doesn't end with an error or an abort is the provider's first answer.
+ * `toolName` maps the name that Pi reports for a tool to the name that events carry.
  */
 export const subscribePiSession = (
   piSession: PiSession,
@@ -300,6 +302,7 @@ export const subscribePiSession = (
     // Provider retries reported in the current turn, and whether the last retry is unresolved.
     let retries = 0;
     let retrying = false;
+    let answered = false;
     const offer = (sessionEvent: AgentSessionEvent) => {
       if (!channel.emitUnsafe(sessionEvent)) {
         log(
@@ -316,6 +319,22 @@ export const subscribePiSession = (
         if (Option.isSome(usage)) {
           total = addUsage(total, usage.value);
           offer(SessionTokensUpdated.make({ session, ...total }));
+        }
+        const message = event.message;
+        if (
+          !answered &&
+          message.role === "assistant" &&
+          message.stopReason !== "error" &&
+          message.stopReason !== "aborted"
+        ) {
+          answered = true;
+          log(
+            Effect.logInfo("Pi session got its provider's first answer", {
+              sessionId: session.id,
+              stopReason: message.stopReason,
+            }),
+          );
+          offer(ProviderAnswered.make({ session }));
         }
       }
       if (event.type === "auto_retry_start") {

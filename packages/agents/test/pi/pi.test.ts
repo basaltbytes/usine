@@ -549,13 +549,19 @@ describe("Pi child backend", () => {
         assert.deepStrictEqual(options?.environment, Option.some(childRequest.environment));
         assert.deepStrictEqual(
           events.map((event) => event._tag),
-          ["SessionStarted", "SessionTokensUpdated", "TextOutput", "SessionFinished"],
+          [
+            "SessionStarted",
+            "SessionTokensUpdated",
+            "ProviderAnswered",
+            "TextOutput",
+            "SessionFinished",
+          ],
         );
       }).pipe(Effect.provide(piChildLayer.pipe(Layer.provideMerge(sdk)))),
     );
   });
 
-  it.effect("reports each provider retry of a turn and the recovery when Pi gets an answer", () => {
+  it.effect("reports each provider retry, the recovery, and Pi's first answer once", () => {
     const listeners: Array<(event: PiSessionEvent) => void> = [];
     const publish = (event: PiSessionEvent) => {
       for (const listener of listeners) listener(event);
@@ -572,10 +578,23 @@ describe("Pi child backend", () => {
       dispose: () => undefined,
       messages: [],
       prompt: () => {
+        // Neither a failed nor an aborted request is an answer from the provider.
+        publish({
+          type: "message_end",
+          message: fauxAssistantMessage([], { stopReason: "aborted" }),
+        });
         publish(retry(1, "terminated"));
+        publish({
+          type: "message_end",
+          message: fauxAssistantMessage([], {
+            stopReason: "error",
+            errorMessage: "429 Too Many Requests",
+          }),
+        });
         publish(retry(2, "429 Too Many Requests"));
         publish({ type: "message_end", message: fauxAssistantMessage("Pi child done.") });
         publish({ type: "auto_retry_end", success: true, attempt: 2 });
+        publish({ type: "message_end", message: fauxAssistantMessage("Pi child checked.") });
         publish({ type: "agent_settled", aborted: false });
         // Retry numbering restarts at 1 on the next turn; a retry that Pi abandons has no recovery.
         publish(retry(1, "terminated"));
@@ -610,14 +629,19 @@ describe("Pi child backend", () => {
         const running = yield* (yield* ChildBackend).launch(childRequest);
         const [events] = yield* Effect.all([Stream.runCollect(running.events), running.result]);
         assert.deepStrictEqual(
-          events.map((event) => event._tag),
+          events
+            .filter((event) => event._tag !== "SessionTokensUpdated")
+            .map((event) =>
+              event._tag === "TextOutput" ? `TextOutput: ${event.text}` : event._tag,
+            ),
           [
             "SessionStarted",
             "ProviderRetrying",
             "ProviderRetrying",
-            "SessionTokensUpdated",
-            "TextOutput",
+            "ProviderAnswered",
+            "TextOutput: Pi child done.",
             "ProviderRecovered",
+            "TextOutput: Pi child checked.",
             "ProviderRetrying",
             "SessionFinished",
           ],

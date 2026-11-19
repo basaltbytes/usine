@@ -178,6 +178,7 @@ export const pollingTestLayer = (
     waitForUpgrade: () => Effect.void,
     cancelUpgrade: Effect.void,
     upgradeDrain: Effect.succeedNone,
+    capacityWaits: Effect.succeed([]),
     retry: () => Effect.die("unused"),
     runAgain: () => Effect.die("unused"),
     revoke: () => Effect.die("unused"),

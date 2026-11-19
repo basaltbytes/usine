@@ -19,6 +19,7 @@ import { Harness, ModelId } from "@usine/core/agent/brain";
 import {
   type BillingPool,
   HarnessSession,
+  ProviderAnswered,
   ProviderRecovered,
   ProviderRetries,
   ProviderRetrying,
@@ -65,7 +66,6 @@ import { claudeSessionMeter, claudeTokenMeter, type RestoredUsage } from "../usa
 import { structuredCompletion } from "../completion.ts";
 import { claudeCompletion } from "./completion.ts";
 import { brainOptions } from "./options.ts";
-import { claudeRateLimits } from "./rate-limits.ts";
 import { claudeProviderFailures } from "./provider.ts";
 import {
   apiRetryMessage,
@@ -75,6 +75,7 @@ import {
   decodeMessageAcknowledgement,
   decodeCompletionUpdate,
   isAssistantMessage,
+  isModelAnswer,
   loginCheck,
   type LoginCheck,
   sessionEventsFrom,
@@ -659,7 +660,6 @@ const makeClaudeSessions = Effect.gen(function* () {
       Option.getOrUndefined(policy.restored.usage),
       current.retained,
     );
-    const readRateLimits = claudeRateLimits(session);
     let backgroundTasks: ReadonlyArray<string> = [];
     // Holds the timer that ends a wait for background work after the child answered.
     const backgroundWait = yield* FiberHandle.make<void>();
@@ -668,6 +668,8 @@ const makeClaudeSessions = Effect.gen(function* () {
     // API retries reported in the current turn, and whether the last retry is unresolved.
     let retries = 0;
     let retrying = false;
+    // Whether the model answered since the current Claude process started.
+    let answered = false;
 
     /**
      * The configured wait for background work after an answer, or `None` for no limit. The limit
@@ -782,8 +784,19 @@ const makeClaudeSessions = Effect.gen(function* () {
         }),
       );
     });
+    const reportAnswer = Effect.fn("ClaudeRuntime.reportAnswer")(function* () {
+      yield* Effect.annotateCurrentSpan({ sessionId: session.id });
+      answered = true;
+      yield* Effect.logInfo(
+        "Claude child got its provider's first answer since the process started",
+        {
+          sessionId: session.id,
+        },
+      );
+      yield* channel.emit(ProviderAnswered.make({ session }));
+    });
 
-    const provider = claudeProviderFailures(session.id);
+    const provider = claudeProviderFailures(session);
 
     /** Logs how a new process's first result settled the usage that Claude restored. */
     const logRestored = ({ resultTokens, processTokens, restored }: RestoredUsage) =>
@@ -825,9 +838,8 @@ const makeClaudeSessions = Effect.gen(function* () {
             yield* conversation.read(ids, "now");
           }
         }
-        const limits = yield* readRateLimits(message);
-        if (Option.isSome(limits)) yield* channel.emit(limits.value);
-        const reported = provider.read(message);
+        const reported = yield* provider.read(message);
+        if (Option.isSome(reported.rateLimits)) yield* channel.emit(reported.rateLimits.value);
         if (Option.isSome(reported.rejectedUntil))
           yield* Effect.logWarning("Claude reports that its usage limit rejects requests", {
             sessionId: session.id,
@@ -838,7 +850,10 @@ const makeClaudeSessions = Effect.gen(function* () {
           betweenTurns = false;
           yield* resumeTurn("turn started");
         }
-        if (retrying && isAssistantMessage(message)) yield* reportRecovery();
+        if (isModelAnswer(message)) {
+          if (retrying) yield* reportRecovery();
+          if (!answered) yield* reportAnswer();
+        }
         if (Schema.is(ClaudeCompletionHeader)(message)) {
           const update = yield* decodeCompletionUpdate(message).pipe(
             Effect.mapError((cause) =>
@@ -1005,6 +1020,7 @@ const makeClaudeSessions = Effect.gen(function* () {
       provider.clear();
       retries = 0;
       retrying = false;
+      answered = false;
       const { sessionId: _assignedId, resume: _resumedId, ...resumeOptions } = options;
       current = yield* policy.reopen(
         launchWithRetries(

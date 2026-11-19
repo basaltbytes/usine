@@ -1156,6 +1156,8 @@ describe("Claude child backend", () => {
   ) =>
     Effect.gen(function* () {
       const events = yield* Queue.unbounded<string>();
+      // The tags of the events that `until` took, in order.
+      const taken: Array<string> = [];
       yield* Effect.forkScoped(
         running.events.pipe(
           Stream.runForEach((event) => Queue.offer(events, event._tag)),
@@ -1164,7 +1166,8 @@ describe("Claude child backend", () => {
       );
       const until = (tag: string): Effect.Effect<void> =>
         Queue.take(events).pipe(
-          Effect.flatMap((taken) => (taken === tag ? Effect.void : until(tag))),
+          Effect.tap((next) => Effect.sync(() => taken.push(next))),
+          Effect.flatMap((next) => (next === tag ? Effect.void : until(tag))),
         );
       const toolRound = (id: string) =>
         Effect.gen(function* () {
@@ -1181,7 +1184,7 @@ describe("Claude child backend", () => {
           });
           yield* until("ToolFinished");
         });
-      return { until, toolRound };
+      return { until, toolRound, taken };
     });
 
   // Claude doesn't fold in a message sent while no turn runs: the message starts the next turn,
@@ -1484,7 +1487,7 @@ describe("Claude child backend", () => {
           }),
         );
         const output = () => outputs.at(-1)!;
-        const { toolRound } = yield* turnDriver(running, output);
+        const { toolRound, until, taken } = yield* turnDriver(running, output);
         yield* Queue.take(inputs);
         yield* toolRound("bash-1");
         const steer = Steer.make({ message: "Check the logs" });
@@ -1517,6 +1520,12 @@ describe("Claude child backend", () => {
           result: "Done",
           queued_turn_count: 0,
         });
+        yield* until("SessionFinished");
+        assert.lengthOf(
+          taken.filter((tag) => tag === "ProviderAnswered"),
+          2,
+          "each Claude process reports its provider's first answer",
+        );
         return yield* running.result;
       }).pipe(Effect.scoped, Effect.provide(claudeChild.pipe(Layer.provide(sdk))));
       assert.strictEqual(result.message, "Done");
@@ -1908,7 +1917,7 @@ describe("Claude child backend", () => {
         assert.strictEqual(result.message, "Child completed the edit.");
         assert.deepStrictEqual(
           events.map((event) => event._tag),
-          ["SessionStarted", "TextOutput", "SessionFinished"],
+          ["SessionStarted", "ProviderAnswered", "TextOutput", "SessionFinished"],
           "the failed launch leaves nothing in the transcript",
         );
         const started = events[0];
@@ -2129,7 +2138,7 @@ describe("Claude child backend", () => {
           assert.strictEqual(result.message, "Gate passed; PR published");
           assert.deepStrictEqual(
             events.map((event) => event._tag),
-            ["SessionStarted", "TextOutput", "SessionFinished"],
+            ["SessionStarted", "ProviderAnswered", "TextOutput", "SessionFinished"],
           );
         }).pipe(Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk)))),
       );
@@ -2905,7 +2914,7 @@ describe("Claude child backend", () => {
     }).pipe(Effect.scoped),
   );
 
-  it.effect("reports each API retry of a turn and the recovery when an answer arrives", () => {
+  it.effect("reports each API retry, the recovery, and the model's first answer once", () => {
     const retry = (attempt: number, status: number | null, error: string) => ({
       type: "system",
       subtype: "api_retry",
@@ -2917,15 +2926,30 @@ describe("Claude child backend", () => {
       uuid: `retry-${attempt}`,
       session_id: "claude-session-1",
     });
+    const answer = (text: string) => ({
+      type: "assistant",
+      message: { model: "claude-sonnet-4-6", content: [{ type: "text", text }] },
+    });
     const sdk = Layer.succeed(ClaudeSdk)({
       open: () =>
         scripted([
           retry(1, null, "unknown"),
           retry(2, 529, "overloaded"),
+          // Claude Code writes these messages itself; neither is an answer from the model.
           {
             type: "assistant",
-            message: { content: [{ type: "text", text: "Child completed the edit." }] },
+            message: {
+              model: "<synthetic>",
+              content: [{ type: "text", text: "No response requested." }],
+            },
           },
+          {
+            type: "assistant",
+            error: "server_error",
+            message: { content: [{ type: "text", text: "API Error: 500" }] },
+          },
+          answer("Editing the file."),
+          answer("Child completed the edit."),
           { type: "result", subtype: "success", result: "Child completed the edit." },
         ]),
     });
@@ -2938,13 +2962,19 @@ describe("Claude child backend", () => {
         const session = yield* (yield* ChildBackend).launch(request());
         const [events] = yield* Effect.all([Stream.runCollect(session.events), session.result]);
         assert.deepStrictEqual(
-          events.map((event) => event._tag),
+          events.map((event) =>
+            event._tag === "TextOutput" ? `TextOutput: ${event.text}` : event._tag,
+          ),
           [
             "SessionStarted",
             "ProviderRetrying",
             "ProviderRetrying",
+            "TextOutput: No response requested.",
+            "TextOutput: API Error: 500",
             "ProviderRecovered",
-            "TextOutput",
+            "ProviderAnswered",
+            "TextOutput: Editing the file.",
+            "TextOutput: Child completed the edit.",
             "SessionFinished",
           ],
         );
@@ -3117,10 +3147,20 @@ describe("Claude child backend", () => {
     api_error_status: 429,
     result: LIMIT_TEXT,
   };
+  /** A rate-limit report that allows requests, at `utilization` of the allowance. */
+  const allowance = (rateLimitType: string, utilization: number, resetsAt: number) => ({
+    type: "rate_limit_event",
+    rate_limit_info: { status: "allowed_warning", rateLimitType, utilization, resetsAt },
+  });
   it.effect.each([
     {
       name: "a rejected usage limit",
       messages: [rejected, limitError, limitResult],
+      resetsAt: Option.some("2026-11-11T05:00:00.000Z"),
+    },
+    {
+      name: "a rejected usage limit while another window used up resets later",
+      messages: [allowance("seven_day_opus", 1, 1_794_416_400), rejected, limitError, limitResult],
       resetsAt: Option.some("2026-11-11T05:00:00.000Z"),
     },
     {
@@ -3137,6 +3177,89 @@ describe("Claude child backend", () => {
       ],
       resetsAt: Option.some("2026-11-11T05:00:00.000Z"),
       message: "API request failed without a response (rate_limit); retry 1 of 10 in 5s",
+    },
+    {
+      name: "a rate limit while the session's reports show a window used up",
+      messages: [
+        {
+          type: "rate_limit_event",
+          rate_limit_info: {
+            status: "allowed_warning",
+            rateLimitType: "seven_day",
+            utilization: 1,
+            resetsAt: 1_794_373_200,
+          },
+        },
+        {
+          type: "rate_limit_event",
+          rate_limit_info: {
+            status: "allowed_warning",
+            rateLimitType: "five_hour",
+            utilization: 0.4,
+            resetsAt: 1_794_300_000,
+          },
+        },
+        limitError,
+        limitResult,
+      ],
+      resetsAt: Option.some("2026-11-11T05:00:00.000Z"),
+    },
+    {
+      name: "a rate limit while the session's reports show several windows used up",
+      messages: [
+        allowance("five_hour", 1, 1_794_344_400),
+        allowance("seven_day", 1, 1_794_416_400),
+        allowance("seven_day_opus", 1, 1_794_373_200),
+        limitError,
+        limitResult,
+      ],
+      resetsAt: Option.some("2026-11-11T17:00:00.000Z"),
+    },
+    {
+      name: "a rate limit after the latest used-up window was reported below its allowance again",
+      messages: [
+        allowance("five_hour", 1, 1_794_344_400),
+        allowance("seven_day", 1, 1_794_416_400),
+        allowance("seven_day", 0.5, 1_794_416_400),
+        limitError,
+        limitResult,
+      ],
+      resetsAt: Option.some("2026-11-10T21:00:00.000Z"),
+    },
+    {
+      name: "a rate limit while a used-up window has no reset time",
+      messages: [
+        allowance("seven_day", 1, 1_794_416_400),
+        {
+          type: "rate_limit_event",
+          rate_limit_info: {
+            status: "allowed_warning",
+            rateLimitType: "five_hour",
+            utilization: 1,
+          },
+        },
+        limitError,
+        limitResult,
+      ],
+      resetsAt: Option.none(),
+    },
+    {
+      name: "a rate limit after a used-up window was reported below its allowance again",
+      messages: [
+        { ...rejected, rate_limit_info: { ...rejected.rate_limit_info, status: "allowed" } },
+        {
+          type: "rate_limit_event",
+          rate_limit_info: {
+            status: "allowed",
+            rateLimitType: "five_hour",
+            utilization: 0.1,
+            resetsAt: 1_794_390_000,
+          },
+        },
+        limitError,
+        limitResult,
+      ],
+      resetsAt: Option.none(),
     },
     {
       name: "an overload during a usage-limit warning",

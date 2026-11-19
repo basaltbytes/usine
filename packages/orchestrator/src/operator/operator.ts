@@ -6,8 +6,8 @@ export { CallScopeTarget, type ResolvedCall } from "./call-scope.ts";
 export { entityRequirement } from "./access.ts";
 import { ExpressionEngine } from "@usine/expression/expression-engine";
 import { approvalFor } from "../approval.ts";
-import type { UpgradeDrain } from "@usine/engine/engine";
 import { upgradeAttentionFor } from "./upgrade.ts";
+import { capacityAttentionFor } from "./capacity.ts";
 import { WorkerPreflightView, workerPreflightView } from "./preflight.ts";
 export { WorkerPreflightView } from "./preflight.ts";
 import { WebhookHealth } from "../webhooks.ts";
@@ -164,6 +164,8 @@ import {
   UnconfirmedStopView,
 } from "./run.ts";
 import {
+  type EngineWaits,
+  readEngineWaits,
   readRunningEvents,
   readTranscript,
   readUnrecordedEnds,
@@ -297,11 +299,15 @@ const makeOperatorObservation = Effect.gen(function* () {
   const usageReader = yield* RunUsageReader;
   const stops = yield* UnconfirmedStops;
   const engine = yield* Effect.serviceOption(RunEngine);
-  const readUpgrade = Option.match(engine, {
-    onNone: () => Effect.succeed(null),
-    onSome: (runs) => Effect.map(runs.upgradeDrain, Option.getOrNull),
-  });
-  const upgradeAttention = upgradeAttentionFor(readUpgrade, acknowledgements);
+  const readWaits = readEngineWaits(engine);
+  const upgradeAttention = upgradeAttentionFor(
+    Effect.map(readWaits, ({ upgrade }) => upgrade),
+    acknowledgements,
+  );
+  const capacityAttention = capacityAttentionFor(
+    Effect.map(readWaits, ({ capacity }) => capacity),
+    acknowledgements,
+  );
   const workerStatus = yield* WorkerStatus;
   const workerAttention = workerAttentionFor(reader, acknowledgements, workerStatus);
   const poolAttention = poolAttentionFor(reader, acknowledgements);
@@ -316,7 +322,7 @@ const makeOperatorObservation = Effect.gen(function* () {
     revision: Option.Option<ProjectionRevision>,
     unconfirmedStops: ReadonlyArray<UnconfirmedStop>,
     provisioning: ReadonlyArray<ProvisioningPause>,
-    upgrade: UpgradeDrain | null,
+    engineWaits: EngineWaits,
   ) {
     const [snapshots, states, cycleAsks, workerAttempts] = yield* Effect.all(
       [
@@ -331,7 +337,7 @@ const makeOperatorObservation = Effect.gen(function* () {
     const access = workerAccesses(instance.config.workers);
     const waits = quotaWaits(provisioning);
     const views = snapshots.map((snapshot) =>
-      runSummaryView(snapshot, paused, access, waits, upgrade),
+      runSummaryView(snapshot, paused, access, waits, engineWaits),
     );
     const runsByRepository = new Map<string, Array<(typeof views)[number]>>();
     for (const view of views) {
@@ -367,7 +373,7 @@ const makeOperatorObservation = Effect.gen(function* () {
           }
           const merged = new Map((runsByRepository.get(name) ?? []).map((run) => [run.id, run]));
           for (const saved of history.runs) {
-            const view = runSummaryView(saved, paused, access, waits, upgrade);
+            const view = runSummaryView(saved, paused, access, waits, engineWaits);
             merged.set(view.id, view);
           }
           const projectRuns = [...merged.values()].sort(
@@ -633,7 +639,7 @@ const makeOperatorObservation = Effect.gen(function* () {
       let run = allRuns.get(runId);
       if (run === undefined) {
         const summary = yield* reader.summary(runId);
-        run = runSummaryView(summary, paused, access, waits, upgrade);
+        run = runSummaryView(summary, paused, access, waits, engineWaits);
       }
       const attempt = run.attempts.find(({ id }) => id === attemptId);
       if (attempt === undefined) {
@@ -722,7 +728,7 @@ const makeOperatorObservation = Effect.gen(function* () {
             ] as const,
             { concurrency: "unbounded" },
           );
-        const upgrade = yield* readUpgrade;
+        const engineWaits = yield* readWaits;
         const reports = {
           pollReported: Option.isSome(latestPoll),
           scheduleReported: Option.isSome(latestSchedule),
@@ -763,7 +769,7 @@ const makeOperatorObservation = Effect.gen(function* () {
             scheduleFailures,
             unconfirmedStops.map(({ attemptId }) => attemptId),
             provisioning,
-            upgrade,
+            engineWaits,
           ]),
         );
         if (Option.isNone(token)) {
@@ -778,7 +784,7 @@ const makeOperatorObservation = Effect.gen(function* () {
             revision,
             unconfirmedStops,
             provisioning,
-            upgrade,
+            engineWaits,
           );
           return [{ ...projected, reports }, Option.none<CachedOverview>()] as const;
         }
@@ -800,7 +806,7 @@ const makeOperatorObservation = Effect.gen(function* () {
           revision,
           unconfirmedStops,
           provisioning,
-          upgrade,
+          engineWaits,
         );
         return [
           { ...projected, reports },
@@ -812,6 +818,7 @@ const makeOperatorObservation = Effect.gen(function* () {
         workerAttention(overview, running, instance.config.workers).pipe(
           Effect.flatMap(poolAttention),
           Effect.flatMap(upgradeAttention),
+          Effect.flatMap(capacityAttention),
           Effect.flatMap((view) => webhookAttention(view, instance.config.webhooks)),
           Effect.tap(({ needsYou, dismissedNeeds }) =>
             reports.pollReported && reports.scheduleReported
@@ -887,7 +894,7 @@ const makeOperatorObservation = Effect.gen(function* () {
             (openAttempt !== undefined && Option.contains(candidate.attemptId, openAttempt.id))),
       );
     const paused = new Set(states.filter((state) => state.paused).map((state) => state.loop));
-    const [usage, unrecordedEnds, settled, unconfirmedStop, upgrade] = yield* Effect.all(
+    const [usage, unrecordedEnds, settled, unconfirmedStop, engineWaits] = yield* Effect.all(
       [
         usageReader.read(runUsageSource(snapshot)),
         readUnrecordedEnds(reader, snapshot),
@@ -895,7 +902,7 @@ const makeOperatorObservation = Effect.gen(function* () {
           Effect.provideService(ItemProjectionReader, itemReader),
         ),
         blockingStop(snapshot, unconfirmedStops),
-        readUpgrade,
+        readWaits,
       ],
       { concurrency: "unbounded" },
     );
@@ -905,7 +912,7 @@ const makeOperatorObservation = Effect.gen(function* () {
       paused,
       access: workerAccesses(instance.config.workers),
       waits: quotaWaits(provisioning),
-      upgrade,
+      engineWaits,
       agentDefinitionChanged:
         currentAgent !== undefined && !sameAgent(snapshot.agent, currentAgent.agent),
       worker: snapshot.attempts.at(-1)?.worker ?? null,
@@ -922,7 +929,7 @@ const makeOperatorObservation = Effect.gen(function* () {
     runId: RunId,
     request: TranscriptRequest = ColdTranscriptRequest.make(),
   ) {
-    const { snapshot, paused, access, waits, upgrade, ...context } = yield* runContext(
+    const { snapshot, paused, access, waits, engineWaits, ...context } = yield* runContext(
       instance,
       runId,
     );
@@ -939,7 +946,7 @@ const makeOperatorObservation = Effect.gen(function* () {
     );
     return RunDetailView.make({
       ...context,
-      run: runView(snapshot, paused, access, waits, upgrade),
+      run: runView(snapshot, paused, access, waits, engineWaits),
       eventDedupKey: snapshot.event.dedupKey,
       eventPayload: snapshot.event.payload,
       transcript: transcript.events,
@@ -949,7 +956,7 @@ const makeOperatorObservation = Effect.gen(function* () {
   });
 
   const brief = Effect.fn("Operator.brief")(function* (instance: LoadedInstance, runId: RunId) {
-    const { snapshot, paused, access, waits, upgrade, usage, ...context } = yield* runContext(
+    const { snapshot, paused, access, waits, engineWaits, usage, ...context } = yield* runContext(
       instance,
       runId,
     );
@@ -958,7 +965,7 @@ const makeOperatorObservation = Effect.gen(function* () {
     );
     const view = RunBriefView.make({
       ...context,
-      run: runSummaryView(summarizeRun(snapshot), paused, access, waits, upgrade),
+      run: runSummaryView(summarizeRun(snapshot), paused, access, waits, engineWaits),
       task: textExcerpt(snapshot.task),
       resultMessage: Option.match(snapshot.step.result, {
         onNone: () => null,
@@ -2057,6 +2064,7 @@ export {
   WorkerPausedNeed,
   WebhookSilenceNeed,
   UpgradeDrainNeed,
+  ProviderCapacityNeed,
   UnconfirmedStopNeed,
   NeedView,
   PoolLimitNeed,

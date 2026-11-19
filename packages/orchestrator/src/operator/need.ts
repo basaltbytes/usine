@@ -1,4 +1,4 @@
-import { UpgradeWait } from "@usine/engine/engine";
+import { CapacityGroup, UpgradeWait } from "@usine/engine/engine";
 import { CiFixRun } from "@usine/engine/run-reader";
 import { ConfigFileError } from "@usine/config/file";
 import { BillingPool, PoolLogin } from "@usine/core/agent/session";
@@ -329,9 +329,32 @@ export class UpgradeDrainNeed extends Schema.TaggedClass<
   deferredRuns: Schema.Int.check(Schema.isGreaterThan(0)),
 }) {}
 
+/**
+ * A capacity group whose provider refuses requests. Runs that need it wait without an Attempt, and
+ * one Attempt at a time tests it at `nextTryAt`; none of them fails.
+ */
+export class ProviderCapacityNeed extends Schema.TaggedClass<
+  ProviderCapacityNeed,
+  Brand.Brand<"@usine/orchestrator/operator/need/ProviderCapacityNeed">
+>("@usine/orchestrator/ProviderCapacityNeed")("ProviderCapacityNeed", {
+  /** The attention entry identity used to distinguish this condition from other entries. */
+  id: Schema.String,
+  /** The harness, model, and Worker whose provider refuses requests. */
+  group: CapacityGroup,
+  /** The provider's latest refusal. */
+  message: Schema.NonEmptyString,
+  /** When the group started refusing, as an ISO 8601 timestamp. */
+  since: Schema.String,
+  /** When the next Attempt tests the group, as an ISO 8601 timestamp; it can be past while one does. */
+  nextTryAt: Schema.String,
+  /** The Runs that wait for the group, including the one testing it. */
+  waitingRuns: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+}) {}
+
 /** One reason the overview asks for operator attention. */
 export const NeedView = Schema.Union([
   UpgradeDrainNeed,
+  ProviderCapacityNeed,
   WebhookSilenceNeed,
   CycleBudgetNeed,
   ApprovalNeed,
