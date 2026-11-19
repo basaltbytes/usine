@@ -47,7 +47,7 @@
   "devDependencies": {
     "@cloudflare/workers-types": "5.20261027.1",
     "@effect/vitest": "catalog:",
-    "@types/node": "^26.6.5",
+    "@types/node": "catalog:",
     "@usine/tsconfig": "workspace:*",
     "effect": "catalog:",
     "typescript": "catalog:",

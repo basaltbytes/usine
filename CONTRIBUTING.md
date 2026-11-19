@@ -21,6 +21,8 @@ The script tests invoke `corepack pnpm` to use the version pinned in `package.js
 
 Published libraries declare `effect` as a peer dependency at the version in the `catalog` of `pnpm-workspace.yaml`. A package that depends on `@effect/platform-node` also depends on `@effect/platform-node-shared` at the catalog version, because the caret range of `@effect/platform-node` can resolve to a release that needs a newer `effect`.
 
+The workspace resolves one `@types/node`, at the version in the `catalog`. Most packages don't declare it and get Node's types from the copy that pnpm hoists, so an override in `pnpm-workspace.yaml` applies the catalog version to every dependency. A package that declares `@types/node` references it as `catalog:`.
+
 API contract changes require regenerating and staging `apps/docs/public/openapi.json` before `pnpm check`. See the [docs README](apps/docs/README.md#operator-http-api-reference) for generation commands.
 
 SQLite storage fixtures use `tooling/test/sqlite.mts` to select writable `/dev/shm` on Linux when it is mounted as tmpfs. On other hosts, they use the OS temporary directory. Fixtures that execute binaries or Git hooks keep using the OS temporary directory because shared memory can be mounted with `noexec`.
