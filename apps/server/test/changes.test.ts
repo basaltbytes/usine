@@ -351,6 +351,74 @@ it.effect("closes the routes without waiting for a stream whose reader stopped r
   }).pipe(Effect.provide(changeBusLayer)),
 );
 
+it.effect("runs no credential check and sends no notice published after the routes close", () =>
+  Effect.gen(function* () {
+    let checks = 0;
+    const verify = Effect.sync(() => {
+      checks++;
+    });
+    const routes = yield* Scope.make();
+    const layer = yield* live;
+    const changes = yield* Layer.buildWithScope(layer, routes);
+    const stream = yield* open().pipe(
+      Effect.provideService(ChangeAccess, verify),
+      Effect.provideContext(changes),
+    );
+    const ready = yield* Deferred.make<void>();
+    const frames: string[] = [];
+    const reader = yield* stream.pipe(
+      Stream.runForEach((frame) =>
+        Effect.sync(() => {
+          frames.push(frame);
+        }).pipe(Effect.andThen(Deferred.succeed(ready, undefined))),
+      ),
+      Effect.forkChild,
+    );
+    yield* Deferred.await(ready);
+    const opened = checks;
+
+    yield* Scope.close(routes, Exit.void);
+    yield* (yield* ChangeBus).publish([
+      { audience: InstanceScope.make(), target: { kind: "worker", id: "after-close" } },
+    ]);
+
+    const exit = yield* Fiber.await(reader);
+    assert.strictEqual(exit._tag, "Success");
+    assert.strictEqual(checks, opened);
+    assert.notInclude(frames.join(""), "after-close");
+  }).pipe(Effect.provide(changeBusLayer)),
+);
+
+it.effect(
+  "runs no credential check and sends nothing on a stream opened after the routes close",
+  () =>
+    Effect.gen(function* () {
+      let checks = 0;
+      const verify = Effect.sync(() => {
+        checks++;
+      });
+      const routes = yield* Scope.make();
+      const layer = yield* live;
+      const changes = yield* Layer.buildWithScope(layer, routes);
+      const bus = yield* ChangeBus;
+      const { revision } = yield* Effect.scoped(bus.open);
+      yield* bus.publish([
+        { audience: InstanceScope.make(), target: { kind: "worker", id: "replayed" } },
+      ]);
+      yield* Scope.close(routes, Exit.void);
+
+      for (const cursor of [undefined, revision]) {
+        const stream = yield* open(cursor).pipe(
+          Effect.provideService(ChangeAccess, verify),
+          Effect.provideContext(changes),
+        );
+        const frames = yield* Stream.runCollect(stream);
+        assert.deepStrictEqual(frames, []);
+      }
+      assert.strictEqual(checks, 0);
+    }).pipe(Effect.provide(changeBusLayer)),
+);
+
 it.effect("resets a live subscriber whose queue drops committed writes", () =>
   Effect.gen(function* () {
     return yield* Effect.gen(function* () {
