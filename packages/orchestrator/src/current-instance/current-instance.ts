@@ -44,7 +44,19 @@ import {
   type RestartChange,
   restartChanges,
 } from "./changes.ts";
-import { afterRunning, timedStep } from "./steps.ts";
+import {
+  afterRunning,
+  type ConfigurationSaveId,
+  ConfigurationWriteProgress,
+  RevisionStep,
+  timedStep,
+} from "./steps.ts";
+
+/** A configuration save, with the ID that its client gave it. */
+export interface ConfigurationSave extends ConfigurationCommit {
+  /** The ID of the save in `CurrentInstance.writes`, or `None` if its client gave none. */
+  readonly save: Option.Option<ConfigurationSaveId>;
+}
 
 /** A reload changed `usine.yaml` in a way that needs a restart, so the running instance is kept. */
 export class RestartRequiredError extends Schema.TaggedError<
@@ -183,9 +195,14 @@ export class CurrentInstance extends Context.Service<
      * a rejected `workers` change.
      */
     readonly reload: Effect.Effect<InstanceReload, InstanceReloadError>;
-    /** Checks runtime compatibility before storing and applying a revision. */
+    /** The configuration saves that run now, in the order they started. */
+    readonly writes: Effect.Effect<ReadonlyArray<ConfigurationWriteProgress>>;
+    /**
+     * Checks runtime compatibility before storing and applying a revision. A caller that
+     * interrupts it before the `store` step stores nothing.
+     */
     readonly commit: (
-      request: ConfigurationCommit,
+      request: ConfigurationSave,
     ) => Effect.Effect<
       ConfigurationRevision,
       InstanceReloadError | ConfigurationInvalid | ConfigurationStoreError | StaleRevision
@@ -217,7 +234,15 @@ export class CurrentInstance extends Context.Service<
         const current = yield* SubscriptionRef.make(initial);
         const registered = yield* Ref.make(Option.none<WorkerReload>());
         const reloading = yield* Semaphore.make(1);
+        const writes = yield* Ref.make<ReadonlyMap<number, ConfigurationWriteProgress>>(new Map());
+        const writeCount = yield* Ref.make(0);
         yield* logConfigWarnings(initial.warnings);
+
+        /** Runs `effect` as `step` after `track` records the step. */
+        const trackedStep =
+          (track: (step: RevisionStep) => Effect.Effect<void>) =>
+          <A, E, R>(step: RevisionStep, effect: Effect.Effect<A, E, R>) =>
+            Effect.andThen(track(step), timedStep(step, effect));
 
         const beforeWorkersStart = Effect.fn("CurrentInstance.beforeWorkersStart")(function* (
           running: LoadedInstance,
@@ -235,9 +260,14 @@ export class CurrentInstance extends Context.Service<
           return Effect.void;
         });
 
-        const prepare = (snapshot: Configuration) =>
+        /** Prepares `snapshot`, and calls `track` with each step before it starts. */
+        const prepare = (
+          snapshot: Configuration,
+          track: (step: RevisionStep) => Effect.Effect<void>,
+        ) =>
           Effect.uninterruptibleMask((restore) =>
             Effect.gen(function* () {
+              const step = trackedStep(track);
               const running = yield* SubscriptionRef.get(current);
               if (Option.isNone(snapshot.instance))
                 return yield* FactoryConfigError.make({
@@ -248,7 +278,7 @@ export class CurrentInstance extends Context.Service<
               const loaded = snapshot.instance.value;
               yield* Effect.annotateCurrentSpan({ revision: snapshot.number });
               const workers = yield* Ref.get(registered);
-              yield* timedStep(
+              yield* step(
                 "restart",
                 Effect.suspend(() => {
                   const restart = restartChanges(running, loaded, Option.isSome(workers));
@@ -257,7 +287,7 @@ export class CurrentInstance extends Context.Service<
                     : Effect.void;
                 }),
               );
-              const applyWorkers = yield* timedStep(
+              const applyWorkers = yield* step(
                 "worker-preflight",
                 restore(
                   Option.isSome(workers)
@@ -322,32 +352,76 @@ export class CurrentInstance extends Context.Service<
           Effect.uninterruptibleMask((restore) =>
             Effect.gen(function* () {
               yield* Ref.set(observed, snapshot);
-              const apply = yield* restore(prepare(snapshot));
+              const apply = yield* restore(prepare(snapshot, () => Effect.void));
               return yield* timedStep("apply", apply);
             }),
           ).pipe(Effect.scoped);
 
         const commitRevision = Effect.fn("CurrentInstance.commit")(
-          (request: ConfigurationCommit) =>
-            Effect.uninterruptibleMask((restore) =>
-              Effect.gen(function* () {
-                yield* Effect.annotateCurrentSpan({ expectedRevision: request.expected });
-                const snapshot = yield* timedStep("read", store.read);
-                const time = yield* DateTime.now;
-                const candidate = yield* timedStep(
-                  "parse",
-                  commit(parser, snapshot, request.expected, request.changes, {
-                    actor: request.actor,
-                    message: request.message,
-                    time,
+          function* (request: ConfigurationSave) {
+            const expected = request.expected;
+            yield* Effect.annotateCurrentSpan({ expectedRevision: expected });
+            if (Option.isSome(request.save))
+              yield* Effect.annotateCurrentSpan({ save: request.save.value });
+            const id = yield* Ref.getAndUpdate(writeCount, (count) => count + 1);
+            const progressAt = (step: RevisionStep) =>
+              Option.match(request.save, {
+                onNone: () => ConfigurationWriteProgress.make({ expected, step }),
+                onSome: (save) => ConfigurationWriteProgress.make({ save, expected, step }),
+              });
+            const track = (step: RevisionStep) =>
+              Ref.update(writes, (current) => new Map(current).set(id, progressAt(step)));
+            const step = trackedStep(track);
+            const interrupted = Effect.gen(function* () {
+              const at = (yield* Ref.get(writes)).get(id)?.step ?? "wait";
+              // The `store` and `apply` steps are uninterruptible, so the interruption arrived
+              // after the revision was stored.
+              yield* at === "store" || at === "apply"
+                ? Effect.logInfo(
+                    "The client left a configuration save after its revision was stored; the revision applies",
+                    { step: at, expectedRevision: expected },
+                  )
+                : Effect.logInfo(
+                    "Configuration save interrupted by the client; nothing was saved",
+                    {
+                      step: at,
+                      expectedRevision: expected,
+                    },
+                  );
+            });
+            return yield* Effect.acquireUseRelease(
+              track("wait"),
+              () =>
+                Effect.uninterruptibleMask((restore) =>
+                  Effect.gen(function* () {
+                    const snapshot = yield* step("read", store.read);
+                    const time = yield* DateTime.now;
+                    const candidate = yield* step(
+                      "parse",
+                      commit(parser, snapshot, expected, request.changes, {
+                        actor: request.actor,
+                        message: request.message,
+                        time,
+                      }),
+                    );
+                    const apply = yield* restore(prepare(candidate.configuration, track));
+                    const revision = yield* step("store", store.commit(request));
+                    yield* step("apply", apply);
+                    return revision;
                   }),
-                );
-                const apply = yield* restore(prepare(candidate.configuration));
-                const revision = yield* timedStep("store", store.commit(request));
-                yield* timedStep("apply", apply);
-                return revision;
-              }),
-            ).pipe(Effect.scoped, afterRunning(reloading)),
+                ).pipe(
+                  Effect.scoped,
+                  afterRunning(reloading),
+                  Effect.onInterrupt(() => interrupted),
+                ),
+              () =>
+                Ref.update(writes, (current) => {
+                  const next = new Map(current);
+                  next.delete(id);
+                  return next;
+                }),
+            );
+          },
           Effect.tapError((error) =>
             Effect.logWarning("Configuration write refused", {
               errorTag: error._tag,
@@ -415,6 +489,7 @@ export class CurrentInstance extends Context.Service<
           get: SubscriptionRef.get(current),
           changes: SubscriptionRef.changes(current),
           reload,
+          writes: Ref.get(writes).pipe(Effect.map((current) => [...current.values()])),
           commit: commitRevision,
           registerWorkers,
         };

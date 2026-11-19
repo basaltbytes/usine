@@ -9,6 +9,7 @@ import {
 import { formatRevisionEntity } from "@usine/config/folder-codec";
 import {
   type ConfigurationReplacement,
+  ConfigurationSaveId,
   type LoopDraft,
   LoopPreviewRequest,
   ConfigurationWrite,
@@ -218,6 +219,27 @@ export const useWorkerPreflight = (worker: WorkerName) => {
   });
   return { ...mutation, isPending: pending };
 };
+
+/**
+ * Returns a new ID for a configuration save: 16 random bytes in hex. Unlike `crypto.randomUUID`,
+ * it works on an instance served over plain HTTP.
+ */
+export const newConfigurationSaveId = (): ConfigurationSaveId =>
+  ConfigurationSaveId.make(
+    Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) =>
+      byte.toString(16).padStart(2, "0"),
+    ).join(""),
+  );
+
+/** Polls the configuration saves that run now, for a save that takes a while. */
+export const configurationWritesQuery = () =>
+  queryOptions({
+    queryKey: [...configurationEditorKeys, "writes"],
+    queryFn: () => api((client) => client.configurationWrites({})),
+    refetchInterval: 1000,
+    staleTime: 0,
+    meta: { refreshLabel: "Configuration saves", changes: changes.kind("configuration") },
+  });
 
 export const configurationHeadQuery = () =>
   queryOptions({

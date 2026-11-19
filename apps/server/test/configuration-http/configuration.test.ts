@@ -395,7 +395,7 @@ it("applies API changes to the configuration view and running scheduler, and pau
     }).pipe(Effect.scoped),
   ));
 
-it("preserves encoded identifiers and accepts only one of two writes to the same revision", () =>
+it("preserves encoded identifiers, accepts only one of two writes to the same revision, and lists no running save after them", () =>
   Effect.runPromise(
     Effect.gen(function* () {
       const { request, store } = yield* harness();
@@ -425,6 +425,8 @@ it("preserves encoded identifiers and accepts only one of two writes to the same
           value: { name: "owner/repo" },
         },
       });
+      const writes = yield* request("GET", "/writes");
+      expect(writes).toMatchObject({ status: 200, body: [] });
     }).pipe(Effect.scoped),
   ));
 

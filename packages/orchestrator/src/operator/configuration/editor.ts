@@ -35,6 +35,7 @@ import {
   CurrentInstance,
   type InstanceReloadError,
 } from "../../current-instance/current-instance.ts";
+import type { ConfigurationWriteProgress } from "../../current-instance/steps.ts";
 import {
   ConfigurationEntityRequest,
   ConfigurationEntityView,
@@ -76,11 +77,14 @@ const entitiesOf = (configuration: Configuration) =>
 export class ConfigurationEditor extends Context.Service<
   ConfigurationEditor,
   {
+    /** Reads the number of the stored revision, which a write expects to replace. */
+    readonly head: Effect.Effect<ConfigurationRevisionNumber, ConfigurationEditorError>;
+    /** Lists the configuration saves that run now, with the step that each runs. */
+    readonly writes: Effect.Effect<ReadonlyArray<ConfigurationWriteProgress>>;
     /**
      * Validates the JSON or Markdown in `input` against the current configuration and returns
      * problems without writing.
      */
-    readonly head: Effect.Effect<ConfigurationRevisionNumber, ConfigurationEditorError>;
     readonly checkLoop: (input: LoopDraft) => Effect.Effect<LoopCheck, ConfigurationEditorError>;
     /**
      * Evaluates `input` against stored items and optionally renders a prompt. It does not submit
@@ -170,7 +174,7 @@ export class ConfigurationEditor extends Context.Service<
         );
       const save = (
         snapshot: Configuration,
-        input: Pick<ConfigurationWrite, "expected" | "message">,
+        input: Pick<ConfigurationWrite, "expected" | "message" | "save">,
         changes: ReadonlyArray<ConfigurationChange>,
       ) =>
         Effect.gen(function* () {
@@ -197,6 +201,7 @@ export class ConfigurationEditor extends Context.Service<
             changes,
             actor: yield* requestActor(snapshot.actor),
             message: Option.fromUndefinedOr(input.message),
+            save: Option.fromUndefinedOr(input.save),
           });
         });
       const resolveKey = (snapshot: Configuration, key: ConfigurationEntityKey) =>
@@ -218,6 +223,7 @@ export class ConfigurationEditor extends Context.Service<
 
       return ConfigurationEditor.of({
         head: Effect.map(store.read, ({ number }) => number),
+        writes: current.writes,
         checkLoop: (input) =>
           requirePermission("maintain", loopScope(input.name)).pipe(
             Effect.andThen(loops.checkLoop(input)),

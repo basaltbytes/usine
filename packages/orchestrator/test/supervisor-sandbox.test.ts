@@ -117,6 +117,7 @@ for (const settings of [
                 reload: Effect.die("no reload"),
                 commit: () => Effect.die("no commit"),
                 registerWorkers: () => Effect.void,
+                writes: Effect.succeed([]),
               }),
             ),
           ),

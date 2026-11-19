@@ -107,9 +107,15 @@ When the orchestrator saves a revision through the operator API or reloads the s
 | `read` | step | none | Reads the configuration store. |
 | `parse` | step | none | Parses and validates the changed entities. |
 | `restart` | step | none | Checks for changes that require a restart. |
-| `worker-preflight` | step | none | Runs preflight for added workers, added capacity, and new brains. |
+| `worker-preflight` | step | none | Runs preflight for added workers, added capacity, and new brains, without pulling an attempt image. |
 | `store` | step | none | Stores the revision. |
 | `apply` | step | none | Applies the revision to new work. |
+
+The `worker-preflight` step of a save or reload doesn't pull the attempt image of an SSH worker. Preflight checks the image that the machine has. When the machine has none, a manifest request checks that the registry has the image, the checks that run the image wait, and the worker's harnesses show as deferred. After the revision applies, the worker takes no attempt while a preflight pulls the image and checks the image's user ID, the shared caches, Podman's resource enforcement, and the harnesses. A failed check keeps the worker out of scheduling and retries, as any failed preflight does. Preflight of a worker whose connection the revision changes works the same way. Startup, on-demand, and retried preflights pull the image. A save doesn't wait for the preflight that pulls a missing image or for a retried preflight, but it waits for a startup or on-demand preflight that runs at the same time.
+
+If the client of a save disconnects before the `store` step, the save stops, and the orchestrator logs `Configuration save interrupted by the client; nothing was saved` at Info level with the `step` that was running and the `expectedRevision`. No revision is stored. The `store` and `apply` steps finish even if the client disconnects: the revision applies, and the orchestrator logs `The client left a configuration save after its revision was stored; the revision applies`.
+
+`GET /api/configuration/writes` lists the saves that run now: the ID that the save's client sent with the write (`save`), the revision each expects to replace (`expected`), and its `step`. A save waiting for another change shows `wait`. The configuration form sends a new `save` ID with each save and shows the step of that save only. When a save takes more than 3 seconds, the configuration form shows its step, such as `Still saving: checking the workers (worker-preflight).`
 
 The UI refuses a revision that requires a restart or fails preflight. CLI commands can save it while the process keeps the accepted configuration. A successful CLI exit confirms storage. Check logs for `Stored configuration applied; new runs use the new configuration` or `Configuration revision could not be applied; the running configuration is unchanged`. Correct rejected settings or restart to apply them. Send `SIGHUP` to the orchestrator process to request an explicit store reread.
 

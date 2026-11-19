@@ -6,6 +6,7 @@ import { Array as Arr, Effect, Match, Option } from "effect";
 import {
   type ExecutorError,
   logPreflightFailure,
+  type PreflightImage,
   type PreflightReport,
   WorkerCapabilityError,
   type WorkerCapability,
@@ -81,8 +82,10 @@ const containerLogins = Effect.fn("SshExecutor.containerLogins")(function* (
  * Verifies an SSH Worker's machine: SSH connects, the root is a writable directory, Git runs,
  * memory is enough for the concurrent Attempts, the Gateway (if any) responds and is reachable,
  * the container runtime and attempt image work when installed, the root and the image storage
- * have the free disk space of the Worker's threshold, and each brain is ready. Pulls the Attempt
- * image and removes older images of its repository. For a fixed tailnet worker, configures
+ * have the free disk space of the Worker's threshold, and each brain is ready. With `image`
+ * `pull`, the default, pulls the Attempt image and removes older images of its repository. With
+ * `defer`, a machine without the image skips the checks that run the image, and the report gives
+ * the image as `missingImage` and the brains as deferred. For a fixed tailnet worker, configures
  * gateway routing with passwordless sudo. With a container runtime, it derives the container limits that `usine.yaml` leaves unset
  * for `maxConcurrentAttempts` containers, which the report gives, and
  * brains are probed in a container from the image; without, as the SSH user, which the report
@@ -99,11 +102,12 @@ export const sshMachinePreflightFor = (
     machine: SshMachine,
     brains: ReadonlyArray<BrainSpec>,
     maxConcurrentAttempts: number,
+    image: PreflightImage = "pull",
   ) {
     const worker = machine.address.name;
     const host = machine.shell.destination;
     const root = machine.address.root;
-    yield* Effect.annotateCurrentSpan({ worker, host, maxConcurrentAttempts });
+    yield* Effect.annotateCurrentSpan({ worker, host, maxConcurrentAttempts, image });
     const connected = yield* commands
       .inspect("preflight", machine.shell, "true", [])
       .pipe(
@@ -178,7 +182,7 @@ export const sshMachinePreflightFor = (
         machine.gateway.value,
       );
     }
-    const containerCheck = yield* containers.verify(machine, maxConcurrentAttempts);
+    const containerCheck = yield* containers.verify(machine, maxConcurrentAttempts, image);
     yield* verifyFreeDisk(
       commands,
       machine,
@@ -222,28 +226,35 @@ export const sshMachinePreflightFor = (
     const harnesses = Arr.dedupe(brains.map(({ harness }) => harness));
     const probe = (shell: RemoteHost) =>
       verifyHarnessReadiness(worker, machine.provisioned, brains, harnessProbe(machine, shell));
-    yield* containerCheck._tag === "Container"
-      ? Effect.scoped(
-          containerLogins(catalog, machine, harnesses).pipe(
-            Effect.flatMap((logins) =>
-              containers.preflightShell(
-                machine,
-                containerCheck.settings,
-                logins,
-                Option.match(machine.gateway, {
-                  onNone: () => ({}),
-                  onSome: ({ settings }) =>
-                    gatewayExportedEnvironment(
-                      { ...settings, catalog },
-                      `${machine.workerDirectory}/gh`,
-                    ),
-                }),
+    yield* Match.valueTags(containerCheck, {
+      Container: ({ settings, image: attemptImage }) =>
+        attemptImage === "missing"
+          ? Effect.logInfo(
+              "The worker doesn't have the attempt image, so the preflight that pulls it checks the harnesses",
+              { worker, host, harnesses: harnesses.join(",") },
+            )
+          : Effect.scoped(
+              containerLogins(catalog, machine, harnesses).pipe(
+                Effect.flatMap((logins) =>
+                  containers.preflightShell(
+                    machine,
+                    settings,
+                    logins,
+                    Option.match(machine.gateway, {
+                      onNone: () => ({}),
+                      onSome: (gateway) =>
+                        gatewayExportedEnvironment(
+                          { ...gateway.settings, catalog },
+                          `${machine.workerDirectory}/gh`,
+                        ),
+                    }),
+                  ),
+                ),
+                Effect.flatMap(probe),
               ),
             ),
-            Effect.flatMap(probe),
-          ),
-        )
-      : probe(machine.shell);
+      SharedUser: () => probe(machine.shell),
+    });
     const fields = {
       worker,
       host,
@@ -254,12 +265,21 @@ export const sshMachinePreflightFor = (
       findings: findings.length,
     };
     return yield* Match.valueTags(containerCheck, {
-      Container: ({ limits }) =>
+      Container: ({ settings, limits, image: attemptImage }) =>
         Effect.as(
-          Effect.logInfo("SSH Worker preflight verified", { ...fields, ...limitFields(limits) }),
+          Effect.logInfo(
+            attemptImage === "missing"
+              ? "SSH Worker preflight verified without the attempt image"
+              : "SSH Worker preflight verified",
+            { ...fields, ...limitFields(limits) },
+          ),
           {
             degraded: Option.none(),
-            deferred: Option.none(),
+            deferred:
+              attemptImage === "missing"
+                ? Option.some("Checked by the preflight that pulls the attempt image.")
+                : Option.none(),
+            missingImage: attemptImage === "missing" ? Option.some(settings.image) : Option.none(),
             containerLimits: Option.some(limits.limits),
             findings,
             gatewayUpgrade,
@@ -269,6 +289,7 @@ export const sshMachinePreflightFor = (
         Effect.as(Effect.logInfo("SSH Worker preflight verified", fields), {
           degraded: Option.some(degraded),
           deferred: Option.none(),
+          missingImage: Option.none(),
           containerLimits: Option.none(),
           findings,
           gatewayUpgrade,
@@ -294,12 +315,14 @@ export const sshPreflightFor = (
       worker: WorkerName,
       brains: ReadonlyArray<BrainSpec>,
       maxConcurrentAttempts: number,
+      image: PreflightImage = "pull",
     ) {
-      yield* Effect.annotateCurrentSpan({ worker, maxConcurrentAttempts });
+      yield* Effect.annotateCurrentSpan({ worker, maxConcurrentAttempts, image });
       const entry = yield* workerFor(worker);
+      // A provisioned Worker has no machine, so its preflight pulls no image.
       return yield* Option.match(entry.machine, {
         onNone: () => verifyProvisioned(entry, brains, maxConcurrentAttempts),
-        onSome: (machine) => verifyMachine(machine, brains, maxConcurrentAttempts),
+        onSome: (machine) => verifyMachine(machine, brains, maxConcurrentAttempts, image),
       });
     },
     (effect, worker) => classifyDiskFull(worker, effect),

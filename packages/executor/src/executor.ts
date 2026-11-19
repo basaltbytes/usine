@@ -16,6 +16,7 @@ import { RunId, type Run } from "@usine/core/run";
 import {
   BotAccount,
   BotLogin,
+  ContainerImage,
   ContainerLimits,
   MachineId,
   MachineProvider,
@@ -171,6 +172,17 @@ export const ExecutorError = Schema.Union([
 ]);
 export type ExecutorError = typeof ExecutorError.Type;
 
+/**
+ * When a preflight downloads the Attempt image of a Worker that runs Attempts in containers.
+ *
+ * - `pull`: the preflight pulls the image, so the machine gets a tag that moved in the registry.
+ * - `defer`: the preflight checks the image that the machine has. A machine without the image
+ *   checks with a manifest request that the registry has it, skips the checks that run the image,
+ *   and the report names the image in `missingImage`. A configuration save uses it, so the save
+ *   doesn't wait for a download.
+ */
+export type PreflightImage = "pull" | "defer";
+
 /** The outcome of a preflight that found every capability that Attempts need. */
 export interface PreflightReport {
   /**
@@ -179,11 +191,20 @@ export interface PreflightReport {
    */
   readonly degraded: Option.Option<string>;
   /**
-   * When the brains are checked instead, if the preflight had no machine to check them on, as
-   * for a provisioned Worker, which checks them on its first machine each day. `None` if the
-   * preflight checked them.
+   * When the brains are checked instead, if the preflight had no machine or Attempt image to
+   * check them on: a provisioned Worker checks them on its first machine each day, and a `pull`
+   * preflight checks them for a Worker with a `missingImage`. `None` if the preflight checked
+   * them.
    */
   readonly deferred: Option.Option<string>;
+  /**
+   * The Attempt image that a `defer` preflight found missing on the machine. The preflight checked
+   * the machine, but not the image's user, the shared caches, the container limits that Podman
+   * enforces, or the brains: a `pull` preflight downloads the image and checks them before the
+   * Worker takes Attempts. `None` if the preflight checked the image, or the Worker runs no
+   * containers.
+   */
+  readonly missingImage: Option.Option<ContainerImage>;
   /**
    * The limits of each Attempt container, the ones `usine.yaml` sets and the ones derived from
    * the machine. `None` if the Worker runs no containers or the preflight checked no machine.
@@ -206,6 +227,7 @@ export interface PreflightReport {
 export const fullPreflight: PreflightReport = {
   degraded: Option.none(),
   deferred: Option.none(),
+  missingImage: Option.none(),
   containerLimits: Option.none(),
   findings: [],
   gatewayUpgrade: Option.none(),
@@ -413,12 +435,14 @@ export class Executor extends Context.Service<
     >;
     /**
      * Verifies Git, enough memory for `maxConcurrentAttempts` concurrent Attempts, and each brain
-     * in `brains`. Never installs tools or logs in; an SSH Worker pulls its Attempt image.
+     * in `brains`. Never installs tools or logs in. An SSH Worker pulls its Attempt image when
+     * `image` is `pull`, the default.
      */
     readonly preflight: (
       worker: WorkerName,
       brains: ReadonlyArray<BrainSpec>,
       maxConcurrentAttempts: number,
+      image?: PreflightImage,
     ) => Effect.Effect<PreflightReport, ExecutorError>;
     /**
      * Verifies the Agent's brain, then acquires the checkout and credential in the caller's scope.

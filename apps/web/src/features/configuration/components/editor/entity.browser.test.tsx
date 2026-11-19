@@ -31,6 +31,8 @@ declare module "vitest/browser" {
     ) => Promise<void>;
     delayConfigurationLookup: (identifier: string) => Promise<void>;
     releaseConfigurationLookup: (identifier: string) => Promise<void>;
+    delayConfigurationSave: (step: string) => Promise<void>;
+    releaseConfigurationSave: () => Promise<void>;
     configurationEditorScreenshot: (name: string) => Promise<void>;
     configurationEditorResponses: (
       rejections: readonly { readonly status: number; readonly body: string }[],
@@ -211,6 +213,27 @@ it("keeps invalid text and lists every field problem under the editor before sav
     method: "PUT",
     payload: { expected: 2, text: "name: local\nkind: local\nmax_concurrent_attempts: 3\n" },
   });
+});
+
+it("names the step of its own save once the save has run for 3 seconds", async () => {
+  await mount();
+  await commands.delayConfigurationSave("wait");
+  await editText();
+  await page
+    .getByRole("textbox", { name: "Configuration text" })
+    .fill("name: local\nkind: local\nmax_concurrent_attempts: 3\n");
+  const clicked = performance.now();
+  await button("Save").click();
+  expect(page.getByText(/Still saving/u).query()).toBeNull();
+  const step = page.getByRole("status").filter({
+    hasText: "Still saving: waiting for another configuration change to finish (wait).",
+  });
+  await expect.element(step, { timeout: 10_000 }).toBeVisible();
+  expect(performance.now() - clicked).toBeGreaterThanOrEqual(3000);
+  expect(page.getByText(/worker-preflight/u).query(), "another save's step").toBeNull();
+  await commands.releaseConfigurationSave();
+  await expect.element(page.getByRole("status").filter({ hasText: "Saved" })).toBeVisible();
+  await expect.element(step).not.toBeInTheDocument();
 });
 
 it("shows the newer revision on conflict and preserves the draft when reloading text", async () => {

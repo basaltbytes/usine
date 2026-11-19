@@ -175,6 +175,25 @@ describe("rootless Podman", () => {
     }).pipe(Effect.provide(runtime(machine, mintingProvider())));
   });
 
+  it.effect("checks the limits in the pull preflight after a deferred one", () => {
+    const machine = podmanMachine();
+    machine.state.imageOnMachine = false;
+    machine.state.limitsEnforced = false;
+    return Effect.gen(function* () {
+      const executor = yield* Executor;
+      const report = yield* executor.preflight(WORKER, [], 1, "defer");
+      assert.deepStrictEqual(report.missingImage, Option.some(ATTEMPT_IMAGE));
+      assert.isFalse(
+        machine.state.calls.some(({ line }) => line.includes("/sys/fs/cgroup/cpu.max")),
+        "the deferred preflight starts no container to check the limits",
+      );
+
+      const error = yield* executor.preflight(WORKER, [], 1, "pull").pipe(Effect.flip);
+      assert.strictEqual(error._tag, "WorkerCapabilityError");
+      assert.include(error.message, "did not enforce");
+    }).pipe(Effect.provide(runtime(machine, mintingProvider())));
+  });
+
   it.effect("refuses unenforced limits even with no harnesses and removes the probe", () => {
     const machine = podmanMachine();
     machine.state.limitsEnforced = false;

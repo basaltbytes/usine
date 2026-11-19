@@ -147,6 +147,7 @@ it.live(
           changes: Stream.make(fixtureInstance),
           reload: Effect.die("unused"),
           commit: () => Effect.die("unused"),
+          writes: Effect.succeed([]),
           registerWorkers: () => Effect.void,
         });
         const app = Layer.mock(GitHubApp)({

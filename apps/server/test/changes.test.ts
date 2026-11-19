@@ -58,6 +58,7 @@ const instances = Effect.gen(function* () {
     changes: Stream.never,
     reload: unused(),
     commit: unused,
+    writes: Effect.succeed([]),
     registerWorkers: () => Effect.void,
   });
 });

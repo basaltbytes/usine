@@ -2,13 +2,14 @@ import { InstanceScope } from "@usine/core/access";
 import { ChangeBus } from "@usine/core/changes";
 import type { Worker } from "@usine/config/factory";
 import type { BrainSpec } from "@usine/core/agent/brain";
-import type { WorkerName } from "@usine/core/worker";
+import type { ContainerImage, WorkerName } from "@usine/core/worker";
 import {
   type Executor,
   ExecutorOperationError,
   type ExecutorError,
   fullPreflight,
   type MachineCheck,
+  type PreflightImage,
   type PreflightReport,
   type WorkerCapabilityError,
 } from "@usine/executor";
@@ -51,6 +52,19 @@ interface PreflightConfiguration {
   readonly workers: ReadonlyArray<Worker>;
   readonly roster: ReadonlyArray<BrainSpec>;
 }
+
+/**
+ * What a Worker needs after a preflight that retried it: nothing, more retries, or a `pull`
+ * preflight of the Attempt `image` that a `defer` preflight found missing.
+ */
+type Recovery =
+  | { readonly _tag: "Recovered" }
+  | { readonly _tag: "Failing" }
+  | { readonly _tag: "ImageMissing"; readonly image: ContainerImage };
+
+/** Why a Worker takes no Attempt while a preflight pulls its Attempt `image`. */
+const pullingMessage = (image: ContainerImage) =>
+  `The worker doesn't have the attempt image ${image}; it takes attempts once a preflight pulls and checks it.`;
 
 export const preflightFor = Effect.fn("WorkerScheduler.preflightFor")(function* (
   executor: Pick<Executor["Service"], "preflight">,
@@ -151,7 +165,7 @@ export const preflightFor = Effect.fn("WorkerScheduler.preflightFor")(function* 
     yield* Effect.annotateCurrentSpan({ worker, capability: error.capability });
     yield* record(worker, roster, Exit.fail(error));
     yield* TxRef.update(blocked, (current) => new Map(current).set(worker, error.message));
-    yield* FiberMap.run(retries, worker, retry(worker), { onlyIfMissing: true });
+    yield* FiberMap.run(retries, worker, retry(worker, "later"), { onlyIfMissing: true });
     yield* Effect.logWarning(
       "A worker check failed while an attempt prepared; scheduling disabled until preflight passes",
       { worker, capability: error.capability, message: error.message },
@@ -198,18 +212,25 @@ export const preflightFor = Effect.fn("WorkerScheduler.preflightFor")(function* 
     yield* changed(worker);
   });
 
+  /**
+   * Preflights `worker` for `roster`. With `image` `defer`, as a configuration save runs it, an
+   * SSH Worker pulls no Attempt image.
+   */
   const check = Effect.fn("WorkerScheduler.checkPreflight")(function* (
     worker: Worker,
     roster: ReadonlyArray<BrainSpec>,
+    image: PreflightImage,
   ) {
-    yield* Effect.annotateCurrentSpan({ worker: worker.name });
+    yield* Effect.annotateCurrentSpan({ worker: worker.name, image });
     return yield* Effect.acquireUseRelease(
       TxRef.update(checking, (current) => new Set([...current, worker.name])).pipe(
         Effect.andThen(changed(worker.name)),
       ),
       () =>
         initialize(worker).pipe(
-          Effect.andThen(executor.preflight(worker.name, roster, worker.maxConcurrentAttempts)),
+          Effect.andThen(
+            executor.preflight(worker.name, roster, worker.maxConcurrentAttempts, image),
+          ),
           Effect.mapError((error) =>
             error._tag === "ExecutorOperationError"
               ? ExecutorOperationError.make({
@@ -229,14 +250,15 @@ export const preflightFor = Effect.fn("WorkerScheduler.preflightFor")(function* 
     );
   });
 
-  const recover = Effect.fn("WorkerScheduler.retryPreflight")(function* (name: WorkerName) {
+  /**
+   * Records `result`, a preflight that retried the blocked Worker `name`. A passed preflight
+   * resumes scheduling on the Worker, unless it found its Attempt image missing.
+   */
+  const settle = Effect.fn("WorkerScheduler.settlePreflight")(function* (
+    name: WorkerName,
+    result: Result.Result<PreflightReport, ExecutorError>,
+  ) {
     yield* Effect.annotateCurrentSpan({ worker: name });
-
-    if (!(yield* TxRef.get(blocked)).has(name)) return false;
-    const { workers, roster } = yield* Ref.get(configuration);
-    const worker = workers.find((worker) => worker.name === name);
-    if (worker === undefined) return false;
-    const result = yield* check(worker, roster).pipe(Effect.result);
     if (Result.isFailure(result)) {
       yield* TxRef.update(blocked, (current) => new Map(current).set(name, result.failure.message));
       yield* Effect.logWarning("Worker preflight still fails; scheduling stays disabled", {
@@ -245,7 +267,15 @@ export const preflightFor = Effect.fn("WorkerScheduler.preflightFor")(function* 
         message: result.failure.message,
       });
       yield* changed(name);
-      return true;
+      return { _tag: "Failing" } satisfies Recovery;
+    }
+    const missing = result.success.missingImage;
+    if (Option.isSome(missing)) {
+      yield* TxRef.update(blocked, (current) =>
+        new Map(current).set(name, pullingMessage(missing.value)),
+      );
+      yield* changed(name);
+      return { _tag: "ImageMissing", image: missing.value } satisfies Recovery;
     }
     yield* TxRef.update(
       blocked,
@@ -253,23 +283,65 @@ export const preflightFor = Effect.fn("WorkerScheduler.preflightFor")(function* 
     );
     yield* changed(name);
     yield* Effect.logInfo("Worker preflight passed; scheduling resumed", { worker: name });
-    return false;
+    return { _tag: "Recovered" } satisfies Recovery;
   });
 
-  const retry = (worker: WorkerName) =>
+  /**
+   * Runs a `pull` preflight of the blocked Worker `name` with the current roster, unless a
+   * configuration save unblocked or removed it. The preflight runs outside `exclusive`, and its
+   * result is settled inside it.
+   */
+  const recover = Effect.fn("WorkerScheduler.retryPreflight")(function* (name: WorkerName) {
+    yield* Effect.annotateCurrentSpan({ worker: name });
+    const recovered: Recovery = { _tag: "Recovered" };
+    if (!(yield* TxRef.get(blocked)).has(name)) return recovered;
+    const { workers, roster } = yield* Ref.get(configuration);
+    const worker = workers.find((worker) => worker.name === name);
+    if (worker === undefined) {
+      yield* Effect.logInfo("The worker left the configuration; its preflight retries stop", {
+        worker: name,
+      });
+      return recovered;
+    }
+    const result = yield* check(worker, roster, "pull").pipe(Effect.result);
+    return yield* exclusive.withPermit(settle(name, result));
+  });
+
+  /**
+   * Retries the `pull` preflight of the blocked Worker `name` until it passes: at once if `first`
+   * is `now`, then after 1, 2, and 5 minutes, and then every 10 minutes. A configuration save
+   * that checks the Worker again or removes it interrupts the retries.
+   */
+  const retry = (name: WorkerName, first: "now" | "later") =>
     Effect.gen(function* () {
-      let failures = 0;
-      while (true) {
+      if (first === "now" && (yield* recover(name))._tag === "Recovered") return;
+      for (let failures = 0; ; failures += 1) {
         const minutes = [1, 2, 5][failures] ?? 10;
         yield* Effect.logInfo("Worker preflight will be retried; its runs wait", {
-          worker,
+          worker: name,
           retryAfterMinutes: minutes,
         });
         yield* Effect.sleep(Duration.minutes(minutes));
-        if (!(yield* exclusive.withPermit(recover(worker)))) return;
-        failures += 1;
+        if ((yield* recover(name))._tag === "Recovered") return;
       }
     });
+
+  /**
+   * Starts the `pull` preflight of the Attempt `image` that a `defer` preflight of `worker` found
+   * missing, and its retries while it fails. The caller has blocked the Worker with
+   * `pullingMessage`.
+   */
+  const pullLater = Effect.fn("WorkerScheduler.pullAttemptImageLater")(function* (
+    worker: WorkerName,
+    image: ContainerImage,
+  ) {
+    yield* Effect.annotateCurrentSpan({ worker, image });
+    yield* Effect.logInfo(
+      "The worker doesn't have its attempt image; a preflight pulls and checks it, and the worker takes no attempt until it passes",
+      { worker, image },
+    );
+    yield* FiberMap.run(retries, worker, retry(worker, "now"));
+  });
 
   const start = Effect.fn("WorkerScheduler.preflight")(function* (
     workers: ReadonlyArray<Worker>,
@@ -279,7 +351,7 @@ export const preflightFor = Effect.fn("WorkerScheduler.preflightFor")(function* 
     const results = yield* Effect.forEach(
       workers,
       (worker) =>
-        check(worker, roster).pipe(
+        check(worker, roster, "pull").pipe(
           Effect.tapError((error) =>
             Effect.logWarning("Worker preflight failed; scheduling disabled", {
               worker: worker.name,
@@ -301,9 +373,11 @@ export const preflightFor = Effect.fn("WorkerScheduler.preflightFor")(function* 
       blocked,
       new Map(failures.map(({ worker, error }) => [worker, error.message])),
     );
-    yield* Effect.forEach(failures, ({ worker }) => FiberMap.run(retries, worker, retry(worker)), {
-      discard: true,
-    });
+    yield* Effect.forEach(
+      failures,
+      ({ worker }) => FiberMap.run(retries, worker, retry(worker, "later")),
+      { discard: true },
+    );
   });
 
   const run = Effect.fn("WorkerScheduler.runPreflight")(function* (
@@ -342,7 +416,7 @@ export const preflightFor = Effect.fn("WorkerScheduler.preflightFor")(function* 
                 message: `Worker "${name}" is not configured.`,
               });
             yield* Effect.logInfo("On-demand worker preflight started", { worker: name });
-            const result = yield* check(worker, roster).pipe(Effect.result);
+            const result = yield* check(worker, roster, "pull").pipe(Effect.result);
             if (Result.isFailure(result)) {
               yield* TxRef.update(blocked, (current) =>
                 new Map(current).set(name, result.failure.message),
@@ -352,7 +426,7 @@ export const preflightFor = Effect.fn("WorkerScheduler.preflightFor")(function* 
                 errorTag: result.failure._tag,
                 message: result.failure.message,
               });
-              yield* FiberMap.run(retries, name, retry(name));
+              yield* FiberMap.run(retries, name, retry(name, "later"));
             } else {
               yield* TxRef.update(
                 blocked,
@@ -383,18 +457,28 @@ export const preflightFor = Effect.fn("WorkerScheduler.preflightFor")(function* 
     );
   });
 
+  /**
+   * Applies the preflights of a configuration save: resumes scheduling on each Worker in
+   * `checked`, except the ones in `missing`, which wait for a preflight that pulls the Attempt
+   * image that the save's preflight found missing.
+   */
   const accept = Effect.fn("WorkerScheduler.acceptPreflight")(function* (
     declared: ReadonlyArray<Worker>,
     roster: ReadonlyArray<BrainSpec>,
     checked: ReadonlySet<WorkerName>,
+    missing: ReadonlyMap<WorkerName, ContainerImage>,
   ) {
     yield* Ref.set(configuration, { workers: declared, roster });
     const names = new Set(declared.map(({ name }) => name));
     const previous = yield* TxRef.get(blocked);
-    const next = new Map(
-      [...previous].filter(([worker]) => names.has(worker) && !checked.has(worker)),
-    );
+    const next = new Map([
+      ...[...previous].filter(([worker]) => names.has(worker) && !checked.has(worker)),
+      ...[...missing].map(([worker, image]) => [worker, pullingMessage(image)] as const),
+    ]);
     yield* TxRef.set(blocked, next);
+    yield* Effect.forEach(missing, ([worker, image]) => pullLater(worker, image), {
+      discard: true,
+    });
     yield* Effect.forEach(
       [...previous.keys()].filter((worker) => !next.has(worker)),
       (worker) =>
@@ -412,6 +496,10 @@ export const preflightFor = Effect.fn("WorkerScheduler.preflightFor")(function* 
     );
   });
 
+  /**
+   * Preflights the Workers whose connection a configuration save changed, without pulling their
+   * Attempt images. Retries the ones that fail, and pulls the images that the machines lack.
+   */
   const refresh = Effect.fn("WorkerScheduler.refreshPreflight")(function* (
     workers: ReadonlyArray<Worker>,
   ) {
@@ -424,6 +512,7 @@ export const preflightFor = Effect.fn("WorkerScheduler.preflightFor")(function* 
           ...workers.map(({ name }) => [name, "Checking changed worker connection"] as const),
         ]),
     );
+    const { roster } = yield* Ref.get(configuration);
     yield* Effect.forEach(
       workers,
       (worker) =>
@@ -432,8 +521,11 @@ export const preflightFor = Effect.fn("WorkerScheduler.preflightFor")(function* 
           yield* Effect.logInfo("Worker connection changed; running attempts keep their machine", {
             worker: worker.name,
           });
-          if (yield* recover(worker.name))
-            yield* FiberMap.run(retries, worker.name, retry(worker.name));
+          const result = yield* check(worker, roster, "defer").pipe(Effect.result);
+          const recovery = yield* settle(worker.name, result);
+          if (recovery._tag === "Failing")
+            yield* FiberMap.run(retries, worker.name, retry(worker.name, "later"));
+          else if (recovery._tag === "ImageMissing") yield* pullLater(worker.name, recovery.image);
         }),
       { concurrency: "unbounded", discard: true },
     );

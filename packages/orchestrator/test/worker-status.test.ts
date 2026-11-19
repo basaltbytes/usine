@@ -1,7 +1,14 @@
 import { assert, describe, it } from "@effect/vitest";
 import { BrainSpec, Harness, ModelId } from "@usine/core/agent/brain";
 import { HarnessUnavailableError } from "@usine/core/agent/capability";
-import { WorkerName } from "@usine/core/worker";
+import {
+  ContainerCpus,
+  ContainerImage,
+  ContainerLimits,
+  ContainerMemoryMib,
+  ContainerPids,
+  WorkerName,
+} from "@usine/core/worker";
 import { fullPreflight, WorkerCapabilityError } from "@usine/executor";
 import { DateTime, Option, Result } from "effect";
 import { recordPreflight, unchecked, type WorkerPreflight } from "../src/worker-status.ts";
@@ -69,6 +76,34 @@ describe("Worker preflight record", () => {
     assert.deepStrictEqual(failed.findings, [finding]);
     const fixed = recordPreflight(failed, [codex], at(11), Result.succeed(fullPreflight));
     assert.deepStrictEqual(fixed.findings, []);
+  });
+
+  it("records the limits and findings of a machine check that deferred a missing image", () => {
+    const limits = ContainerLimits.make({
+      cpus: ContainerCpus.make(2),
+      memoryMib: ContainerMemoryMib.make(4096),
+      pids: ContainerPids.make(4096),
+    });
+    const finding = "The SSH user can't read the kernel journal";
+    const record = recordPreflight(
+      unchecked(worker),
+      [codex],
+      at(9),
+      Result.succeed({
+        degraded: Option.none(),
+        deferred: Option.some("Checked by the preflight that pulls the attempt image."),
+        missingImage: Option.some(ContainerImage.make("ghcr.io/basaltbytes/usine-worker:next")),
+        containerLimits: Option.some(limits),
+        findings: [finding],
+        gatewayUpgrade: Option.none(),
+      }),
+    );
+    assert.deepStrictEqual(summary(record), {
+      prerequisites: "Passed 2026-10-20T09:00:00.000Z",
+      harnesses: ["codex Deferred 2026-10-20T09:00:00.000Z"],
+    });
+    assert.deepStrictEqual(record.containerLimits, Option.some(limits));
+    assert.deepStrictEqual(record.findings, [finding]);
   });
 
   it("takes the gateway upgrade from every passed preflight and keeps it through a failed one", () => {

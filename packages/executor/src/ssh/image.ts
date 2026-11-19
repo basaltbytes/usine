@@ -1,9 +1,105 @@
-import type { ContainerImage } from "@usine/core/worker";
+import type { ContainerImage, WorkerName } from "@usine/core/worker";
 import { Duration, Effect, Option } from "effect";
 import { WorkerCapabilityError } from "../executor.ts";
 import type { RemoteCommands } from "../remote/commands.ts";
 import type { ContainerRuntime } from "../remote/runtime.ts";
 import type { SshMachine } from "./model.ts";
+
+const imageGap = (worker: WorkerName, message: string, detail: string) =>
+  WorkerCapabilityError.make({
+    worker,
+    capability: "container",
+    message,
+    cause: new Error(detail),
+  });
+
+/** Returns the ID of `image` on the machine, or `None` if the machine doesn't have it. */
+const inspectAttemptImage = Effect.fn("SshExecutor.inspectAttemptImage")(function* (
+  commands: RemoteCommands,
+  machine: SshMachine,
+  image: ContainerImage,
+  runtime: ContainerRuntime,
+  operation: "preflight" | "prepare",
+) {
+  const worker = machine.address.name;
+  const fields = { worker, host: machine.shell.destination, image, runtime };
+  yield* Effect.annotateCurrentSpan(fields);
+  const [duration, result] = yield* commands
+    .inspect(operation, machine.shell, runtime, ["image", "inspect", "--format", "{{.Id}}", image])
+    .pipe(Effect.timed);
+  const absent =
+    runtime === "podman"
+      ? result.exitCode === 125 && result.stderr.trim().endsWith(": image not known")
+      : result.exitCode === 1;
+  if (result.exitCode !== 0 && !absent)
+    return yield* imageGap(
+      worker,
+      `Can't inspect the attempt image ${image}`,
+      result.stderr.trim(),
+    );
+  const id = result.stdout.trim();
+  if (result.exitCode === 0 && id.length === 0)
+    return yield* imageGap(
+      worker,
+      `Can't inspect the attempt image ${image}`,
+      "Image inspect returned no ID",
+    );
+  const present = result.exitCode === 0;
+  yield* Effect.logInfo("Inspected the attempt image", {
+    ...fields,
+    status: present ? "present" : "absent",
+    durationMillis: Duration.toMillis(duration),
+  });
+  return present ? Option.some(id) : Option.none<string>();
+});
+
+/**
+ * Checks the attempt image without pulling it, for a `defer` preflight. Returns `true` if the
+ * machine has `image`. Otherwise checks with a manifest request that the registry has it, so
+ * that a `pull` preflight can download it, and returns `false`.
+ */
+export const findAttemptImage = Effect.fn("SshExecutor.findAttemptImage")(function* (
+  commands: RemoteCommands,
+  machine: SshMachine,
+  image: ContainerImage,
+  runtime: ContainerRuntime,
+) {
+  const worker = machine.address.name;
+  const fields = { worker, host: machine.shell.destination, image, runtime };
+  yield* Effect.annotateCurrentSpan(fields);
+  const local = yield* inspectAttemptImage(commands, machine, image, runtime, "preflight");
+  if (Option.isSome(local)) {
+    yield* Effect.logInfo(
+      "Checking the attempt image that the worker has, without pulling it",
+      fields,
+    );
+    return true;
+  }
+  const [duration, manifest] = yield* commands
+    .inspect("preflight", machine.shell, runtime, ["manifest", "inspect", image])
+    .pipe(Effect.timed);
+  const manifestFields = {
+    ...fields,
+    durationMillis: Duration.toMillis(duration),
+    exitCode: manifest.exitCode,
+  };
+  if (manifest.exitCode !== 0) {
+    yield* Effect.logWarning("The registry has no attempt image that the worker can pull", {
+      ...manifestFields,
+      stderr: manifest.stderr.trim().slice(0, 1000),
+    });
+    return yield* imageGap(
+      worker,
+      `SSH worker "${worker}" doesn't have the attempt image ${image}, and can't find it in the registry`,
+      manifest.stderr.trim() || `${runtime} manifest inspect exited with code ${manifest.exitCode}`,
+    );
+  }
+  yield* Effect.logInfo(
+    "The worker doesn't have the attempt image, and the registry has it; a pull preflight downloads it",
+    manifestFields,
+  );
+  return false;
+});
 
 /** Checks the local image before any container starts and pulls it during preflight or when absent. */
 export const prepareAttemptImage = Effect.fn("SshExecutor.prepareAttemptImage")(function* (
@@ -16,41 +112,8 @@ export const prepareAttemptImage = Effect.fn("SshExecutor.prepareAttemptImage")(
   const worker = machine.address.name;
   const fields = { worker, host: machine.shell.destination, image, runtime };
   yield* Effect.annotateCurrentSpan(fields);
-  const gap = (message: string, detail: string) =>
-    WorkerCapabilityError.make({
-      worker,
-      capability: "container",
-      message,
-      cause: new Error(detail),
-    });
-  const inspect = Effect.fn("SshExecutor.inspectAttemptImage")(function* () {
-    yield* Effect.annotateCurrentSpan(fields);
-    const [duration, result] = yield* commands
-      .inspect(operation, machine.shell, runtime, [
-        "image",
-        "inspect",
-        "--format",
-        "{{.Id}}",
-        image,
-      ])
-      .pipe(Effect.timed);
-    const absent =
-      runtime === "podman"
-        ? result.exitCode === 125 && result.stderr.trim().endsWith(": image not known")
-        : result.exitCode === 1;
-    if (result.exitCode !== 0 && !absent)
-      return yield* gap(`Can't inspect the attempt image ${image}`, result.stderr.trim());
-    const id = result.stdout.trim();
-    if (result.exitCode === 0 && id.length === 0)
-      return yield* gap(`Can't inspect the attempt image ${image}`, "Image inspect returned no ID");
-    const present = result.exitCode === 0;
-    yield* Effect.logInfo("Inspected the attempt image", {
-      ...fields,
-      status: present ? "present" : "absent",
-      durationMillis: Duration.toMillis(duration),
-    });
-    return present ? Option.some(id) : Option.none<string>();
-  });
+  const gap = (message: string, detail: string) => imageGap(worker, message, detail);
+  const inspect = () => inspectAttemptImage(commands, machine, image, runtime, operation);
   const before = yield* inspect();
   if (operation === "prepare" && Option.isSome(before)) return;
   if (Option.isNone(before)) {

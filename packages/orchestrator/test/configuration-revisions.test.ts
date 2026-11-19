@@ -29,6 +29,7 @@ import {
 } from "effect";
 import { TestClock } from "effect/testing";
 import { CurrentInstance } from "../src/current-instance/current-instance.ts";
+import { ConfigurationSaveId } from "../src/current-instance/steps.ts";
 import { writeInstanceFiles } from "./support/instance-folder.ts";
 
 const parser = ConfigParser.layer.pipe(Layer.provide(MarcbachmannCelLayer));
@@ -156,6 +157,16 @@ const stepLogger = (steps: Array<StepLog>, messages: Array<unknown> = []) =>
     steps.push(...Option.toArray(Schema.decodeUnknownOption(StepLog)(message[1])));
   });
 
+/** A logger that appends the message and fields of each line to `entries`. */
+const entryLogger = (entries: Array<readonly [unknown, unknown]>) =>
+  Logger.make<unknown, void>(({ message }) => {
+    if (Array.isArray(message)) entries.push([message[0], message[1]]);
+  });
+
+const nothingSaved = "Configuration save interrupted by the client; nothing was saved";
+const revisionApplies =
+  "The client left a configuration save after its revision was stored; the revision applies";
+
 /** Runs `effect` with a tracer that appends each span it starts to `spans`. */
 const recordingSpans =
   (spans: Array<Tracer.Span>) =>
@@ -270,13 +281,17 @@ const revisionFixture = Effect.gen(function* () {
       before: before === undefined ? agent.after : persona(before),
       after: persona(after),
     });
-  /** Saves `change` through `CurrentInstance.commit` on top of revision `expected`. */
-  const save = (expected: number, change: ConfigurationChange) =>
+  /**
+   * Saves `change` through `CurrentInstance.commit` on top of revision `expected`, with the save
+   * ID `id` if given.
+   */
+  const save = (expected: number, change: ConfigurationChange, id?: string) =>
     current.commit({
       expected: ConfigurationRevisionNumber.make(expected),
       actor: initial.config.operator,
       message: Option.none(),
       changes: [change],
+      save: Option.map(Option.fromUndefinedOr(id), ConfigurationSaveId.make),
     });
   return { store, revision, current, edit, save };
 });
@@ -321,6 +336,7 @@ it.effect("logs every step of a save that waits behind a running save", () => {
 
 it.effect("logs the wait of a save whose caller gives up and releases the queue", () => {
   const steps: Array<StepLog> = [];
+  const messages: Array<unknown> = [];
   const spans: Array<Tracer.Span> = [];
   return Effect.gen(function* () {
     const { store, revision, current, edit, save } = yield* revisionFixture;
@@ -345,6 +361,7 @@ it.effect("logs the wait of a save whose caller gives up and releases the queue"
       durationMillis: 30_000,
       outcome: "interrupted",
     });
+    expect(messages.filter((message) => message === nothingSaved)).toHaveLength(2);
     expect((yield* store.read).number).toBe(revision.number);
     stuck = false;
     yield* save(revision.number, edit("Third."));
@@ -352,8 +369,91 @@ it.effect("logs the wait of a save whose caller gives up and releases the queue"
     expect(unordered(stepSpans(spans))).toEqual(unordered(steps));
   }).pipe(
     Effect.scoped,
-    Effect.withLogger(stepLogger(steps)),
+    Effect.withLogger(stepLogger(steps, messages)),
     recordingSpans(spans),
     Effect.provide(NodeServices.layer),
   );
 });
+
+it.effect(
+  "logs that nothing was saved when the client interrupts a save during the worker preflight",
+  () => {
+    const entries: Array<readonly [unknown, unknown]> = [];
+    return Effect.gen(function* () {
+      const { store, revision, current, edit, save } = yield* revisionFixture;
+      const preflighting = yield* Deferred.make<void>();
+      yield* current.registerWorkers(() =>
+        Deferred.succeed(preflighting, undefined).pipe(Effect.andThen(Effect.never)),
+      );
+      const saving = yield* save(revision.number, edit("Interrupted."), "first-save").pipe(
+        Effect.forkChild,
+      );
+      yield* Deferred.await(preflighting);
+      const waiting = yield* save(revision.number, edit("Waiting."), "second-save").pipe(
+        Effect.forkChild,
+      );
+      const running = yield* current.writes.pipe(
+        Effect.repeat({ until: (writes) => writes.length === 2 }),
+      );
+      expect(running.map(({ save, expected, step }) => ({ save, expected, step }))).toEqual([
+        { save: "first-save", expected: revision.number, step: "worker-preflight" },
+        { save: "second-save", expected: revision.number, step: "wait" },
+      ]);
+      yield* Fiber.interrupt(waiting);
+
+      yield* Fiber.interrupt(saving);
+
+      expect(entries.filter(([message]) => message === nothingSaved)).toEqual([
+        [nothingSaved, { step: "wait", expectedRevision: revision.number }],
+        [nothingSaved, { step: "worker-preflight", expectedRevision: revision.number }],
+      ]);
+      expect((yield* store.read).number).toBe(revision.number);
+      const finished = yield* current.writes;
+      expect(finished).toEqual([]);
+    }).pipe(
+      Effect.scoped,
+      Effect.withLogger(entryLogger(entries)),
+      Effect.provide(NodeServices.layer),
+    );
+  },
+);
+
+it.effect(
+  "logs that a save applies when the client interrupts it after its revision is stored",
+  () => {
+    const entries: Array<readonly [unknown, unknown]> = [];
+    return Effect.gen(function* () {
+      const { store, revision, current, edit, save } = yield* revisionFixture;
+      const applying = yield* Deferred.make<void>();
+      const release = yield* Deferred.make<void>();
+      yield* current.registerWorkers(() =>
+        Effect.succeed(
+          Deferred.succeed(applying, undefined).pipe(Effect.andThen(Deferred.await(release))),
+        ),
+      );
+      const saving = yield* save(revision.number, edit("Applied.")).pipe(Effect.forkChild);
+      yield* Deferred.await(applying);
+      const running = yield* current.writes;
+      expect(running.map(({ step }) => step)).toEqual(["apply"]);
+
+      // The interruption reaches the save during `apply`, which runs on until it finishes.
+      const interrupting = yield* Fiber.interrupt(saving).pipe(
+        Effect.forkChild({ startImmediately: true }),
+      );
+      yield* Deferred.succeed(release, undefined);
+      yield* Fiber.join(interrupting);
+
+      expect(entries.filter(([message]) => message === nothingSaved)).toEqual([]);
+      expect(entries.filter(([message]) => message === revisionApplies)).toEqual([
+        [revisionApplies, { step: "apply", expectedRevision: revision.number }],
+      ]);
+      expect((yield* store.read).number).toBe(revision.number + 1);
+      const finished = yield* current.writes;
+      expect(finished).toEqual([]);
+    }).pipe(
+      Effect.scoped,
+      Effect.withLogger(entryLogger(entries)),
+      Effect.provide(NodeServices.layer),
+    );
+  },
+);
