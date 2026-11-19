@@ -1156,6 +1156,8 @@ describe("Claude child backend", () => {
   ) =>
     Effect.gen(function* () {
       const events = yield* Queue.unbounded<string>();
+      // The tags of the events that `until` took, in order.
+      const taken: Array<string> = [];
       yield* Effect.forkScoped(
         running.events.pipe(
           Stream.runForEach((event) => Queue.offer(events, event._tag)),
@@ -1164,7 +1166,8 @@ describe("Claude child backend", () => {
       );
       const until = (tag: string): Effect.Effect<void> =>
         Queue.take(events).pipe(
-          Effect.flatMap((taken) => (taken === tag ? Effect.void : until(tag))),
+          Effect.tap((next) => Effect.sync(() => taken.push(next))),
+          Effect.flatMap((next) => (next === tag ? Effect.void : until(tag))),
         );
       const toolRound = (id: string) =>
         Effect.gen(function* () {
@@ -1181,7 +1184,7 @@ describe("Claude child backend", () => {
           });
           yield* until("ToolFinished");
         });
-      return { until, toolRound };
+      return { until, toolRound, taken };
     });
 
   // Claude doesn't fold in a message sent while no turn runs: the message starts the next turn,
@@ -1484,7 +1487,7 @@ describe("Claude child backend", () => {
           }),
         );
         const output = () => outputs.at(-1)!;
-        const { toolRound } = yield* turnDriver(running, output);
+        const { toolRound, until, taken } = yield* turnDriver(running, output);
         yield* Queue.take(inputs);
         yield* toolRound("bash-1");
         const steer = Steer.make({ message: "Check the logs" });
@@ -1517,6 +1520,12 @@ describe("Claude child backend", () => {
           result: "Done",
           queued_turn_count: 0,
         });
+        yield* until("SessionFinished");
+        assert.lengthOf(
+          taken.filter((tag) => tag === "ProviderAnswered"),
+          2,
+          "each Claude process reports its provider's first answer",
+        );
         return yield* running.result;
       }).pipe(Effect.scoped, Effect.provide(claudeChild.pipe(Layer.provide(sdk))));
       assert.strictEqual(result.message, "Done");
@@ -1908,7 +1917,7 @@ describe("Claude child backend", () => {
         assert.strictEqual(result.message, "Child completed the edit.");
         assert.deepStrictEqual(
           events.map((event) => event._tag),
-          ["SessionStarted", "TextOutput", "SessionFinished"],
+          ["SessionStarted", "ProviderAnswered", "TextOutput", "SessionFinished"],
           "the failed launch leaves nothing in the transcript",
         );
         const started = events[0];
@@ -2129,7 +2138,7 @@ describe("Claude child backend", () => {
           assert.strictEqual(result.message, "Gate passed; PR published");
           assert.deepStrictEqual(
             events.map((event) => event._tag),
-            ["SessionStarted", "TextOutput", "SessionFinished"],
+            ["SessionStarted", "ProviderAnswered", "TextOutput", "SessionFinished"],
           );
         }).pipe(Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk)))),
       );
@@ -2905,7 +2914,7 @@ describe("Claude child backend", () => {
     }).pipe(Effect.scoped),
   );
 
-  it.effect("reports each API retry of a turn and the recovery when an answer arrives", () => {
+  it.effect("reports each API retry, the recovery, and the model's first answer once", () => {
     const retry = (attempt: number, status: number | null, error: string) => ({
       type: "system",
       subtype: "api_retry",
@@ -2917,15 +2926,30 @@ describe("Claude child backend", () => {
       uuid: `retry-${attempt}`,
       session_id: "claude-session-1",
     });
+    const answer = (text: string) => ({
+      type: "assistant",
+      message: { model: "claude-sonnet-4-6", content: [{ type: "text", text }] },
+    });
     const sdk = Layer.succeed(ClaudeSdk)({
       open: () =>
         scripted([
           retry(1, null, "unknown"),
           retry(2, 529, "overloaded"),
+          // Claude Code writes these messages itself; neither is an answer from the model.
           {
             type: "assistant",
-            message: { content: [{ type: "text", text: "Child completed the edit." }] },
+            message: {
+              model: "<synthetic>",
+              content: [{ type: "text", text: "No response requested." }],
+            },
           },
+          {
+            type: "assistant",
+            error: "server_error",
+            message: { content: [{ type: "text", text: "API Error: 500" }] },
+          },
+          answer("Editing the file."),
+          answer("Child completed the edit."),
           { type: "result", subtype: "success", result: "Child completed the edit." },
         ]),
     });
@@ -2938,13 +2962,19 @@ describe("Claude child backend", () => {
         const session = yield* (yield* ChildBackend).launch(request());
         const [events] = yield* Effect.all([Stream.runCollect(session.events), session.result]);
         assert.deepStrictEqual(
-          events.map((event) => event._tag),
+          events.map((event) =>
+            event._tag === "TextOutput" ? `TextOutput: ${event.text}` : event._tag,
+          ),
           [
             "SessionStarted",
             "ProviderRetrying",
             "ProviderRetrying",
+            "TextOutput: No response requested.",
+            "TextOutput: API Error: 500",
             "ProviderRecovered",
-            "TextOutput",
+            "ProviderAnswered",
+            "TextOutput: Editing the file.",
+            "TextOutput: Child completed the edit.",
             "SessionFinished",
           ],
         );

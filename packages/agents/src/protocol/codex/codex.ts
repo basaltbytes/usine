@@ -4,7 +4,6 @@ import { UsageCount } from "../count.ts";
 import {
   AccountRateLimitsUpdatedNotification,
   AccountUpdatedNotification,
-  AgentMessageDeltaNotification,
   AgentMessageThreadItem,
   AuthModeValues,
   ChatgptAccount,
@@ -24,6 +23,8 @@ import {
   MessagePhaseValues,
   ModelListResponse as GeneratedModelListResponse,
   PatchApplyStatusValues,
+  PlanThreadItem,
+  ReasoningThreadItem,
   TextUserInput,
   ThreadResumeResponse as GeneratedThreadResumeResponse,
   ThreadStartResponse as GeneratedThreadStartResponse,
@@ -307,6 +308,13 @@ export const ToolItem = Schema.Struct({
   /** The namespace of a dynamic tool. */
   namespace: DynamicToolCallThreadItem.fields.namespace,
 });
+/** The kinds of thread item that only the model produces: a message, reasoning, a plan, or a tool call. */
+export const ModelItemType = Schema.Union([
+  AgentMessageThreadItem.fields.type,
+  ReasoningThreadItem.fields.type,
+  PlanThreadItem.fields.type,
+  ToolItem.fields.type,
+]);
 export const ThreadResumeResponse = GeneratedThreadResumeResponse.mapFields(
   ({ modelProvider, thread }) => ({
     modelProvider: replaces(modelProvider, EndpointName),
@@ -355,7 +363,6 @@ export const ErrorNotification = GeneratedErrorNotification.mapFields(
     turnId,
   }),
 );
-export const TurnActivity = AgentMessageDeltaNotification.mapFields(({ turnId }) => ({ turnId }));
 export { RateLimitWindow } from "./generated.ts";
 export const RateLimitsUpdated = AccountRateLimitsUpdatedNotification.mapFields(
   ({ rateLimits }) => ({

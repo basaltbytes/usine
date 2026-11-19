@@ -131,8 +131,8 @@ export type TurnCompletedConform = Assert<
 export type ErrorNotificationConform = Assert<
   Decodes<typeof Ours.ErrorNotification, Params<"error">>
 >;
-export type TurnActivityConform = Assert<
-  Decodes<typeof Ours.TurnActivity, Params<"item/started"> | Params<"item/agentMessage/delta">>
+export type ModelItemTypesConform = Assert<
+  Extends<typeof Ours.ModelItemType.Type, ThreadItem["type"]>
 >;
 export type RateLimitsUpdatedConform = Assert<
   Decodes<typeof Ours.RateLimitsUpdated, Params<"account/rateLimits/updated">>

@@ -94,6 +94,26 @@ export const ClaudeApiRetry = Schema.Struct({
 export const decodeApiRetry = Schema.decodeUnknownOption(ClaudeApiRetry);
 export const isAssistantMessage = Schema.is(Schema.Struct({ type: Schema.Literal("assistant") }));
 
+/** The model that Claude Code names on an assistant message that it wrote itself. */
+const SYNTHETIC_MODEL = "<synthetic>";
+const decodeAnswer = Schema.decodeUnknownOption(
+  Schema.Struct({
+    type: Schema.Literal("assistant"),
+    error: Schema.optionalKey(Schema.Json),
+    message: Schema.Struct({ model: Schema.optionalKey(Schema.String) }),
+  }),
+);
+
+/**
+ * Returns whether `message` is an answer from the model: an assistant message without an `error`
+ * that Claude Code didn't write itself, as it writes a usage-limit notice.
+ */
+export const isModelAnswer = (message: Schema.Json): boolean =>
+  Option.exists(
+    decodeAnswer(message),
+    (answer) => answer.error === undefined && answer.message.model !== SYNTHETIC_MODEL,
+  );
+
 /** Returns an API retry's fields as one sentence, because Claude Code includes no message. */
 export const apiRetryMessage = (retry: typeof ClaudeApiRetry.Type): string => {
   const failure =

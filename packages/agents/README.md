@@ -309,6 +309,8 @@ Provider capacity refusals use `AgentCapacityError`, which maps to `ProviderCapa
 
 Claude Code ends a turn on an API error with a `success` result that has `is_error`: that result fails the session after a capacity refusal or usage limit, or when it has HTTP 429 or 529 or capacity error text that `harnessFailure` recognizes; after any other API error, its text stays the session's answer. When a harness exposes only text, `harnessFailure` recognizes “Selected model is at capacity”, `overloaded_error`, HTTP 529, and 503 with a retry hint. Other task failures remain `AgentResultError`.
 
+Each harness reports `ProviderAnswered` once per harness process at the model's first answer, when the provider has accepted a request. Claude counts an assistant message that has no `error` and whose model isn't `<synthetic>`, the model that Claude Code names on messages it writes itself, such as a usage-limit notice. Codex counts a message, reasoning, plan, or tool item of the current turn, or a completed turn, but not the echo of the turn's input. Pi counts an assistant message that doesn't end with an error or an abort. Claude and Codex report `ProviderRecovered` after retries at the same answers.
+
 `reportText` relays capacity refusals with `[usine:provider-capacity]`; `reportedOutcome` restores their classification. Pi children classify the final assistant error when a turn settles, including when SDK retries are disabled or the SDK does not retry that error. A successful SDK retry completes normally.
 
 ## CI handoff

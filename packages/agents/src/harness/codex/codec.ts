@@ -9,6 +9,7 @@ import {
   AgentMessageItem,
   ErrorNotification,
   isCodexErrorCode,
+  ModelItemType,
   type RateLimitsUpdated,
   type RateLimitWindow,
   ToolItem,
@@ -87,6 +88,8 @@ const ToolKindItem = Schema.Struct({ type: ToolItem.fields.type });
 export const AgentMessageKindItem = Schema.Struct({ type: AgentMessageItem.fields.type });
 /** Matches a thread item of the user message kind, whether or not it decodes. */
 export const UserMessageKindItem = Schema.Struct({ type: UserMessageItem.fields.type });
+/** Matches a thread item that only the model produces, whether or not it decodes. */
+export const ModelKindItem = Schema.Struct({ type: ModelItemType });
 const MessageKindItem = Schema.Union([AgentMessageKindItem, UserMessageKindItem]);
 const ItemKind = Schema.Struct({ type: Schema.String });
 

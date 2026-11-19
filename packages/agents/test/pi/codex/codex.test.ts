@@ -2646,6 +2646,7 @@ describe("Codex child backend", () => {
           events.map((event) => event._tag),
           [
             "SessionStarted",
+            "ProviderAnswered",
             "ToolStarted",
             "ToolFinished",
             "TextOutput",
@@ -2697,7 +2698,7 @@ describe("Codex child backend", () => {
   });
 
   it.effect(
-    "reports each provider reconnect of a turn and the recovery when the turn resumes",
+    "reports each provider reconnect of a turn, and the recovery and first answer when the turn resumes",
     () => {
       // App-server notifications from a Worker whose gateway could not resolve chatgpt.com (#266).
       const reconnect = (message: string, additionalDetails: string, turnId = "turn-1") => ({
@@ -2710,6 +2711,19 @@ describe("Codex child backend", () => {
         },
       });
       const notifications: ReadonlyArray<CodexNotification> = [
+        // The echo of the turn's own input isn't an answer from the model.
+        {
+          method: "item/started",
+          params: {
+            threadId: "thread-1",
+            turnId: "turn-1",
+            item: {
+              type: "userMessage",
+              id: "input-1",
+              content: [{ type: "text", text: request().prompt, text_elements: [] }],
+            },
+          },
+        },
         reconnect("Reconnecting... 1/5", "request timed out"),
         reconnect(
           "Reconnecting... waiting for network",
@@ -2769,6 +2783,7 @@ describe("Codex child backend", () => {
               "ProviderRetrying",
               "ProviderRetrying",
               "ProviderRecovered",
+              "ProviderAnswered",
               "TextOutput",
               "SessionFinished",
             ],
