@@ -14,6 +14,8 @@ const fixture = () => {
   const machine = fakeMachine();
   const gateway = fakeGateway(machine);
   const upstream: Array<{ path: string; headers: Readonly<Record<string, string>> }> = [];
+  /** The paths requested on `llm.gw.test`. */
+  const llm: Array<string> = [];
   const proxy = GatewayProxy.layer.pipe(
     Layer.provide(
       Layer.succeed(HttpClient.HttpClient)(
@@ -32,20 +34,29 @@ const fixture = () => {
     Effect.gen(function* () {
       const admin = yield* HttpClient.HttpClient;
       const modelProxy = yield* GatewayProxy;
-      return HttpClient.make((request) =>
-        request.headers.host === "llm.gw.test"
-          ? modelProxy.handle.pipe(
-              Effect.provideService(
-                HttpServerRequest.HttpServerRequest,
-                HttpServerRequest.fromClientRequest(request),
-              ),
-              Effect.map((response) => HttpServerResponse.toClientResponse(response, { request })),
-            )
-          : admin.execute(request),
-      );
+      return HttpClient.make((request) => {
+        if (request.headers.host !== "llm.gw.test") return admin.execute(request);
+        const path = new URL(request.url).pathname;
+        llm.push(path);
+        // A Gateway from before protocol slots refuses their path prefixes.
+        if (
+          gateway.switches.beforeProtocolSlots &&
+          /^\/(?:anthropic-messages|openai-responses)\//u.test(path)
+        )
+          return Effect.succeed(
+            HttpClientResponse.fromWeb(request, new Response(null, { status: 404 })),
+          );
+        return modelProxy.handle.pipe(
+          Effect.provideService(
+            HttpServerRequest.HttpServerRequest,
+            HttpServerRequest.fromClientRequest(request),
+          ),
+          Effect.map((response) => HttpServerResponse.toClientResponse(response, { request })),
+        );
+      });
     }),
   ).pipe(Layer.provideMerge(gateway.layer), Layer.provide(proxy));
-  return { machine, gateway, upstream, transport };
+  return { machine, gateway, upstream, llm, transport };
 };
 
 it.effect("reports the gateway model proxy probe deadline", () => {
@@ -171,6 +182,31 @@ it.effect("refuses an unexpected model proxy probe status", () => {
     ),
     Effect.provide(machine.layer),
   );
+});
+
+it.effect("uses the provider prefixes of a gateway from before protocol slots", () => {
+  const { machine, gateway, upstream, llm, transport } = fixture();
+  gateway.switches.beforeProtocolSlots = true;
+  return Effect.gen(function* () {
+    const settings = gatewayAddress().gateway;
+    assert(Option.isSome(settings));
+    const route = yield* gatewayModelRouteFor(
+      WorkerName.make("coordinator-older-gateway"),
+      RepositoryName.make("usine/coordinator"),
+      settings.value,
+    );
+    const credential = yield* route.credential("anthropic-messages");
+    assert.deepStrictEqual(credential, Option.some("api-key"));
+    const answer = yield* route.request("anthropic-messages", '{"model":"claude-sonnet-4-6"}', {});
+    const text = yield* Effect.promise(() => answer.text());
+    assert.strictEqual(text, "gateway model answer");
+    assert.deepStrictEqual(llm, [
+      "/openai-responses/v1/models",
+      "/openai/v1/models",
+      "/anthropic/v1/messages",
+    ]);
+    assert.strictEqual(new URL(upstream[0]?.path ?? "").pathname, "/v1/messages");
+  }).pipe(Effect.provide(transport.pipe(Layer.provideMerge(machine.layer))), Effect.scoped);
 });
 
 it.effect("requires credential reporting from older gateways", () => {

@@ -73,6 +73,7 @@ export class HarnessCredential extends Schema.Class<
   Schema.Struct({
     provider: GatewayLlmProvider,
     protocol: GatewayLlmProtocol,
+    /** The base URL's path on the gateway's `llm.<domain>` host: the protocol, then an optional subpath. */
     gatewayPath: Schema.NonEmptyString,
     /** None when credential wiring needs no attempt home. */
     home: Schema.Option(Schema.NonEmptyString),
@@ -89,6 +90,12 @@ export class HarnessCredential extends Schema.Class<
         ((Option.isSome(home) || (!gateway.requiresHome && !apiKey.requiresHome)) &&
           !cloudflare.requiresHome) ||
         "Credential wiring requires an attempt home; Cloudflare wiring supports environment variables only",
+    ),
+    Schema.makeFilter(
+      ({ protocol, gatewayPath }) =>
+        gatewayPath === protocol ||
+        gatewayPath.startsWith(`${protocol}/`) ||
+        "The gateway path starts with its protocol",
     ),
   ),
 ) {}

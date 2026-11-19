@@ -173,6 +173,7 @@ export const machineChecksFor = (
         brains,
         containerLimits: report.containerLimits,
         findings: report.findings,
+        gatewayUpgrade: report.gatewayUpgrade,
       }),
     );
   });

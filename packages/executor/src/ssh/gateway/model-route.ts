@@ -9,6 +9,7 @@ import { ChildProcessSpawner } from "effect/process";
 import { DEFAULT_SSH, remoteCommandsFor } from "../../remote/commands.ts";
 import type { SshWorkerGateway } from "../model.ts";
 import { gatewayAdminFor } from "./admin.ts";
+import { type GatewayLlmPrefixes, llmPrefixOf } from "./environment.ts";
 import { gatewayForwardFor } from "./forward.ts";
 
 /** A gateway model route that could not be checked or used. Contains no credentials. */
@@ -60,27 +61,43 @@ export const gatewayModelRouteFor = Effect.fn("GatewayModelRoute.open")(
     const opened = yield* modelForward.current.pipe(
       Effect.catchTag("GatewayForwardClosed", (error) => modelForward.reopen(error.generation)),
     );
-    const probe = yield* http
-      .get(new URL("/openai-responses/v1/models", opened.url), {
-        headers: { host: `llm.${gateway.domain}` },
-      })
-      .pipe(
-        Effect.timeoutOrElse({
-          duration: "30 seconds",
-          orElse: () =>
-            GatewayModelError.make({
-              message: `The model proxy on gateway ${gateway.destination} did not answer within 30 seconds.`,
-            }),
-        }),
+    /** Returns whether the model proxy serves `prefixes`: it refuses a request without a caller token. */
+    const serves = Effect.fn("GatewayModelRoute.probe")(function* (prefixes: GatewayLlmPrefixes) {
+      yield* Effect.annotateCurrentSpan({ worker, llmPrefixes: prefixes });
+      const probe = yield* http
+        .get(new URL(`/${llmPrefixOf("openai-responses", prefixes)}/v1/models`, opened.url), {
+          headers: { host: `llm.${gateway.domain}` },
+        })
+        .pipe(
+          Effect.timeoutOrElse({
+            duration: "30 seconds",
+            orElse: () =>
+              GatewayModelError.make({
+                message: `The model proxy on gateway ${gateway.destination} did not answer within 30 seconds.`,
+              }),
+          }),
+        );
+      return (
+        probe.status === 401 && probe.headers["x-usine-gateway-refusal"] === "missing-caller-token"
       );
-    if (
-      probe.status !== 401 ||
-      probe.headers["x-usine-gateway-refusal"] !== "missing-caller-token"
-    ) {
+    });
+    // A gateway from before protocol slots refuses the protocol prefixes as unsupported paths.
+    const llmPrefixes: Option.Option<GatewayLlmPrefixes> = (yield* serves("protocol"))
+      ? Option.some("protocol")
+      : (yield* serves("provider"))
+        ? Option.some("provider")
+        : Option.none();
+    if (Option.isNone(llmPrefixes)) {
       return yield* GatewayModelError.make({
         message: `The coordinator can't reach the model proxy on gateway ${gateway.destination}.`,
       });
     }
+    const prefixes = llmPrefixes.value;
+    if (prefixes === "provider")
+      yield* Effect.logWarning(
+        "The gateway predates protocol path prefixes; the orchestrator model route uses its provider prefixes until @usine/gateway is upgraded on it",
+        { worker, gateway: gateway.destination },
+      );
 
     const failed = (message: string) => GatewayModelError.make({ message });
     const requestFor = Effect.map(DateTime.now, (now) =>
@@ -135,7 +152,7 @@ export const gatewayModelRouteFor = Effect.fn("GatewayModelRoute.open")(
           "Upgrade @usine/gateway: the coordinator requires gateway credential reporting.",
         );
       return Option.fromUndefinedOr(
-        listed.value.providers.find(({ provider }) => provider === protocol)?.credential,
+        listed.value.list.providers.find(({ provider }) => provider === protocol)?.credential,
       );
     });
     const request = Effect.fn("GatewayModelRoute.request")(function* (
@@ -150,7 +167,9 @@ export const gatewayModelRouteFor = Effect.fn("GatewayModelRoute.open")(
         Effect.catchTag("GatewayForwardClosed", (error) => modelForward.reopen(error.generation)),
       );
       const response = yield* http.execute(
-        HttpClientRequest.post(new URL(`/${protocol}${path}`, forward.url)).pipe(
+        HttpClientRequest.post(
+          new URL(`/${llmPrefixOf(protocol, prefixes)}${path}`, forward.url),
+        ).pipe(
           HttpClientRequest.setHeaders(headers),
           // The gateway reads its own token header before Authorization, so no caller header stays.
           (request) =>
@@ -175,6 +194,7 @@ export const gatewayModelRouteFor = Effect.fn("GatewayModelRoute.open")(
     yield* Effect.logInfo("Opened the orchestrator gateway model route", {
       worker,
       gateway: gateway.destination,
+      llmPrefixes: prefixes,
     });
     const route: GatewayModelRoute = {
       credential: (protocol) =>

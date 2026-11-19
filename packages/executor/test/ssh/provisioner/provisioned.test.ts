@@ -350,6 +350,7 @@ describe("Provisioned SSH Worker", () => {
               brains: [TEST_AGENT.brain],
               containerLimits: Option.none(),
               findings: [],
+              gatewayUpgrade: Option.none(),
             }),
           ),
         );
@@ -596,6 +597,7 @@ describe("Provisioned SSH Worker", () => {
                   }),
                 ),
                 findings: [],
+                gatewayUpgrade: Option.none(),
               }),
             ),
           );

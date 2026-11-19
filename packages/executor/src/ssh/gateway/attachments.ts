@@ -160,6 +160,8 @@ export const gatewayAttachmentsFor = Effect.fn("SshExecutor.gatewayAttachmentsFo
     const fields = { attemptId, worker, repository, permissions, domain: settings.domain };
     yield* Effect.annotateCurrentSpan(fields);
     const directories = configDirectories(catalog, machine, attemptId);
+    const llmPrefixes = yield* Ref.get(gateway.llmPrefixes);
+    yield* Effect.annotateCurrentSpan({ llmPrefixes });
     const homes = yield* Effect.forEach(
       catalog.descriptors.filter(({ worker }) =>
         Option.exists(
@@ -177,6 +179,7 @@ export const gatewayAttachmentsFor = Effect.fn("SshExecutor.gatewayAttachmentsFo
         catalog,
         domain: settings.domain,
         llmProviders: settings.llmProviders,
+        llmPrefixes,
         ...directories,
       }),
     );
@@ -311,6 +314,7 @@ export const gatewayAttachmentsFor = Effect.fn("SshExecutor.gatewayAttachmentsFo
       domain: settings.domain,
       egress: settings.egress,
       llmProviders: settings.llmProviders,
+      llmPrefixes,
       ...directories,
       callerToken,
     });
