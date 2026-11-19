@@ -42,8 +42,6 @@ const agent = Agent.make({
   name: AgentName.make("developer"),
   brain,
   persona: AgentPersona.make("Finish the task"),
-  parentModel: Option.none(),
-  parentEffort: Option.none(),
 });
 const worker = WorkerName.make("local");
 const salvage = SalvagePushed.make({
@@ -65,7 +63,6 @@ const submission = Submission.make({
   revision: RepositoryRevision.make("main"),
   task: AttemptTask.make("Finish the task"),
   agent,
-  parentModel: Option.none(),
 });
 
 const inspectUntil = (

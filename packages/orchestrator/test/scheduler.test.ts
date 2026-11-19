@@ -7,7 +7,6 @@ import { assert, describe, it } from "@effect/vitest";
 import { UsineConfig } from "@usine/config/factory";
 import type { Agent } from "@usine/core/agent";
 import { HarnessUnavailableError } from "@usine/core/agent/capability";
-import type { CoordinatorKind } from "@usine/core/agent";
 import { Attempt, AttemptId, AttemptNumber, AttemptTask } from "@usine/core/attempt";
 import { DedupKey, Event, EventId } from "@usine/core/event";
 import { InstanceDirectory } from "@usine/core/instance";
@@ -472,15 +471,13 @@ const startScheduler = (...args: Parameters<typeof schedulerContext>) =>
  * Returns an executor of `kind` whose preflight records `worker xN: model` for each check, and
  * its image mode in `images` if given, and fails for the Workers in `failing`. A `defer`
  * preflight of a Worker in `missingImage` reports `MISSING_IMAGE`, and a `pull` preflight of one
- * runs `pulling` first. With `coordinators`, its preparation records the coordinator of each
- * request, then fails. With `prepareFailure`, its preparation fails with it.
+ * runs `pulling` first. With `prepareFailure`, its preparation fails with it.
  */
 const recordingExecutor = (
   preflighted: Array<string>,
   options: {
     readonly kind?: WorkerKind;
     readonly failing?: ReadonlyArray<string>;
-    readonly coordinators?: Array<CoordinatorKind>;
     readonly prepareFailure?: WorkerCapabilityError;
     readonly images?: Array<PreflightImage | undefined>;
     readonly missingImage?: ReadonlyArray<string>;
@@ -492,22 +489,8 @@ const recordingExecutor = (
     recover: unused,
     isLive: unused,
     outcome: unused,
-    prepare: (request) => {
-      if (options.prepareFailure !== undefined) return Effect.fail(options.prepareFailure);
-      const coordinators = options.coordinators;
-      if (coordinators === undefined) return unused();
-      return Effect.sync(() => coordinators.push(request.coordinator)).pipe(
-        Effect.andThen(
-          Effect.fail(
-            ExecutorOperationError.make({
-              operation: "prepare",
-              message: "The test stops at preparation",
-              cause: new Error("stop"),
-            }),
-          ),
-        ),
-      );
-    },
+    prepare: () =>
+      options.prepareFailure !== undefined ? Effect.fail(options.prepareFailure) : unused(),
     cancel: unused,
     intervene: unused,
     sweep: Effect.void,
@@ -568,7 +551,6 @@ const submission = (
     revision: RepositoryRevision.make("HEAD"),
     task: AttemptTask.make(`Implement issue ${second}.`),
     agent,
-    parentModel: Option.none(),
   });
 
 /** Returns the first Attempt of a Run of `selected` on the `local` Worker. */
@@ -605,7 +587,6 @@ const executionOf = (selected: Submission, second: number) => {
     revision: selected.revision,
     task: selected.task,
     agent: selected.agent,
-    parentModel: selected.parentModel,
     permissions: selected.permissions,
     resume: Option.none(),
     reattach: false,

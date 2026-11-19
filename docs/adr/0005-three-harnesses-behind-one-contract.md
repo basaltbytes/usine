@@ -12,7 +12,7 @@ An agent is standing instructions plus a brain spec: harness, model, and effort.
 
 ## Status
 
-Built: harness runtimes and descriptors, a role-neutral session spec (#1203), roles as declarations (#1204), usine tool sets and a structured `complete` on all three (#1205, #1206, #1208), and the supervisor role on all three (#1267, #1280). Codex lacks `closed-tools`, because some of its own tools stay on in every thread: it refuses roles that close them, and keeps all its tools for a role that keeps only read tools, such as the supervisor, whose read-only container limits them. The coding agent runs on all three; Pi on local workers only. `coordinator: session | events` (#1158) selects the Pi parent, which Claude Code and Codex refuse, or the event-driven coordinator (#1157).
+Built: harness runtimes and descriptors, a role-neutral session spec (#1203), roles as declarations (#1204), usine tool sets and a structured `complete` on all three (#1205, #1206, #1208), and the supervisor role on all three (#1267, #1280). Codex lacks `closed-tools`, because some of its own tools stay on in every thread: it refuses roles that close them, and keeps all its tools for a role that keeps only read tools, such as the supervisor, whose read-only container limits them. The coding agent runs on all three; Pi on local workers only. Every new attempt runs on the event-driven coordinator (#1157, #1166); the Pi parent, which Claude Code and Codex refuse, runs only the attempts that earlier versions started with it.
 
 ## Considered options
 

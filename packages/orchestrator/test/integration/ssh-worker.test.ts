@@ -116,8 +116,6 @@ const brain = (harness: Harness, model: string) =>
 const agent = Agent.make({
   name: AgentName.make("developer"),
   brain: brain(Harness.make("claude"), "claude-sonnet-4-6"),
-  parentModel: Option.none(),
-  parentEffort: Option.none(),
   persona: AgentPersona.make("Verify the SSH Worker transport."),
 });
 
@@ -322,7 +320,6 @@ describe.skipIf(destination === undefined)("live SSH Worker", () => {
               revision: RepositoryRevision.make(values.revision),
               task: AttemptTask.make("Verify the SSH Worker transport"),
               agent,
-              parentModel: Option.none(),
             }),
           );
           assert.strictEqual(accepted._tag, "Claimed");
@@ -712,7 +709,6 @@ describe.skipIf(gatewayDestination === undefined)("live SSH Worker behind a Gate
               revision: RepositoryRevision.make(values.revision),
               task: AttemptTask.make("Verify the Worker reaches GitHub through its Gateway"),
               agent,
-              parentModel: Option.none(),
             }),
           );
           assert.strictEqual(accepted._tag, "Claimed");

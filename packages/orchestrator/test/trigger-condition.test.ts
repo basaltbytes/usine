@@ -40,8 +40,6 @@ const agent = AgentFile.make({
   harness: Harness.make("codex"),
   model: ModelId.make("gpt-5.6-sol"),
   effort: "high",
-  parentModel: Option.none(),
-  parentEffort: Option.none(),
   persona: AgentPersona.make("Implement the issue."),
 });
 
@@ -99,7 +97,6 @@ const submissionFor = (loop: LoopName, itemKey: string) =>
     revision: RepositoryRevision.make("HEAD"),
     task: AttemptTask.make("Implement issue 28."),
     agent: agent.agent,
-    parentModel: Option.none(),
   });
 
 const layerWith = (
@@ -209,7 +206,6 @@ describe("TriggerCondition", () => {
           get: SubscriptionRef.get(current),
           changes: SubscriptionRef.changes(current),
           reload: Effect.die("the test swaps the instance itself"),
-          registerParentAdmission: () => Effect.void,
           writes: Effect.succeed([]),
           registerWorkers: () => Effect.void,
           commit: () => Effect.die("the test swaps the instance itself"),

@@ -318,7 +318,6 @@ export class ScheduleTriggers extends Context.Service<
           repository: due.repository,
           revision: DEFAULT_BRANCH_REVISION,
           task: AttemptTask.make(task),
-          parentModel: due.parentModel,
         });
         const submitted = yield* runs.submit(submission);
         yield* Effect.logInfo("Submitted scheduled Tick", {
@@ -443,7 +442,6 @@ export class ScheduleTriggers extends Context.Service<
             due.push({
               agent: resolved.success.agent,
               loop: schedule.loop,
-              parentModel: resolved.success.parentModel,
               repository,
               scheduledAt: boundaries.latest,
               scheduledAtLocal: boundaries.latestLocal,

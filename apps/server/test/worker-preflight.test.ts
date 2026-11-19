@@ -95,11 +95,8 @@ const submission = Submission.make({
       model: ModelId.make("gpt-6-sol"),
       effort: "high",
     }),
-    parentModel: Option.none(),
-    parentEffort: Option.none(),
     persona: AgentPersona.make("Implement the issue"),
   }),
-  parentModel: Option.none(),
 });
 
 it.live(
@@ -150,7 +147,6 @@ it.live(
           changes: Stream.make(fixtureInstance),
           reload: Effect.die("unused"),
           commit: () => Effect.die("unused"),
-          registerParentAdmission: () => Effect.void,
           writes: Effect.succeed([]),
           registerWorkers: () => Effect.void,
         });

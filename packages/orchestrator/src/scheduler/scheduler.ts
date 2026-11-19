@@ -4,7 +4,6 @@ import { ExpressionEngine } from "@usine/expression/expression-engine";
 import { positionFor, positionFields } from "./position.ts";
 import type { UsineConfig, Worker as ConfigWorker } from "@usine/config/factory";
 import type { LoadedInstance } from "@usine/config/instance";
-import { resolveCoordinator, resolveParentEffort } from "@usine/core/agent";
 import type { BrainSpec } from "@usine/core/agent/brain";
 import { AgentFailure, InfraFailure } from "@usine/core/attempt/failure";
 import type { AttemptId } from "@usine/core/attempt";
@@ -963,8 +962,6 @@ export const stepExecutorLayer = (
             reattach: execution.reattach,
           });
           const { settings } = (yield* instances.get).config;
-          const coordinator = resolveCoordinator(execution.agent, settings.coordinator);
-          yield* Effect.annotateCurrentSpan({ coordinator });
           const { commitAuthor, botLogin } = yield* writerFor(execution.attempt.id);
           yield* machineForAttempt(execution);
           const prepared = yield* executor
@@ -979,13 +976,10 @@ export const stepExecutorLayer = (
                 payload: execution.event.payload,
                 task: execution.task,
                 agent: execution.agent,
-                parentModel: execution.parentModel,
                 maxChildren: settings.maxChildren,
                 maxAttemptMinutes: settings.maxAttemptMinutes,
                 maxAttemptTokens: settings.maxAttemptTokens,
                 maxBackgroundWaitMinutes: settings.maxBackgroundWaitMinutes,
-                parentEffort: resolveParentEffort(execution.agent, settings.parentEffort),
-                coordinator,
                 salvageRef: salvageRefFor(execution.run.id, execution.attempt.number),
                 resume: execution.resume,
                 reattach: execution.reattach,

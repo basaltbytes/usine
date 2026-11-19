@@ -10,7 +10,6 @@ const ADMISSION_SETTING_KEYS = [
   "outcomeLabels",
   "cycleLimit",
   "agent",
-  "parentModel",
   "task",
 ] as const;
 

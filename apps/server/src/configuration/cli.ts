@@ -1,13 +1,5 @@
-import { loadParentModels } from "@usine/durable/live";
-import { parentModels } from "@usine/orchestrator/parent-models";
-import type { LoadedInstance } from "@usine/config/instance";
-import { parentAdmissionProblems } from "@usine/orchestrator/parent-admission";
-import { checkCoordinatorBrains } from "@usine/orchestrator/current-instance";
 import { localActor } from "@usine/core/operator";
 import {
-  Configuration,
-  ConfigurationInvalid,
-  commit,
   StaleRevision,
   ConfigurationStore,
   ConfigurationStoreError,
@@ -24,50 +16,23 @@ import {
   parseConfigurationEntity,
 } from "@usine/config/folder-codec";
 import { ConfigParser } from "@usine/config/parser";
-import { InstanceId, InstanceDirectory } from "@usine/core/instance";
+import { InstanceDirectory } from "@usine/core/instance";
 import { localSqliteLayer } from "@usine/engine/local-sqlite";
-import { Config, Crypto, Console, DateTime, Effect, FileSystem, Layer, Option, Path } from "effect";
+import { Config, Console, DateTime, Effect, FileSystem, Layer, Option, Path } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import { ConfigCommand, ConfigCommandError } from "./command.ts";
 import { configurationLayer, initializeConfiguration } from "./runtime.ts";
 
-/** Loads the models and credentials that the orchestrator gives the coordinator brains of `loaded`. */
-const orchestratorParentModels = (directory: InstanceDirectory) =>
-  Effect.fn("Cli.config.parentModels")(function* (loaded: LoadedInstance) {
-    const uuid = yield* (yield* Crypto.Crypto).randomUUIDv4().pipe(Effect.orDie);
-    const access = yield* parentModels(loaded, InstanceId.make(uuid));
-    return yield* loadParentModels(directory, access);
-  });
-
-/**
- * Runs `command` on the configuration store. `loadParents` loads the models and credentials that
- * a revision's coordinator brains are checked against before it is written.
- */
+/** Runs `command` on the configuration store. */
 export const runConfigCommand = Effect.fn("Cli.config")(
-  function* (
-    directory: InstanceDirectory,
-    command: ConfigCommand,
-    loadParents: ReturnType<typeof orchestratorParentModels> = orchestratorParentModels(directory),
-  ) {
+  function* (directory: InstanceDirectory, command: ConfigCommand) {
     const path = yield* Path.Path;
     const store = yield* ConfigurationStore;
     const folder = yield* ConfigurationFolder;
-    // The time limit of the check covers loading the parent models.
-    const admitParents = Effect.fn("Cli.config.admitParents")(
-      (loaded: LoadedInstance) =>
-        checkCoordinatorBrains(
-          Effect.flatMap(loadParents(loaded), (parents) =>
-            parentAdmissionProblems(loaded, parents),
-          ),
-          (problems) => ConfigurationInvalid.make({ problems }),
-        ),
-      Effect.scoped,
-    );
     if (command._tag === "ConfigImportCommand") {
       const current = yield* store.read;
       if (Option.isNone(current.instance)) {
         const imported = yield* folder.load(InstanceDirectory.make(path.resolve(command.folder)));
-        yield* admitParents(imported);
         const revision = yield* store.commit({
           expected: current.number,
           changes: configurationDiff([], configurationEntities(imported)),
@@ -99,17 +64,6 @@ export const runConfigCommand = Effect.fn("Cli.config")(
         if (changes.length === 0) {
           yield* Console.log("No configuration changes.");
           return;
-        }
-        const parser = yield* ConfigParser;
-        const candidate = yield* commit(
-          parser,
-          Configuration.make({ number, instance: Option.some(instance) }),
-          expected,
-          changes,
-          { actor, message, time: yield* DateTime.now },
-        );
-        if (Option.isSome(candidate.configuration.instance)) {
-          yield* admitParents(candidate.configuration.instance.value);
         }
         const revision = yield* store.commit({
           expected,

@@ -68,8 +68,6 @@ export const testAgent = Agent.make({
     model: ModelId.make("claude-sonnet-4-6"),
     effort: "high",
   }),
-  parentModel: Option.none(),
-  parentEffort: Option.none(),
   persona: AgentPersona.make("Implement the task."),
 });
 
@@ -157,7 +155,6 @@ export const submission = (number: number, receivedAt = `2026-08-30T12:00:0${num
     revision: RepositoryRevision.make("main"),
     task: AttemptTask.make(`Complete local task ${number}`),
     agent: testAgent,
-    parentModel: Option.none(),
   });
 
 export const waitFor = Effect.fn("test.waitFor")(function* (

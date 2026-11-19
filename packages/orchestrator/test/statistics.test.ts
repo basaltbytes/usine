@@ -91,8 +91,6 @@ const agentOf = (name: string, brain: BrainSpec) =>
   Agent.make({
     name: AgentName.make(name),
     brain,
-    parentModel: Option.none(),
-    parentEffort: Option.none(),
     persona: AgentPersona.make("Work."),
   });
 const developer = agentOf("developer", opus);

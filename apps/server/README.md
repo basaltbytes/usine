@@ -285,7 +285,7 @@ Provider connections are available in setup and Configuration > Settings. `usine
 
 Provider reports preserve the gateway's `refreshable` capability. Local Claude setup tokens also report `refreshable: false`; native Claude OAuth logins keep their reported expiry. Settings explains that setup tokens cannot refresh and that their expiry date is not included with the token.
 
-With a gateway configured, the coordinator also uses the gateway's provider credentials. Startup checks its connection before resuming attempts and validates each agent's parent using the gateway credential. A missing provider credential quarantines the affected agent and its loops; the orchestrator host needs no provider login. Without a gateway, the coordinator uses its local Pi login.
+With a gateway configured, the supervisor and the Pi parent of an attempt that an earlier version started with one use the gateway's provider credentials, so the orchestrator host needs no provider login. Without a gateway, that Pi parent uses its local Pi login.
 
 Local provider status checks report missing Claude Code and Codex commands separately, with an installation instruction for the affected provider. Availability changes log once at Info, including recovery; unchanged errors remain quiet across polls. ChatGPT authorization reports a missing Codex command before starting sign-in.
 

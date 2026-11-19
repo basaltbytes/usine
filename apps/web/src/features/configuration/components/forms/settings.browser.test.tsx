@@ -17,7 +17,7 @@ it("writes the supervisor's brain under settings.supervisor and removes it when 
   client.setQueryData(capabilitiesQuery().queryKey, capabilitiesFixture());
   const changes: Array<Schema.JsonObject> = [];
   const Form = () => {
-    const [value, setValue] = useState<Schema.JsonObject>({ settings: { coordinator: "events" } });
+    const [value, setValue] = useState<Schema.JsonObject>({ settings: { poll_interval: 60 } });
     return (
       <SettingsFields
         value={value}
@@ -46,7 +46,7 @@ it("writes the supervisor's brain under settings.supervisor and removes it when 
     expect(changes).toHaveLength(1);
     expect(changes[0]).toStrictEqual({
       settings: {
-        coordinator: "events",
+        poll_interval: 60,
         supervisor: { harness: "", model: "", effort: "medium" },
       },
     });
@@ -59,7 +59,7 @@ it("writes the supervisor's brain under settings.supervisor and removes it when 
       .fill("claude-sonnet-5-5");
     expect(changes.at(-1)).toStrictEqual({
       settings: {
-        coordinator: "events",
+        poll_interval: 60,
         supervisor: { harness: "claude", model: "claude-sonnet-5-5", effort: "medium" },
       },
     });
@@ -69,7 +69,7 @@ it("writes the supervisor's brain under settings.supervisor and removes it when 
     await expect
       .element(page.getByRole("textbox", { name: "Supervisor model", exact: true }))
       .not.toBeInTheDocument();
-    expect(changes.at(-1)).toStrictEqual({ settings: { coordinator: "events" } });
+    expect(changes.at(-1)).toStrictEqual({ settings: { poll_interval: 60 } });
   } finally {
     root.unmount();
     host.remove();

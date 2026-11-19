@@ -99,9 +99,7 @@ These settings require a restart:
 
 For example, after changing browser origins with the CLI, run `usine restart` when no attempt is running.
 
-Before storing a revision, CLI commands and the operator API check the coordinator brain of each agent: the parent model, effort, and credential. The check looks up each agent's parent model and effort, and checks the credential's login once per provider, however many agents, models, and efforts use that provider. When an agent names no parent model and Pi has no default model, Pi lists the models that have a credential, once per check, and that list checks the login of every provider. So the provider of the selected model is checked twice: once by the list and once by its own login check. The 10-second limit covers the whole check: every agent, every login, and, for CLI commands, loading the parent models. If the check doesn't finish within 10 seconds, the write is refused with `ValidationTimeoutError` (HTTP 503 from the operator API), and no revision is stored. The orchestrator repeats the check, with the same limit, before it applies a reload or a revision stored by the CLI; a check that runs out of time keeps the running configuration.
-
-When the orchestrator saves a revision through the operator API or reloads the store, each step logs `Configuration step finished` with its `step`, `durationMillis`, and `outcome` (`passed`, `failed`, or `interrupted`). A refused coordinator brain logs `coordinator-brains` as `failed`. A reload skips `parse` and `store`. At startup, the orchestrator checks the coordinator brains of the stored configuration before it starts runs and logs that check as the `coordinator-brains` step. The startup check has no time limit; until it finishes, the API returns HTTP 503. Agents whose brain is refused stay out of the running configuration:
+When the orchestrator saves a revision through the operator API or reloads the store, each step logs `Configuration step finished` with its `step`, `durationMillis`, and `outcome` (`passed`, `failed`, or `interrupted`). A reload skips `parse` and `store`:
 
 | Step | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -109,7 +107,6 @@ When the orchestrator saves a revision through the operator API or reloads the s
 | `read` | step | none | Reads the configuration store. |
 | `parse` | step | none | Parses and validates the changed entities. |
 | `restart` | step | none | Checks for changes that require a restart. |
-| `coordinator-brains` | step | 10-second limit for the whole step | Checks each agent's coordinator brain. |
 | `worker-preflight` | step | none | Runs preflight for added workers, added capacity, and new brains, without pulling an attempt image. |
 | `store` | step | none | Stores the revision. |
 | `apply` | step | none | Applies the revision to new work. |
@@ -120,11 +117,20 @@ If the client of a save disconnects before the `store` step, the save stops, and
 
 `GET /api/configuration/writes` lists the saves that run now: the ID that the save's client sent with the write (`save`), the revision each expects to replace (`expected`), and its `step`. A save waiting for another change shows `wait`. The configuration form sends a new `save` ID with each save and shows the step of that save only. When a save takes more than 3 seconds, the configuration form shows its step, such as `Still saving: checking the workers (worker-preflight).`
 
-The UI refuses a revision that requires a restart, fails preflight, or runs out of time. CLI commands can save it while the process keeps the accepted configuration. A successful CLI exit confirms storage. Check logs for `Stored configuration applied; new runs use the new configuration` or `Configuration revision could not be applied; the running configuration is unchanged`. Correct rejected settings or restart to apply them. Send `SIGHUP` to the orchestrator process to request an explicit store reread.
+The UI refuses a revision that requires a restart or fails preflight. CLI commands can save it while the process keeps the accepted configuration. A successful CLI exit confirms storage. Check logs for `Stored configuration applied; new runs use the new configuration` or `Configuration revision could not be applied; the running configuration is unchanged`. Correct rejected settings or restart to apply them. Send `SIGHUP` to the orchestrator process to request an explicit store reread.
+
+## Stored configuration
+
+When usine opens the configuration store, it rewrites stored values that earlier versions accepted and the current rules reject or ignore. It records the changes as one configuration revision without an actor:
+
+- It removes `coordinator`, `parent_model`, and `parent_effort` from the settings and from each agent. The revision message is `Removed coordinator, parent_model, and parent_effort, which usine ignores`, and usine logs `Removed stored keys that usine ignores` for each entity.
+- It removes the outcome labels that the loop rules reject. See [Loops](/reference/configuration/loops/).
+
+If the configuration is still invalid after these changes, usine keeps the stored values and logs `Kept stored values; the upgraded configuration is invalid` with the problems. Reverting a revision reads the values of earlier revisions without these keys.
 
 ## Exit status
 
 | Status | Type | Default | Description |
 | --- | --- | --- | --- |
 | `0` | exit code | success | Command completed, including unchanged content, empty history, or help. |
-| `1` | exit code | failure | Invalid usage, editor failure, invalid configuration, stale revision, coordinator brain check timeout (`ValidationTimeoutError`), or storage failure, with a diagnostic on standard error. |
+| `1` | exit code | failure | Invalid usage, editor failure, invalid configuration, stale revision, or storage failure, with a diagnostic on standard error. |

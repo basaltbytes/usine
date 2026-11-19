@@ -4,8 +4,7 @@ import type { ConfigFileError } from "@usine/config/file";
 import type { LoadedInstance } from "@usine/config/instance";
 import type { LoopFile } from "@usine/config/loop";
 import type { ManagedRepo } from "@usine/config/factory";
-import { Agent, resolveParentModel, AgentName } from "@usine/core/agent";
-import { ModelId } from "@usine/core/agent/brain";
+import { Agent, AgentName } from "@usine/core/agent";
 import { AttemptTask } from "@usine/core/attempt";
 import type { CiPolicy } from "@usine/core/ci";
 import { Event, DedupKey, EventId } from "@usine/core/event";
@@ -25,7 +24,6 @@ export const DEFAULT_BRANCH_REVISION = RepositoryRevision.make("HEAD");
 export interface ResolvedLoop {
   readonly agent: Agent;
   readonly loop: LoopFile;
-  readonly parentModel: Option.Option<ModelId>;
 }
 
 /** The Agent of a loaded Loop is no longer in the roster. */
@@ -38,7 +36,7 @@ export class LoopAgentResolutionError extends Schema.TaggedError<
   message: Schema.NonEmptyString,
 }) {}
 
-/** Resolves one Loop's roster Agent and effective parent model. */
+/** Resolves one Loop's roster Agent. */
 export const resolveTriggerLoop = Effect.fn("TriggerRouting.resolveLoop")(function* (
   instance: LoadedInstance,
   loop: LoopFile,
@@ -53,12 +51,7 @@ export const resolveTriggerLoop = Effect.fn("TriggerRouting.resolveLoop")(functi
       message: `Loop "${loop.name}" references agent "${loop.agent}", which is not in the roster`,
     });
   }
-  const agent = loaded.agent;
-  return {
-    agent,
-    loop,
-    parentModel: resolveParentModel(agent, instance.config.settings.parentModel),
-  } satisfies ResolvedLoop;
+  return { agent: loaded.agent, loop } satisfies ResolvedLoop;
 });
 
 /** Resolves every loaded Loop's Agent, skipping and logging each Loop whose Agent is missing. */
@@ -99,11 +92,11 @@ export const cycleLimitOf = (loop: LoopFile): Option.Option<CycleLimit> =>
 
 /**
  * Returns the Submission settings that come from the Loop and its Agent: approval, evaluated
- * against `payload`, permissions, CI policy, outcome labels, cycle limit, Agent, and parent model.
+ * against `payload`, permissions, CI policy, outcome labels, cycle limit, and Agent.
  */
 export const loopSettings = Effect.fn("TriggerRouting.loopSettings")(function* (
   expressions: ExpressionEngine["Service"],
-  { agent, loop, parentModel }: ResolvedLoop,
+  { agent, loop }: ResolvedLoop,
   repository: Pick<ManagedRepo, "name">,
   payload: Schema.Json,
 ) {
@@ -115,7 +108,6 @@ export const loopSettings = Effect.fn("TriggerRouting.loopSettings")(function* (
     outcomeLabels: loop.outcomeLabels,
     cycleLimit: cycleLimitOf(loop),
     agent,
-    parentModel,
   };
 });
 

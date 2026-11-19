@@ -133,8 +133,6 @@ const developer = AgentFile.make({
   harness: brain.harness,
   model: brain.model,
   effort: brain.effort,
-  parentModel: Option.none(),
-  parentEffort: Option.none(),
   persona: AgentPersona.make("Implement the issue."),
 });
 // Loop prompts make the full configuration larger than one tool result.
@@ -310,11 +308,8 @@ const started = (number: number) =>
     agent: Agent.make({
       name: developer.name,
       brain,
-      parentModel: Option.none(),
-      parentEffort: Option.none(),
       persona: developer.persona,
     }),
-    parentModel: Option.none(),
   });
 
 /** Runs `effect` and returns its value with the elapsed real-clock milliseconds. */

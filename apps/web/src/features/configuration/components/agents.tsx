@@ -16,12 +16,7 @@ import {
   TableHeader,
   TableRow,
 } from "~/components/ui/table";
-import {
-  agentCopy,
-  coordinatorCopy,
-  emptyListCopy,
-  plural,
-} from "~/features/configuration/strings";
+import { emptyListCopy, plural } from "~/features/configuration/strings";
 import { ListEmpty } from "~/features/configuration/components/list-empty";
 import { AgentModels } from "~/features/configuration/components/agent-models";
 import { FileError } from "~/features/configuration/components/file-error";
@@ -67,11 +62,6 @@ const AgentRow = ({ agent }: AgentRowProps) => {
       <TableCell>{harnessLabel(agent.harness)}</TableCell>
       <TableCell variant="mono">{agent.model}</TableCell>
       <TableCell className="hidden sm:table-cell">{agent.effort}</TableCell>
-      <TableCell variant="mono" className="hidden lg:table-cell">
-        {agent.resolvedParentModel ?? (
-          <span className="font-sans text-sm text-muted-foreground">Chosen by Pi</span>
-        )}
-      </TableCell>
       <FillCell tone="muted" className="hidden whitespace-normal md:table-cell">
         {agent.loops.length === 0 ? "No loop" : agent.loops.join(", ")}
       </FillCell>
@@ -99,7 +89,7 @@ const InvalidAgentRow = ({ agent }: InvalidAgentRowProps) => {
       <TableCell>
         <NotLoaded />
       </TableCell>
-      <TableCell colSpan={4} className="max-w-0">
+      <TableCell colSpan={3} className="max-w-0">
         <TextTooltip text={agent.error.message} repeats>
           <p className="truncate text-destructive">{agent.error.message}</p>
         </TextTooltip>
@@ -130,7 +120,6 @@ export const AgentsList = ({ configuration }: AgentsListProps) => {
                 <TableHead>Harness</TableHead>
                 <TableHead>Model</TableHead>
                 <TableHead className="hidden sm:table-cell">Effort</TableHead>
-                <TableHead className="hidden lg:table-cell">Parent model</TableHead>
                 <TableHead className="hidden md:table-cell">Loops</TableHead>
               </TableRow>
             </TableHeader>
@@ -149,19 +138,9 @@ export const AgentsList = ({ configuration }: AgentsListProps) => {
   );
 };
 
-type SourceProps = { readonly children: string };
+type AgentFactsProps = { readonly agent: AgentFileView };
 
-/** Renders the source of a parent setting: this file, `settings` in `usine.yaml`, or the fallback. */
-const Source = ({ children }: SourceProps) => (
-  <p className="mt-0.5 text-xs text-muted-foreground">{children}</p>
-);
-
-type AgentFactsProps = {
-  readonly agent: AgentFileView;
-  readonly configuration: ConfigurationView;
-};
-
-const AgentFacts = ({ agent, configuration }: AgentFactsProps) => {
+const AgentFacts = ({ agent }: AgentFactsProps) => {
   const harnessLabel = useHarnessLabel();
   return (
     <Facts>
@@ -170,40 +149,6 @@ const AgentFacts = ({ agent, configuration }: AgentFactsProps) => {
         <code className="font-mono text-xs">{agent.model}</code>
       </Fact>
       <Fact label="Effort">{agent.effort}</Fact>
-      <Fact label={coordinatorCopy.label}>
-        {agent.resolvedCoordinator}
-        <Source>
-          {agent.coordinator !== null ? agentCopy.override : coordinatorCopy.fromSettings}
-        </Source>
-      </Fact>
-      {agent.resolvedCoordinator === "session" && (
-        <>
-          <Fact label="Parent model">
-            {agent.resolvedParentModel === null ? (
-              <Unset>Chosen by Pi</Unset>
-            ) : (
-              <code className="font-mono text-xs">{agent.resolvedParentModel}</code>
-            )}
-            <Source>
-              {agent.parentModel !== null
-                ? agentCopy.override
-                : configuration.settings.parentModel !== null
-                  ? "From settings.parent_model"
-                  : agentCopy.parentModelUnset}
-            </Source>
-          </Fact>
-          <Fact label="Parent effort">
-            {agent.resolvedParentEffort}
-            <Source>
-              {agent.parentEffort !== null
-                ? agentCopy.override
-                : configuration.settings.parentEffort !== null
-                  ? "From settings.parent_effort"
-                  : "Same as effort"}
-            </Source>
-          </Fact>
-        </>
-      )}
       <Fact label="Loops">
         {agent.loops.length === 0 ? (
           <Unset>No loop uses this agent</Unset>
@@ -238,7 +183,7 @@ export const AgentDetail = ({ name, configuration }: AgentDetailProps) => {
   if (agent !== undefined)
     return (
       <ConfigurationPage entity={entityKey("agent", name)} title={agent.name} file={agent.file}>
-        <DetailColumns facts={<AgentFacts agent={agent} configuration={configuration} />}>
+        <DetailColumns facts={<AgentFacts agent={agent} />}>
           <DetailSection title="Persona" aside="Sent to the agent with every task">
             <Markdown className="max-w-[72ch] text-md">{agent.persona}</Markdown>
           </DetailSection>

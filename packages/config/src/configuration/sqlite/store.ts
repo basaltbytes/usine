@@ -5,7 +5,7 @@ import { DateTime, Effect, Layer, Option, Schema } from "effect";
 import { ConfigParser } from "../../parser.ts";
 import { commit, validateConfiguration } from "../commit.ts";
 import { configurationEntities } from "../entities.ts";
-import { storedLoopUpgrades } from "../upgrade.ts";
+import { removedKeyUpgrades, storedLoopUpgrades } from "../upgrade.ts";
 import {
   Configuration,
   ConfigurationEntity,
@@ -81,12 +81,14 @@ export const sqliteConfigurationLayer = Layer.effect(
       );
     });
 
-    // Rewrites stored loops that the current loop rules reject, in one recorded revision.
+    // Rewrites stored values that the current rules reject or ignore, in one recorded revision.
     yield* Effect.gen(function* () {
       const latest = yield* latestRevision;
       if (Option.isNone(latest)) return;
       const entities = yield* storedEntities;
-      const upgrades = storedLoopUpgrades(entities);
+      const loops = storedLoopUpgrades(entities);
+      const keys = removedKeyUpgrades(entities);
+      const upgrades = [...loops, ...keys];
       if (upgrades.length === 0) return;
       const upgraded = new Map(upgrades.map(({ change }) => [change.key.key, change.after]));
       const valid = yield* validateConfiguration(
@@ -100,8 +102,8 @@ export const sqliteConfigurationLayer = Layer.effect(
       ).pipe(
         Effect.as(true),
         Effect.catchTag("ConfigurationInvalid", ({ problems }) =>
-          Effect.logWarning("Kept stored outcome labels; the upgraded configuration is invalid", {
-            loops: upgrades.map(({ change }) => change.key.identifier),
+          Effect.logWarning("Kept stored values; the upgraded configuration is invalid", {
+            entities: upgrades.map(({ change }) => change.key.key),
             problems: problems.map(({ file, message }) => `${file}: ${message}`),
           }).pipe(Effect.as(false)),
         ),
@@ -111,28 +113,44 @@ export const sqliteConfigurationLayer = Layer.effect(
         number: ConfigurationRevisionNumber.make(latest.value + 1),
         actor: Option.none(),
         time: yield* DateTime.now,
-        message: Option.some("Removed outcome labels that the loop rules no longer accept"),
+        message: Option.some(
+          [
+            ...(loops.length > 0
+              ? ["Removed outcome labels that the loop rules no longer accept"]
+              : []),
+            ...(keys.length > 0
+              ? ["Removed coordinator, parent_model, and parent_effort, which usine ignores"]
+              : []),
+          ].join(". "),
+        ),
         changes: upgrades.map(({ change }) => change),
       });
       const value = yield* Schema.encodeEffect(RevisionJson)(revision);
       yield* sql`INSERT INTO ${sql(revisionTable)} ${sql.insert({ number: revision.number, value })}`;
-      for (const { change, removed } of upgrades) {
+      for (const { change } of upgrades) {
         if (Option.isNone(change.after)) continue;
         const encoded = yield* Schema.encodeEffect(EntityJson)(
           ConfigurationEntity.make({ key: change.key, value: change.after.value }),
         );
         yield* sql`UPDATE ${sql(entityTable)} SET value = ${encoded} WHERE key = ${change.key.key}`;
+      }
+      for (const { change, removed } of loops)
         yield* Effect.logInfo("Removed stored outcome labels that the loop rules reject", {
           revision: revision.number,
           loop: change.key.identifier,
           removed,
         });
-      }
+      for (const { change, removed } of keys)
+        yield* Effect.logInfo("Removed stored keys that usine ignores", {
+          revision: revision.number,
+          entity: change.key.key,
+          removed,
+        });
     }).pipe(
       sql.withTransaction,
       Effect.provideService(SqlClient.BeginTransaction, "BEGIN IMMEDIATE"),
-      Effect.mapError(failure("upgrade stored loops")),
-      Effect.withSpan("ConfigurationStore.upgradeStoredLoops"),
+      Effect.mapError(failure("upgrade stored values")),
+      Effect.withSpan("ConfigurationStore.upgradeStoredValues"),
     );
 
     const read = Effect.gen(function* () {

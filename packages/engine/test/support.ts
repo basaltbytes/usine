@@ -32,8 +32,6 @@ export const testAgent = Agent.make({
     model: ModelId.make("claude-sonnet-4-6"),
     effort: "high",
   }),
-  parentModel: Option.none(),
-  parentEffort: Option.none(),
   persona: AgentPersona.make("Implement the task."),
 });
 
@@ -171,7 +169,6 @@ export const submission = (options: {
     revision: RepositoryRevision.make(`revision-${options.number}`),
     task: AttemptTask.make(`Run test ${options.number}`),
     agent: testAgent,
-    parentModel: Option.none(),
   });
 };
 

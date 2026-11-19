@@ -228,7 +228,6 @@ const executionOf = (runId: RunId, attemptId: AttemptId, reattach = false) => {
     revision: selected.revision,
     task: selected.task,
     agent: selected.agent,
-    parentModel: selected.parentModel,
     permissions: selected.permissions,
     resume: Option.none(),
     reattach,
