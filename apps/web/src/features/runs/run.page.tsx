@@ -14,6 +14,7 @@ import {
 } from "~/components/runs/intervention/edit-and-retry";
 import { useEarlierTranscript } from "~/hooks/runs/transcript";
 import { RunHeader } from "~/components/runs/header";
+import { RepositoryReferences } from "~/components/references/scope";
 import { RunWorkspace } from "~/features/runs/components/workspace";
 
 type RunPageProps = { readonly runId: RunId };
@@ -36,34 +37,36 @@ export const RunPage = ({ runId }: RunPageProps) => {
     });
   };
   return (
-    <main className="flex min-h-[36rem] flex-1 flex-col">
-      <RunHeader
-        detail={detail.data}
-        overview={overview}
-        placement="page"
-        shared
-        className="px-4 pt-4 pb-4 md:px-5"
-        actions={<ContextualActions detail={detail.data} onEdit={setEditing} openRun={openRun} />}
-      />
-      {editing !== null && editApplies(run, editing) && (
-        <EditAndRetry
-          key={`${run.id}:${editing}`}
-          run={run}
-          intent={editing}
-          close={() => setEditing(null)}
-          openRun={openRun}
-          className="mx-4 mb-4 max-w-2xl rounded-lg border p-4 md:mx-5"
+    <RepositoryReferences repository={run.repository}>
+      <main className="flex min-h-[36rem] flex-1 flex-col">
+        <RunHeader
+          detail={detail.data}
+          overview={overview}
+          placement="page"
+          shared
+          className="px-4 pt-4 pb-4 md:px-5"
+          actions={<ContextualActions detail={detail.data} onEdit={setEditing} openRun={openRun} />}
         />
-      )}
-      <RunWorkspace
-        detail={detail.data}
-        history={{
-          cursors: detail.data.earlierTranscript,
-          loading: earlier.isPending,
-          error: earlier.isError ? earlier.error.message : null,
-          load: (cursor) => earlier.mutate(cursor),
-        }}
-      />
-    </main>
+        {editing !== null && editApplies(run, editing) && (
+          <EditAndRetry
+            key={`${run.id}:${editing}`}
+            run={run}
+            intent={editing}
+            close={() => setEditing(null)}
+            openRun={openRun}
+            className="mx-4 mb-4 max-w-2xl rounded-lg border p-4 md:mx-5"
+          />
+        )}
+        <RunWorkspace
+          detail={detail.data}
+          history={{
+            cursors: detail.data.earlierTranscript,
+            loading: earlier.isPending,
+            error: earlier.isError ? earlier.error.message : null,
+            load: (cursor) => earlier.mutate(cursor),
+          }}
+        />
+      </main>
+    </RepositoryReferences>
   );
 };

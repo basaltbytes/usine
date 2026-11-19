@@ -15,6 +15,11 @@
   --typeset-flow: 0.75em;
 }
 
+/* A code span that links, such as a loop name or a source line, shows the link's underline. */
+.typeset-chat :where(a > code) {
+  text-decoration: inherit;
+}
+
 /* Catppuccin Latte, a light fallback; the app ships the `.dark` palette. */
 :root {
   --background: #eff1f5; /* base */
