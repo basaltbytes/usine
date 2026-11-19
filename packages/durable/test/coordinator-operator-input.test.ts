@@ -809,6 +809,47 @@ describe("event-driven coordinator operator input across restarts", () => {
     }).pipe(Effect.scoped),
   );
 
+  it.live("restores the native user-message items that the child observed after a restart", () =>
+    Effect.gen(function* () {
+      const database = yield* temporaryDatabase;
+      const request = coordinated("input/restart/receipts");
+      const recording = recordingSink();
+      // The first child saves the items of its last turn before it starts, as Codex does.
+      const receiving = Layer.effectContext(
+        Effect.gen(function* () {
+          const services = yield* Effect.context<ChildBackend | StubChildren>();
+          const backend = Context.get(services, ChildBackend);
+          let launches = 0;
+          return Context.add(services, ChildBackend, {
+            ...backend,
+            launch: (child) =>
+              Effect.gen(function* () {
+                const journal = yield* ChildSessionJournal.current;
+                if (launches++ === 0) yield* journal.received(["task", "guidance"]);
+                return yield* backend.launch(child);
+              }),
+          });
+        }),
+      ).pipe(Layer.provide(stubChildBackendLayer));
+      const first = yield* orchestrator(sqliteJournal(database).pipe(coordinatorOver(receiving)));
+      yield* first.execute(request, recording.sink);
+      const working = yield* first.nextChild;
+      yield* saveSession(working, request);
+      yield* sessionsStarted(recording, 2);
+      yield* first.stop;
+
+      const second = yield* orchestrator(sqliteJournal(database).pipe(coordinator));
+      const execution = yield* second.execute(request, recording.sink);
+      const resumed = yield* second.nextChild;
+      yield* resumed.reply("Done after the restart.");
+      yield* Fiber.join(execution);
+      yield* second.stop;
+
+      assert.deepStrictEqual(working.request.receipts, Option.some([]));
+      assert.deepStrictEqual(resumed.request.receipts, Option.some(["task", "guidance"]));
+    }).pipe(Effect.scoped),
+  );
+
   it.live("rejects a stored input whose child ended before a restart, before the outcome", () =>
     Effect.gen(function* () {
       const database = yield* temporaryDatabase;
@@ -1186,6 +1227,39 @@ describe("event-driven coordinator operator input across restarts", () => {
         Option.map(refused, ({ inputs, supervision }) => ({ inputs, supervision })),
         Option.some({ inputs: [], supervision: [] }),
       );
+      assertAdmitted(attemptId, recording.outbound());
+    }).pipe(Effect.scoped),
+  );
+
+  it.live("rejects input addressed to a child that a restart replaced", () =>
+    Effect.gen(function* () {
+      const database = yield* temporaryDatabase;
+      const request = coordinated("input/restart/replaced", 2);
+      const attemptId = request.spec.attemptId;
+      const recording = recordingSink();
+      const first = yield* orchestrator(sqliteJournal(database).pipe(coordinator));
+      yield* first.execute(request, recording.sink);
+      const replaced = yield* first.nextChild;
+      yield* sessionsStarted(recording, 1);
+      yield* first.stop;
+
+      const second = yield* orchestrator(sqliteJournal(database).pipe(coordinator));
+      const execution = yield* second.execute(request, recording.sink);
+      const replacement = yield* second.nextChild;
+      yield* second.attempts.intervene(
+        attemptId,
+        toChild(replaced.request.session.id, AttemptChannel.Steer.make({ message: "Late." })),
+      );
+      yield* replacement.reply("Finished from the checkout.");
+      yield* Fiber.join(execution);
+      const delivered = yield* replacement.interventions;
+      yield* second.stop;
+
+      assert.notStrictEqual(replacement.request.session.id, replaced.request.session.id);
+      assert.deepStrictEqual(delivered, []);
+      assert.deepStrictEqual(receipts(recording.outbound()).map(summary), [
+        { input: 1, applied: false, message: "This session is no longer live" },
+      ]);
       assertAdmitted(attemptId, recording.outbound());
     }).pipe(Effect.scoped),
   );
