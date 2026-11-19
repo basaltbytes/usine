@@ -596,6 +596,7 @@ export class ProviderCapacity extends Context.Service<
             .map(([key, pool]) => waitOf(current, key, pool))
             .sort((left, right) => DateTime.Order(left.since, right.since)),
         ),
+        Effect.withSpan("ProviderCapacity.waits"),
       );
 
       return { refused, answered, claim, awaitTurn, force, leave, waits };

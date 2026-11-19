@@ -1,5 +1,5 @@
 import type { RunId } from "@usine/core/run";
-import { pendingProviderRetry } from "@usine/core/attempt";
+import { pendingProviderRetry, ProviderRetry } from "@usine/core/attempt";
 import type { Worker as ConfigWorker } from "@usine/config/factory";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AttemptFailure } from "@usine/core/attempt/failure";
@@ -13,7 +13,7 @@ import {
   RunReader,
   summarizeRun,
 } from "@usine/engine/run-reader";
-import type { UpgradeDrain, RunStoreError } from "@usine/engine/engine";
+import type { CapacityWait, RunEngine, RunStoreError, UpgradeDrain } from "@usine/engine/engine";
 import {
   type TranscriptEntry,
   TranscriptPageQuery,
@@ -219,6 +219,44 @@ export const readRunningEvents = Effect.fn("Operator.readRunningEvents")(functio
   return new Map(read.map(({ runId, event }) => [runId, event] as const));
 });
 
+/** The Runs that the engine in this process holds: for an upgrade, and for pools at capacity. */
+export interface EngineWaits {
+  readonly upgrade: UpgradeDrain | null;
+  readonly capacity: ReadonlyArray<CapacityWait>;
+}
+
+/** The waits of a process that drives no Run, as in setup mode. */
+const noEngineWaits: EngineWaits = { upgrade: null, capacity: [] };
+
+/** Reads the waits of `engine`, or none without an engine. */
+export const readEngineWaits = (
+  engine: Option.Option<RunEngine["Service"]>,
+): Effect.Effect<EngineWaits> =>
+  Option.match(engine, {
+    onNone: () => Effect.succeed(noEngineWaits),
+    onSome: (runs) =>
+      Effect.all({
+        upgrade: Effect.map(runs.upgradeDrain, Option.getOrNull),
+        capacity: runs.capacityWaits,
+      }),
+  });
+
+/**
+ * Returns the Run's pending capacity retry, at the next try of the pool that the Run waits for if
+ * that is later, with the pool's latest refusal.
+ */
+const providerRetryOf = (snapshot: RunSummary, capacity: EngineWaits["capacity"]) =>
+  Option.map(pendingProviderRetry(snapshot.run.state, snapshot.attempts), (retry) => {
+    const pool = capacity.find(({ runIds }) => runIds.includes(snapshot.run.id));
+    return pool === undefined
+      ? retry
+      : ProviderRetry.make({
+          nextAttempt: retry.nextAttempt,
+          retryAt: DateTime.max(retry.retryAt, pool.nextTryAt),
+          message: pool.message,
+        });
+  });
+
 /**
  * Returns the operator's view of a saved Run. `pausedLoops` gives the paused Loops and `workers`
  * how each Attempt's Worker is accessed.
@@ -228,9 +266,10 @@ export const runSummaryView = (
   pausedLoops: ReadonlySet<LoopName>,
   workers: WorkerAccesses,
   waits: ReadonlyMap<RunId, MachineQuotaWait> = new Map(),
-  upgrade: UpgradeDrain | null = null,
+  { upgrade, capacity }: EngineWaits = noEngineWaits,
 ): RunSummaryView => {
   const actions = RunState.operatorActions(snapshot.run.state);
+  const providerRetry = providerRetryOf(snapshot, capacity);
   const unresolved = !Option.contains(
     snapshot.resolvedFailureAttemptId,
     snapshot.attempts.at(-1)?.id,
@@ -249,7 +288,7 @@ export const runSummaryView = (
       Boolean(actions.canCancel) && upgrade !== null && upgrade.runIds.includes(snapshot.run.id)
         ? upgrade.wait
         : null,
-    providerRetry: Option.getOrNull(pendingProviderRetry(snapshot.run.state, snapshot.attempts)),
+    providerRetry: Option.getOrNull(providerRetry),
     loopPaused: pausedLoops.has(snapshot.run.loop),
     machineWait: actions.canCancel ? (waits.get(snapshot.run.id) ?? null) : null,
     openedAt: DateTime.formatIso(snapshot.run.openedAt),
@@ -267,6 +306,8 @@ export const runSummaryView = (
     runAgain: Option.getOrNull(snapshot.runAgain),
     pullRequestUrl: snapshot.pullRequestUrl,
     ...actions,
+    // A retry of a Run that waits after a capacity refusal starts its next Attempt now.
+    canRetry: actions.canRetry || Option.isSome(providerRetry),
     canResolveFailure: actions.canResolveFailure && unresolved,
     canApplyCiLabels: actions.canApplyCiLabels && unresolved,
   });
@@ -278,10 +319,10 @@ export const runView = (
   pausedLoops: ReadonlySet<LoopName>,
   workers: WorkerAccesses,
   waits: ReadonlyMap<RunId, MachineQuotaWait> = new Map(),
-  upgrade: UpgradeDrain | null = null,
+  engine: EngineWaits = noEngineWaits,
 ): RunView =>
   RunView.make({
-    ...runSummaryView(summarizeRun(snapshot), pausedLoops, workers, waits, upgrade),
+    ...runSummaryView(summarizeRun(snapshot), pausedLoops, workers, waits, engine),
     task: snapshot.task,
     resultMessage: Option.match(snapshot.step.result, {
       onNone: () => null,

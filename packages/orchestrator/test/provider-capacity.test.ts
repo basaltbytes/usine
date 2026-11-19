@@ -82,7 +82,7 @@ const inspectUntil = (
     return yield* Effect.die("Run did not reach the expected state");
   });
 
-it.effect.each(["success", "restart", "cancel", "cap", "ordinary"] as const)(
+it.effect.each(["success", "restart", "cancel", "repeated", "ordinary"] as const)(
   "handles a scripted Codex refusal through the engine: %s",
   (scenario) =>
     Effect.gen(function* () {
@@ -98,7 +98,7 @@ it.effect.each(["success", "restart", "cancel", "cap", "ordinary"] as const)(
         open: () =>
           Effect.sync(() => {
             calls += 1;
-            const fails = calls === 1 || scenario === "cap";
+            const fails = calls === 1 || scenario === "repeated";
             const responses = new Map<string, Schema.Json>(
               Object.entries({
                 initialize: {},
@@ -222,11 +222,12 @@ it.effect.each(["success", "restart", "cancel", "cap", "ordinary"] as const)(
           }
           const retry = pendingProviderRetry(failed.run.state, failed.attempts);
           assert(Option.isSome(retry));
-          assert.strictEqual(DateTime.toEpochMillis(retry.value.retryAt), 120_000);
+          assert.strictEqual(DateTime.toEpochMillis(retry.value.retryAt), 300_000);
           const view = runView(failed, new Set(), new Map());
           assert.strictEqual(view.providerRetry?.message, capacityMessage);
           assert.strictEqual(view.providerRetry?.nextAttempt, 2);
-          yield* TestClock.adjust("119 seconds");
+          assert.isTrue(view.canRetry);
+          yield* TestClock.adjust("299 seconds");
           assert.strictEqual(calls, 1);
           assert.isFalse(leased);
           if (scenario === "restart") return accepted.runId;
@@ -238,7 +239,7 @@ it.effect.each(["success", "restart", "cancel", "cap", "ordinary"] as const)(
             return accepted.runId;
           }
           yield* TestClock.adjust("1 second");
-          if (scenario === "cap") {
+          if (scenario === "repeated") {
             const second = yield* inspectUntil(
               engine,
               accepted.runId,
@@ -247,21 +248,26 @@ it.effect.each(["success", "restart", "cancel", "cap", "ordinary"] as const)(
                 Option.isSome(s.attempts[1]?.endedAt ?? Option.none()) &&
                 !leased,
             );
+            const next = Option.getOrNull(pendingProviderRetry(second.run.state, second.attempts));
+            assert.strictEqual(next?.nextAttempt, 3);
             assert.strictEqual(
-              Option.getOrNull(pendingProviderRetry(second.run.state, second.attempts))
-                ?.nextAttempt,
-              3,
+              DateTime.toEpochMillis(next?.retryAt ?? DateTime.makeUnsafe(0)),
+              1_200_000,
             );
-            yield* TestClock.adjust("299 seconds");
+            yield* TestClock.adjust("899 seconds");
             assert.strictEqual(calls, 2);
             yield* TestClock.adjust("1 second");
-            const exhausted = yield* inspectUntil(
+            // A third refusal keeps the Run, which waits 30 minutes for its fourth Attempt.
+            const third = yield* inspectUntil(
               engine,
               accepted.runId,
-              (s) => s.run.state._tag === "Failed",
+              (s) =>
+                s.attempts.length === 3 &&
+                Option.isSome(s.attempts[2]?.endedAt ?? Option.none()) &&
+                !leased,
             );
-            assert.strictEqual(exhausted.attempts.length, 3);
-            assert.isNull(runView(exhausted, new Set(), new Map()).providerRetry);
+            assert.strictEqual(third.run.state._tag, "Running");
+            assert.strictEqual(runView(third, new Set(), new Map()).providerRetry?.nextAttempt, 4);
             yield* engine.retry(
               accepted.runId,
               RetryRequest.make({ requestedBy: Option.none(), amendment: Option.none() }),
@@ -269,9 +275,13 @@ it.effect.each(["success", "restart", "cancel", "cap", "ordinary"] as const)(
             const retried = yield* inspectUntil(
               engine,
               accepted.runId,
-              (s) => s.attempts.length === 4 && s.run.state._tag === "Failed",
+              (s) =>
+                s.attempts.length === 4 &&
+                Option.isSome(s.attempts[3]?.endedAt ?? Option.none()) &&
+                !leased,
             );
             assert.strictEqual(calls, 4);
+            assert.strictEqual(retried.run.state._tag, "Running");
             assert.strictEqual(
               Option.getOrNull(retried.attempts[3]?.start ?? Option.none())?._tag,
               "OperatorRetry",

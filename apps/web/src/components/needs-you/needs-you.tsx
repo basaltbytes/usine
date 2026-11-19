@@ -139,6 +139,7 @@ const NeedEntry = ({ need }: NeedEntryProps) => {
   const dismiss = <DismissNeed need={need} action="dismissNeed" />;
   switch (need._tag) {
     case "WebhookSilenceNeed":
+    case "ProviderCapacityNeed":
     case "PoolLimitNeed": {
       const copy = needCopy(need);
       return <NeedItem copy={copy} heading={copy.title} dismiss={dismiss} />;
