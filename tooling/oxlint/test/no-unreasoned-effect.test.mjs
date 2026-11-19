@@ -77,3 +77,15 @@ export const useValue = () => useEffect(() => {}, []);`,
     assert.match(result.stdout, /require-react-disable-reason/u);
   });
 }
+
+test("rejects an explained next-line directive that disables the guard", () => {
+  const result = lint(
+    "hooks/example.ts",
+    `import { useEffect } from "react";
+// oxlint-disable-next-line usine/require-react-disable-reason -- temporary
+// oxlint-disable-next-line usine/no-unreasoned-effect
+export const useValue = () => useEffect(() => {}, []);`,
+  );
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.match(result.stdout, /require-react-disable-reason/u);
+});

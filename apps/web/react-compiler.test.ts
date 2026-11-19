@@ -2,8 +2,13 @@ import { parseSync, transformFromAstSync, traverse } from "@babel/core";
 import compiler, { type LoggerEvent, type ErrorCategory } from "babel-plugin-react-compiler";
 import { NodeFileSystem } from "@effect/platform-node";
 import { Effect, FileSystem } from "effect";
+// Effect Path has no glob matcher for lint ignore patterns.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
+import { matchesGlob } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { ignorePatterns } from "../../.oxlintrc.json";
+import { invalidReactDisable } from "../../tooling/oxlint/shared/react-disable";
 import { compilerOptions } from "./react-compiler";
 
 const sourceRoot = new URL("./src/", import.meta.url);
@@ -38,7 +43,7 @@ const exclusions = [
     "TanStack Virtual's `useVirtualizer()` API returns functions that cannot be memoized safely",
 }));
 
-const compile = (source: string, filename: string) => {
+const parseSource = (source: string, filename: string) => {
   const ast = parseSync(source, {
     filename,
     configFile: false,
@@ -46,6 +51,11 @@ const compile = (source: string, filename: string) => {
     parserOpts: { plugins: ["typescript", "jsx"] },
   });
   if (ast === null) throw new Error(`No syntax tree for ${filename}`);
+  return ast;
+};
+
+const compile = (source: string, filename: string) => {
+  const ast = parseSource(source, filename);
   const names = new Map<string, string>();
   traverse(ast, {
     Function(path) {
@@ -77,7 +87,7 @@ const compile = (source: string, filename: string) => {
       ],
     ],
   });
-  return { events, names };
+  return { events, names, comments: ast.comments ?? [] };
 };
 
 describe("React Compiler coverage", () => {
@@ -107,7 +117,10 @@ describe("React Compiler coverage", () => {
 
   it.each(sources)("compiles $file without unexpected skips", ({ file, source }) => {
     const filename = fileURLToPath(new URL(file, sourceRoot));
-    const { events, names } = compile(source, filename);
+    const { events, names, comments } = compile(source, filename);
+    if (!ignorePatterns.some((pattern) => matchesGlob(`apps/web/src/${file}`, pattern))) {
+      expect(comments.filter((comment) => invalidReactDisable(comment.value))).toEqual([]);
+    }
     const failures = events.flatMap<CompilationFailure>((event) => {
       if (
         event.kind !== "CompileError" &&
@@ -154,4 +167,43 @@ describe("React Compiler coverage", () => {
       ).toBe(false);
     }
   });
+});
+
+describe("React disable directives", () => {
+  const invalidComments = (source: string) =>
+    (parseSource(source, "probe.tsx").comments ?? []).filter((comment) =>
+      invalidReactDisable(comment.value),
+    );
+
+  for (const tool of ["oxlint", "eslint"]) {
+    for (const hook of ["useEffect", "useMemo"]) {
+      const call = `${hook}(() => {}, []);`;
+      const rule = hook === "useEffect" ? "usine/no-unreasoned-effect" : "usine/no-manual-memo";
+      it.each([
+        `${call} // ${tool}-disable-line`,
+        `// ${tool}-disable-next-line\n${call}`,
+        `/* ${tool}-disable */\n${call}`,
+        `/* ${tool}-disable */\n${call}\n/* ${tool}-enable */`,
+        `/* ${tool}-disable usine/require-react-disable-reason */\n// ${tool}-disable-next-line ${rule}\n${call}`,
+        `// ${tool}-disable-next-line usine/require-react-disable-reason -- temporary\n// ${tool}-disable-next-line ${rule}\n${call}`,
+        `${call} // ${tool}-disable-line ${rule}, usine/require-react-disable-reason`,
+        `${call} // ${tool}-disable-line ${rule} -- Browser events.`,
+      ])("rejects %s", (source) => {
+        expect(invalidComments(source).length).toBeGreaterThan(0);
+      });
+      it(`accepts an explained ${tool} exclusion for ${hook}`, () => {
+        expect(
+          invalidComments(`// ${tool}-disable-next-line ${rule} -- Browser events.\n${call}`),
+        ).toEqual([]);
+      });
+    }
+    it.each([
+      `// ${tool}-disable-next-line no-console\nconsole.log("debug");`,
+      `/* ${tool}-disable no-console -- Debug output. */\nconsole.log("debug");\n/* ${tool}-enable no-console */`,
+      `const example = "// ${tool}-disable";`,
+      `const example = <pre>{"/* ${tool}-disable */"}</pre>;`,
+    ])("accepts unrelated directives and string contents: %s", (source) => {
+      expect(invalidComments(source)).toEqual([]);
+    });
+  }
 });

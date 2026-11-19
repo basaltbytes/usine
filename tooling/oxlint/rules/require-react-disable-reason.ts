@@ -1,6 +1,6 @@
 import { defineRule } from "@oxlint/plugins";
 
-const reactRules = new Set(["usine/no-manual-memo", "usine/no-unreasoned-effect"]);
+import { invalidReactDisable } from "../shared/react-disable.ts";
 
 export const requireReactDisableReasonRule = defineRule({
   meta: {
@@ -15,19 +15,7 @@ export const requireReactDisableReasonRule = defineRule({
     return {
       Program() {
         for (const comment of context.sourceCode.getAllComments()) {
-          const directive =
-            /^\s*(?:oxlint|eslint)-disable(-next-line|-line)?(?:\s|$)([\s\S]*)/u.exec(
-              comment.value,
-            );
-          if (directive === null) continue;
-          const [rules = "", ...reason] = (directive[2] ?? "").split(/(?:^|\s)--(?:\s|$)/u);
-          const names = rules
-            .trim()
-            .split(/[\s,]+/u)
-            .filter(Boolean);
-          if (names.length > 0 && !names.some((name) => reactRules.has(name))) continue;
-          if (directive[1] === "-next-line" && names.length > 0 && reason.join(" ").trim() !== "")
-            continue;
+          if (!invalidReactDisable(comment.value)) continue;
           context.report({ loc: comment.loc, messageId: "invalidDirective" });
         }
       },
