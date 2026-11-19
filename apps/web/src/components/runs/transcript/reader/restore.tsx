@@ -39,12 +39,14 @@ export const RestoreReader = ({
   const { state, reveal } = useTranscriptDisclosure();
   const requested = useRef(new Set<string>());
   const [layout, setLayout] = useState(0);
+  // oxlint-disable-next-line usine/no-unreasoned-effect -- Observe viewport resizes while restoring the saved DOM scroll position.
   useLayoutEffect(() => {
     const viewport = viewportRef.current;
     if (target === null || viewport === null) return;
     return observeResize([viewport], () => setLayout((value) => value + 1));
   }, [target, viewportRef]);
   const [notice, setNotice] = useState<string | null>(null);
+  // oxlint-disable-next-line usine/no-unreasoned-effect -- Load saved history and restore its DOM scroll position after disclosures mount.
   useEffect(() => {
     if (target === null || !active) return;
     const limited = requested.current.size >= 20;

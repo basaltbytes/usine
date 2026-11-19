@@ -98,7 +98,10 @@ export const TokenScopes = ({ token, close }: TokenScopesProps) => {
       } else {
         const body: ScopeEdit = { scopes };
         // An unchanged field keeps the stored ceiling; an emptied field removes it.
-        if (operations !== initialOperations) body.operations = ceiling.length > 0 ? ceiling : null;
+        if (operations !== initialOperations) {
+          if (ceiling.length > 0) body.operations = ceiling;
+          else body.operations = null;
+        }
         await authRequest(`/api/tokens/${encodeURIComponent(token.id)}/scopes`, Acknowledged, {
           method: "PUT",
           body,
@@ -108,12 +111,11 @@ export const TokenScopes = ({ token, close }: TokenScopesProps) => {
         client.invalidateQueries(tokensQuery()),
         client.invalidateQueries(sessionQuery()),
       ]);
-      close?.();
+      if (close !== undefined) close();
     } catch (cause) {
       setError(rejectionMessage(cause));
-    } finally {
-      setPending(false);
     }
+    setPending(false);
   };
   return (
     <form

@@ -1,4 +1,4 @@
-import { createContext, useContext, useReducer, useCallback, type ReactNode } from "react";
+import { createContext, useContext, useReducer, type ReactNode } from "react";
 
 interface Disclosure {
   readonly open: boolean;
@@ -53,17 +53,17 @@ type TranscriptDisclosureProviderProps = {
 /** Provides disclosure state; mount it outside the scroller's filter `key` so the state survives filtering and regrouping. */
 export const TranscriptDisclosureProvider = ({
   children,
-  initialState = new Map<string, Disclosure>(),
+  initialState,
   onInspect,
 }: TranscriptDisclosureProviderProps) => {
-  const [state, reveal] = useReducer(changeDisclosure, initialState);
-  const change = useCallback(
-    (choice: DisclosureChange) => {
-      if (choice.open) onInspect?.();
-      reveal(choice);
-    },
-    [onInspect],
+  const [state, reveal] = useReducer(
+    changeDisclosure,
+    initialState ?? new Map<string, Disclosure>(),
   );
+  const change = (choice: DisclosureChange) => {
+    if (choice.open) onInspect?.();
+    reveal(choice);
+  };
   return (
     <DisclosureContext.Provider value={{ state, change, reveal }}>
       {children}

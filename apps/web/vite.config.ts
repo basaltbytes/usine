@@ -1,6 +1,8 @@
 import { tanstackRouter } from "@tanstack/router-plugin/vite";
 import tailwindcss from "@tailwindcss/vite";
-import react from "@vitejs/plugin-react";
+import react, { reactCompilerPreset } from "@vitejs/plugin-react";
+import babel from "@rolldown/plugin-babel";
+import { compilerOptions } from "./react-compiler.ts";
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
 
@@ -17,6 +19,7 @@ export default defineConfig({
       generatedRouteTree: "./src/route-tree.gen.ts",
     }),
     react(),
+    babel({ presets: [reactCompilerPreset(compilerOptions)] }),
     tailwindcss(),
   ],
   resolve: {

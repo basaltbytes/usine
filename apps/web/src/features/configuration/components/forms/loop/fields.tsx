@@ -28,6 +28,7 @@ export const LoopFields = ({ name, ...fields }: LoopFieldsProps) => {
     [];
   const [checkedValue, setCheckedValue] = useState(fields.value);
   const [preview, setPreview] = useState<typeof fields.value>();
+  // oxlint-disable-next-line usine/no-unreasoned-effect -- Debounce validation requests to the server with a browser timer.
   useEffect(() => {
     const timer = setTimeout(() => setCheckedValue(fields.value), 350);
     return () => clearTimeout(timer);

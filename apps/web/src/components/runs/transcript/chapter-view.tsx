@@ -36,10 +36,9 @@ type ChapterViewProps = {
   readonly history: TranscriptHistory;
 };
 
-export const ChapterView = ({ chapter, first, runTask, history }: ChapterViewProps) => {
-  const cursor = history.cursors.find(({ attemptId }) => attemptId === chapter.attemptId);
+const speakerRows = (chapter: Chapter) => {
   let previous: Speaker | null = null;
-  const rows = chapter.rows.map((row) => {
+  return chapter.rows.map((row) => {
     const speaker = rowSpeaker(row);
     const changed =
       speaker !== null &&
@@ -49,6 +48,11 @@ export const ChapterView = ({ chapter, first, runTask, history }: ChapterViewPro
     if (speaker !== null) previous = speaker;
     return { row, speaker: changed ? speaker.name : null };
   });
+};
+
+export const ChapterView = ({ chapter, first, runTask, history }: ChapterViewProps) => {
+  const cursor = history.cursors.find(({ attemptId }) => attemptId === chapter.attemptId);
+  const rows = speakerRows(chapter);
   return (
     <>
       <MessageScrollerItem messageId={chapter.key} className={first ? undefined : "mt-10"}>

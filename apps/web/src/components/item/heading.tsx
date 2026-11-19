@@ -33,32 +33,35 @@ export const ItemHeading = ({
   title,
   variant,
   linked = true,
-  as: Element = variant === "page" ? "h1" : "span",
+  as,
   className,
   style,
-}: ItemHeadingProps) => (
-  <Element
-    className={cn(
-      variant === "page"
-        ? "text-xl font-semibold wrap-anywhere"
-        : "block truncate text-sm font-medium",
-      className,
-    )}
-    {...(style === undefined ? {} : { style })}
-    {...(variant === "row" ? { title } : {})}
-  >
-    {Option.match(item, {
-      onNone: () => null,
-      onSome: (mark) => (
-        <>
-          <ItemMark
-            item={mark}
-            size={variant === "page" ? "title" : "inline"}
-            linked={linked}
-          />{" "}
-        </>
-      ),
-    })}
-    {title}
-  </Element>
-);
+}: ItemHeadingProps) => {
+  const Element = as ?? (variant === "page" ? "h1" : "span");
+  return (
+    <Element
+      className={cn(
+        variant === "page"
+          ? "text-xl font-semibold wrap-anywhere"
+          : "block truncate text-sm font-medium",
+        className,
+      )}
+      {...(style === undefined ? {} : { style })}
+      {...(variant === "row" ? { title } : {})}
+    >
+      {Option.match(item, {
+        onNone: () => null,
+        onSome: (mark) => (
+          <>
+            <ItemMark
+              item={mark}
+              size={variant === "page" ? "title" : "inline"}
+              linked={linked}
+            />{" "}
+          </>
+        ),
+      })}
+      {title}
+    </Element>
+  );
+};

@@ -1,3 +1,6 @@
+import { noManualMemoRule } from "./rules/no-manual-memo.ts";
+import { noUnreasonedEffectRule } from "./rules/no-unreasoned-effect.ts";
+import { requireReactDisableReasonRule } from "./rules/require-react-disable-reason.ts";
 import { eslintCompatPlugin } from "@oxlint/plugins";
 
 import { noChainedTypeAssertionsRule } from "./rules/no-chained-type-assertions.ts";
@@ -31,6 +34,9 @@ import { webImportDirectionRule } from "./rules/web-import-direction.ts";
 const usinePlugin = eslintCompatPlugin({
   meta: { name: "usine" },
   rules: {
+    "require-react-disable-reason": requireReactDisableReasonRule,
+    "no-manual-memo": noManualMemoRule,
+    "no-unreasoned-effect": noUnreasonedEffectRule,
     "web-import-direction": webImportDirectionRule,
     "no-em-dash-copy": noEmDashCopyRule,
     "no-native-title-tooltip": noNativeTitleTooltipRule,

@@ -95,7 +95,7 @@ export default mergeConfig(
           extends: true,
           test: {
             name: "unit",
-            include: ["src/**/*.test.{ts,tsx}"],
+            include: ["src/**/*.test.{ts,tsx}", "react-compiler.test.ts"],
             exclude: [...configDefaults.exclude, "**/*.browser.test.tsx"],
           },
         },

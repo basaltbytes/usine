@@ -256,6 +256,7 @@ const Crumbs = ({ view, project, runId, task }: CrumbsProps) => {
 
 const Shell = () => {
   const queryClient = useQueryClient();
+  // oxlint-disable-next-line usine/no-unreasoned-effect -- Subscribe the query cache to server change events.
   useEffect(() => connectChanges(queryClient), [queryClient]);
   const { data } = useSuspenseQuery(overviewQuery());
   const { data: needs } = useSuspenseQuery({

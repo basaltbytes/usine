@@ -1,6 +1,6 @@
 import type { RunId } from "@usine/core/run";
 import type { TranscriptSequence } from "@usine/engine/transcript";
-import { memo, useCallback, useMemo, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { ConversationViewport } from "~/components/runs/transcript/conversation-viewport";
 import { TranscriptDisclosureProvider } from "~/components/runs/transcript/grouping/disclosure";
 import { RevealTarget, type ReaderTarget } from "~/components/runs/transcript/navigation/errors";
@@ -40,7 +40,7 @@ const narrowEntry = (document: ReaderDocument): ReaderTarget | null => {
   return row === undefined ? null : { messageId: row.key, tool: null };
 };
 
-type ReaderProps = {
+type ConversationProps = {
   readonly runId: RunId;
   readonly document: ReaderDocument;
   /** The newest transcript event, including events that no row shows. */
@@ -56,7 +56,8 @@ type ReaderProps = {
   readonly onReading: (place: ReadingPlace) => void;
 };
 
-const Reader = ({
+/** Renders a Run's Attempts as one document that follows new activity until the reader scrolls away. */
+export const Conversation = ({
   runId,
   document,
   through,
@@ -66,25 +67,25 @@ const Reader = ({
   active,
   request,
   onReading,
-}: ReaderProps) => {
+}: ConversationProps) => {
   const [saved] = useState(() => readerMemory(() => window.localStorage).read(runId, Date.now()));
   const [pendingRestore, setPendingRestore] = useState<ReadingAnchor | null>(
     saved?.position._tag === "Anchor" ? saved.position : null,
   );
   const [allowLatest, setAllowLatest] = useState(pendingRestore === null);
   const [defaultPosition] = useState<"start" | "end">(pendingRestore === null ? "end" : "start");
-  const restored = useCallback(() => setPendingRestore(null), []);
-  const inspect = useCallback(() => {
+  const restored = () => setPendingRestore(null);
+  const inspect = () => {
     setPendingRestore(null);
     setAllowLatest(false);
-  }, []);
+  };
   const navigate = () => {
     setPendingRestore(null);
     setAllowLatest(true);
   };
   const viewportRef = useRef<HTMLDivElement>(null);
-  const updates = useMemo(() => indexTranscriptUpdates(document), [document]);
-  const rows = useMemo(() => readingRows(document), [document]);
+  const updates = indexTranscriptUpdates(document);
+  const rows = readingRows(document);
   const [unread, setUnread] = useState(() =>
     initializeUnread(saved === null ? through : saved.readThrough),
   );
@@ -99,22 +100,19 @@ const Reader = ({
     setPendingTarget(request.target);
     setPendingLatest(false);
   }
-  const observe = useCallback(
-    (atLatest: boolean) => {
-      setUnread((previous) => {
-        const next = advanceUnread(previous, updates, through);
-        return atLatest && pendingRestore === null && allowLatest ? acknowledgeUnread(next) : next;
-      });
-    },
-    [updates, through, pendingRestore, allowLatest],
-  );
+  const observe = (atLatest: boolean) => {
+    setUnread((previous) => {
+      const next = advanceUnread(previous, updates, through);
+      return atLatest && pendingRestore === null && allowLatest ? acknowledgeUnread(next) : next;
+    });
+  };
   const jumpLatest = () => {
     navigate();
     setPendingLatest(true);
     setPendingTarget(null);
   };
-  const reachedLatest = useCallback(() => setPendingLatest(false), []);
-  const revealed = useCallback(() => setPendingTarget(null), []);
+  const reachedLatest = () => setPendingLatest(false);
+  const revealed = () => setPendingTarget(null);
   const latest = history.cursors.at(-1);
   const following = active && pendingRestore === null && allowLatest;
   return (
@@ -189,6 +187,3 @@ const Reader = ({
     </TranscriptDisclosureProvider>
   );
 };
-
-/** Renders a Run's Attempts as one document that follows new activity until the reader scrolls away. */
-export const Conversation = memo(Reader);

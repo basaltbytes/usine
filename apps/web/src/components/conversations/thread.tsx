@@ -9,7 +9,7 @@ import {
 } from "@usine/core/conversation";
 import { OperatorHttpError } from "@usine/orchestrator/operator/http";
 import { DateTime, Schema } from "effect";
-import { type RefObject, useMemo, useState } from "react";
+import { type RefObject, useState } from "react";
 import { ErrorAlert } from "~/components/error-alert";
 import { PageFact } from "~/components/page";
 import {
@@ -102,10 +102,7 @@ const ThreadBody = ({ id, record, composerRef }: ThreadBodyProps) => {
   const events = useQuery(conversationEventsQuery(queryClient, id));
   useMarkRead(id, record);
   const [draft, setDraft] = useState("");
-  const timeline = useMemo(
-    () => conversationTimeline(record, events.data ?? []),
-    [record, events.data],
-  );
+  const timeline = conversationTimeline(record, events.data ?? []);
   const refresh = () =>
     Promise.all([
       queryClient.invalidateQueries({ queryKey: conversationKey(id) }),

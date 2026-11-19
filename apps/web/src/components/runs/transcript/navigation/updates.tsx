@@ -25,9 +25,11 @@ export const UpdateNavigation = ({
 }: UpdateNavigationProps) => {
   const { end } = useMessageScrollerScrollable();
   const { scrollToEnd } = useMessageScroller();
+  // oxlint-disable-next-line usine/no-unreasoned-effect -- Synchronize read acknowledgements with the scroller viewport boundary.
   useEffect(() => {
     onObserve(active && !end && !revealing);
   }, [active, end, revealing, onObserve]);
+  // oxlint-disable-next-line usine/no-unreasoned-effect -- Scroll the DOM viewport to the requested latest message.
   useLayoutEffect(() => {
     if (pendingLatest && scrollToEnd({ behavior: "instant" })) onReachedLatest();
   }, [pendingLatest, scrollToEnd, onReachedLatest]);

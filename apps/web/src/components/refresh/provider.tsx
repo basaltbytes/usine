@@ -20,6 +20,7 @@ export const RefreshProvider = ({ children }: RefreshProviderProps) => {
   const client = useQueryClient();
   const { data: connection = "connecting" } = useQuery(connectionQuery());
   const [sources, setSources] = useState<ReadonlyArray<RefreshSource>>([]);
+  // oxlint-disable-next-line usine/no-unreasoned-effect -- Subscribe to query-cache events for refresh timestamps and failures.
   useEffect(() => {
     const cache = client.getQueryCache();
     const failures = new Map<string, number>();

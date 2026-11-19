@@ -114,6 +114,21 @@ export const unchangedRunAgain = (run: RunView) => ({
   amendment: EditAndRetry.make({ task: AttemptTask.make(run.task), agent: run.agent }),
 });
 
+const runAgain = (runId: RunId, amendment: EditAndRetry | "unchanged") =>
+  api(
+    (client) =>
+      Effect.gen(function* () {
+        const payload =
+          amendment === "unchanged"
+            ? unchangedRunAgain(
+                (yield* readRunDetail(client, runId, ColdTranscriptRequest.make())).run,
+              ).amendment
+            : amendment;
+        return yield* client.runAgain({ params: { runId }, payload });
+      }),
+    "full",
+  );
+
 /**
  * Opens a new Run for the Item of a succeeded or canceled Run, with the task and Agent in
  * `amendment`. On success, refetches the overview, desk, and Run detail; the result is the new Run
@@ -137,20 +152,7 @@ export const useRunAgain = ({
     }: {
       readonly runId: RunId;
       readonly amendment: EditAndRetry | "unchanged";
-    }) =>
-      api(
-        (client) =>
-          Effect.gen(function* () {
-            const payload =
-              amendment === "unchanged"
-                ? unchangedRunAgain(
-                    (yield* readRunDetail(client, runId, ColdTranscriptRequest.make())).run,
-                  ).amendment
-                : amendment;
-            return yield* client.runAgain({ params: { runId }, payload });
-          }),
-        "full",
-      ),
+    }) => runAgain(runId, amendment),
     onSuccess: async (result, { runId }) => {
       await refresh(runId);
       if (result._tag === "Claimed") onClaimed?.(result.runId);

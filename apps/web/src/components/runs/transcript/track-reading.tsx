@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect } from "react";
 import { useMessageScrollerVisibility } from "~/components/ui/message-scroller";
 import {
   readingOrder,
@@ -16,10 +16,11 @@ type TrackReadingProps = {
 /** Reports the reading position while the reader is shown. */
 export const TrackReading = ({ document, active, onReading }: TrackReadingProps) => {
   const { visibleMessageIds } = useMessageScrollerVisibility();
-  const order = useMemo(() => readingOrder(document), [document]);
+  const order = readingOrder(document);
   const place = readingPlace(order, visibleMessageIds);
   const attemptId = place?.attemptId;
   const checkpointKey = place?.checkpointKey ?? null;
+  // oxlint-disable-next-line usine/no-unreasoned-effect -- Observe the transcript DOM scroll position to identify the visible checkpoint.
   useEffect(() => {
     if (active && attemptId !== undefined) onReading({ attemptId, checkpointKey });
   }, [active, attemptId, checkpointKey, onReading]);

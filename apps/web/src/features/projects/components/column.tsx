@@ -125,6 +125,7 @@ export const BoardColumn = ({
   });
   const visible = virtual.getVirtualItems();
   const last = visible.at(-1)?.index ?? 0;
+  // oxlint-disable-next-line usine/no-unreasoned-effect -- Load the next server page when the virtual viewport approaches the end of the board column.
   useEffect(() => {
     if (!folded && history.hasNextPage && !history.isFetchingNextPage && last >= items.length - 5)
       void history.fetchNextPage();

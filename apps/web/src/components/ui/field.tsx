@@ -1,4 +1,3 @@
-import { useMemo } from "react";
 import { cva, type VariantProps } from "class-variance-authority";
 
 import { cn } from "~/lib/utils";
@@ -174,7 +173,7 @@ function FieldError({
 }: React.ComponentProps<"div"> & {
   errors?: Array<{ message?: string } | undefined>;
 }) {
-  const content = useMemo(() => {
+  const content = (() => {
     // Truthy ReactNode children take precedence over generated error messages.
     // @effect-diagnostics-next-line strictBooleanExpressions:off
     if (children) {
@@ -196,7 +195,7 @@ function FieldError({
         {uniqueErrors.map((error, index) => error?.message && <li key={index}>{error.message}</li>)}
       </ul>
     );
-  }, [children, errors]);
+  })();
 
   // ReactNode errors omit false, zero, and empty strings.
   // @effect-diagnostics-next-line strictBooleanExpressions:off

@@ -33,10 +33,12 @@ export const TaskRuns = ({ task, openRun }: TaskRunsProps) => {
   });
   const visible = virtual.getVirtualItems();
   const last = visible.at(-1)?.index ?? 0;
+  // oxlint-disable-next-line usine/no-unreasoned-effect -- Load history from the server as the virtual viewport approaches its end.
   useEffect(() => {
     if (history.hasNextPage && !history.isFetchingNextPage && last >= runs.length - 8)
       void history.fetchNextPage();
   }, [history.hasNextPage, history.isFetchingNextPage, history.fetchNextPage, last, runs.length]);
+  // oxlint-disable-next-line usine/no-unreasoned-effect -- Observe the history sentinel intersecting the scroll container.
   useEffect(() => {
     const node = more.current;
     if (node === null || !history.hasNextPage || history.isFetchingNextPage) return;

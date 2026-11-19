@@ -37,7 +37,8 @@ export const RememberReader = ({
   const position = useRef(initialPosition);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const memory = useRef(readerMemory(() => window.localStorage));
-  const capture = (viewport = viewportRef.current) => {
+  const capture = (container?: HTMLDivElement | null) => {
+    const viewport = container === undefined ? viewportRef.current : container;
     if (!active || restoring) return;
     if (viewport === null || viewport.clientHeight === 0) return;
     const element = visibleTranscriptRow(viewport);
@@ -64,15 +65,18 @@ export const RememberReader = ({
     };
   };
   const latestCapture = useRef(capture);
+  // oxlint-disable-next-line usine/no-unreasoned-effect -- Capture the committed DOM scroll position for browser-storage persistence.
   useLayoutEffect(() => {
     latestCapture.current = capture;
     capture();
   });
+  // oxlint-disable-next-line usine/no-unreasoned-effect -- Capture the DOM scroll position before the viewport ref is detached.
   useLayoutEffect(() => {
     // React clears the viewport ref before this cleanup runs, so the element is captured here.
     const viewport = viewportRef.current;
     return () => latestCapture.current(viewport);
   }, [active, runId, viewportRef]);
+  // oxlint-disable-next-line usine/no-unreasoned-effect -- Persist scroll bookmarks to localStorage on scrolling, visibility changes, and page exit.
   useEffect(() => {
     const flush = () => {
       clearTimeout(timer.current);
@@ -102,6 +106,7 @@ export const RememberReader = ({
       flush();
     };
   }, [runId, viewportRef]);
+  // oxlint-disable-next-line usine/no-unreasoned-effect -- Save the visible DOM reading anchor after transcript or disclosure changes.
   useEffect(() => {
     if (!active || restoring) return;
     const frame = requestAnimationFrame(() => {

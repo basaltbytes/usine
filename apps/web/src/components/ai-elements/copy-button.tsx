@@ -15,6 +15,7 @@ export const CopyButton = ({
 }) => {
   const [status, setStatus] = useState<"idle" | "copying" | "copied" | "failed">("idle");
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  // oxlint-disable-next-line usine/no-unreasoned-effect -- Cancel the clipboard feedback timer when the control unmounts.
   useEffect(() => () => clearTimeout(timeoutRef.current), []);
 
   const copy = async () => {

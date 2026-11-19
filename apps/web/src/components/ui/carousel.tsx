@@ -54,51 +54,44 @@ function Carousel({
     },
     plugins,
   );
-  const [canScrollPrev, setCanScrollPrev] = React.useState(false);
-  const [canScrollNext, setCanScrollNext] = React.useState(false);
+  const subscribe = (onChange: () => void) => {
+    if (api === undefined) return () => {};
+    api.on("reInit", onChange);
+    api.on("select", onChange);
+    return () => {
+      api.off("reInit", onChange);
+      api.off("select", onChange);
+    };
+  };
+  const snapshot = () =>
+    (api?.canScrollPrev() === true ? 1 : 0) | (api?.canScrollNext() === true ? 2 : 0);
+  const scrollability = React.useSyncExternalStore(subscribe, snapshot, () => 0);
+  const canScrollPrev = (scrollability & 1) !== 0;
+  const canScrollNext = (scrollability & 2) !== 0;
 
-  const onSelect = React.useCallback((api: CarouselApi) => {
-    if (api === undefined) return;
-    setCanScrollPrev(api.canScrollPrev());
-    setCanScrollNext(api.canScrollNext());
-  }, []);
-
-  const scrollPrev = React.useCallback(() => {
+  const scrollPrev = () => {
     api?.scrollPrev();
-  }, [api]);
+  };
 
-  const scrollNext = React.useCallback(() => {
+  const scrollNext = () => {
     api?.scrollNext();
-  }, [api]);
+  };
 
-  const handleKeyDown = React.useCallback(
-    (event: React.KeyboardEvent<HTMLDivElement>) => {
-      if (event.key === "ArrowLeft") {
-        event.preventDefault();
-        scrollPrev();
-      } else if (event.key === "ArrowRight") {
-        event.preventDefault();
-        scrollNext();
-      }
-    },
-    [scrollPrev, scrollNext],
-  );
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === "ArrowLeft") {
+      event.preventDefault();
+      scrollPrev();
+    } else if (event.key === "ArrowRight") {
+      event.preventDefault();
+      scrollNext();
+    }
+  };
 
+  // oxlint-disable-next-line usine/no-unreasoned-effect -- Expose the mounted Embla controller to the caller.
   React.useEffect(() => {
     if (api === undefined || setApi === undefined) return;
     setApi(api);
   }, [api, setApi]);
-
-  React.useEffect(() => {
-    if (api === undefined) return;
-    onSelect(api);
-    api.on("reInit", onSelect);
-    api.on("select", onSelect);
-
-    return () => {
-      api?.off("select", onSelect);
-    };
-  }, [api, onSelect]);
 
   return (
     <CarouselContext.Provider

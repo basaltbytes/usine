@@ -35,6 +35,7 @@ export const Timeline = ({ chapter, current, onCheckpoint }: TimelineProps) => {
     )?.key ?? current;
   const railRef = useRef<HTMLOListElement>(null);
   const [mark, setMark] = useState<number | null>(null);
+  // oxlint-disable-next-line usine/no-unreasoned-effect -- Measure the checkpoint marker against DOM layout and resize events.
   useLayoutEffect(() => {
     const rail = railRef.current;
     if (rail === null) return;

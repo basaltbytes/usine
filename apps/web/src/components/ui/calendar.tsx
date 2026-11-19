@@ -7,6 +7,11 @@ import { cn } from "~/lib/utils";
 import { Button, buttonVariants } from "~/components/ui/button";
 import { CaretLeftIcon, CaretRightIcon, CaretDownIcon } from "@phosphor-icons/react";
 
+const rtlNavigationClasses = [
+  String.raw`rtl:**:[.rdp-button\_next>svg]:rotate-180`,
+  String.raw`rtl:**:[.rdp-button\_previous>svg]:rotate-180`,
+];
+
 function Calendar({
   className,
   classNames,
@@ -27,8 +32,7 @@ function Calendar({
       showOutsideDays={showOutsideDays}
       className={cn(
         "group/calendar bg-background p-3 [--cell-radius:var(--radius-md)] [--cell-size:--spacing(6)] in-data-[slot=card-content]:bg-transparent in-data-[slot=popover-content]:bg-transparent",
-        String.raw`rtl:**:[.rdp-button\_next>svg]:rotate-180`,
-        String.raw`rtl:**:[.rdp-button\_previous>svg]:rotate-180`,
+        rtlNavigationClasses,
         className,
       )}
       captionLayout={captionLayout}
@@ -149,6 +153,7 @@ function CalendarDayButton({
   const defaultClassNames = getDefaultClassNames();
 
   const ref = React.useRef<HTMLButtonElement>(null);
+  // oxlint-disable-next-line usine/no-unreasoned-effect -- Focus the day button requested by the calendar controller.
   React.useEffect(() => {
     if (modifiers.focused === true) ref.current?.focus();
   }, [modifiers.focused]);

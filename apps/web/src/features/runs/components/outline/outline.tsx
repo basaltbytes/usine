@@ -105,6 +105,7 @@ export const Outline = ({
       : null;
   const open = selection._tag === "Attempt" ? (reading?.attemptId ?? selection.attemptId) : null;
   const current = selection._tag === "Attempt" ? (reading?.checkpointKey ?? null) : null;
+  // oxlint-disable-next-line usine/no-unreasoned-effect -- Keep the active checkpoint within the outline DOM scroll viewport.
   useEffect(() => {
     // If the outline is scrollable, keeps the marked checkpoint in view.
     const nav = navRef.current;

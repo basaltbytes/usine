@@ -1,11 +1,4 @@
-import {
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  type ReactNode,
-  type RefObject,
-} from "react";
+import { useEffect, useLayoutEffect, useRef, type ReactNode, type RefObject } from "react";
 import { MessageScrollerViewport, useMessageScroller } from "~/components/ui/message-scroller";
 
 const SCROLL_KEYS = ["ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown", " "];
@@ -55,6 +48,7 @@ export const ConversationViewport = ({
   const { scrollToEnd } = useMessageScroller();
   const inputTop = useRef(0);
   const pendingScroll = useRef<{ top: number; following: boolean; frame: number } | null>(null);
+  // oxlint-disable-next-line usine/no-unreasoned-effect -- Capture DOM scroll position before native wheel and touch scrolling.
   useEffect(() => {
     const viewport = viewportRef.current;
     if (viewport === null) return;
@@ -69,7 +63,7 @@ export const ConversationViewport = ({
       viewport.removeEventListener("touchmove", recordPosition);
     };
   }, [viewportRef]);
-  const cancelPendingScroll = useCallback(() => {
+  const cancelPendingScroll = () => {
     const pending = pendingScroll.current;
     if (pending === null) return;
     cancelAnimationFrame(pending.frame);
@@ -77,8 +71,10 @@ export const ConversationViewport = ({
     const viewport = viewportRef.current;
     if (pending.following && viewport !== null && viewport.scrollTop === pending.top)
       scrollToEnd({ behavior: "instant" });
-  }, [scrollToEnd, viewportRef]);
+  };
+  // oxlint-disable-next-line usine/no-unreasoned-effect -- Cancel pending browser animation frames when the transcript changes or unmounts.
   useLayoutEffect(() => cancelPendingScroll, [cancelPendingScroll, revision]);
+  // oxlint-disable-next-line usine/no-unreasoned-effect -- Cancel pending scroll observation when new browser input arrives.
   useEffect(() => {
     const inputs = ["pointerdown", "keydown", "wheel", "touchmove"] as const;
     for (const input of inputs) window.addEventListener(input, cancelPendingScroll, true);
@@ -87,6 +83,7 @@ export const ConversationViewport = ({
     };
   }, [cancelPendingScroll]);
   // Navigation can enable following after the scroller has handled the native scroll event.
+  // oxlint-disable-next-line usine/no-unreasoned-effect -- Follow the scroller DOM viewport as content changes.
   useEffect(() => {
     const viewport = viewportRef.current;
     if (following && viewport !== null && atLatest(viewport)) scrollToEnd({ behavior: "instant" });
@@ -102,11 +99,11 @@ export const ConversationViewport = ({
       onNavigate();
     } else if (pending.following) scrollToEnd({ behavior: "instant" });
   };
-  const scroll = (viewport: HTMLDivElement, top = viewport.scrollTop) => {
+  const scroll = (viewport: HTMLDivElement, top?: number) => {
     cancelPendingScroll();
     onInteract();
     pendingScroll.current = {
-      top,
+      top: top ?? viewport.scrollTop,
       following: following && atLatest(viewport),
       // Restore following after input that moves nothing; a later native scroll still navigates.
       frame: requestAnimationFrame(() => {

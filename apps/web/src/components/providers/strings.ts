@@ -4,7 +4,7 @@ export const providerNames = { claude: "Claude", chatgpt: "ChatGPT" } as const;
 export const connect = (name: string) => `Connect ${name}`;
 export const replace = (name: string) => `Replace ${name} login`;
 export const disconnect = (name: string) => `Disconnect ${name}`;
-export const useKey = "Use an API key";
+export const apiKeyChoice = "Use an API key";
 export const keyLabel = "API key";
 export const saveKey = "Save API key";
 export const cancelLogin = "Cancel sign-in";
