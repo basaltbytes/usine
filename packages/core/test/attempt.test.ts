@@ -78,6 +78,14 @@ describe("auto-retry law (ADR 0002, ADR 0013)", () => {
     expect(shouldAutoRetry({ failure: capacity, earlier: refusals, maxAutoAttempts: n(3) })).toBe(
       true,
     );
+    // Earlier infrastructure failures that used up the cap don't fail a usage limit.
+    expect(
+      shouldAutoRetry({
+        failure: capacity,
+        earlier: [failed(infra), failed(infra)],
+        maxAutoAttempts: n(3),
+      }),
+    ).toBe(true);
     expect(
       shouldAutoRetry({
         failure: infra,
@@ -128,14 +136,35 @@ describe("provider retry deadline", () => {
     ).toStrictEqual([5, 15, 30, 60, 60, 60]);
   });
 
-  it("keeps the wait for an earlier reset that a later refusal doesn't report", () => {
-    const reset = DateTime.makeUnsafe("2026-11-11T08:00:00Z");
+  it.each([
+    ["doesn't report one", Option.none()],
+    ["reports an earlier one", Option.some(DateTime.makeUnsafe("2026-11-11T05:00:00Z"))],
+  ] as const)(
+    "keeps the wait for an earlier refusal's reset when a later refusal %s",
+    (_, later) => {
+      const reset = DateTime.makeUnsafe("2026-11-11T08:00:00Z");
+      const retry = pendingProviderRetry(Running.make(), [
+        refused(1, Option.some(reset)),
+        refused(2, later),
+      ]);
+      expect(Option.map(retry, ({ retryAt }) => DateTime.formatIso(retryAt))).toStrictEqual(
+        Option.some("2026-11-11T08:00:00.000Z"),
+      );
+    },
+  );
+
+  it("counts only the refusals since the last Attempt that the provider didn't refuse", () => {
     const retry = pendingProviderRetry(Running.make(), [
-      refused(1, Option.some(reset)),
-      refused(2, Option.none()),
+      refused(1, Option.none()),
+      {
+        ...refused(2, Option.none()),
+        outcome: Option.some(AttemptFailed.make({ failure: infra })),
+      },
+      refused(3, Option.none()),
+      refused(4, Option.none()),
     ]);
     expect(Option.map(retry, ({ retryAt }) => DateTime.formatIso(retryAt))).toStrictEqual(
-      Option.some("2026-11-11T08:00:00.000Z"),
+      Option.some("2026-11-11T03:15:00.000Z"),
     );
   });
 

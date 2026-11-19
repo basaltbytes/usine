@@ -3159,6 +3159,11 @@ describe("Claude child backend", () => {
       resetsAt: Option.some("2026-11-11T05:00:00.000Z"),
     },
     {
+      name: "a rejected usage limit while another window used up resets later",
+      messages: [allowance("seven_day_opus", 1, 1_794_416_400), rejected, limitError, limitResult],
+      resetsAt: Option.some("2026-11-11T05:00:00.000Z"),
+    },
+    {
       name: "a rate limit without a reported reset time",
       messages: [limitError, limitResult],
       resetsAt: Option.none(),

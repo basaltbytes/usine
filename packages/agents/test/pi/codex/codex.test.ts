@@ -3180,4 +3180,119 @@ describe("Codex child backend", () => {
       }).pipe(Effect.provide(codexChildLayer.pipe(Layer.provideMerge(server)))),
     );
   });
+
+  it.effect(
+    "reports the provider's answer when a Codex turn completes without a model item",
+    () => {
+      const server = connectionLayer(
+        successfulResponses([{ id: "gpt-5.6-terra", model: "gpt-5.6-terra" }]),
+        [
+          {
+            method: "turn/completed",
+            params: { turn: { id: "turn-1", status: "completed", error: null } },
+          },
+        ],
+      );
+      return Effect.scoped(
+        Effect.gen(function* () {
+          const running = yield* (yield* ChildBackend).launch(request());
+          const [events] = yield* Effect.all([
+            Stream.runCollect(running.events),
+            Effect.exit(running.result),
+          ]);
+          assert.lengthOf(
+            events.filter((event) => event._tag === "ProviderAnswered"),
+            1,
+          );
+        }).pipe(Effect.provide(codexChildLayer.pipe(Layer.provideMerge(server)))),
+      );
+    },
+  );
+
+  it.effect(
+    "reports the provider's first answer again after a lost Codex app-server is replaced",
+    () =>
+      Effect.gen(function* () {
+        const original = yield* Queue.make<CodexNotification, SessionOperationError | Cause.Done>();
+        const restored = yield* Queue.make<CodexNotification, Cause.Done>();
+        const recovered = yield* Deferred.make<void>();
+        const responses: Readonly<Record<string, Schema.Json>> = successfulResponses([
+          { id: "gpt-5.6-terra", model: "gpt-5.6-terra" },
+        ]);
+        const message = (turnId: string, id: string, text: string): CodexNotification => ({
+          method: "item/completed",
+          params: { threadId: "thread-1", turnId, item: { type: "agentMessage", id, text } },
+        });
+        let opens = 0;
+        let turns = 0;
+        const server = Layer.succeed(CodexAppServer)({
+          stop: () => Effect.void,
+          open: () =>
+            Effect.sync(
+              () =>
+                ({
+                  notifications:
+                    opens++ === 0
+                      ? Stream.fromQueue(original)
+                      : Stream.unwrap(
+                          Deferred.succeed(recovered, undefined).pipe(
+                            Effect.as(Stream.fromQueue(restored)),
+                          ),
+                        ),
+                  notify: () => Effect.void,
+                  close: Queue.end(restored),
+                  request: (_operation, method) =>
+                    Effect.sync(() => {
+                      if (method === "turn/start") return { turn: { id: `turn-${++turns}` } };
+                      if (method === "thread/resume")
+                        return {
+                          modelProvider: "openai",
+                          thread: { id: "thread-1", turns: [] },
+                        };
+                      return responses[method] ?? {};
+                    }),
+                }) satisfies CodexConnection,
+            ),
+        });
+        yield* Effect.gen(function* () {
+          const host = RemoteShell.make({
+            ssh: { command: "ssh", args: [] },
+            sshEnvironment: {},
+            destination: "worker",
+          });
+          const running = yield* (yield* ChildBackend).launch(request(undefined, undefined, host));
+          yield* Queue.offer(original, message("turn-1", "m-1", "Working on it."));
+          yield* Queue.fail(
+            original,
+            SessionOperationError.make({
+              operation: "stream",
+              sessionId: Option.some(running.session.id),
+              message: "App-server exited",
+              cause: ChildProcessLost.make({ exitCode: 1, stderrTail: "App-server exited" }),
+            }),
+          );
+          yield* Deferred.await(recovered);
+          yield* Queue.offerAll(restored, [
+            message("turn-2", "m-2", "Done."),
+            {
+              method: "turn/completed",
+              params: { turn: { id: "turn-2", status: "completed", error: null } },
+            },
+          ]);
+          const [events, result] = yield* Effect.all([
+            Stream.runCollect(running.events),
+            running.result,
+          ]);
+          assert.strictEqual(result.message, "Done.");
+          assert.strictEqual(opens, 2);
+          // One answer per app-server process: each process's first answer counts.
+          assert.deepStrictEqual(
+            events
+              .filter((event) => event._tag === "ProviderAnswered" || event._tag === "TextOutput")
+              .map((event) => (event._tag === "TextOutput" ? event.text : event._tag)),
+            ["ProviderAnswered", "Working on it.", "ProviderAnswered", "Done."],
+          );
+        }).pipe(Effect.provide(codexChildLayer.pipe(Layer.provideMerge(server))));
+      }).pipe(Effect.scoped),
+  );
 });

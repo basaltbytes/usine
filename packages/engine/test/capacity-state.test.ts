@@ -26,6 +26,7 @@ const claude = CapacityGroup.make({
   worker: WorkerName.make("local"),
 });
 const elsewhere = CapacityGroup.make({ ...claude, worker: WorkerName.make("remote") });
+const sonnet = CapacityGroup.make({ ...claude, model: ModelId.make("sonnet") });
 const at = (minutes: number) => DateTime.makeUnsafe(Duration.toMillis(Duration.minutes(minutes)));
 const run = (name: string) => RunId.make(name);
 
@@ -100,6 +101,14 @@ describe("capacity state", () => {
     assert.deepStrictEqual(waitsOf(after)[0]?.runIds, [run("b")]);
   });
 
+  it("lets Runs on another model or Worker start while a group is at capacity", () => {
+    const marked = refusedAll(refusal(run("a"), 0, 0));
+    const claims = [sonnet, elsewhere, claude].map(
+      (group, index) => claimAt(marked, run(`new-${index}`), 1, group)[0].claim,
+    );
+    assert.deepStrictEqual(claims, ["Free", "Free", "Wait"]);
+  });
+
   it("elects one waiting Run to test the group at its next try", () => {
     const marked = refusedAll(refusal(run("a"), 0, 0), refusal(run("b"), 0, 0));
     const [first, elected] = turn(marked, run("a"), at(5));
@@ -125,20 +134,24 @@ describe("capacity state", () => {
     assert.deepStrictEqual(wait?.runIds, [run("a"), run("b")]);
   });
 
-  it("releases the waiting Runs when the Attempt that tests the group succeeds", () => {
-    const marked = refusedAll(refusal(run("a"), 0, 0), refusal(run("b"), 0, 0));
-    const [, elected] = turn(marked, run("a"), at(5));
-    const [, probing] = claimAt(elected, run("a"), 5);
-    const [outcome, after] = settled(probing, {
-      runId: run("a"),
-      group: claude,
-      startedAt: at(5),
-      end: "Succeeded",
-      now: at(6),
-    });
-    assert.deepStrictEqual(outcome, { _tag: "Released", runs: [[run("b"), loop]] });
-    assert.deepStrictEqual(waitsOf(after), []);
-  });
+  // A failure of the agent's work comes after the provider answered its requests.
+  it.each(["Succeeded", "AgentFailure"] as const)(
+    "releases the waiting Runs when the Attempt that tests the group ends with %s",
+    (end) => {
+      const marked = refusedAll(refusal(run("a"), 0, 0), refusal(run("b"), 0, 0));
+      const [, elected] = turn(marked, run("a"), at(5));
+      const [, probing] = claimAt(elected, run("a"), 5);
+      const [outcome, after] = settled(probing, {
+        runId: run("a"),
+        group: claude,
+        startedAt: at(5),
+        end,
+        now: at(6),
+      });
+      assert.deepStrictEqual(outcome, { _tag: "Released", runs: [[run("b"), loop]] });
+      assert.deepStrictEqual(waitsOf(after), []);
+    },
+  );
 
   it("lets another waiting Run test the group after the testing Attempt fails on infrastructure", () => {
     const marked = refusedAll(refusal(run("a"), 0, 0), refusal(run("b"), 0, 0));
