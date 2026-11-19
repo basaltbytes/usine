@@ -1,7 +1,7 @@
 import { capabilitiesQuery } from "~/lib/configuration/capabilities";
 import { capabilitiesFixture } from "~/lib/configuration/fixture";
 import { projectQuery } from "~/features/projects/queries";
-import { projectTasksQuery } from "~/features/tasks/queries";
+import { projectTasksQuery } from "~/lib/tasks/queries";
 import { administratorPermissions } from "@usine/core/access";
 import { PermissionsContext, sessionQuery } from "~/lib/permissions";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";

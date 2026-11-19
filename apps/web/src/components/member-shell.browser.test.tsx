@@ -1,5 +1,5 @@
 import { projectQuery } from "~/features/projects/queries";
-import { projectTasksQuery } from "~/features/tasks/queries";
+import { projectTasksQuery } from "~/lib/tasks/queries";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
 import { administratorPermissions, PermissionGrant, ProjectScope } from "@usine/core/access";

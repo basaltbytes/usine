@@ -214,6 +214,18 @@ const rowPlace = ({ status, last }: TaskRow): readonly [group: number, at: numbe
 };
 
 /**
+ * Returns the Tasks list row of `task`, or `undefined` if it has no Run. `stalled` is the desk's
+ * list of stalled Items.
+ */
+export const taskRow = (
+  task: BoardTaskView,
+  stalled: ReadonlyArray<StalledItemView>,
+): TaskRow | undefined => {
+  const last = boardTaskRuns(task).at(-1);
+  return last === undefined ? undefined : { task, last, status: taskStatus(task, last, stalled) };
+};
+
+/**
  * Returns the Tasks list rows for the Tasks in `lanes` that have at least one Run, in `rowPlace`
  * order; ties go to the higher current Item number. `stalled` is the desk's list of stalled Items.
  */
@@ -224,8 +236,8 @@ export const taskRows = (
   lanes
     .flatMap(({ items }) => items)
     .flatMap((task) => {
-      const last = boardTaskRuns(task).at(-1);
-      return last === undefined ? [] : [{ task, last, status: taskStatus(task, last, stalled) }];
+      const row = taskRow(task, stalled);
+      return row === undefined ? [] : [row];
     })
     .map((row) => ({ row, place: rowPlace(row) }))
     .sort(

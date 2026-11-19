@@ -1,5 +1,5 @@
 import { ProjectId } from "@usine/core/project";
-import { projectTasksQuery } from "~/features/tasks/queries";
+import { projectTasksQuery } from "~/lib/tasks/queries";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { RepositoryName } from "@usine/core/repository";
 import { Schema } from "effect";

@@ -1,6 +1,6 @@
 import { Harness } from "@usine/core/agent/brain";
 import { projectQuery } from "~/features/projects/queries";
-import { projectTasksQuery } from "~/features/tasks/queries";
+import { projectTasksQuery } from "~/lib/tasks/queries";
 import { administratorPermissions } from "@usine/core/access";
 import { PermissionsContext, sessionQuery } from "~/lib/permissions";
 import { ProjectId } from "@usine/core/project";
