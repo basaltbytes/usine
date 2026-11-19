@@ -167,6 +167,7 @@ const NeedEntry = ({ need }: NeedEntryProps) => {
       return <RunFailureAsk need={need} dismiss={dismiss} />;
     case "WorkerQuotaNeed":
       return <WorkerQuotaAsk need={need} dismiss={dismiss} />;
+    case "WorkerGatewayNeed":
     case "WorkerPausedNeed":
       return (
         <NeedItem

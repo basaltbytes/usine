@@ -169,8 +169,12 @@ export const preflightFor = Effect.fn("WorkerScheduler.preflightFor")(function* 
   ) {
     yield* Effect.annotateCurrentSpan({ worker });
     if (Option.isSome(checked)) {
-      const { brains, containerLimits, findings } = checked.value;
-      yield* record(worker, brains, Exit.succeed({ ...fullPreflight, containerLimits, findings }));
+      const { brains, containerLimits, findings, gatewayUpgrade } = checked.value;
+      yield* record(
+        worker,
+        brains,
+        Exit.succeed({ ...fullPreflight, containerLimits, findings, gatewayUpgrade }),
+      );
       return yield* changed(worker);
     }
     const restored = yield* Ref.modify(records, (state) => {

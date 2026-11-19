@@ -71,6 +71,30 @@ describe("Worker preflight record", () => {
     assert.deepStrictEqual(fixed.findings, []);
   });
 
+  it("takes the gateway upgrade from every passed preflight and keeps it through a failed one", () => {
+    const upgrade = "Gateway usine-gateway is older than this orchestrator";
+    const checked = recordPreflight(
+      unchecked(worker),
+      [codex],
+      at(8),
+      Result.succeed({
+        ...fullPreflight,
+        deferred: Option.some("Checked on the worker's first machine each day."),
+        gatewayUpgrade: Option.some(upgrade),
+      }),
+    );
+    assert.deepStrictEqual(checked.gatewayUpgrade, Option.some(upgrade));
+    const failed = recordPreflight(
+      checked,
+      [codex],
+      at(9),
+      Result.fail(notLoggedIn(codex.harness)),
+    );
+    assert.deepStrictEqual(failed.gatewayUpgrade, Option.some(upgrade));
+    const upgraded = recordPreflight(failed, [codex], at(10), Result.succeed(fullPreflight));
+    assert.deepStrictEqual(upgraded.gatewayUpgrade, Option.none());
+  });
+
   it("fails an unavailable harness, passes the ones checked before it, and keeps the rest", () => {
     const finding = "The SSH user can't read the kernel journal";
     const started = recordPreflight(

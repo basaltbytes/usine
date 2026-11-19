@@ -71057,6 +71057,9 @@
                   "$ref": "#/components/schemas/_usine_orchestrator_WorkerQuotaNeedEncoded"
                 },
                 {
+                  "$ref": "#/components/schemas/_usine_orchestrator_WorkerGatewayNeedEncoded"
+                },
+                {
                   "$ref": "#/components/schemas/_usine_orchestrator_WorkerPausedNeedEncoded"
                 },
                 {
@@ -71113,6 +71116,9 @@
                 },
                 {
                   "$ref": "#/components/schemas/_usine_orchestrator_WorkerQuotaNeedEncoded"
+                },
+                {
+                  "$ref": "#/components/schemas/_usine_orchestrator_WorkerGatewayNeedEncoded"
                 },
                 {
                   "$ref": "#/components/schemas/_usine_orchestrator_WorkerPausedNeedEncoded"
@@ -71212,6 +71218,34 @@
           "_tag",
           "id",
           "worker"
+        ],
+        "additionalProperties": false
+      },
+      "_usine_orchestrator_WorkerGatewayNeedEncoded": {
+        "type": "object",
+        "properties": {
+          "_tag": {
+            "type": "string",
+            "enum": [
+              "WorkerGatewayNeed"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "worker": {
+            "type": "string",
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "_tag",
+          "id",
+          "worker",
+          "message"
         ],
         "additionalProperties": false
       },
@@ -72161,6 +72195,9 @@
                   "$ref": "#/components/schemas/_usine_orchestrator_WorkerQuotaNeedEncoded"
                 },
                 {
+                  "$ref": "#/components/schemas/_usine_orchestrator_WorkerGatewayNeedEncoded"
+                },
+                {
                   "$ref": "#/components/schemas/_usine_orchestrator_WorkerPausedNeedEncoded"
                 },
                 {
@@ -72217,6 +72254,9 @@
                 },
                 {
                   "$ref": "#/components/schemas/_usine_orchestrator_WorkerQuotaNeedEncoded"
+                },
+                {
+                  "$ref": "#/components/schemas/_usine_orchestrator_WorkerGatewayNeedEncoded"
                 },
                 {
                   "$ref": "#/components/schemas/_usine_orchestrator_WorkerPausedNeedEncoded"

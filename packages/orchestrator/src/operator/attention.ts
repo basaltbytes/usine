@@ -65,6 +65,7 @@ export const needRepositories = (need: NeedView) =>
     UnconfiguredWorkerNeed: () => [],
     WorkerPreflightNeed: () => [],
     WorkerQuotaNeed: () => [],
+    WorkerGatewayNeed: () => [],
     WorkerPausedNeed: () => [],
     PoolLimitNeed: () => [],
     WebhookSilenceNeed: () => [],

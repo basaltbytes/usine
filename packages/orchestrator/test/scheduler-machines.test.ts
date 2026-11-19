@@ -266,6 +266,7 @@ describe("Worker scheduler on a provisioned Worker", () => {
             brains: [testAgent.brain],
             containerLimits: Option.some(limits),
             findings: ["The SSH user can't read the kernel journal"],
+            gatewayUpgrade: Option.none(),
           }),
         );
         const context = yield* scheduler(fake.machines);

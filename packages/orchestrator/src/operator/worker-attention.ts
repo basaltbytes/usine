@@ -9,6 +9,7 @@ import { partitionNeeds, projectAttention } from "./attention.ts";
 import {
   type NeedView,
   UnresponsiveWorkerNeed,
+  WorkerGatewayNeed,
   WorkerPausedNeed,
   WorkerPreflightNeed,
   WorkerQuotaNeed,
@@ -21,7 +22,7 @@ import type { RunSummaryView } from "./run.ts";
 export const workerAttentionFor = (
   reader: Pick<RunReader["Service"], "transcript">,
   acknowledgements: Pick<AttentionAcknowledgements["Service"], "list">,
-  status: Pick<WorkerStatus["Service"], "unavailable" | "provisioning">,
+  status: Pick<WorkerStatus["Service"], "unavailable" | "provisioning" | "preflights">,
 ) =>
   Effect.fn("Operator.workerAttention")(function* (
     overview: ReadyOverview,
@@ -104,6 +105,16 @@ export const workerAttentionFor = (
           WorkerQuotaNeed.make({ id: `worker-quota:${worker}`, worker, message: quota.value }),
         );
     }
+    for (const { worker, gatewayUpgrade } of yield* status.preflights) {
+      if (declared.includes(worker) && Option.isSome(gatewayUpgrade))
+        needs.push(
+          WorkerGatewayNeed.make({
+            id: `worker-gateway:${worker}`,
+            worker,
+            message: gatewayUpgrade.value,
+          }),
+        );
+    }
     if (needs.length === 0) return overview;
     const storedAcknowledgements = yield* acknowledgements.list;
     const { needsYou, dismissedNeeds } = partitionNeeds(needs, storedAcknowledgements);
@@ -114,6 +125,7 @@ export const workerAttentionFor = (
       dismissed: dismissedNeeds.length,
       quotaRefusals: needs.filter((need) => need._tag === "WorkerQuotaNeed").length,
       preflightFailures: needs.filter((need) => need._tag === "WorkerPreflightNeed").length,
+      gatewayUpgrades: needs.filter((need) => need._tag === "WorkerGatewayNeed").length,
       paused: needs.filter((need) => need._tag === "WorkerPausedNeed").length,
     });
     return ReadyOverview.make({

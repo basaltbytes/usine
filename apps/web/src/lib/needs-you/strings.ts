@@ -111,6 +111,12 @@ export const needCopy = (need: NeedView): NeedCopy =>
       repository: null,
       runId: null,
     }),
+    WorkerGatewayNeed: ({ worker, message }) => ({
+      title: `${worker}: gateway upgrade needed`,
+      detail: `${message} Attempts on this worker keep running meanwhile.`,
+      repository: null,
+      runId: null,
+    }),
     WorkerPreflightNeed: ({ worker, message }) => ({
       title: `${worker}: preflight failed`,
       detail: `${message} This worker takes no new attempts while preflight retries automatically.`,
@@ -170,6 +176,7 @@ export const needKindLabel = {
   CycleBudgetNeed: "Cycle budget exhausted",
   WorkerPreflightNeed: "Worker preflight failed",
   WorkerQuotaNeed: "Cloud quota reached",
+  WorkerGatewayNeed: "Gateway upgrade needed",
   WorkerPausedNeed: "Worker paused",
   UnconfiguredWorkerNeed: "Unconfigured worker",
   UnresponsiveWorkerNeed: "Unresponsive worker",
