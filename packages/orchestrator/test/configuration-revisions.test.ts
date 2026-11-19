@@ -479,7 +479,8 @@ it.effect(
         [nothingSaved, { step: "worker-preflight", expectedRevision: revision.number }],
       ]);
       expect((yield* store.read).number).toBe(revision.number);
-      expect(yield* current.writes).toEqual([]);
+      const finished = yield* current.writes;
+      expect(finished).toEqual([]);
     }).pipe(
       Effect.scoped,
       Effect.withLogger(entryLogger(entries)),
