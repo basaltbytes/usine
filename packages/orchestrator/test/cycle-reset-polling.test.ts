@@ -534,8 +534,6 @@ it.live(
         harness: Harness.make("codex"),
         model: "test-model",
         effort: "high",
-        parentModel: Option.none(),
-        parentEffort: Option.none(),
         persona: "Review this Item.",
       });
       const withLoop = (loop: LoopFile) =>

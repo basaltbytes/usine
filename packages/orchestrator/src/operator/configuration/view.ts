@@ -6,14 +6,7 @@ import {
   permits,
 } from "@usine/core/access";
 import { visibleRepository, visibleLoop } from "../access.ts";
-import {
-  AgentPersona,
-  AgentName,
-  CoordinatorKind,
-  resolveCoordinator,
-  resolveParentEffort,
-  resolveParentModel,
-} from "@usine/core/agent";
+import { AgentPersona, AgentName } from "@usine/core/agent";
 import { Effort, Harness, ModelId } from "@usine/core/agent/brain";
 import { CycleLimit } from "@usine/core/cycle-budget";
 import { LoopName, LoopPermissions, OutcomeLabels } from "@usine/core/loop";
@@ -160,18 +153,6 @@ export class AgentFileView extends Schema.Class<
   model: ModelId,
   /** The child model reasoning effort. */
   effort: Effort,
-  /** The file's own parent model and effort, or null if it sets none. */
-  parentModel: Schema.NullOr(ModelId),
-  /** The explicitly configured parent effort, or null to use the instance or agent default. */
-  parentEffort: Schema.NullOr(Effort),
-  /** The file's parent model, else `settings.parent_model`. If null, Pi chooses. */
-  resolvedParentModel: Schema.NullOr(ModelId),
-  /** The file's parent effort, else `settings.parent_effort`, else `effort`. */
-  resolvedParentEffort: Effort,
-  /** The file's coordinator kind, or null if it sets none. */
-  coordinator: Schema.NullOr(CoordinatorKind),
-  /** The file's coordinator kind, else `settings.coordinator`. */
-  resolvedCoordinator: CoordinatorKind,
   /** The standing instructions supplied to the agent. */
   persona: AgentPersona,
   /** The loaded Loops that use this Agent. */
@@ -481,12 +462,6 @@ export class SettingsView extends Schema.Class<
    * limit.
    */
   maxBackgroundWaitMinutes: Schema.NullOr(Schema.Int),
-  /** The instance default parent model, or null to let Pi choose. */
-  parentModel: Schema.NullOr(ModelId),
-  /** The instance default parent reasoning effort, or null to use the agent effort. */
-  parentEffort: Schema.NullOr(Effort),
-  /** The coordinator kind of attempts whose agent sets none. */
-  coordinator: CoordinatorKind,
   /**
    * The harness, model, and effort of the supervisor role, or null when the role is not
    * configured. `ownTools` says why the harness keeps all its own tools, which the supervisor's
@@ -750,14 +725,6 @@ const makeOperatorConfiguration = Effect.gen(function* () {
         harness: file.harness,
         model: file.model,
         effort: file.effort,
-        parentModel: Option.getOrNull(file.parentModel),
-        parentEffort: Option.getOrNull(file.parentEffort),
-        resolvedParentModel: Option.getOrNull(
-          resolveParentModel(file.agent, config.settings.parentModel),
-        ),
-        resolvedParentEffort: resolveParentEffort(file.agent, config.settings.parentEffort),
-        coordinator: Option.getOrNull(file.coordinator),
-        resolvedCoordinator: resolveCoordinator(file.agent, config.settings.coordinator),
         persona: file.persona,
         loops: instance.loops.filter(({ agent }) => agent === file.name).map(({ name }) => name),
       }),
@@ -824,9 +791,6 @@ const makeOperatorConfiguration = Effect.gen(function* () {
         maxAttemptMinutes: Option.getOrNull(settings.maxAttemptMinutes),
         maxAttemptTokens: Option.getOrNull(settings.maxAttemptTokens),
         maxBackgroundWaitMinutes: Option.getOrNull(settings.maxBackgroundWaitMinutes),
-        parentModel: Option.getOrNull(settings.parentModel),
-        parentEffort: Option.getOrNull(settings.parentEffort),
-        coordinator: settings.coordinator,
         supervisor: Option.match(settings.supervisor, {
           onNone: () => null,
           onSome: (brain) => ({

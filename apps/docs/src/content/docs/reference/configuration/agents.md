@@ -17,11 +17,10 @@ The server builds one harness runtime registry at startup and shares it between 
 | `harness` | `claude`, `codex`, or `pi` | required | Coding-agent harness used by child sessions. |
 | `model` | non-blank string | required | Model ID understood by the harness, with `provider/model` for Pi. |
 | `effort` | effort | required | Reasoning effort of child sessions. |
-| `coordinator` | `session` or `events` | instance setting | What coordinates the agent's attempts. See [Coordinator](#coordinator). |
-| `parent_model` | string | instance setting, then Pi selection | Model for the Pi parent in `provider/model` form. Not allowed with `coordinator: events`. |
-| `parent_effort` | effort | instance setting, then child effort | Reasoning effort of the Pi parent. Not allowed with `coordinator: events`. |
-| `decision` | `model` and `effort` | none | Model and effort that decide a child's report with `coordinator: events`, on the agent's own harness. See [Coordinator](#coordinator). |
-| persona | non-blank Markdown | required | Standing instructions included for the parent and every child. |
+| `decision` | `model` and `effort` | none | Model and effort that decide a child's report, on the agent's own harness. See [Coordinator](#coordinator). |
+| persona | non-blank Markdown | required | Standing instructions included with the task of every child. |
+
+Earlier versions also read `coordinator`, `parent_model`, and `parent_effort`. usine ignores these keys in imported agent files and removes them from stored agents. See [Stored configuration](/reference/configuration/config/#stored-configuration).
 
 For example, create `developer` with harness `codex`, model `gpt-6-astra`, effort `medium`, and this persona:
 
@@ -35,43 +34,27 @@ Effort values are `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max`.
 
 ## Coordinator
 
-The coordinator decides what an attempt does next. `coordinator` selects it for each attempt: the agent's value, else the instance's [`coordinator` setting](/reference/configuration/settings/#instance-settings), else `session`. A run uses the agent definition saved when it started; the instance setting applies when each attempt launches. An attempt keeps its coordinator across orchestrator restarts.
+The coordinator decides what an attempt does next. Every attempt runs on the event-driven coordinator: rules applied to the attempt's lifecycle events coordinate it, with no parent session and no parent model credential. The coordinator starts one child with the task and turns the child's report into the attempt's outcome. The attempt details show **No parent session**, and input addressed to the parent goes to the child. See [Message an agent](/guides/message-an-agent/). The [child-session budget](/reference/configuration/settings/#instance-settings) counts all child starts over the attempt's lifetime.
 
-- `session`: a parent session coordinates the attempt. See [Parent selection](#parent-selection).
-- `events`: rules applied to the attempt's lifecycle events coordinate it, with no parent session and no parent model credential. The coordinator starts one child with the task and turns the child's report into the attempt's outcome. The attempt details show **No parent session**, and input addressed to the parent goes to the child. See [Message an agent](/guides/message-an-agent/).
+An attempt that an earlier version started with a Pi parent session keeps that parent when an orchestrator restart reattaches it.
 
-With `decision`, the `events` coordinator asks the decision model what to do with a child's report that has no reserved marker and no CI handoff: complete the attempt, start another child to continue the work, fail it as blocked, as a question, or as a failure, or fail it for a retry after an infrastructure failure or a usage limit. The request runs once on the agent's harness, on the attempt's worker with the child's credential, with no usine tools and no saved conversation. A harness that can't turn its own tools off, such as Codex, runs them read-only in the checkout. It reads the event, the start of the task, the outcome labels and CI policy, the earlier children's reports, and the end of the child's output. Its tokens count toward the attempt's usage as a separate session. A replacement child must fit the child-session budget. If the model refuses, answers with something other than a decision, hits a usage limit, or doesn't answer within 10 minutes, the attempt completes with the report, as without `decision`, and the server logs the reason at Warning. A reserved marker and every other event keep their fixed outcome, and a report that starts with `[usine:awaiting-ci]` completes the attempt with the handoff unchanged.
+With `decision`, the coordinator asks the decision model what to do with a child's report that has no reserved marker and no CI handoff: complete the attempt, start another child to continue the work, fail it as blocked, as a question, or as a failure, or fail it for a retry after an infrastructure failure or a usage limit. The request runs once on the agent's harness, on the attempt's worker with the child's credential, with no usine tools and no saved conversation. A harness that can't turn its own tools off, such as Codex, runs them read-only in the checkout. It reads the event, the start of the task, the outcome labels and CI policy, the earlier children's reports, and the end of the child's output. Its tokens count toward the attempt's usage as a separate session. A replacement child must fit the child-session budget. If the model refuses, answers with something other than a decision, hits a usage limit, or doesn't answer within 10 minutes, the attempt completes with the report, as without `decision`, and the server logs the reason at Warning. A reserved marker and every other event keep their fixed outcome, and a report that starts with `[usine:awaiting-ci]` completes the attempt with the handoff unchanged.
 
-With `events`, a child that stops and can't resume, such as after an orchestrator restart when its saved session is missing or its worker or checkout is gone, is replaced once with a new child that continues from the checkout. Each replacement takes the next slot of the [child-session budget](/reference/configuration/settings/#instance-settings). When the budget has no slot left, the attempt fails with `InfraFailure`, which the engine retries from salvage. A child whose launch hadn't returned when the orchestrator stopped resumes its saved conversation if available. If no conversation was saved or the harness reports it unavailable, the child launches fresh in its own slot. An unreadable saved conversation or a changed worker, machine, checkout, harness, or harness home ends the child as interrupted and uses a budget slot. If an upgrade changes the shape of a stored coordinator record so that it can't be read, the attempt fails with `InfraFailure`, the server logs the attempt ID and the record, and other attempts keep running.
+A child that stops and can't resume, such as after an orchestrator restart when its saved session is missing or its worker or checkout is gone, is replaced once with a new child that continues from the checkout. Each replacement takes the next slot of the [child-session budget](/reference/configuration/settings/#instance-settings). When the budget has no slot left, the attempt fails with `InfraFailure`, which the engine retries from salvage. A child whose launch hadn't returned when the orchestrator stopped resumes its saved conversation if available. If no conversation was saved or the harness reports it unavailable, the child launches fresh in its own slot. An unreadable saved conversation or a changed worker, machine, checkout, harness, or harness home ends the child as interrupted and uses a budget slot. If an upgrade changes the shape of a stored coordinator record so that it can't be read, the attempt fails with `InfraFailure`, the server logs the attempt ID and the record, and other attempts keep running.
 
-An agent that resolves to `events` needs no parent model, effort, or credential, so startup, reloads, and saved edits don't validate them. An instance without a Pi credential starts when every agent resolves to `events`. Configuration imports, reloads, and saved edits refuse `parent_model` or `parent_effort` in the same agent file or `settings` block as `coordinator: events`, and the problem names the field.
-
-For example, this agent runs on the event-driven coordinator:
+For example, this agent has a decision model:
 
 ```yaml
 ---
 harness: codex
 model: gpt-6-astra
 effort: medium
-coordinator: events
 decision:
   model: gpt-6-astra
   effort: low
 ---
 Complete one repository task at a time.
 ```
-
-## Parent selection
-
-An attempt with `coordinator: session` has a Pi parent in the orchestrator. Its `subagent` tool starts child sessions on the worker using the agent's harness, model, and effort. Children cannot create nested children. The [child-session budget](/reference/configuration/settings/#instance-settings) counts all child starts over the attempt's lifetime.
-
-Parent model selection uses the agent override, instance default, Pi's configured default, then the first Pi model with a credential. Parent effort uses the agent override, instance default, then child effort. Pi reads model defaults from `~/.pi/agent` or `PI_CODING_AGENT_DIR` for the Unix user running the orchestrator. With a gateway, the parent uses the first gateway declared by the SSH workers and needs no local provider login. Use `openai-codex/<model>` for its ChatGPT login, or `openai/<model>` and `anthropic/<model>` for its API keys. Without a gateway, an `openai-codex` model requires a local ChatGPT login; other providers require local API keys.
-
-Startup validates the resolved parent model, effort, and credential of each rostered agent with `coordinator: session`. An unavailable model, unsupported effort, or missing credential quarantines that agent and its loops and appears in **Needs attention**. The server and operator UI stay available, and other agents continue to run. Correct the parent configuration or credential and reload to restore the agent and its loops.
-
-Configuration imports, reloads, and saved edits validate the resolved parent of every agent with `coordinator: session`, including agent overrides and instance defaults, before accepting a revision. A refusal keeps the running configuration unchanged; CLI imports and saved edits also leave the stored revision unchanged. Each attempt checks its parent before creating the conversation, so a later credential change fails only that attempt with `AgentFailure`.
-
-The parent uses the coordinator role, which requires durable coordination: committed tool intents and results that continue after an orchestrator restart. Pi provides that capability. The `parent_model` and `parent_effort` settings continue to select its brain.
 
 ## Harness requirements
 
@@ -92,13 +75,13 @@ codex login status
 
 A gateway can inject either a provider API key or a subscription credential. Cloudflare workers require provider API keys. Provisioned SSH workers require credentials from their gateway or `api_keys` settings. Local preflight and children accept managed Claude setup tokens and API keys, and Codex ChatGPT logins and API keys. Local Codex launches select file credential storage so they use the credentials managed by `usine login` and removed by `usine logout`, including when Codex configuration selects keyring storage.
 
-For Pi children on a ChatGPT subscription, set `harness` to `pi` and `model` to an `openai-codex/...` model. Run Pi as the Unix user running the orchestrator, with the same `~/.pi/agent` or `PI_CODING_AGENT_DIR` configuration as the parent. Enter `/login`, choose **Sign in with an account**, then **OpenAI Codex (legacy)** for the `openai-codex` provider. Preflight accepts that login without an API key. Other account logins, including Pi's **OpenAI** ChatGPT sign-in and its OpenRouter sign-in, have no supported usine pool and fail preflight.
+For Pi children on a ChatGPT subscription, set `harness` to `pi` and `model` to an `openai-codex/...` model. Run Pi as the Unix user running the orchestrator, with the same `~/.pi/agent` or `PI_CODING_AGENT_DIR` configuration as the orchestrator. Enter `/login`, choose **Sign in with an account**, then **OpenAI Codex (legacy)** for the `openai-codex` provider. Preflight accepts that login without an API key. Other account logins, including Pi's **OpenAI** ChatGPT sign-in and its OpenRouter sign-in, have no supported usine pool and fail preflight.
 
 Each parent and child session records the billing pool resolved at launch. Usage totals read that recorded pool, including after an orchestrator restart. Reattaching a retained Claude process preserves its cumulative token and cost totals without counting the same usage twice, including assistant messages that the process sends again after reattachment. When Claude recovers through a replacement process, it saves zero usage for that process alongside the unchanged session totals before it launches the replacement. A later orchestrator restart preserves the earlier usage even if it stopped during that launch or the replacement is still waiting for guidance. Older transcripts without a recorded pool use the historical harness and model rule.
 
 OpenAI-compatible endpoints and local models use `apiKeys`. API-key sessions record the endpoint's provider name when available, such as a Pi provider configured in `models.json`. The transcript includes the name without the endpoint URL or credential. An API-key credential uses `apiKeys` even when the model ID has an `openai-codex/` prefix.
 
-Pi parents and children record ChatGPT usage under `chatgptPlan`, including tokens and Pi's cost estimate. Pi reports no plan rate windows, so usine cannot warn before Pi sessions reach the ChatGPT plan limit.
+Pi children record ChatGPT usage under `chatgptPlan`, including tokens and Pi's cost estimate. Pi reports no plan rate windows, so usine cannot warn before Pi sessions reach the ChatGPT plan limit.
 
 Claude Code subscription sessions report allowance usage under `claudePlan`, including usage outside usine. The five-hour allowance appears as the primary window, and the latest reported seven-day allowance appears as the secondary window, including model-specific allowances. **Needs attention** warns when a reported window reaches 80% usage and has a future reset time. Later reports update only the reported window and preserve the other window across children and attempts. Claude plan reports apply to worker subscription logins and gateway subscription credentials; API-key sessions do not update Claude plan windows. A report without utilization leaves the recorded windows unchanged, and an omitted reset time remains unknown.
 

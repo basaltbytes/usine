@@ -7,5 +7,3 @@ projects:
     repositories: [YOUR_GITHUB_LOGIN/usine-scratch]
 labels:
   - name: ready-for-agent
-settings:
-  coordinator: events

@@ -83,8 +83,6 @@ const developer = AgentFile.make({
   harness: brain.harness,
   model: brain.model,
   effort: brain.effort,
-  parentModel: Option.none(),
-  parentEffort: Option.none(),
   persona: AgentPersona.make("Implement the issue."),
 });
 const labelled = (name: string, label: string) =>
@@ -154,8 +152,6 @@ const issue = (number: number, labels: ReadonlyArray<string>, gone = false) =>
 const agent = Agent.make({
   name: developer.name,
   brain,
-  parentModel: Option.none(),
-  parentEffort: Option.none(),
   persona: developer.persona,
 });
 

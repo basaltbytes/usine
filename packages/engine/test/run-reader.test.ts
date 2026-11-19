@@ -99,8 +99,6 @@ describe("Run evidence reader", () => {
           agent: Agent.make({
             name: AgentName.make("developer"),
             brain: BrainSpec.make({ harness: Harness.make("codex"), model, effort: "high" }),
-            parentModel: Option.none(),
-            parentEffort: Option.none(),
             persona: AgentPersona.make("Implement the task."),
           }),
           parentModel: Option.none(),

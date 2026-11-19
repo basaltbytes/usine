@@ -443,7 +443,7 @@ describe("exe.dev preparation", () => {
       assert.strictEqual(prepared.workspace.spec.attemptId, ATTEMPT_ID);
       assert.deepStrictEqual(prepared.workspace.spec.payload, request.payload);
       assert.deepStrictEqual(prepared.workspace.spec.agent, request.agent);
-      assert.deepStrictEqual(prepared.workspace.spec.parentModel, request.parentModel);
+      assert.strictEqual(prepared.workspace.spec.coordinator, "events");
       assert.isTrue(prepared.workspace.spec.requiresCi);
       assert.deepStrictEqual(prepared.workspace.spec.outcomeLabels, outcomeLabels);
       assert.deepStrictEqual(prepared.workspace.spec.maxBackgroundWaitMinutes, Option.some(9));

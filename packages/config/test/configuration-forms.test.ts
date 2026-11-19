@@ -3,32 +3,24 @@ import { Effect } from "effect";
 import { ConfigurationEntityId, ConfigurationEntityKey } from "../src/configuration/model.ts";
 import { parseConfigurationForm, validateConfigurationForm } from "../src/configuration/forms.ts";
 
-it.effect(
-  "preserves agent parent overrides through the form codec and rejects unknown fields",
-  () =>
-    Effect.gen(function* () {
-      const key = ConfigurationEntityKey.make({
-        kind: "agent",
-        identifier: ConfigurationEntityId.make("developer"),
-      });
-      const value = yield* parseConfigurationForm(
-        key,
-        "---\nharness: codex\nmodel: custom-model\neffort: high\nparent_model: parent-model\nparent_effort: low\n---\n# Persona\n",
-      );
-      expect(value).toMatchObject({
-        parentModel: { _tag: "Some", value: "parent-model" },
-        parentEffort: { _tag: "Some", value: "low" },
-        persona: "# Persona\n",
-      });
-      const validation = yield* validateConfigurationForm(key, value);
-      expect(validation).toEqual(value);
-      const error = yield* validateConfigurationForm(key, { ...value, typo: true }).pipe(
-        Effect.flip,
-      );
-      expect(error.details).toEqual(
-        expect.arrayContaining([expect.objectContaining({ path: ["typo"] })]),
-      );
-    }),
+it.effect("round-trips an agent through the form codec and rejects unknown fields", () =>
+  Effect.gen(function* () {
+    const key = ConfigurationEntityKey.make({
+      kind: "agent",
+      identifier: ConfigurationEntityId.make("developer"),
+    });
+    const value = yield* parseConfigurationForm(
+      key,
+      "---\nharness: codex\nmodel: custom-model\neffort: high\n---\n# Persona\n",
+    );
+    expect(value).toMatchObject({ model: "custom-model", persona: "# Persona\n" });
+    const validation = yield* validateConfigurationForm(key, value);
+    expect(validation).toEqual(value);
+    const error = yield* validateConfigurationForm(key, { ...value, typo: true }).pipe(Effect.flip);
+    expect(error.details).toEqual(
+      expect.arrayContaining([expect.objectContaining({ path: ["typo"] })]),
+    );
+  }),
 );
 
 it.effect(

@@ -51,8 +51,6 @@ const brain = BrainSpec.make({
 const agent = Agent.make({
   name: AgentName.make("developer"),
   brain,
-  parentModel: Option.none(),
-  parentEffort: Option.none(),
   persona: AgentPersona.make("Implement the issue."),
 });
 const parent = ParentSession.make({ id: AgentSessionId.make("parent"), agent: agent.name, brain });
@@ -139,7 +137,6 @@ const seed = (directory: string) =>
       revision: RepositoryRevision.make("main"),
       task: AttemptTask.make("Save all evidence."),
       agent,
-      parentModel: Option.none(),
     });
     const submitted = yield* engine.submit(submission);
     assert(submitted._tag === "Claimed");

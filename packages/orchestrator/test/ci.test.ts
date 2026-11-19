@@ -106,8 +106,6 @@ const agent = AgentFile.make({
   harness: Harness.make("codex"),
   model: ModelId.make("gpt-6.1-sol"),
   effort: "high",
-  parentModel: Option.none(),
-  parentEffort: Option.none(),
   persona: AgentPersona.make("Implement changes."),
 });
 const loop = LoopFile.make({
@@ -438,7 +436,6 @@ const openWait = Effect.fn("test.openCiWait")(function* (timeoutSeconds: number,
       ci: Option.some(CiPolicy.make({ fixLoop: loop.name, timeoutSeconds })),
     }),
     agent: agent.agent,
-    parentModel: Option.none(),
     dedupKey: DedupKey.make("ci-development"),
     cycleGeneration: CycleGeneration.make(0),
     itemKey: gitHubItemKey(repository, 815),
@@ -2046,7 +2043,6 @@ it.live("red CI observed after the deadline starts one budgeted fix with failure
         const another = yield* triggerSubmission(expressions, {
           loop: LoopFile.make({ ...loop, maxCycles: CycleLimit.make(1) }),
           agent: agent.agent,
-          parentModel: Option.none(),
           dedupKey: DedupKey.make("another-fix"),
           cycleGeneration: CycleGeneration.make(0),
           itemKey: gitHubItemKey(repository, 815),
@@ -2851,7 +2847,6 @@ it.live.each(["removed", "changed"] as const)(
           ...agent,
           name: AgentName.make("replacement"),
           model: ModelId.make("gpt-6-astra"),
-          parentModel: Option.some(ModelId.make("gpt-6.1-sol")),
           persona: AgentPersona.make("Use the updated agent."),
         });
         const editedLoop = LoopFile.make({
@@ -2905,7 +2900,6 @@ it.live.each(["removed", "changed"] as const)(
             Effect.timeout("5 seconds"),
           );
           assert.deepStrictEqual(fix.agent, editedAgent.agent);
-          assert.deepStrictEqual(fix.parentModel, editedAgent.parentModel);
           assert.strictEqual(fix.permissions, "read");
           assert.deepStrictEqual(fix.ciPolicy, editedLoop.ci);
           yield* engine.approve(
@@ -2929,7 +2923,6 @@ it.live.each(["removed", "changed"] as const)(
           assert.deepStrictEqual(saved.outcomeLabels, [GitHubLabelName.make("review-passed")]);
           assert.deepStrictEqual(saved.cycleLimit, Option.some(CycleLimit.make(4)));
           assert.deepStrictEqual(saved.agent, editedAgent.agent);
-          assert.deepStrictEqual(saved.parentModel, editedAgent.parentModel);
           assert.strictEqual(saved.permissions, "read");
           assert.deepStrictEqual(saved.ciPolicy, editedLoop.ci);
           assert.strictEqual(saved.task, fix.task);
@@ -3194,7 +3187,6 @@ it.live.each([
         const existing = yield* triggerSubmission(expressions, {
           loop,
           agent: agent.agent,
-          parentModel: Option.none(),
           dedupKey: DedupKey.make("existing-fix"),
           cycleGeneration: CycleGeneration.make(0),
           itemKey: gitHubItemKey(repository, 815),

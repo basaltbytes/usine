@@ -1,6 +1,5 @@
 import type { LoopApproval } from "@usine/config/loop";
 import { UpgradeChannel, UpgradeMode } from "@usine/core/upgrade";
-import { CoordinatorKind } from "@usine/core/agent";
 import type { LoopPermissions } from "@usine/core/loop";
 import { CONTAINER_LIMITS, type ContainerLimit, type WorkerKind } from "@usine/core/worker";
 import type {
@@ -302,21 +301,7 @@ export const supervisorCopy = {
   unavailable: "Unavailable",
 };
 
-export const coordinatorCopy = {
-  effect: {
-    session:
-      "A parent session coordinates each attempt, unless the agent file sets coordinator: events.",
-    events:
-      "Rules on lifecycle events coordinate each attempt, with no parent session, unless the agent file sets coordinator: session.",
-  } satisfies Record<CoordinatorKind, string>,
-  label: "Coordinator",
-  agentHint: "Leave blank to use settings.coordinator.",
-  fromSettings: "From settings.coordinator",
-};
-
 export const agentCopy = {
-  override: "Set on this agent",
-  parentModelUnset: "Not set on this agent or in settings",
   models: "Models",
   modelsNote: "Merged tasks, by the model of the first attempt with this agent",
   modelsError: "Could not load the model statistics",
@@ -398,7 +383,7 @@ export const settingsFormFields = [
     path: "settings.max_attempt_tokens",
     label: "Attempt token limit",
     kind: "number",
-    description: "Tokens per attempt, parent and children combined. Leave blank for no ceiling.",
+    description: "Tokens per attempt, all its sessions combined. Leave blank for no ceiling.",
   },
   {
     path: "settings.max_background_wait_minutes",
@@ -406,23 +391,6 @@ export const settingsFormFields = [
     kind: "number",
     description:
       "Minutes a child that answered waits for its background tasks to start a turn. Then it returns its answer and its background tasks stop. Leave blank for no limit.",
-  },
-  {
-    path: "settings.coordinator",
-    label: "Coordinator",
-    options: CoordinatorKind.literals,
-    description:
-      "What coordinates attempts when the agent sets none: a parent session, or rules on events.",
-  },
-  {
-    path: "settings.parent_model",
-    label: "Parent model",
-    description: "Parent model when the agent sets none. Leave blank to let Pi choose.",
-  },
-  {
-    path: "settings.parent_effort",
-    label: "Parent effort",
-    description: "Parent effort when the agent sets none. Leave blank to use the agent's effort.",
   },
   {
     path: "settings.upgrade_channel",

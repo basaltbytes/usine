@@ -6,7 +6,7 @@ import { ItemKey } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
 import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
 import { StepName } from "@usine/core/step";
-import { DateTime, Option } from "effect";
+import { DateTime } from "effect";
 
 import { Submission } from "../../src/engine/submission.ts";
 
@@ -17,8 +17,6 @@ export const testAgent = Agent.make({
     model: ModelId.make("claude-sonnet-4-6"),
     effort: "high",
   }),
-  parentModel: Option.none(),
-  parentEffort: Option.none(),
   persona: AgentPersona.make("Implement the task."),
 });
 
@@ -37,5 +35,4 @@ export const lifecycleSubmission = Submission.make({
   revision: RepositoryRevision.make("lifecycle-revision"),
   task: AttemptTask.make("Exercise the Run lifecycle"),
   agent: testAgent,
-  parentModel: Option.none(),
 });

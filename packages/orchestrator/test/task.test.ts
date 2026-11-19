@@ -62,8 +62,6 @@ const brain = BrainSpec.make({
 const developer = Agent.make({
   name: AgentName.make("developer"),
   brain,
-  parentModel: Option.none(),
-  parentEffort: Option.none(),
   persona: AgentPersona.make("Build it."),
 });
 
@@ -217,7 +215,6 @@ const summary = (
     }),
     revision: RepositoryRevision.make("main"),
     permissions: "write",
-    parentModel: Option.none(),
     itemKey: gitHubItemKey(repository, item),
     run: Run.make({
       id: runId,

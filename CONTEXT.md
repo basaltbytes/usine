@@ -261,11 +261,11 @@ The branch `usine/salvage/<run>/<attempt>` that the executor pushes with the wor
 _Avoid_: backup, checkpoint, recovery branch
 
 **Coordinator**:
-What starts an attempt's children and turns their reports into the attempt's outcome: a Pi parent session, or the event-driven coordinator, which handles each attempt lifecycle event with a rule, or a child's report with a completion from the decision brain, and has no parent session.
+What starts an attempt's children and turns their reports into the attempt's outcome: the event-driven coordinator, which handles each attempt lifecycle event with a rule, or a child's report with a completion from the decision brain, and has no parent session. Attempts that earlier versions started have a Pi parent session instead.
 _Avoid_: orchestrator, supervisor
 
 **Coordinator kind**:
-The `coordinator` setting of an instance or agent: `session`, where a parent session coordinates the attempt, or `events`, where the event-driven coordinator does.
+The coordinator that an attempt runs with: `events` for every new attempt, or `session` for an attempt that an earlier version started with a Pi parent session.
 _Avoid_: parent kind, `parent: pi | none`
 
 **Decision brain**:

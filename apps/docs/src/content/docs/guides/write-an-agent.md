@@ -7,7 +7,7 @@ Create an agent that loops can use for repository work.
 
 ## Prerequisites
 
-Instance admin access, workers with the intended child harness and credentials, and a usable Pi parent credential for the Unix user running the orchestrator. See [harness requirements](/reference/configuration/agents/#harness-requirements).
+Instance admin access, and workers with the intended child harness and credentials. See [harness requirements](/reference/configuration/agents/#harness-requirements).
 
 ## Procedure
 
@@ -21,14 +21,13 @@ Instance admin access, workers with the intended child harness and credentials, 
    Record blockers on the issue or pull request. Do not merge.
    ```
 
-4. Set parent model and effort overrides if this agent needs different values from the instance defaults. The parent runs in the orchestrator and delegates to children on workers.
-5. Save the agent. Correct validation or preflight failures before assigning it to a loop.
+4. Save the agent. Correct validation or preflight failures before assigning it to a loop.
 
 ## Check the result
 
 The agent appears in **Configuration > Agents** and in the loop agent selector. A new run records that agent definition. Edits apply to new runs; use **Edit and retry** to apply an updated definition to a failed run.
 
-For later CLI edits, run `EDITOR=vi usine config edit agent developer`. [Agents](/reference/configuration/agents/) explains parent selection and preflight.
+For later CLI edits, run `EDITOR=vi usine config edit agent developer`. [Agents](/reference/configuration/agents/) explains the coordinator and preflight.
 
 ## Compare models
 

@@ -8,7 +8,7 @@ Automatic retry resumes salvaged work and covers only failures outside the agent
 
 Each open run is one engine fiber over usine's own run tables. It reserves a worker, opens or reattaches an attempt, and records its outcome until the run closes. A run waiting for approval or for CI ([ADR 0033](./0033-durable-ci-waits.md)) has no fiber.
 
-Built: two coordinators, selected by `coordinator: session | events` (#1157, #1158): the Pi parent, a pi-durable task, and the event-driven coordinator. Decided, not built: the second replaces the first (#1166).
+Built: the event-driven coordinator runs every new attempt (#1157, #1166). The Pi parent, a pi-durable task, still runs the attempts that earlier versions started with it when the engine reattaches them.
 
 ## Considered options
 

@@ -197,8 +197,6 @@ const agentFile = AgentFile.make({
   harness: brain.harness,
   model: brain.model,
   effort: brain.effort,
-  parentModel: Option.none(),
-  parentEffort: Option.none(),
   persona: AgentPersona.make("Review the issue."),
 });
 const loop = LoopFile.make({
@@ -270,11 +268,8 @@ const snapshot = RunSnapshot.make({
   agent: Agent.make({
     name: agentFile.name,
     brain,
-    parentModel: Option.none(),
-    parentEffort: Option.none(),
     persona: agentFile.persona,
   }),
-  parentModel: Option.none(),
   permissions: "write",
 });
 
@@ -2297,8 +2292,6 @@ describe("Operator", () => {
           harness: Harness.make("codex"),
           model: ModelId.make("new-model"),
           persona: AgentPersona.make("Review the implementation"),
-          parentModel: Option.some(ModelId.make("openai/new-parent")),
-          parentEffort: Option.some("medium"),
         });
         const configured = LoadedInstance.make({
           ...fixtureInstance,
@@ -2322,7 +2315,6 @@ describe("Operator", () => {
             AttemptContext.make({
               task: AttemptTask.make("Correct the failed approach"),
               agent: replacement.agent,
-              parentModel: replacement.parentModel,
             }),
           ]);
           const refused = yield* Effect.flip(
@@ -2354,7 +2346,6 @@ describe("Operator", () => {
             AttemptContext.make({
               task: snapshot.task,
               agent: reloadedAgent.agent,
-              parentModel: reloadedAgent.parentModel,
             }),
           );
           const input = yield* Schema.decodeEffect(SessionIntervention)({
@@ -2403,7 +2394,6 @@ describe("Operator", () => {
         const reviewer = AgentFile.make({
           ...agentFile,
           name: AgentName.make("reviewer"),
-          parentModel: Option.some(ModelId.make("openai/new-parent")),
         });
         const configured = LoadedInstance.make({
           ...fixtureInstance,
@@ -2438,7 +2428,6 @@ describe("Operator", () => {
                 context: AttemptContext.make({
                   task: AttemptTask.make("Finish the review"),
                   agent: reviewer.agent,
-                  parentModel: reviewer.parentModel,
                 }),
                 requestedBy: Option.some(OperatorLogin.make("Philippe")),
               }),

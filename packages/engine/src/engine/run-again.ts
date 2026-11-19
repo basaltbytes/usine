@@ -88,6 +88,5 @@ export const runAgainSubmission = (
     revision: ran.revision,
     task: request.context.task,
     agent: request.context.agent,
-    parentModel: request.context.parentModel,
   });
 };

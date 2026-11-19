@@ -38,8 +38,6 @@ const spec: HarvestSpec = {
       model: ModelId.make("claude-sonnet-4-6"),
       effort: "high",
     }),
-    parentModel: Option.none(),
-    parentEffort: Option.none(),
     persona: AgentPersona.make("Implement the issue."),
   }),
   requiresCi: false,

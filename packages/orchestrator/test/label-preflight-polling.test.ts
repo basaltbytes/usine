@@ -38,8 +38,6 @@ const agent = AgentFile.make({
   harness: Harness.make("codex"),
   model: ModelId.make("gpt-5.6-sol"),
   effort: "high",
-  parentModel: Option.none(),
-  parentEffort: Option.none(),
   persona: AgentPersona.make("Implement the issue."),
 });
 const loop = LoopFile.make({

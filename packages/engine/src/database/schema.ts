@@ -79,12 +79,13 @@ export const triggerEvents = snakeCase.table(
     // The Item's cycle generation, read before fetching the trigger input.
     cycleGeneration: integer().notNull().default(0),
     // The submitted execution context. A queued Event is claimed from these columns; execution
-    // reads the Run's copy. Claiming a queued Event rewrites its Agent and parent model, with the
-    // Loop settings above, when its trigger recheck returns the Loop's current settings.
+    // reads the Run's copy. Claiming a queued Event rewrites its Agent, with the Loop settings
+    // above, when its trigger recheck returns the Loop's current settings.
     repository: text().$type<RepositoryName>().notNull(),
     revision: text().$type<RepositoryRevision>().notNull(),
     task: text().$type<AttemptTask>().notNull(),
     agentJson: text({ mode: "json" }).$type<unknown>().notNull(),
+    // Earlier versions, which configured a parent model, wrote it; usine doesn't read it.
     parentModel: text().$type<ModelId>(),
     // The Event that this one reopens after its Run was canceled (#267).
     reopensEventId: text()
@@ -224,6 +225,7 @@ export const runs = snakeCase.table(
     revision: text().$type<RepositoryRevision>().notNull(),
     task: text().$type<AttemptTask>().notNull(),
     agentJson: text({ mode: "json" }).$type<unknown>().notNull(),
+    // Earlier versions, which configured a parent model, wrote it; usine doesn't read it.
     parentModel: text().$type<ModelId>(),
     /** The operator retry for the Run's next Attempt; cleared when that Attempt starts. */
     nextStartJson: text({ mode: "json" }).$type<unknown>(),

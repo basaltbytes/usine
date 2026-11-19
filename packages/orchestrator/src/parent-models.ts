@@ -66,7 +66,10 @@ export const instanceModelRoute = Effect.fn("Orchestrator.instanceModelRoute")(f
   return Option.some(current);
 });
 
-/** Provides retryable gateway model access for coordinator admission and launch. */
+/**
+ * Provides retryable gateway model access for the Pi parent of attempts that earlier versions
+ * started.
+ */
 export const parentModels = Effect.fn("Orchestrator.parentModels")(function* (
   startup: LoadedInstance,
   instanceId: InstanceId,

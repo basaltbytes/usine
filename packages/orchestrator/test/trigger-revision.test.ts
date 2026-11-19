@@ -10,7 +10,7 @@ import { RunId } from "@usine/core/run";
 import { Claimed, RunEngine, type Submission } from "@usine/engine/engine";
 import { ItemProjection } from "@usine/engine/item-projection";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
-import { Effect, Layer, Option, Schema } from "effect";
+import { Effect, Layer, Schema } from "effect";
 import { evaluateItem } from "../src/polling/loop-evaluation.ts";
 import { resolveTriggerLoop } from "../src/trigger-submission.ts";
 
@@ -33,8 +33,6 @@ it.effect.each(["issue", "pr"] as const)(
         harness: Harness.make("codex"),
         model: "gpt-5.6-sol",
         effort: "high",
-        parentModel: Option.none(),
-        parentEffort: Option.none(),
         persona: "Review the code.",
       });
       const instance = LoadedInstance.make({

@@ -105,7 +105,7 @@ Runtime backups use `VACUUM INTO` to omit free pages, including those freed by s
 
 Session queries also return each operator input's latest delivery or rejection receipt. Queued, forwarded, delivered, and unread message states remain available outside the loaded page.
 
-The run ledger keeps the submitted agent, rendered task, payload snapshot, effective parent model, and each attempt's child brain across restarts.
+The run ledger keeps the submitted agent, rendered task, payload snapshot, and each attempt's child brain across restarts.
 
 ### Attempt windows
 

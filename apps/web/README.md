@@ -203,7 +203,7 @@ Under the outline, a red count with previous and next controls steps through loa
 
 ### Reader
 
-Each attempt is one document. Its first line names the worker, parent model, each child's harness, model, and effort, the account rate-window readings, and whether the operator intervened. Messages from the parent, children, and operator follow at a 72-character measure, with time and speaker in a narrow column.
+Each attempt is one document. Its first line names the worker, the parent model of an attempt that an earlier version started with a Pi parent session, each child's harness, model, and effort, the account rate-window readings, and whether the operator intervened. Messages from the parent, children, and operator follow at a 72-character measure, with time and speaker in a narrow column.
 
 Operator messages show their latest delivery receipt once. A parent steer shows **Forwarded to child** while routed to a child, **Delivered to parent** when the parent reads it, or **Not acted on** if withdrawn or unread when the session ends. A queued note identifies which session still needs to read it. Forwarded receipts update the child's supervision state.
 
@@ -224,7 +224,7 @@ A live attempt shows its current activity under the last message, and the reader
 The stored configuration in full-panel pages: **Loops**, **Agents**, **Workers**, **Repositories**, **Labels**, and **Settings**, with instance-wide **History**. List rows open detail pages with the file's long parts beside a rail of short facts (rail first on phones).
 
 - **Loop**: trigger and selector as written, the agent with its brain, the selected repositories, approval, cycle limit, permissions, step, and the prompt as Markdown with each `{{ }}` expression outlined. The database-backed **Pause** or **Resume** control is in the heading and on each list row.
-- **Agent**: the persona and where its parent model and effort come from.
+- **Agent**: the persona, the brain, and the loops that use the agent.
 - **Worker**: connection and gateway settings (never the admin token), slots in use, and the last preflight of its own prerequisites and of each harness. The **Workers** list places a provisioned worker by its machines, such as `hetzner cx33 in nbg1, one machine per attempt`, and adds the failure and next try while machine creation is paused.
   - For a provisioned worker: the provisioner settings (provider; server type, location, image, network, firewall, SSH key, SSH user, and labels for Hetzner, or size for Boat) and the names of the variables with the provider token and the Anthropic API key, never their values. **Machines** lists each machine in flight, oldest first, with the provider ID, state (`Creating`, `Ready`, or `Deleting`), age, and the run it serves, which opens its drawer, or the attempt for a machine found after a restart. Above them, the last failed creation shows the reason, the provider's message, the failures in a row, and the next try. Harness checks run on the first machine of each day, so each harness reads `Deferred` until that check passes or fails.
 - **Repository**: its lanes in board order with each label as GitHub has it, the labels usine creates there, and the loops that select it.

@@ -59,8 +59,6 @@ export class AttemptContext extends Schema.Class<
   task: AttemptTask,
   /** The agent definition selected for subsequent attempts. */
   agent: Agent,
-  /** The effective Pi parent model, or `None` to let Pi select it. */
-  parentModel: Schema.OptionFromNullOr(ModelId),
 }) {}
 
 /** An operator's resolution of a failed attempt; the login is absent if none was recorded. */

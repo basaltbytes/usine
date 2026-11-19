@@ -57,8 +57,6 @@ const brain = BrainSpec.make({
 const agent = Agent.make({
   name: AgentName.make("developer"),
   brain,
-  parentModel: Option.none(),
-  parentEffort: Option.none(),
   persona: AgentPersona.make("Implement the issue."),
 });
 const time = (iso: string) => DateTime.makeUnsafe(iso);
@@ -129,7 +127,6 @@ const snapshot = (attempts: ReadonlyArray<Attempt>) =>
     revision: RepositoryRevision.make("main"),
     task: AttemptTask.make("Implement #247."),
     agent,
-    parentModel: Option.none(),
     permissions: "write",
   });
 const reviewRun = RunSummary.make({

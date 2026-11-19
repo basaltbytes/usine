@@ -143,7 +143,6 @@ const eventRouteSelection = {
   revision: triggerEvents.revision,
   task: triggerEvents.task,
   agent: triggerEvents.agentJson,
-  parentModel: triggerEvents.parentModel,
 } as const;
 
 /** The trigger Event columns that hold the Loop's settings when the Event matched. */
@@ -161,7 +160,6 @@ const loopSettingColumns = Effect.fnUntraced(function* (submission: Submission) 
     outcomeLabelsJson: [...submission.outcomeLabels],
     cycleLimit: Option.getOrNull(submission.cycleLimit),
     agentJson: yield* encodeAgent(submission.agent),
-    parentModel: Option.getOrNull(submission.parentModel),
   };
 });
 
@@ -180,7 +178,6 @@ const runSelection = {
   revision: runs.revision,
   task: runs.task,
   agent: runs.agentJson,
-  parentModel: runs.parentModel,
   stepName: steps.stepName,
   result: steps.result,
   approvalReason: triggerEvents.approvalReason,
@@ -216,7 +213,7 @@ export const attemptSelection = {
 } as const;
 
 const runSummarySelection = {
-  ...Struct.omit(runSelection, ["task", "result", "revision", "parentModel", "stepName", "agent"]),
+  ...Struct.omit(runSelection, ["task", "result", "revision", "stepName", "agent"]),
   agent: jsonObject([
     ["name", jsonExtract(runs.agentJson, "$.name")],
     ["brain", jsonExtract(runs.agentJson, "$.brain")],
@@ -409,7 +406,6 @@ export const queriesFor = (
       revision: storedRun.revision,
       task: storedRun.task,
       agent: storedRun.agent,
-      parentModel: Option.fromNullishOr(storedRun.parentModel),
       permissions: route.permissions,
       ciPolicy: Option.fromNullishOr(route.ciPolicy),
       outcomeLabels: route.outcomeLabels,
@@ -860,7 +856,6 @@ export const queriesFor = (
       .set({
         task: context.task,
         agentJson: agentJson,
-        parentModel: Option.getOrNull(context.parentModel),
       })
       .where(eq(runs.runId, runId))
       .execute();
@@ -997,7 +992,6 @@ export const queriesFor = (
         revision: submission.revision,
         task: submission.task,
         agentJson: agentJson,
-        parentModel: Option.getOrNull(submission.parentModel),
       })
       .onConflictDoNothing()
       .execute();
