@@ -3,12 +3,12 @@ import { GatewayAdminPort } from "@usine/core/worker";
 import type { RepositoryName } from "@usine/core/repository";
 import { AnonymousCredential } from "@usine/gateway";
 import { AttachRequest, CALLER_CREDENTIAL_HEADERS } from "@usine/gateway/admin";
-import { Context, DateTime, Effect, Option, Schema, Semaphore, Stream } from "effect";
+import { Context, DateTime, Effect, Option, Ref, Schema, Semaphore, Stream } from "effect";
 import { HttpClient, HttpClientRequest } from "effect/http";
 import { ChildProcessSpawner } from "effect/process";
 import { DEFAULT_SSH, remoteCommandsFor } from "../../remote/commands.ts";
 import type { SshWorkerGateway } from "../model.ts";
-import { gatewayAdminFor } from "./admin.ts";
+import { gatewayAdminFor, type ReportedProviders } from "./admin.ts";
 import { type GatewayLlmPrefixes, llmPrefixOf } from "./environment.ts";
 import { gatewayForwardFor } from "./forward.ts";
 
@@ -82,17 +82,32 @@ export const gatewayModelRouteFor = Effect.fn("GatewayModelRoute.open")(
         message: `The coordinator can't reach the model proxy on gateway ${gateway.destination}.`,
       });
     }
-    const reported = yield* admin.providers;
-    // A Gateway that predates the provider report also predates protocol path prefixes.
-    const prefixes: GatewayLlmPrefixes = Option.match(reported, {
-      onNone: () => "provider",
-      onSome: (reported) => reported.prefixes,
-    });
-    if (prefixes === "provider")
-      yield* Effect.logWarning(
-        "The gateway predates protocol path prefixes; the orchestrator model route uses its provider prefixes until @usine/gateway is upgraded on it",
-        { worker, gateway: gateway.destination },
+    const prefixes = yield* Ref.make<GatewayLlmPrefixes>("protocol");
+    /** Sends later requests to the path prefixes that `reported` shows, and logs each change. */
+    const recordPrefixes = Effect.fn("GatewayModelRoute.recordPrefixes")(function* (
+      reported: Option.Option<ReportedProviders>,
+    ) {
+      // A Gateway that predates the provider report also predates protocol path prefixes.
+      const next = Option.match(reported, {
+        onNone: (): GatewayLlmPrefixes => "provider",
+        onSome: ({ prefixes }) => prefixes,
+      });
+      const fields = { worker, gateway: gateway.destination, llmPrefixes: next };
+      yield* Effect.annotateCurrentSpan(fields);
+      const previous = yield* Ref.getAndSet(prefixes, next);
+      if (previous === next) return;
+      if (next === "provider")
+        return yield* Effect.logWarning(
+          "The gateway predates protocol path prefixes; the orchestrator model route uses its provider prefixes until @usine/gateway is upgraded on it",
+          fields,
+        );
+      yield* Effect.logInfo(
+        "The gateway serves protocol path prefixes; the orchestrator model route uses them",
+        fields,
       );
+    });
+    const readProviders = Effect.tap(admin.providers, recordPrefixes);
+    yield* readProviders;
 
     const failed = (message: string) => GatewayModelError.make({ message });
     const requestFor = Effect.map(DateTime.now, (now) =>
@@ -135,13 +150,24 @@ export const gatewayModelRouteFor = Effect.fn("GatewayModelRoute.open")(
           }),
         ),
         Effect.ignore,
+        Effect.andThen(
+          readProviders.pipe(
+            Effect.tapError((error) =>
+              Effect.logWarning(
+                "Could not read the gateway's provider report; the orchestrator model route keeps its path prefixes",
+                { worker, message: error.message },
+              ),
+            ),
+            Effect.ignore,
+          ),
+        ),
       ),
     ).pipe(Effect.forkScoped);
     const credential = Effect.fn("GatewayModelRoute.credential")(function* (
       protocol: GatewayLlmProtocol,
     ) {
       yield* Effect.annotateCurrentSpan({ worker, protocol });
-      const listed = yield* admin.providers;
+      const listed = yield* readProviders;
       if (Option.isNone(listed))
         return yield* failed(
           "Upgrade @usine/gateway: the coordinator requires gateway credential reporting.",
@@ -161,9 +187,10 @@ export const gatewayModelRouteFor = Effect.fn("GatewayModelRoute.open")(
       const forward = yield* modelForward.current.pipe(
         Effect.catchTag("GatewayForwardClosed", (error) => modelForward.reopen(error.generation)),
       );
+      const current = yield* Ref.get(prefixes);
       const response = yield* http.execute(
         HttpClientRequest.post(
-          new URL(`/${llmPrefixOf(protocol, prefixes)}${path}`, forward.url),
+          new URL(`/${llmPrefixOf(protocol, current)}${path}`, forward.url),
         ).pipe(
           HttpClientRequest.setHeaders(headers),
           // The gateway reads its own token header before Authorization, so no caller header stays.
@@ -186,10 +213,11 @@ export const gatewayModelRouteFor = Effect.fn("GatewayModelRoute.open")(
         },
       );
     });
+    const opening = yield* Ref.get(prefixes);
     yield* Effect.logInfo("Opened the orchestrator gateway model route", {
       worker,
       gateway: gateway.destination,
-      llmPrefixes: prefixes,
+      llmPrefixes: opening,
     });
     const route: GatewayModelRoute = {
       credential: (protocol) =>

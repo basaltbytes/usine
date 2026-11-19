@@ -186,29 +186,78 @@ it.effect("refuses an unexpected model proxy probe status", () => {
   );
 });
 
-it.effect("uses the provider prefixes of a gateway from before protocol slots", () => {
-  const { machine, gateway, upstream, llm, transport } = fixture();
+it.effect(
+  "uses the provider prefixes of a gateway from before protocol slots, and the protocol prefixes once a credential read finds it upgraded",
+  () => {
+    const { machine, gateway, upstream, llm, transport } = fixture();
+    gateway.switches.beforeProtocolSlots = true;
+    return Effect.gen(function* () {
+      const settings = gatewayAddress().gateway;
+      assert(Option.isSome(settings));
+      const route = yield* gatewayModelRouteFor(
+        WorkerName.make("coordinator-older-gateway"),
+        RepositoryName.make("usine/coordinator"),
+        settings.value,
+      );
+      const credential = yield* route.credential("anthropic-messages");
+      assert.deepStrictEqual(credential, Option.some("api-key"));
+      const answer = yield* route.request(
+        "anthropic-messages",
+        '{"model":"claude-sonnet-4-6"}',
+        {},
+      );
+      const text = yield* Effect.promise(() => answer.text());
+      assert.strictEqual(text, "gateway model answer");
+      assert.deepStrictEqual(llm, ["/openai-responses/v1/models", "/anthropic/v1/messages"]);
+      assert.strictEqual(new URL(upstream[0]?.path ?? "").pathname, "/v1/messages");
+      gateway.switches.beforeProtocolSlots = false;
+      const upgraded = yield* route.credential("anthropic-messages");
+      assert.deepStrictEqual(upgraded, Option.some("api-key"));
+      const after = yield* route.request("anthropic-messages", "{}", {});
+      assert.strictEqual(after.status, 200);
+      yield* Effect.promise(() => after.text());
+      assert.strictEqual(llm.at(-1), "/anthropic-messages/v1/messages");
+    }).pipe(Effect.provide(transport.pipe(Layer.provideMerge(machine.layer))), Effect.scoped);
+  },
+);
+
+it.effect("switches to the protocol prefixes on the renewal after a gateway upgrade", () => {
+  const { machine, gateway, llm, transport } = fixture();
   gateway.switches.beforeProtocolSlots = true;
+  const infos: Array<unknown> = [];
   return Effect.gen(function* () {
     const settings = gatewayAddress().gateway;
     assert(Option.isSome(settings));
     const route = yield* gatewayModelRouteFor(
-      WorkerName.make("coordinator-older-gateway"),
+      WorkerName.make("coordinator-upgraded-gateway"),
       RepositoryName.make("usine/coordinator"),
       settings.value,
     );
-    const credential = yield* route.credential("anthropic-messages");
-    assert.deepStrictEqual(credential, Option.some("api-key"));
-    const answer = yield* route.request("anthropic-messages", '{"model":"claude-sonnet-4-6"}', {});
-    const text = yield* Effect.promise(() => answer.text());
-    assert.strictEqual(text, "gateway model answer");
-    assert.deepStrictEqual(llm, ["/openai-responses/v1/models", "/anthropic/v1/messages"]);
-    assert.strictEqual(new URL(upstream[0]?.path ?? "").pathname, "/v1/messages");
-  }).pipe(Effect.provide(transport.pipe(Layer.provideMerge(machine.layer))), Effect.scoped);
+    gateway.switches.beforeProtocolSlots = false;
+    yield* advance(gateway, 3);
+    const answer = yield* route.request("anthropic-messages", "{}", {});
+    assert.strictEqual(answer.status, 200);
+    yield* Effect.promise(() => answer.text());
+    assert.deepStrictEqual(llm, ["/openai-responses/v1/models", "/anthropic-messages/v1/messages"]);
+    assert.include(
+      infos,
+      "The gateway serves protocol path prefixes; the orchestrator model route uses them",
+    );
+  }).pipe(
+    Effect.provide([
+      Logger.layer([
+        Logger.make(({ logLevel, message }) => {
+          if (logLevel === "Info") infos.push(Array.isArray(message) ? message[0] : message);
+        }),
+      ]),
+      transport.pipe(Layer.provideMerge(machine.layer)),
+    ]),
+    Effect.scoped,
+  );
 });
 
 it.effect("requires credential reporting from older gateways", () => {
-  const { machine, gateway, transport } = fixture();
+  const { machine, gateway, llm, transport } = fixture();
   gateway.switches.reportsProviders = false;
   return Effect.gen(function* () {
     const settings = gatewayAddress().gateway;
@@ -220,6 +269,9 @@ it.effect("requires credential reporting from older gateways", () => {
     );
     const failure = yield* route.credential("openai-responses").pipe(Effect.flip);
     assert.include(failure.message, "Upgrade @usine/gateway");
+    const answer = yield* route.request("anthropic-messages", "{}", {});
+    yield* Effect.promise(() => answer.text());
+    assert.strictEqual(llm.at(-1), "/anthropic/v1/messages");
   }).pipe(Effect.provide(transport.pipe(Layer.provideMerge(machine.layer))), Effect.scoped);
 });
 
