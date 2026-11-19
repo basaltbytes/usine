@@ -71,6 +71,7 @@ import {
   type RunAgainResult,
   runAgainSubmission,
 } from "../engine/run-again.ts";
+import type { CapacityWait } from "../engine/capacity/state.ts";
 import { plainRetry, type RetryOutcome, type RetryRequest } from "../engine/retry.ts";
 import { StepExecution } from "../step-executor.ts";
 import { TranscriptEntry, TranscriptQuery } from "../transcript.ts";
@@ -845,6 +846,7 @@ const makeRunStore = Effect.gen(function* () {
   const retry = Effect.fn("RunStore.retry")(function* (
     runId: RunId,
     request: RetryRequest = plainRetry,
+    wait: Option.Option<CapacityWait> = Option.none(),
   ) {
     const { amendment, requestedBy } = request;
     yield* Effect.annotateCurrentSpan({ runId });
@@ -852,7 +854,7 @@ const makeRunStore = Effect.gen(function* () {
       Effect.gen(function* () {
         const tx = queriesFor(transaction, codec, record);
         const current = yield* tx.snapshot(runId);
-        const decision = retryRun(current);
+        const decision = retryRun(current, wait);
         yield* Effect.logInfo("Operator retry decided", {
           runId,
           state: current.run.state._tag,
@@ -938,8 +940,8 @@ const makeRunStore = Effect.gen(function* () {
             ),
           );
           yield* Effect.logInfo(
-            "Operator retry starts the next Attempt of a Run that waits after a capacity refusal",
-            { runId },
+            "Operator retry starts the next Attempt of a Run that waits for provider capacity",
+            { runId, state: current.run.state._tag, attempts: current.attempts.length },
           );
           return "Forced" satisfies RetryOutcome;
         }
@@ -1375,12 +1377,14 @@ export class RunStore extends Context.Service<
     ) => Effect.Effect<boolean, RunStoreError>;
     /**
      * Reopens a failed Run for its next Attempt, or records that a Run waiting after a capacity
-     * refusal starts its next Attempt now, and returns what changed. Fails with
-     * `RunRetryBlockedError` while another Run of the same Loop and Item is open.
+     * refusal or for `wait`, the capacity group it waits for without an Attempt, starts its next
+     * Attempt now, and returns what changed. Fails with `RunRetryBlockedError` while another Run
+     * of the same Loop and Item is open.
      */
     readonly retry: (
       runId: RunId,
       request?: RetryRequest,
+      wait?: Option.Option<CapacityWait>,
     ) => Effect.Effect<RetryOutcome, RunStoreError>;
     /**
      * Opens a new Run for the Item state of a succeeded or canceled Run as an operator Event

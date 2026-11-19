@@ -1,5 +1,5 @@
 import type { RunId } from "@usine/core/run";
-import { pendingProviderRetry, ProviderRetry } from "@usine/core/attempt";
+import { AttemptNumber, pendingProviderRetry, ProviderRetry } from "@usine/core/attempt";
 import type { Worker as ConfigWorker } from "@usine/config/factory";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AttemptFailure } from "@usine/core/attempt/failure";
@@ -242,20 +242,28 @@ export const readEngineWaits = (
   });
 
 /**
- * Returns the Run's pending capacity retry, at the next try of the capacity group that the Run
- * waits for if that is later, with the group's latest refusal.
+ * Returns the Run's wait for provider capacity: its pending capacity retry, at the next try of the
+ * capacity group that the Run waits for if that is later, with the group's latest refusal. A Run
+ * that waits for a group without a refused Attempt of its own waits for the group's next try.
  */
-const providerRetryOf = (snapshot: RunSummary, capacity: EngineWaits["capacity"]) =>
-  Option.map(pendingProviderRetry(snapshot.run.state, snapshot.attempts), (retry) => {
-    const group = capacity.find(({ runIds }) => runIds.includes(snapshot.run.id));
-    return group === undefined
-      ? retry
-      : ProviderRetry.make({
-          nextAttempt: retry.nextAttempt,
-          retryAt: DateTime.max(retry.retryAt, group.nextTryAt),
-          message: group.message,
-        });
-  });
+const providerRetryOf = (
+  snapshot: RunSummary,
+  capacity: EngineWaits["capacity"],
+): Option.Option<ProviderRetry> => {
+  const retry = pendingProviderRetry(snapshot.run.state, snapshot.attempts);
+  const group = capacity.find(({ runIds }) => runIds.includes(snapshot.run.id));
+  if (group === undefined || !RunState.isOpen(snapshot.run.state)) return retry;
+  return Option.some(
+    ProviderRetry.make({
+      nextAttempt: AttemptNumber.make((snapshot.attempts.at(-1)?.number ?? 0) + 1),
+      retryAt: Option.match(retry, {
+        onNone: () => group.nextTryAt,
+        onSome: ({ retryAt }) => DateTime.max(retryAt, group.nextTryAt),
+      }),
+      message: group.message,
+    }),
+  );
+};
 
 /**
  * Returns the operator's view of a saved Run. `pausedLoops` gives the paused Loops and `workers`

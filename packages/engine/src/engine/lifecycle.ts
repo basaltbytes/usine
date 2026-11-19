@@ -37,6 +37,7 @@ import { Run, RunId } from "@usine/core/run";
 import * as RunState from "@usine/core/run/state";
 import { StepResult } from "@usine/core/step/result";
 import { Array as EffectArray, Data, Match, Option, Result } from "effect";
+import type { CapacityWait } from "./capacity/state.ts";
 import type { IgnoreReason } from "./submission.ts";
 
 /** A Run and its Attempts, ordered by Attempt number. */
@@ -396,18 +397,24 @@ type RetryDecision =
   | { readonly _tag: "RetryRejected" };
 
 /**
- * Returns the operator retry decision, regardless of the Attempt count. A retry of a running Run
- * that waits after a capacity refusal starts its next Attempt now. A retry of another running Run
- * with no open Attempt changes nothing; a retry of a running Attempt is rejected.
+ * Returns the operator retry decision, regardless of the Attempt count. `wait` is the capacity
+ * group at capacity that the Run waits for without an Attempt, if any. A retry of a running Run
+ * that waits after a capacity refusal, or of an open Run without an open Attempt that waits for
+ * `wait`, starts its next Attempt now. A retry of another running Run with no open Attempt changes
+ * nothing; a retry of a running Attempt or of another unstarted Run is rejected.
  */
-export const retryRun = (current: RunProgress): RetryDecision => {
+export const retryRun = (
+  current: RunProgress,
+  wait: Option.Option<CapacityWait>,
+): RetryDecision => {
   const state = current.run.state;
   if (state._tag === "Failed") return { _tag: "Resume", state: RunState.retry(state) };
   if (state._tag === "Running" && Option.isNone(openAttempt(current))) {
-    return Option.isSome(pendingProviderRetry(state, current.attempts))
+    return Option.isSome(wait) || Option.isSome(pendingProviderRetry(state, current.attempts))
       ? { _tag: "RetryNow" }
       : { _tag: "ResumePending" };
   }
+  if (RunState.isStartable(state) && Option.isSome(wait)) return { _tag: "RetryNow" };
   return { _tag: "RetryRejected" };
 };
 

@@ -346,17 +346,20 @@ export const capacityBackoff = (refusals: number): Duration.Duration =>
   CAPACITY_BACKOFF[Math.min(Math.max(refusals, 1), CAPACITY_BACKOFF.length) - 1] ??
   Duration.minutes(60);
 
-/** The next attempt after a provider capacity refusal, with its earliest start time. */
+/**
+ * The next attempt of a run that waits for model provider capacity, after its own capacity refusal
+ * or another run's, with its earliest start time.
+ */
 export class ProviderRetry extends Schema.Class<
   ProviderRetry,
   Brand.Brand<"@usine/core/attempt/attempt/ProviderRetry">
 >("ProviderRetry")(
   closedStruct({
-    /** The 1-based number of the attempt to start after the refusal. */
-    nextAttempt: AttemptNumber.check(Schema.isGreaterThanOrEqualTo(2)),
+    /** The 1-based number of the attempt to start when the wait ends. */
+    nextAttempt: AttemptNumber,
     /** The earliest permitted retry time after the provider backoff. */
     retryAt: Schema.DateTimeUtcFromString,
-    /** The provider capacity refusal reported by the previous attempt. */
+    /** The provider's latest capacity refusal. */
     message: Schema.NonEmptyString,
   }),
 ) {}

@@ -3330,6 +3330,83 @@ it.effect(
     }),
 );
 
+it.effect("shows the group's next try on a Run that waits for it without an Attempt", () =>
+  Effect.gen(function* () {
+    const fixtureInstance = yield* instance;
+    const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
+    const moved = yield* Ref.make<ItemLabelMutation | null>(null);
+    const reads = yield* Ref.make(0);
+    const revision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
+    const refusedAt = yield* DateTime.now;
+    const nextTryAt = DateTime.add(refusedAt, { minutes: 5 });
+    // The Run was submitted after another Run's refusal, so its first claim made it wait.
+    const current = RunSnapshot.make({
+      ...snapshot,
+      run: Run.make({ ...snapshot.run, state: RunState.Pending.make() }),
+      attempts: [],
+    });
+    const wait = CapacityWait.make({
+      group: CapacityGroup.make({
+        harness: brain.harness,
+        model: brain.model,
+        worker: WorkerName.make("local"),
+      }),
+      message: "You've hit your limit",
+      since: refusedAt,
+      refusals: 1,
+      nextTryAt,
+      probes: [],
+      runIds: [current.run.id],
+    });
+    yield* Effect.gen(function* () {
+      const operator = yield* Operator;
+      const view = yield* operator.overview(fixtureInstance);
+      const runs = view.projects.flatMap(({ runs }) =>
+        (runs ?? []).filter(({ id }) => id === current.run.id),
+      );
+      assert.deepStrictEqual(
+        runs.map(({ providerRetry, canRetry }) => ({
+          nextAttempt: providerRetry?.nextAttempt,
+          retryAt: Option.map(Option.fromNullishOr(providerRetry), ({ retryAt }) =>
+            DateTime.toEpochMillis(retryAt),
+          ),
+          message: providerRetry?.message,
+          canRetry,
+        })),
+        [
+          {
+            nextAttempt: AttemptNumber.make(1),
+            retryAt: Option.some(DateTime.toEpochMillis(nextTryAt)),
+            message: "You've hit your limit",
+            canRetry: true,
+          },
+        ],
+      );
+    }).pipe(
+      Effect.provide(
+        testLayer(
+          approved,
+          moved,
+          reads,
+          revision,
+          current,
+          undefined,
+          undefined,
+          [],
+          [],
+          [],
+          undefined,
+          {},
+          undefined,
+          undefined,
+          undefined,
+          Effect.succeed([wait]),
+        ),
+      ),
+    );
+  }),
+);
+
 it.effect("filters cached project lists and refuses actions outside a project binding", () =>
   Effect.gen(function* () {
     const fixtureInstance = yield* instance;

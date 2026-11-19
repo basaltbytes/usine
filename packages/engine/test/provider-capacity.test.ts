@@ -512,28 +512,39 @@ describe("provider capacity without a reset time", () => {
           const retried = yield* claimed(engine, submission({ number: 1, item: "item-1" }));
           const canceled = yield* claimed(engine, submission({ number: 2, item: "item-2" }));
           yield* settle(engine, [retried, canceled]);
+          // A Run submitted while its group is at capacity waits without an Attempt.
+          const unstarted = yield* claimed(engine, submission({ number: 3, item: "item-3" }));
+          const [pending] = yield* settle(engine, [unstarted]);
+          assert.strictEqual(pending?.run.state._tag, "Pending");
+          assert.lengthOf(pending?.attempts ?? [], 0);
           const before = (yield* Ref.get(provider.starts)).length;
 
           yield* TestClock.adjust(Duration.minutes(1));
-          yield* engine.retry(
-            retried,
-            RetryRequest.make({ requestedBy: Option.none(), amendment: Option.none() }),
-          );
+          for (const runId of [retried, unstarted])
+            yield* engine.retry(
+              runId,
+              RetryRequest.make({ requestedBy: Option.none(), amendment: Option.none() }),
+            );
           yield* engine.cancel(canceled);
-          const [now, gone] = yield* settle(engine, [retried, canceled]);
+          const [now, gone, started] = yield* settle(engine, [retried, canceled, unstarted]);
           assert.strictEqual(gone?.run.state._tag, "Canceled");
-          assert.strictEqual(now?.run.state._tag, "Running");
-          assert.strictEqual(
-            Option.getOrNull(now?.attempts.at(-1)?.start ?? Option.none())?._tag,
-            "OperatorRetry",
-          );
+          for (const snapshot of [now, started]) {
+            assert.strictEqual(snapshot?.run.state._tag, "Running");
+            assert.strictEqual(
+              Option.getOrNull(snapshot?.attempts.at(-1)?.start ?? Option.none())?._tag,
+              "OperatorRetry",
+            );
+          }
           const after = yield* Ref.get(provider.starts);
-          assert.deepStrictEqual(
+          assert.sameDeepMembers(
             after.slice(before).map(({ runId, at }) => [runId, at]),
-            [[retried, minutes(1)]],
+            [
+              [retried, minutes(1)],
+              [unstarted, minutes(1)],
+            ],
           );
           const [wait] = yield* engine.capacityWaits;
-          assert.deepStrictEqual(wait?.runIds, [retried]);
+          assert.sameMembers([...(wait?.runIds ?? [])], [retried, unstarted]);
           assert.strictEqual(wait?.refusals, 2);
           assert.strictEqual(
             DateTime.toEpochMillis(wait?.nextTryAt ?? DateTime.makeUnsafe(0)),

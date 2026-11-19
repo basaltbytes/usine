@@ -14,7 +14,17 @@ import type { OperatorActor } from "@usine/core/operator";
 import { RunId } from "@usine/core/run";
 import { ApprovalSource } from "@usine/core/run/approval";
 import type { WorkerName } from "@usine/core/worker";
-import { Context, Crypto, type Duration, Effect, Layer, Match, Option, Result } from "effect";
+import {
+  Array as EffectArray,
+  Context,
+  Crypto,
+  type Duration,
+  Effect,
+  Layer,
+  Match,
+  Option,
+  Result,
+} from "effect";
 import { RunDatabase } from "../database/database.ts";
 import {
   AttemptCancellationError,
@@ -109,7 +119,9 @@ const makeRunEngine = Effect.gen(function* () {
     runId: RunId,
     request: RetryRequest = plainRetry,
   ) {
-    const outcome = yield* store.retry(runId, request);
+    const waits = yield* capacity.waits;
+    const wait = EffectArray.findFirst(waits, ({ runIds }) => runIds.includes(runId));
+    const outcome = yield* store.retry(runId, request, wait);
     if (outcome === "Reopened") {
       yield* driver.resume(runId);
       return;
@@ -421,8 +433,9 @@ export class RunEngine extends Context.Service<
     ) => Effect.Effect<void, RunEngineError>;
     /**
      * Requests another Attempt for a failed Run with its existing Event, applying the request's
-     * task and Agent if set. A Run that waits after a capacity refusal starts its next Attempt
-     * now, which tests its capacity group. The Attempt records the request as its start reason.
+     * task and Agent if set. A Run that waits after a capacity refusal, or that waits for its
+     * capacity group without an Attempt, starts its next Attempt now, which tests the group. The
+     * Attempt records the request as its start reason.
      */
     readonly retry: (runId: RunId, request?: RetryRequest) => Effect.Effect<void, RunEngineError>;
     /**

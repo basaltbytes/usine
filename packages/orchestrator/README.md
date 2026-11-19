@@ -404,7 +404,7 @@ The configuration view includes all declared labels, including declarations with
 
 `preview` accepts `{ name, value, itemKey? }`. It applies the selector, stream, and condition to stored items, excluding items marked gone. The response includes up to 20 `items`, the full match `total`, and a `prompt` with the selected item's key and rendered text. Without `itemKey`, it renders the first match; an explicitly selected item that no longer matches returns 404. Evaluation or rendering failures appear in `failures`, and `repositoriesWithoutItems` identifies repositories with no stored items for that stream. Schedule loops return no polled items. Preview makes no GitHub requests and saves no revision.
 
-`RunView.providerRetry` is non-null while a running run waits to retry a provider capacity refusal. It includes the provider's message, the next attempt number, and its earliest start time. `ProviderCapacityFailureView` preserves the refusal in attempt history. Attempt statistics count `ProviderRetry` starts as automatic retries.
+`RunView.providerRetry` is non-null while an open run waits for provider capacity: after its own capacity refusal, or for a capacity group at capacity before a refusal of its own. It includes the latest refusal's message, the next attempt number, and its earliest start time, which is the group's next try if that is later. `canRetry` is true while it is set. `ProviderCapacityFailureView` preserves the refusal in attempt history. Attempt statistics count `ProviderRetry` starts as automatic retries.
 
 ## Projects
 
