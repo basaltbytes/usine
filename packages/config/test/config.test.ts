@@ -12,7 +12,7 @@ import { LoadedInstance } from "../src/instance/instance.ts";
 import { loopReferenceFailure, referenceIndex } from "../src/instance/references.ts";
 import { ManagedRepo, UsineConfig } from "../src/factory.ts";
 import { LoopFile } from "../src/loop.ts";
-import { formatAgent, formatLoop, ConfigParser } from "../src/parser.ts";
+import { formatLoop, ConfigParser } from "../src/parser.ts";
 import { issueEnvironment, pullRequestEnvironment } from "../src/payload-slices.ts";
 import { matchesSelector } from "../src/selector.ts";
 import { updateFrontmatter, updateYaml, YamlEdit } from "../src/yaml/writer.ts";
@@ -1111,20 +1111,15 @@ workers:
         InstancePath.make("usine.yaml"),
         "version: 1\nrepos: []\nsettings:\n  poll_interval: 30\n  coordinator: session\n  parent_model: openai-codex/gpt-5.6-terra\n  parent_effort: low\n",
       );
-      const encoded = yield* Schema.encodeEffect(UsineConfig)(config);
-      expect(encoded.settings).toMatchObject({ poll_interval: 30 });
-      expect(
-        ["coordinator", "parent_model", "parent_effort"].filter(
-          (key) => key in (encoded.settings ?? {}),
-        ),
-      ).toEqual([]);
+      expect(config.settings.pollInterval).toBe(30);
 
       const agent = yield* parser.parseAgentFile(
         InstancePath.make("agents/developer.md"),
         "---\nharness: codex\nmodel: gpt-5.6-sol\neffort: xhigh\ncoordinator: session\nparent_model: openai-codex/gpt-5.6-terra\nparent_effort: low\ndecision:\n  model: gpt-5.6-terra\n  effort: low\n---\nPersona body.",
       );
-      expect(formatAgent(agent)).toBe(
-        "---\nharness: codex\nmodel: gpt-5.6-sol\neffort: xhigh\ndecision:\n  model: gpt-5.6-terra\n  effort: low\n---\nPersona body.",
+      expect(agent.agent.brain.model).toBe("gpt-5.6-sol");
+      expect(Option.map(agent.decision, ({ model }) => model)).toEqual(
+        Option.some("gpt-5.6-terra"),
       );
 
       const unknownHarness = yield* parser

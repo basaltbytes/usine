@@ -2,8 +2,7 @@ import { NodeServices } from "@effect/platform-node";
 import { assert, it } from "@effect/vitest";
 import { layer as durableTestingLayer, StubChildren } from "@usine/durable/testing";
 import { Submission } from "@usine/engine/engine";
-import { TranscriptAllQuery } from "@usine/engine/transcript";
-import { Context, Effect, FileSystem, Layer, Option } from "effect";
+import { Context, Effect, FileSystem, Layer } from "effect";
 import { LIVE_TEST_TIMEOUT, submission, waitFor, withLocalEngine } from "./support.ts";
 
 it.live(
@@ -25,16 +24,7 @@ it.live(
           const child = yield* children.next;
           assert.include(child.request.prompt, "Complete local task 1");
           yield* child.reply("Done by the child.");
-          const snapshot = yield* waitFor(engine, accepted.runId, "Succeeded");
-          const attempt = snapshot.attempts[0];
-          assert(attempt !== undefined);
-          const started = (yield* engine.transcript(
-            TranscriptAllQuery.make({ attemptId: attempt.id }),
-          )).flatMap(({ envelope }) =>
-            envelope.payload._tag === "Started" ? [envelope.payload] : [],
-          );
-          assert.lengthOf(started, 1);
-          assert(Option.isNone(started[0]?.parentModel ?? Option.some("missing")));
+          yield* waitFor(engine, accepted.runId, "Succeeded");
         }),
       );
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),

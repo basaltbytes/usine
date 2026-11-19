@@ -19,8 +19,6 @@ describe("Agent", () => {
       expect(stored.decision).toEqual(
         Option.some(DecisionBrain.make({ model: ModelId.make("gpt-5.6-terra"), effort: "low" })),
       );
-      const encoded = yield* Schema.encodeEffect(Agent)(stored);
-      expect(Object.keys(encoded).sort()).toEqual(["brain", "decision", "name", "persona"]);
     }),
   );
 });

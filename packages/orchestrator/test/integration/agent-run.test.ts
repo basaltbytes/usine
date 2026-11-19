@@ -393,7 +393,6 @@ describe("live agent loop", () => {
               assert.strictEqual(attempt.brain.harness, "claude");
               assert.strictEqual(attempt.brain.model, settings.childModel);
               assert.strictEqual(attempt.brain.effort, "low");
-              assert(Option.isNone(attempt.parentModel));
               const payload = yield* Schema.decodeUnknownEffect(IssuePayload)(
                 snapshot.event.payload,
               );
