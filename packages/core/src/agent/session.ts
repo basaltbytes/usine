@@ -1,4 +1,4 @@
-import { type Brand, Effect, Option, Schema } from "effect";
+import { Array as Arr, type Brand, DateTime, Effect, Option, Schema } from "effect";
 import { GatewayCredentialKind } from "../worker.ts";
 import { AgentName } from "./agent.ts";
 import { BrainSpec } from "./brain.ts";
@@ -340,6 +340,22 @@ export class RateLimitWindow extends Schema.Class<
   /** The provider-reported reset time, or `None` if unreported. */
   resetsAt: Schema.OptionFromNullOr(Schema.DateTimeUtcFromString),
 }) {}
+
+/**
+ * Returns the latest reset time among the used-up windows in `windows`, those at 100 percent or
+ * more. Returns `None` if no window is used up or a used-up window has no reset time.
+ */
+export const usedUpUntil = (windows: Iterable<RateLimitWindow>): Option.Option<DateTime.Utc> =>
+  Option.all(
+    Arr.filter(windows, ({ usedPercent }) => usedPercent >= 100).map(({ resetsAt }) => resetsAt),
+  ).pipe(
+    Option.flatMap(
+      Arr.match({
+        onEmpty: Option.none,
+        onNonEmpty: (resets) => Option.some(Arr.max(resets, DateTime.Order)),
+      }),
+    ),
+  );
 
 /** The rate-limit windows from one provider report; a window is `None` if not reported. */
 export class RateLimitsSnapshot extends Schema.Class<

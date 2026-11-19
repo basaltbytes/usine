@@ -86,7 +86,7 @@ const readClaudeCompletion = Effect.fn("ClaudeRuntime.readCompletion")(function*
 ) {
   const tokens = claudeTokenMeter();
   yield* spent(SessionTokensUpdated.make({ session, totalTokens: TokenCount.make(0) }));
-  const provider = claudeProviderFailures(session.id);
+  const provider = claudeProviderFailures(session);
   let result = Option.none<typeof ClaudeResultMessage.Type>();
   yield* Stream.concat(Stream.fromIterable(launch.read), Stream.fromQueue(launch.output)).pipe(
     Stream.takeUntil(Schema.is(ClaudeResultMessage)),
@@ -101,7 +101,7 @@ const readClaudeCompletion = Effect.fn("ClaudeRuntime.readCompletion")(function*
               costUsd: used.value.costUsd,
             }),
           );
-        const reported = provider.read(message);
+        const reported = yield* provider.read(message);
         if (Option.isSome(reported.rejectedUntil))
           yield* Effect.logWarning("Claude reports that its usage limit rejects requests", {
             sessionId: session.id,

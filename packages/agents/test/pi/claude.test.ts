@@ -3117,6 +3117,11 @@ describe("Claude child backend", () => {
     api_error_status: 429,
     result: LIMIT_TEXT,
   };
+  /** A rate-limit report that allows requests, at `utilization` of the allowance. */
+  const allowance = (rateLimitType: string, utilization: number, resetsAt: number) => ({
+    type: "rate_limit_event",
+    rate_limit_info: { status: "allowed_warning", rateLimitType, utilization, resetsAt },
+  });
   it.effect.each([
     {
       name: "a rejected usage limit",
@@ -3163,6 +3168,45 @@ describe("Claude child backend", () => {
         limitResult,
       ],
       resetsAt: Option.some("2026-11-11T05:00:00.000Z"),
+    },
+    {
+      name: "a rate limit while the session's reports show several windows used up",
+      messages: [
+        allowance("five_hour", 1, 1_794_344_400),
+        allowance("seven_day", 1, 1_794_416_400),
+        allowance("seven_day_opus", 1, 1_794_373_200),
+        limitError,
+        limitResult,
+      ],
+      resetsAt: Option.some("2026-11-11T17:00:00.000Z"),
+    },
+    {
+      name: "a rate limit after the latest used-up window was reported below its allowance again",
+      messages: [
+        allowance("five_hour", 1, 1_794_344_400),
+        allowance("seven_day", 1, 1_794_416_400),
+        allowance("seven_day", 0.5, 1_794_416_400),
+        limitError,
+        limitResult,
+      ],
+      resetsAt: Option.some("2026-11-10T21:00:00.000Z"),
+    },
+    {
+      name: "a rate limit while a used-up window has no reset time",
+      messages: [
+        allowance("seven_day", 1, 1_794_416_400),
+        {
+          type: "rate_limit_event",
+          rate_limit_info: {
+            status: "allowed_warning",
+            rateLimitType: "five_hour",
+            utilization: 1,
+          },
+        },
+        limitError,
+        limitResult,
+      ],
+      resetsAt: Option.none(),
     },
     {
       name: "a rate limit after a used-up window was reported below its allowance again",

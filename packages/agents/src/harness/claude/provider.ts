@@ -1,5 +1,10 @@
-import type { AgentSessionId } from "@usine/core/agent/session";
-import { DateTime, Option, Schema } from "effect";
+import {
+  type AgentSession,
+  type PoolRateLimitsUpdated,
+  type RateLimitWindow,
+  usedUpUntil,
+} from "@usine/core/agent/session";
+import { type DateTime, Effect, Option, Schema } from "effect";
 import { AgentCapacityError, type AgentResultError } from "../../runtime.ts";
 import {
   apiErrorRefusal,
@@ -11,7 +16,12 @@ import {
   isAssistantMessage,
   resultFailure,
 } from "./codec.ts";
-import { isRateLimitEvent, rejectedUntil, reportedWindow } from "./rate-limits.ts";
+import {
+  type AllowanceType,
+  claudeRateLimits,
+  isRateLimitEvent,
+  rejectedUntil,
+} from "./rate-limits.ts";
 
 /** What one Claude message reported about its provider. */
 export interface ProviderReport {
@@ -19,29 +29,24 @@ export interface ProviderReport {
   readonly retry: Option.Option<typeof ClaudeApiRetry.Type>;
   /** The reset time of the usage limit, when the message reports that the limit rejects requests. */
   readonly rejectedUntil: Option.Option<DateTime.Utc>;
+  /** The Claude plan allowance window that the message reports, as a pool update. */
+  readonly rateLimits: Option.Option<PoolRateLimitsUpdated>;
 }
 
 /**
  * Tracks what a Claude turn's messages report about its provider, and classifies the turn's
  * failed result with it. A session and a completion read each message through `read`, so both
  * fail a result the same way. A capacity refusal while the latest rate-limit report rejects
- * requests carries the limit's reset time. Without one, it carries the latest reset time of the
- * allowance windows that the session's latest reports show used up.
+ * requests carries the limit's reset time. Without one, it carries the reset time that
+ * `usedUpUntil` reads from the latest window of each allowance that the session's reports show.
  */
-export const claudeProviderFailures = (sessionId: AgentSessionId) => {
+export const claudeProviderFailures = (session: AgentSession) => {
+  const readRateLimits = claudeRateLimits(session);
   let failure = Option.none<AgentCapacityError | AgentResultError>();
   let limitResetsAt = Option.none<DateTime.Utc>();
-  // The reset time of each allowance window whose latest report shows it used up.
-  const usedUp = new Map<string, DateTime.Utc>();
+  const windows = new Map<AllowanceType, RateLimitWindow>();
   const withReset = (refusal: AgentCapacityError): AgentCapacityError => {
-    const resetsAt = Option.orElse(limitResetsAt, () =>
-      Option.fromUndefinedOr(
-        [...usedUp.values()].reduce<DateTime.Utc | undefined>(
-          (latest, at) => (latest === undefined ? at : DateTime.max(latest, at)),
-          undefined,
-        ),
-      ),
-    );
+    const resetsAt = Option.orElse(limitResetsAt, () => usedUpUntil(windows.values()));
     return Option.isSome(resetsAt)
       ? AgentCapacityError.make({
           sessionId: refusal.sessionId,
@@ -52,32 +57,31 @@ export const claudeProviderFailures = (sessionId: AgentSessionId) => {
   };
   return {
     /** Records what `message` reports: a provider retry, an assistant error, or a rate limit. */
-    read: (message: Schema.Json): ProviderReport => {
-      const rejected = isRateLimitEvent(message) ? rejectedUntil(message) : Option.none();
-      if (isRateLimitEvent(message)) {
-        limitResetsAt = rejected;
-        const window = reportedWindow(message);
-        if (Option.isSome(window)) {
-          const { window: name, usedUpUntil } = window.value;
-          if (Option.isSome(usedUpUntil)) usedUp.set(name, usedUpUntil.value);
-          else usedUp.delete(name);
-        }
-      }
-      const retry = decodeApiRetry(message);
-      if (Option.isSome(retry)) failure = apiRetryFailure(sessionId, retry.value);
-      else if (isAssistantMessage(message)) failure = assistantFailure(sessionId, message, failure);
-      return { retry, rejectedUntil: rejected };
-    },
+    read: (message: Schema.Json): Effect.Effect<ProviderReport> =>
+      Effect.map(readRateLimits(message), (reported) => {
+        if (Option.isSome(reported)) windows.set(reported.value.allowance, reported.value.window);
+        const rejected = isRateLimitEvent(message) ? rejectedUntil(message) : Option.none();
+        if (isRateLimitEvent(message)) limitResetsAt = rejected;
+        const retry = decodeApiRetry(message);
+        if (Option.isSome(retry)) failure = apiRetryFailure(session.id, retry.value);
+        else if (isAssistantMessage(message))
+          failure = assistantFailure(session.id, message, failure);
+        return {
+          retry,
+          rejectedUntil: rejected,
+          rateLimits: Option.map(reported, ({ update }) => update),
+        };
+      }),
     /** Returns the failure of a result that isn't a `success`, or that has no result text. */
     failedResult: (
       result: typeof ClaudeResultMessage.Type,
     ): AgentCapacityError | AgentResultError => {
-      const failed = resultFailure(sessionId, result, failure);
+      const failed = resultFailure(session.id, result, failure);
       return Schema.is(AgentCapacityError)(failed) ? withReset(failed) : failed;
     },
     /** Returns the capacity refusal or usage limit of a `success` result with `is_error`. */
     refusal: (result: typeof ClaudeResultMessage.Type): Option.Option<AgentCapacityError> =>
-      Option.map(apiErrorRefusal(sessionId, result, failure), withReset),
+      Option.map(apiErrorRefusal(session.id, result, failure), withReset),
     /** Forgets the reported failure, after a turn that succeeded. */
     clear: () => {
       failure = Option.none();
