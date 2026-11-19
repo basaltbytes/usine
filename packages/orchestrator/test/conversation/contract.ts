@@ -35,9 +35,11 @@ import {
   PostedWithSession,
   TurnId,
   TurnMember,
+  TurnSource,
 } from "@usine/core/conversation";
 import { OperatorLogin } from "@usine/core/operator";
 import { ProjectId } from "@usine/core/project";
+import { CommitSha, RepositoryName } from "@usine/core/repository";
 import { NodeServices } from "@effect/platform-node";
 import { DateTime, Effect, Layer, Option, type Scope } from "effect";
 import { ConversationStore, ReadMarker } from "../../src/conversation/store.ts";
@@ -52,6 +54,12 @@ export interface StoreAdapter {
   /** Allocates isolated storage and removes it after the test. */
   readonly fixture: Effect.Effect<StoreFixture, never, Scope.Scope>;
 }
+
+/** The source that the answered turn read. */
+const source = TurnSource.make({
+  repository: RepositoryName.make("acme/app"),
+  revision: CommitSha.make("0123456789abcdef0123456789abcdef01234567"),
+});
 
 const at = (minute: number) => DateTime.makeUnsafe(Date.UTC(2026, 10, 17, 9, minute));
 const member = TurnMember.make({ id: GitHubUserId.make(7), login: OperatorLogin.make("ada") });
@@ -226,7 +234,11 @@ export const conversationStoreContract = (adapter: StoreAdapter) =>
           const answer = yield* store.answer(
             running,
             succeedTurn(running, at(5), saved, spent(120)),
-            Reply.make({ body: MessageBody.make("Nothing needs you."), at: at(5) }),
+            Reply.make({
+              body: MessageBody.make("Nothing needs you."),
+              at: at(5),
+              sources: [source],
+            }),
           );
           assert.strictEqual(answer.sequence, 3);
           assert.strictEqual(answer.turn, running.id);
@@ -247,14 +259,18 @@ export const conversationStoreContract = (adapter: StoreAdapter) =>
           assert.deepStrictEqual<Option.Option<unknown>>(
             Option.map(read, ({ turns, messages }) => ({
               turns: turns.map(({ state }) => state._tag),
-              messages: messages.map(({ role, body }) => [role, body]),
+              messages: messages.map((message) => [
+                message.role,
+                message.body,
+                ...(message.role === "supervisor" ? [message.sources] : []),
+              ]),
             })),
             Option.some({
               turns: ["Succeeded", "Canceled"],
               messages: [
                 ["member", "first"],
                 ["member", "second"],
-                ["supervisor", "Nothing needs you."],
+                ["supervisor", "Nothing needs you.", [source]],
               ],
             }),
           );

@@ -8,6 +8,7 @@ import {
   SessionTokensUpdated,
 } from "./agent/session.ts";
 import { OperatorLogin } from "./operator.ts";
+import { CommitSha, RepositoryName } from "./repository.ts";
 
 /** The ID of a conversation with the supervisor. */
 export const ConversationId = Schema.NonEmptyString.pipe(Schema.brand("ConversationId"));
@@ -175,6 +176,24 @@ export class MemberMessage extends Schema.Class<
   author: OperatorLogin,
 }) {}
 
+/** A repository whose source a turn read, at the commit it read. */
+export class TurnSource extends Schema.Class<
+  TurnSource,
+  Brand.Brand<"@usine/core/conversation/TurnSource">
+>("Conversation/TurnSource")({
+  repository: RepositoryName,
+  revision: CommitSha,
+}) {}
+
+/**
+ * The sources of a turn; empty for a turn that mounted none and for an answer stored before
+ * answers kept them.
+ */
+const turnSources = Schema.Array(TurnSource).pipe(
+  Schema.withDecodingDefaultKey(Effect.succeed([])),
+  Schema.withConstructorDefault(Effect.succeed([])),
+);
+
 /** The supervisor's answer to a member message. */
 export class SupervisorMessage extends Schema.Class<
   SupervisorMessage,
@@ -182,6 +201,8 @@ export class SupervisorMessage extends Schema.Class<
 >("Conversation/SupervisorMessage")({
   ...messageFields,
   role: Schema.Literal("supervisor"),
+  /** The source that the turn read, which the answer's source lines refer to. */
+  sources: turnSources,
 }) {}
 
 /**
@@ -455,6 +476,8 @@ export class Reply extends Schema.Class<Reply, Brand.Brand<"@usine/core/conversa
 )({
   body: MessageBody,
   at: Schema.DateTimeUtc,
+  /** The source that the turn read. */
+  sources: turnSources,
 }) {}
 
 /** Returns the supervisor message of `reply` to `turn` at `sequence`. */
@@ -467,6 +490,7 @@ export const replied = (turn: Turn, reply: Reply, sequence: MessageSequence) =>
     body: reply.body,
     createdAt: reply.at,
     role: "supervisor",
+    sources: reply.sources,
   });
 
 /** One session event of a turn, at its position in the conversation. */

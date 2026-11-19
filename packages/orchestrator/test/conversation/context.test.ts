@@ -20,6 +20,7 @@ import {
   settle,
 } from "@usine/core/permission-request";
 import { ProjectId } from "@usine/core/project";
+import { RepositoryName } from "@usine/core/repository";
 import { DateTime, Effect, Option, Schema } from "effect";
 import { OUTCOMES_LIMIT, turnPrompt } from "../../src/conversation/context.ts";
 
@@ -106,6 +107,29 @@ describe("turnPrompt", () => {
       assert.isBelow(cut?.result.length ?? 0, 100_000);
       assert.include(cut?.cut, "of 100000 characters");
       assert.deepStrictEqual([whole?.result, whole?.cut], ['{"ok":true}', undefined]);
+    }),
+  );
+
+  it.effect("gives the reference forms that usine links, and source lines only with source", () =>
+    Effect.gen(function* () {
+      const prompt = (repositories: ReadonlyArray<RepositoryName>) =>
+        turnPrompt({
+          member: ada,
+          grants: [],
+          at,
+          conversation,
+          repositories,
+          needsYou: [],
+          needsTotal: 0,
+          reply: defaultFormat,
+          input: { _tag: "Message", text: "Where does the store open?" },
+        });
+      const mounted = yield* prompt([RepositoryName.make("basaltbytes/usine")]);
+      assert.include(mounted, "a task as #<number> in the project or <owner>/<name>#<number>");
+      assert.include(mounted, "Write a source line as <owner>/<name>/<path>:<line>");
+      assert.include(mounted, "/projects/<project>/runs/<run> for a run");
+      const bare = yield* prompt([]);
+      assert.notInclude(bare, "Write a source line");
     }),
   );
 });

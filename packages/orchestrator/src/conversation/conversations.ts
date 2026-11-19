@@ -53,6 +53,7 @@ import {
   type TurnFailure,
   TurnId,
   type TurnMember,
+  TurnSource,
 } from "@usine/core/conversation";
 import type { OperatorLogin } from "@usine/core/operator";
 import type {
@@ -396,7 +397,8 @@ export const conversationsLayer = Layer.effect(
 
     /**
      * Runs `running` in the supervisor sandbox with the member's access and passes each session
-     * event to `observe`. Interrupting it stops the session and removes the sandbox.
+     * event to `observe`. Returns the answer and the source that the turn mounted. Interrupting it
+     * stops the session and removes the sandbox.
      */
     const execute = (
       record: ConversationRecord,
@@ -496,7 +498,12 @@ export const conversationsLayer = Layer.effect(
               TurnStopped.make({ failure: TurnError.make({ message }), usage: reply.usage }),
             ),
           );
-        return reply;
+        return {
+          reply,
+          sources: trees.map(({ repository, revision }) =>
+            TurnSource.make({ repository, revision }),
+          ),
+        };
       }).pipe(Effect.scoped);
 
     const ended = Effect.fn("Conversations.ended")(function* (
@@ -600,7 +607,7 @@ export const conversationsLayer = Layer.effect(
           Option.orElse(reported, () => usage),
         );
       }
-      const reply = outcome.result.success;
+      const { reply, sources } = outcome.result.success;
       const body = Schema.decodeOption(MessageBody)(reply.message);
       if (Option.isNone(body))
         return yield* fail(
@@ -611,7 +618,7 @@ export const conversationsLayer = Layer.effect(
         );
       const at = yield* now;
       const succeeded = succeedTurn(running, at, reply.saved, reply.usage);
-      yield* store.answer(running, succeeded, Reply.make({ body: body.value, at }));
+      yield* store.answer(running, succeeded, Reply.make({ body: body.value, at, sources }));
       yield* notify(conversation);
       yield* Effect.logInfo("Supervisor turn answered", {
         conversation: conversation.id,

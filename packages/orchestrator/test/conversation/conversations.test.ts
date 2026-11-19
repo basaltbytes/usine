@@ -11,6 +11,7 @@ import {
   SupervisorSandbox,
   type SupervisorSandboxService,
   SupervisorSeat,
+  SupervisorSource,
   SupervisorUnavailable,
 } from "@usine/agents/supervisor";
 import { UsineConfig } from "@usine/config/factory";
@@ -44,10 +45,12 @@ import {
   MessageSequence,
   type Turn,
   TurnMember,
+  TurnSource,
 } from "@usine/core/conversation";
 import { OperatorLogin } from "@usine/core/operator";
 import { CallTarget, OperationCall, OperationName } from "@usine/core/permission-request";
 import { ProjectId } from "@usine/core/project";
+import { CommitSha, RepositoryName } from "@usine/core/repository";
 import { WorkerName } from "@usine/core/worker";
 import {
   Deferred,
@@ -112,6 +115,9 @@ const instance = (settings: Settings) =>
         warnings: [],
       }),
   ).pipe(Effect.orDie);
+
+/** The commit that every turn reads of each repository. */
+const head = CommitSha.make("0123456789abcdef0123456789abcdef01234567");
 
 const container = { runtime: "docker", name: "test-container" };
 const seat = SupervisorSeat.make({
@@ -278,7 +284,18 @@ const conversations = (store: Layer.Layer<ConversationStore | PermissionStore>, 
           acting(grants, ran),
           scriptedHarness(setup.scripts, starts),
           fixedInstanceLayer(loaded),
-          Layer.succeed(SupervisorSourceTrees)({ prepare: () => Effect.succeed([]) }),
+          Layer.succeed(SupervisorSourceTrees)({
+            prepare: (repositories) =>
+              Effect.succeed(
+                repositories.map((repository) =>
+                  SupervisorSource.make({
+                    repository,
+                    revision: head,
+                    directory: `/sources/${repository}`,
+                  }),
+                ),
+              ),
+          }),
           changeBusLayer,
           NodeServices.layer,
         ),
@@ -377,6 +394,12 @@ describe("conversations with the supervisor", () => {
             ["supervisor", "first answer"],
             ["supervisor", "second answer"],
           ],
+        );
+        assert.deepStrictEqual(
+          done.messages.flatMap((stored) => (stored.role === "supervisor" ? [stored.sources] : [])),
+          [0, 1].map(() => [
+            TurnSource.make({ repository: RepositoryName.make("acme/app"), revision: head }),
+          ]),
         );
         assert.deepStrictEqual(
           done.turns.map(({ member }) => member.login),
