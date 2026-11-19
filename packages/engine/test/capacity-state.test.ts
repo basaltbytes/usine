@@ -134,6 +134,24 @@ describe("capacity state", () => {
     assert.deepStrictEqual(wait?.runIds, [run("a"), run("b")]);
   });
 
+  it("keeps a Run waiting for the group of its claim when it registers a refusal in another group again", () => {
+    const marked = refusedAll(
+      refusal(run("b"), 0, 1),
+      refusal(run("b"), 6, 7),
+      refusal(run("a"), 2, 3, elsewhere),
+    );
+    const [elected, testing] = turn(marked, run("a"), at(8));
+    assert.strictEqual(elected._tag, "Due");
+    // The Run elected to test `remote` got a slot on `local`, whose next try is at 22.
+    const [claimed, waiting] = claimAt(testing, run("a"), 8);
+    assert.strictEqual(claimed.claim, "Wait");
+    const [outcome, after] = refused(waiting, refusal(run("a"), 2, 3, elsewhere));
+    assert.strictEqual(outcome, "Elsewhere");
+    assert.strictEqual(after, waiting);
+    const [step] = turn(after, run("a"), at(8));
+    assert.deepStrictEqual(step, { _tag: "Sleep", until: at(22), group: claude });
+  });
+
   // A failure of the agent's work comes after the provider answered its requests.
   it.each(["Succeeded", "AgentFailure"] as const)(
     "releases the waiting Runs when the Attempt that tests the group ends with %s",

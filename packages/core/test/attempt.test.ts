@@ -1,5 +1,6 @@
 import { describe, expect, it } from "@effect/vitest";
 import { Effect, DateTime, Duration, Option, Schema } from "effect";
+import { BrainSpec, Harness, ModelId } from "../src/agent/brain.ts";
 import { ChildSessionBudget, ChildSessionCount } from "../src/agent/session.ts";
 import {
   AttemptId,
@@ -10,6 +11,7 @@ import {
   AttemptNumber,
   AttemptWindow,
   capacityBackoff,
+  capacityRefusalStreak,
   pendingProviderRetry,
   shouldAutoRetry,
   totalOutOfMemoryKills,
@@ -28,7 +30,7 @@ import {
 import { AttemptFailed } from "../src/attempt/outcome.ts";
 import { SalvageRetained } from "../src/attempt/salvage.ts";
 import { Running } from "../src/run/state.ts";
-import { ContainerId, ContainerMemoryMib } from "../src/worker.ts";
+import { ContainerId, ContainerMemoryMib, WorkerName } from "../src/worker.ts";
 import { RepositoryName } from "../src/repository.ts";
 
 const infra = InfraFailure.make({
@@ -98,7 +100,18 @@ describe("auto-retry law (ADR 0002, ADR 0013)", () => {
 
 describe("provider retry deadline", () => {
   const endedAt = DateTime.makeUnsafe("2026-11-11T03:00:00Z");
-  const refused = (number: number, resetsAt: Option.Option<DateTime.Utc>) => ({
+  const opus = BrainSpec.make({
+    harness: Harness.make("claude"),
+    model: ModelId.make("opus"),
+    effort: "high",
+  });
+  /** Attempt `number`, which the provider refused on `worker` with `brain`. */
+  const refused = (
+    number: number,
+    resetsAt: Option.Option<DateTime.Utc>,
+    worker: string = "local",
+    brain: BrainSpec = opus,
+  ) => ({
     number: n(number),
     outcome: Option.some(
       AttemptFailed.make({
@@ -106,6 +119,8 @@ describe("provider retry deadline", () => {
       }),
     ),
     endedAt: Option.some(endedAt),
+    worker: WorkerName.make(worker),
+    brain,
   });
   const retryAt = (refusals: number, resetsAt: Option.Option<DateTime.Utc>) =>
     pendingProviderRetry(
@@ -152,6 +167,40 @@ describe("provider retry deadline", () => {
       );
     },
   );
+
+  it("counts only the refusals in the capacity group of the latest one", () => {
+    const sonnet = BrainSpec.make({ ...opus, model: ModelId.make("sonnet") });
+    const retry = pendingProviderRetry(Running.make(), [
+      refused(1, Option.none()),
+      refused(2, Option.none(), "remote"),
+      refused(3, Option.none(), "local", sonnet),
+      refused(4, Option.none()),
+      refused(5, Option.none()),
+    ]);
+    expect(Option.map(retry, ({ retryAt }) => DateTime.formatIso(retryAt))).toStrictEqual(
+      Option.some("2026-11-11T03:30:00.000Z"),
+    );
+  });
+
+  it("returns the refusals since the last Attempt that the provider didn't refuse, in the group of the latest one, newest first", () => {
+    const attempts = [
+      refused(1, Option.none()),
+      {
+        ...refused(2, Option.none()),
+        outcome: Option.some(AttemptFailed.make({ failure: infra })),
+      },
+      refused(3, Option.none()),
+      refused(4, Option.none(), "remote"),
+      refused(5, Option.none()),
+      refused(6, Option.none()),
+    ];
+    expect(capacityRefusalStreak(attempts).map(({ number }) => number)).toStrictEqual([6, 5, 3]);
+    expect(capacityRefusalStreak(attempts.slice(0, 4)).map(({ number }) => number)).toStrictEqual([
+      4,
+    ]);
+    expect(capacityRefusalStreak(attempts.slice(0, 2))).toStrictEqual([]);
+    expect(capacityRefusalStreak([])).toStrictEqual([]);
+  });
 
   it("counts only the refusals since the last Attempt that the provider didn't refuse", () => {
     const retry = pendingProviderRetry(Running.make(), [

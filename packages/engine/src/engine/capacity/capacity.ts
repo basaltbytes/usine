@@ -1,6 +1,6 @@
 import { InstanceScope } from "@usine/core/access";
 import type { BrainSpec } from "@usine/core/agent/brain";
-import type { Attempt } from "@usine/core/attempt";
+import { type Attempt, capacityRefusalStreak } from "@usine/core/attempt";
 import type * as AttemptChannel from "@usine/core/attempt/channel";
 import type { AttemptFailure } from "@usine/core/attempt/failure";
 import { ChangeBus, type ScopedChange } from "@usine/core/changes";
@@ -68,10 +68,10 @@ export class ProviderCapacity extends Context.Service<
   {
     /**
      * Registers the consecutive capacity refusals that end `attempts`, the Attempts of the Run
-     * `runId` of `loop` from oldest to newest, in the group of the newest refusal. Then waits for
-     * the Run's turn: until the group it waits for is free, or until no Attempt tests the group
-     * and its next try has come. Returns `Forced` when an operator retry ends the wait, and `Due`
-     * otherwise.
+     * `runId` of `loop` from oldest to newest, in the group of the newest refusal, unless the
+     * claim of the Run's slot made it wait for another group. Then waits for the Run's turn: until
+     * the group it waits for is free, or until no Attempt tests the group and its next try has
+     * come. Returns `Forced` when an operator retry ends the wait, and `Due` otherwise.
      */
     readonly awaitTurn: (run: {
       readonly runId: RunId;
@@ -162,10 +162,17 @@ export class ProviderCapacity extends Context.Service<
             "The capacity refusal ended before the provider last answered in its group; the Run doesn't wait for it",
             groupLog,
           );
-          return;
+          return recorded;
         }
-        if (recorded === "Known") return;
+        if (recorded === "Known") return recorded;
         const current = yield* Ref.get(state);
+        if (recorded === "Elsewhere") {
+          yield* Effect.logInfo(
+            "The Run keeps waiting for the group that the claim of its slot put it in; its capacity refusal in another group doesn't move it",
+            { ...groupLog, waitsFor: current.waiting.get(attempt.runId)?.key },
+          );
+          return recorded;
+        }
         const wait = Option.getOrUndefined(Capacity.waitFor(current, key));
         const logged = wait === undefined ? groupLog : { ...fields, ...waitFields(wait) };
         if (recorded === "Marked")
@@ -184,6 +191,7 @@ export class ProviderCapacity extends Context.Service<
             logged,
           );
         yield* announceGroups([key]);
+        return recorded;
       });
 
       /** Settles the group of `attempt` after it ended with `end`, and logs what changed. */
@@ -398,8 +406,9 @@ export class ProviderCapacity extends Context.Service<
         readonly attempts: ReadonlyArray<Attempt>;
       }) {
         yield* Effect.annotateCurrentSpan({ runId: run.runId });
-        for (const attempt of Capacity.refusalStreak(run.attempts))
-          yield* refused(attempt, run.loop);
+        // The streak is in one group, so a Run that waits for another group skips all of it.
+        for (const attempt of capacityRefusalStreak(run.attempts))
+          if ((yield* refused(attempt, run.loop)) === "Elsewhere") break;
         return yield* waitTurn(run.runId);
       });
 

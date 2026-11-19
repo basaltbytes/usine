@@ -96,19 +96,23 @@ const sessionEnvelope = (
  * A provider that refuses Claude requests until `limitEndsAt`, in milliseconds since the epoch of
  * the test clock, without a reset time unless `resetsAt` is set. Codex requests always succeed. A
  * refused Attempt first reports Claude Code's synthetic usage-limit answer from its child and a
- * parent model answer, neither of which is the provider of the child accepting a request. Each
- * reserved slot is on the next of `workers` in turn.
+ * parent model answer, neither of which is the provider of the child accepting a request. The
+ * `count`th slot, from 0, that the Run of `item` reserves is on `slot(item, count)` of `workers`,
+ * by default on the next Worker in turn.
  */
 const scriptedProvider = (
   limitEndsAt: number,
   accepted: Accepted = immediately,
   resetsAt: Option.Option<number> = Option.none(),
   workers: EffectArray.NonEmptyReadonlyArray<string> = ["local"],
+  slot: (item: string, count: number) => string = (_, count) =>
+    workers[count % workers.length] ?? workers[0],
 ) =>
   Effect.gen(function* () {
     const starts = yield* Ref.make<ReadonlyArray<Started>>([]);
     const leased = yield* Ref.make(0);
-    const reserved = yield* Ref.make(0);
+    // The slots that each Run reserved.
+    const reserved = yield* Ref.make<ReadonlyMap<RunId, number>>(new Map());
     const acceptedCount = yield* Ref.make(0);
     const names = EffectArray.map(workers, (name) => WorkerName.make(name));
     const executor = Layer.succeed(StepExecutor)({
@@ -121,10 +125,13 @@ const scriptedProvider = (
       occupy: (worker) => Effect.succeed({ worker, kind: "local", release: Effect.void }),
       sweep: Effect.void,
       discard: () => Effect.void,
-      reserve: () =>
+      reserve: (runId, { itemKey }) =>
         Ref.update(leased, (count) => count + 1).pipe(
           Effect.andThen(
-            Ref.modify(reserved, (count) => [names[count % names.length] ?? names[0], count + 1]),
+            Ref.modify(reserved, (counts) => {
+              const count = counts.get(runId) ?? 0;
+              return [WorkerName.make(slot(itemKey, count)), new Map(counts).set(runId, count + 1)];
+            }),
           ),
           Effect.map((worker) => ({
             worker,
@@ -175,7 +182,7 @@ const scriptedProvider = (
           return StepCompletion.fromResult(stepResult("done"));
         }),
     });
-    return { starts, leased, executor };
+    return { starts, leased, reserved, executor };
   });
 
 /** Returns the Runs of `runIds` whose latest Attempt is still open. */
@@ -355,6 +362,58 @@ describe("provider capacity without a reset time", () => {
             );
             const [done] = yield* settle(engine, [runId], (state) => state === "Succeeded");
             assert.strictEqual(done?.run.state._tag, "Succeeded");
+          }).pipe(Effect.provide(engineLayer(directory, provider.executor)));
+        }),
+      ),
+    { timeout: 120_000 },
+  );
+
+  it.effect(
+    "keeps a Run waiting for the group of its claim when its slot is on another Worker than its newest refusal",
+    () =>
+      withInstance((directory) =>
+        Effect.gen(function* () {
+          // The Run of item-1 reserves its second slot on `remote` and every other slot on
+          // `local`, like every slot of the Run of item-2.
+          const provider = yield* scriptedProvider(
+            minutes(600),
+            immediately,
+            Option.none(),
+            ["local", "remote"],
+            (item, count) => (item === "item-1" && count === 1 ? "remote" : "local"),
+          );
+          yield* Effect.gen(function* () {
+            const engine = yield* RunEngine;
+            const first = yield* claimed(engine, submission({ number: 1, item: "item-1" }));
+            yield* settle(engine, [first]);
+            const second = yield* claimed(engine, submission({ number: 2, item: "item-2" }));
+            const runs = [first, second];
+            yield* settle(engine, runs);
+            let elapsed = 0;
+            for (const checkpoint of [5, 10, 15, 20, 30, 50]) {
+              yield* TestClock.adjust(Duration.minutes(checkpoint - elapsed));
+              elapsed = checkpoint;
+              yield* settle(engine, runs);
+            }
+            const starts = yield* Ref.get(provider.starts);
+            assert.sameDeepMembers(
+              starts.map(({ worker, at }) => [worker, at / minutes(1)]),
+              [
+                ["local", 0],
+                ["local", 5],
+                ["remote", 5],
+                ["local", 20],
+                ["local", 50],
+              ],
+            );
+            // The Run elected to test `remote` got a slot on `local` and waits for that group
+            // without reserving a slot again until its next try. Each Attempt reserves a slot,
+            // and so does each claim that makes a Run wait.
+            const counts = yield* Ref.get(provider.reserved);
+            const reserved = [...counts.values()].reduce((total, count) => total + count, 0);
+            assert.isAtMost(reserved, starts.length + 4);
+            const leases = yield* Ref.get(provider.leased);
+            assert.strictEqual(leases, 0);
           }).pipe(Effect.provide(engineLayer(directory, provider.executor)));
         }),
       ),

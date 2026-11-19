@@ -242,24 +242,22 @@ export const readEngineWaits = (
   });
 
 /**
- * Returns the Run's wait for provider capacity: its pending capacity retry, at the next try of the
- * capacity group that the Run waits for if that is later, with the group's latest refusal. A Run
- * that waits for a group without a refused Attempt of its own waits for the group's next try.
+ * Returns the Run's wait for provider capacity: the next try and latest refusal of the capacity
+ * group that the engine lists the Run as waiting for, or else its pending capacity retry. The
+ * group's next try is when the engine starts the Run's next Attempt, with or without a refused
+ * Attempt of its own.
  */
 const providerRetryOf = (
   snapshot: RunSummary,
   capacity: EngineWaits["capacity"],
 ): Option.Option<ProviderRetry> => {
-  const retry = pendingProviderRetry(snapshot.run.state, snapshot.attempts);
   const group = capacity.find(({ runIds }) => runIds.includes(snapshot.run.id));
-  if (group === undefined || !RunState.isOpen(snapshot.run.state)) return retry;
+  if (group === undefined || !RunState.isOpen(snapshot.run.state))
+    return pendingProviderRetry(snapshot.run.state, snapshot.attempts);
   return Option.some(
     ProviderRetry.make({
       nextAttempt: AttemptNumber.make((snapshot.attempts.at(-1)?.number ?? 0) + 1),
-      retryAt: Option.match(retry, {
-        onNone: () => group.nextTryAt,
-        onSome: ({ retryAt }) => DateTime.max(retryAt, group.nextTryAt),
-      }),
+      retryAt: group.nextTryAt,
       message: group.message,
     }),
   );

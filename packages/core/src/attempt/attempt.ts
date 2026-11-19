@@ -315,6 +315,28 @@ export const capacityRefusal = (
   );
 
 /**
+ * Returns the Attempts of `attempts`, ordered oldest to newest, that a capacity wait follows, newest
+ * first: the consecutive capacity refusals since the last Attempt that the provider didn't refuse,
+ * in the capacity group of the newest one, its Worker and child harness and model. A refusal in
+ * another group neither moves the wait nor lengthens its backoff.
+ */
+export const capacityRefusalStreak = <A extends Pick<Attempt, "outcome" | "worker" | "brain">>(
+  attempts: ReadonlyArray<A>,
+): ReadonlyArray<A> => {
+  const streak = EffectArray.takeWhile(EffectArray.reverse(attempts), (attempt) =>
+    Option.isSome(capacityRefusal(attempt)),
+  );
+  const [newest] = streak;
+  if (newest === undefined) return [];
+  return streak.filter(
+    ({ worker, brain }) =>
+      worker === newest.worker &&
+      brain.harness === newest.brain.harness &&
+      brain.model === newest.brain.model,
+  );
+};
+
+/**
  * Returns whether `failure` permits an automatic retry (ADR 0002). A capacity refusal always
  * does. Another retryable failure does while the failed Attempt and the `earlier` ones, without
  * those that a provider refused for capacity, are fewer than `maxAutoAttempts`.
@@ -368,21 +390,19 @@ export class ProviderRetry extends Schema.Class<
  * Returns a pending capacity retry from persisted state, including after an orchestrator restart.
  * `attempts` must be ordered oldest to newest. Returns `None` unless the run is running and its
  * latest attempt has a recorded end time and a capacity failure. The retry starts no earlier than
- * `capacityBackoff` of the Run's consecutive capacity refusals after the latest one ended, and no
+ * `capacityBackoff` of the refusals of `capacityRefusalStreak` after the latest one ended, and no
  * earlier than the latest usage-limit reset time that those refusals report.
  */
 export const pendingProviderRetry = (
   state: RunState,
-  attempts: ReadonlyArray<Pick<Attempt, "number" | "outcome" | "endedAt">>,
+  attempts: ReadonlyArray<Pick<Attempt, "number" | "outcome" | "endedAt" | "worker" | "brain">>,
 ): Option.Option<ProviderRetry> => {
   if (state._tag !== "Running") return Option.none();
   const last = attempts.at(-1);
   if (last === undefined || Option.isNone(last.endedAt)) return Option.none();
   const refusal = capacityRefusal(last);
   if (Option.isNone(refusal)) return Option.none();
-  const streak = EffectArray.takeWhile(EffectArray.reverse(attempts), (attempt) =>
-    Option.isSome(capacityRefusal(attempt)),
-  );
+  const streak = capacityRefusalStreak(attempts);
   const backoff = DateTime.addDuration(last.endedAt.value, capacityBackoff(streak.length));
   const resets = streak.flatMap((attempt) =>
     Option.toArray(Option.flatMap(capacityRefusal(attempt), ({ resetsAt }) => resetsAt)),

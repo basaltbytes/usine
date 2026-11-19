@@ -3243,12 +3243,15 @@ it.effect(
       const refusedAt = yield* DateTime.now;
       const [original] = snapshot.attempts;
       assert(original !== undefined);
+      // Four refusals in a row, so the Run's own backoff is 60 minutes.
       const current = RunSnapshot.make({
         ...snapshot,
         run: Run.make({ ...snapshot.run, state: RunState.Running.make() }),
-        attempts: [
+        attempts: [1, 2, 3, 4].map((number) =>
           Attempt.make({
             ...original,
+            id: AttemptId.make(`refused-${number}`),
+            number: AttemptNumber.make(number),
             outcome: Option.some(
               AttemptFailed.make({
                 failure: ProviderCapacityFailure.make({ message: "You've hit your limit" }),
@@ -3256,7 +3259,7 @@ it.effect(
             ),
             endedAt: Option.some(refusedAt),
           }),
-        ],
+        ),
       });
       yield* Effect.gen(function* () {
         const operator = yield* Operator;
@@ -3272,27 +3275,38 @@ it.effect(
               })),
           ),
         );
-        const backoff = DateTime.toEpochMillis(DateTime.add(refusedAt, { minutes: 5 }));
+        const backoff = DateTime.toEpochMillis(DateTime.add(refusedAt, { minutes: 60 }));
         const own = yield* retries;
         assert.deepStrictEqual(own, [{ retryAt: Option.some(backoff), canRetry: true }]);
 
-        // Other Runs' refusals lengthened the group's wait past the Run's own backoff.
-        const nextTryAt = DateTime.add(refusedAt, { minutes: 50 });
-        yield* Ref.set(waits, [
-          CapacityWait.make({
-            group: CapacityGroup.make({
-              harness: brain.harness,
-              model: brain.model,
-              worker: WorkerName.make("local"),
+        const waitUntil = (nextTryAt: DateTime.Utc, refusals: number) =>
+          Ref.set(waits, [
+            CapacityWait.make({
+              group: CapacityGroup.make({
+                harness: brain.harness,
+                model: brain.model,
+                worker: WorkerName.make("local"),
+              }),
+              message: "You've hit your limit",
+              since: refusedAt,
+              refusals,
+              nextTryAt,
+              probes: [],
+              runIds: [current.run.id],
             }),
-            message: "You've hit your limit",
-            since: refusedAt,
-            refusals: 3,
-            nextTryAt,
-            probes: [],
-            runIds: [current.run.id],
-          }),
+          ]);
+        // The provider answered in the group after the Run's first three refusals, so the group
+        // counts only the latest one and tries again before the Run's own backoff ends.
+        const sooner = DateTime.add(refusedAt, { minutes: 5 });
+        yield* waitUntil(sooner, 1);
+        const answered = yield* retries;
+        assert.deepStrictEqual(answered, [
+          { retryAt: Option.some(DateTime.toEpochMillis(sooner)), canRetry: true },
         ]);
+
+        // Other Runs' refusals lengthened the group's wait past the Run's own backoff.
+        const nextTryAt = DateTime.add(refusedAt, { minutes: 90 });
+        yield* waitUntil(nextTryAt, 5);
         const grouped = yield* retries;
         assert.deepStrictEqual(grouped, [
           { retryAt: Option.some(DateTime.toEpochMillis(nextTryAt)), canRetry: true },

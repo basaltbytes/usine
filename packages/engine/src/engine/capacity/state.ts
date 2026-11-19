@@ -86,24 +86,6 @@ export const refusalOf = (attempt: Attempt, loop: LoopName): Option.Option<Capac
     })),
   );
 
-/**
- * Returns the Attempts that the Run of `attempts`, ordered oldest to newest, waits after, newest
- * first: its consecutive capacity refusals since its last Attempt that the provider didn't refuse,
- * in the group of the newest one. The Run waits for that group, so a refusal in another group,
- * such as on another Worker, neither moves its wait nor lengthens the group's backoff.
- */
-export const refusalStreak = (attempts: ReadonlyArray<Attempt>): ReadonlyArray<Attempt> => {
-  const streak = EffectArray.takeWhile(EffectArray.reverse(attempts), (attempt) =>
-    Option.isSome(capacityRefusal(attempt)),
-  );
-  const [newest] = streak;
-  if (newest === undefined) return [];
-  const key = capacityGroupKey(capacityGroupOf(newest.brain, newest.worker));
-  return streak.filter(
-    (attempt) => capacityGroupKey(capacityGroupOf(attempt.brain, attempt.worker)) === key,
-  );
-};
-
 interface GroupState {
   readonly group: CapacityGroup;
   /** Ordered by end time. */
@@ -220,12 +202,17 @@ export const waitsOf = (state: CapacityState): ReadonlyArray<CapacityWait> =>
 
 /**
  * How `refused` recorded a refusal: `Stale` if it ended before the provider last answered in its
- * group, `Known` if it was recorded before and its Run still waits, `Rejoined` if it was recorded
- * before and its Run waits for its group again, and `Marked` if it marked the group.
+ * group, `Elsewhere` if its Run waits for another group, `Known` if it was recorded before and its
+ * Run still waits, `Rejoined` if it was recorded before and its Run waits for its group again, and
+ * `Marked` if it marked the group.
  */
-export type Refused = "Stale" | "Known" | "Rejoined" | "Marked";
+export type Refused = "Stale" | "Elsewhere" | "Known" | "Rejoined" | "Marked";
 
-/** Records `refusal` and that its Run waits for the refused group, unless it is stale. */
+/**
+ * Records `refusal` and that its Run waits for the refused group, unless it is stale or the Run
+ * waits for another group: the claim of its slot made it wait there after the refusal, so it keeps
+ * that group.
+ */
 export const refused = (
   state: CapacityState,
   refusal: CapacityRefusal,
@@ -234,10 +221,12 @@ export const refused = (
   const answeredAt = state.answered.get(key);
   if (answeredAt !== undefined && !DateTime.isGreaterThan(refusal.endedAt, answeredAt))
     return ["Stale", state];
+  const waiter = state.waiting.get(refusal.runId);
+  if (waiter !== undefined && waiter.key !== key) return ["Elsewhere", state];
   const existing = state.groups.get(key);
   const recorded = existing?.refusals.some(({ attemptId }) => attemptId === refusal.attemptId);
   // A Run registers its refusals again each time it waits; it keeps the group it waits for.
-  if (recorded === true && state.waiting.has(refusal.runId)) return ["Known", state];
+  if (recorded === true && waiter !== undefined) return ["Known", state];
   const { groups } = leaveProbes(state, refusal.runId);
   const waiting = new Map(state.waiting).set(refusal.runId, { key, loop: refusal.loop });
   if (existing !== undefined && recorded === true)
