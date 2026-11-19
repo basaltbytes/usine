@@ -14,7 +14,19 @@ import {
 import type { RunId } from "@usine/core/run";
 import { StepCompletion } from "@usine/core/step/result";
 import { WorkerName } from "@usine/core/worker";
-import { DateTime, Deferred, Duration, Effect, Layer, Option, Ref } from "effect";
+import {
+  Array as EffectArray,
+  Context,
+  DateTime,
+  Deferred,
+  Duration,
+  Effect,
+  Exit,
+  Layer,
+  Option,
+  Ref,
+  Scope,
+} from "effect";
 import { TestClock } from "effect/testing";
 import { RetryRequest, RunEngine, Submission } from "../src/engine/engine.ts";
 import { type StepExecution, StepExecutor } from "../src/step-executor.ts";
@@ -35,6 +47,7 @@ const codexAgent = Agent.make({
 interface Started {
   readonly runId: RunId;
   readonly harness: string;
+  readonly worker: string;
   readonly at: number;
 }
 
@@ -83,20 +96,23 @@ const sessionEnvelope = (
  * A provider that refuses Claude requests until `limitEndsAt`, in milliseconds since the epoch of
  * the test clock, without a reset time unless `resetsAt` is set. Codex requests always succeed. A
  * refused Attempt first reports Claude Code's synthetic usage-limit answer from its child and a
- * parent model answer, neither of which is the provider of the child accepting a request.
+ * parent model answer, neither of which is the provider of the child accepting a request. Each
+ * reserved slot is on the next of `workers` in turn.
  */
 const scriptedProvider = (
   limitEndsAt: number,
   accepted: Accepted = immediately,
   resetsAt: Option.Option<number> = Option.none(),
+  workers: EffectArray.NonEmptyReadonlyArray<string> = ["local"],
 ) =>
   Effect.gen(function* () {
     const starts = yield* Ref.make<ReadonlyArray<Started>>([]);
     const leased = yield* Ref.make(0);
+    const reserved = yield* Ref.make(0);
     const acceptedCount = yield* Ref.make(0);
-    const local = WorkerName.make("local");
+    const names = EffectArray.map(workers, (name) => WorkerName.make(name));
     const executor = Layer.succeed(StepExecutor)({
-      workers: Effect.succeed([local]),
+      workers: Effect.succeed(names),
       isLive: () => Effect.succeed(false),
       outcome: () => Effect.succeedNone,
       recover: () => Effect.succeed("found" as const),
@@ -107,17 +123,24 @@ const scriptedProvider = (
       discard: () => Effect.void,
       reserve: () =>
         Ref.update(leased, (count) => count + 1).pipe(
-          Effect.as({
-            worker: local,
+          Effect.andThen(
+            Ref.modify(reserved, (count) => [names[count % names.length] ?? names[0], count + 1]),
+          ),
+          Effect.map((worker) => ({
+            worker,
             kind: "local" as const,
             release: Ref.update(leased, (count) => count - 1),
-          }),
+          })),
         ),
       execute: (execution, io) =>
         Effect.gen(function* () {
           const at = yield* Effect.clockWith((clock) => clock.currentTimeMillis);
           const { harness } = execution.attempt.brain;
-          yield* Ref.update(starts, (seen) => [...seen, { runId: execution.run.id, harness, at }]);
+          const { worker } = execution.attempt;
+          yield* Ref.update(starts, (seen) => [
+            ...seen,
+            { runId: execution.run.id, harness, worker, at },
+          ]);
           if (harness === "claude" && at < limitEndsAt) {
             yield* io.append(
               "outbound",
@@ -294,6 +317,93 @@ describe("provider capacity without a reset time", () => {
         }),
       ),
     { timeout: 120_000 },
+  );
+
+  it.effect(
+    "backs off in the group of each refusal when a Run's Attempts alternate between Workers",
+    () =>
+      withInstance((directory) =>
+        Effect.gen(function* () {
+          const provider = yield* scriptedProvider(minutes(120), immediately, Option.none(), [
+            "local",
+            "remote",
+          ]);
+          yield* Effect.gen(function* () {
+            const engine = yield* RunEngine;
+            const runId = yield* claimed(engine, submission({ number: 1 }));
+            yield* settle(engine, [runId]);
+            let elapsed = 0;
+            for (const checkpoint of [4, 5, 9, 10, 24, 25, 39, 40, 69, 70, 99, 100, 159, 160]) {
+              yield* TestClock.adjust(Duration.minutes(checkpoint - elapsed));
+              elapsed = checkpoint;
+              yield* settle(engine, [runId]);
+            }
+            // Each Worker's group backs off after its own refusals: 5, 15, 30, then 60 minutes.
+            const starts = yield* Ref.get(provider.starts);
+            assert.deepStrictEqual(
+              starts.map(({ worker, at }) => [worker, at / minutes(1)]),
+              [
+                ["local", 0],
+                ["remote", 5],
+                ["local", 10],
+                ["remote", 25],
+                ["local", 40],
+                ["remote", 70],
+                ["local", 100],
+                ["remote", 160],
+              ],
+            );
+            const [done] = yield* settle(engine, [runId], (state) => state === "Succeeded");
+            assert.strictEqual(done?.run.state._tag, "Succeeded");
+          }).pipe(Effect.provide(engineLayer(directory, provider.executor)));
+        }),
+      ),
+    { timeout: 120_000 },
+  );
+
+  it.effect("rebuilds the group's backoff from a waiting Run's refusals after a restart", () =>
+    withInstance((directory) =>
+      Effect.gen(function* () {
+        const provider = yield* scriptedProvider(minutes(600));
+        const scope = yield* Scope.make();
+        const services = yield* Scope.provide(
+          Layer.build(engineLayer(directory, provider.executor)),
+          scope,
+        );
+        const before = Context.get(services, RunEngine);
+        const runId = yield* claimed(before, submission({ number: 1 }));
+        yield* settle(before, [runId]);
+        let elapsed = 0;
+        for (const checkpoint of [5, 20, 50]) {
+          yield* TestClock.adjust(Duration.minutes(checkpoint - elapsed));
+          elapsed = checkpoint;
+          yield* settle(before, [runId]);
+        }
+        const refused = yield* Ref.get(provider.starts);
+        assert.lengthOf(refused, 4);
+        yield* Scope.close(scope, Exit.void);
+
+        yield* Effect.gen(function* () {
+          const engine = yield* RunEngine;
+          yield* settle(engine, [runId]);
+          // Four refusals, each from an Attempt that started after the previous one ended.
+          const [wait] = yield* engine.capacityWaits;
+          assert.strictEqual(wait?.refusals, 4);
+          assert.strictEqual(
+            DateTime.toEpochMillis(wait?.nextTryAt ?? DateTime.makeUnsafe(0)),
+            minutes(110),
+          );
+          yield* TestClock.adjust(Duration.minutes(59));
+          yield* settle(engine, [runId]);
+          const waited = yield* Ref.get(provider.starts);
+          assert.lengthOf(waited, 4);
+          yield* TestClock.adjust(Duration.minutes(1));
+          yield* settle(engine, [runId]);
+          const tested = yield* Ref.get(provider.starts);
+          assert.lengthOf(tested, 5);
+        }).pipe(Effect.provide(engineLayer(directory, provider.executor)));
+      }),
+    ),
   );
 
   it.effect(

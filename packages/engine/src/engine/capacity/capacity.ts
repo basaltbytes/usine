@@ -1,6 +1,6 @@
 import { InstanceScope } from "@usine/core/access";
 import type { BrainSpec } from "@usine/core/agent/brain";
-import { type Attempt, capacityRefusal } from "@usine/core/attempt";
+import type { Attempt } from "@usine/core/attempt";
 import type * as AttemptChannel from "@usine/core/attempt/channel";
 import type { AttemptFailure } from "@usine/core/attempt/failure";
 import { ChangeBus, type ScopedChange } from "@usine/core/changes";
@@ -69,9 +69,10 @@ export class ProviderCapacity extends Context.Service<
   {
     /**
      * Registers the consecutive capacity refusals that end `attempts`, the Attempts of the Run
-     * `runId` of `loop` from oldest to newest, then waits for the Run's turn: until the group it
-     * waits for is free, or until no Attempt tests the group and its next try has come. Returns
-     * `Forced` when an operator retry ends the wait, and `Due` otherwise.
+     * `runId` of `loop` from oldest to newest, in the group of the newest refusal. Then waits for
+     * the Run's turn: until the group it waits for is free, or until no Attempt tests the group
+     * and its next try has come. Returns `Forced` when an operator retry ends the wait, and `Due`
+     * otherwise.
      */
     readonly awaitTurn: (run: {
       readonly runId: RunId;
@@ -394,11 +395,8 @@ export class ProviderCapacity extends Context.Service<
         readonly attempts: ReadonlyArray<Attempt>;
       }) {
         yield* Effect.annotateCurrentSpan({ runId: run.runId });
-        // Newest first: the refusals since the Run's last Attempt that the provider didn't refuse.
-        for (const attempt of [...run.attempts].reverse()) {
-          if (Option.isNone(capacityRefusal(attempt))) break;
+        for (const attempt of Capacity.refusalStreak(run.attempts))
           yield* refused(attempt, run.loop);
-        }
         return yield* waitTurn(run.runId);
       });
 

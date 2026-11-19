@@ -86,6 +86,24 @@ export const refusalOf = (attempt: Attempt, loop: LoopName): Option.Option<Capac
     })),
   );
 
+/**
+ * Returns the Attempts that the Run of `attempts`, ordered oldest to newest, waits after, newest
+ * first: its consecutive capacity refusals since its last Attempt that the provider didn't refuse,
+ * in the group of the newest one. The Run waits for that group, so a refusal in another group,
+ * such as on another Worker, neither moves its wait nor lengthens the group's backoff.
+ */
+export const refusalStreak = (attempts: ReadonlyArray<Attempt>): ReadonlyArray<Attempt> => {
+  const streak = EffectArray.takeWhile(EffectArray.reverse(attempts), (attempt) =>
+    Option.isSome(capacityRefusal(attempt)),
+  );
+  const [newest] = streak;
+  if (newest === undefined) return [];
+  const key = capacityGroupKey(capacityGroupOf(newest.brain, newest.worker));
+  return streak.filter(
+    (attempt) => capacityGroupKey(capacityGroupOf(attempt.brain, attempt.worker)) === key,
+  );
+};
+
 interface GroupState {
   readonly group: CapacityGroup;
   /** Ordered by end time. */
