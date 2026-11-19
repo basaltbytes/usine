@@ -217,6 +217,59 @@ it.live.each([
   ),
 );
 
+it.live("a successful retry preserves both attempts' harvested ranges across restart", () =>
+  withInstance((directory) =>
+    Effect.gen(function* () {
+      const nextHead = CommitSha.make("b".repeat(40));
+      const next = StepResult.make({
+        message: "Retry pushed a fix",
+        facts: [
+          PullRequest.make({
+            number: 815,
+            url: new URL("https://github.com/basaltbytes/usine/pull/815"),
+            base: Option.some(head),
+            head: Option.some(nextHead),
+          }),
+        ],
+      });
+      const worker = yield* slottedExecutor([Effect.succeed(pushed), Effect.succeed(next)]);
+      const runtime = engineLayer(directory, worker.executor);
+      const runId = yield* Effect.scoped(
+        Effect.gen(function* () {
+          const engine = yield* RunEngine;
+          const accepted = yield* engine.submit(required());
+          assert(accepted._tag === "Claimed");
+          const waiting = yield* waitFor(
+            engine,
+            accepted.runId,
+            ({ run }) => run.state._tag === "AwaitingCi",
+          );
+          yield* engine.settleCi(accepted.runId, head, CiFailed.make({ message: "CI failed" }));
+          yield* engine.retry(accepted.runId);
+          yield* waitFor(engine, accepted.runId, ({ run }) => run.state._tag === "AwaitingCi");
+          yield* engine.settleCi(accepted.runId, nextHead, CiPassed.make());
+          const completed = yield* engine.inspect(accepted.runId);
+          assert.strictEqual(completed.run.state._tag, "Succeeded");
+          assert.strictEqual(completed.attempts.length, 2);
+          assert.deepStrictEqual(completed.attempts[0]?.result, waiting.step.result);
+          assert.deepStrictEqual(completed.attempts[1]?.result, completed.step.result);
+          return accepted.runId;
+        }).pipe(Effect.provide(runtime)),
+      );
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const engine = yield* RunEngine;
+          const restored = yield* engine.inspect(runId);
+          assert.deepStrictEqual(
+            restored.attempts.map((attempt) => Option.map(attempt.result, ({ facts }) => facts)),
+            [Option.some(pushed.facts), Option.some(next.facts)],
+          );
+        }).pipe(Effect.provide(runtime)),
+      );
+    }),
+  ),
+);
+
 // A result harvested before reasons were recorded fails as an InfraFailure without one, which
 // the engine retries only up to the Attempt cap.
 it.live("a CI handoff without a harvested pull request or reason stops after three attempts", () =>

@@ -279,6 +279,34 @@ describe("SSH Worker", () => {
     }).pipe(Effect.scoped, Effect.provide(runtime(machine, credentials)));
   });
 
+  it.effect("salvages a failed Attempt with its credential, then removes the credential", () => {
+    const machine = fakeMachine();
+    const credentials = mintingProvider();
+    return Effect.gen(function* () {
+      const executor = yield* Executor;
+      machine.state.salvage = "dirty";
+      const prepared = yield* executor.prepare(request);
+      const recorded: Array<AttemptSalvage> = [];
+      const failure = yield* prepared
+        .launch({
+          append: () => Effect.void,
+          comments: () => Effect.void,
+          outOfMemory: () => Effect.void,
+          transcript: Effect.succeed([]),
+          windows: aloneOnItem(),
+          salvage: (salvage) => Effect.sync(() => void recorded.push(salvage)),
+        })
+        .pipe(Effect.flip);
+      assert.strictEqual(failure._tag, "InfraFailure");
+      assert.strictEqual(recorded[0]?._tag, "Pushed");
+      const lines = machine.state.calls.map(({ line }) => line);
+      assert.include(lines.find((line) => line.includes("'commit' '--quiet'")) ?? "", BOT_COMMITS);
+      const push = lines.findIndex((line) => line.includes("'push' '--force'"));
+      assert(lines[push]?.includes(`USINE_GITHUB_TOKEN_FILE='${CREDENTIALS}/token'`));
+      assert(lines.indexOf(`exec 'rm' '-rf' '${CREDENTIALS}'`) > push);
+    }).pipe(Effect.scoped, Effect.provide(runtime(machine, credentials, fails)));
+  });
+
   it.effect.each([
     {
       case: "a child answered at the wait limit",

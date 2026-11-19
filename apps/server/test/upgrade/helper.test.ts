@@ -526,7 +526,7 @@ describe.skipIf(!hasUpgradeTools)("upgrade helper (requires GNU tools and flock)
     expect(result.retained.some((path) => path.endsWith("backup.old00000"))).toBe(false);
   });
 
-  it.each(["migrated-api", "migrated-no-durable"] as const)(
+  it.each(["migrated-api", "migrated-external", "migrated-no-durable"] as const)(
     "restores the previous stores before its API answers after %s",
     slowCli,
     (scenario) => {
