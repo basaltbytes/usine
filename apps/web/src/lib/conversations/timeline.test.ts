@@ -8,7 +8,7 @@ import {
   supervisorCalls,
   turnEvents,
 } from "~/lib/conversations/fixture";
-import { retryRequest, upgradeRequest } from "~/lib/conversations/request-fixture";
+import { messageRequest, retryRequest } from "~/lib/conversations/request-fixture";
 import { burstSummary, currentCall } from "~/lib/runs/transcript/grouping/summary";
 import { conversationTimeline, type TurnStep } from "./timeline";
 
@@ -79,7 +79,7 @@ it("places a permission request at the call that made it, between the calls arou
     { tool: "mcp__usine__retry", input: { runId: "run-7431" } },
     ...supervisorCalls(2),
   ];
-  const elsewhere = upgradeRequest({ toolCall: null });
+  const elsewhere = messageRequest({ toolCall: null });
   const [entry] = conversationTimeline(
     { ...record, requests: [retryRequest(), elsewhere] },
     stepEvents("t-1", 1, steps),

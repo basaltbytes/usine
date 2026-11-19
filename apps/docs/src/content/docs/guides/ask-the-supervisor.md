@@ -30,7 +30,7 @@ A permission request appears in the turn at the place of the call that made it, 
    - **Allow always for** the project runs the call and stores a standing grant: later calls of the same operation in that project, from any conversation, run without a request.
    - **Deny** runs nothing.
 
-   An operation outside a project, such as an upgrade or a configuration write, offers **Allow once** and **Deny** only. Without the access that the operation needs, the request says what answering needs and has no answers.
+   An operation outside a project, such as an upgrade, an operation that sends text to a coding agent, such as an operator message, and a configuration write offer **Allow once** and **Deny** only. Without the access that the operation needs, the request says what answering needs and has no answers.
 3. Check the outcome under the request: who answered, then **Ran** with the operation's **Result**, **Failed** with its error, or **Interrupted by a restart, outcome unknown**. A call that a standing grant covered shows **Allowed by a standing grant from** the member who created it.
 
 When every request of the turn has an answer, a message from usine lists the outcomes, and the supervisor's next turn starts with them. A request that another member answered first returns an error and changes nothing.

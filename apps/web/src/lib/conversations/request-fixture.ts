@@ -1,3 +1,4 @@
+import { InstanceScope, ProjectScope } from "@usine/core/access";
 import { HarnessSession } from "@usine/core/agent/session";
 import {
   defaultFormat,
@@ -15,6 +16,7 @@ import {
   CallTarget,
   CoveredByGrant,
   GrantRevocation,
+  isGrantable,
   OperationName,
   PermissionRequestId,
   RequestDenied,
@@ -64,18 +66,21 @@ type RequestFields = {
 /** Returns a permission request of the fixture conversation, waiting and answerable by default. */
 const requestOf = (fields: RequestFields): PermissionRequest => {
   const project = fields.project === undefined ? conversationProject.project : fields.project;
+  const operation = OperationName.make(fields.operation);
+  const permission = fields.permission ?? (project === null ? "admin" : "operate");
+  const scope = project === null ? InstanceScope.make() : ProjectScope.make({ project });
   return {
     id: PermissionRequestId.make(fields.id),
     conversation: conversationId,
     turn: TurnId.make(fields.turn),
     toolCall: fields.toolCall,
-    operation: OperationName.make(fields.operation),
+    operation,
     summary: fields.summary,
     arguments: fields.arguments,
     target: CallTarget.make(fields.target),
     project,
-    permission: fields.permission ?? (project === null ? "admin" : "operate"),
-    grantable: project !== null,
+    permission,
+    grantable: isGrantable({ operation, permission, scope }),
     requestedAt: at(2),
     state: fields.state ?? RequestWaiting.make({}),
     reportedIn: null,
@@ -96,17 +101,40 @@ export const retryRequest = (overrides: Partial<RequestFields> = {}) =>
     ...overrides,
   });
 
-/** A request to upgrade the instance, which needs admin and has no project. */
-export const upgradeRequest = (overrides: Partial<RequestFields> = {}) =>
+/** A request to change the implement loop of the fixture project, which needs maintain. */
+export const loopChangeRequest = (overrides: Partial<RequestFields> = {}) =>
   requestOf({
     id: "r-2",
     turn: "t-1",
     toolCall: "call-3",
-    operation: "requestUpgrade",
-    summary: "Request an upgrade",
-    arguments: { body: { mode: "idle", version: "0.42.0" } },
-    target: "the instance",
-    project: null,
+    operation: "replaceConfigurationEntity",
+    summary: "Replace a configuration entity",
+    arguments: {
+      kind: "loop",
+      identifier: `${conversationProject.project}/implement`,
+      body: {
+        expected: 12,
+        text: "---\ntrigger: { on: issue, if: 'true' }\nagent: developer\ntimeout: 45m\n---\nImplement the issue, then run the tests.\n",
+      },
+    },
+    target: `loop ${conversationProject.project}/implement`,
+    permission: "maintain",
+    ...overrides,
+  });
+
+/** A request to send an operator message to run 7431's agent, which no grant can cover. */
+export const messageRequest = (overrides: Partial<RequestFields> = {}) =>
+  requestOf({
+    id: "r-2",
+    turn: "t-1",
+    toolCall: "call-3",
+    operation: "intervene",
+    summary: "Send an operator message",
+    arguments: {
+      runId: "run-7431",
+      body: { message: "Rerun only sessions.test.ts and report the timeout." },
+    },
+    target: "run run-7431",
     ...overrides,
   });
 

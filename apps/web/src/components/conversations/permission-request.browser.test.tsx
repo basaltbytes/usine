@@ -27,12 +27,13 @@ import {
   supervisorCalls,
 } from "~/lib/conversations/fixture";
 import {
+  loopChangeRequest,
+  messageRequest,
   type PermissionServer,
   permissionServer,
   ranOnce,
   retryGrant,
   retryRequest,
-  upgradeRequest,
 } from "~/lib/conversations/request-fixture";
 import { overviewQuery } from "~/lib/overview";
 import { sessionQuery } from "~/lib/permissions";
@@ -94,7 +95,7 @@ const requesting = (requests: ReturnType<typeof retryRequest>[]) => {
     stepEvents("t-1", 1, [
       ...supervisorCalls(1),
       { tool: "mcp__usine__retry", input: { runId: "run-7431" } },
-      { tool: "mcp__usine__requestUpgrade", input: { body: { mode: "idle" } } },
+      { tool: "mcp__usine__intervene", input: { runId: "run-7431" } },
       ...supervisorCalls(1),
     ]),
   );
@@ -129,32 +130,30 @@ afterEach(() => {
 });
 
 it("answers a request once at its call and shows who allowed it and what it did", async () => {
-  requesting([retryRequest(), upgradeRequest({ answerable: false })]);
+  requesting([retryRequest(), loopChangeRequest({ answerable: false })]);
   await mount(`/conversations?conversation=${conversationId}`, administratorPermissions);
   const retry = request("Retry a failed run");
   await expect.element(retry).toBeVisible();
   await expect.element(retry.getByRole("button", { name: "Allow once" })).toBeVisible();
   await expect.element(retry.getByRole("button", { name: /^Allow always for / })).toBeVisible();
   await expect.element(retry.getByRole("button", { name: "Deny" })).toBeVisible();
-  const upgrade = request("Request an upgrade");
-  await expect
-    .element(upgrade.getByText(/Answering needs admin access on the instance/u))
-    .toBeVisible();
-  expect(upgrade.getByRole("button").elements()).toHaveLength(0);
+  const loopChange = request("Replace a configuration entity");
+  await expect.element(loopChange.getByText(/Answering needs maintain access on /u)).toBeVisible();
+  expect(loopChange.getByRole("button", { name: /^Allow|^Deny/u }).elements()).toHaveLength(0);
   await retry.getByRole("button", { name: "Allow once" }).click();
   await expect.element(retry.getByText("Allowed once by ada · Ran")).toBeVisible();
   expect(retry.getByRole("button", { name: "Allow once" }).elements()).toHaveLength(0);
   expect(permissions.answers).toEqual(["r-1 once"]);
 });
 
-it("offers only once and deny outside a project, and no answer to a reader", async () => {
-  requesting([upgradeRequest()]);
+it("offers only once and deny for an operator message, and no answer to a reader", async () => {
+  requesting([messageRequest()]);
   await mount(`/conversations?conversation=${conversationId}`, administratorPermissions);
-  const upgrade = request("Request an upgrade");
-  await expect.element(upgrade.getByRole("button", { name: "Allow once" })).toBeVisible();
+  const message = request("Send an operator message");
+  await expect.element(message.getByRole("button", { name: "Allow once" })).toBeVisible();
   expect(
-    upgrade
-      .getByRole("button")
+    message
+      .getByRole("button", { name: /^Allow|^Deny/u })
       .elements()
       .map((button) => button.textContent),
   ).toEqual(["Allow once", "Deny"]);

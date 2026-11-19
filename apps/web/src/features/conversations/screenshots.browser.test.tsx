@@ -35,12 +35,12 @@ import { configurationQuery } from "~/lib/configuration/queries";
 import {
   deniedBy,
   failedUnderGrant,
+  loopChangeRequest,
   type PermissionServer,
   permissionServer,
   ranOnce,
   retryGrant,
   retryRequest,
-  upgradeRequest,
   withFollowUp,
 } from "~/lib/conversations/request-fixture";
 import { overviewQuery } from "~/lib/overview";
@@ -237,20 +237,25 @@ const scenes: ReadonlyArray<Scene> = [
   },
 ];
 
-/** A turn that asked to retry run 7431 and to upgrade the instance, with the retry in `state`. */
+/**
+ * A turn that asked to retry run 7431 and to raise the implement loop's timeout, with the retry
+ * in `state`.
+ */
 const asking = (server: ConversationServer, retry: ReturnType<typeof retryRequest>) => {
+  const loopChange = loopChangeRequest({ answerable: false });
   server.conversations.set(conversationId, {
     ...conversationOf([
       {
         turn: "t-1",
         member: ada,
-        text: "Run 7431 failed on a flaky test. Retry it, then upgrade when the queue is empty.",
+        text: "Run 7431 failed on a flaky test. Retry it, and give the implement loop more time.",
         minute: 1,
         state: answered(1),
-        answer: "Both need a member's answer: the retry of run 7431, and the upgrade to 0.42.0.",
+        answer:
+          "Both need a member's answer: the retry of run 7431, and the implement loop's timeout of 45 minutes.",
       },
     ]),
-    requests: [retry, upgradeRequest({ answerable: false })],
+    requests: [retry, loopChange],
   });
   server.events.set(
     conversationId,
@@ -258,7 +263,7 @@ const asking = (server: ConversationServer, retry: ReturnType<typeof retryReques
       "Run 7431 failed in `pnpm test` on a timeout in `sessions.test.ts`; the head passed CI before.",
       ...supervisorCalls(3),
       { tool: "mcp__usine__retry", input: { runId: "run-7431" } },
-      { tool: "mcp__usine__requestUpgrade", input: { body: { mode: "idle" } } },
+      { tool: "mcp__usine__replaceConfigurationEntity", input: loopChange.arguments },
     ]),
   );
 };
@@ -283,7 +288,7 @@ const permissionScenes: ReadonlyArray<Scene> = [
             record,
             "t-1",
             "- Retry a failed run: run run-7431. Allowed once by ada. Ran.",
-            "Run 7431 is retrying. The upgrade still waits for an admin's answer.",
+            "Run 7431 is retrying. The loop change still waits for a maintainer's answer.",
           ),
         );
     },
