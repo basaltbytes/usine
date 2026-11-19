@@ -1,6 +1,6 @@
 # @usine/core
 
-`GatewayLlmProtocol` identifies gateway credential slots by wire protocol: `anthropic-messages` and `openai-responses`. `GatewayLlmProvider` identifies API-key providers (`anthropic` and `openai`).
+`GatewayLlmProtocol` identifies gateway credential slots by wire protocol: `anthropic-messages` and `openai-responses`. `GatewayLlmProvider` identifies API-key providers (`anthropic` and `openai`). `GATEWAY_LEGACY_PROVIDERS` maps each protocol to the provider name that gateways and configurations used before protocol slots, as path prefix, report name, and `llm_providers` value; `gatewayLlmProtocolOf` and the `GatewayLlmProtocolFromName` schema read either name as the protocol.
 
 Domain model for [usine](https://github.com/basaltbytes/usine): event, run, step, and attempt types for every other block, plus shared instance, repo, worker, and agent values.
 
