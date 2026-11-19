@@ -2,6 +2,8 @@ import {
   Conversation,
   type ConversationId,
   EventSequence,
+  followedUp,
+  followUpOf,
   isOpen,
   Message,
   MessageSequence,
@@ -150,6 +152,29 @@ export const sqliteConversationStoreLayer = Layer.effect(
           return ConversationRecord.make({ conversation, messages: [message], turns: [turn] });
         }).pipe(transaction, Effect.catchTag("SqlError", failure("create a conversation")));
       }),
+      followUp: Effect.fn("ConversationStore.followUp")(function* (post) {
+        yield* Effect.annotateCurrentSpan({
+          conversation: post.conversation,
+          reports: post.reports,
+        });
+        return yield* Effect.gen(function* () {
+          const [exists] =
+            yield* sql`SELECT id FROM usine_conversations WHERE id = ${post.conversation}`;
+          if (exists === undefined)
+            return yield* ConversationNotFound.make({ conversation: post.conversation });
+          const [queued] =
+            yield* sql`SELECT id FROM usine_conversation_turns WHERE id = ${followUpOf(post.reports)}`;
+          if (queued !== undefined) return Option.none<Turn>();
+          const sequence = yield* nextMessage(post.conversation);
+          const { message, turn } = followedUp(post, sequence);
+          yield* insertMessage(message);
+          yield* insertTurn(turn);
+          return Option.some<Turn>(turn);
+        }).pipe(
+          transaction,
+          Effect.catchTag(["SqlError", "SchemaError"], failure("queue a follow-up turn")),
+        );
+      }),
       post: Effect.fn("ConversationStore.post")(function* (post) {
         yield* Effect.annotateCurrentSpan({ conversation: post.conversation });
         return yield* Effect.gen(function* () {
@@ -186,6 +211,7 @@ export const sqliteConversationStoreLayer = Layer.effect(
             LEFT JOIN usine_conversation_turns t ON t.id = json_extract(m.value, '$.turn')
             WHERE m.conversation_id = c.id
               AND m.sequence > coalesce(r.through, 0)
+              AND json_extract(m.value, '$.role') <> 'usine'
               AND NOT (json_extract(m.value, '$.role') = 'member' AND json_extract(t.value, '$.member.id') = ${member})
           ) OR EXISTS (
             SELECT 1 FROM usine_conversation_turns t

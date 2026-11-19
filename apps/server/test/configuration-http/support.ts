@@ -239,6 +239,7 @@ export const harness = (
       runAgain: () => unused,
       intervene: () => unused,
       cancel: () => unused,
+      callScope: () => unused,
       runWorkerPreflight: () => unused,
       discardLeftovers: () => unused,
       moveBoardItem: () => unused,

@@ -18,6 +18,7 @@ import { LoadedInstance } from "@usine/config/instance";
 import {
   GitHubUserId,
   PermissionGrant,
+  permits,
   ProjectScope,
   RequestPermissions,
 } from "@usine/core/access";
@@ -45,6 +46,7 @@ import {
   TurnMember,
 } from "@usine/core/conversation";
 import { OperatorLogin } from "@usine/core/operator";
+import { CallTarget, OperationCall, OperationName } from "@usine/core/permission-request";
 import { ProjectId } from "@usine/core/project";
 import { WorkerName } from "@usine/core/worker";
 import { Deferred, Effect, Exit, Layer, Option, Ref, Schema, Scope, Stream } from "effect";
@@ -56,6 +58,10 @@ import {
   conversationsLayer,
 } from "../../src/conversation/conversations.ts";
 import { memoryConversationStoreLayer } from "../../src/conversation/memory.ts";
+import { ActingCalls } from "../../src/conversation/permissions/acting.ts";
+import { memoryPermissionStoreLayer } from "../../src/conversation/permissions/memory.ts";
+import { Permissions, permissionsLayer } from "../../src/conversation/permissions/permissions.ts";
+import { PermissionStore } from "../../src/conversation/permissions/store.ts";
 import { ConversationStore } from "../../src/conversation/store.ts";
 import { SupervisorSourceTrees } from "../../src/supervisor-sandbox.ts";
 import { fixedInstanceLayer } from "../support/current-instance.ts";
@@ -186,14 +192,17 @@ const available: SupervisorSandboxService = {
 
 /**
  * Gives every turn the poster's `grants`, three needs, and no operator tools, or refuses it with
- * `refused`, as for a revoked token.
+ * `refused`, as for a revoked token. A turn's session first sends each of `calls` to the turn's
+ * requests, as a tool call would, and `prompts` collects each turn's message.
  */
 const access = (
   grants: Ref.Ref<ReadonlyArray<PermissionGrant>>,
   refused: Ref.Ref<Option.Option<string>>,
+  calls: Ref.Ref<ReadonlyArray<OperationCall>>,
+  prompts: Array<string>,
 ) =>
   Layer.succeed(TurnAccess)({
-    open: (_member, _credential, scope) =>
+    open: (_member, _credential, scope, requests) =>
       Effect.gen(function* () {
         const refusal = yield* Ref.get(refused);
         if (Option.isSome(refusal)) return yield* TurnAccessError.make({ message: refusal.value });
@@ -203,7 +212,15 @@ const access = (
           grants: turnGrants(scope, current),
           needsYou: ['{"_tag":"ApprovalNeed","runId":"run-1"}'],
           needsTotal: 3,
-          run: (turn, observe) => runSupervisorTurn(turn, Toolkit.empty, observe),
+          run: (turn, observe) =>
+            Effect.gen(function* () {
+              prompts.push(turn.message);
+              const pending = yield* Ref.getAndSet(calls, []);
+              yield* Effect.forEach(pending, (call, index) =>
+                requests.call(call, Option.some(`call-${index}`)).pipe(Effect.orDie),
+              );
+              return yield* runSupervisorTurn(turn, Toolkit.empty, observe);
+            }),
         };
       }),
   });
@@ -214,21 +231,40 @@ interface Setup {
   readonly sandbox?: SupervisorSandboxService;
 }
 
+/** Runs each allowed call as a success, records it, and gives each member `grants`. */
+const acting = (grants: Ref.Ref<ReadonlyArray<PermissionGrant>>, ran: Array<OperationCall>) =>
+  Layer.succeed(ActingCalls)({
+    access: () =>
+      Effect.map(Ref.get(grants), (current) => ({
+        permits: ({ permission, scope }) => permits(current, permission, scope),
+      })),
+    run: (_actor, call) =>
+      Effect.sync(() => {
+        ran.push(call);
+        return { _tag: "Succeeded" as const, result: '{"ok":true}' };
+      }),
+  });
+
 /**
  * The conversations of one orchestrator process on `store`, with a scripted harness. Building it
  * again on the same store is a restart.
  */
-const conversations = (store: Layer.Layer<ConversationStore>, setup: Setup) =>
+const conversations = (store: Layer.Layer<ConversationStore | PermissionStore>, setup: Setup) =>
   Effect.gen(function* () {
     const starts: Array<Start> = [];
+    const prompts: Array<string> = [];
+    const ran: Array<OperationCall> = [];
     const grants = yield* Ref.make<ReadonlyArray<PermissionGrant>>(operator);
     const refused = yield* Ref.make(Option.none<string>());
+    const calls = yield* Ref.make<ReadonlyArray<OperationCall>>([]);
     const loaded = yield* instance(setup.settings ?? { supervisor: brain });
     const layer = conversationsLayer.pipe(
+      Layer.provideMerge(permissionsLayer),
       Layer.provide(
         Layer.mergeAll(
           store,
-          access(grants, refused),
+          access(grants, refused, calls, prompts),
+          acting(grants, ran),
           scriptedHarness(setup.scripts, starts),
           fixedInstanceLayer(loaded),
           Layer.succeed(SupervisorSourceTrees)({ prepare: () => Effect.succeed([]) }),
@@ -238,7 +274,7 @@ const conversations = (store: Layer.Layer<ConversationStore>, setup: Setup) =>
       ),
       Layer.provide(Layer.succeed(SupervisorSandbox, setup.sandbox ?? available)),
     );
-    return { layer, starts, grants, refused };
+    return { layer, starts, grants, refused, calls, prompts, ran };
   });
 
 const message = (text: string) => ({
@@ -278,8 +314,9 @@ const until = (
   }).pipe(Effect.timeout("5 seconds"), Effect.orDie);
 
 /** One in-memory store; layers built on it again share its records, as a restart does. */
-const memoryStore = Effect.map(Layer.build(memoryConversationStoreLayer), (context) =>
-  Layer.succeedContext(context),
+const memoryStore = Effect.map(
+  Layer.build(Layer.merge(memoryConversationStoreLayer, memoryPermissionStoreLayer)),
+  (context) => Layer.succeedContext(context),
 );
 
 /** Waits until the conversation has stored `count` events. */
@@ -587,6 +624,53 @@ describe("conversations with the supervisor", () => {
           ["StartPrompt", "StartPrompt"],
         );
       }).pipe(Effect.scoped),
+  );
+
+  it.live("runs an allowed call once and reports its outcome in the conversation's next turn", () =>
+    Effect.gen(function* () {
+      const store = yield* memoryStore;
+      const setup = yield* conversations(store, {
+        scripts: [script("asked for a retry"), script("the run is retrying")],
+      });
+      yield* Ref.set(setup.calls, [
+        OperationCall.make({
+          operation: OperationName.make("retry"),
+          summary: "Retry a failed run",
+          arguments: { runId: "run-1" },
+          target: CallTarget.make("run run-1"),
+          scope: project,
+          permission: "operate",
+        }),
+      ]);
+      yield* Effect.gen(function* () {
+        const service = yield* Conversations;
+        const permissions = yield* Permissions;
+        const started = yield* service.start(request("Retry run 1"), as(ada));
+        const id = started.conversation.id;
+        yield* until(id, (turns) => turns[0]?.state._tag === "Succeeded");
+        const [waiting] = yield* permissions.ofConversation(id, Option.some(as(grace)));
+        if (waiting === undefined) return assert.fail("The turn stored no request");
+        assert.deepStrictEqual([waiting.request.state._tag, waiting.answerable], ["Waiting", true]);
+        assert.isEmpty(setup.ran, "nothing runs before a member answers");
+        const answered = yield* service.answer(id, waiting.request.id, "once", as(grace));
+        assert.strictEqual(answered.state._tag, "Ran");
+        const done = yield* until(id, (turns) => turns[1]?.state._tag === "Succeeded");
+        assert.deepStrictEqual(
+          done.messages.map(({ role }) => role),
+          ["member", "supervisor", "usine", "supervisor"],
+        );
+        assert.include(
+          setup.prompts[1],
+          "Outcomes of the permission requests of the previous turn:",
+        );
+        assert.include(setup.prompts[1], '"answer":"allowed once","by":"grace","outcome":"ran"');
+        const again = yield* service
+          .answer(id, waiting.request.id, "deny", as(grace))
+          .pipe(Effect.flip);
+        assert.strictEqual(again._tag, "RequestAnswered");
+        assert.lengthOf(setup.ran, 1, "the allowed call ran exactly once");
+      }).pipe(asOperator, Effect.provide(setup.layer));
+    }).pipe(Effect.scoped),
   );
 
   it.live("reports setup required and refuses messages without a sandbox or a supervisor", () =>

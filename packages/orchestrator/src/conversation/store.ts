@@ -6,6 +6,7 @@ import {
   ConversationId,
   type EndedTurn,
   type EventSequence,
+  type FollowUpPost,
   MemberMessage,
   type MemberPost,
   Message,
@@ -77,8 +78,9 @@ export const lastActivity = ({ conversation, lastTurn, lastMessage }: Conversati
 
 /**
  * Returns whether `member` has unread activity in a conversation with `messages` and `turns`: a
- * message after `marker` that someone else posted, or a turn that failed after `marker`. Without
- * a marker, every message by someone else and every failed turn counts.
+ * member or supervisor message after `marker` that someone else posted, or a turn that failed
+ * after `marker`. Without a marker, every such message by someone else and every failed turn
+ * counts. The outcomes messages that usine posts don't count.
  */
 export const isUnread = (
   member: GitHubUserId,
@@ -90,7 +92,9 @@ export const isUnread = (
   const own = new Set(turns.filter((turn) => turn.member.id === member).map(({ id }) => id));
   const fromOthers = messages.some(
     (message) =>
-      message.sequence > through && !(message.role === "member" && own.has(message.turn)),
+      message.sequence > through &&
+      message.role !== "usine" &&
+      !(message.role === "member" && own.has(message.turn)),
   );
   const failed = turns.some(
     ({ state }) =>
@@ -150,6 +154,13 @@ export class ConversationStore extends Context.Service<
       conversation: Conversation,
       post: MemberPost,
     ) => Effect.Effect<ConversationRecord, ConversationStoreError>;
+    /**
+     * Appends the outcomes message of `post` and queues the turn that reports them, unless that
+     * turn exists. Returns the queued turn, or `None` when it existed.
+     */
+    readonly followUp: (
+      post: FollowUpPost,
+    ) => Effect.Effect<Option.Option<Turn>, ConversationStoreError | ConversationNotFound>;
     /** Appends the member message of `post` to its conversation and queues its turn. */
     readonly post: (
       post: MemberPost,

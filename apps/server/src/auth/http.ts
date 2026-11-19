@@ -422,8 +422,14 @@ export const authenticatedRoutes = (services: AuthServices) => {
         });
         return yield* authFailure(`This token cannot call ${operation}.`, 403);
       }
-      if (access.credential === "turn" && operation !== undefined) {
-        yield* Effect.logWarning("Turn credential refused outside the operator API", { operation });
+      if (
+        (access.credential === "turn" || access.credential === "call") &&
+        operation !== undefined
+      ) {
+        yield* Effect.logWarning("Supervisor credential refused outside the operator API", {
+          operation,
+          credential: access.credential,
+        });
         return yield* authFailure("A supervisor turn can call only the operator API.", 403);
       }
       if (requirement === "local" && access.credential !== "local")

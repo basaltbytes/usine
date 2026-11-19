@@ -1,6 +1,13 @@
 import { jsonKey } from "@usine/core/json-key";
-import { AccessDenied, InstanceScope, requirePermission } from "@usine/core/access";
+import {
+  AccessDenied,
+  type AccessScope,
+  InstanceScope,
+  requirePermission,
+} from "@usine/core/access";
 import { filterOverview, loopScope, repositoryScope } from "./access.ts";
+import { CallScopeTarget } from "./call-scope.ts";
+export { CallScopeTarget } from "./call-scope.ts";
 import { ExpressionEngine } from "@usine/expression/expression-engine";
 import { approvalFor } from "../approval.ts";
 import type { UpgradeDrain } from "@usine/engine/engine";
@@ -13,7 +20,7 @@ import { webhookAttentionFor } from "./webhooks.ts";
 import type { ConfigurationStoreError } from "@usine/config/configuration";
 import { groupProjectViews } from "./projects.ts";
 import { readApprovalItems } from "./approval.ts";
-import { boardRepositories } from "@usine/config/project";
+import { boardRepositories, resolveLoopName } from "@usine/config/project";
 import { requestActor } from "@usine/core/operator";
 import {
   AttentionAcknowledgements,
@@ -43,7 +50,7 @@ import type { LoadedInstance } from "@usine/config/instance";
 import { Event, DedupKey, EventId } from "@usine/core/event";
 import { CycleBudgetAskId } from "@usine/core/cycle-budget";
 import { BoardMoveRecord, BoardMoves } from "@usine/engine/board-moves";
-import { CycleBudgets, type CycleBudgetResetRejectedError } from "@usine/engine/cycle-budget";
+import { CycleBudgets, CycleBudgetResetRejectedError } from "@usine/engine/cycle-budget";
 import { LoopName } from "@usine/core/loop";
 import { RunId } from "@usine/core/run";
 import { ApprovalSource } from "@usine/core/run/approval";
@@ -1725,10 +1732,45 @@ const makeOperator = Effect.gen(function* () {
     return CycleBudgetResetView.make({ replayedCiFixEventIds: replayed });
   });
 
+  const callScope = Effect.fn("Operator.callScope")(function* (
+    instance: LoadedInstance,
+    target: CallScopeTarget,
+  ) {
+    yield* Effect.annotateCurrentSpan({ target: target._tag });
+    const scope = yield* CallScopeTarget.$match(target, {
+      Run: ({ runId }) =>
+        Effect.map(reader.inspect(runId), ({ repository }) =>
+          repositoryScope(instance, repository),
+        ),
+      Repository: ({ repository }) => Effect.succeed(repositoryScope(instance, repository)),
+      Loop: ({ loop }) =>
+        Option.match(resolveLoopName(instance.loops, loop), {
+          onNone: () =>
+            Effect.fail(
+              LoopNotFoundError.make({
+                loop,
+                message: "Loop is missing or ambiguous. Use project/loop.",
+              }),
+            ),
+          onSome: (name) => Effect.succeed(loopScope(name)),
+        }),
+      CycleBudgetAsk: ({ askId }) =>
+        Effect.flatMap(budgets.asks, (asks) => {
+          const ask = asks.find(({ id }) => id === askId);
+          return ask === undefined
+            ? Effect.fail(CycleBudgetResetRejectedError.make({ askId }))
+            : Effect.succeed(repositoryScope(instance, ask.repository));
+        }),
+    });
+    yield* requirePermission("read", scope);
+    return scope;
+  });
+
   return {
     ...observation,
     approve,
     cancel,
+    callScope,
     runWorkerPreflight: (worker: WorkerName) =>
       requirePermission("admin", InstanceScope.make()).pipe(
         Effect.andThen(workerStatus.runPreflight(worker)),
@@ -1807,6 +1849,15 @@ export class Operator extends Context.Service<
       runId: RunId,
       attemptId: AttemptId,
     ) => Effect.Effect<void, OperatorError>;
+    /**
+     * Returns the scope that a call on `target` checks its permission on: the project of the
+     * target's repository or loop, or the instance. Fails with `AccessDenied` when the caller
+     * can't read that scope.
+     */
+    readonly callScope: (
+      instance: LoadedInstance,
+      target: CallScopeTarget,
+    ) => Effect.Effect<AccessScope, OperatorError>;
     /** Requests a new Attempt for a failed Run with its effective task and Agent. */
     readonly retry: (instance: LoadedInstance, runId: RunId) => Effect.Effect<void, OperatorError>;
     /** Amends a failed Run and requests its next Attempt atomically. */

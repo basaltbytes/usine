@@ -54,6 +54,7 @@ import {
   operatorPermissions,
 } from "@usine/orchestrator/operator/http";
 import type { Conversations } from "@usine/orchestrator/conversation";
+import type { Permissions } from "@usine/orchestrator/conversation/permissions";
 import { conversationHandlers } from "./supervisor/conversations-http.ts";
 import { ByteSize, Effect, Layer, Option, Path, Schema, type Types } from "effect";
 import {
@@ -778,7 +779,7 @@ export const serverLayer = (
   webhooks: Layer.Layer<never, never, HttpRouter.HttpRouter> = Layer.empty,
   setup?: Setup["Service"],
   conversations:
-    | Layer.Layer<Conversations, never, HttpRouter.HttpRouter>
+    | Layer.Layer<Conversations | Permissions, never, HttpRouter.HttpRouter>
     | Layer.Layer<never> = Layer.empty,
 ) => {
   const authenticated = authenticatedRoutes(auth);

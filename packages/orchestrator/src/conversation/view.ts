@@ -18,7 +18,19 @@ import {
   TurnMember,
   TurnState,
 } from "@usine/core/conversation";
+import {
+  Answer,
+  CallTarget,
+  GrantRevocation,
+  isGrantable,
+  OperationName,
+  PermissionRequestId,
+  RequestState,
+  StandingGrantId,
+} from "@usine/core/permission-request";
+import { ProjectId } from "@usine/core/project";
 import { Effect, Option, Schema } from "effect";
+import type { GrantEntry, RequestEntry } from "./permissions/permissions.ts";
 import { type ConversationSummary, lastActivity, type ReadMarker } from "./store.ts";
 
 /** Whether members can post to the supervisor, and why not. */
@@ -143,11 +155,120 @@ export const readMarkerView = (marker: ReadMarker): typeof ReadMarkerView.Type =
   readAt: marker.at,
 });
 
+/** A permission request as the API shows it, without the credentials of the members. */
+export const PermissionRequestView = Schema.Struct({
+  id: PermissionRequestId,
+  conversation: ConversationId,
+  turn: TurnId,
+  /**
+   * The harness's ID of the tool call: the `callId` of the turn's `ToolStarted` and `ToolFinished`
+   * events of the call. Null when the harness gave none.
+   */
+  toolCall: Schema.NullOr(Schema.String),
+  operation: OperationName,
+  /** The operation's summary, such as `Retry a failed run`. */
+  summary: Schema.String,
+  /** The tool arguments: path and query parameters by name, and `body`. */
+  arguments: Schema.Record(Schema.String, Schema.Json),
+  target: CallTarget,
+  /** The project of the target, or null for an operation outside a project. */
+  project: Schema.NullOr(ProjectId),
+  /** Whether `always` is an answer: only a call in a project can have a standing grant. */
+  grantable: Schema.Boolean,
+  requestedAt: Schema.DateTimeUtc,
+  state: RequestState,
+  /** The turn that reported the outcome to the supervisor, or null. */
+  reportedIn: Schema.NullOr(TurnId),
+  /** Whether the caller can answer the request now. */
+  answerable: Schema.Boolean,
+}).annotate({ title: "Permission request" });
+
+/** Returns the API view of `request`. */
+export const requestView = ({
+  request,
+  answerable,
+}: RequestEntry): typeof PermissionRequestView.Type => ({
+  id: request.id,
+  conversation: request.conversation,
+  turn: request.turn,
+  toolCall: Option.getOrNull(request.toolCall),
+  operation: request.call.operation,
+  summary: request.call.summary,
+  arguments: request.call.arguments,
+  target: request.call.target,
+  project: request.call.scope._tag === "Project" ? request.call.scope.project : null,
+  grantable: isGrantable(request.call),
+  requestedAt: request.requestedAt,
+  state: request.state,
+  reportedIn: Option.getOrNull(request.reportedIn),
+  answerable,
+});
+
 export const ConversationView = Schema.Struct({
   conversation: Conversation,
   messages: Schema.Array(Message),
   turns: Schema.Array(TurnView),
-}).annotate({ title: "Conversation with messages and turns" });
+  /** The permission requests of the conversation's turns, oldest first. */
+  requests: Schema.Array(PermissionRequestView),
+}).annotate({ title: "Conversation with messages, turns, and permission requests" });
+
+export const AnswerPayload = Schema.Struct({
+  /** `once` runs the call, `always` also stores a standing grant, and `deny` runs nothing. */
+  answer: Answer,
+}).annotate({ title: "Answer" });
+
+/** A standing grant as the API shows it, without the credential of its member. */
+export const StandingGrantView = Schema.Struct({
+  id: StandingGrantId,
+  operation: OperationName,
+  /** The operation's summary, such as `Retry a failed run`. */
+  summary: Schema.String,
+  project: ProjectId,
+  /** The member who allowed it. */
+  member: TurnMember,
+  /** The request whose answer created it. */
+  request: PermissionRequestId,
+  createdAt: Schema.DateTimeUtc,
+  /** When a call last ran under it, or null. */
+  lastUsedAt: Schema.NullOr(Schema.DateTimeUtc),
+  /** Who revoked it and when, or null. */
+  revoked: Schema.NullOr(GrantRevocation),
+  /** Whether it applies now: it isn't revoked, and its member's access permits its operation. */
+  applies: Schema.Boolean,
+  /** Whether the caller can revoke it. */
+  revocable: Schema.Boolean,
+}).annotate({ title: "Standing grant" });
+
+/** Returns the API view of `entry`. */
+export const grantView = ({
+  grant,
+  applies,
+  revocable,
+}: GrantEntry): typeof StandingGrantView.Type => ({
+  id: grant.id,
+  operation: grant.operation,
+  summary: grant.summary,
+  project: grant.project,
+  member: grant.member,
+  request: grant.request,
+  createdAt: grant.createdAt,
+  lastUsedAt: Option.getOrNull(grant.lastUsedAt),
+  revoked: Option.getOrNull(grant.revoked),
+  applies,
+  revocable,
+});
+
+export const StandingGrantsView = Schema.Struct({
+  grants: Schema.Array(StandingGrantView),
+}).annotate({ title: "Standing grants" });
+
+/** The most allowed calls that one read returns. */
+export const ACTIONS_PAGE = 100;
+
+export const SupervisorActionsView = Schema.Struct({
+  /** The calls that members allowed or standing grants covered, latest answer first. */
+  actions: Schema.Array(PermissionRequestView),
+}).annotate({ title: "Supervisor actions" });
 
 export const PostedView = Schema.Struct({
   message: MemberMessage,

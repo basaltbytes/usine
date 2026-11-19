@@ -213,7 +213,7 @@ What a session does for usine, such as the coordinator, the coding agent, or the
 _Avoid_: agent type, mode, persona
 
 **Supervisor**:
-The role that observes and operates the factory for a member, with the operator tools that the member's token allows, and reads the instance's source. It runs in the supervisor sandbox with the instance's `supervisor` brain and keeps its conversation between turns.
+The role that observes and operates the factory for a member: it reads through the operator tools that the member's token allows, and each operation that changes the factory runs only under a standing grant or after a member answers a permission request. It reads the instance's source, runs in the supervisor sandbox with the instance's `supervisor` brain, and keeps its conversation between turns.
 _Avoid_: orchestrator agent, assistant, operator agent
 
 **Supervisor sandbox**:
@@ -223,6 +223,14 @@ _Avoid_: jail, supervisor VM
 **Conversation**:
 A thread of member messages and supervisor answers on the instance or one project, readable by every member who can read that scope. Each message queues a turn that runs with the posting member's access, one turn at a time.
 _Avoid_: chat, thread, ask, question
+
+**Permission request**:
+A supervisor turn's call of an operator operation that needs more than `read`, stored with its arguments, target, and project, which runs only after a member allows it. A member answers it once: allow once, allow always for the project, or deny.
+_Avoid_: proposal, confirmation, approval
+
+**Standing grant**:
+A member's answer that lets supervisor turns run one operation in one project without a permission request, while the member's own access permits that operation.
+_Avoid_: permission, allowlist, approval rule
 
 **Anchor**:
 What a conversation is about, such as a walkthrough passage: a kind and a reference that usine stores without reading, and a key for lookup.

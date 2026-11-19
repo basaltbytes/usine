@@ -55,6 +55,11 @@ import {
   type TurnMember,
 } from "@usine/core/conversation";
 import type { OperatorLogin } from "@usine/core/operator";
+import type {
+  Answer,
+  PermissionRequest,
+  PermissionRequestId,
+} from "@usine/core/permission-request";
 import type { RepositoryName } from "@usine/core/repository";
 import {
   Array as Arr,
@@ -79,7 +84,15 @@ import { CurrentInstance } from "../current-instance/current-instance.ts";
 import { visibleRepository } from "../operator/access.ts";
 import { SupervisorSourceTrees } from "../supervisor-sandbox.ts";
 import { TurnAccess } from "./access.ts";
-import { turnPrompt } from "./context.ts";
+import { type TurnInput, turnPrompt } from "./context.ts";
+import type { Actor } from "./permissions/acting.ts";
+import {
+  type NotGrantable,
+  type PermissionRequestNotFound,
+  Permissions,
+  type RequestAnswered,
+} from "./permissions/permissions.ts";
+import type { PermissionStoreError } from "./permissions/store.ts";
 import {
   ConversationNotFound,
   type ConversationRecord,
@@ -223,6 +236,26 @@ export class Conversations extends Context.Service<
       Turn,
       AccessDenied | ConversationNotFound | TurnNotFound | ConversationStoreError | TurnConflict
     >;
+    /**
+     * Applies `by`'s answer to a permission request of the conversation once, as
+     * `Permissions.answer` does, and runs the turn that reports the outcomes once every request
+     * of the turn has an answer.
+     */
+    readonly answer: (
+      id: ConversationId,
+      request: PermissionRequestId,
+      answer: Answer,
+      by: Actor,
+    ) => Effect.Effect<
+      PermissionRequest,
+      | AccessDenied
+      | ConversationNotFound
+      | PermissionRequestNotFound
+      | RequestAnswered
+      | NotGrantable
+      | PermissionStoreError
+      | ConversationStoreError
+    >;
   }
 >()("@usine/orchestrator/conversation/conversations") {}
 
@@ -295,6 +328,7 @@ export const conversationsLayer = Layer.effect(
   Conversations,
   Effect.gen(function* () {
     const store = yield* ConversationStore;
+    const permissions = yield* Permissions;
     const access = yield* TurnAccess;
     const sandbox = yield* SupervisorSandbox;
     const sources = yield* SupervisorSourceTrees;
@@ -378,7 +412,9 @@ export const conversationsLayer = Layer.effect(
         if (Option.isNone(configured)) return yield* stopped(notConfigured);
         const supervisorBrain = configured.value;
         const member = yield* access
-          .open(running.member, running.credential, conversation.scope)
+          .open(running.member, running.credential, conversation.scope, {
+            call: (call, toolCall) => permissions.gate(conversation, running, call, toolCall),
+          })
           .pipe(Effect.mapError(({ message }) => stopped(message)));
         if (!permits(member.posterGrants, "operate", conversation.scope))
           return yield* stopped(
@@ -399,7 +435,19 @@ export const conversationsLayer = Layer.effect(
         const message = record.messages.find(({ sequence }) => sequence === running.message);
         if (message === undefined)
           return yield* Effect.die(new Error(`Turn ${running.id} has no stored message`));
-        const text = yield* bodyText(message.body);
+        const input: TurnInput =
+          message.role === "usine"
+            ? {
+                _tag: "Outcomes",
+                requests: yield* permissions
+                  .answeredOf(message.reports)
+                  .pipe(
+                    Effect.mapError(() =>
+                      stopped("usine couldn't read the outcomes of the permission requests."),
+                    ),
+                  ),
+              }
+            : { _tag: "Message", text: yield* bodyText(message.body) };
         const prompt = yield* turnPrompt({
           member: running.member,
           grants: member.grants,
@@ -409,7 +457,7 @@ export const conversationsLayer = Layer.effect(
           needsYou: member.needsYou,
           needsTotal: member.needsTotal,
           reply: running.reply,
-          text,
+          input,
         });
         const resume = resumePoint(
           record.turns.filter(({ message: sequence }) => sequence < running.message),
@@ -603,6 +651,16 @@ export const conversationsLayer = Layer.effect(
         );
         const end = yield* runTurn(record.value, next.value, active);
         yield* Deferred.succeed(active.ended, end);
+        // A member can answer the turn's requests while it runs; its end then queues the report.
+        yield* permissions.followUp(end).pipe(
+          Effect.catchTags({
+            ConversationStoreError: ({ operation }) =>
+              Effect.logError("Follow-up turn not queued; the next start retries", { operation }),
+            PermissionStoreError: ({ operation }) =>
+              Effect.logError("Follow-up turn not queued; the next start retries", { operation }),
+            ConversationNotFound: () => Effect.void,
+          }),
+        );
         yield* SynchronizedRef.update(workers, (all) =>
           new Map(all).set(id, { pending: all.get(id)?.pending ?? false, active: Option.none() }),
         );
@@ -634,8 +692,7 @@ export const conversationsLayer = Layer.effect(
       });
 
     const recover = Effect.gen(function* () {
-      const open = yield* store.open;
-      const interrupted = open.filter(isRunning);
+      const interrupted = (yield* store.open).filter(isRunning);
       for (const turn of interrupted) {
         const usage = yield* storedUsage(store, turn);
         const at = yield* now;
@@ -645,6 +702,9 @@ export const conversationsLayer = Layer.effect(
           turn: turn.id,
         });
       }
+      // Before reading the queued turns, so that the follow-ups that a stop left out run too.
+      yield* permissions.recover;
+      const open = yield* store.open;
       const waiting = new Set(open.map(({ conversation }) => conversation));
       for (const conversation of waiting) yield* wake(conversation);
       yield* Effect.logInfo("Conversations recovered", {
@@ -819,6 +879,11 @@ export const conversationsLayer = Layer.effect(
           by,
         });
         return canceled;
+      }),
+      answer: Effect.fn("Conversations.answer")(function* (id, request, answer, by) {
+        const answered = yield* permissions.answer(id, request, answer, by);
+        if (Option.isSome(answered.followUp)) yield* wake(id);
+        return answered.request;
       }),
     });
   }),

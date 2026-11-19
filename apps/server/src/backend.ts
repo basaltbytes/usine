@@ -1,5 +1,6 @@
 import type { WorkerPreflightView } from "@usine/orchestrator/operator";
 import { resolveLoopName } from "@usine/config/project";
+import type { AccessScope } from "@usine/core/access";
 import { requestActor } from "@usine/core/operator";
 import {
   AttentionAcknowledgement,
@@ -17,6 +18,7 @@ import type { CurrentInstance } from "@usine/orchestrator/current-instance";
 import type { WorkerName } from "@usine/core/worker";
 import {
   type BoardMove,
+  type CallScopeTarget,
   type ConfigurationView,
   type DeskView,
   type FactoryOverview,
@@ -106,6 +108,11 @@ export class FactoryBackend extends Context.Service<
       input: SessionIntervention,
     ) => Effect.Effect<void, BackendError>;
     readonly cancel: (runId: RunId) => Effect.Effect<void, BackendError>;
+    /**
+     * Returns the scope that a call on `target` checks its permission on. Fails with
+     * `AccessDenied` when the request can't read it.
+     */
+    readonly callScope: (target: CallScopeTarget) => Effect.Effect<AccessScope, BackendError>;
     readonly runWorkerPreflight: (
       worker: WorkerName,
     ) => Effect.Effect<WorkerPreflightView, BackendError>;
@@ -199,6 +206,8 @@ export const liveBackendLayer = (
       Effect.flatMap(instances.get, (instance) => operator.intervene(instance, runId, input)),
     cancel: (runId) =>
       Effect.flatMap(instances.get, (instance) => operator.cancel(instance, runId)),
+    callScope: (target) =>
+      Effect.flatMap(instances.get, (instance) => operator.callScope(instance, target)),
     runWorkerPreflight: operator.runWorkerPreflight,
     discardLeftovers: operator.discardLeftovers,
     moveBoardItem: (move) =>
@@ -280,6 +289,7 @@ export const needsSetupBackendLayer = (
     runAgain: fail,
     intervene: fail,
     cancel: fail,
+    callScope: fail,
     runWorkerPreflight: fail,
     discardLeftovers: fail,
     moveBoardItem: fail,

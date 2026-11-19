@@ -3,7 +3,7 @@ title: Ask the supervisor
 description: Start a conversation with the supervisor from any page, follow its answer, and see which conversations have unread activity.
 ---
 
-Ask the supervisor about runs, tasks, and the source of a project or the whole instance. A turn only reads: it can't approve, retry, move, or change anything.
+Ask the supervisor about runs, tasks, and the source of a project or the whole instance, or ask it to act on them. A turn reads with the access of the member who posted the message. When it calls an operation that changes the factory, such as a retry or a board move, usine runs nothing and stores a permission request that a member answers, unless a standing grant covers the call. See [Permission requests](/reference/operator-api/#permission-requests).
 
 ## Prerequisites
 

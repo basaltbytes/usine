@@ -96,33 +96,47 @@ import { ConfigurationSummaryView } from "./configuration/summary.ts";
 import { DeskView } from "./desk.ts";
 import { RunStatisticsView, StatisticsView, StatisticsWindow } from "./statistics/view.ts";
 import { AnchorKey, ConversationId, EventSequence, TurnId } from "@usine/core/conversation";
+import { PermissionRequestId, StandingGrantId } from "@usine/core/permission-request";
 import {
+  AnswerPayload,
   ConversationEventsView,
   ConversationStatusView,
   ConversationsView,
   ConversationView,
   MarkReadPayload,
   MessagePayload,
+  PermissionRequestView,
   PostedView,
   ReadMarkerView,
+  StandingGrantsView,
+  StandingGrantView,
   StartConversationPayload,
+  SupervisorActionsView,
   TurnView,
 } from "../conversation/view.ts";
 export {
+  ACTIONS_PAGE,
+  AnswerPayload,
   ConversationEventsView,
   ConversationStatusView,
   ConversationSummaryView,
   ConversationsView,
   ConversationView,
   EVENTS_PAGE,
+  grantView,
   MarkReadPayload,
   MessagePayload,
+  PermissionRequestView,
   PostedView,
   PREVIEW_LENGTH,
   readMarkerView,
   ReadMarkerView,
+  requestView,
+  StandingGrantsView,
+  StandingGrantView,
   StartConversationPayload,
   summaryView,
+  SupervisorActionsView,
   turnView,
   TurnView,
 } from "../conversation/view.ts";
@@ -172,6 +186,11 @@ const errorStatuses = {
   TurnConflict: 409,
   SupervisorNotReady: 409,
   ConversationStoreError: 500,
+  PermissionRequestNotFound: 404,
+  RequestAnswered: 409,
+  NotGrantable: 400,
+  GrantNotFound: 404,
+  PermissionStoreError: 500,
 } as const;
 
 /**
@@ -515,7 +534,7 @@ const conversationGroup = HttpApiGroup.make("conversation")
   .annotate(OpenApi.Title, "Conversations")
   .annotate(
     OpenApi.Description,
-    "Members' conversations with the supervisor. A conversation is readable by every member who can read its scope; a conversation that the caller can't read is not found. Posting needs operate on the scope. Each change emits a `conversation` change notice.",
+    "Members' conversations with the supervisor, and the permission requests and standing grants of its turns. A conversation is readable by every member who can read its scope; a conversation that the caller can't read is not found. Posting needs operate on the scope. Each change emits a `conversation` change notice, and each change to a standing grant or an allowed call a `permission` notice. A supervisor turn can't call any of these operations.",
   )
   .add(
     HttpApiEndpoint.get("conversationStatus", "/api/conversations/status", {
@@ -551,7 +570,10 @@ const conversationGroup = HttpApiGroup.make("conversation")
       success: ConversationView,
     })
       .annotate(OpenApi.Summary, "Read a conversation")
-      .annotate(OpenApi.Description, "Returns the conversation with its messages and turns."),
+      .annotate(
+        OpenApi.Description,
+        "Returns the conversation with its messages, its turns, and its turns' permission requests, each with whether the caller can answer it.",
+      ),
     HttpApiEndpoint.get("conversationEvents", "/api/conversations/:conversation/events", {
       params: { conversation: ConversationId },
       query: Schema.Struct({
@@ -597,6 +619,45 @@ const conversationGroup = HttpApiGroup.make("conversation")
       .annotate(
         OpenApi.Description,
         "Cancels a queued turn, or stops a running one and keeps the events it produced. Returns the turn once its end is stored.",
+      ),
+    HttpApiEndpoint.post(
+      "answerRequest",
+      "/api/conversations/:conversation/requests/:request/answer",
+      {
+        params: { conversation: ConversationId, request: PermissionRequestId },
+        payload: AnswerPayload,
+        success: PermissionRequestView,
+      },
+    )
+      .annotate(OpenApi.Summary, "Answer a permission request")
+      .annotate(
+        OpenApi.Description,
+        "Answers a waiting permission request of a supervisor turn with `once`, `always`, or `deny`. `once` runs the call as the caller, `always` also stores a standing grant for the operation in the call's project, and `deny` runs nothing. `always` is refused with 400 `NotGrantable` for an operation outside a project. Returns 403 when the caller's access doesn't permit the operation in its scope, and 409 `RequestAnswered` for a request that has an answer; neither changes anything. Returns the request with the outcome of the call. When every request of the turn has an answer, usine queues the turn that reports the outcomes to the supervisor.",
+      ),
+    HttpApiEndpoint.get("supervisorGrants", "/api/supervisor/grants", {
+      success: StandingGrantsView,
+    })
+      .annotate(OpenApi.Summary, "List standing grants")
+      .annotate(
+        OpenApi.Description,
+        "Lists the standing grants that aren't revoked, in projects that the caller can read, oldest first. Each says whether it applies now, and whether the caller can revoke it.",
+      ),
+    HttpApiEndpoint.delete("revokeSupervisorGrant", "/api/supervisor/grants/:grant", {
+      params: { grant: StandingGrantId },
+      success: StandingGrantView,
+    })
+      .annotate(OpenApi.Summary, "Revoke a standing grant")
+      .annotate(
+        OpenApi.Description,
+        "Revokes a standing grant, so later calls of its operation in its project wait for a member again. Needs the access that the grant's operation needs in its project. Revoking a revoked grant changes nothing.",
+      ),
+    HttpApiEndpoint.get("supervisorActions", "/api/supervisor/actions", {
+      success: SupervisorActionsView,
+    })
+      .annotate(OpenApi.Summary, "List the calls that supervisor turns ran")
+      .annotate(
+        OpenApi.Description,
+        "Lists up to 100 calls that members allowed or standing grants covered, in conversations that the caller can read, latest answer first, each with the member who allowed it, the grant if any, and its outcome.",
       ),
   )
   .annotate(HttpApi.PayloadParseOptions, { onExcessProperty: "error" })
@@ -1212,6 +1273,10 @@ export const conversationPermissions = {
   postMessage: "operate",
   markRead: "read",
   cancelTurn: "operate",
+  answerRequest: "operate",
+  supervisorGrants: "read",
+  revokeSupervisorGrant: "operate",
+  supervisorActions: "read",
 } as const satisfies Record<
   keyof typeof OperatorApi.groups.conversation.endpoints,
   "read" | "operate"

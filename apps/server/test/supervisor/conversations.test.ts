@@ -25,6 +25,7 @@ import {
 import { ProjectId } from "@usine/core/project";
 import { TurnAccess } from "@usine/orchestrator/conversation/access";
 import { Conversations, SupervisorReady } from "@usine/orchestrator/conversation";
+import { Permissions } from "@usine/orchestrator/conversation/permissions";
 import {
   ConversationRecord,
   ConversationSummary,
@@ -144,7 +145,15 @@ const fixture = (grants: MemberGrants = { current: administratorPermissions }) =
     const routes = Layer.mergeAll(
       apiRoutes.pipe(Layer.provide(authenticated.guard.layer)),
       authenticated.routes,
-    ).pipe(HttpRouter.provideRequest(Layer.merge(Layer.mock(FactoryBackend)({}), conversations)));
+    ).pipe(
+      HttpRouter.provideRequest(
+        Layer.mergeAll(
+          Layer.mock(FactoryBackend)({}),
+          conversations,
+          Layer.mock(Permissions)({ ofConversation: () => Effect.succeed([]) }),
+        ),
+      ),
+    );
     const context = yield* Layer.build(Layer.provideMerge(routes, HttpRouter.layer));
     const router = Context.get(context, HttpRouter.HttpRouter);
     const document = yield* Schema.decodeUnknownEffect(PublishedApi)(operatorOpenApi());
@@ -156,6 +165,7 @@ const fixture = (grants: MemberGrants = { current: administratorPermissions }) =
       turnAccessLayer.pipe(
         Layer.provide(Layer.succeed(HttpRouter.HttpRouter, router)),
         Layer.provide(Layer.succeed(Authentication, services.authentication)),
+        Layer.provide(Layer.mock(FactoryBackend)({})),
       ),
     ).pipe(Effect.map((context) => Context.get(context, TurnAccess)));
     return {
@@ -345,11 +355,16 @@ describe("a supervisor turn's credential", () => {
         PostedWithSession.make({}),
       );
       const endpoints = Object.values(OperatorApi.groups.conversation.endpoints);
-      assert.lengthOf(endpoints, 8);
+      assert.lengthOf(endpoints, 12);
       for (const endpoint of endpoints) {
-        const url = endpoint.path.replace(":conversation", "c-1").replace(":turn", "t-1");
+        const url = endpoint.path
+          .replace(":conversation", "c-1")
+          .replace(":turn", "t-1")
+          .replace(":request", "r-1")
+          .replace(":grant", "g-1");
         const response = yield* request(secret)({
-          method: endpoint.method === "POST" ? "POST" : "GET",
+          method:
+            endpoint.method === "POST" || endpoint.method === "DELETE" ? endpoint.method : "GET",
           url,
           body:
             endpoint.method === "POST"
@@ -358,7 +373,9 @@ describe("a supervisor turn's credential", () => {
                     ? { scope: { _tag: "Project", project: "alpha" }, message }
                     : url.endsWith("/read")
                       ? { through: 1 }
-                      : message,
+                      : url.endsWith("/answer")
+                        ? { answer: "once" }
+                        : message,
                 )
               : Option.none(),
         });
@@ -422,7 +439,9 @@ describe("a supervisor turn's credential", () => {
       yield* token([grant("read"), grant("operate")]);
       yield* services.store.revoke(alice.id, poster.id);
       const revoked = yield* turnAccess
-        .open(aliceMember, PostedWithToken.make({ tokenId: poster.id }), alpha)
+        .open(aliceMember, PostedWithToken.make({ tokenId: poster.id }), alpha, {
+          call: () => Effect.die("The turn makes no call"),
+        })
         .pipe(Effect.scoped, Effect.flip);
       assert.strictEqual(
         revoked.message,
