@@ -780,11 +780,12 @@ describe.skipIf(process.platform !== "linux")("worker process owner", () => {
       Effect.gen(function* () {
         const cwd = mkdtempSync(join(tmpdir(), "usine-owner-lease-"));
         const pidFile = childPidFile(cwd, AgentSessionId.make("attempt:child:1"));
-        const relay = workerRelay(pidFile, "attach", 0, 1000, process.execPath, [
+        const lease = 1000;
+        const relay = workerRelay(pidFile, "attach", 0, lease, process.execPath, [
           "-e",
           "process.stdout.write(String(process.pid)); setInterval(() => {}, 1000)",
         ]);
-        // Renews the lease, as the orchestrator does, until the harness is seen running.
+        // Renews the lease, as the orchestrator does, until the harness has outlived one lease.
         const heartbeats = yield* Effect.sync(() =>
           relay.child.stdin.write(encodeOwnerFrame({ heartbeat: true, offset: 0 }) + "\n"),
         ).pipe(Effect.repeat(Schedule.spaced(Duration.millis(50))), Effect.forkChild);
@@ -795,11 +796,12 @@ describe.skipIf(process.platform !== "linux")("worker process owner", () => {
             "base64",
           ).toString(),
         );
-        assert(signal(pid, 0));
+        yield* sleep(lease * 1.5);
+        assert(signal(pid, 0), "heartbeats renew the lease");
         yield* Fiber.interrupt(heartbeats);
         yield* eventually(() => relay.frames.some((frame) => frame.exitCode !== undefined));
         assert.isFalse(signal(pid, 0));
-        assert.isFalse(existsSync(pidFile));
+        yield* eventually(() => !existsSync(pidFile));
         assert.isTrue(existsSync(`${pidFile}.transport`));
         execFileSync("sh", ["-c", CHILD_KILL_SCRIPT, "sh", cwd]);
         assert.isFalse(existsSync(`${pidFile}.transport`));
