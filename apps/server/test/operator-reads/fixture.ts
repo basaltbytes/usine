@@ -393,6 +393,10 @@ const NOT_CALLED = new Map([
   ["previewLoop", "It needs the configuration editor, which this fixture doesn't run."],
   ["configurationHead", "It needs the configuration editor; it returns one revision number."],
   [
+    "configurationWrites",
+    "It needs the configuration editor; it lists the saves that run now, with two fields each.",
+  ],
+  [
     "configurationRevisions",
     "It needs the configuration editor; test/configuration-http bounds its pages to one result.",
   ],
