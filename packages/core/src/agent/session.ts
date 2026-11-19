@@ -408,6 +408,19 @@ export class ProviderRecovered extends Schema.TaggedClass<
   retries: ProviderRetries,
 }) {}
 
+/**
+ * The first answer from the model provider since the harness process started: the provider
+ * accepted a request. A harness doesn't report its own synthetic answers, such as a usage-limit
+ * notice, as one.
+ */
+export class ProviderAnswered extends Schema.TaggedClass<
+  ProviderAnswered,
+  Brand.Brand<"@usine/core/agent/session/ProviderAnswered">
+>("Agent/ProviderAnswered")("ProviderAnswered", {
+  /** The session whose model provider answered. */
+  session: AgentSession,
+}) {}
+
 /** A normalized session activity or usage report for storage in an attempt transcript. */
 export const AgentSessionEvent = Schema.Union([
   SessionStarted,
@@ -421,5 +434,6 @@ export const AgentSessionEvent = Schema.Union([
   SessionTokensUpdated,
   ProviderRetrying,
   ProviderRecovered,
+  ProviderAnswered,
 ]);
 export type AgentSessionEvent = typeof AgentSessionEvent.Type;
