@@ -7,7 +7,6 @@ import {
   CycleLimit,
   DEFAULT_CYCLE_LIMIT,
 } from "@usine/core/cycle-budget";
-import { ModelId } from "@usine/core/agent/brain";
 import { AttemptTask } from "@usine/core/attempt";
 import { DedupKey, Event, EventId } from "@usine/core/event";
 import { ItemKey } from "@usine/core/item";
@@ -97,8 +96,6 @@ export class Submission extends Schema.Class<
   task: AttemptTask,
   /** The agent definition saved at match time for the run. */
   agent: Agent,
-  /** The requested Pi parent model, or `None` to use the runtime default. */
-  parentModel: Schema.Option(ModelId),
 }) {}
 
 // Older Runs used this Effect workflow execution ID; hashing the same input keeps Run IDs stable.

@@ -1,8 +1,6 @@
 import { jsonKey } from "@usine/core/json-key";
 import { NodeFileSystem, NodePath } from "@effect/platform-node";
 import { assert, describe, expect, it } from "@effect/vitest";
-import { DecisionBrain } from "@usine/core/agent";
-import { ModelId } from "@usine/core/agent/brain";
 import { InstanceDirectory } from "@usine/core/instance";
 import { type Environment, ExpressionEngine, Source } from "@usine/expression/expression-engine";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
@@ -1106,58 +1104,28 @@ workers:
       }).pipe(Effect.provide(parserLayer)),
   );
 
-  it.effect("parses the coordinator kind in settings and agent frontmatter", () =>
+  it.effect("ignores the removed coordinator and parent keys in usine.yaml and agent files", () =>
     Effect.gen(function* () {
       const parser = yield* ConfigParser;
-      const unset = yield* parser.parseUsineYaml(
+      const config = yield* parser.parseUsineYaml(
         InstancePath.make("usine.yaml"),
-        "version: 1\nrepos: []\n",
+        "version: 1\nrepos: []\nsettings:\n  poll_interval: 30\n  coordinator: session\n  parent_model: openai-codex/gpt-5.6-terra\n  parent_effort: low\n",
       );
-      expect(unset.settings.coordinator).toBe("session");
-      const events = yield* parser.parseUsineYaml(
-        InstancePath.make("usine.yaml"),
-        "version: 1\nrepos: []\nsettings:\n  coordinator: events\n",
-      );
-      expect(events.settings.coordinator).toBe("events");
-
-      const withParent = yield* parser
-        .parseUsineYaml(
-          InstancePath.make("usine.yaml"),
-          "version: 1\nrepos: []\nsettings:\n  coordinator: events\n  parent_model: openai-codex/gpt-5.6-terra\n  parent_effort: low\n",
-        )
-        .pipe(Effect.flip);
-      expect(withParent.stage).toBe("schema");
-      expect(withParent.details?.map(({ path }) => path)).toEqual([
-        ["settings", "parent_model"],
-        ["settings", "parent_effort"],
-      ]);
+      const encoded = yield* Schema.encodeEffect(UsineConfig)(config);
+      expect(encoded.settings).toMatchObject({ poll_interval: 30 });
+      expect(
+        ["coordinator", "parent_model", "parent_effort"].filter(
+          (key) => key in (encoded.settings ?? {}),
+        ),
+      ).toEqual([]);
 
       const agent = yield* parser.parseAgentFile(
         InstancePath.make("agents/developer.md"),
-        "---\nharness: codex\nmodel: gpt-5.6-sol\neffort: xhigh\ncoordinator: events\ndecision:\n  model: gpt-5.6-terra\n  effort: low\n---\nPersona body.",
-      );
-      expect(Option.getOrNull(agent.agent.coordinator)).toBe("events");
-      expect(Option.getOrNull(agent.agent.decision)).toEqual(
-        DecisionBrain.make({ model: ModelId.make("gpt-5.6-terra"), effort: "low" }),
+        "---\nharness: codex\nmodel: gpt-5.6-sol\neffort: xhigh\ncoordinator: session\nparent_model: openai-codex/gpt-5.6-terra\nparent_effort: low\ndecision:\n  model: gpt-5.6-terra\n  effort: low\n---\nPersona body.",
       );
       expect(formatAgent(agent)).toBe(
-        "---\nharness: codex\nmodel: gpt-5.6-sol\neffort: xhigh\ncoordinator: events\ndecision:\n  model: gpt-5.6-terra\n  effort: low\n---\nPersona body.",
+        "---\nharness: codex\nmodel: gpt-5.6-sol\neffort: xhigh\ndecision:\n  model: gpt-5.6-terra\n  effort: low\n---\nPersona body.",
       );
-
-      const agentWithParent = yield* parser
-        .parseAgentFile(
-          InstancePath.make("agents/developer.md"),
-          "---\nharness: codex\nmodel: gpt-5.6-sol\neffort: xhigh\ncoordinator: events\nparent_model: openai-codex/gpt-5.6-terra\n---\nPersona body.",
-        )
-        .pipe(Effect.flip);
-      expect(agentWithParent.stage).toBe("schema");
-      expect(agentWithParent.details?.map(({ path }) => path)).toEqual([["parent_model"]]);
-
-      const sessionWithParent = yield* parser.parseAgentFile(
-        InstancePath.make("agents/developer.md"),
-        "---\nharness: codex\nmodel: gpt-5.6-sol\neffort: xhigh\ncoordinator: session\nparent_model: openai-codex/gpt-5.6-terra\n---\nPersona body.",
-      );
-      expect(Option.getOrNull(sessionWithParent.agent.coordinator)).toBe("session");
 
       const unknownHarness = yield* parser
         .parseAgentFile(

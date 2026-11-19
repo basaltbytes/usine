@@ -1,8 +1,4 @@
-import {
-  coordinatorCopy,
-  supervisorCopy,
-  webhookStatusCopy,
-} from "~/features/configuration/strings";
+import { supervisorCopy, webhookStatusCopy } from "~/features/configuration/strings";
 import { entityKey } from "~/features/configuration/lib/entities";
 import type { ConfigurationView, SettingsView } from "@usine/orchestrator/operator";
 import type { ReactNode } from "react";
@@ -56,7 +52,7 @@ const groups = (
         effect:
           settings.maxAttemptTokens === null
             ? "No token ceiling."
-            : "Tokens an attempt may use, parent and children combined, before the runaway guard fails it.",
+            : "Tokens an attempt may use, all its sessions combined, before the runaway guard fails it.",
       },
       {
         key: "settings.max_background_wait_minutes",
@@ -68,32 +64,6 @@ const groups = (
           settings.maxBackgroundWaitMinutes === null
             ? "A child that answers while its background tasks run waits for them without a limit."
             : "Minutes a child that answered waits for its background tasks to start a turn. Then it returns its answer and its background tasks stop.",
-      },
-    ],
-  ],
-  [
-    "Coordinator",
-    [
-      {
-        key: "settings.coordinator",
-        value: mono(settings.coordinator),
-        effect: coordinatorCopy.effect[settings.coordinator],
-      },
-      {
-        key: "settings.parent_model",
-        value: settings.parentModel === null ? unset("Not set") : mono(settings.parentModel),
-        effect:
-          settings.parentModel === null
-            ? "Chosen by Pi unless the agent file sets parent_model."
-            : "Parent model when the agent file sets no parent_model.",
-      },
-      {
-        key: "settings.parent_effort",
-        value: settings.parentEffort === null ? unset("Not set") : mono(settings.parentEffort),
-        effect:
-          settings.parentEffort === null
-            ? "parent_effort from the agent file, or effort if it is not set."
-            : "Parent effort when the agent file sets no parent_effort.",
       },
     ],
   ],

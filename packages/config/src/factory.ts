@@ -1,8 +1,7 @@
 import { catalog } from "@usine/agents/harness";
 import { RoleBinding } from "@usine/core/access";
 import { UpgradeChannel, UpgradeMode } from "@usine/core/upgrade";
-import { CoordinatorKind, DEFAULT_COORDINATOR } from "@usine/core/agent";
-import { BrainSpec, Effort, ModelId } from "@usine/core/agent/brain";
+import { BrainSpec } from "@usine/core/agent/brain";
 import { ChildSessionBudget } from "@usine/core/agent/session";
 import { OperatorLogin } from "@usine/core/operator";
 import { canonicalRepositoryName, RepositoryName } from "@usine/core/repository";
@@ -55,12 +54,7 @@ import {
   SchemaTransformation,
 } from "effect";
 import { IpNetwork } from "effect/net";
-import {
-  eventsWithoutParentBrain,
-  nonBlankString,
-  uniqueLabelNames,
-  uniqueRepositoryNames,
-} from "./checks.ts";
+import { nonBlankString, uniqueLabelNames, uniqueRepositoryNames } from "./checks.ts";
 import { Lanes, Project } from "./project/project.ts";
 import { DeclaredLabel } from "./label.ts";
 
@@ -691,7 +685,7 @@ export class Settings extends Schema.Class<Settings, Brand.Brand<"@usine/config/
   maxChildren: ChildSessionBudget.pipe(Schema.withDecodingDefaultKey(Effect.succeed(4))),
   /** The wall-clock limit per attempt, in minutes, or `None` for no limit. */
   maxAttemptMinutes: Schema.OptionFromOptionalKey(PositiveInt),
-  /** The token limit per attempt, counting the parent and every child, or `None` for no limit. */
+  /** The token limit per attempt, counting all its sessions, or `None` for no limit. */
   maxAttemptTokens: Schema.OptionFromOptionalKey(PositiveInt),
   /**
    * The minutes an idle child that answered waits for its background work to start a turn, or
@@ -699,18 +693,6 @@ export class Settings extends Schema.Class<Settings, Brand.Brand<"@usine/config/
    * tasks stop.
    */
   maxBackgroundWaitMinutes: Schema.OptionFromOptionalKey(PositiveInt),
-  /**
-   * The coordinator kind of attempts whose agent sets none: `session` or `events`. Decoding
-   * defaults to `session`.
-   */
-  coordinator: CoordinatorKind.pipe(
-    Schema.withDecodingDefaultKey(Effect.succeed(DEFAULT_COORDINATOR)),
-    Schema.withConstructorDefault(Effect.succeed(DEFAULT_COORDINATOR)),
-  ),
-  /** The parent model for agents that set none, or `None` to let Pi select it. */
-  parentModel: Schema.OptionFromOptionalKey(ModelId),
-  /** The parent reasoning effort for agents that set none, or `None` to use the child's effort. */
-  parentEffort: Schema.OptionFromOptionalKey(Effort),
   /**
    * The harness, model, and effort of the supervisor role, or `None` when the instance runs no
    * supervisor. Admission refuses a brain whose harness can't serve the role.
@@ -794,10 +776,8 @@ const SettingsFromYaml = Settings.pipe(
     maxBackgroundWaitMinutes: "max_background_wait_minutes",
     supervisorLimits: "supervisor_limits",
     supervisorImagePullTimeoutMinutes: "supervisor_image_pull_timeout_minutes",
-    parentModel: "parent_model",
-    parentEffort: "parent_effort",
   }),
-).check(eventsWithoutParentBrain({ parentModel: "parent_model", parentEffort: "parent_effort" }));
+);
 
 /**
  * Decodes snake_case worker settings and checks SSH destination, provisioner, and gateway

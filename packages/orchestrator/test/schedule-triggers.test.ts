@@ -52,8 +52,6 @@ const agent = AgentFile.make({
   harness: Harness.make("codex"),
   model: ModelId.make("gpt-5.6-sol"),
   effort: "high",
-  parentModel: Option.none(),
-  parentEffort: Option.none(),
   persona: AgentPersona.make("Implement the issue."),
 });
 
@@ -272,7 +270,6 @@ describe("ScheduleTriggers", () => {
           assert.strictEqual(submission.task, `Run maintenance for ${submission.repository}.`);
           assert.strictEqual(submission.agent.name, agent.name);
           assert.strictEqual(submission.agent.brain.model, agent.model);
-          assert(Option.isNone(submission.parentModel));
           assert.deepStrictEqual(submission.event.payload, {
             tick: {
               scheduledAt: "2026-08-31T07:00:00.000Z",

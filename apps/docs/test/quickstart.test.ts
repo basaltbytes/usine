@@ -6,7 +6,7 @@ import { ConfigurationFolder } from "@usine/config/folder-codec";
 import { ConfigParser } from "@usine/config/parser";
 import { InstanceDirectory } from "@usine/core/instance";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
-import { Effect, FileSystem, Layer, Option } from "effect";
+import { Effect, FileSystem, Layer } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import { bootstrapCommand, developerAgent } from "../src/quickstart/bootstrap.ts";
 import { type QuickstartRoute, quickstartRoutes } from "../src/quickstart/routes.ts";
@@ -28,26 +28,15 @@ const loadsQuickstart = (root: InstanceDirectory, route: QuickstartRoute) =>
       { name: "local", kind: "local" },
     ]);
     expect(
-      instance.agents.map(({ name, harness, model, effort, coordinator, parentModel }) => ({
-        name,
-        harness,
-        model,
-        effort,
-        coordinator,
-        parentModel,
-      })),
+      instance.agents.map(({ name, harness, model, effort }) => ({ name, harness, model, effort })),
     ).toEqual([
       {
         name: "developer",
         harness: Harness.make(route.harness),
         model: route.model,
         effort: "medium",
-        coordinator: Option.none(),
-        parentModel: Option.none(),
       },
     ]);
-    expect(instance.config.settings.coordinator).toEqual("events");
-    expect(instance.config.settings.parentModel).toEqual(Option.none());
     expect(instance.loops.map(({ name, agent, approval }) => ({ name, agent, approval }))).toEqual([
       { name: "scratch/first-pr", agent: "developer", approval: "required" },
     ]);

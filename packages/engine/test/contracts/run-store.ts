@@ -759,7 +759,6 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
           revision: RepositoryRevision.make("store-revision"),
           task: AttemptTask.make("Run the store test"),
           agent: testAgent,
-          parentModel: Option.none(),
         });
         const runId = RunId.make("store-run");
         const failure = InfraFailure.make({
@@ -835,7 +834,6 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
           revision: RepositoryRevision.make("closed-revision"),
           task: AttemptTask.make("Close before starting"),
           agent: testAgent,
-          parentModel: Option.none(),
         });
         const runId = RunId.make("closed-run");
 

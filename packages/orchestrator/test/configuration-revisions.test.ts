@@ -1,6 +1,3 @@
-import { DurableHarness } from "@usine/durable/harness";
-import { fauxParent } from "@usine/durable/testing";
-import { parentAdmissionLayer } from "../src/current-instance/parents.ts";
 import { Harness } from "@usine/core/agent/brain";
 import { NodeServices } from "@effect/platform-node";
 import { expect, it } from "@effect/vitest";
@@ -31,10 +28,7 @@ import {
   Tracer,
 } from "effect";
 import { TestClock } from "effect/testing";
-import {
-  coordinatorBrainTimeout,
-  CurrentInstance,
-} from "../src/current-instance/current-instance.ts";
+import { CurrentInstance } from "../src/current-instance/current-instance.ts";
 import { writeInstanceFiles } from "./support/instance-folder.ts";
 
 const parser = ConfigParser.layer.pipe(Layer.provide(MarcbachmannCelLayer));
@@ -76,17 +70,6 @@ it.live("applies committed agent brains and webhook settings live", () =>
       ),
     );
     const current = Context.get(context, CurrentInstance);
-    const unused = () => Effect.die("unused harness operation");
-    yield* Layer.build(parentAdmissionLayer).pipe(
-      Effect.provideService(CurrentInstance, current),
-      Effect.provideService(DurableHarness, {
-        ...fauxParent([]),
-        install: unused,
-        resume: unused,
-        use: unused,
-        subscribe: unused,
-      }),
-    );
     const preflighted: Array<string> = [];
     yield* current.registerWorkers((_, loaded) =>
       Effect.sync(() => {
@@ -105,28 +88,6 @@ it.live("applies committed agent brains and webhook settings live", () =>
     const agentAfter = yield* Effect.transposeOption(
       Option.map(agent.after, Schema.decodeUnknownEffect(Schema.JsonObject)),
     );
-    const invalid = yield* Effect.flip(
-      current.commit({
-        expected: revision.number,
-        actor: initial.config.operator,
-        message: Option.none(),
-        changes: [
-          ConfigurationChange.make({
-            ...agent,
-            before: agent.after,
-            after: Option.map(agentAfter, (value) => ({
-              ...value,
-              parentModel: { _tag: "Some", value: "unknown-provider/nonexistent-model" },
-            })),
-          }),
-        ],
-      }),
-    );
-    expect(invalid._tag).toBe("FactoryConfigError");
-    expect((yield* store.read).number).toBe(revision.number);
-    const unchanged = yield* current.get;
-    expect(unchanged).toBe(initial);
-
     const changed = yield* store.commit({
       expected: revision.number,
       actor: initial.config.operator,
@@ -215,9 +176,8 @@ const recordingSpans =
 
 /**
  * Returns each `CurrentInstance.step` span in `spans` as the step log it should match. A span that
- * never ended has outcome `open`; a span outside a `CurrentInstance.commit`,
- * `CurrentInstance.reload`, or `CurrentInstance.registerParentAdmission` span has outcome
- * `orphaned`.
+ * never ended has outcome `open`; a span outside a `CurrentInstance.commit` or
+ * `CurrentInstance.reload` span has outcome `orphaned`.
  */
 const stepSpans = (spans: ReadonlyArray<Tracer.Span>): Array<StepLog> =>
   spans
@@ -235,11 +195,7 @@ const stepSpans = (spans: ReadonlyArray<Tracer.Span>): Array<StepLog> =>
         step,
         durationMillis: Number((endTime - startTime) / 1_000_000n),
         outcome: !ancestors.some((name) =>
-          [
-            "CurrentInstance.commit",
-            "CurrentInstance.reload",
-            "CurrentInstance.registerParentAdmission",
-          ].includes(name),
+          ["CurrentInstance.commit", "CurrentInstance.reload"].includes(name),
         )
           ? "orphaned"
           : Exit.isSuccess(exit)
@@ -259,16 +215,12 @@ const unordered = (steps: ReadonlyArray<StepLog>) =>
       left.outcome.localeCompare(right.outcome),
   );
 
-/** The step that `revisionFixture` logs when it registers the coordinator brain check. */
-const startupCheck: StepLog = { step: "coordinator-brains", durationMillis: 0, outcome: "passed" };
-
 const savedSteps = (wait: number, preflight = 0): Array<StepLog> =>
   [
     ["wait", wait],
     ["read", 0],
     ["parse", 0],
     ["restart", 0],
-    ["coordinator-brains", 0],
     ["worker-preflight", preflight],
     ["store", 0],
     ["apply", 0],
@@ -278,10 +230,7 @@ const savedSteps = (wait: number, preflight = 0): Array<StepLog> =>
     outcome: "passed",
   }));
 
-/**
- * Builds the current instance over a stored reviewer agent, with a coordinator brain check that
- * signals `checking` and never finishes while `slow.value` is true.
- */
+/** Builds the current instance over a stored reviewer agent. */
 const revisionFixture = Effect.gen(function* () {
   const directory = yield* (yield* FileSystem.FileSystem).makeTempDirectoryScoped();
   const root = InstanceDirectory.make(directory);
@@ -307,13 +256,6 @@ const revisionFixture = Effect.gen(function* () {
     ),
   );
   const current = Context.get(context, CurrentInstance);
-  const slow = { value: false };
-  const checking = yield* Deferred.make<void>();
-  yield* current.registerParentAdmission(() =>
-    slow.value
-      ? Deferred.succeed(checking, undefined).pipe(Effect.andThen(Effect.never))
-      : Effect.succeed([]),
-  );
   const agent = revision.changes.find(({ key }) => key.kind === "agent");
   if (agent === undefined) return yield* Effect.die("missing agent fixture");
   const agentAfter = yield* Effect.transposeOption(
@@ -336,37 +278,7 @@ const revisionFixture = Effect.gen(function* () {
       message: Option.none(),
       changes: [change],
     });
-  return { store, initial, revision, current, slow, checking, edit, save };
-});
-
-it.effect("refuses a save whose coordinator brain check is slow and stores no revision", () => {
-  const steps: Array<StepLog> = [];
-  return Effect.gen(function* () {
-    const { store, initial, revision, current, slow, checking, edit, save } =
-      yield* revisionFixture;
-    yield* current.registerWorkers(() => Effect.succeed(Effect.void));
-    slow.value = true;
-    const saving = yield* save(revision.number, edit("Review again.")).pipe(
-      Effect.flip,
-      Effect.forkChild,
-    );
-    yield* Deferred.await(checking);
-    yield* TestClock.adjust(coordinatorBrainTimeout);
-    const failure = yield* Fiber.join(saving);
-
-    expect(failure._tag).toBe("ValidationTimeoutError");
-    if (failure._tag !== "ValidationTimeoutError") return;
-    expect(failure.step).toBe("coordinator-brains");
-    expect(failure.message).toContain("didn't finish within 10 seconds");
-    expect((yield* store.read).number).toBe(revision.number);
-    const unchanged = yield* current.get;
-    expect(unchanged).toBe(initial);
-    expect(steps).toEqual([
-      startupCheck,
-      ...savedSteps(0).slice(0, 4),
-      { step: "coordinator-brains", durationMillis: 10_000, outcome: "failed" },
-    ]);
-  }).pipe(Effect.scoped, Effect.withLogger(stepLogger(steps)), Effect.provide(NodeServices.layer));
+  return { store, revision, current, edit, save };
 });
 
 it.effect("logs every step of a save that waits behind a running save", () => {
@@ -397,7 +309,7 @@ it.effect("logs every step of a save that waits behind a running save", () => {
     yield* Fiber.join(second);
 
     expect((yield* store.read).number).toBe(revision.number + 2);
-    expect(steps).toEqual([startupCheck, ...savedSteps(0, 2_000), ...savedSteps(2_000)]);
+    expect(steps).toEqual([...savedSteps(0, 2_000), ...savedSteps(2_000)]);
     expect(unordered(stepSpans(spans))).toEqual(unordered(steps));
   }).pipe(
     Effect.scoped,
@@ -442,54 +354,6 @@ it.effect("logs the wait of a save whose caller gives up and releases the queue"
     Effect.scoped,
     Effect.withLogger(stepLogger(steps)),
     recordingSpans(spans),
-    Effect.provide(NodeServices.layer),
-  );
-});
-
-it.effect("keeps following stored revisions after one times out its brain check", () => {
-  const steps: Array<StepLog> = [];
-  const messages: Array<unknown> = [];
-  return Effect.gen(function* () {
-    const { store, initial, revision, current, slow, checking, edit } = yield* revisionFixture;
-    yield* current.registerWorkers(() => Effect.succeed(Effect.void));
-    const installed = yield* current.changes.pipe(
-      Stream.take(2),
-      Stream.runCollect,
-      Effect.forkChild,
-    );
-    slow.value = true;
-    yield* store.commit({
-      expected: revision.number,
-      actor: initial.config.operator,
-      message: Option.none(),
-      changes: [edit("Timed out.")],
-    });
-    // The memory store polls for revisions every 500 milliseconds.
-    yield* TestClock.adjust("500 millis");
-    yield* Deferred.await(checking);
-    yield* TestClock.adjust(coordinatorBrainTimeout);
-    expect(steps).toContainEqual({
-      step: "coordinator-brains",
-      durationMillis: 10_000,
-      outcome: "failed",
-    });
-    const unchanged = yield* current.get;
-    expect(unchanged).toBe(initial);
-
-    slow.value = false;
-    yield* store.commit({
-      expected: ConfigurationRevisionNumber.make(revision.number + 1),
-      actor: initial.config.operator,
-      message: Option.none(),
-      changes: [edit("Applied.", "Timed out.")],
-    });
-    yield* TestClock.adjust("500 millis");
-    const [, applied] = yield* Fiber.join(installed);
-    expect(applied?.agents[0]?.agent.persona).toBe("Applied.");
-    expect(messages).not.toContain("Configuration revision stream failed; retrying");
-  }).pipe(
-    Effect.scoped,
-    Effect.withLogger(stepLogger(steps, messages)),
     Effect.provide(NodeServices.layer),
   );
 });

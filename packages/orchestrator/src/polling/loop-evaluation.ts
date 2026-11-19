@@ -140,7 +140,7 @@ export const evaluateItem = Effect.fn("PollingTriggers.evaluateItem")(function* 
   }
   const failures: Array<LoopEvaluationFailure> = [];
   let revokedRuns = 0;
-  for (const { agent, loop, parentModel } of loops) {
+  for (const { agent, loop } of loops) {
     yield* Effect.annotateCurrentSpan({ loop: loop.name, agent: agent.name });
     const matches = yield* Effect.result(evaluateTrigger(loop, repository, payload));
     // A failed `if:` gives no answer about the match, so the Item's queued Runs stay as they are.
@@ -203,7 +203,6 @@ export const evaluateItem = Effect.fn("PollingTriggers.evaluateItem")(function* 
       revision,
       task: AttemptTask.make(rendered.success),
       agent,
-      parentModel,
     });
     const submitted = yield* runs.submit(submission);
     yield* Effect.logInfo("Submitted matching item state", {

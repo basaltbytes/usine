@@ -76,7 +76,6 @@ import {
   OpenApi,
 } from "effect/http-api";
 import { RestartBlock } from "../current-instance/changes.ts";
-import { RevisionStep } from "../current-instance/steps.ts";
 import type { InstanceReloadError } from "../current-instance/current-instance.ts";
 import { BoardLaneId } from "./board.ts";
 import { CycleBudgetResetView } from "./need.ts";
@@ -319,31 +318,8 @@ export class FactoryConfigRefusal extends Schema.Error<
   { httpApiStatus: 422 },
 ) {}
 
-/**
- * A configuration write or reload refused because one of its steps, such as the coordinator brain
- * check, ran out of time.
- */
-export class ValidationTimeoutRefusal extends Schema.Error<
-  ValidationTimeoutRefusal,
-  Brand.Brand<"@usine/orchestrator/operator/http/ValidationTimeoutRefusal">
->("@usine/orchestrator/ValidationTimeoutRefusal")(
-  {
-    /** The fixed domain error tag that identifies this refusal. */
-    error: Schema.Literal("ValidationTimeoutError"),
-    /** The diagnostic text to show to the operator. */
-    message: Schema.String,
-    /** The step of the save or reload that ran out of time. */
-    step: RevisionStep,
-  },
-  { httpApiStatus: 503 },
-) {}
-
 /** The reason a reload kept the running instance. */
-export type ReloadRefusal =
-  | RestartRequiredRefusal
-  | ReloadPreflightRefusal
-  | FactoryConfigRefusal
-  | ValidationTimeoutRefusal;
+export type ReloadRefusal = RestartRequiredRefusal | ReloadPreflightRefusal | FactoryConfigRefusal;
 
 /** Returns the reload endpoint's refusal for `error`, with `message` for the operator. */
 export const reloadRefusal = (error: InstanceReloadError, message: string): ReloadRefusal =>
@@ -377,8 +353,6 @@ export const reloadRefusal = (error: InstanceReloadError, message: string): Relo
       }),
     FactoryConfigError: ({ _tag, file, stage }) =>
       FactoryConfigRefusal.make({ error: _tag, message, file, stage }),
-    ValidationTimeoutError: ({ _tag, step }) =>
-      ValidationTimeoutRefusal.make({ error: _tag, message, step }),
   });
 
 /** An HTTP 409 response when a configuration write uses an outdated revision. */
@@ -443,7 +417,6 @@ const configurationWriteErrors = [
   RestartRequiredRefusal,
   ReloadPreflightRefusal,
   FactoryConfigRefusal,
-  ValidationTimeoutRefusal,
 ];
 const revisionParams = {
   number: Schema.FiniteFromString.pipe(Schema.decodeTo(ConfigurationRevisionNumber)),

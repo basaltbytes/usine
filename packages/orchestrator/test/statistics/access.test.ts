@@ -30,7 +30,6 @@ const summary = Effect.gen(function* () {
   const decodedValue1 = yield* Schema.decodeEffect(Agent)({
     name: "developer",
     brain: { harness: Harness.make("codex"), model: "test", effort: "high" },
-    parentModel: null,
     persona: "Work.",
   });
   return RunSummary.make({

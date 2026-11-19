@@ -33,9 +33,9 @@ import {
   UndeclaredTriggerLabelWarning,
   UndeclaredOutcomeLabelWarning,
 } from "./instance/diagnostics.ts";
-import { eventsWithoutParentBrain, scheduleWithoutOutcomeLabels } from "./checks.ts";
+import { scheduleWithoutOutcomeLabels } from "./checks.ts";
 import { LoopFile, loopPath, LoopApproval, LoopPriority, PromptTemplate } from "./loop.ts";
-import { AgentPersona, AgentName, CoordinatorKind, DecisionBrain } from "@usine/core/agent";
+import { AgentPersona, AgentName, DecisionBrain } from "@usine/core/agent";
 import { IssueTrigger, PullRequestTrigger, ScheduleTrigger, Stream } from "./trigger.ts";
 import { UsineConfig } from "./factory.ts";
 import { ValidSelector } from "./selector.ts";
@@ -102,15 +102,29 @@ class AgentFrontmatter extends Schema.Class<
   harness: catalog.harness,
   model: ModelId,
   effort: Effort,
-  parentModel: Schema.OptionFromOptionalKey(ModelId),
-  parentEffort: Schema.OptionFromOptionalKey(Effort),
-  coordinator: Schema.OptionFromOptionalKey(CoordinatorKind),
   decision: Schema.OptionFromOptionalKey(DecisionBrain),
 }) {}
 
-const AuthoredAgentFrontmatter = AgentFrontmatter.pipe(
-  Schema.encodeKeys({ parentModel: "parent_model", parentEffort: "parent_effort" }),
-).check(eventsWithoutParentBrain({ parentModel: "parent_model", parentEffort: "parent_effort" }));
+/**
+ * The keys that earlier versions read in agent frontmatter and in the `settings` block of
+ * `usine.yaml`. Parsing drops them and logs a warning.
+ */
+export const REMOVED_KEYS = ["coordinator", "parent_model", "parent_effort"] as const;
+
+const jsonObject = Schema.decodeUnknownOption(Schema.JsonObject);
+
+/** Returns `fields` without `REMOVED_KEYS`, and logs the keys it drops from `file`. */
+const dropRemovedKeys = Effect.fnUntraced(function* (file: InstancePath, fields: Schema.Json) {
+  const object = jsonObject(fields);
+  if (Option.isNone(object)) return fields;
+  const removed = REMOVED_KEYS.filter((key) => Object.hasOwn(object.value, key));
+  if (removed.length === 0) return fields;
+  yield* Effect.logWarning("Ignored keys that usine doesn't read; remove them from the file", {
+    file,
+    keys: removed,
+  });
+  return Struct.omit(object.value, removed);
+});
 
 /**
  * Serializes `agent` as YAML frontmatter and a Markdown persona, with snake_case keys. The name
@@ -119,7 +133,7 @@ const AuthoredAgentFrontmatter = AgentFrontmatter.pipe(
 export const formatAgent = (agent: AgentFile): string =>
   // The value is already validated.
   // @effect-diagnostics-next-line schemaSync:off
-  `---\n${writeYaml(Schema.encodeSync(AuthoredAgentFrontmatter)(AgentFrontmatter.make(agent)))}---\n${agent.persona}`;
+  `---\n${writeYaml(Schema.encodeSync(AgentFrontmatter)(AgentFrontmatter.make(agent)))}---\n${agent.persona}`;
 
 /**
  * Serializes `loop` as YAML frontmatter and a Markdown prompt, with snake_case keys. The name
@@ -301,7 +315,13 @@ const parseUsineYaml = Effect.fn("ConfigParser.parseUsineYaml")(
   (file: InstancePath, source: string): Effect.Effect<UsineConfig, ConfigFileError> =>
     Effect.gen(function* () {
       const yaml = yield* parseYaml(file, source);
-      return yield* Schema.decodeUnknownEffect(UsineConfig)(yaml, {
+      const fields = jsonObject(yaml);
+      const settings = Option.flatMap(fields, (value) => Option.fromUndefinedOr(value.settings));
+      const config =
+        Option.isSome(fields) && Option.isSome(settings)
+          ? { ...fields.value, settings: yield* dropRemovedKeys(file, settings.value) }
+          : yaml;
+      return yield* Schema.decodeUnknownEffect(UsineConfig)(config, {
         onExcessProperty: "error",
         errors: "all",
       }).pipe(Effect.mapError((error) => schemaError(file, error)));
@@ -310,32 +330,23 @@ const parseUsineYaml = Effect.fn("ConfigParser.parseUsineYaml")(
 
 /**
  * Parses Markdown `source`, deriving the agent name from `file`. Rejects invalid frontmatter,
- * unknown keys, and an empty persona with `ConfigFileError`.
+ * unknown keys other than `REMOVED_KEYS`, and an empty persona with `ConfigFileError`.
  */
 export const parseAgentFile = Effect.fn("ConfigParser.parseAgentFile")(
   (file: InstancePath, source: string): Effect.Effect<AgentFile, ConfigFileError> =>
     Effect.gen(function* () {
       const name = yield* agentName(file);
       const markdown = yield* splitMarkdown(file, source);
-      const yaml = yield* parseYaml(file, markdown.yaml);
-      const frontmatter = yield* Schema.decodeUnknownEffect(AuthoredAgentFrontmatter)(yaml, {
+      const authored = yield* parseYaml(file, markdown.yaml);
+      const yaml = yield* dropRemovedKeys(file, authored);
+      const frontmatter = yield* Schema.decodeUnknownEffect(AgentFrontmatter)(yaml, {
         onExcessProperty: "error",
         errors: "all",
       }).pipe(Effect.mapError((error) => schemaError(file, error)));
       const persona = yield* Schema.decodeEffect(AgentPersona)(markdown.body).pipe(
         Effect.mapError((error) => schemaError(file, error)),
       );
-      return AgentFile.make({
-        name,
-        harness: frontmatter.harness,
-        model: frontmatter.model,
-        effort: frontmatter.effort,
-        parentModel: frontmatter.parentModel,
-        parentEffort: frontmatter.parentEffort,
-        coordinator: frontmatter.coordinator,
-        decision: frontmatter.decision,
-        persona,
-      });
+      return AgentFile.make({ name, ...frontmatter, persona });
     }),
 );
 

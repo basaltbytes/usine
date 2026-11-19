@@ -1,8 +1,6 @@
 import { ChangeBus } from "@usine/core/changes";
 import { ConfigParser } from "@usine/config/parser";
-import { InvalidAgent } from "@usine/config/agent";
-import { QuarantinedLoop, loopPath } from "@usine/config/loop";
-import { ConfigFileError, FactoryConfigError, InstancePath } from "@usine/config/file";
+import { FactoryConfigError, InstancePath } from "@usine/config/file";
 import {
   Configuration,
   ConfigurationStore,
@@ -25,7 +23,6 @@ import {
   Array as EffectArray,
   Context,
   DateTime,
-  Duration,
   Effect,
   Layer,
   Match,
@@ -47,7 +44,7 @@ import {
   type RestartChange,
   restartChanges,
 } from "./changes.ts";
-import { afterRunning, RevisionStep, timedStep } from "./steps.ts";
+import { afterRunning, timedStep } from "./steps.ts";
 
 /** A reload changed `usine.yaml` in a way that needs a restart, so the running instance is kept. */
 export class RestartRequiredError extends Schema.TaggedError<
@@ -134,54 +131,8 @@ export const reloadPreflightFailed = (
   });
 };
 
-/** The longest wait for the coordinator brain check before a save or reload is refused. */
-export const coordinatorBrainTimeout = Duration.seconds(10);
-
-/** A step of a save or reload didn't finish in time, so nothing was stored or applied. */
-export class ValidationTimeoutError extends Schema.TaggedError<
-  ValidationTimeoutError,
-  Brand.Brand<"@usine/orchestrator/current-instance/current-instance/ValidationTimeoutError">
->("@usine/orchestrator/ValidationTimeoutError")("ValidationTimeoutError", {
-  /** The step that ran out of time. */
-  step: RevisionStep,
-  /** An operator summary of the timeout, stating that the running configuration is kept. */
-  message: Schema.NonEmptyString,
-}) {}
-
-/**
- * Runs `check` as the `coordinator-brains` step. Fails with `ValidationTimeoutError` when it runs
- * longer than `coordinatorBrainTimeout`, and with `refuse(problems)` when it refuses a brain, so
- * a refused brain logs the step as `failed`.
- */
-export const checkCoordinatorBrains = <E, R, F>(
-  check: Effect.Effect<ReadonlyArray<ConfigFileError>, E, R>,
-  refuse: (problems: EffectArray.NonEmptyReadonlyArray<ConfigFileError>) => F,
-): Effect.Effect<void, E | F | ValidationTimeoutError, R> =>
-  timedStep(
-    "coordinator-brains",
-    check.pipe(
-      Effect.timeoutOrElse({
-        duration: coordinatorBrainTimeout,
-        orElse: () =>
-          Effect.fail(
-            ValidationTimeoutError.make({
-              step: "coordinator-brains",
-              message: `The coordinator brain check didn't finish within ${Duration.toSeconds(coordinatorBrainTimeout)} seconds. The running configuration is unchanged. Check that the model provider responds, then try again.`,
-            }),
-          ),
-      }),
-      Effect.flatMap((problems) =>
-        EffectArray.isReadonlyArrayNonEmpty(problems) ? Effect.fail(refuse(problems)) : Effect.void,
-      ),
-    ),
-  );
-
 /** The reason a reload kept the running instance. */
-export type InstanceReloadError =
-  | FactoryConfigError
-  | RestartRequiredError
-  | ReloadPreflightError
-  | ValidationTimeoutError;
+export type InstanceReloadError = FactoryConfigError | RestartRequiredError | ReloadPreflightError;
 
 /**
  * Prepares a reload from `running` to `loaded` and returns the effect that applies its workers.
@@ -213,12 +164,11 @@ const rejectionLogFields = (error: InstanceReloadError) =>
       causeTag: cause._tag,
       message,
     }),
-    ValidationTimeoutError: ({ _tag, step, message }) => ({ errorTag: _tag, step, message }),
   });
 
 /**
  * The stored configuration snapshot that the orchestrator runs, replaced by each reload. Consumers read
- * it each time they act; a Run keeps the Agent, task, and parent model it opened with.
+ * it each time they act; a Run keeps the Agent and task it opened with.
  */
 export class CurrentInstance extends Context.Service<
   CurrentInstance,
@@ -245,10 +195,6 @@ export class CurrentInstance extends Context.Service<
      * setup mode, a reload rejects any `workers` change.
      */
     readonly registerWorkers: (workers: WorkerReload) => Effect.Effect<void, never, Scope.Scope>;
-    /** Quarantines startup refusals and checks later revisions until the scope closes. */
-    readonly registerParentAdmission: (
-      admit: (loaded: LoadedInstance) => Effect.Effect<ReadonlyArray<ConfigFileError>>,
-    ) => Effect.Effect<void, never, Scope.Scope>;
   }
 >()("@usine/orchestrator/current-instance/current-instance/CurrentInstance") {
   /**
@@ -270,9 +216,6 @@ export class CurrentInstance extends Context.Service<
         );
         const current = yield* SubscriptionRef.make(initial);
         const registered = yield* Ref.make(Option.none<WorkerReload>());
-        const parentAdmission = yield* Ref.make<
-          (loaded: LoadedInstance) => Effect.Effect<ReadonlyArray<ConfigFileError>>
-        >(() => Effect.succeed([]));
         const reloading = yield* Semaphore.make(1);
         yield* logConfigWarnings(initial.warnings);
 
@@ -313,16 +256,6 @@ export class CurrentInstance extends Context.Service<
                     ? Effect.fail(restartRequired(restart))
                     : Effect.void;
                 }),
-              );
-              const admit = yield* Ref.get(parentAdmission);
-              yield* restore(
-                checkCoordinatorBrains(admit(loaded), ([problem]) =>
-                  FactoryConfigError.make({
-                    file: problem.file,
-                    stage: problem.stage,
-                    message: `${problem.message}. The running configuration is unchanged.`,
-                  }),
-                ),
               );
               const applyWorkers = yield* timedStep(
                 "worker-preflight",
@@ -460,7 +393,6 @@ export class CurrentInstance extends Context.Service<
                   FactoryConfigError: () => Effect.void,
                   RestartRequiredError: () => Effect.void,
                   ReloadPreflightError: () => Effect.void,
-                  ValidationTimeoutError: () => Effect.void,
                 }),
               );
             }).pipe(reloading.withPermits(1)),
@@ -485,68 +417,6 @@ export class CurrentInstance extends Context.Service<
           reload,
           commit: commitRevision,
           registerWorkers,
-          registerParentAdmission: Effect.fn("CurrentInstance.registerParentAdmission")(function* (
-            admit: (loaded: LoadedInstance) => Effect.Effect<ReadonlyArray<ConfigFileError>>,
-          ) {
-            yield* Effect.annotateCurrentSpan({ directory });
-            yield* Effect.acquireRelease(Ref.set(parentAdmission, admit), () =>
-              Ref.set(parentAdmission, () => Effect.succeed([])),
-            );
-            yield* Effect.gen(function* () {
-              const loaded = yield* SubscriptionRef.get(current);
-              // A refusal fails the step, so it logs as `failed`, and then quarantines the agents.
-              const problems = yield* timedStep(
-                "coordinator-brains",
-                Effect.flatMap(admit(loaded), (problems) =>
-                  EffectArray.isReadonlyArrayNonEmpty(problems)
-                    ? Effect.fail(problems)
-                    : Effect.void,
-                ),
-              ).pipe(Effect.as(EffectArray.empty<ConfigFileError>()), Effect.catch(Effect.succeed));
-              if (problems.length === 0) return;
-              const refused = new Set(problems.map(({ file }) => file));
-              const agents = loaded.agents.filter(
-                ({ name }) => !refused.has(InstancePath.make(`agents/${name}.md`)),
-              );
-              const names = new Set(agents.map(({ name }) => name));
-              const loops = loaded.loops.filter((loop) => names.has(loop.agent));
-              const quarantined = loaded.loops.filter((loop) => !names.has(loop.agent));
-              yield* SubscriptionRef.set(
-                current,
-                LoadedInstance.make({
-                  ...loaded,
-                  agents,
-                  loops,
-                  invalidAgents: [
-                    ...loaded.invalidAgents,
-                    ...problems.map((error) => InvalidAgent.make({ file: error.file, error })),
-                  ],
-                  quarantinedLoops: [
-                    ...loaded.quarantinedLoops,
-                    ...quarantined.map((loop) => {
-                      const file = loopPath(loop.name);
-                      return QuarantinedLoop.make({
-                        file,
-                        error: ConfigFileError.make({
-                          file,
-                          stage: "reference",
-                          expression: Option.none(),
-                          message: `Agent "${loop.agent}" cannot run as coordinator. Correct its parent configuration and reload.`,
-                        }),
-                      });
-                    }),
-                  ],
-                }),
-              );
-              yield* Effect.logWarning(
-                "Coordinator admission quarantined agents and loops at startup",
-                {
-                  agents: problems.map(({ file }) => file),
-                  loops: quarantined.map(({ name }) => name),
-                },
-              );
-            }).pipe(reloading.withPermits(1));
-          }),
         };
       }),
     );

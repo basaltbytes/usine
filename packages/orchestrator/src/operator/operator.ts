@@ -39,7 +39,7 @@ import {
   TranscriptSessionsQuery,
 } from "@usine/engine/transcript";
 import { GitHubLabelName } from "@usine/core/label";
-import { Agent, resolveParentModel } from "@usine/core/agent";
+import { Agent } from "@usine/core/agent";
 import { AttemptContext, AttemptId } from "@usine/core/attempt";
 import { Intervention } from "@usine/core/attempt/channel";
 import type { LoadedInstance } from "@usine/config/instance";
@@ -1473,13 +1473,7 @@ const makeOperator = Effect.gen(function* () {
       runId,
       RetryRequest.make({
         requestedBy: yield* requestActor(instance.config.operator),
-        amendment: Option.some(
-          AttemptContext.make({
-            task: edit.task,
-            agent,
-            parentModel: resolveParentModel(agent, instance.config.settings.parentModel),
-          }),
-        ),
+        amendment: Option.some(AttemptContext.make({ task: edit.task, agent })),
       }),
     );
     yield* Effect.logInfo("Operator amended and retried Run", { runId, agent: agent.name });
@@ -1531,11 +1525,7 @@ const makeOperator = Effect.gen(function* () {
         permissions: loop.permissions,
         ciPolicy: loop.ci,
         outcomeLabels: loop.outcomeLabels,
-        context: AttemptContext.make({
-          task: edit.task,
-          agent,
-          parentModel: resolveParentModel(agent, instance.config.settings.parentModel),
-        }),
+        context: AttemptContext.make({ task: edit.task, agent }),
         requestedBy: yield* requestActor(instance.config.operator),
       }),
     );

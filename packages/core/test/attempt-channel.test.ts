@@ -32,8 +32,6 @@ const agent = Agent.make({
     model: ModelId.make("claude-sonnet-4-6"),
     effort: "high",
   }),
-  parentModel: Option.none(),
-  parentEffort: Option.none(),
   persona: AgentPersona.make("Implement the task and sign every GitHub comment."),
 });
 const parentModel = ModelId.make("anthropic/claude-opus-4-6");

@@ -34,8 +34,6 @@ const agent = Agent.make({
     model: ModelId.make("test-model"),
     effort: "high",
   }),
-  parentModel: Option.none(),
-  parentEffort: Option.none(),
 });
 const worker = WorkerName.make("test-worker");
 const success = Result.succeed(StepResult.make({ message: "Round complete", facts: [] }));
@@ -57,7 +55,6 @@ const submission = (loop: string, round: number, item = "pr-72") =>
     revision: RepositoryRevision.make(`commit-${round}`),
     task: AttemptTask.make("Work on this Item"),
     agent,
-    parentModel: Option.none(),
   });
 const afterReset = (value: Submission) =>
   Submission.make({

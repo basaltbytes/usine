@@ -21,6 +21,7 @@ const workspace = AttemptWorkspace.make({
     ...request,
     baseCommit: CommitSha.make("0123456789abcdef0123456789abcdef01234567"),
     parentModel: Option.some(PARENT_MODEL),
+    parentEffort: "medium",
     preparedAt: Option.none(),
   }),
 });

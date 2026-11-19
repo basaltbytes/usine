@@ -36,14 +36,10 @@ export const SettingsFields = (fields: FormFieldsProps) => {
               : next,
           );
         }}
-        definitions={settingsFormFields.map((field) =>
-          field.path === "settings.parent_effort"
-            ? { ...field, options: Effort.literals, optional: true }
-            : {
-                ...field,
-                optional: field.path === "operator" || field.path === "settings.parent_model",
-              },
-        )}
+        definitions={settingsFormFields.map((field) => ({
+          ...field,
+          optional: field.path === "operator",
+        }))}
       />
       {fieldValue(fields.value, "webhooks.mode") === "endpoint" && (
         <Fields

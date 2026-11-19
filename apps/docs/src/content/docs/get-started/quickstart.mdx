@@ -102,7 +102,7 @@ Expected: `ls` lists `developer.md` under `agents` and `first-pr.md` under `proj
 
 The tabs differ only in the developer agent's `harness` and `model`, which select the harness from step 2. The `effort` value must be a level that the model supports; `medium` works for each tab's example model. For Pi, `/thinking` lists those levels, as shown in step 2. For Claude Code, `sonnet` selects the latest Sonnet model. Use another model ID that the harness accepts if you prefer.
 
-The instance setting `coordinator: events` selects the event-driven coordinator. It starts one child with the task and turns the child's report into the attempt's outcome, so the instance needs no parent model or credential. See [Coordinator](/reference/configuration/agents/#coordinator).
+The event-driven coordinator starts one child with the task and turns the child's report into the attempt's outcome, so the instance needs no parent model or credential. See [Coordinator](/reference/configuration/agents/#coordinator).
 
 The loop selects open issues labeled `ready-for-agent` and requires approval. Its task removes that label before changing the README, then opens a pull request that closes the issue. Review the instructions before continuing.
 

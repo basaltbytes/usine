@@ -24,7 +24,7 @@ import { SettingsPage } from "~/features/configuration/settings.page";
 import { SettingsFields } from "~/features/configuration/components/forms/settings";
 import { WorkersList } from "~/features/configuration/components/workers/list";
 import { WorkerDetail } from "~/features/configuration/components/workers/detail";
-import { AgentFileView, ConfigurationView, SettingsView } from "@usine/orchestrator/operator";
+import { ConfigurationView, SettingsView } from "@usine/orchestrator/operator";
 import { Schema } from "effect";
 import {
   configurationFixture,
@@ -158,37 +158,12 @@ describe("Agents page", () => {
     assert.include(markup, 'href="/configuration/agents/reviewer"');
   });
 
-  it("shows an Agent's persona and where its parent settings come from", async () => {
+  it("shows an Agent's persona and the Loops that name it", async () => {
     const markup = await render(() => (
       <AgentDetail name="developer" configuration={configurationFixture()} />
     ));
-    const page = text(markup);
     assert.include(markup, "<li>Keep changes small.</li>");
-    assert.include(page, "openai-codex/gpt-5.6-terra From settings.parent_model");
-    assert.include(page, "medium Set on this agent");
-    assert.include(page, "Coordinator session From settings.coordinator");
     assert.include(markup, 'href="/configuration/loops/start-dev"');
-  });
-
-  it("shows an Agent that inherits the event-driven coordinator without parent settings", async () => {
-    const configuration = configurationFixture();
-    const page = text(
-      await render(() => (
-        <AgentDetail
-          name="developer"
-          configuration={ConfigurationView.make({
-            ...configuration,
-            settings: SettingsView.make({ ...configuration.settings, coordinator: "events" }),
-            agents: configuration.agents.map((agent) =>
-              AgentFileView.make({ ...agent, coordinator: null, resolvedCoordinator: "events" }),
-            ),
-          })}
-        />
-      )),
-    );
-    assert.include(page, "Coordinator events From settings.coordinator");
-    assert.notInclude(page, "Parent model");
-    assert.notInclude(page, "Parent effort");
   });
 
   it("shows why an Agent file did not load", async () => {

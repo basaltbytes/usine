@@ -6,7 +6,7 @@ Stores versioned configuration and imports and exports the files of a [usine](ht
 
 - `usine.yaml`: schema version, factory-wide GitHub labels, the managed-repo registry, projects, settings, workers, webhook mode, and operator login.
 - `projects/<project>/loops/*.md`: strict YAML frontmatter and a Markdown prompt. The parser type-checks trigger, approval, and priority conditions and every `{{ CEL expression }}` against the trigger's payload.
-- `agents/*.md`: harness, model, effort, optional parent model and parent effort, and persona.
+- `agents/*.md`: harness, model, effort, an optional decision brain, and persona. Parsing ignores the `coordinator`, `parent_model`, and `parent_effort` keys of earlier versions, in agent files and in `settings`.
 
 Each worker accepts `paused` (default `false`), which keeps new attempts off the worker while its running attempts finish. Encoding omits `paused: false`, so exports of unpaused workers stay unchanged.
 

@@ -3,8 +3,8 @@ import type {
   RecoveredLeftovers,
   RecoverySink,
 } from "@usine/core/attempt/salvage";
-import { Agent, CoordinatorKind, DEFAULT_COORDINATOR } from "@usine/core/agent";
-import { BrainSpec, Effort, ModelId } from "@usine/core/agent/brain";
+import { Agent } from "@usine/core/agent";
+import { BrainSpec } from "@usine/core/agent/brain";
 import { ChildSessionBudget } from "@usine/core/agent/session";
 import { AttemptTask, AttemptId, type StopReason } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
@@ -251,11 +251,6 @@ export class CheckoutRequest extends Schema.Class<
    * children. Preparation verifies the brain on the Worker.
    */
   agent: Agent,
-  /**
-   * The Pi parent's model. If `None`, uses the configured default model, then the first model
-   * with a credential. A model unknown to Pi fails the launch.
-   */
-  parentModel: Schema.Option(ModelId),
   /** The maximum child sessions per Attempt. One more fails the Attempt with `ChildSessionBudgetFailure`. */
   maxChildren: ChildSessionBudget,
   /** The maximum minutes of Attempt execution, excluding preparation and cleanup, or `None` for no limit. */
@@ -268,12 +263,6 @@ export class CheckoutRequest extends Schema.Class<
    */
   maxBackgroundWaitMinutes: Schema.Option(Schema.Int.check(Schema.isGreaterThan(0))).pipe(
     Schema.withConstructorDefault(Effect.succeed(Option.none<number>())),
-  ),
-  /** The Pi parent's reasoning effort. The launch fails if the model doesn't support it. */
-  parentEffort: Effort,
-  /** What coordinates the Attempt's children, copied into the RunSpec. */
-  coordinator: CoordinatorKind.pipe(
-    Schema.withConstructorDefault(Effect.succeed(DEFAULT_COORDINATOR)),
   ),
   /** The ref that unfinished work is pushed to if the Attempt doesn't succeed. */
   salvageRef: SalvageRef,

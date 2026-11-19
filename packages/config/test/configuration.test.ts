@@ -907,7 +907,7 @@ it.live("rewrites stored outcome labels that the loop rules reject when it opens
     yield* sql`CREATE TRIGGER refuse_entity_update BEFORE UPDATE ON usine_configuration_entities
       BEGIN SELECT RAISE(ABORT, 'entity update refused'); END`;
     const failed = yield* open.pipe(Effect.flip);
-    expect(failed).toMatchObject({ operation: "upgrade stored loops" });
+    expect(failed).toMatchObject({ operation: "upgrade stored values" });
     const stored = yield* revisions;
     expect(stored).toEqual([1]);
     yield* sql`DROP TRIGGER refuse_entity_update`;
@@ -970,8 +970,8 @@ it.live("keeps stored outcome labels when the upgraded configuration is still in
     expect(String(refused.cause)).toContain("ConfigurationInvalid");
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toEqual([
-      "Kept stored outcome labels; the upgraded configuration is invalid",
-      expect.objectContaining({ loops: ["implement", "nightly"] }),
+      "Kept stored values; the upgraded configuration is invalid",
+      expect.objectContaining({ entities: ["loop:implement", "loop:nightly"] }),
     ]);
   }).pipe(
     Effect.scoped,
@@ -980,6 +980,112 @@ it.live("keeps stored outcome labels when the upgraded configuration is still in
     Effect.withLogger(logger),
   );
 });
+
+const EntityRow = Schema.fromJsonString(Schema.toCodecJson(ConfigurationEntity));
+const RevisionRow = Schema.fromJsonString(Schema.toCodecJson(ConfigurationRevision));
+
+/** Adds the coordinator and parent keys that earlier versions stored to an agent or settings value. */
+const withRemovedKeys = (key: ConfigurationEntityKey, value: Schema.Json): Schema.Json => {
+  const fields = Schema.decodeUnknownOption(Schema.JsonObject)(value);
+  if (Option.isNone(fields)) return value;
+  if (key.kind === "agent")
+    return {
+      ...fields.value,
+      parentModel: { _tag: "Some", value: "openai-codex/gpt-5.6-terra" },
+      parentEffort: { _tag: "None" },
+      coordinator: "session",
+    };
+  const settings = Schema.decodeUnknownOption(Schema.JsonObject)(fields.value.settings);
+  if (key.kind !== "settings" || Option.isNone(settings)) return value;
+  return {
+    ...fields.value,
+    settings: {
+      ...settings.value,
+      coordinator: "events",
+      parent_model: "openai-codex/gpt-5.6-terra",
+      parent_effort: "low",
+    },
+  };
+};
+
+it.live("loads stored agents and settings that keep the removed coordinator and parent keys", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const directory = yield* fs.makeTempDirectoryScoped({ directory: sqliteTempDirectory() });
+    const sqlite = SqliteClient.layer({ filename: `${directory}/configuration.sqlite` });
+    const open = Effect.map(
+      Layer.build(sqliteConfigurationLayer.pipe(Layer.provide(parserLayer), Layer.provide(sqlite))),
+      (services) => Context.get(services, ConfigurationStore),
+    );
+    const store = yield* open;
+    const changes = yield* initialChanges;
+    yield* store.commit({ expected: zero, changes, ...metadata });
+
+    // Rewrites the stored values and revision 1 as an earlier version wrote them.
+    const sqlServices = yield* Layer.build(sqlite);
+    const sql = Context.get(sqlServices, SqlClient.SqlClient);
+    const rows = yield* sql<{
+      readonly key: string;
+      readonly value: string;
+    }>`SELECT key, value FROM usine_configuration_entities`;
+    for (const row of rows) {
+      const entity = yield* Schema.decodeEffect(EntityRow)(row.value);
+      const value = yield* Schema.encodeEffect(EntityRow)(
+        ConfigurationEntity.make({
+          key: entity.key,
+          value: withRemovedKeys(entity.key, entity.value),
+        }),
+      );
+      yield* sql`UPDATE usine_configuration_entities SET value = ${value} WHERE key = ${row.key}`;
+    }
+    const [first] = yield* sql<{
+      readonly value: string;
+    }>`SELECT value FROM usine_configuration_revisions WHERE number = 1`;
+    if (first === undefined) return yield* Effect.die("missing revision 1");
+    const imported = yield* Schema.decodeEffect(RevisionRow)(first.value);
+    const legacy = yield* Schema.encodeEffect(RevisionRow)(
+      ConfigurationRevision.make({
+        ...imported,
+        changes: imported.changes.map((change) =>
+          ConfigurationChange.make({
+            ...change,
+            after: Option.map(change.after, (value) => withRemovedKeys(change.key, value)),
+          }),
+        ),
+      }),
+    );
+    yield* sql`UPDATE usine_configuration_revisions SET value = ${legacy} WHERE number = 1`;
+
+    const reopened = yield* open;
+    const loaded = yield* reopened.read;
+    expect(loaded.number).toBe(2);
+    assert(Option.isSome(loaded.instance));
+    expect(loaded.instance.value.agents.map(({ name }) => name)).toEqual(["developer"]);
+    expect(loaded.instance.value.loops.map(({ name }) => name)).toEqual(["implement"]);
+    const upgrade = yield* reopened.revision(ConfigurationRevisionNumber.make(2));
+    assert(Option.isSome(upgrade));
+    expect(upgrade.value.message).toEqual(
+      Option.some(
+        "Removed coordinator, parent_model, and parent_effort, which usine ignores",
+      ),
+    );
+    expect(upgrade.value.changes.map(({ key }) => key.key).sort()).toEqual([
+      "agent:developer",
+      "settings:instance",
+    ]);
+    const stored = yield* sql<{
+      readonly value: string;
+    }>`SELECT value FROM usine_configuration_entities`;
+    expect(stored.filter(({ value }) => /coordinator|parent/u.test(value))).toEqual([]);
+
+    // Revert and the revision stream replay the history that still holds the keys.
+    let replayed = Configuration.empty;
+    for (const revision of yield* reopened.list(Option.none()))
+      replayed = (yield* replay(parser, replayed, replayed.number, revision.changes, revision))
+        .configuration;
+    expect(replayed.number).toBe(2);
+  }).pipe(Effect.scoped, Effect.timeout("10 seconds"), Effect.provide(NodeServices.layer)),
+);
 
 const extraLabel = ConfigurationChange.make({
   key: ConfigurationEntityKey.make({

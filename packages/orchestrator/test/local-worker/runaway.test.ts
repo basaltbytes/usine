@@ -70,7 +70,6 @@ const freshExecution = (runId: RunId, attemptId: AttemptId) => {
     revision: selected.revision,
     task: selected.task,
     agent: selected.agent,
-    parentModel: selected.parentModel,
     permissions: selected.permissions,
     resume: Option.none(),
   });

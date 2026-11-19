@@ -3,8 +3,10 @@ import { CompletionCheck } from "@usine/engine/completion-check";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
+import * as AttemptChannel from "@usine/core/attempt/channel";
 import { InstanceDirectory } from "@usine/core/instance";
 import { safeSegment } from "@usine/core/repository";
+import { AttemptRequest, AttemptRuntime } from "@usine/durable/attempt-runtime";
 import { backup as backupDurableStorage } from "@usine/durable/backup";
 import { RunEngine } from "@usine/engine/engine";
 import { backup as backupRuntimeStore } from "@usine/engine/local-sqlite";
@@ -49,19 +51,50 @@ import {
 } from "./support.ts";
 
 /**
+ * Provides the routed `AttemptRuntime` of `durable`, with every Attempt started on the Pi parent,
+ * as versions that configured a parent model started it.
+ */
+const startedOnPiParent = (durable: ReturnType<typeof durableTestingLayer>) =>
+  Layer.merge(
+    durable,
+    Layer.effect(
+      AttemptRuntime,
+      Effect.gen(function* () {
+        const runtime = yield* AttemptRuntime;
+        return AttemptRuntime.of({
+          ...runtime,
+          execute: (request, io) =>
+            runtime.execute(
+              AttemptRequest.make({
+                ...request,
+                spec: AttemptChannel.RunSpec.make({ ...request.spec, coordinator: "session" }),
+              }),
+              io,
+            ),
+        });
+      }),
+    ).pipe(Layer.provide(durable)),
+  );
+
+/**
  * Returns the local composition over the durable testing runtime on `database`, with the parent
- * model answering `steps`.
+ * model answering `steps`. With `piParent`, new Attempts start on the Pi parent, as an earlier
+ * version started them; otherwise the runtime routes them as the current version does.
  */
 const durableRuntime = (
   instance: InstanceDirectory,
   remote: string,
   database: string,
   steps: ReadonlyArray<ParentStep>,
-  credentials: Layer.Layer<CredentialProvider> = credentialLayer,
+  options: {
+    readonly piParent: boolean;
+    readonly credentials?: Layer.Layer<CredentialProvider>;
+  },
 ) =>
   Effect.gen(function* () {
     const decodedValue7 = yield* config;
     const decodedValue8 = yield* config;
+    const durable = durableTestingLayer({ database, parent: steps });
     return localLayer(instance, decodedValue8, [], {
       repositoryUrl: () => remote,
       interruptGrace: "1 second",
@@ -69,8 +102,8 @@ const durableRuntime = (
     }).pipe(
       Layer.provide(harnessesLive),
       Layer.provide(MarcbachmannCelLayer),
-      Layer.provide(credentials),
-      Layer.provideMerge(durableTestingLayer({ database, parent: steps })),
+      Layer.provide(options.credentials ?? credentialLayer),
+      Layer.provideMerge(options.piParent ? startedOnPiParent(durable) : durable),
       Layer.provide(hostLoginLockLayer),
       Layer.provide(alwaysHoldsLayer),
       Layer.provide(CompletionCheck.unverified),
@@ -97,7 +130,7 @@ const commitInWorktree = (worktree: string, message: string) =>
 
 describe("local worker restart", () => {
   it.live(
-    "reattaches the durable parent task after a restart while its child was running",
+    "reattaches a Pi parent task that an earlier version started, while its child was running",
     () =>
       Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem;
@@ -109,9 +142,13 @@ describe("local worker restart", () => {
         const database = `${root}/durable.sqlite`;
 
         const firstScope = yield* Scope.make();
-        const decodedValue6 = yield* durableRuntime(instance, remote, database, [
-          delegate("Implement the task"),
-        ]);
+        const decodedValue6 = yield* durableRuntime(
+          instance,
+          remote,
+          database,
+          [delegate("Implement the task")],
+          { piParent: true },
+        );
         const firstContext = yield* Scope.provide(Layer.build(decodedValue6), firstScope);
         const first = Context.get(firstContext, RunEngine);
         const accepted = yield* first.submit(submission(2));
@@ -127,9 +164,13 @@ describe("local worker restart", () => {
         assert(currentExists, "the checkout must survive the restart");
 
         const secondScope = yield* Scope.make();
-        const decodedValue5 = yield* durableRuntime(instance, remote, database, [
-          answer("Finished after the restart"),
-        ]);
+        const decodedValue5 = yield* durableRuntime(
+          instance,
+          remote,
+          database,
+          [answer("Finished after the restart")],
+          { piParent: false },
+        );
         const services = yield* Scope.provide(Layer.build(decodedValue5), secondScope);
         const second = Context.get(services, RunEngine);
         const finished = yield* waitFor(second, accepted.runId, "Succeeded");
@@ -187,9 +228,13 @@ describe("local worker restart", () => {
         const backups = yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-backups-" });
 
         const firstScope = yield* Scope.make();
-        const decodedValue4 = yield* durableRuntime(instance, remote, database, [
-          delegate("Implement the task"),
-        ]);
+        const decodedValue4 = yield* durableRuntime(
+          instance,
+          remote,
+          database,
+          [delegate("Implement the task")],
+          { piParent: true },
+        );
         const firstContext = yield* Scope.provide(Layer.build(decodedValue4), firstScope);
         const first = Context.get(firstContext, RunEngine);
         const accepted = yield* first.submit(submission(4));
@@ -215,9 +260,13 @@ describe("local worker restart", () => {
         yield* fileSystem.copyFile(`${backups}/backup.durable.sqlite`, database);
 
         const secondScope = yield* Scope.make();
-        const decodedValue3 = yield* durableRuntime(instance, remote, database, [
-          answer("Finished after the restore"),
-        ]);
+        const decodedValue3 = yield* durableRuntime(
+          instance,
+          remote,
+          database,
+          [answer("Finished after the restore")],
+          { piParent: false },
+        );
         const services = yield* Scope.provide(Layer.build(decodedValue3), secondScope);
         const second = Context.get(services, RunEngine);
         const finished = yield* waitFor(second, accepted.runId, "Succeeded");
@@ -268,7 +317,7 @@ describe("local worker restart", () => {
           remote,
           database,
           [delegate("Implement the task"), answer("Finished before the stop")],
-          holdingCredentials,
+          { piParent: true, credentials: holdingCredentials },
         );
         const firstContext = yield* Scope.provide(Layer.build(decodedValue2), firstScope);
         const first = Context.get(firstContext, RunEngine);
@@ -289,7 +338,9 @@ describe("local worker restart", () => {
         assert(currentExists, "the unharvested checkout survives the stop");
 
         const secondScope = yield* Scope.make();
-        const decodedValue1 = yield* durableRuntime(instance, remote, database, []);
+        const decodedValue1 = yield* durableRuntime(instance, remote, database, [], {
+          piParent: false,
+        });
         const services = yield* Scope.provide(Layer.build(decodedValue1), secondScope);
         const second = Context.get(services, RunEngine);
         const finished = yield* waitFor(second, accepted.runId, "Succeeded");

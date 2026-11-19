@@ -232,7 +232,6 @@ describe("Attempt transcripts", () => {
         revision: RepositoryRevision.make("protocol-v3-revision"),
         task: AttemptTask.make("Read a durable protocol-v3 transcript"),
         agent: testAgent,
-        parentModel: Option.none(),
       });
       const runId = RunId.make("protocol-v3-run");
 
@@ -298,7 +297,6 @@ describe("Attempt transcripts", () => {
         revision: RepositoryRevision.make("protocol-v4-revision"),
         task: AttemptTask.make("Read a durable protocol-v4 transcript"),
         agent: testAgent,
-        parentModel: Option.none(),
       });
       const runId = RunId.make("protocol-v4-run");
 

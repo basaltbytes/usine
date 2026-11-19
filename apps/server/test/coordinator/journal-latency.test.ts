@@ -64,8 +64,6 @@ const request = StoredRequest.make({
         model: ModelId.make("gpt-6-astra"),
         effort: "medium",
       }),
-      parentModel: Option.none(),
-      parentEffort: Option.none(),
       persona: AgentPersona.make("Implement the issue."),
     }),
     parentModel: Option.none(),

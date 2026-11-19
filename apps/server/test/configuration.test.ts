@@ -1,8 +1,7 @@
 import { jsonKey } from "@usine/core/json-key";
 import { HttpClient, FetchHttpClient } from "effect/http";
 
-import { Context, Fiber, Effect, Layer, Option, Schema, Deferred, FileSystem } from "effect";
-import { TestClock } from "effect/testing";
+import { Fiber, Effect, Layer, Option, Schema, Deferred, FileSystem } from "effect";
 import { webRequest } from "../../../tooling/test/http.mts";
 import { sqliteTempDirectory } from "../../../tooling/test/sqlite.mts";
 import { NodeServices, NodeFileSystem } from "@effect/platform-node";
@@ -18,12 +17,6 @@ import { get } from "node:http";
 import { createServer } from "node:net";
 import { ConfigurationEntityView, UpgradeView } from "@usine/orchestrator/operator/http";
 import { UsineConfig } from "@usine/config/factory";
-import { fauxParent } from "@usine/durable/testing";
-import { coordinatorBrainTimeout } from "@usine/orchestrator/current-instance";
-import { runConfigCommand } from "../src/configuration/cli.ts";
-import { parseConfigCommand } from "../src/configuration/command.ts";
-import { configurationLayer } from "../src/configuration/runtime.ts";
-import { failureMessage } from "../src/failure-message.ts";
 import {
   ConfigurationStore,
   configurationDiff,
@@ -80,35 +73,6 @@ const directoryFixture = Effect.gen(function* () {
       "---\ntrigger: { on: issue, if: 'true' }\nagent: developer\n---\nImplement #{{ item.number }}.\n",
     ),
   );
-  const fs = yield* FileSystem.FileSystem;
-  yield* fs.makeDirectory(join(directory, "pi"));
-  yield* fs.writeFileString(
-    join(directory, "pi/settings.json"),
-    jsonKey({ defaultProvider: "local", defaultModel: "parent-test" }),
-  );
-  yield* fs.writeFileString(
-    join(directory, "pi/models.json"),
-    jsonKey({
-      providers: {
-        local: {
-          baseUrl: "http://127.0.0.1:1/v1",
-          api: "openai-completions",
-          apiKey: "test-key",
-          models: [
-            {
-              id: "parent-test",
-              name: "Parent test",
-              reasoning: true,
-              input: ["text"],
-              cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-              contextWindow: 32768,
-              maxTokens: 1024,
-            },
-          ],
-        },
-      },
-    }),
-  );
   return directory;
 });
 
@@ -120,13 +84,11 @@ const run = (directory: string, args: ReadonlyArray<string>, editor = "") =>
     env: {
       ...process.env,
       EDITOR: editor,
-      PI_CODING_AGENT_DIR: join(directory, "pi"),
-      PI_OFFLINE: "1",
     },
   });
 
 it.live(
-  "rejects an invalid parent on the first import",
+  "imports files that keep the removed coordinator and parent keys",
   () =>
     Effect.gen(function* () {
       const directory = yield* directoryFixture;
@@ -135,93 +97,28 @@ it.live(
       const original = yield* fs.readFileString(agent);
       yield* fs.writeFileString(
         agent,
-        original.replace("effort: high", "effort: high\nparent_model: unknown/x"),
+        original.replace(
+          "effort: high",
+          "effort: high\ncoordinator: session\nparent_model: unknown/x\nparent_effort: low",
+        ),
       );
-      const rejected = run(directory, ["import", directory]);
-      expect(rejected.status).not.toBe(0);
-      expect(rejected.stdout + rejected.stderr).toContain("cannot run as coordinator");
-      const database = new DatabaseSync(join(directory, ".usine/runtime.sqlite"));
-      try {
-        expect(database.prepare("SELECT * FROM usine_configuration_revisions").all()).toHaveLength(
-          0,
-        );
-      } finally {
-        database.close();
-      }
-      yield* fs.writeFileString(agent, original);
+      const settings = join(directory, "usine.yaml");
+      yield* fs.writeFileString(
+        settings,
+        `${yield* fs.readFileString(settings)}settings:\n  coordinator: session\n  parent_model: unknown/x\n`,
+      );
       const accepted = run(directory, ["import", directory]);
       expect(accepted.status, accepted.stderr).toBe(0);
       expect(accepted.stdout).toContain("Revision 1:");
+      const exported = join(directory, "exported");
+      expect(run(directory, ["export", exported]).status).toBe(0);
+      const files = [
+        yield* fs.readFileString(join(exported, "usine.yaml")),
+        yield* fs.readFileString(join(exported, "agents/developer.md")),
+      ];
+      expect(files.filter((text) => /coordinator|parent_/u.test(text))).toEqual([]);
     }).pipe(Effect.provide(NodeFileSystem.layer)),
   { timeout: 60_000 },
-);
-
-it.effect("refuses an import whose coordinator brain check doesn't finish in time", () =>
-  Effect.gen(function* () {
-    const folder = yield* directoryFixture;
-    const directory = InstanceDirectory.make(folder);
-    const context = yield* Layer.build(
-      configurationLayer.pipe(Layer.provide(localSqliteLayer(directory))),
-    );
-    const checking = yield* Deferred.make<void>();
-    const parents = {
-      ...fauxParent([]),
-      credentials: {
-        route: "gateway",
-        authentication: () =>
-          Deferred.succeed(checking, undefined).pipe(Effect.andThen(Effect.never)),
-      },
-    } as const;
-    const command = yield* parseConfigCommand(["import", directory]);
-    const importing = yield* runConfigCommand(directory, command, () =>
-      Effect.succeed(parents),
-    ).pipe(Effect.provideContext(context), Effect.flip, Effect.forkChild);
-    yield* Deferred.await(checking);
-    yield* TestClock.adjust(coordinatorBrainTimeout);
-    const failure = yield* Fiber.join(importing);
-
-    expect(failure._tag).toBe("ValidationTimeoutError");
-    expect(failureMessage(failure)).toBe(
-      "The coordinator brain check didn't finish within 10 seconds. The running configuration is unchanged. Check that the model provider responds, then try again. No revision was written.",
-    );
-    expect((yield* Context.get(context, ConfigurationStore).read).number).toBe(0);
-  }).pipe(Effect.provide(NodeServices.layer)),
-);
-
-it.effect("counts loading the parent models in the coordinator brain check's 10 seconds", () =>
-  Effect.gen(function* () {
-    const folder = yield* directoryFixture;
-    const directory = InstanceDirectory.make(folder);
-    const context = yield* Layer.build(
-      configurationLayer.pipe(Layer.provide(localSqliteLayer(directory))),
-    );
-    const loading = yield* Deferred.make<void>();
-    const checking = yield* Deferred.make<void>();
-    const parents = {
-      ...fauxParent([]),
-      credentials: {
-        route: "gateway",
-        authentication: () =>
-          Deferred.succeed(checking, undefined).pipe(Effect.andThen(Effect.never)),
-      },
-    } as const;
-    const command = yield* parseConfigCommand(["import", directory]);
-    const importing = yield* runConfigCommand(directory, command, () =>
-      Deferred.succeed(loading, undefined).pipe(
-        Effect.andThen(Effect.sleep("6 seconds")),
-        Effect.as(parents),
-      ),
-    ).pipe(Effect.provideContext(context), Effect.flip, Effect.forkChild);
-    yield* Deferred.await(loading);
-    yield* TestClock.adjust("6 seconds");
-    yield* Deferred.await(checking);
-    yield* TestClock.adjust("4 seconds");
-
-    expect(importing.pollUnsafe()).toBeDefined();
-    const failure = yield* Fiber.join(importing);
-    expect(failure._tag).toBe("ValidationTimeoutError");
-    expect((yield* Context.get(context, ConfigurationStore).read).number).toBe(0);
-  }).pipe(Effect.provide(NodeServices.layer)),
 );
 
 it.live(
