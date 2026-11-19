@@ -35,13 +35,13 @@ Instance admin access, an instance using SSH workers, a Linux machine with Git, 
    ```
 
 4. Open **Configuration > Workers > New**. Enter a name, select kind `ssh`, and set destination `usine@203.0.113.20`, identity file `~/.ssh/usine_worker`, root `/home/usine/.usine`, and concurrency `1`. Save.
-5. Inspect preflight. Fix any image, UID, resource-control, tool, or login error before running work.
+5. Inspect preflight. The save doesn't wait for the attempt image: on a machine without it, the worker shows the image as missing and takes no work until a preflight pulls the image and checks its UID, resource controls, and logins. Fix any image, UID, resource-control, tool, or login error before running work.
 
 ## Check the result
 
 The worker reports passing preflight, its selected runtime, and applied container limits. Start a test run and confirm its attempt lists the SSH worker.
 
-For Docker and Podman, the server logs whether the attempt image is present and how long inspection and pulling take. A missing image produces a warning and is pulled before the first container starts. A configuration save that preflights the worker doesn't pull: it checks the image on the machine, or with `docker manifest inspect` or `podman manifest inspect` that the registry has it, and the next attempt pulls a missing image. Other Podman inspection errors stop preparation and report a container capability error.
+For Docker and Podman, the server logs whether the attempt image is present and how long inspection and pulling take. A missing image produces a warning and is pulled before the first container starts. A configuration save that preflights the worker doesn't pull: it checks the image on the machine, or with `docker manifest inspect` or `podman manifest inspect` that the registry has it. When the machine lacks the image, a preflight pulls and checks it after the save, and the worker takes no attempt until that preflight passes. Other Podman inspection errors stop preparation and report a container capability error.
 
 After a pull, usine removes the other images of the attempt image's repository. It keeps the current image, the most recently built other image, and any image that a container uses. After a rollback, the retained image can be newer than the current image. Preflight and each attempt check that the worker's root and image storage have at least 10 GiB free. Below that, **Needs attention** shows the free space and the threshold, and attempts wait until a preflight passes. Set `min_free_disk_gib` to change the threshold; see [Free disk space and older images](/reference/configuration/workers/#free-disk-space-and-older-images).
 
