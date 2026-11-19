@@ -1065,9 +1065,7 @@ it.live("loads stored agents and settings that keep the removed coordinator and 
     const upgrade = yield* reopened.revision(ConfigurationRevisionNumber.make(2));
     assert(Option.isSome(upgrade));
     expect(upgrade.value.message).toEqual(
-      Option.some(
-        "Removed coordinator, parent_model, and parent_effort, which usine ignores",
-      ),
+      Option.some("Removed coordinator, parent_model, and parent_effort, which usine ignores"),
     );
     expect(upgrade.value.changes.map(({ key }) => key.key).sort()).toEqual([
       "agent:developer",
