@@ -61,7 +61,7 @@ Instance admin access, a matching usine checkout, a Hetzner project, the `hcloud
    usine login chatgpt
    ```
 
-   Each gateway reports its connection state separately. A gateway that cannot report its state shows an error beside its destination; healthy gateways keep their connection controls. A CLI command with `--target` checks the selected gateway.
+   Each gateway reports its connection state separately. A gateway that cannot report its state shows an error beside its destination; healthy gateways keep their connection controls. A gateway without the provider-credentials admin API shows that it is older than the orchestrator and names the `@usine/gateway` version to install. A CLI command with `--target` checks the selected gateway.
 
    Add `--target usine-gateway` when the instance has several gateways. Add `--api-key` for masked API-key entry. usine transfers completed credentials through the gateway admin API over SSH, saves them with mode `0600`, and updates the workers’ `llm_providers` in a configuration revision. Claude selects `anthropic-messages`; ChatGPT selects `openai-responses`. No provider credential requires a manual SSH transfer or service reload.
 
@@ -75,7 +75,29 @@ Preflight reaches the admin API and the gateway from the worker. A test attempt 
 
 The executor manages its own admin API forward; omit `LocalForward` from the gateway SSH alias. A private Hetzner worker reaches the gateway only. A Boat worker uses [the Tailscale connection procedure](/guides/connect-boat-to-a-gateway/). A long-lived worker outside the private network uses [worker-level tailnet settings](/guides/add-an-ssh-worker/#home-worker-on-a-mac).
 
-Gateway slots use wire protocols. In the SSH worker’s `gateway.llm_providers`, use `anthropic-messages` for the Anthropic Messages API and `openai-responses` for the OpenAI Responses API or a ChatGPT login. Upgrade the gateway first, then the orchestrator. For one release, the gateway accepts the previous `/anthropic` and `/openai` prefixes and logs a deprecation warning so running attempts can finish. A gateway without credential reporting fails preflight with an instruction to upgrade `@usine/gateway`. Credential environment-variable names stay the same. See the [worker reference](/reference/configuration/workers/#gateway).
+Gateway slots use wire protocols. In the SSH worker’s `gateway.llm_providers`, use `anthropic-messages` for the Anthropic Messages API and `openai-responses` for the OpenAI Responses API or a ChatGPT login. Credential environment-variable names stay the same. See the [worker reference](/reference/configuration/workers/#gateway).
+
+## Upgrade the gateway
+
+Upgrade the gateway before the orchestrator, to the `@usine/gateway` version that the new `@usine/server` release depends on:
+
+1. List the dependencies of the `@usine/server` version that you install next, and note the `@usine/gateway` version:
+
+   ```sh
+   npm view @usine/server@<version> dependencies
+   ```
+
+2. Install that version on the gateway:
+
+   ```sh
+   GATEWAY_SSH=usine-gateway ./infra/hetzner/gateway/gateway.sh install @usine/gateway@<gateway-version>
+   ```
+
+3. [Upgrade the orchestrator](/guides/upgrade-an-instance/).
+
+For one release, an upgraded gateway also accepts the previous `/anthropic` and `/openai` prefixes and logs a deprecation warning, so attempts configured by the previous orchestrator can finish.
+
+If the orchestrator is upgraded first, attempts keep running. While the gateway reports its providers as `anthropic` and `openai` instead of protocol IDs, attempts call `/anthropic` and `/openai/v1`, the coordinator does the same, and the orchestrator logs a warning once for each worker. **Needs attention** shows **Gateway upgrade needed** for each worker behind a gateway that is older than the orchestrator, including a gateway without the provider-credentials admin API that **Settings > Provider connections** uses. After you upgrade the gateway, the next preflight switches attempts to the protocol paths and removes the entry; run [worker preflight](/guides/run-worker-preflight/) to check at once. A gateway without credential reporting fails preflight with an instruction to upgrade `@usine/gateway`.
 
 ## Coordinator credentials
 

@@ -11,6 +11,8 @@ Access to the instance machine, a recoverable backup, and either a global instal
 
 Complete GitHub App setup before requesting a managed upgrade. During setup, the server refuses upgrade requests with a message that setup must finish first.
 
+An instance with a gateway upgrades the gateway first; see [Upgrade the gateway](/guides/configure-a-gateway/#upgrade-the-gateway).
+
 ## Procedure
 
 1. From the instance folder, inspect the running and available versions:
