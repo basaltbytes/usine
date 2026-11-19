@@ -60,6 +60,24 @@ export const conversationQuery = (id: ConversationId) =>
     meta: { refreshLabel: "Conversation", changes: changes.conversation(id) },
   });
 
+/** The standing grants in the projects that the member can read, oldest first. */
+export const grantsQuery = () =>
+  queryOptions({
+    queryKey: ["supervisor-grants"],
+    queryFn: () => conversationApi((client) => client.supervisorGrants()),
+    staleTime: 30_000,
+    meta: { refreshLabel: "Standing grants", changes: changes.kind("permission") },
+  });
+
+/** The calls that members allowed or standing grants covered, latest answer first. */
+export const allowedCallsQuery = () =>
+  queryOptions({
+    queryKey: ["supervisor-actions"],
+    queryFn: () => conversationApi((client) => client.supervisorActions()),
+    staleTime: 30_000,
+    meta: { refreshLabel: "Allowed calls", changes: changes.kind("permission") },
+  });
+
 const conversationEventsKey = (id: ConversationId) => ["conversation-events", id] as const;
 
 /**

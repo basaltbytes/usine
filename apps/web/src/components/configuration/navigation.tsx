@@ -9,6 +9,7 @@ import {
   TagIcon,
   HardDrivesIcon,
   RobotIcon,
+  ShieldCheckIcon,
 } from "@phosphor-icons/react";
 import { Link, useMatchRoute, useParams } from "@tanstack/react-router";
 import { RepositoryName } from "@usine/core/repository";
@@ -30,6 +31,7 @@ export const CONFIGURATION_PAGES = [
   { to: "/configuration/repositories", label: "Repositories", icon: BookBookmarkIcon },
   { to: "/configuration/labels", label: "Labels", icon: TagIcon },
   { to: "/configuration/bindings", label: "Role bindings", icon: UsersIcon },
+  { to: "/configuration/grants", label: "Standing grants", icon: ShieldCheckIcon },
   { to: "/configuration/history", label: "History", icon: ClockCounterClockwiseIcon },
   { to: "/configuration/settings", label: "Settings", icon: GearSixIcon },
 ] as const;
@@ -43,7 +45,11 @@ export const ConfigurationMenu = ({ inSection }: ConfigurationMenuProps) => {
   return (
     <SidebarMenu>
       {CONFIGURATION_PAGES.filter(
-        ({ to }) => admin || to === "/configuration/projects" || to === "/configuration/loops",
+        ({ to }) =>
+          admin ||
+          to === "/configuration/projects" ||
+          to === "/configuration/loops" ||
+          to === "/configuration/grants",
       ).map(({ to, label, icon: Glyph }) => (
         <SidebarMenuItem key={to}>
           <SidebarMenuButton

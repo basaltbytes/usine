@@ -1,7 +1,12 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
-import { type PermissionGrant, PermissionGrant as Grant } from "@usine/core/access";
+import {
+  administratorPermissions,
+  type PermissionGrant,
+  PermissionGrant as Grant,
+} from "@usine/core/access";
 import { Conversation, ConversationId, ConversationTitle } from "@usine/core/conversation";
+import { OperationName, StandingGrantId } from "@usine/core/permission-request";
 import { FactoryOverview } from "@usine/orchestrator/operator";
 import { Schema } from "effect";
 import { flushSync } from "react-dom";
@@ -25,6 +30,19 @@ import {
   stepEvents,
   supervisorCalls,
 } from "~/lib/conversations/fixture";
+import { configurationFixture } from "~/lib/configuration/fixture";
+import { configurationQuery } from "~/lib/configuration/queries";
+import {
+  deniedBy,
+  failedUnderGrant,
+  type PermissionServer,
+  permissionServer,
+  ranOnce,
+  retryGrant,
+  retryRequest,
+  upgradeRequest,
+  withFollowUp,
+} from "~/lib/conversations/request-fixture";
 import { overviewQuery } from "~/lib/overview";
 import { sessionQuery } from "~/lib/permissions";
 import { taskOverview } from "~/lib/tasks/fixture";
@@ -128,7 +146,7 @@ type Scene = {
   readonly name: string;
   readonly path: string;
   readonly permissions?: ReadonlyArray<PermissionGrant>;
-  readonly arrange: (server: ConversationServer) => void;
+  readonly arrange: (server: ConversationServer, supervisor: PermissionServer) => void;
   readonly ready: string;
   /** Runs once the scene is ready, before the capture. */
   readonly act?: () => Promise<void>;
@@ -219,25 +237,130 @@ const scenes: ReadonlyArray<Scene> = [
   },
 ];
 
-const devices = [{ device: "phone", width: 390, height: 844 }] as const;
+/** A turn that asked to retry run 7431 and to upgrade the instance, with the retry in `state`. */
+const asking = (server: ConversationServer, retry: ReturnType<typeof retryRequest>) => {
+  server.conversations.set(conversationId, {
+    ...conversationOf([
+      {
+        turn: "t-1",
+        member: ada,
+        text: "Run 7431 failed on a flaky test. Retry it, then upgrade when the queue is empty.",
+        minute: 1,
+        state: answered(1),
+        answer: "Both need a member's answer: the retry of run 7431, and the upgrade to 0.42.0.",
+      },
+    ]),
+    requests: [retry, upgradeRequest({ answerable: false })],
+  });
+  server.events.set(
+    conversationId,
+    stepEvents("t-1", 1, [
+      "Run 7431 failed in `pnpm test` on a timeout in `sessions.test.ts`; the head passed CI before.",
+      ...supervisorCalls(3),
+      { tool: "mcp__usine__retry", input: { runId: "run-7431" } },
+      { tool: "mcp__usine__requestUpgrade", input: { body: { mode: "idle" } } },
+    ]),
+  );
+};
 
-it.each(devices)(
-  "captures the conversation screens on $device",
-  async ({ device, width, height }) => {
+const permissionScenes: ReadonlyArray<Scene> = [
+  {
+    name: "request-waiting",
+    path: `/conversations?conversation=${conversationId}`,
+    arrange: (server) => asking(server, retryRequest()),
+    ready: "Allow once",
+  },
+  {
+    name: "request-allowed",
+    path: `/conversations?conversation=${conversationId}`,
+    arrange: (server) => {
+      asking(server, retryRequest({ state: ranOnce(5), answerable: false }));
+      const record = server.conversations.get(conversationId);
+      if (record !== undefined)
+        server.conversations.set(
+          conversationId,
+          withFollowUp(
+            record,
+            "t-1",
+            "- Retry a failed run: run run-7431. Allowed once by ada. Ran.",
+            "Run 7431 is retrying. The upgrade still waits for an admin's answer.",
+          ),
+        );
+    },
+    ready: "Allowed once by ada · Ran",
+  },
+  {
+    name: "request-denied",
+    path: `/conversations?conversation=${conversationId}`,
+    arrange: (server) => asking(server, retryRequest({ state: deniedBy(5), answerable: false })),
+    ready: "Denied by grace",
+  },
+  {
+    name: "grants",
+    path: "/configuration/grants",
+    permissions: administratorPermissions,
+    arrange: (_server, supervisor) => {
+      supervisor.grants.push(
+        retryGrant(),
+        retryGrant({
+          id: StandingGrantId.make("r-9:grant"),
+          operation: OperationName.make("moveBoardItem"),
+          summary: "Move a repository item",
+          member: grace,
+          lastUsedAt: null,
+          applies: false,
+        }),
+      );
+      supervisor.actions.push(
+        retryRequest({
+          id: "r-3",
+          target: "run run-7502",
+          arguments: { runId: "run-7502" },
+          state: failedUnderGrant(9),
+          answerable: false,
+        }),
+        retryRequest({ state: ranOnce(4), answerable: false }),
+      );
+    },
+    ready: "Allowed calls",
+  },
+];
+
+const captures = [
+  { prefix: "881", scenes, devices: [{ device: "phone", width: 390, height: 844 }] },
+  {
+    prefix: "1297",
+    scenes: permissionScenes,
+    devices: [
+      { device: "desktop", width: 1280, height: 900 },
+      { device: "phone", width: 390, height: 844 },
+    ],
+  },
+] as const;
+
+it.each(
+  captures.flatMap(({ prefix, scenes: captured, devices }) =>
+    devices.map((device) => ({ prefix, scenes: captured, ...device })),
+  ),
+)(
+  "captures the $prefix screens on $device",
+  async ({ prefix, scenes: captured, device, width, height }) => {
     await page.viewport(width, height);
     document.documentElement.classList.add("dark");
     await commands.reducedMotion(true);
     try {
-      for (const scene of scenes) {
+      for (const scene of captured) {
         const fake = conversationServer(async (url) =>
           url.pathname === "/api/overview"
             ? encodedResponse(FactoryOverview, taskOverview())
             : encodedResponse(Schema.Array(Schema.Never), []),
         );
-        scene.arrange(fake.server);
-        answer = fake.fetch;
+        const supervisor = permissionServer(fake.server, fake.fetch);
+        scene.arrange(fake.server, supervisor.server);
+        answer = supervisor.fetch;
         const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
         queryClient.setQueryData(overviewQuery().queryKey, taskOverview());
+        queryClient.setQueryData(configurationQuery().queryKey, configurationFixture());
         queryClient.setQueryData(sessionQuery().queryKey, {
           permissions: scene.permissions ?? operator,
           member: ada,
@@ -263,7 +386,7 @@ it.each(devices)(
         await loaded;
         await expect.element(page.getByText(scene.ready).last()).toBeVisible();
         await scene.act?.();
-        await commands.configurationEditorScreenshot(`881-${scene.name}-${device}`);
+        await commands.configurationEditorScreenshot(`${prefix}-${scene.name}-${device}`);
         flushSync(() => root.unmount());
         host.remove();
         queryClient.clear();

@@ -1,12 +1,13 @@
 import { DateTime } from "effect";
-import type { MemberMessage, SupervisorMessage } from "@usine/core/conversation";
-import { type ReactNode, useState } from "react";
+import type { MemberMessage, OutcomesMessage, SupervisorMessage } from "@usine/core/conversation";
+import type { ReactNode } from "react";
 import { Markdown } from "~/components/markdown";
 import { StatusBadge } from "~/components/status-badge";
+import { TwoStepButton } from "~/components/two-step-button";
 import { Bubble, BubbleContent } from "~/components/ui/bubble";
-import { Button } from "~/components/ui/button";
 import { Message, MessageContent, MessageFooter, MessageHeader } from "~/components/ui/message";
 import { MessageScrollerItem } from "~/components/ui/message-scroller";
+import { PermissionRequestBlock } from "~/components/conversations/permission-request";
 import { ConversationToolGroup } from "~/components/conversations/tools";
 import {
   canceledLabel,
@@ -16,6 +17,8 @@ import {
   failedLabel,
   failureReason,
   keepQueuedLabel,
+  outcomesLabel,
+  outcomesSpeaker,
   queuedBehindLabel,
   queuedLabel,
   runningLabel,
@@ -50,7 +53,7 @@ const Speaker = ({ speaker, at, inset }: SpeakerProps) => {
 };
 
 type MessageTextProps = {
-  readonly message: MemberMessage | SupervisorMessage;
+  readonly message: MemberMessage | SupervisorMessage | OutcomesMessage;
   readonly className?: string;
 };
 
@@ -62,43 +65,6 @@ const MessageText = ({ message, className }: MessageTextProps) => {
     </p>
   ) : (
     <Markdown className={cn("text-md wrap-anywhere", className)}>{markdown}</Markdown>
-  );
-};
-
-type QueuedCancelProps = {
-  readonly cancel: () => void;
-  readonly canceling: boolean;
-};
-
-/**
- * Cancels a queued turn in two steps. The first button keeps its place as it changes from Cancel
- * turn to Keep queued, so a double-click doesn't confirm.
- */
-const QueuedCancel = ({ cancel, canceling }: QueuedCancelProps) => {
-  const [confirming, setConfirming] = useState(false);
-  return (
-    <span className="flex flex-wrap gap-2">
-      <Button
-        variant="ghost"
-        size="sm"
-        className="pointer-coarse:h-11"
-        disabled={canceling}
-        onClick={() => setConfirming(!confirming)}
-      >
-        {confirming ? keepQueuedLabel : cancelTurnLabel}
-      </Button>
-      {confirming && (
-        <Button
-          variant="destructive"
-          size="sm"
-          className="pointer-coarse:h-11"
-          disabled={canceling}
-          onClick={cancel}
-        >
-          {canceling ? cancelingTurnLabel : confirmCancelLabel}
-        </Button>
-      )}
-    </span>
   );
 };
 
@@ -115,7 +81,16 @@ const TurnState = ({ entry, cancel, canceling }: TurnStateProps) => {
       return (
         <MessageFooter variant="metadata" className="flex-wrap">
           <StatusBadge state="Queued" label={entry.behind ? queuedBehindLabel : queuedLabel} />
-          {cancel !== undefined && <QueuedCancel cancel={cancel} canceling={canceling} />}
+          {cancel !== undefined && (
+            <TwoStepButton
+              label={cancelTurnLabel}
+              keepLabel={keepQueuedLabel}
+              confirmLabel={confirmCancelLabel}
+              pendingLabel={cancelingTurnLabel}
+              pending={canceling}
+              confirm={cancel}
+            />
+          )}
         </MessageFooter>
       );
     case "Running":
@@ -159,10 +134,20 @@ type TurnMessagesProps = {
  * streams in.
  */
 export const TurnMessages = ({ entry, pending, own, cancel, canceling }: TurnMessagesProps) => {
-  const { message, activity, reply } = entry;
+  const { message, outcomes, activity, reply } = entry;
   const align = own ? "end" : "start";
   return (
     <>
+      {outcomes !== undefined && (
+        <MessageScrollerItem messageId={`${entry.turn.id}:outcomes`} scrollAnchor>
+          <Message aria-label={outcomesLabel} role="group">
+            <MessageContent spacing="compact">
+              <Speaker speaker={outcomesSpeaker} at={outcomes.createdAt} inset={false} />
+              <MessageText message={outcomes} className="text-sm text-muted-foreground" />
+            </MessageContent>
+          </Message>
+        </MessageScrollerItem>
+      )}
       {message !== undefined && (
         <MessageScrollerItem messageId={`${entry.turn.id}:message`} scrollAnchor>
           <Message align={align} aria-label={`Message from ${message.author}`} role="group">
@@ -190,6 +175,8 @@ export const TurnMessages = ({ entry, pending, own, cancel, canceling }: TurnMes
                   {activity.map((step) =>
                     step._tag === "Tools" ? (
                       <ConversationToolGroup key={step.key} group={step} />
+                    ) : step._tag === "Request" ? (
+                      <PermissionRequestBlock key={step.key} request={step.request} />
                     ) : (
                       <Markdown
                         key={step.key}

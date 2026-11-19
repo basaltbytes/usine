@@ -3,23 +3,36 @@ import {
   MemberMessage,
   MessageBody,
   MessageSequence,
+  type OutcomesMessage,
   Queued,
   type SupervisorMessage,
   type TurnEvent,
   TurnId,
   type TurnMember,
 } from "@usine/core/conversation";
-import type { ConversationView, TurnView } from "@usine/orchestrator/operator/http";
+import type {
+  ConversationView,
+  PermissionRequestView,
+  TurnView,
+} from "@usine/orchestrator/operator/http";
 import { type DateTime, Option, Schema } from "effect";
 import type { ToolCall } from "~/lib/runs/transcript/model";
 
 export type Conversation = typeof ConversationView.Type;
 export type Turn = typeof TurnView.Type;
+export type PermissionRequest = typeof PermissionRequestView.Type;
 
 type TextStep = { readonly _tag: "Text"; readonly key: string; readonly text: string };
 
+/** A permission request of a turn, at the place of the tool call that made it. */
+interface RequestStep {
+  readonly _tag: "Request";
+  readonly key: string;
+  readonly request: PermissionRequest;
+}
+
 /** One step of a turn's activity, in the order the session reported it. */
-type Activity = TextStep | { readonly _tag: "Tool"; readonly call: ToolCall };
+type Activity = TextStep | RequestStep | { readonly _tag: "Tool"; readonly call: ToolCall };
 
 /** The tool calls of a turn between two texts, shown as one line. */
 export interface ToolGroupStep {
@@ -29,13 +42,17 @@ export interface ToolGroupStep {
   readonly calls: readonly [ToolCall, ...ToolCall[]];
 }
 
-/** A text of a turn, or the tool calls between two texts. */
-export type TurnStep = TextStep | ToolGroupStep;
+/** A text of a turn, a permission request, or the tool calls between two of them. */
+export type TurnStep = TextStep | RequestStep | ToolGroupStep;
 
-/** A member message, what its turn did, and the supervisor's answer once there is one. */
+/**
+ * A member message, or the outcomes of the previous turn's permission requests, what its turn
+ * did, and the supervisor's answer once there is one.
+ */
 export interface TurnEntry {
   readonly turn: Turn;
   readonly message: MemberMessage | undefined;
+  readonly outcomes: OutcomesMessage | undefined;
   readonly activity: ReadonlyArray<TurnStep>;
   readonly reply: SupervisorMessage | undefined;
   /** Whether an earlier turn of the conversation is queued or running. */
@@ -48,46 +65,75 @@ const isMember = (message: Conversation["messages"][number]): message is MemberM
   message.role === "member";
 const isSupervisor = (message: Conversation["messages"][number]): message is SupervisorMessage =>
   message.role === "supervisor";
+const isOutcomes = (message: Conversation["messages"][number]): message is OutcomesMessage =>
+  message.role === "usine";
 
-/** Returns the session events of `turn` as text and tool calls, each tool call paired by `callId`. */
-const turnActivity = (turn: Turn, events: ReadonlyArray<TurnEvent>): ReadonlyArray<Activity> => {
+const requestStep = (request: PermissionRequest): RequestStep => ({
+  _tag: "Request",
+  key: `request:${request.id}`,
+  request,
+});
+
+/**
+ * Returns the session events of `turn` as text, tool calls, and permission requests, each tool
+ * call paired by `callId`. A request takes the place of the tool call that made it; a request
+ * whose call isn't among the events comes last.
+ */
+const turnActivity = (
+  turn: Turn,
+  events: ReadonlyArray<TurnEvent>,
+  requests: ReadonlyArray<PermissionRequest>,
+): ReadonlyArray<Activity> => {
   const activity: Array<Activity> = [];
   const calls = new Map<string, number>();
+  const byCall = new Map(
+    requests.flatMap((request) =>
+      request.toolCall === null ? [] : [[request.toolCall, request] as const],
+    ),
+  );
+  const placed = new Set<string>();
   for (const { sequence, event } of events) {
     if (event._tag === "TextOutput")
       activity.push({ _tag: "Text", key: `${turn.id}:${sequence}`, text: event.text });
-    else if (event._tag === "ToolStarted") {
-      calls.set(event.callId, activity.length);
-      activity.push({
-        _tag: "Tool",
-        call: {
-          key: `${turn.id}:${event.callId}`,
-          name: event.tool,
-          start: Option.some({ input: event.input }),
-          state: { _tag: turn.state._tag === "Running" ? "Running" : "Stopped" },
-        },
-      });
-    } else if (event._tag === "ToolFinished") {
-      const index = calls.get(event.callId);
-      const started = index === undefined ? undefined : activity[index];
-      const state = {
-        _tag: event.isError ? ("Error" as const) : ("Finished" as const),
-        output: event.output,
-      };
-      if (started?._tag === "Tool" && index !== undefined)
-        activity[index] = { _tag: "Tool", call: { ...started.call, state } };
-      else
+    else if (event._tag === "ToolStarted" || event._tag === "ToolFinished") {
+      const request = byCall.get(event.callId);
+      if (request !== undefined) {
+        if (!placed.has(request.id)) activity.push(requestStep(request));
+        placed.add(request.id);
+      } else if (event._tag === "ToolStarted") {
+        calls.set(event.callId, activity.length);
         activity.push({
           _tag: "Tool",
           call: {
             key: `${turn.id}:${event.callId}`,
             name: event.tool,
-            start: Option.none(),
-            state,
+            start: Option.some({ input: event.input }),
+            state: { _tag: turn.state._tag === "Running" ? "Running" : "Stopped" },
           },
         });
+      } else {
+        const index = calls.get(event.callId);
+        const started = index === undefined ? undefined : activity[index];
+        const state = {
+          _tag: event.isError ? ("Error" as const) : ("Finished" as const),
+          output: event.output,
+        };
+        if (started?._tag === "Tool" && index !== undefined)
+          activity[index] = { _tag: "Tool", call: { ...started.call, state } };
+        else
+          activity.push({
+            _tag: "Tool",
+            call: {
+              key: `${turn.id}:${event.callId}`,
+              name: event.tool,
+              start: Option.none(),
+              state,
+            },
+          });
+      }
     }
   }
+  for (const request of requests) if (!placed.has(request.id)) activity.push(requestStep(request));
   return activity;
 };
 
@@ -95,7 +141,7 @@ const turnActivity = (turn: Turn, events: ReadonlyArray<TurnEvent>): ReadonlyArr
 const groupCalls = (activity: ReadonlyArray<Activity>): ReadonlyArray<TurnStep> => {
   const steps: Array<TurnStep> = [];
   for (const step of activity) {
-    if (step._tag === "Text") {
+    if (step._tag !== "Tool") {
       steps.push(step);
       continue;
     }
@@ -108,9 +154,9 @@ const groupCalls = (activity: ReadonlyArray<Activity>): ReadonlyArray<TurnStep> 
 };
 
 /**
- * Returns the conversation as turns in message order: each with its member message, its activity
- * as texts and groups of tool calls, and its answer. A text that repeats the answer is left out,
- * so the answer shows once.
+ * Returns the conversation as turns in message order: each with its member message or outcomes
+ * message, its activity as texts, permission requests, and groups of tool calls, and its answer.
+ * A text that repeats the answer is left out, so the answer shows once.
  */
 export const conversationTimeline = (
   conversation: Conversation,
@@ -126,12 +172,16 @@ export const conversationTimeline = (
       turnActivity(
         turn,
         events.filter((entry) => entry.turn === turn.id),
+        conversation.requests.filter((request) => request.turn === turn.id),
       ).filter((step) => step._tag !== "Text" || step.text.trim() !== answer),
     );
     return {
       turn,
       message: conversation.messages
         .filter(isMember)
+        .find(({ sequence }) => sequence === turn.message),
+      outcomes: conversation.messages
+        .filter(isOutcomes)
         .find(({ sequence }) => sequence === turn.message),
       activity,
       reply,
@@ -147,7 +197,9 @@ export const bodyText = (body: MemberMessage["body"]): string =>
   isText(body) ? body : JSON.stringify(body, null, 2);
 
 /** Returns the Markdown of a message whose body is Markdown text, or `undefined` otherwise. */
-export const markdownBody = (message: MemberMessage | SupervisorMessage): string | undefined =>
+export const markdownBody = (
+  message: MemberMessage | SupervisorMessage | OutcomesMessage,
+): string | undefined =>
   message.format === "markdown" && isText(message.body) ? message.body : undefined;
 
 const PENDING = "pending:";

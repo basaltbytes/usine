@@ -1,11 +1,12 @@
 # AI Elements
 
-Tool, CodeBlock, Terminal and the shared clipboard control are adapted from
+Tool, Confirmation, CodeBlock, Terminal and the shared clipboard control are adapted from
 [Vercel AI Elements](https://github.com/vercel/ai-elements/tree/6a9d5b1822ffb10bba4bd97175f01edd7d8651cd/packages/elements/src)
 at commit `6a9d5b1822ffb10bba4bd97175f01edd7d8651cd`. The upstream Apache 2.0
 copyright and license notice is retained in [LICENSE](LICENSE).
 
 Source files: [tool.tsx](https://github.com/vercel/ai-elements/blob/6a9d5b1822ffb10bba4bd97175f01edd7d8651cd/packages/elements/src/tool.tsx),
+[confirmation.tsx](https://github.com/vercel/ai-elements/blob/6a9d5b1822ffb10bba4bd97175f01edd7d8651cd/packages/elements/src/confirmation.tsx),
 [code-block.tsx](https://github.com/vercel/ai-elements/blob/6a9d5b1822ffb10bba4bd97175f01edd7d8651cd/packages/elements/src/code-block.tsx),
 and [terminal.tsx](https://github.com/vercel/ai-elements/blob/6a9d5b1822ffb10bba4bd97175f01edd7d8651cd/packages/elements/src/terminal.tsx).
 
@@ -35,6 +36,12 @@ language requested. Highlighting and clipboard failures remain visible to the re
 different interpretation of a CommonJS default import. Vite prebundles this local
 bridge for development; production builds bundle it normally.
 
-Language selectors, approval controls, terminal clearing and terminal live scrolling
-are omitted: these panels display recorded tool activity, while MessageScroller
-owns the conversation's scroll behavior.
+Confirmation keeps the upstream composition (title, request, accepted, rejected,
+actions, and action) for a supervisor's permission request. It takes three states,
+requested, accepted, and rejected, instead of the AI SDK's tool part states, and
+renders a bordered group, in the attention tone while the request waits, instead of
+the upstream Alert.
+
+Language selectors, terminal clearing and terminal live scrolling are omitted: these
+panels display recorded tool activity, while MessageScroller owns the conversation's
+scroll behavior.
