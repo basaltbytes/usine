@@ -71,7 +71,7 @@ import {
   type RunAgainResult,
   runAgainSubmission,
 } from "../engine/run-again.ts";
-import { plainRetry, type RetryRequest } from "../engine/retry.ts";
+import { plainRetry, type RetryOutcome, type RetryRequest } from "../engine/retry.ts";
 import { StepExecution } from "../step-executor.ts";
 import { TranscriptEntry, TranscriptQuery } from "../transcript.ts";
 import { attemptWindowQueries } from "./attempt-windows.ts";
@@ -920,9 +920,32 @@ const makeRunStore = Effect.gen(function* () {
             ),
           );
           yield* tx.updateState(runId, decision.state);
-          return true;
+          return "Reopened" satisfies RetryOutcome;
         }
-        if (decision._tag === "ResumePending" && Option.isNone(amendment)) return false;
+        if (decision._tag === "RetryNow") {
+          if (Option.isSome(amendment)) {
+            yield* tx.amend(runId, amendment.value);
+            yield* Effect.logInfo("Run effective task and Agent amended", {
+              runId,
+              agent: amendment.value.agent.name,
+            });
+          }
+          yield* tx.setNextStart(
+            runId,
+            Option.some(
+              Option.isSome(amendment)
+                ? StartedByEditAndRetry.make({ operator: requestedBy })
+                : StartedByRetry.make({ operator: requestedBy }),
+            ),
+          );
+          yield* Effect.logInfo(
+            "Operator retry starts the next Attempt of a Run that waits after a capacity refusal",
+            { runId },
+          );
+          return "Forced" satisfies RetryOutcome;
+        }
+        if (decision._tag === "ResumePending" && Option.isNone(amendment))
+          return "Unchanged" satisfies RetryOutcome;
         return yield* RunOperationRejectedError.make({
           runId,
           operation: "retry",
@@ -1352,10 +1375,14 @@ export class RunStore extends Context.Service<
       operator: Option.Option<OperatorActor>,
     ) => Effect.Effect<boolean, RunStoreError>;
     /**
-     * Reopens a failed Run for its next Attempt and returns whether this call reopened it. Fails
-     * with `RunRetryBlockedError` while another Run of the same Loop and Item is open.
+     * Reopens a failed Run for its next Attempt, or records that a Run waiting after a capacity
+     * refusal starts its next Attempt now, and returns what changed. Fails with
+     * `RunRetryBlockedError` while another Run of the same Loop and Item is open.
      */
-    readonly retry: (runId: RunId, request?: RetryRequest) => Effect.Effect<boolean, RunStoreError>;
+    readonly retry: (
+      runId: RunId,
+      request?: RetryRequest,
+    ) => Effect.Effect<RetryOutcome, RunStoreError>;
     /**
      * Opens a new Run for the Item state of a succeeded or canceled Run as an operator Event
      * (#152). Fails with `RunOperationRejectedError` for a Run in another state, or with

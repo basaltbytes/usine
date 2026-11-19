@@ -173,6 +173,7 @@ const claimingRuns = Layer.succeed(RunEngine)({
   waitForUpgrade: () => Effect.void,
   cancelUpgrade: Effect.void,
   upgradeDrain: Effect.succeedNone,
+  capacityWaits: Effect.succeed([]),
   retry: () => Effect.die("unused"),
   runAgain: () => Effect.die("unused"),
   revoke: () => Effect.succeed([]),

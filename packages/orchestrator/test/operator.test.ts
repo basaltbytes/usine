@@ -535,6 +535,7 @@ const testLayer = (
     waitForUpgrade: () => Effect.void,
     cancelUpgrade: Effect.void,
     upgradeDrain,
+    capacityWaits: Effect.succeed([]),
     retry: commands.retry,
     revoke: () => Effect.succeed([]),
     runAgain: commands.runAgain,

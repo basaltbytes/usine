@@ -48,6 +48,7 @@ import { LoopControl } from "../loop-control/loop-control.ts";
 import { CycleBudgets } from "../cycle-budget/cycle-budget.ts";
 import { BoardMoves } from "../board-moves/board-moves.ts";
 import { AttemptAdmission } from "./admission.ts";
+import { type CapacityWait, ProviderCapacity } from "./capacity.ts";
 import { RunDriver } from "./run-driver.ts";
 import { UnconfirmedStop, UnconfirmedStops } from "./unconfirmed-stops.ts";
 
@@ -63,6 +64,7 @@ const makeRunEngine = Effect.gen(function* () {
   const store = yield* RunStore;
   const driver = yield* RunDriver;
   const admission = yield* AttemptAdmission;
+  const capacity = yield* ProviderCapacity;
   const stepExecutor = yield* StepExecutor;
   const crypto = yield* Crypto.Crypto;
 
@@ -107,8 +109,13 @@ const makeRunEngine = Effect.gen(function* () {
     runId: RunId,
     request: RetryRequest = plainRetry,
   ) {
-    if (yield* store.retry(runId, request)) {
+    const outcome = yield* store.retry(runId, request);
+    if (outcome === "Reopened") {
       yield* driver.resume(runId);
+      return;
+    }
+    if (outcome === "Forced") {
+      yield* driver.retryNow(runId);
       return;
     }
     yield* Effect.logDebug("Retry changed nothing; the Run already waits for its next Attempt", {
@@ -321,6 +328,7 @@ const makeRunEngine = Effect.gen(function* () {
     waitForUpgrade: admission.waitForUpgrade,
     cancelUpgrade: admission.cancelUpgrade,
     upgradeDrain: admission.upgradeDrain,
+    capacityWaits: capacity.waits,
     inspect,
     intervene,
     reconcile: driver.reconcile,
@@ -354,6 +362,8 @@ export class RunEngine extends Context.Service<
     readonly cancelUpgrade: Effect.Effect<void>;
     /** The pending upgrade and the runs it defers in this process. */
     readonly upgradeDrain: Effect.Effect<Option.Option<UpgradeDrain>>;
+    /** The pools at capacity in this process and the Runs that wait for them. */
+    readonly capacityWaits: Effect.Effect<ReadonlyArray<CapacityWait>>;
     /** Records the approval Event and its source, and opens the Run's approval gate. A repeated approval keeps the first source. */
     readonly approve: (
       runId: RunId,
@@ -409,7 +419,8 @@ export class RunEngine extends Context.Service<
     ) => Effect.Effect<void, RunEngineError>;
     /**
      * Requests another Attempt for a failed Run with its existing Event, applying the request's
-     * task and Agent if set. The Attempt records the request as its start reason.
+     * task and Agent if set. A Run that waits after a capacity refusal starts its next Attempt
+     * now, which tests the provider's pool. The Attempt records the request as its start reason.
      */
     readonly retry: (runId: RunId, request?: RetryRequest) => Effect.Effect<void, RunEngineError>;
     /**
@@ -472,6 +483,7 @@ export const layerWithDatabase = <DatabaseError, DatabaseRequirements>(
   const driver = RunDriver.layer.pipe(
     Layer.provideMerge(store),
     Layer.provideMerge(AttemptAdmission.layer),
+    Layer.provideMerge(ProviderCapacity.layer),
     Layer.provide(itemWriter),
     Layer.provide(controls),
     Layer.provide(database),
@@ -531,3 +543,4 @@ export {
 } from "./error.ts";
 
 export { UpgradeDrain, UpgradeWait } from "./upgrade.ts";
+export { CapacityPool, CapacityWait } from "./capacity.ts";

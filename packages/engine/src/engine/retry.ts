@@ -24,3 +24,10 @@ export const plainRetry = RetryRequest.make({
   requestedBy: Option.none(),
   amendment: Option.none(),
 });
+
+/**
+ * What an operator retry changed: it reopened a failed Run, made a Run that waits after a capacity
+ * refusal start its next Attempt now, or changed nothing because the Run already waits for its
+ * next Attempt.
+ */
+export type RetryOutcome = "Reopened" | "Forced" | "Unchanged";

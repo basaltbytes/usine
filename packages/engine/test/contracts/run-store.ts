@@ -315,7 +315,7 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
 
           yield* store.cancel(openRun);
           const retryResult = yield* store.retry(failedRun);
-          assert.strictEqual(retryResult, true);
+          assert.strictEqual(retryResult, "Reopened");
           assert.strictEqual((yield* store.snapshot(failedRun)).run.state._tag, "Running");
         }),
       ),
@@ -795,9 +795,9 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
 
           // A repeated retry is accepted until the reopened Run starts its next Attempt.
           const retryResult = yield* store.retry(runId);
-          assert.strictEqual(retryResult, true);
+          assert.strictEqual(retryResult, "Reopened");
           const currentRetryResult = yield* store.retry(runId);
-          assert.strictEqual(currentRetryResult, false);
+          assert.strictEqual(currentRetryResult, "Unchanged");
           const restarted = yield* store.beginAttempt(
             runId,
             WorkerName.make("local"),
