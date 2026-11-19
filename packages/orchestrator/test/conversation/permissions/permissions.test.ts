@@ -26,12 +26,16 @@ import {
 import { OperatorLogin } from "@usine/core/operator";
 import {
   allow,
+  AllowedAlways,
   AllowedOnce,
   CallTarget,
+  isWaiting,
   OperationCall,
   OperationName,
   PermissionRequestId,
   requested,
+  StandingGrant,
+  StandingGrantId,
 } from "@usine/core/permission-request";
 import { ProjectId } from "@usine/core/project";
 import { DateTime, Deferred, Effect, Fiber, Layer, Option, Ref } from "effect";
@@ -82,6 +86,15 @@ const intervene = OperationCall.make({
   target: CallTarget.make("run run-1"),
   scope: factory,
   permission: "operate",
+});
+
+const loopWrite = OperationCall.make({
+  operation: OperationName.make("replaceConfigurationEntity"),
+  summary: "Replace a configuration entity",
+  arguments: { kind: "loop", identifier: "factory/implement", body: { expected: 3, text: "x" } },
+  target: CallTarget.make("loop factory/implement"),
+  scope: factory,
+  permission: "maintain",
 });
 
 const noWake = () => Effect.void;
@@ -282,6 +295,51 @@ describe("supervisor permissions", () => {
           stored.map(({ request }) => request.state._tag),
           ["Waiting", "Waiting"],
         );
+      }).pipe(Effect.provide(open));
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("never lets a grant cover a configuration write", () =>
+    Effect.gen(function* () {
+      const { access, ran, open } = yield* fixture();
+      yield* Ref.update(access, (grants) =>
+        new Map(grants).set(ada.id, [
+          ...operatorOn(InstanceScope.make()),
+          PermissionGrant.make({ permission: "maintain", scope: InstanceScope.make() }),
+        ]),
+      );
+      yield* Effect.gen(function* () {
+        const permissions = yield* Permissions;
+        const { conversation, turn } = yield* running("c1", factory);
+        const request = yield* permissions.gate(conversation, turn, loopWrite, Option.none());
+        const always = yield* permissions
+          .answer(conversation.id, request.id, "always", as(ada), noWake)
+          .pipe(Effect.flip);
+        assert.strictEqual(always._tag, "NotGrantable");
+        // A grant that ada's access permits, stored as an earlier version could have.
+        const grant = StandingGrant.make({
+          id: StandingGrantId.make("g-1"),
+          operation: loopWrite.operation,
+          summary: loopWrite.summary,
+          permission: "maintain",
+          project: factory.project,
+          member: ada,
+          credential: PostedWithSession.make({}),
+          request: request.id,
+          createdAt: at,
+          lastUsedAt: Option.none(),
+          revoked: Option.none(),
+        });
+        if (!isWaiting(request)) return assert.fail("The write didn't wait for an answer");
+        const store = yield* PermissionStore;
+        yield* store.transition(
+          request,
+          allow(request, AllowedAlways.make({ by: ada, at, grant: grant.id })),
+          Option.some(grant),
+        );
+        const again = yield* permissions.gate(conversation, turn, loopWrite, Option.none());
+        assert.strictEqual(again.state._tag, "Waiting");
+        assert.isEmpty(ran);
       }).pipe(Effect.provide(open));
     }).pipe(Effect.scoped),
   );

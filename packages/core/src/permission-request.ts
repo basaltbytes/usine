@@ -41,7 +41,7 @@ export class OperationCall extends Schema.Class<
   target: CallTarget,
   /**
    * Where the operation's permission is checked: the project of the target, or the instance for
-   * operations outside a project, such as upgrades, configuration writes, and worker operations.
+   * operations outside a project, such as upgrades, worker operations, and writes of agents.
    */
   scope: AccessScope,
   permission: WritePermission,
@@ -55,22 +55,26 @@ export interface OperationRequirement {
 }
 
 /**
- * The operations that send free text to a coding agent that can push: an operator message, and
- * the task of an edit-and-retry or a run-again. A standing grant never covers them, so text from a
- * pull request or an issue can't reach an agent without a member reading it first.
+ * The operations that a member allows only once, whatever their scope. An operator message, and
+ * the task of an edit-and-retry or a run-again, send free text to a coding agent that can push, so
+ * under a grant, text from a pull request or an issue would reach it with no member reading it.
+ * A configuration write or revert can rewrite a loop's prompt, which agents run, or an agent's.
  */
-const FREE_TEXT_OPERATIONS: ReadonlySet<string> = new Set([
+const ONCE_ONLY_OPERATIONS: ReadonlySet<string> = new Set([
   "intervene",
   "editAndRetry",
   "runAgain",
+  "replaceConfigurationEntity",
+  "deleteConfigurationEntity",
+  "revertConfigurationRevision",
 ]);
 
 /**
- * Whether a standing grant can cover `call`: a call in a project of an operation that sends no
- * free text to a coding agent.
+ * Whether a standing grant can cover `call`: a call in a project of an operation that a member
+ * can allow more than once.
  */
 export const isGrantable = (call: OperationRequirement): boolean =>
-  call.scope._tag === "Project" && !FREE_TEXT_OPERATIONS.has(call.operation);
+  call.scope._tag === "Project" && !ONCE_ONLY_OPERATIONS.has(call.operation);
 
 /**
  * Returns the grants that a credential limited to `requirement` has, within a member's grants:
@@ -448,10 +452,15 @@ export const grantRequirement = (grant: StandingGrant): OperationRequirement => 
   scope: ProjectScope.make({ project: grant.project }),
 });
 
-/** Whether `grant` covers `call`: it isn't revoked, and has the call's operation and project. */
+/**
+ * Whether `grant` covers `call`: it isn't revoked, the call is grantable, and the grant has the
+ * call's operation, permission, and project.
+ */
 export const covers = (grant: StandingGrant, call: OperationCall): boolean =>
   Option.isNone(grant.revoked) &&
+  isGrantable(call) &&
   grant.operation === call.operation &&
+  grant.permission === call.permission &&
   call.scope._tag === "Project" &&
   call.scope.project === grant.project;
 
