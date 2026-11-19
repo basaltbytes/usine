@@ -2053,6 +2053,7 @@ export {
   UnresponsiveWorkerNeed,
   WorkerPreflightNeed,
   WorkerQuotaNeed,
+  WorkerGatewayNeed,
   WorkerPausedNeed,
   WebhookSilenceNeed,
   UpgradeDrainNeed,

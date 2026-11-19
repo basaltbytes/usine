@@ -744,7 +744,7 @@ describe("SSH Worker behind a Gateway", () => {
         yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
         assert.deepStrictEqual(
           gateway.calls.map(({ method, path }) => `${method} ${path}`),
-          ["GET /v1/attachments", "GET /v1/providers"],
+          ["GET /v1/attachments", "GET /v1/providers", "GET /v1/provider-credentials"],
         );
         const lines = machine.state.calls.map(({ line }) => line);
         assert(
@@ -842,7 +842,11 @@ describe("SSH Worker behind a Gateway", () => {
           gateway.calls.map(
             ({ method, path, delivered }) => `${method} ${path} ${String(delivered)}`,
           ),
-          ["GET /v1/attachments true", "GET /v1/providers true"],
+          [
+            "GET /v1/attachments true",
+            "GET /v1/providers true",
+            "GET /v1/provider-credentials true",
+          ],
         );
       }).pipe(Effect.provide(gatewayRuntime(machine, mintingProvider(), gateway)));
     },

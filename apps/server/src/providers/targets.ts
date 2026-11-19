@@ -5,6 +5,7 @@ import {
   configurationEntities,
 } from "@usine/config/configuration";
 import { localActor } from "@usine/core/operator";
+import type { ReleaseVersion } from "@usine/core/upgrade";
 import { SshWorker, WorkerGateway, type Worker } from "@usine/config/factory";
 import {
   Config,
@@ -41,6 +42,7 @@ const localFailure = () =>
   failed("Could not read or save the local harness login. Check its directory permissions.");
 const makeProviderTargets = Effect.fn("ProviderTargets.make")(function* (
   workers: Effect.Effect<readonly Worker[]>,
+  release: Option.Option<ReleaseVersion>,
 ) {
   const configuration = yield* ConfigurationStore;
   const fs = yield* FileSystem.FileSystem;
@@ -59,6 +61,16 @@ const makeProviderTargets = Effect.fn("ProviderTargets.make")(function* (
     Config.withDefault("/usr/local/bin:/usr/bin:/bin"),
     Effect.orDie,
   );
+  const olderGateway = (destination: string) =>
+    failed(
+      `Gateway ${destination} is older than this orchestrator: it has no provider-credentials admin API. ${Option.match(
+        release,
+        {
+          onNone: () => "Install the @usine/gateway release that matches this orchestrator on it.",
+          onSome: (version) => `Install @usine/gateway@${version} on it.`,
+        },
+      )}`,
+    );
   const claudeCommand = Effect.fn("ProviderTargets.claudeCommand")(function* (
     action: "status" | "logout",
   ) {
@@ -180,6 +192,8 @@ const makeProviderTargets = Effect.fn("ProviderTargets.make")(function* (
       const config = [
         `url = "http://127.0.0.1:${gateway.adminPort}/v1/provider-credentials${method === "DELETE" ? `/${provider}` : ""}"`,
         `request = "${method}"`,
+        // The status follows the body on its own line, also when --fail suppresses the body.
+        'write-out = "\\n%{http_code}"',
         `header = ${authorization}`,
         'header = "Content-Type: application/json"',
         ...(payload === undefined ? [] : [`data = ${data}`]),
@@ -210,11 +224,15 @@ const makeProviderTargets = Effect.fn("ProviderTargets.make")(function* (
       const exit = yield* child.exitCode.pipe(
         Effect.mapError(() => failed("The gateway request failed.")),
       );
+      const statusLine = output.lastIndexOf("\n");
+      const status = output.slice(statusLine + 1);
       if (Number(exit) !== 0)
-        return yield* failed(
-          "The gateway refused the credential request. Check its version, admin token, and service logs.",
-        );
-      return output;
+        return yield* status === "404"
+          ? olderGateway(gateway.destination)
+          : failed(
+              "The gateway refused the credential request. Check its version, admin token, and service logs.",
+            );
+      return output.slice(0, Math.max(statusLine, 0));
     },
     Effect.timeoutOrElse({
       duration: "35 seconds",
@@ -441,6 +459,8 @@ const makeProviderTargets = Effect.fn("ProviderTargets.make")(function* (
     ).pipe(Effect.mapError(() => failed("Upgrade the gateway to enable provider connections.")));
     return { target, label: gateway.destination, providers };
   });
+  // Settings polls the list, so each destination's error is logged when it changes.
+  const destinationErrors = new Map<string, string>();
   return {
     get,
     list: Effect.gen(function* () {
@@ -450,12 +470,20 @@ const makeProviderTargets = Effect.fn("ProviderTargets.make")(function* (
         targets,
         (target) =>
           get(target).pipe(
+            Effect.tap(() =>
+              destinationErrors.delete(target)
+                ? Effect.logInfo("Provider destination status available", { target })
+                : Effect.void,
+            ),
             Effect.catchTag("ProviderCredentialError", (error) =>
               Effect.gen(function* () {
-                yield* Effect.logWarning("Provider destination status unavailable", {
-                  target,
-                  message: error.message,
-                });
+                if (destinationErrors.get(target) !== error.message) {
+                  destinationErrors.set(target, error.message);
+                  yield* Effect.logWarning("Provider destination status unavailable", {
+                    target,
+                    message: error.message,
+                  });
+                }
                 return {
                   target,
                   label: target === "local" ? "Local harnesses" : target,
@@ -541,6 +569,12 @@ export class ProviderTargets extends Context.Service<
     ) => Effect.Effect<void, ProviderCredentialError>;
   }
 >()("@usine/server/providers/targets/ProviderTargets") {
-  static readonly layer = (workers: Effect.Effect<readonly Worker[]>) =>
-    Layer.effect(ProviderTargets, makeProviderTargets(workers));
+  /**
+   * Returns the provider targets of `workers`. `release` is the `@usine/gateway` release that an
+   * older gateway is told to install, or `None` when this server isn't a published release.
+   */
+  static readonly layer = (
+    workers: Effect.Effect<readonly Worker[]>,
+    release: Option.Option<ReleaseVersion>,
+  ) => Layer.effect(ProviderTargets, makeProviderTargets(workers, release));
 }

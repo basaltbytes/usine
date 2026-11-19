@@ -14,6 +14,8 @@ const fixture = () => {
   const machine = fakeMachine();
   const gateway = fakeGateway(machine);
   const upstream: Array<{ path: string; headers: Readonly<Record<string, string>> }> = [];
+  /** The paths requested on `llm.gw.test`. */
+  const llm: Array<string> = [];
   const proxy = GatewayProxy.layer.pipe(
     Layer.provide(
       Layer.succeed(HttpClient.HttpClient)(
@@ -32,20 +34,31 @@ const fixture = () => {
     Effect.gen(function* () {
       const admin = yield* HttpClient.HttpClient;
       const modelProxy = yield* GatewayProxy;
-      return HttpClient.make((request) =>
-        request.headers.host === "llm.gw.test"
-          ? modelProxy.handle.pipe(
-              Effect.provideService(
-                HttpServerRequest.HttpServerRequest,
-                HttpServerRequest.fromClientRequest(request),
-              ),
-              Effect.map((response) => HttpServerResponse.toClientResponse(response, { request })),
-            )
-          : admin.execute(request),
-      );
+      return HttpClient.make((request) => {
+        if (request.headers.host !== "llm.gw.test") return admin.execute(request);
+        const path = new URL(request.url).pathname;
+        llm.push(path);
+        // A Gateway from before protocol slots authenticates the caller, then refuses their
+        // path prefixes, so a request without a caller token gets a 401 on every path.
+        if (
+          gateway.switches.beforeProtocolSlots &&
+          request.headers.authorization !== undefined &&
+          /^\/(?:anthropic-messages|openai-responses)\//u.test(path)
+        )
+          return Effect.succeed(
+            HttpClientResponse.fromWeb(request, new Response(null, { status: 404 })),
+          );
+        return modelProxy.handle.pipe(
+          Effect.provideService(
+            HttpServerRequest.HttpServerRequest,
+            HttpServerRequest.fromClientRequest(request),
+          ),
+          Effect.map((response) => HttpServerResponse.toClientResponse(response, { request })),
+        );
+      });
     }),
   ).pipe(Layer.provideMerge(gateway.layer), Layer.provide(proxy));
-  return { machine, gateway, upstream, transport };
+  return { machine, gateway, upstream, llm, transport };
 };
 
 it.effect("reports the gateway model proxy probe deadline", () => {
@@ -173,8 +186,78 @@ it.effect("refuses an unexpected model proxy probe status", () => {
   );
 });
 
+it.effect(
+  "uses the provider prefixes of a gateway from before protocol slots, and the protocol prefixes once a credential read finds it upgraded",
+  () => {
+    const { machine, gateway, upstream, llm, transport } = fixture();
+    gateway.switches.beforeProtocolSlots = true;
+    return Effect.gen(function* () {
+      const settings = gatewayAddress().gateway;
+      assert(Option.isSome(settings));
+      const route = yield* gatewayModelRouteFor(
+        WorkerName.make("coordinator-older-gateway"),
+        RepositoryName.make("usine/coordinator"),
+        settings.value,
+      );
+      const credential = yield* route.credential("anthropic-messages");
+      assert.deepStrictEqual(credential, Option.some("api-key"));
+      const answer = yield* route.request(
+        "anthropic-messages",
+        '{"model":"claude-sonnet-4-6"}',
+        {},
+      );
+      const text = yield* Effect.promise(() => answer.text());
+      assert.strictEqual(text, "gateway model answer");
+      assert.deepStrictEqual(llm, ["/openai-responses/v1/models", "/anthropic/v1/messages"]);
+      assert.strictEqual(new URL(upstream[0]?.path ?? "").pathname, "/v1/messages");
+      gateway.switches.beforeProtocolSlots = false;
+      const upgraded = yield* route.credential("anthropic-messages");
+      assert.deepStrictEqual(upgraded, Option.some("api-key"));
+      const after = yield* route.request("anthropic-messages", "{}", {});
+      assert.strictEqual(after.status, 200);
+      yield* Effect.promise(() => after.text());
+      assert.strictEqual(llm.at(-1), "/anthropic-messages/v1/messages");
+    }).pipe(Effect.provide(transport.pipe(Layer.provideMerge(machine.layer))), Effect.scoped);
+  },
+);
+
+it.effect("switches to the protocol prefixes on the renewal after a gateway upgrade", () => {
+  const { machine, gateway, llm, transport } = fixture();
+  gateway.switches.beforeProtocolSlots = true;
+  const infos: Array<unknown> = [];
+  return Effect.gen(function* () {
+    const settings = gatewayAddress().gateway;
+    assert(Option.isSome(settings));
+    const route = yield* gatewayModelRouteFor(
+      WorkerName.make("coordinator-upgraded-gateway"),
+      RepositoryName.make("usine/coordinator"),
+      settings.value,
+    );
+    gateway.switches.beforeProtocolSlots = false;
+    yield* advance(gateway, 3);
+    const answer = yield* route.request("anthropic-messages", "{}", {});
+    assert.strictEqual(answer.status, 200);
+    yield* Effect.promise(() => answer.text());
+    assert.deepStrictEqual(llm, ["/openai-responses/v1/models", "/anthropic-messages/v1/messages"]);
+    assert.include(
+      infos,
+      "The gateway serves protocol path prefixes; the orchestrator model route uses them",
+    );
+  }).pipe(
+    Effect.provide([
+      Logger.layer([
+        Logger.make(({ logLevel, message }) => {
+          if (logLevel === "Info") infos.push(Array.isArray(message) ? message[0] : message);
+        }),
+      ]),
+      transport.pipe(Layer.provideMerge(machine.layer)),
+    ]),
+    Effect.scoped,
+  );
+});
+
 it.effect("requires credential reporting from older gateways", () => {
-  const { machine, gateway, transport } = fixture();
+  const { machine, gateway, llm, transport } = fixture();
   gateway.switches.reportsProviders = false;
   return Effect.gen(function* () {
     const settings = gatewayAddress().gateway;
@@ -186,6 +269,9 @@ it.effect("requires credential reporting from older gateways", () => {
     );
     const failure = yield* route.credential("openai-responses").pipe(Effect.flip);
     assert.include(failure.message, "Upgrade @usine/gateway");
+    const answer = yield* route.request("anthropic-messages", "{}", {});
+    yield* Effect.promise(() => answer.text());
+    assert.strictEqual(llm.at(-1), "/anthropic/v1/messages");
   }).pipe(Effect.provide(transport.pipe(Layer.provideMerge(machine.layer))), Effect.scoped);
 });
 

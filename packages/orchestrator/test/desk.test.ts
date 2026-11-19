@@ -476,6 +476,7 @@ const deskLayer = (
         ],
         containerLimits: Option.none(),
         findings: [],
+        gatewayUpgrade: Option.none(),
       },
       {
         worker: WorkerName.make("spare"),
@@ -483,6 +484,7 @@ const deskLayer = (
         harnesses: [{ harness: Harness.make("claude"), check: passed("05:30:00") }],
         containerLimits: Option.none(),
         findings: [],
+        gatewayUpgrade: Option.none(),
       },
     ]),
   });

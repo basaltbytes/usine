@@ -244,6 +244,10 @@ const sink = {
   checkoutAcquired: Effect.void,
 };
 
+/** The reason a machine check gives for a Gateway that is older than the orchestrator. */
+const GATEWAY_UPGRADE =
+  "Gateway usine-gateway is older than this orchestrator: it has no provider-credentials admin API, so Settings can't manage its provider logins. Upgrade @usine/gateway on it to the release that matches the orchestrator.";
+
 /** Lets the scheduler's fibers run until they wait. */
 const settle = Effect.forEach(Array.from({ length: 20 }), () => Effect.yieldNow, {
   discard: true,
@@ -265,6 +269,7 @@ describe("Worker scheduler on a provisioned Worker", () => {
             brains: [testAgent.brain],
             containerLimits: Option.some(limits),
             findings: ["The SSH user can't read the kernel journal"],
+            gatewayUpgrade: Option.some(GATEWAY_UPGRADE),
           }),
         );
         const context = yield* scheduler(fake.machines);
@@ -285,6 +290,7 @@ describe("Worker scheduler on a provisioned Worker", () => {
         const checked = (yield* status.preflights).find(({ worker }) => worker === POOL);
         assert.deepStrictEqual(checked?.containerLimits, Option.some(limits));
         assert.deepStrictEqual(checked?.findings, ["The SSH user can't read the kernel journal"]);
+        assert.deepStrictEqual(checked?.gatewayUpgrade, Option.some(GATEWAY_UPGRADE));
 
         yield* lease.release;
         assert.deepStrictEqual(fake.calls.at(-1), "release hold-1");

@@ -41,6 +41,7 @@ import { Option, type Duration, type Effect, type Redacted, type Ref } from "eff
 import type { HarnessProbe } from "../harness-preflight.ts";
 import type { RemoteMachine } from "../remote/machine.ts";
 import type { GatewayAdmin } from "./gateway/admin.ts";
+import type { GatewayLlmPrefixes } from "./gateway/environment.ts";
 import type { GatewayForward } from "./gateway/forward.ts";
 
 /** The Gateway in front of an SSH Worker's machine on a private network (ADR 0027). */
@@ -266,6 +267,11 @@ export interface MachineGateway {
    * `llmProviders` doesn't list.
    */
   readonly credentials: Ref.Ref<GatewayCredentials>;
+  /**
+   * The path prefixes the Gateway serves on `llm.<domain>`, from the last preflight that read
+   * its provider report. `protocol` before then.
+   */
+  readonly llmPrefixes: Ref.Ref<GatewayLlmPrefixes>;
 }
 
 /** The credential kind the Gateway holds for each provider; see `MachineGateway.credentials`. */

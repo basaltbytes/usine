@@ -194,6 +194,12 @@ export interface PreflightReport {
    * log that the SSH user can't read, which leaves out-of-memory kills without process names.
    */
   readonly findings: ReadonlyArray<string>;
+  /**
+   * Why the Worker's Gateway needs an upgrade to match the orchestrator, for operators, such as a
+   * Gateway from before protocol path prefixes, whose older prefixes Attempts use instead. `None`
+   * if the Worker has no Gateway or its Gateway matches.
+   */
+  readonly gatewayUpgrade: Option.Option<string>;
 }
 
 /** The report of a Worker that runs Attempts as designed, without containers. */
@@ -202,6 +208,7 @@ export const fullPreflight: PreflightReport = {
   deferred: Option.none(),
   containerLimits: Option.none(),
   findings: [],
+  gatewayUpgrade: Option.none(),
 };
 
 /** Logs each preflight failure at error level. */
@@ -467,6 +474,8 @@ export class MachineCheck extends Schema.Class<
   containerLimits: Schema.Option(ContainerLimits),
   /** The machine's preflight findings, as in `PreflightReport`. */
   findings: Schema.Array(Schema.String),
+  /** Why the Worker's Gateway needs an upgrade, as in `PreflightReport`. */
+  gatewayUpgrade: Schema.Option(Schema.String),
 }) {}
 
 /** A machine that a provisioned Worker created for an Attempt and holds until `release`. */

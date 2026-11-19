@@ -1,4 +1,4 @@
-import { type Brand, Effect, Schema } from "effect";
+import { type Brand, Effect, Schema, SchemaGetter } from "effect";
 
 /** A worker's kebab-case name in the instance configuration. */
 export const WorkerName = Schema.String.check(
@@ -117,6 +117,39 @@ export type GatewayLlmProvider = typeof GatewayLlmProvider.Type;
 /** The wire protocol of a gateway credential slot. */
 export const GatewayLlmProtocol = Schema.Literals(["anthropic-messages", "openai-responses"]);
 export type GatewayLlmProtocol = typeof GatewayLlmProtocol.Type;
+
+/**
+ * The provider name that gateways and configurations before protocol slots used for each
+ * protocol: as its `llm.<domain>` path prefix, in the gateway's provider report, and in
+ * `llm_providers`.
+ */
+export const GATEWAY_LEGACY_PROVIDERS = {
+  "anthropic-messages": "anthropic",
+  "openai-responses": "openai",
+} as const satisfies Record<GatewayLlmProtocol, GatewayLlmProvider>;
+
+const isGatewayLlmProvider = Schema.is(GatewayLlmProvider);
+// SAFETY: `GATEWAY_LEGACY_PROVIDERS` names each provider for exactly one protocol, so the inverse
+// has a protocol for each provider; `test/worker.test.ts` checks it.
+const protocolOfLegacyProvider = Object.fromEntries(
+  Object.entries(GATEWAY_LEGACY_PROVIDERS).map(([protocol, provider]) => [provider, protocol]),
+) as Record<GatewayLlmProvider, GatewayLlmProtocol>;
+
+/** Returns the protocol of a gateway slot name: a protocol, or a name in `GATEWAY_LEGACY_PROVIDERS`. */
+export const gatewayLlmProtocolOf = (
+  name: GatewayLlmProvider | GatewayLlmProtocol,
+): GatewayLlmProtocol => (isGatewayLlmProvider(name) ? protocolOfLegacyProvider[name] : name);
+
+/** Decodes a gateway slot name to its protocol with `gatewayLlmProtocolOf`, and encodes the protocol. */
+export const GatewayLlmProtocolFromName = Schema.Union([
+  GatewayLlmProvider,
+  GatewayLlmProtocol,
+]).pipe(
+  Schema.decodeTo(GatewayLlmProtocol, {
+    decode: SchemaGetter.transform(gatewayLlmProtocolOf),
+    encode: SchemaGetter.transform((protocol) => protocol),
+  }),
+);
 
 /**
  * The kind of LLM provider credential that the Gateway stores, as reported by its admin API, or

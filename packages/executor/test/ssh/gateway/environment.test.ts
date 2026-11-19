@@ -11,7 +11,11 @@ import { assert, describe, it } from "@effect/vitest";
 import { Harness } from "@usine/core/agent/brain";
 import { GatewayDomain, type GatewayLlmProtocol } from "@usine/core/worker";
 import { Option, Redacted } from "effect";
-import { gatewayConfigFiles, gatewayEnvironment } from "../../../src/ssh/gateway/environment.ts";
+import {
+  gatewayConfigFiles,
+  gatewayEnvironment,
+  type GatewayLlmPrefixes,
+} from "../../../src/ssh/gateway/environment.ts";
 
 const CALLER_TOKEN = "ugw1.sample-claims.sample-signature";
 const DIRECTORIES = {
@@ -22,12 +26,14 @@ const DIRECTORIES = {
 const environmentFor = (
   llmProviders: ReadonlyArray<GatewayLlmProtocol>,
   harness: Option.Option<Harness> = Option.none(),
+  llmPrefixes: GatewayLlmPrefixes = "protocol",
 ) => {
   const { exported, sent } = gatewayEnvironment({
     catalog,
     harness,
     domain: GatewayDomain.make("gw.internal"),
     llmProviders,
+    llmPrefixes,
     ...DIRECTORIES,
     callerToken: Redacted.make(CALLER_TOKEN),
   });
@@ -107,6 +113,7 @@ describe("An Attempt's environment behind a Gateway", () => {
       catalog: source,
       domain: GatewayDomain.make("gw.internal"),
       llmProviders: ["anthropic-messages", "openai-responses"] as const,
+      llmPrefixes: "protocol" as const,
       ...DIRECTORIES,
       homes: { ...DIRECTORIES.homes, opencode: "/attempt/opencode" },
       callerToken: Redacted.make(CALLER_TOKEN),
@@ -136,6 +143,7 @@ describe("An Attempt's environment behind a Gateway", () => {
           catalog,
           domain: GatewayDomain.make("gw.internal"),
           llmProviders,
+          llmPrefixes: "protocol",
           ...DIRECTORIES,
         }),
       );
@@ -149,5 +157,32 @@ describe("An Attempt's environment behind a Gateway", () => {
       CODEX_CONFIG,
     );
     assert.notInclude(jsonKey(withCodex), CALLER_TOKEN);
+  });
+
+  it("points Claude Code and Codex at the provider prefixes of a Gateway from before protocol slots", () => {
+    const claude = environmentFor(
+      ["anthropic-messages", "openai-responses"],
+      Option.some(Harness.make("claude")),
+      "provider",
+    );
+    assert.strictEqual(claude.exported.ANTHROPIC_BASE_URL, "http://llm.gw.internal/anthropic");
+    const files = Object.fromEntries(
+      gatewayConfigFiles({
+        catalog,
+        domain: GatewayDomain.make("gw.internal"),
+        llmProviders: ["openai-responses"],
+        llmPrefixes: "provider",
+        ...DIRECTORIES,
+      }),
+    );
+    assert.strictEqual(
+      files["/home/usine/.usine/workers/eu-one/codex/config.toml"],
+      CODEX_CONFIG.replace("/openai-responses/v1", "/openai/v1"),
+    );
+    const current = environmentFor(["anthropic-messages"], Option.some(Harness.make("claude")));
+    assert.strictEqual(
+      current.exported.ANTHROPIC_BASE_URL,
+      "http://llm.gw.internal/anthropic-messages",
+    );
   });
 });
