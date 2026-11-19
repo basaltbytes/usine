@@ -13,7 +13,7 @@ import {
 } from "@usine/core/access";
 import { ProjectId } from "@usine/core/project";
 import { ReleaseVersion } from "@usine/core/upgrade";
-import { UpgradeDrain, UpgradeWait } from "@usine/engine/engine";
+import { CapacityGroup, CapacityWait, UpgradeDrain, UpgradeWait } from "@usine/engine/engine";
 import { WebhookHealth } from "../src/webhooks.ts";
 import { testAppLayer } from "./support/github-app.ts";
 import { pollingTestLayer } from "./support/polling.ts";
@@ -82,6 +82,7 @@ import {
   DefectFailure,
   GitHubPushFailure,
   InfraFailure,
+  ProviderCapacityFailure,
 } from "@usine/core/attempt/failure";
 import { AttemptCanceled, AttemptFailed } from "@usine/core/attempt/outcome";
 import * as RunState from "@usine/core/run/state";
@@ -488,6 +489,7 @@ const testLayer = (
   upgradeDrain: Effect.Effect<Option.Option<UpgradeDrain>> = Effect.succeedNone,
   /** The CI fix Run of each source Run that the reader reports. */
   ciFixRuns: ReadonlyMap<RunId, CiFixRun> = new Map(),
+  capacityWaits: Effect.Effect<ReadonlyArray<CapacityWait>> = Effect.succeed([]),
 ) => {
   const acknowledged: Array<AttentionAcknowledgement> = [];
   const readTranscript = (query: TranscriptQuery) =>
@@ -535,7 +537,7 @@ const testLayer = (
     waitForUpgrade: () => Effect.void,
     cancelUpgrade: Effect.void,
     upgradeDrain,
-    capacityWaits: Effect.succeed([]),
+    capacityWaits,
     retry: commands.retry,
     revoke: () => Effect.succeed([]),
     runAgain: commands.runAgain,
@@ -3233,6 +3235,107 @@ it.effect(
             {},
             undefined,
             Ref.get(drain),
+          ),
+        ),
+      );
+    }),
+);
+
+it.effect(
+  "shows one entry per capacity group and the group's next try on the Runs that wait for it",
+  () =>
+    Effect.gen(function* () {
+      const fixtureInstance = yield* instance;
+      const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
+      const moved = yield* Ref.make<ItemLabelMutation | null>(null);
+      const reads = yield* Ref.make(0);
+      const revision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
+      const waits = yield* Ref.make<ReadonlyArray<CapacityWait>>([]);
+      const refusedAt = yield* DateTime.now;
+      const [original] = snapshot.attempts;
+      assert(original !== undefined);
+      const current = RunSnapshot.make({
+        ...snapshot,
+        run: Run.make({ ...snapshot.run, state: RunState.Running.make() }),
+        attempts: [
+          Attempt.make({
+            ...original,
+            outcome: Option.some(
+              AttemptFailed.make({
+                failure: ProviderCapacityFailure.make({ message: "You've hit your limit" }),
+              }),
+            ),
+            endedAt: Option.some(refusedAt),
+          }),
+        ],
+      });
+      yield* Effect.gen(function* () {
+        const operator = yield* Operator;
+        const retries = Effect.map(operator.overview(fixtureInstance), (view) =>
+          view.projects.flatMap(({ runs }) =>
+            (runs ?? [])
+              .filter(({ id }) => id === current.run.id)
+              .map(({ providerRetry, canRetry }) => ({
+                retryAt: Option.map(Option.fromNullishOr(providerRetry), ({ retryAt }) =>
+                  DateTime.toEpochMillis(retryAt),
+                ),
+                canRetry,
+              })),
+          ),
+        );
+        const backoff = DateTime.toEpochMillis(DateTime.add(refusedAt, { minutes: 5 }));
+        assert.deepStrictEqual(yield* retries, [
+          { retryAt: Option.some(backoff), canRetry: true },
+        ]);
+
+        // Other Runs' refusals lengthened the group's wait past the Run's own backoff.
+        const nextTryAt = DateTime.add(refusedAt, { minutes: 50 });
+        yield* Ref.set(waits, [
+          CapacityWait.make({
+            group: CapacityGroup.make({
+              harness: brain.harness,
+              model: brain.model,
+              worker: WorkerName.make("local"),
+            }),
+            message: "You've hit your limit",
+            since: refusedAt,
+            refusals: 3,
+            nextTryAt,
+            probes: [],
+            runIds: [current.run.id],
+          }),
+        ]);
+        const grouped = yield* retries;
+        assert.deepStrictEqual(grouped, [
+          { retryAt: Option.some(DateTime.toEpochMillis(nextTryAt)), canRetry: true },
+        ]);
+        const view = yield* operator.overview(fixtureInstance);
+        const needs = view.needsYou.filter(({ _tag }) => _tag === "ProviderCapacityNeed");
+        assert.lengthOf(needs, 1);
+        const [need] = needs;
+        assert(need?._tag === "ProviderCapacityNeed");
+        assert.strictEqual(need.waitingRuns, 1);
+        assert.strictEqual(need.nextTryAt, DateTime.formatIso(nextTryAt));
+        assert(!view.needsYou.some(({ _tag }) => _tag === "RunFailureNeed"));
+      }).pipe(
+        Effect.provide(
+          testLayer(
+            approved,
+            moved,
+            reads,
+            revision,
+            current,
+            undefined,
+            undefined,
+            [],
+            [],
+            [],
+            undefined,
+            {},
+            undefined,
+            undefined,
+            undefined,
+            Ref.get(waits),
           ),
         ),
       );

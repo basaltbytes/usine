@@ -1,19 +1,18 @@
 import type { AttentionAcknowledgements } from "@usine/engine/attention";
-import type { CapacityWait } from "@usine/engine/engine";
-import { jsonKey } from "@usine/core/json-key";
+import { capacityGroupKey, type CapacityWait } from "@usine/engine/engine";
 import { DateTime, Effect } from "effect";
 import { partitionNeeds } from "./attention.ts";
 import { ProviderCapacityNeed } from "./need.ts";
 import { ReadyOverview } from "./overview.ts";
 
-/** Returns one attention entry for each pool at capacity, in place of a failure per Run. */
+/** Returns one attention entry for each capacity group at capacity, in place of a failure per Run. */
 export const capacityNeeds = (
   waits: ReadonlyArray<CapacityWait>,
 ): ReadonlyArray<ProviderCapacityNeed> =>
-  waits.map(({ pool, message, since, nextTryAt, probes, runIds }) =>
+  waits.map(({ group, message, since, nextTryAt, probes, runIds }) =>
     ProviderCapacityNeed.make({
-      id: `provider-capacity:${jsonKey([pool.worker, pool.harness, pool.model])}`,
-      pool,
+      id: `provider-capacity:${capacityGroupKey(group)}`,
+      group,
       message,
       since: DateTime.formatIso(since),
       nextTryAt: DateTime.formatIso(nextTryAt),
@@ -27,11 +26,11 @@ export const capacityAttentionFor = (
 ) =>
   Effect.fn("Operator.capacityAttention")(function* (overview: ReadyOverview) {
     const waits = yield* read;
-    yield* Effect.annotateCurrentSpan({ pools: waits.length });
+    yield* Effect.annotateCurrentSpan({ groups: waits.length });
     if (waits.length === 0) return overview;
     const needs = capacityNeeds(waits);
-    yield* Effect.logDebug("Refreshed the attention entries of pools at capacity", {
-      pools: needs.map(({ id, waitingRuns, nextTryAt }) => ({ id, waitingRuns, nextTryAt })),
+    yield* Effect.logDebug("Refreshed the attention entries of capacity groups at capacity", {
+      groups: needs.map(({ id, waitingRuns, nextTryAt }) => ({ id, waitingRuns, nextTryAt })),
     });
     const storedAcknowledgements = yield* acknowledgements.list;
     const { needsYou, dismissedNeeds } = partitionNeeds(needs, storedAcknowledgements);

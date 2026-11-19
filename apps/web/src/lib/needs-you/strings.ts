@@ -30,8 +30,8 @@ export const needCopy = (need: NeedView): NeedCopy =>
       repository: null,
       runId: null,
     }),
-    ProviderCapacityNeed: ({ pool, message, since, nextTryAt, waitingRuns }) => ({
-      title: `${pool.harness} ${pool.model} on ${pool.worker}: at capacity since ${timestampLabel(since)}`,
+    ProviderCapacityNeed: ({ group, message, since, nextTryAt, waitingRuns }) => ({
+      title: `${group.harness} ${group.model} on ${group.worker}: at capacity since ${timestampLabel(since)}`,
       detail: `Next try at ${timestampLabel(nextTryAt)}. ${waitingRuns} ${waitingRuns === 1 ? "run waits" : "runs wait"} without failing; retry a run to try now. ${message}`,
       repository: null,
       runId: null,

@@ -219,7 +219,7 @@ export const readRunningEvents = Effect.fn("Operator.readRunningEvents")(functio
   return new Map(read.map(({ runId, event }) => [runId, event] as const));
 });
 
-/** The Runs that the engine in this process holds: for an upgrade, and for pools at capacity. */
+/** The Runs that the engine in this process holds: for an upgrade, and for capacity groups. */
 export interface EngineWaits {
   readonly upgrade: UpgradeDrain | null;
   readonly capacity: ReadonlyArray<CapacityWait>;
@@ -242,18 +242,18 @@ export const readEngineWaits = (
   });
 
 /**
- * Returns the Run's pending capacity retry, at the next try of the pool that the Run waits for if
- * that is later, with the pool's latest refusal.
+ * Returns the Run's pending capacity retry, at the next try of the capacity group that the Run
+ * waits for if that is later, with the group's latest refusal.
  */
 const providerRetryOf = (snapshot: RunSummary, capacity: EngineWaits["capacity"]) =>
   Option.map(pendingProviderRetry(snapshot.run.state, snapshot.attempts), (retry) => {
-    const pool = capacity.find(({ runIds }) => runIds.includes(snapshot.run.id));
-    return pool === undefined
+    const group = capacity.find(({ runIds }) => runIds.includes(snapshot.run.id));
+    return group === undefined
       ? retry
       : ProviderRetry.make({
           nextAttempt: retry.nextAttempt,
-          retryAt: DateTime.max(retry.retryAt, pool.nextTryAt),
-          message: pool.message,
+          retryAt: DateTime.max(retry.retryAt, group.nextTryAt),
+          message: group.message,
         });
   });
 
