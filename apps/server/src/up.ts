@@ -18,7 +18,10 @@ import { writeAdminToken } from "./auth/local.ts";
 import type { AuthServices } from "./auth/http.ts";
 import { FetchHttpClient, type HttpRouter } from "effect/http";
 import { conversationsLayer, type Conversations } from "@usine/orchestrator/conversation";
+import { type Permissions, permissionsLayer } from "@usine/orchestrator/conversation/permissions";
+import { sqlitePermissionStoreLayer } from "@usine/orchestrator/conversation/permissions/sqlite";
 import { sqliteConversationStoreLayer } from "@usine/orchestrator/conversation/sqlite";
+import { actingCallsLayer } from "./supervisor/acting.ts";
 import { turnAccessLayer } from "./supervisor/turns.ts";
 import type { SqlClient } from "effect/sql";
 import { ItemProjectionReader } from "@usine/engine/item-projection";
@@ -97,7 +100,7 @@ const serve = Effect.fnUntraced(function* (options: {
   readonly configurationEditor: ConfigurationEditor["Service"];
   readonly catalog?: Layer.Layer<GitHubApp | GitHubPolling | GitHubFiles>;
   readonly webhooks?: Layer.Layer<never, never, HttpRouter.HttpRouter>;
-  readonly conversations?: Layer.Layer<Conversations, never, HttpRouter.HttpRouter>;
+  readonly conversations?: Layer.Layer<Conversations | Permissions, never, HttpRouter.HttpRouter>;
   readonly listener: StartupListener;
 }) {
   yield* Layer.build(
@@ -290,6 +293,11 @@ const start = Effect.fnUntraced(function* (
       }),
     );
     const upgrades = Context.get(upgradeContext, ServerUpgrades);
+    const backend = liveBackendLayer(
+      instances,
+      operator,
+      Context.get(context, OperatorConfiguration),
+    );
     return {
       drain: engine.drain,
       running: Effect.raceFirst(
@@ -297,11 +305,7 @@ const start = Effect.fnUntraced(function* (
           setup,
           providers,
           auth,
-          backend: liveBackendLayer(
-            instances,
-            operator,
-            Context.get(context, OperatorConfiguration),
-          ),
+          backend,
           configurationEditor,
           catalog: Layer.mergeAll(
             Layer.succeed(GitHubApp, Context.get(context, GitHubApp)),
@@ -314,15 +318,18 @@ const start = Effect.fnUntraced(function* (
           listener,
           webhooks,
           upgrades,
-          // Turns run in the runtime's supervisor sandbox, with the access of their member.
+          // Turns run in the runtime's supervisor sandbox, with the access of their member; the
+          // calls that members allow run with the access of those members.
           conversations: conversationsLayer.pipe(
-            Layer.provide(turnAccessLayer),
-            Layer.provide(sqliteConversationStoreLayer),
+            Layer.provideMerge(permissionsLayer),
+            Layer.provide(Layer.merge(turnAccessLayer, actingCallsLayer)),
+            Layer.provide(Layer.merge(sqliteConversationStoreLayer, sqlitePermissionStoreLayer)),
             Layer.provide(
               Layer.mergeAll(
                 Layer.succeedContext(context),
                 Layer.succeed(Authentication, auth.authentication),
                 Layer.succeed(CurrentInstance, instances),
+                backend,
                 database,
                 NodeServices.layer,
               ),

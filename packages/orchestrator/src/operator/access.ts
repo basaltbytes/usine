@@ -1,6 +1,8 @@
 import {
   AccessDenied,
+  type AccessScope,
   InstanceScope,
+  type Permission,
   ProjectScope,
   RequestPermissions,
   permits,
@@ -83,12 +85,26 @@ export const visibleInstance = (instance: LoadedInstance) =>
     });
   });
 
-export const entityPermission = (key: ConfigurationEntityKey, permission: "read" | "maintain") => {
-  if (key.kind === "loop") return requirePermission(permission, loopScope(key.identifier));
+/**
+ * Returns the permission and scope that reading or changing the entity `key` needs: `permission`
+ * on the loop's or project's scope, and instance admin for every other kind. `None` for a project
+ * identifier that isn't a project ID, which no permission allows.
+ */
+export const entityRequirement = (
+  key: ConfigurationEntityKey,
+  permission: "read" | "maintain",
+): Option.Option<{ readonly permission: Permission; readonly scope: AccessScope }> => {
+  if (key.kind === "loop") return Option.some({ permission, scope: loopScope(key.identifier) });
   if (key.kind === "project")
-    return Schema.decodeEffect(ProjectId)(key.identifier).pipe(
-      Effect.mapError(() => AccessDenied.make({ permission })),
-      Effect.flatMap((project) => requirePermission(permission, ProjectScope.make({ project }))),
-    );
-  return requirePermission("admin", InstanceScope.make());
+    return Option.map(Schema.decodeOption(ProjectId)(key.identifier), (project) => ({
+      permission,
+      scope: ProjectScope.make({ project }),
+    }));
+  return Option.some({ permission: "admin", scope: InstanceScope.make() });
 };
+
+export const entityPermission = (key: ConfigurationEntityKey, permission: "read" | "maintain") =>
+  Option.match(entityRequirement(key, permission), {
+    onNone: () => Effect.fail(AccessDenied.make({ permission })),
+    onSome: (requirement) => requirePermission(requirement.permission, requirement.scope),
+  });

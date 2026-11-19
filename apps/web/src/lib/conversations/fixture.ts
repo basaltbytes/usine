@@ -139,6 +139,7 @@ export const conversationOf = (
     }),
     messages,
     turns: turns.map(({ answer: _answer, minute: _minute, ...turn }) => turn),
+    requests: [],
   };
 };
 

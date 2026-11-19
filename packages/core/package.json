@@ -147,6 +147,10 @@
       "types": "./dist/conversation.d.ts",
       "default": "./dist/conversation.js"
     },
+    "./permission-request": {
+      "types": "./dist/permission-request.d.ts",
+      "default": "./dist/permission-request.js"
+    },
     "./json-key": {
       "types": "./dist/json-key.d.ts",
       "default": "./dist/json-key.js"

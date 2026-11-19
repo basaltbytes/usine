@@ -239,6 +239,7 @@ export const harness = (
       runAgain: () => unused,
       intervene: () => unused,
       cancel: () => unused,
+      callScope: () => unused,
       runWorkerPreflight: () => unused,
       discardLeftovers: () => unused,
       moveBoardItem: () => unused,
@@ -276,6 +277,7 @@ export const harness = (
     return {
       request,
       handler: app.handler,
+      editor: Context.get(editorContext, ConfigurationEditor),
       store,
       current,
       controls,

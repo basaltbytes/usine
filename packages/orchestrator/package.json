@@ -47,6 +47,26 @@
       "types": "./dist/conversation/sqlite/store.d.ts",
       "default": "./dist/conversation/sqlite/store.js"
     },
+    "./conversation/permissions": {
+      "types": "./dist/conversation/permissions/permissions.d.ts",
+      "default": "./dist/conversation/permissions/permissions.js"
+    },
+    "./conversation/permissions/acting": {
+      "types": "./dist/conversation/permissions/acting.d.ts",
+      "default": "./dist/conversation/permissions/acting.js"
+    },
+    "./conversation/permissions/store": {
+      "types": "./dist/conversation/permissions/store.d.ts",
+      "default": "./dist/conversation/permissions/store.js"
+    },
+    "./conversation/permissions/memory": {
+      "types": "./dist/conversation/permissions/memory.d.ts",
+      "default": "./dist/conversation/permissions/memory.js"
+    },
+    "./conversation/permissions/sqlite": {
+      "types": "./dist/conversation/permissions/sqlite.d.ts",
+      "default": "./dist/conversation/permissions/sqlite.js"
+    },
     "./current-instance": {
       "types": "./dist/current-instance/current-instance.d.ts",
       "default": "./dist/current-instance/current-instance.js"

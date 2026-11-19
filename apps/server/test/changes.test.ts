@@ -110,6 +110,7 @@ it.effect("keeps a connected stream idle for 30 seconds without reading projecti
       runAgain: unused,
       intervene: unused,
       cancel: unused,
+      callScope: unused,
       runWorkerPreflight: unused,
       discardLeftovers: unused,
       moveBoardItem: unused,

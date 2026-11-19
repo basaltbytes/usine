@@ -26,6 +26,7 @@ export const ChangeTarget = Schema.Struct({
     "activity",
     "navigation",
     "conversation",
+    "permission",
   ]),
   id: Schema.String,
 });

@@ -137,9 +137,9 @@ export class PostedWithSession extends Schema.TaggedClass<
 >("PostingCredential/PostedWithSession")("PostedWithSession", {}) {}
 
 /**
- * What identifies the credential that posted a message. A turn's access is recomputed from it,
- * and from the member's current grants, each time the turn uses it, so a revoked token ends that
- * access. It stays on the server: API views of a turn leave it out.
+ * What identifies the credential that a member posted a message or answered a permission request
+ * with. Access is recomputed from it, and from the member's current grants, each time it is used,
+ * so a revoked token ends that access. It stays on the server: API views leave it out.
  */
 export const PostingCredential = Schema.Union([PostedWithToken, PostedWithSession]);
 export type PostingCredential = typeof PostingCredential.Type;
@@ -184,7 +184,21 @@ export class SupervisorMessage extends Schema.Class<
   role: Schema.Literal("supervisor"),
 }) {}
 
-export const Message = Schema.Union([MemberMessage, SupervisorMessage]);
+/**
+ * A message that usine posts when every permission request of a turn has an answer. The turn that
+ * it queues reports the outcomes of those requests to the supervisor.
+ */
+export class OutcomesMessage extends Schema.Class<
+  OutcomesMessage,
+  Brand.Brand<"@usine/core/conversation/OutcomesMessage">
+>("Conversation/OutcomesMessage")({
+  ...messageFields,
+  role: Schema.Literal("usine"),
+  /** The turn whose permission requests have the outcomes. */
+  reports: TurnId,
+}) {}
+
+export const Message = Schema.Union([MemberMessage, SupervisorMessage, OutcomesMessage]);
 export type Message = typeof Message.Type;
 
 /** A turn that waits for the conversation's earlier turns to end. */
@@ -383,6 +397,57 @@ export const posted = (post: MemberPost, sequence: MessageSequence) => ({
     Queued.make({}),
   ),
 });
+
+/**
+ * What usine posts when every permission request of the turn `reports` has an answer: the
+ * outcomes message, and the turn that reports them. The turn runs with the access of the member
+ * and credential that posted the message of `reports`.
+ */
+export class FollowUpPost extends Schema.Class<
+  FollowUpPost,
+  Brand.Brand<"@usine/core/conversation/FollowUpPost">
+>("Conversation/FollowUpPost")({
+  conversation: ConversationId,
+  reports: TurnId,
+  member: TurnMember,
+  credential: PostingCredential,
+  /** The outcomes as Markdown text, for members. */
+  body: MessageBody,
+  reply: MessageFormat,
+  at: Schema.DateTimeUtc,
+}) {}
+
+/** The ID of the turn that reports the outcomes of the permission requests of `turn`. */
+export const followUpOf = (turn: TurnId) => TurnId.make(`${turn}:outcomes`);
+
+/** Returns the outcomes message of `post` at `sequence`, and its queued turn. */
+export const followedUp = (post: FollowUpPost, sequence: MessageSequence) => {
+  const turn = followUpOf(post.reports);
+  return {
+    message: OutcomesMessage.make({
+      conversation: post.conversation,
+      sequence,
+      turn,
+      format: defaultFormat,
+      body: post.body,
+      createdAt: post.at,
+      role: "usine",
+      reports: post.reports,
+    }),
+    turn: withState(
+      {
+        id: turn,
+        conversation: post.conversation,
+        member: post.member,
+        credential: post.credential,
+        message: sequence,
+        reply: post.reply,
+        queuedAt: post.at,
+      },
+      Queued.make({}),
+    ),
+  };
+};
 
 /** The supervisor's answer to a turn, before the store gives it a sequence. */
 export class Reply extends Schema.Class<Reply, Brand.Brand<"@usine/core/conversation/Reply">>(

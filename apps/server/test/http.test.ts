@@ -1083,6 +1083,7 @@ describe("operator HTTP API", () => {
           Effect.fail(
             RunOperationRejectedError.make({ runId: id, operation: "cancel", state: "Failed" }),
           ),
+        callScope: () => Effect.die("unused"),
         discardLeftovers: () => Effect.void,
         moveBoardItem: (move) => {
           if (move.toLane === "Ready")
@@ -1396,6 +1397,7 @@ describe("operator HTTP API", () => {
               : Effect.fail(CycleBudgetResetRejectedError.make({ askId: id })),
           retry: (id) => record(`retry:${id}`),
           cancel: (id) => record(`cancel:${id}`),
+          callScope: () => Effect.die("unused"),
           discardLeftovers: (worker) =>
             Effect.fail(LeftoversDiscardRejectedError.make({ worker, running: 2 })),
           pause: (loop) =>

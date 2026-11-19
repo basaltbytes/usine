@@ -3,6 +3,8 @@ import {
   type Conversation,
   type ConversationId,
   EventSequence,
+  followedUp,
+  followUpOf,
   isOpen,
   type Message,
   MessageSequence,
@@ -78,6 +80,26 @@ export const memoryConversationStoreLayer = Layer.effect(
           const stored = { conversation, messages: [message], turns: [turn], events: [] };
           yield* save(stored);
           return record(stored);
+        }).pipe(serialized);
+      }),
+      followUp: Effect.fn("ConversationStore.followUp")(function* (post) {
+        yield* Effect.annotateCurrentSpan({
+          conversation: post.conversation,
+          reports: post.reports,
+        });
+        return yield* Effect.gen(function* () {
+          const stored = yield* load(post.conversation);
+          if (Option.isNone(stored))
+            return yield* ConversationNotFound.make({ conversation: post.conversation });
+          const id = followUpOf(post.reports);
+          if (stored.value.turns.some((turn) => turn.id === id)) return Option.none<Turn>();
+          const { message, turn } = followedUp(post, nextMessage(stored.value));
+          yield* save({
+            ...stored.value,
+            messages: [...stored.value.messages, message],
+            turns: [...stored.value.turns, turn],
+          });
+          return Option.some<Turn>(turn);
         }).pipe(serialized);
       }),
       post: Effect.fn("ConversationStore.post")(function* (post) {

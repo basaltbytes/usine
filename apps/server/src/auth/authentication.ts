@@ -17,6 +17,7 @@ import { GitHubSignIn } from "./github.ts";
 import {
   AuthError,
   authFailure,
+  ceilingAdmits,
   GitHubIdentity,
   type GitHubUserId,
   InstanceToken,
@@ -32,7 +33,7 @@ import { AuthStore } from "./store.ts";
 import { randomSecret, secretHash } from "./crypto.ts";
 
 export interface Access {
-  readonly credential: "local" | "bootstrap" | "member" | "turn";
+  readonly credential: "local" | "bootstrap" | "member" | "turn" | "call";
   readonly member: Option.Option<Member>;
   readonly token: Option.Option<InstanceToken>;
   readonly csrf: string;
@@ -145,6 +146,19 @@ export class Authentication extends Context.Service<
       scope: AccessScope,
       credential: PostingCredential,
     ) => Effect.Effect<Redacted.Redacted<string>, never, Scope.Scope>;
+    /**
+     * Returns a credential that runs one allowed call of a supervisor turn as `member` until the
+     * scope of the returned effect closes. At each request it has the current access of
+     * `credential`, within `ceiling`, and can call only `operation`, if the credential's own
+     * operation ceiling admits it. It lives only in this process; the auth guard refuses it
+     * outside the operator group.
+     */
+    readonly callCredential: (
+      member: GitHubUserId,
+      credential: PostingCredential,
+      ceiling: ReadonlyArray<PermissionGrant>,
+      operation: OperationId,
+    ) => Effect.Effect<Redacted.Redacted<string>, never, Scope.Scope>;
   }
 >()("@usine/server/auth/authentication") {}
 
@@ -176,6 +190,15 @@ export const authenticationLayer = (options: {
           readonly member: GitHubUserId;
           readonly scope: AccessScope;
           readonly credential: PostingCredential;
+        }
+      >();
+      const callCredentials = new Map<
+        TokenHash,
+        {
+          readonly member: GitHubUserId;
+          readonly credential: PostingCredential;
+          readonly ceiling: ReadonlyArray<PermissionGrant>;
+          readonly operation: OperationId;
         }
       >();
       const localHash = secretHash(Redacted.value(options.localToken));
@@ -322,6 +345,20 @@ export const authenticationLayer = (options: {
             csrf: csrf(secret),
             permissions: turnGrants(turn.scope, posting.permissions),
             operations: posting.operations,
+          };
+        }
+        const call = callCredentials.get(hash);
+        if (call !== undefined) {
+          const posting = yield* postingAccess(call.member, call.credential);
+          return {
+            credential: "call" as const,
+            member: Option.some(posting.member),
+            token: Option.none(),
+            csrf: csrf(secret),
+            permissions: intersectPermissions(posting.permissions, call.ceiling),
+            operations: Option.some(
+              ceilingAdmits(posting.operations, call.operation) ? [call.operation] : [],
+            ),
           };
         }
         const found = yield* store.authenticate(hash, now);
@@ -666,6 +703,24 @@ export const authenticationLayer = (options: {
             (secret) =>
               Effect.sync(() => {
                 turnCredentials.delete(secretHash(Redacted.value(secret)));
+                Redacted.wipeUnsafe(secret);
+              }),
+          ),
+        callCredential: (member, credential, ceiling, operation) =>
+          Effect.acquireRelease(
+            Effect.sync(() => {
+              const secret = randomSecret();
+              callCredentials.set(secretHash(Redacted.value(secret)), {
+                member,
+                credential,
+                ceiling,
+                operation,
+              });
+              return secret;
+            }),
+            (secret) =>
+              Effect.sync(() => {
+                callCredentials.delete(secretHash(Redacted.value(secret)));
                 Redacted.wipeUnsafe(secret);
               }),
           ),
