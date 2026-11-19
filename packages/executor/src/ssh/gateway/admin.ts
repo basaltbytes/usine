@@ -2,6 +2,7 @@ import {
   GatewayCredentialKind,
   GatewayLlmProtocol,
   GatewayLlmProvider,
+  gatewayLlmProtocolOf,
   WorkerName,
 } from "@usine/core/worker";
 import {
@@ -15,22 +16,21 @@ import {
   LlmProviderSummary,
   AdminAuthorization,
 } from "@usine/gateway/admin";
-import {
-  type Brand,
-  DateTime,
-  Effect,
-  Option,
-  type Redacted,
-  Result,
-  Schema,
-  SchemaGetter,
-} from "effect";
+import { type Brand, DateTime, Effect, Option, type Redacted, Result, Schema } from "effect";
 import { HttpClient, HttpClientError, HttpClientRequest } from "effect/http";
 import { HttpApi, HttpApiGroup, HttpApiEndpoint, HttpApiClient } from "effect/http-api";
 import type { SshWorkerGateway } from "../model.ts";
+import type { GatewayLlmPrefixes } from "./environment.ts";
 import { type GatewayForward, GatewayForwardClosed, type OpenForward } from "./forward.ts";
 
-const GatewayAdminOperation = Schema.Literals(["attach", "renew", "detach", "list", "providers"]);
+const GatewayAdminOperation = Schema.Literals([
+  "attach",
+  "renew",
+  "detach",
+  "list",
+  "providers",
+  "connections",
+]);
 type GatewayAdminOperation = typeof GatewayAdminOperation.Type;
 
 const ACTIONS = {
@@ -39,6 +39,7 @@ const ACTIONS = {
   detach: "detach an attachment",
   list: "list the attachments",
   providers: "list the LLM providers",
+  connections: "read the provider credentials",
 } as const satisfies Record<GatewayAdminOperation, string>;
 
 /**
@@ -67,10 +68,21 @@ export interface GatewayAdmin {
   /** Returns the active attachments for all the Gateway's Workers. */
   readonly list: Effect.Effect<AttachmentList, GatewayAdminError>;
   /**
-   * Returns the LLM providers the Gateway has credentials for, with each credential kind. Returns
-   * `None` if the Gateway predates this endpoint.
+   * Returns the LLM providers the Gateway has credentials for, with each credential kind, and the
+   * path prefixes it serves. Returns `None` if the Gateway predates this endpoint.
    */
-  readonly providers: Effect.Effect<Option.Option<LlmProviderList>, GatewayAdminError>;
+  readonly providers: Effect.Effect<Option.Option<ReportedProviders>, GatewayAdminError>;
+  /**
+   * Returns whether the Gateway serves the provider-credentials admin API, which Settings uses
+   * to connect provider logins. Gateways before it answer 404.
+   */
+  readonly servesProviderCredentials: Effect.Effect<boolean, GatewayAdminError>;
+}
+
+/** The LLM providers a Gateway reports, by protocol, and the path prefixes it serves. */
+export interface ReportedProviders {
+  readonly list: LlmProviderList;
+  readonly prefixes: GatewayLlmPrefixes;
 }
 
 /** The timeout for one admin request. A publish keeps the Attempt's scope open while it runs. */
@@ -110,6 +122,8 @@ const reason = (failure: { readonly _tag: string }): string => {
       return "the attachment ID belongs to another worker or repository";
     case "SchemaError":
       return "the admin API response doesn't match its schema";
+    case "ProviderCredentialError":
+      return "the admin API returned status 503: the gateway has no usable provider credential store";
     default:
       return `the request failed with ${failure._tag}`;
   }
@@ -133,26 +147,19 @@ const sinceFields = (failure: { readonly _tag: string }) => {
   return {};
 };
 
-const ReportedProtocol = Schema.Union([GatewayLlmProvider, GatewayLlmProtocol]).pipe(
-  Schema.decodeTo(GatewayLlmProtocol, {
-    decode: SchemaGetter.transform((value) =>
-      value === "anthropic"
-        ? "anthropic-messages"
-        : value === "openai"
-          ? "openai-responses"
-          : value,
-    ),
-    encode: SchemaGetter.transform((value) => value),
-  }),
-);
+const isLegacyProvider = Schema.is(GatewayLlmProvider);
 
+// Gateways before protocol slots report each provider by its provider name.
 const CompatibleProvidersApi = HttpApi.make("CompatibleProvidersApi").add(
   HttpApiGroup.make("llm")
     .add(
       HttpApiEndpoint.get("providers", "/v1/providers", {
         success: Schema.Struct({
           providers: Schema.Array(
-            Schema.Struct({ provider: ReportedProtocol, credential: GatewayCredentialKind }),
+            Schema.Struct({
+              provider: Schema.Union([GatewayLlmProvider, GatewayLlmProtocol]),
+              credential: GatewayCredentialKind,
+            }),
           ),
         }),
       }),
@@ -168,7 +175,10 @@ const adminClientAt = (url: URL, adminToken: Redacted.Redacted<string>) =>
     };
     const client = yield* HttpApiClient.make(GatewayAdminApi, options);
     const compatible = yield* HttpApiClient.make(CompatibleProvidersApi, options);
-    return { ...client, llm: compatible.llm };
+    return {
+      ...client,
+      llm: { providers: compatible.llm.providers, connections: client.llm.connections },
+    };
   });
 
 type AdminClient = Effect.Success<ReturnType<typeof adminClientAt>>;
@@ -253,13 +263,33 @@ export const gatewayAdminFor = Effect.fn("SshExecutor.gatewayAdminFor")(function
     providers: bounded("providers")((client) =>
       client.llm.providers().pipe(
         Effect.map((reported) =>
-          Option.some(
-            LlmProviderList.make({
-              providers: reported.providers.map((provider) => LlmProviderSummary.make(provider)),
+          Option.some<ReportedProviders>({
+            list: LlmProviderList.make({
+              providers: reported.providers.map(({ provider, credential }) =>
+                LlmProviderSummary.make({ provider: gatewayLlmProtocolOf(provider), credential }),
+              ),
             }),
-          ),
+            prefixes: reported.providers.some(({ provider }) => isLegacyProvider(provider))
+              ? "provider"
+              : "protocol",
+          }),
         ),
         Effect.catchIf(unknownRoute, () => Effect.succeedNone),
+      ),
+    ),
+    // Only the route matters: a failure with a response other than 404 means the Gateway serves it.
+    servesProviderCredentials: bounded("connections")((client) =>
+      client.llm.connections().pipe(
+        Effect.as(true),
+        Effect.catchIf(unknownRoute, () => Effect.succeed(false)),
+        Effect.catchIf(
+          (failure) => !unanswered(failure),
+          (failure) =>
+            Effect.logWarning(
+              "The Gateway's provider-credentials admin API answered with an error; the Gateway serves it, so it counts as current",
+              { worker, gateway: forward.gateway, reason: reason(failure) },
+            ).pipe(Effect.as(true)),
+        ),
       ),
     ),
   } satisfies GatewayAdmin;

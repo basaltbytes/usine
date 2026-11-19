@@ -95,6 +95,7 @@ describe("Worker preflight record", () => {
         missingImage: Option.some(ContainerImage.make("ghcr.io/basaltbytes/usine-worker:next")),
         containerLimits: Option.some(limits),
         findings: [finding],
+        gatewayUpgrade: Option.none(),
       }),
     );
     assert.deepStrictEqual(summary(record), {
@@ -103,6 +104,30 @@ describe("Worker preflight record", () => {
     });
     assert.deepStrictEqual(record.containerLimits, Option.some(limits));
     assert.deepStrictEqual(record.findings, [finding]);
+  });
+
+  it("takes the gateway upgrade from every passed preflight and keeps it through a failed one", () => {
+    const upgrade = "Gateway usine-gateway is older than this orchestrator";
+    const checked = recordPreflight(
+      unchecked(worker),
+      [codex],
+      at(8),
+      Result.succeed({
+        ...fullPreflight,
+        deferred: Option.some("Checked on the worker's first machine each day."),
+        gatewayUpgrade: Option.some(upgrade),
+      }),
+    );
+    assert.deepStrictEqual(checked.gatewayUpgrade, Option.some(upgrade));
+    const failed = recordPreflight(
+      checked,
+      [codex],
+      at(9),
+      Result.fail(notLoggedIn(codex.harness)),
+    );
+    assert.deepStrictEqual(failed.gatewayUpgrade, Option.some(upgrade));
+    const upgraded = recordPreflight(failed, [codex], at(10), Result.succeed(fullPreflight));
+    assert.deepStrictEqual(upgraded.gatewayUpgrade, Option.none());
   });
 
   it("fails an unavailable harness, passes the ones checked before it, and keeps the rest", () => {

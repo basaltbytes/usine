@@ -1,6 +1,7 @@
 import type { harnessesLive } from "@usine/agents/harness/node";
 import { NodeCrypto } from "@effect/platform-node";
 import {
+  GATEWAY_LEGACY_PROVIDERS,
   GatewayAdminPort,
   GatewayDomain,
   type GatewayLlmProtocol,
@@ -16,13 +17,14 @@ import {
   CallerKey,
   CallerTokens,
   GatewaySettings,
+  SettingsInForce,
   gatewayServices,
   GITHUB_ORIGINS,
   type LlmProviders,
   parseEgressAllowlist,
-  type SettingsInForce,
   UpstreamBase,
 } from "@usine/gateway";
+import { LlmProviderList } from "@usine/gateway/admin";
 import {
   Effect,
   FileSystem,
@@ -126,6 +128,8 @@ const GATEWAY_PROVIDERS: LlmProviders = {
  * - `calls` records each request the executor sent, before the admin API handles it.
  * - A detach of an attachment in `refusedDetaches` returns a server error.
  * - While `reportsProviders` is false, the provider list returns 404.
+ * - While `beforeProtocolSlots` is true, the provider list names providers as a Gateway from
+ *   before protocol slots did, and the provider-credentials routes return 404.
  * - `settled` waits until no admin request is in flight.
  */
 export const fakeGateway = (
@@ -136,6 +140,7 @@ export const fakeGateway = (
   const switches = {
     refusedDetaches: new Set<string>(),
     reportsProviders: true,
+    beforeProtocolSlots: false,
   };
   let inFlight = 0;
   const idle = Latch.makeUnsafe(true);
@@ -218,10 +223,26 @@ export const fakeGateway = (
               { request },
             );
           // A Gateway without the route returns an empty 404.
-          if (path === "/v1/providers" && !switches.reportsProviders)
+          if (
+            (path === "/v1/providers" && !switches.reportsProviders) ||
+            (path.startsWith("/v1/provider-credentials") && switches.beforeProtocolSlots)
+          )
             return HttpServerResponse.toClientResponse(HttpServerResponse.empty({ status: 404 }), {
               request,
             });
+          if (path === "/v1/providers" && switches.beforeProtocolSlots) {
+            const { providers } = yield* (yield* SettingsInForce).current;
+            const reported = LlmProviderList.fromProviders(providers).providers.map(
+              ({ provider, credential }) => ({
+                provider: GATEWAY_LEGACY_PROVIDERS[provider],
+                credential,
+              }),
+            );
+            return HttpServerResponse.toClientResponse(
+              HttpServerResponse.jsonUnsafe({ providers: reported }),
+              { request },
+            );
+          }
           const response = yield* handler.pipe(
             Effect.provideService(
               HttpServerRequest.HttpServerRequest,

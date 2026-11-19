@@ -163,6 +163,7 @@ export const sshMachinePreflightFor = (
       commands.run("preflight", machine.shell, "cat", ["/proc/meminfo"]),
     );
 
+    let gatewayUpgrade = Option.none<string>();
     if (Option.isSome(machine.gateway)) {
       const address = machine.address.machine;
       if (address._tag === "Fixed" && Option.isSome(address.tailnet))
@@ -173,7 +174,13 @@ export const sshMachinePreflightFor = (
           address.tailnet.value,
           machine.gateway.value.settings.domain,
         );
-      yield* verifyGateway(catalog, commands, worker, machine, machine.gateway.value);
+      gatewayUpgrade = yield* verifyGateway(
+        catalog,
+        commands,
+        worker,
+        machine,
+        machine.gateway.value,
+      );
     }
     const containerCheck = yield* containers.verify(machine, maxConcurrentAttempts, image);
     yield* verifyFreeDisk(
@@ -275,6 +282,7 @@ export const sshMachinePreflightFor = (
             missingImage: attemptImage === "missing" ? Option.some(settings.image) : Option.none(),
             containerLimits: Option.some(limits.limits),
             findings,
+            gatewayUpgrade,
           } satisfies PreflightReport,
         ),
       SharedUser: ({ degraded }) =>
@@ -284,6 +292,7 @@ export const sshMachinePreflightFor = (
           missingImage: Option.none(),
           containerLimits: Option.none(),
           findings,
+          gatewayUpgrade,
         } satisfies PreflightReport),
     });
   });

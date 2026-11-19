@@ -85,10 +85,11 @@ export interface ProvisionedMachinesOptions {
     machine: SshMachine,
   ) => Effect.Effect<void, ExecutorOperationError | WorkerCapabilityError>;
   readonly reset: (machine: SshMachine) => Effect.Effect<void, ExecutorOperationError>;
+  /** Returns why the Gateway needs an upgrade, or `None` if it matches the orchestrator. */
   readonly verifyGatewayAdmin: (
     worker: WorkerName,
     gateway: MachineGateway,
-  ) => Effect.Effect<void, WorkerCapabilityError>;
+  ) => Effect.Effect<Option.Option<string>, WorkerCapabilityError>;
   readonly settings: Pick<
     SshExecutorOptions,
     | "knownHostsDirectory"
@@ -949,8 +950,9 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
       (warning) => Effect.logWarning(warning, { worker, provider: driver.provider }),
       { discard: true },
     );
-    if (Option.isSome(entry.gateway))
-      yield* options.verifyGatewayAdmin(worker, entry.gateway.value);
+    const gatewayUpgrade = Option.isSome(entry.gateway)
+      ? yield* options.verifyGatewayAdmin(worker, entry.gateway.value)
+      : Option.none<string>();
     yield* tailnets.verify(entry.address);
     const gap = harnessCredentialGap(catalog, entry, brains);
     if (Option.isSome(gap)) return yield* gap.value;
@@ -972,6 +974,7 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
       missingImage: Option.none(),
       containerLimits: Option.none(),
       findings: [],
+      gatewayUpgrade,
     } satisfies PreflightReport;
   });
 

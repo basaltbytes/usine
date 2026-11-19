@@ -17,7 +17,7 @@ Instance admin access and a worker with no running attempt or other preflight.
 
 ## Check the result
 
-A passing preflight restores scheduling and updates the recorded check time. A failed check blocks new attempts on that worker and appears in **Needs attention**. Other workers continue. **Preflight findings** lists gaps that don't block attempts, such as a kernel log that the SSH user can't read, which leaves memory kills without process names.
+A passing preflight restores scheduling and updates the recorded check time. A failed check blocks new attempts on that worker and appears in **Needs attention**. Other workers continue. **Preflight findings** lists gaps that don't block attempts, such as a kernel log that the SSH user can't read, which leaves memory kills without process names. A gateway that is older than the orchestrator doesn't block attempts either; **Needs attention** shows **Gateway upgrade needed** for each worker behind it until a preflight finds it upgraded.
 
 Preflight checks tools and credentials and pulls the SSH attempt image. The preflight of a configuration save doesn't pull: it checks the image that the machine has, or that the registry has it. When the machine lacks the image, the worker takes no attempt until a preflight that starts after the save pulls and checks it. A save that starts while you run preflight waits for it. It does not install harnesses. Provisioned workers defer machine and harness checks until a machine is available. [Workers](/reference/configuration/workers/) describes the checks and limits.
 

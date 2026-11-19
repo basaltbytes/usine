@@ -5,7 +5,7 @@ import { memoryConfigurationLayer } from "@usine/config/memory";
 import { ConfigParser } from "@usine/config/parser";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { jsonKey } from "@usine/core/json-key";
-import { ConfigProvider, Context, Effect, FileSystem, Layer, Redacted } from "effect";
+import { ConfigProvider, Context, Effect, FileSystem, Layer, Option, Redacted } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import { ProviderTargets } from "../src/providers/targets.ts";
 
@@ -63,7 +63,7 @@ it.live("reads native Claude logins and clears an overridden Keychain login on d
       });
       const store = yield* ConfigurationStore;
       const context = yield* Layer.build(
-        ProviderTargets.layer(Effect.succeed([])).pipe(
+        ProviderTargets.layer(Effect.succeed([]), Option.none()).pipe(
           Layer.provide(Layer.succeed(ConfigurationStore, store)),
           Layer.provide(Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, transport)),
           Layer.provide(

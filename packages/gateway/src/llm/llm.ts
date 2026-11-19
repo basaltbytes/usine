@@ -1,4 +1,8 @@
-import { type GatewayCredentialKind, GatewayLlmProtocol } from "@usine/core/worker";
+import {
+  type GatewayCredentialKind,
+  GatewayLlmProtocol,
+  GatewayLlmProtocolFromName,
+} from "@usine/core/worker";
 import { type Brand, Option, Redacted, Schema } from "effect";
 import { Headers } from "effect/http";
 import { UpstreamBase } from "../upstream.ts";
@@ -107,7 +111,7 @@ export type LlmProvider = AnthropicProvider | OpenAiProvider;
 export const LlmProviderName = GatewayLlmProtocol;
 export type LlmProviderName = GatewayLlmProtocol;
 
-const isProviderName = Schema.is(LlmProviderName);
+const providerOfPrefix = Schema.decodeUnknownOption(GatewayLlmProtocolFromName);
 
 /** An LLM request's provider and the path after its prefix. */
 export interface LlmTarget {
@@ -119,15 +123,13 @@ export interface LlmTarget {
 /** Returns the provider from the first path segment; for example, `/anthropic-messages/v1/messages` is Anthropic's `/v1/messages`. */
 export const llmTarget = (pathname: string): Option.Option<LlmTarget> => {
   const match = /^\/([a-z-]+)(\/.*)?$/u.exec(pathname);
-  const prefix = match?.[1];
-  const provider =
-    prefix === "anthropic"
-      ? "anthropic-messages"
-      : prefix === "openai"
-        ? "openai-responses"
-        : prefix;
-  if (match === null || provider === undefined || !isProviderName(provider)) return Option.none();
-  return Option.some({ provider, rest: match[2] ?? "", legacy: prefix !== provider });
+  if (match === null) return Option.none();
+  const prefix = match[1];
+  return Option.map(providerOfPrefix(prefix), (provider) => ({
+    provider,
+    rest: match[2] ?? "",
+    legacy: prefix !== provider,
+  }));
 };
 
 /** Returns the credential kind sent to `provider`: a subscription for a Claude token or a ChatGPT login. */

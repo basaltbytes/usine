@@ -161,6 +161,11 @@ export interface WorkerPreflight {
    * Attempts run without, such as a kernel log that the SSH user can't read.
    */
   readonly findings: ReadonlyArray<string>;
+  /**
+   * Why the Worker's Gateway needs an upgrade to match the orchestrator, from the last passed
+   * preflight. `None` before one, or if the Worker has no Gateway or its Gateway matches.
+   */
+  readonly gatewayUpgrade: Option.Option<string>;
 }
 
 const isHarnessUnavailable = Schema.is(HarnessUnavailableError);
@@ -217,6 +222,8 @@ export const recordPreflight = (
       ),
       containerLimits: checkedMachine ? outcome.success.containerLimits : previous.containerLimits,
       findings: checkedMachine ? outcome.success.findings : previous.findings,
+      // A deferred report still checked the Gateway.
+      gatewayUpgrade: outcome.success.gatewayUpgrade,
     };
   }
   const error = outcome.failure;
@@ -238,6 +245,7 @@ export const recordPreflight = (
       ),
       containerLimits: previous.containerLimits,
       findings: previous.findings,
+      gatewayUpgrade: previous.gatewayUpgrade,
     };
   }
   return {
@@ -246,6 +254,7 @@ export const recordPreflight = (
     harnesses: previous.harnesses,
     containerLimits: previous.containerLimits,
     findings: previous.findings,
+    gatewayUpgrade: previous.gatewayUpgrade,
   };
 };
 
@@ -256,6 +265,7 @@ export const unchecked = (worker: WorkerName): WorkerPreflight => ({
   harnesses: [],
   containerLimits: Option.none(),
   findings: [],
+  gatewayUpgrade: Option.none(),
 });
 
 /** An on-demand preflight could not reserve the configured worker. */

@@ -5,13 +5,22 @@ import {
 } from "@usine/agents/harness";
 import type { RemoteHost } from "@usine/agents/child-host";
 import type { BrainSpec, Harness } from "@usine/core/agent/brain";
-import type { GatewayCredentialKind, GatewayLlmProtocol, WorkerName } from "@usine/core/worker";
+import {
+  type GatewayCredentialKind,
+  GatewayLlmProtocol,
+  type WorkerName,
+} from "@usine/core/worker";
 import { Effect, Option, Redacted, Ref } from "effect";
 import { WorkerCapabilityError } from "../../executor.ts";
 import type { HarnessProbe } from "../../harness-preflight.ts";
 import { type RemoteCommands, sendingShell } from "../../remote/commands.ts";
 import type { GatewayCredentials, MachineGateway, SshMachine } from "../model.ts";
-import { forwardProxyUrl, gatewayEnvironment } from "./environment.ts";
+import {
+  forwardProxyUrl,
+  gatewayEnvironment,
+  type GatewayLlmPrefixes,
+  llmPrefixOf,
+} from "./environment.ts";
 
 /** A placeholder caller token that lets preflight check the sent variables without attaching anything. */
 const PROBE_TOKEN = Redacted.make("usine-preflight");
@@ -50,10 +59,43 @@ const NO_CREDENTIALS: GatewayCredentials = {
   "openai-responses": Option.none(),
 };
 
+/** The `llm.<domain>` path prefixes of a Gateway that serves `prefixes`, for messages. */
+const llmPaths = (prefixes: GatewayLlmPrefixes) =>
+  GatewayLlmProtocol.literals
+    .map((protocol) => `/${llmPrefixOf(protocol, prefixes)}`)
+    .join(" and ");
+
+/**
+ * Records the path prefixes the Gateway serves, which Attempts that start later use. Logs a
+ * warning when the Gateway turns out to predate protocol prefixes, and once it serves them again.
+ */
+const recordLlmPrefixes = Effect.fn("SshExecutor.recordLlmPrefixes")(function* (
+  worker: WorkerName,
+  gateway: MachineGateway,
+  prefixes: GatewayLlmPrefixes,
+) {
+  const fields = {
+    worker,
+    gateway: gateway.forward.gateway,
+    llmPrefixes: prefixes,
+    paths: llmPaths(prefixes),
+  };
+  yield* Effect.annotateCurrentSpan(fields);
+  const previous = yield* Ref.getAndSet(gateway.llmPrefixes, prefixes);
+  if (previous === prefixes)
+    return yield* Effect.logDebug("The Gateway serves the same LLM path prefixes", fields);
+  if (prefixes === "provider")
+    return yield* Effect.logWarning(
+      "The Gateway predates protocol path prefixes; Attempts use its provider prefixes until @usine/gateway is upgraded on it",
+      fields,
+    );
+  yield* Effect.logInfo("The Gateway serves protocol path prefixes; Attempts use them", fields);
+});
+
 /**
  * Reads the Gateway's credential kind for each provider in the Worker's `llmProviders` and
- * records them for the Worker (ADR 0013). Fails if the Gateway has no credential for a listed
- * provider or predates credential reporting.
+ * records them for the Worker (ADR 0013), with the path prefixes the Gateway serves. Fails if the
+ * Gateway has no credential for a listed provider or predates credential reporting.
  */
 const recordProviderCredentials = Effect.fn("SshExecutor.recordProviderCredentials")(function* (
   worker: WorkerName,
@@ -84,7 +126,8 @@ const recordProviderCredentials = Effect.fn("SshExecutor.recordProviderCredentia
       new Error("the gateway answered 404 for GET /v1/providers"),
     );
   }
-  const { providers } = reported.value;
+  yield* recordLlmPrefixes(worker, gateway, reported.value.prefixes);
+  const { providers } = reported.value.list;
   const kindOf = (provider: GatewayLlmProtocol) =>
     Option.fromNullishOr(providers.find((held) => held.provider === provider)?.credential);
   const missing = listed.find((provider) => Option.isNone(kindOf(provider)));
@@ -131,9 +174,37 @@ export const gatewayCredentialFor = (
   );
 
 /**
+ * Returns why the Gateway needs an upgrade to match the orchestrator, for operators, or `None`
+ * if it serves what the orchestrator uses: protocol path prefixes, which Attempts otherwise
+ * replace with the older ones, and the provider-credentials admin API that Settings uses.
+ */
+const gatewayUpgradeOf = (
+  gateway: MachineGateway,
+  prefixes: GatewayLlmPrefixes,
+  servesProviderCredentials: boolean,
+): Option.Option<string> => {
+  const lags = [
+    ...(prefixes === "provider"
+      ? [
+          `it serves model requests only at ${llmPaths("provider")}, which attempts call instead of ${llmPaths("protocol")}`,
+        ]
+      : []),
+    ...(servesProviderCredentials
+      ? []
+      : ["it has no provider-credentials admin API, so Settings can't manage its provider logins"]),
+  ];
+  return lags.length === 0
+    ? Option.none()
+    : Option.some(
+        `Gateway ${gateway.forward.gateway} is older than this orchestrator: ${lags.join("; ")}. Upgrade @usine/gateway on it to the release that matches the orchestrator.`,
+      );
+};
+
+/**
  * Verifies the Gateway's admin API for an SSH Worker without attaching anything: the forward
  * opens and the admin API accepts the admin token. Records the Gateway's credential kind for
- * each provider in the Worker's `llmProviders`. Needs no Worker machine.
+ * each provider in the Worker's `llmProviders`, and the path prefixes it serves. Needs no Worker
+ * machine. Returns why the Gateway needs an upgrade, or `None` if it matches the orchestrator.
  */
 export const verifyGatewayAdmin = Effect.fn("SshExecutor.verifyGatewayAdmin")(function* (
   worker: WorkerName,
@@ -155,12 +226,20 @@ export const verifyGatewayAdmin = Effect.fn("SshExecutor.verifyGatewayAdmin")(fu
     Effect.mapError((error) => gatewayGap(worker, error.message, error)),
   );
   const credentials = yield* recordProviderCredentials(worker, gateway);
+  const prefixes = yield* Ref.get(gateway.llmPrefixes);
+  const servesProviderCredentials = yield* admin.servesProviderCredentials.pipe(
+    Effect.mapError((error) => gatewayGap(worker, error.message, error)),
+  );
+  const upgrade = gatewayUpgradeOf(gateway, prefixes, servesProviderCredentials);
   yield* Effect.logInfo("SSH Worker Gateway admin API verified", {
     worker,
     domain: settings.domain,
     gateway: forward.gateway,
     adminPort: settings.adminPort,
     forwardPort: open.url.port,
+    llmPrefixes: prefixes,
+    servesProviderCredentials,
+    upgrade: Option.getOrUndefined(upgrade),
     llmProviders: settings.llmProviders.join(","),
     "anthropic-messages": credentialMode(
       credentials["anthropic-messages"],
@@ -172,6 +251,7 @@ export const verifyGatewayAdmin = Effect.fn("SshExecutor.verifyGatewayAdmin")(fu
     ),
     attachments: attachments.filter((attachment) => attachment.worker === worker).length,
   });
+  return upgrade;
 });
 
 /**
@@ -193,6 +273,7 @@ const verifyGatewayFromMachine = Effect.fn("SshExecutor.verifyGatewayFromMachine
     catalog,
     domain: settings.domain,
     llmProviders: settings.llmProviders,
+    llmPrefixes: yield* Ref.get(gateway.llmPrefixes),
     ghConfigDirectory: machine.workerDirectory,
     homes: {},
     callerToken: PROBE_TOKEN,
@@ -260,6 +341,7 @@ const verifyGatewayFromMachine = Effect.fn("SshExecutor.verifyGatewayFromMachine
 /**
  * Verifies the Gateway in front of an SSH Worker without attaching anything: the admin API
  * checks of `verifyGatewayAdmin`, then the machine checks of `verifyGatewayFromMachine`.
+ * Returns why the Gateway needs an upgrade, as `verifyGatewayAdmin` does.
  */
 export const verifyGateway = (
   catalog: HarnessCatalog,
@@ -269,7 +351,7 @@ export const verifyGateway = (
   gateway: MachineGateway,
 ) =>
   verifyGatewayAdmin(worker, gateway).pipe(
-    Effect.andThen(verifyGatewayFromMachine(catalog, commands, worker, machine, gateway)),
+    Effect.tap(() => verifyGatewayFromMachine(catalog, commands, worker, machine, gateway)),
   );
 
 /**

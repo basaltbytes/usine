@@ -36,6 +36,7 @@ import { configurationLayer, initializeConfiguration } from "./configuration/run
 import { AttentionAcknowledgements } from "@usine/engine/attention";
 import { NodeServices } from "@effect/platform-node";
 import { InstanceDirectory, type InstanceId } from "@usine/core/instance";
+import type { ReleaseVersion } from "@usine/core/upgrade";
 import { RunEngine, RunEngineShutdown } from "@usine/engine/engine";
 import { GitHubApp, GitHubCredentials } from "@usine/github/github-app";
 import { loadLocalCredentials, loadLocalSecrets } from "@usine/github/local-secrets";
@@ -70,6 +71,7 @@ import {
   type Port,
   type UpCommand,
   VolatileInstanceDirectoryError,
+  gatewayRelease,
   openBrowser,
   packageVersion,
   volatileRoot,
@@ -199,10 +201,20 @@ const start = Effect.fnUntraced(function* (
     ).pipe(Layer.provide(NodeServices.layer), Layer.provide(FetchHttpClient.layer)),
   );
   const setup = Context.get(setupContext, Setup);
+  const release = yield* gatewayRelease().pipe(
+    Effect.catchTag("CliVersionError", (error) =>
+      Effect.logWarning("Could not read the gateway release this server was published with", {
+        cause: error.cause,
+      }).pipe(Effect.as(Option.none<ReleaseVersion>())),
+    ),
+  );
   const providerContext = yield* Layer.build(
     ProviderLogins.layer.pipe(
       Layer.provide(
-        ProviderTargets.layer(Effect.map(instances.get, ({ config }) => config.workers)),
+        ProviderTargets.layer(
+          Effect.map(instances.get, ({ config }) => config.workers),
+          release,
+        ),
       ),
       Layer.provide(providerLoginRunnerLayer),
       Layer.provide(NodeServices.layer),

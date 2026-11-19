@@ -1,9 +1,13 @@
 import type { Harness } from "@usine/core/agent/brain";
 import type { HarnessCatalog } from "@usine/agents/harness";
 import type { RepositoryName } from "@usine/core/repository";
-import type { GatewayDomain, GatewayLlmProtocol } from "@usine/core/worker";
+import {
+  GATEWAY_LEGACY_PROVIDERS,
+  type GatewayDomain,
+  type GatewayLlmProtocol,
+} from "@usine/core/worker";
 import { type CallerToken, GATEWAY_TOKEN_HEADER } from "@usine/gateway/admin";
-import { Option, Redacted } from "effect";
+import { Option, Redacted, Schema } from "effect";
 
 /** The directory of the Unix socket that gh reaches the Gateway through. */
 export const GH_GATEWAY_SOCKET_DIRECTORY = "/run/usine-gateway";
@@ -20,6 +24,18 @@ const FORWARD_PROXY_PORT = 3128;
 /** Returns the Gateway's forward proxy URL from a Worker; children receive it as `HTTPS_PROXY`. */
 export const forwardProxyUrl = (domain: GatewayDomain): string =>
   `http://${domain}:${FORWARD_PROXY_PORT}`;
+
+/**
+ * The path prefixes a Gateway serves on `llm.<domain>`: protocol IDs such as
+ * `/openai-responses`, or the provider names such as `/openai` of a Gateway from before
+ * protocol slots, which reports its providers by the same names.
+ */
+export const GatewayLlmPrefixes = Schema.Literals(["protocol", "provider"]);
+export type GatewayLlmPrefixes = typeof GatewayLlmPrefixes.Type;
+
+/** Returns the `llm.<domain>` path prefix of `protocol` on a Gateway that serves `prefixes`. */
+export const llmPrefixOf = (protocol: GatewayLlmProtocol, prefixes: GatewayLlmPrefixes): string =>
+  prefixes === "protocol" ? protocol : GATEWAY_LEGACY_PROVIDERS[protocol];
 
 /** Returns the URL a Worker behind the Gateway clones and fetches `repository` from. */
 export const gatewayRepositoryUrl = (domain: GatewayDomain, repository: RepositoryName): string =>
@@ -40,6 +56,8 @@ export interface GatewayEnvironmentOptions {
   readonly egress?: "proxy" | "direct";
   readonly domain: GatewayDomain;
   readonly llmProviders: ReadonlyArray<GatewayLlmProtocol>;
+  /** The path prefixes the Gateway serves on `llm.<domain>`, from the last preflight. */
+  readonly llmPrefixes: GatewayLlmPrefixes;
   /** The machine directory that contains the `ghGatewayConfig` files. */
   readonly ghConfigDirectory: string;
   /** Attempt home directories indexed by harness ID. */
@@ -79,6 +97,8 @@ export const gatewayExportedEnvironment = (
 ): Readonly<Record<string, string>> =>
   gatewayEnvironment({
     ...settings,
+    // Without a harness, the environment has no LLM URL.
+    llmPrefixes: "protocol",
     harness: Option.none(),
     ghConfigDirectory,
     homes: {},
@@ -100,6 +120,7 @@ export const gatewayExportedEnvironment = (
  *   Anthropic credential.
  * - Codex reads its descriptor configuration from `CODEX_HOME` and calls `llm.<domain>/openai-responses/v1` with
  *   the caller token if the Gateway has the OpenAI credential.
+ * - A Gateway from before protocol slots gets `/anthropic` and `/openai/v1` instead.
  * - A harness whose provider the Gateway has no credential for uses its own login through the
  *   forward proxy, whose allowlist must include the login's hosts.
  */
@@ -151,13 +172,20 @@ export const gatewayEnvironment = (
 
 /** The registered wiring recipes whose protocols the gateway serves. */
 const gatewayWirings = (
-  options: Pick<GatewayEnvironmentOptions, "catalog" | "domain" | "llmProviders" | "homes">,
+  options: Pick<
+    GatewayEnvironmentOptions,
+    "catalog" | "domain" | "llmProviders" | "llmPrefixes" | "homes"
+  >,
 ) =>
   options.catalog.descriptors.flatMap(({ id, worker }) =>
     Option.toArray(worker.credential)
       .filter(({ protocol }) => options.llmProviders.includes(protocol))
-      .map(({ gateway, gatewayPath }) => ({
+      .map(({ gateway, gatewayPath, protocol }) => ({
         harness: id,
-        ...gateway.render(`http://llm.${options.domain}/${gatewayPath}`, options.homes[id] ?? ""),
+        ...gateway.render(
+          // A credential's `gatewayPath` starts with its protocol.
+          `http://llm.${options.domain}/${llmPrefixOf(protocol, options.llmPrefixes)}${gatewayPath.slice(protocol.length)}`,
+          options.homes[id] ?? "",
+        ),
       })),
   );

@@ -260,6 +260,22 @@ export class WorkerQuotaNeed extends Schema.TaggedClass<
   message: Schema.String,
 }) {}
 
+/**
+ * A worker whose gateway is older than the orchestrator. Attempts on it keep running, with what
+ * the gateway serves, until the operator upgrades the gateway.
+ */
+export class WorkerGatewayNeed extends Schema.TaggedClass<
+  WorkerGatewayNeed,
+  Brand.Brand<"@usine/orchestrator/operator/need/WorkerGatewayNeed">
+>("@usine/orchestrator/WorkerGatewayNeed")("WorkerGatewayNeed", {
+  /** The attention entry identity. */
+  id: Schema.String,
+  /** The worker behind the gateway. */
+  worker: WorkerName,
+  /** What the gateway lacks, from the worker's last preflight. */
+  message: Schema.String,
+}) {}
+
 /** A worker that `usine.yaml` pauses, so it takes no new attempts while its running ones finish. */
 export class WorkerPausedNeed extends Schema.TaggedClass<
   WorkerPausedNeed,
@@ -330,6 +346,7 @@ export const NeedView = Schema.Union([
   UnresponsiveWorkerNeed,
   WorkerPreflightNeed,
   WorkerQuotaNeed,
+  WorkerGatewayNeed,
   WorkerPausedNeed,
   PoolLimitNeed,
 ]);

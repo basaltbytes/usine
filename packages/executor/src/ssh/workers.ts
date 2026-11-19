@@ -8,6 +8,7 @@ import { ChildProcessSpawner } from "effect/process";
 import { WorkerCapabilityError } from "../executor.ts";
 import type { RemoteCommands } from "../remote/commands.ts";
 import { gatewayAdminFor } from "./gateway/admin.ts";
+import type { GatewayLlmPrefixes } from "./gateway/environment.ts";
 import { type GatewayForward, gatewayForwardFor } from "./gateway/forward.ts";
 import type {
   GatewayCredentials,
@@ -186,6 +187,7 @@ export const sshMachinesFor = Effect.fnUntraced(function* (
       "anthropic-messages": Option.none(),
       "openai-responses": Option.none(),
     });
+    const llmPrefixes = yield* Ref.make<GatewayLlmPrefixes>("protocol");
     return {
       gateway: {
         settings: {
@@ -195,6 +197,7 @@ export const sshMachinesFor = Effect.fnUntraced(function* (
         forward,
         admin,
         credentials,
+        llmPrefixes,
       } satisfies MachineGateway,
       forwards: new Map(current.forwards).set(key, { forward, scope: forwardScope, workers }),
       opened: Option.isNone(shared),
