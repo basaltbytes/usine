@@ -39,6 +39,7 @@ import {
   Logger,
   Option,
   type Path,
+  Queue,
   Redacted,
   Schema,
 } from "effect";
@@ -1240,6 +1241,128 @@ describe("Worker scheduler on reload", () => {
 
           yield* status.runPreflight(spare);
           assert.strictEqual(images.at(-1), "pull", "an on-demand preflight pulls the image");
+        }).pipe(Effect.scoped),
+      ),
+  );
+
+  it.effect(
+    "a later reload doesn't wait for the pull preflight of a missing image or for its retry",
+    () =>
+      withWorkers(localWorkers([["local", 1]]), (root) =>
+        Effect.gen(function* () {
+          const instances = yield* CurrentInstance;
+          const images: Array<PreflightImage | undefined> = [];
+          const failing: Array<string> = [];
+          const pulls = yield* Queue.unbounded<void>();
+          const turns = yield* Queue.unbounded<void>();
+          const context = yield* schedulerContext([], {
+            images,
+            failing,
+            missingImage: ["spare"],
+            pulling: Queue.offer(pulls, undefined).pipe(Effect.andThen(Queue.take(turns))),
+          });
+          const status = Context.get(context, WorkerStatus);
+          const reload = (workers: ReadonlyArray<readonly [string, number]>) =>
+            writeInstanceFiles(root, [["usine.yaml", usineYaml(localWorkers(workers))]]).pipe(
+              Effect.andThen(Effect.forkChild(instances.reload)),
+              Effect.flatMap((reloading) =>
+                Fiber.join(reloading).pipe(Effect.timeout("3 seconds"), TestClock.withLive),
+              ),
+            );
+
+          yield* reload([
+            ["local", 1],
+            ["spare", 1],
+          ]);
+          yield* Queue.take(pulls);
+          const whilePulling = yield* reload([
+            ["local", 1],
+            ["spare", 1],
+            ["third", 1],
+          ]);
+          assert.deepStrictEqual(whilePulling.workers.added, [WorkerName.make("third")]);
+
+          failing.push("spare");
+          yield* Queue.offer(turns, undefined);
+          yield* status.unavailable.pipe(
+            Effect.repeat({ until: ([first]) => first?.message.includes("2 GiB") === true }),
+          );
+          yield* TestClock.adjust("1 minute");
+          yield* Queue.take(pulls);
+          const whileRetrying = yield* reload([
+            ["local", 1],
+            ["spare", 1],
+            ["third", 1],
+            ["fourth", 1],
+          ]);
+          assert.deepStrictEqual(whileRetrying.workers.added, [WorkerName.make("fourth")]);
+          assert.deepStrictEqual(images, ["pull", "defer", "pull", "defer", "pull", "defer"]);
+
+          failing.length = 0;
+          yield* Queue.offer(turns, undefined);
+          const recovered = yield* status.unavailable.pipe(
+            Effect.repeat({ until: (unavailable) => unavailable.length === 0 }),
+          );
+          assert.deepStrictEqual(recovered, []);
+        }).pipe(Effect.scoped),
+      ),
+  );
+
+  it.live(
+    "interrupts the pull preflight of a missing image when a reload checks the Worker again or removes it",
+    () =>
+      withWorkers(localWorkers([["local", 1]]), (root) =>
+        Effect.gen(function* () {
+          const instances = yield* CurrentInstance;
+          const preflighted: Array<string> = [];
+          const pulls = yield* Queue.unbounded<void>();
+          const interrupted = yield* Queue.unbounded<void>();
+          const context = yield* schedulerContext(preflighted, {
+            missingImage: ["spare"],
+            pulling: Queue.offer(pulls, undefined).pipe(
+              Effect.andThen(Effect.never),
+              Effect.onInterrupt(() => Queue.offer(interrupted, undefined)),
+            ),
+          });
+          const status = Context.get(context, WorkerStatus);
+          const interruption = Queue.take(interrupted).pipe(Effect.timeout("3 seconds"));
+          yield* writeInstanceFiles(root, [
+            [
+              "usine.yaml",
+              usineYaml(
+                localWorkers([
+                  ["local", 1],
+                  ["spare", 1],
+                ]),
+              ),
+            ],
+          ]);
+          yield* instances.reload;
+          yield* Queue.take(pulls);
+          assert.strictEqual(preflighted.at(-1), "spare x1: gpt-5.6-sol");
+
+          yield* writeInstanceFiles(root, [
+            [
+              "agents/developer.md",
+              "---\nharness: codex\nmodel: gpt-5.5\neffort: high\n---\nImplement the issue.\n",
+            ],
+          ]);
+          yield* instances.reload;
+          yield* interruption;
+          yield* Queue.take(pulls);
+          assert.strictEqual(
+            preflighted.at(-1),
+            "spare x1: gpt-5.5",
+            "the reload that checks the Worker again starts a pull for the new roster",
+          );
+
+          yield* writeInstanceFiles(root, [
+            ["usine.yaml", usineYaml(localWorkers([["local", 1]]))],
+          ]);
+          yield* instances.reload;
+          yield* interruption;
+          const unavailable = yield* status.unavailable;
+          assert.deepStrictEqual(unavailable, []);
         }).pipe(Effect.scoped),
       ),
   );
