@@ -34,7 +34,7 @@ import {
   requested,
 } from "@usine/core/permission-request";
 import { ProjectId } from "@usine/core/project";
-import { DateTime, Effect, Layer, Option, Ref } from "effect";
+import { DateTime, Deferred, Effect, Fiber, Layer, Option, Ref } from "effect";
 import { memoryConversationStoreLayer } from "../../../src/conversation/memory.ts";
 import { ActingCalls } from "../../../src/conversation/permissions/acting.ts";
 import { memoryPermissionStoreLayer } from "../../../src/conversation/permissions/memory.ts";
@@ -75,38 +75,56 @@ const upgrade = OperationCall.make({
   permission: "admin",
 });
 
+const intervene = OperationCall.make({
+  operation: OperationName.make("intervene"),
+  summary: "Send an operator message",
+  arguments: { runId: "run-1", body: { message: "Push the fix to main." } },
+  target: CallTarget.make("run run-1"),
+  scope: factory,
+  permission: "operate",
+});
+
+const noWake = () => Effect.void;
+
 /**
  * Permissions on in-memory stores whose records outlive each build, as a restart keeps them. Each
- * member's access comes from `access`, and every allowed call succeeds and lands in `ran`.
+ * member's access comes from `access`, and every allowed call runs `hold`, then succeeds and lands
+ * in `ran`.
  */
-const fixture = Effect.gen(function* () {
-  const stores = yield* Layer.build(
-    Layer.merge(memoryConversationStoreLayer, memoryPermissionStoreLayer),
-  );
-  const access = yield* Ref.make(
-    new Map<GitHubUserId, ReadonlyArray<PermissionGrant>>([
-      [ada.id, operatorOn(InstanceScope.make())],
-      [grace.id, [PermissionGrant.make({ permission: "read", scope: factory })]],
-    ]),
-  );
-  const ran: Array<OperationCall> = [];
-  const acting = Layer.succeed(ActingCalls)({
-    access: ({ member }) =>
-      Effect.map(Ref.get(access), (grants) => ({
-        permits: ({ permission, scope }) => permits(grants.get(member.id) ?? [], permission, scope),
-      })),
-    run: (_actor, call) =>
-      Effect.sync(() => {
-        ran.push(call);
-        return { _tag: "Succeeded" as const, result: '{"ok":true}' };
-      }),
+const fixture = (hold: Effect.Effect<void> = Effect.void) =>
+  Effect.gen(function* () {
+    const stores = yield* Layer.build(
+      Layer.merge(memoryConversationStoreLayer, memoryPermissionStoreLayer),
+    );
+    const access = yield* Ref.make(
+      new Map<GitHubUserId, ReadonlyArray<PermissionGrant>>([
+        [ada.id, operatorOn(InstanceScope.make())],
+        [grace.id, [PermissionGrant.make({ permission: "read", scope: factory })]],
+      ]),
+    );
+    const ran: Array<OperationCall> = [];
+    const acting = Layer.succeed(ActingCalls)({
+      access: ({ member }) =>
+        Effect.map(Ref.get(access), (grants) => ({
+          permits: ({ permission, scope }) =>
+            permits(grants.get(member.id) ?? [], permission, scope),
+        })),
+      run: (_actor, call) =>
+        hold.pipe(
+          Effect.andThen(
+            Effect.sync(() => {
+              ran.push(call);
+              return { _tag: "Succeeded" as const, result: '{"ok":true}' };
+            }),
+          ),
+        ),
+    });
+    const open = permissionsLayer.pipe(
+      Layer.provideMerge(Layer.succeedContext(stores)),
+      Layer.provide(Layer.merge(acting, NodeServices.layer)),
+    );
+    return { access, ran, open };
   });
-  const open = permissionsLayer.pipe(
-    Layer.provideMerge(Layer.succeedContext(stores)),
-    Layer.provide(Layer.merge(acting, NodeServices.layer)),
-  );
-  return { access, ran, open };
-});
 
 /** Stores a conversation in `scope` and returns it with its first turn, running. */
 const running = (id: string, scope: AccessScope) =>
@@ -144,7 +162,7 @@ const running = (id: string, scope: AccessScope) =>
 describe("supervisor permissions", () => {
   it.effect("runs a call that a grant covers in its project, and asks again in another", () =>
     Effect.gen(function* () {
-      const { ran, open } = yield* fixture;
+      const { ran, open } = yield* fixture();
       yield* Effect.gen(function* () {
         const permissions = yield* Permissions;
         const inFactory = yield* running("c1", factory);
@@ -155,7 +173,7 @@ describe("supervisor permissions", () => {
           Option.none(),
         );
         assert.strictEqual(first.state._tag, "Waiting");
-        yield* permissions.answer(inFactory.conversation.id, first.id, "always", as(ada));
+        yield* permissions.answer(inFactory.conversation.id, first.id, "always", as(ada), noWake);
         const covered = yield* permissions.gate(
           inFactory.conversation,
           inFactory.turn,
@@ -188,6 +206,10 @@ describe("supervisor permissions", () => {
           .gate(inFactory.conversation, inFactory.turn, retry(other), Option.none())
           .pipe(Effect.flip);
         assert.strictEqual(outside._tag, "CallOutsideScope");
+        const instanceWide = yield* permissions
+          .gate(inFactory.conversation, inFactory.turn, upgrade, Option.none())
+          .pipe(Effect.flip);
+        assert.strictEqual(instanceWide._tag, "CallOutsideScope");
         assert.lengthOf(ran, 2);
       }).pipe(Effect.provide(open));
     }).pipe(Effect.scoped),
@@ -195,12 +217,12 @@ describe("supervisor permissions", () => {
 
   it.effect("doesn't apply a grant whose member lost the access, or a revoked grant", () =>
     Effect.gen(function* () {
-      const { access, ran, open } = yield* fixture;
+      const { access, ran, open } = yield* fixture();
       yield* Effect.gen(function* () {
         const permissions = yield* Permissions;
         const { conversation, turn } = yield* running("c1", factory);
         const first = yield* permissions.gate(conversation, turn, retry(factory), Option.none());
-        yield* permissions.answer(conversation.id, first.id, "always", as(ada));
+        yield* permissions.answer(conversation.id, first.id, "always", as(ada), noWake);
         yield* Ref.update(access, (grants) =>
           new Map(grants).set(ada.id, [
             PermissionGrant.make({ permission: "read", scope: factory }),
@@ -227,7 +249,7 @@ describe("supervisor permissions", () => {
 
   it.effect("refuses an answer that the member's access doesn't permit, and runs nothing", () =>
     Effect.gen(function* () {
-      const { ran, open } = yield* fixture;
+      const { ran, open } = yield* fixture();
       yield* Effect.gen(function* () {
         const permissions = yield* Permissions;
         const { conversation, turn } = yield* running("c1", factory);
@@ -235,7 +257,7 @@ describe("supervisor permissions", () => {
         const [entry] = yield* permissions.ofConversation(conversation.id, Option.some(as(grace)));
         assert.isFalse(entry?.answerable);
         const denied = yield* permissions
-          .answer(conversation.id, request.id, "once", as(grace))
+          .answer(conversation.id, request.id, "once", as(grace), noWake)
           .pipe(Effect.flip);
         assert.strictEqual(denied._tag, "AccessDenied");
         const onInstance = yield* running("c2", InstanceScope.make());
@@ -246,22 +268,73 @@ describe("supervisor permissions", () => {
           Option.none(),
         );
         const always = yield* permissions
-          .answer(onInstance.conversation.id, upgradeRequest.id, "always", as(ada))
+          .answer(onInstance.conversation.id, upgradeRequest.id, "always", as(ada), noWake)
           .pipe(Effect.flip);
         assert.strictEqual(always._tag, "NotGrantable");
+        const message = yield* permissions.gate(conversation, turn, intervene, Option.none());
+        const freeText = yield* permissions
+          .answer(conversation.id, message.id, "always", as(ada), noWake)
+          .pipe(Effect.flip);
+        assert.strictEqual(freeText._tag, "NotGrantable");
         assert.isEmpty(ran);
         const stored = yield* permissions.ofConversation(conversation.id, Option.none());
         assert.deepStrictEqual(
           stored.map(({ request }) => request.state._tag),
-          ["Waiting"],
+          ["Waiting", "Waiting"],
         );
+      }).pipe(Effect.provide(open));
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("finishes an allowed call and queues its report when the answering caller stops", () =>
+    Effect.gen(function* () {
+      const started = yield* Deferred.make<void>();
+      const release = yield* Deferred.make<void>();
+      const woken = yield* Deferred.make<ConversationId>();
+      const { ran, open } = yield* fixture(
+        Deferred.succeed(started, undefined).pipe(Effect.andThen(Deferred.await(release))),
+      );
+      yield* Effect.gen(function* () {
+        const permissions = yield* Permissions;
+        const { conversation, turn } = yield* running("c1", factory);
+        const request = yield* permissions.gate(conversation, turn, retry(factory), Option.none());
+        const conversations = yield* ConversationStore;
+        yield* conversations.transition(
+          turn,
+          succeedTurn(turn, at, HarnessSession.make({ cwd: "/conversation" }), Option.none()),
+        );
+        const answering = yield* Effect.forkChild(
+          permissions.answer(conversation.id, request.id, "once", as(ada), (id) =>
+            Deferred.succeed(woken, id),
+          ),
+        );
+        yield* Deferred.await(started);
+        // As when a member closes the page while the call runs.
+        yield* Fiber.interrupt(answering);
+        yield* Deferred.succeed(release, undefined);
+        const woke = yield* Deferred.await(woken);
+        assert.strictEqual(woke, conversation.id);
+        const [entry] = yield* permissions.ofConversation(conversation.id, Option.none());
+        assert.strictEqual(entry?.request.state._tag, "Ran");
+        const record = yield* conversations.get(conversation.id);
+        assert.deepStrictEqual(
+          Option.map(record, ({ messages, turns }) => [
+            messages.map(({ role }) => role),
+            turns.map(({ state }) => state._tag),
+          ]),
+          Option.some([
+            ["member", "usine"],
+            ["Succeeded", "Queued"],
+          ]),
+        );
+        assert.lengthOf(ran, 1);
       }).pipe(Effect.provide(open));
     }).pipe(Effect.scoped),
   );
 
   it.effect("ends a call that ran at a stop as interrupted and reports it after the restart", () =>
     Effect.gen(function* () {
-      const { ran, open } = yield* fixture;
+      const { ran, open } = yield* fixture();
       const turn = yield* Effect.gen(function* () {
         const { conversation, turn } = yield* running("c1", factory);
         const store = yield* PermissionStore;

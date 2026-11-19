@@ -277,6 +277,7 @@ export const harness = (
     return {
       request,
       handler: app.handler,
+      editor: Context.get(editorContext, ConfigurationEditor),
       store,
       current,
       controls,

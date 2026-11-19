@@ -1,13 +1,9 @@
 import { jsonKey } from "@usine/core/json-key";
-import {
-  AccessDenied,
-  type AccessScope,
-  InstanceScope,
-  requirePermission,
-} from "@usine/core/access";
+import { AccessDenied, InstanceScope, requirePermission } from "@usine/core/access";
 import { filterOverview, loopScope, repositoryScope } from "./access.ts";
-import { CallScopeTarget } from "./call-scope.ts";
-export { CallScopeTarget } from "./call-scope.ts";
+import { CallScopeTarget, type ResolvedCall } from "./call-scope.ts";
+export { CallScopeTarget, type ResolvedCall } from "./call-scope.ts";
+export { entityRequirement } from "./access.ts";
 import { ExpressionEngine } from "@usine/expression/expression-engine";
 import { approvalFor } from "../approval.ts";
 import type { UpgradeDrain } from "@usine/engine/engine";
@@ -1737,12 +1733,14 @@ const makeOperator = Effect.gen(function* () {
     target: CallScopeTarget,
   ) {
     yield* Effect.annotateCurrentSpan({ target: target._tag });
-    const scope = yield* CallScopeTarget.$match(target, {
+    const resolved = yield* CallScopeTarget.$match(target, {
       Run: ({ runId }) =>
-        Effect.map(reader.inspect(runId), ({ repository }) =>
-          repositoryScope(instance, repository),
-        ),
-      Repository: ({ repository }) => Effect.succeed(repositoryScope(instance, repository)),
+        Effect.map(reader.inspect(runId), ({ repository }): ResolvedCall => ({
+          target,
+          scope: repositoryScope(instance, repository),
+        })),
+      Repository: ({ repository }) =>
+        Effect.succeed<ResolvedCall>({ target, scope: repositoryScope(instance, repository) }),
       Loop: ({ loop }) =>
         Option.match(resolveLoopName(instance.loops, loop), {
           onNone: () =>
@@ -1752,18 +1750,25 @@ const makeOperator = Effect.gen(function* () {
                 message: "Loop is missing or ambiguous. Use project/loop.",
               }),
             ),
-          onSome: (name) => Effect.succeed(loopScope(name)),
+          onSome: (name) =>
+            Effect.succeed<ResolvedCall>({
+              target: CallScopeTarget.Loop({ loop: name }),
+              scope: loopScope(name),
+            }),
         }),
       CycleBudgetAsk: ({ askId }) =>
         Effect.flatMap(budgets.asks, (asks) => {
           const ask = asks.find(({ id }) => id === askId);
           return ask === undefined
             ? Effect.fail(CycleBudgetResetRejectedError.make({ askId }))
-            : Effect.succeed(repositoryScope(instance, ask.repository));
+            : Effect.succeed<ResolvedCall>({
+                target,
+                scope: repositoryScope(instance, ask.repository),
+              });
         }),
     });
-    yield* requirePermission("read", scope);
-    return scope;
+    yield* requirePermission("read", resolved.scope);
+    return resolved;
   });
 
   return {
@@ -1850,14 +1855,15 @@ export class Operator extends Context.Service<
       attemptId: AttemptId,
     ) => Effect.Effect<void, OperatorError>;
     /**
-     * Returns the scope that a call on `target` checks its permission on: the project of the
+     * Returns `target` as the operation will resolve it, such as a short loop name qualified with
+     * its project, and the scope that the call checks its permission on: the project of the
      * target's repository or loop, or the instance. Fails with `AccessDenied` when the caller
      * can't read that scope.
      */
     readonly callScope: (
       instance: LoadedInstance,
       target: CallScopeTarget,
-    ) => Effect.Effect<AccessScope, OperatorError>;
+    ) => Effect.Effect<ResolvedCall, OperatorError>;
     /** Requests a new Attempt for a failed Run with its effective task and Agent. */
     readonly retry: (instance: LoadedInstance, runId: RunId) => Effect.Effect<void, OperatorError>;
     /** Amends a failed Run and requests its next Attempt atomically. */

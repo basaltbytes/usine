@@ -8,7 +8,7 @@ Conversation text comes from other members, pull requests, and tool results, and
 
 A request is answered once, and an allowed call runs at most once: usine stores the answer before the call and the outcome after it. A call that ran when the orchestrator stopped ends as interrupted and never runs again, because a retry or a run-again that ran twice can do more harm than a member's second look.
 
-Operations outside a project, such as upgrades and configuration writes, can't have a standing grant. Members, tokens, provider logins, setup, and authentication have no tool.
+Operations outside a project, such as upgrades, can't have a standing grant. Neither can an operator message, an edit-and-retry, or a run-again: they send free text to a coding agent that can push, and under a grant, text from a pull request or an issue would reach that agent with no member reading it. A conversation on a project requests only operations in that project, because the members who read it and answer its requests are that project's. Members, tokens, provider logins, setup, and authentication have no tool, and role binding writes and configuration reverts make no request, since a turn would change who has access.
 
 ## Considered options
 

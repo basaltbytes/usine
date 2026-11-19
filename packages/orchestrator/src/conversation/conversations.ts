@@ -881,9 +881,7 @@ export const conversationsLayer = Layer.effect(
         return canceled;
       }),
       answer: Effect.fn("Conversations.answer")(function* (id, request, answer, by) {
-        const answered = yield* permissions.answer(id, request, answer, by);
-        if (Option.isSome(answered.followUp)) yield* wake(id);
-        return answered.request;
+        return yield* permissions.answer(id, request, answer, by, wake);
       }),
     });
   }),

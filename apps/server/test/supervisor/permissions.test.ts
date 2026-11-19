@@ -1,7 +1,10 @@
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import {
+  type AccessScope,
   AccessDenied,
+  administratorPermissions,
+  InstanceScope,
   PermissionGrant,
   ProjectScope,
   type PermissionGrant as Grant,
@@ -20,6 +23,7 @@ import {
 import { ActingMember } from "@usine/core/operator";
 import {
   CallTarget,
+  callCeiling,
   OperationCall,
   OperationName,
   type PermissionRequest,
@@ -34,6 +38,7 @@ import { Permissions, permissionsLayer } from "@usine/orchestrator/conversation/
 import { memoryPermissionStoreLayer } from "@usine/orchestrator/conversation/permissions/memory";
 import { PermissionStore } from "@usine/orchestrator/conversation/permissions/store";
 import { ConversationNotFound, ConversationStore } from "@usine/orchestrator/conversation/store";
+import { ConfigurationEditor } from "@usine/orchestrator/operator";
 import { OperatorApi } from "@usine/orchestrator/operator/http";
 import { Context, DateTime, Effect, Layer, Option, Redacted, Result, Schema, Stream } from "effect";
 import { HttpRouter } from "effect/http";
@@ -51,10 +56,12 @@ import { SetupApi } from "../../src/setup/api.ts";
 import { actingCallsLayer } from "../../src/supervisor/acting.ts";
 import { turnToolkit } from "../../src/supervisor/turns.ts";
 import { alice, authFixture } from "../auth/fixture.ts";
+import { agentText, harness } from "../configuration-http/support.ts";
 
 const alpha = ProjectScope.make({ project: ProjectId.make("alpha") });
-const grant = (permission: "read" | "operate") =>
-  PermissionGrant.make({ permission, scope: alpha });
+const beta = ProjectScope.make({ project: ProjectId.make("beta") });
+const grant = (permission: "read" | "operate", scope: AccessScope = alpha) =>
+  PermissionGrant.make({ permission, scope });
 const aliceMember = TurnMember.make({ id: alice.id, login: alice.login });
 const at = DateTime.makeUnsafe(Date.UTC(2026, 10, 19, 9));
 const approve = OperationCall.make({
@@ -72,10 +79,13 @@ interface MemberGrants {
 
 /**
  * The operator API with a backend that records approvals and their actor, alice's role bindings
- * from `grants`, and supervisor permissions on in-memory stores. A run `run-1` is in project
- * alpha; any other target can't be read.
+ * from `grants`, the configuration `editor` if given, and supervisor permissions on in-memory
+ * stores. A run `run-1` is in project alpha; any other target can't be read.
  */
-const fixture = (grants: MemberGrants) =>
+const fixture = (
+  grants: MemberGrants,
+  editor: Layer.Layer<ConfigurationEditor> | Layer.Layer<never> = Layer.empty,
+) =>
   Effect.gen(function* () {
     const approvals: Array<{ readonly runId: RunId; readonly actor: Option.Option<string> }> = [];
     const services = yield* authFixture([alice], alice, () => grants.current);
@@ -94,7 +104,7 @@ const fixture = (grants: MemberGrants) =>
         }),
       callScope: (target) =>
         target._tag === "Run" && target.runId === "run-1"
-          ? Effect.succeed(alpha)
+          ? Effect.succeed({ target, scope: alpha })
           : Effect.fail(AccessDenied.make({ permission: "read" })),
     });
     const permissions = permissionsLayer.pipe(
@@ -116,10 +126,7 @@ const fixture = (grants: MemberGrants) =>
               ),
             ),
           answer: (id, request, answer, by) =>
-            Effect.map(
-              current.answer(id, request, answer, by),
-              ({ request: answered }) => answered,
-            ),
+            current.answer(id, request, answer, by, () => Effect.void),
         });
       }),
     ).pipe(Layer.provide(Layer.succeedContext(stores)));
@@ -129,7 +136,7 @@ const fixture = (grants: MemberGrants) =>
       authenticated.routes,
     ).pipe(
       HttpRouter.provideRequest(
-        Layer.mergeAll(backend, Layer.provideMerge(conversations, permissions)),
+        Layer.mergeAll(backend, editor, Layer.provideMerge(conversations, permissions)),
       ),
     );
     const context = yield* Layer.build(Layer.provideMerge(routes, HttpRouter.layer));
@@ -144,17 +151,69 @@ const fixture = (grants: MemberGrants) =>
     const backendService = yield* Layer.build(backend).pipe(
       Effect.map((built) => Context.get(built, FactoryBackend)),
     );
-    return { approvals, services, stores, router, tools, session, request, backendService };
+    // A turn's tools in `scope`; each call of a gated tool lands in `calls` as a waiting request.
+    const toolsOfTurn = (
+      scope: AccessScope,
+      ceiling: Option.Option<ReadonlyArray<OperationId>> = Option.none(),
+    ) =>
+      Effect.gen(function* () {
+        const secret = yield* services.authentication.turnCredential(
+          alice.id,
+          scope,
+          PostedWithSession.make({}),
+        );
+        const calls: Array<OperationCall> = [];
+        const toolkit = yield* turnToolkit(
+          { tools, router, authentication: services.authentication, backend: backendService },
+          secret,
+          ceiling,
+          {
+            call: (call, toolCall) =>
+              Effect.sync((): PermissionRequest => {
+                calls.push(call);
+                return requested({
+                  id: PermissionRequestId.make("r-1"),
+                  conversation: ConversationId.make("c-1"),
+                  audience: scope,
+                  turn: TurnId.make("t-1"),
+                  toolCall,
+                  call,
+                  requestedAt: at,
+                });
+              }),
+          },
+        );
+        // Calls the tool `name` as the model does and returns the text that the model reads.
+        const handle = (name: string, params: Schema.Json) =>
+          Effect.gen(function* () {
+            const built = yield* toolkit.toolkit;
+            const result = yield* built
+              .handle(name, params, "call-1")
+              .pipe(Stream.unwrap, Stream.runLast, Effect.result);
+            return Result.isFailure(result)
+              ? String(result.failure)
+              : Option.match(result.success, {
+                  onNone: () => "",
+                  onSome: ({ result: text }) => String(text),
+                });
+          }).pipe(Effect.provide(toolkit.handlers));
+        return { names: Object.keys(toolkit.toolkit.tools), handle, calls };
+      });
+    return { approvals, services, stores, tools, session, request, toolsOfTurn };
   });
 
-/** Stores a conversation in project alpha with a turn, and a waiting request of `call`. */
-const waitingRequest = (stores: Context.Context<ConversationStore | PermissionStore>) =>
+/** Stores a conversation in `scope` with a turn, and a waiting request of `call`. */
+const waitingRequest = (
+  stores: Context.Context<ConversationStore | PermissionStore>,
+  call: OperationCall = approve,
+  scope: AccessScope = alpha,
+) =>
   Effect.gen(function* () {
     const conversations = Context.get(stores, ConversationStore);
     const conversation = Conversation.make({
       id: ConversationId.make("c-1"),
       title: ConversationTitle.make("Approve run 1"),
-      scope: alpha,
+      scope,
       anchor: Option.none(),
       createdBy: alice.login,
       createdAt: at,
@@ -175,10 +234,10 @@ const waitingRequest = (stores: Context.Context<ConversationStore | PermissionSt
     const request = requested({
       id: PermissionRequestId.make("r-1"),
       conversation: conversation.id,
-      audience: alpha,
+      audience: scope,
       turn: TurnId.make("t-1"),
       toolCall: Option.some("call-1"),
-      call: approve,
+      call,
       requestedAt: at,
     });
     yield* Context.get(stores, PermissionStore).create(request, Option.none());
@@ -189,34 +248,8 @@ describe("a supervisor turn's calls that need more than read", () => {
   it.effect("go to the turn's requests and never run with the turn's credential", () =>
     Effect.gen(function* () {
       const grants: MemberGrants = { current: [grant("read"), grant("operate")] };
-      const { approvals, services, router, tools, backendService } = yield* fixture(grants);
-      const secret = yield* services.authentication.turnCredential(
-        alice.id,
-        alpha,
-        PostedWithSession.make({}),
-      );
-      const calls: Array<OperationCall> = [];
-      const toolkit = yield* turnToolkit(
-        { tools, router, authentication: services.authentication, backend: backendService },
-        secret,
-        Option.none(),
-        {
-          call: (call, toolCall) =>
-            Effect.sync((): PermissionRequest => {
-              calls.push(call);
-              return requested({
-                id: PermissionRequestId.make("r-1"),
-                conversation: ConversationId.make("c-1"),
-                audience: alpha,
-                turn: TurnId.make("t-1"),
-                toolCall,
-                call,
-                requestedAt: at,
-              });
-            }),
-        },
-      );
-      const names = Object.keys(toolkit.toolkit.tools);
+      const { approvals, tools, toolsOfTurn } = yield* fixture(grants);
+      const { names, handle, calls } = yield* toolsOfTurn(alpha);
       const operations = tools
         .filter(({ name }) => names.includes(name))
         .map(({ operationId }) => operationId);
@@ -235,19 +268,6 @@ describe("a supervisor turn's calls that need more than read", () => {
         "members, tokens, logins, setup, authentication, and conversations have no tool",
       );
       assert.include(names, "approve");
-      const handle = (name: string, params: Schema.Json) =>
-        Effect.gen(function* () {
-          const built = yield* toolkit.toolkit;
-          const result = yield* built
-            .handle(name, params, "call-1")
-            .pipe(Stream.unwrap, Stream.runLast, Effect.result);
-          return Result.isFailure(result)
-            ? String(result.failure)
-            : Option.match(result.success, {
-                onNone: () => "",
-                onSome: ({ result: text }) => String(text),
-              });
-        }).pipe(Effect.provide(toolkit.handlers));
       const stored = yield* handle("approve", { runId: "run-1" });
       assert.include(stored, "stored permission request r-1");
       assert.deepStrictEqual<ReadonlyArray<ReadonlyArray<unknown>>>(
@@ -256,8 +276,29 @@ describe("a supervisor turn's calls that need more than read", () => {
       );
       const elsewhere = yield* handle("approve", { runId: "run-9" });
       assert.strictEqual(elsewhere, "The run of the call was not found.");
-      assert.lengthOf(calls, 1, "a target the turn can't read makes no request");
+      const binding = yield* handle("replaceConfigurationEntity", {
+        kind: "binding",
+        identifier: "escalate",
+        body: {
+          expected: 1,
+          value: { name: "escalate", member: 1, role: "admin", scope: { _tag: "Instance" } },
+        },
+      });
+      assert.include(binding, "Role bindings are member access");
+      assert.lengthOf(calls, 1, "an unreadable target or a role binding makes no request");
       assert.isEmpty(approvals, "nothing ran");
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("are offered only within the posting token's operation ceiling", () =>
+    Effect.gen(function* () {
+      const { toolsOfTurn } = yield* fixture({ current: [grant("read"), grant("operate")] });
+      const { names } = yield* toolsOfTurn(
+        alpha,
+        Option.some([OperationId.make("operator.approve")]),
+      );
+      assert.include(names, "approve");
+      assert.notInclude(names, "retry");
     }).pipe(Effect.scoped),
   );
 
@@ -314,17 +355,18 @@ describe("a supervisor turn's calls that need more than read", () => {
       }).pipe(Effect.scoped),
   );
 
-  it.effect("run with a credential that can call only the allowed operation", () =>
+  it.effect("run with a credential that can call only the allowed operation in its scope", () =>
     Effect.gen(function* () {
-      const { approvals, request, services } = yield* fixture({
-        current: [grant("read"), grant("operate")],
-      });
+      const member = [grant("read"), grant("operate"), grant("read", beta), grant("operate", beta)];
+      const { approvals, request, services } = yield* fixture({ current: member });
       const secret = yield* services.authentication.callCredential(
         alice.id,
         PostedWithSession.make({}),
-        [grant("read"), grant("operate")],
+        callCeiling(approve),
         OperationId.make("operator.approve"),
       );
+      const access = yield* services.authentication.authenticate(Redacted.value(secret));
+      assert.deepStrictEqual(access.permissions, [grant("read"), grant("operate")]);
       const other = yield* request(secret)({
         method: "POST",
         url: "/api/runs/run-1/retry",
@@ -344,6 +386,38 @@ describe("a supervisor turn's calls that need more than read", () => {
       });
       assert.strictEqual(allowed.status, 200);
       assert.deepStrictEqual(approvals, [{ runId: "run-1", actor: Option.some("alice") }]);
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("change configuration with the permission that the entity's kind needs", () =>
+    Effect.gen(function* () {
+      const { editor } = yield* harness();
+      const { request, session, stores, toolsOfTurn } = yield* fixture(
+        { current: administratorPermissions },
+        Layer.succeed(ConfigurationEditor, editor),
+      );
+      const { handle, calls } = yield* toolsOfTurn(InstanceScope.make());
+      yield* handle("replaceConfigurationEntity", {
+        kind: "agent",
+        identifier: "developer",
+        body: { expected: 1, text: agentText.replace("Implement.", "Implement carefully.") },
+      });
+      const [call] = calls;
+      if (call === undefined) return assert.fail("The write stored no request");
+      assert.deepStrictEqual([call.permission, call.scope], ["admin", InstanceScope.make()]);
+      const waiting = yield* waitingRequest(stores, call, InstanceScope.make());
+      const answered = yield* request(session)({
+        method: "POST",
+        url: `/api/conversations/c-1/requests/${waiting.id}/answer`,
+        body: Option.some({ answer: "once" }),
+      });
+      assert.include(answered.text, '"_tag":"Ran"');
+      const read = yield* request(session)({
+        method: "GET",
+        url: "/api/configuration/entities/agent/developer",
+        body: Option.none(),
+      });
+      assert.include(read.text, "Implement carefully.");
     }).pipe(Effect.scoped),
   );
 });

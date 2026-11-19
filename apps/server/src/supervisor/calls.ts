@@ -1,4 +1,5 @@
 import { type AccessScope, InstanceScope } from "@usine/core/access";
+import { ConfigurationEntityKey } from "@usine/config/configuration";
 import { CycleBudgetAskId } from "@usine/core/cycle-budget";
 import { LoopName } from "@usine/core/loop";
 import {
@@ -9,7 +10,11 @@ import {
 } from "@usine/core/permission-request";
 import { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
-import { CallScopeTarget } from "@usine/orchestrator/operator";
+import {
+  CallScopeTarget,
+  entityRequirement,
+  type ResolvedCall,
+} from "@usine/orchestrator/operator";
 import { Effect, Option, Result, Schema } from "effect";
 import { type OperatorTool, operatorRequest, type ToolArguments } from "../mcp/tools.ts";
 
@@ -36,10 +41,15 @@ const argument = (args: ToolArguments, name: string) =>
 const bodyField = (args: ToolArguments, name: string) =>
   Schema.decodeUnknownOption(Body)(args.body).pipe(Option.flatMap((body) => argument(body, name)));
 
-/** What a call acts on, in words, and what decides its scope; `None` is the instance. */
+/**
+ * What a call acts on, in words, and what decides its scope; `None` is the instance.
+ * `requirement` replaces the operation's declared permission and that scope when the target
+ * decides them.
+ */
 interface Located {
   readonly target: string;
   readonly scope: Option.Option<CallScopeTarget>;
+  readonly requirement?: { readonly permission: WritePermission; readonly scope: AccessScope };
 }
 
 const decode =
@@ -49,6 +59,39 @@ const decode =
       onNone: () => Result.fail(`Pass ${what}.`),
       onSome: Result.succeed,
     });
+
+const refusedBindings =
+  "Role bindings are member access, which a supervisor turn can't request. A member changes them in Configuration > Role bindings.";
+const refusedRevert =
+  "A revert can change any configuration entity, role bindings included, which a supervisor turn can't request. A member reverts a revision in Configuration > History.";
+
+/**
+ * Returns the configuration entity that a write names and the permission and scope that the
+ * configuration editor checks for it, or what is wrong with the arguments.
+ */
+const entityWrite = (args: ToolArguments): Result.Result<Located, string> => {
+  const kind = Option.getOrElse(argument(args, "kind"), () => "");
+  const identifier = Option.getOrElse(argument(args, "identifier"), () => "");
+  const key = Schema.decodeUnknownOption(ConfigurationEntityKey)({ kind, identifier });
+  if (Option.isNone(key))
+    return Result.fail("Pass kind as a configuration entity kind, and identifier.");
+  if (key.value.kind === "binding") return Result.fail(refusedBindings);
+  const requirement = Option.flatMap(entityRequirement(key.value, "maintain"), (needed) =>
+    Option.map(
+      // A maintainer can change only a project's lanes; the editor requires an admin for the rest.
+      Schema.decodeUnknownOption(WritePermission)(
+        key.value.kind === "project" ? "admin" : needed.permission,
+      ),
+      (permission) => ({ permission, scope: needed.scope }),
+    ),
+  );
+  if (Option.isNone(requirement)) return Result.fail("Pass identifier as a project ID.");
+  return Result.succeed({
+    target: `${kind} ${identifier}`,
+    scope: Option.none(),
+    requirement: requirement.value,
+  });
+};
 
 /** Returns what the call of `tool` with `args` acts on, or what is wrong with the arguments. */
 const locate = (tool: OperatorTool, args: ToolArguments): Result.Result<Located, string> => {
@@ -121,15 +164,9 @@ const locate = (tool: OperatorTool, args: ToolArguments): Result.Result<Located,
       });
     case "replaceConfigurationEntity":
     case "deleteConfigurationEntity":
-      return Result.succeed({
-        target: `${Option.getOrElse(argument(args, "kind"), () => "entity")} ${Option.getOrElse(argument(args, "identifier"), () => "?")}`,
-        scope: Option.none(),
-      });
+      return entityWrite(args);
     case "revertConfigurationRevision":
-      return Result.succeed({
-        target: `configuration revision ${Option.getOrElse(argument(args, "number"), () => "?")}`,
-        scope: Option.none(),
-      });
+      return Result.fail(refusedRevert);
     case "dismissNeed":
     case "undoDismissNeed":
       return Result.succeed({
@@ -142,33 +179,61 @@ const locate = (tool: OperatorTool, args: ToolArguments): Result.Result<Located,
 };
 
 /**
- * Returns the operation call that a turn makes with `tool` and `args`: its target in words, and
- * the scope that its permission is checked on, which `scopeOf` resolves for a target in a project.
- * Fails with the text that the model reads when the arguments are invalid or `scopeOf` fails.
+ * Returns `args` with the loop that the call resolved to, for an operation that names its loop by
+ * `loop` alone, so that the stored call runs on the loop that the member saw.
+ */
+const resolvedArguments = (tool: OperatorTool, args: ToolArguments, target: CallScopeTarget) =>
+  target._tag === "Loop" && !tool.pathParameters.includes("project")
+    ? { ...args, loop: target.loop }
+    : args;
+
+/**
+ * Returns the operation call that a turn makes with `tool` and `args`: its target in words, the
+ * scope that its permission is checked on, which `scopeOf` resolves for a target in a project,
+ * and the permission that it needs. A short loop name is stored qualified with its project. Fails
+ * with the text that the model reads when the arguments are invalid, the target is refused, or
+ * `scopeOf` fails.
  */
 export const operationCall = Effect.fn("Supervisor.operationCall")(function* (
   tool: OperatorTool,
   args: ToolArguments,
-  scopeOf: (target: CallScopeTarget) => Effect.Effect<AccessScope, string>,
+  scopeOf: (target: CallScopeTarget) => Effect.Effect<ResolvedCall, string>,
 ) {
   yield* Effect.annotateCurrentSpan({ tool: tool.name });
   const request = operatorRequest(tool, args);
   if (Result.isFailure(request)) return yield* Effect.fail(request.failure);
   const located = locate(tool, args);
-  if (Result.isFailure(located)) return yield* Effect.fail(located.failure);
-  const permission = Schema.decodeUnknownOption(WritePermission)(tool.permission);
+  if (Result.isFailure(located)) {
+    yield* Effect.logInfo("Supervisor call refused", { tool: tool.name, reason: located.failure });
+    return yield* Effect.fail(located.failure);
+  }
+  const { requirement } = located.success;
+  const permission =
+    requirement === undefined
+      ? Schema.decodeUnknownOption(WritePermission)(tool.permission)
+      : Option.some(requirement.permission);
   if (Option.isNone(permission))
     return yield* Effect.die(new Error(`The ${tool.name} tool needs no more than read`));
-  const scope = yield* Option.match(located.success.scope, {
-    onNone: () => Effect.succeed<AccessScope>(InstanceScope.make()),
-    onSome: scopeOf,
+  const resolved = yield* Effect.transposeOption(Option.map(located.success.scope, scopeOf));
+  const target = Option.match(resolved, {
+    onNone: () => located.success.target,
+    onSome: ({ target: resolvedTarget }) =>
+      resolvedTarget._tag === "Loop" ? `loop ${resolvedTarget.loop}` : located.success.target,
   });
   return OperationCall.make({
     operation: OperationName.make(tool.name),
     summary: tool.descriptor.title ?? tool.name,
-    arguments: args,
-    target: CallTarget.make(located.success.target.slice(0, 300)),
-    scope,
+    arguments: Option.match(resolved, {
+      onNone: () => args,
+      onSome: (call) => resolvedArguments(tool, args, call.target),
+    }),
+    target: CallTarget.make(target.slice(0, 300)),
+    scope:
+      requirement?.scope ??
+      Option.match(resolved, {
+        onNone: () => InstanceScope.make(),
+        onSome: ({ scope }) => scope,
+      }),
     permission: permission.value,
   });
 });

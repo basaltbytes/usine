@@ -49,7 +49,18 @@ import { OperatorLogin } from "@usine/core/operator";
 import { CallTarget, OperationCall, OperationName } from "@usine/core/permission-request";
 import { ProjectId } from "@usine/core/project";
 import { WorkerName } from "@usine/core/worker";
-import { Deferred, Effect, Exit, Layer, Option, Ref, Schema, Scope, Stream } from "effect";
+import {
+  Deferred,
+  Effect,
+  Exit,
+  Layer,
+  Option,
+  Ref,
+  Schedule,
+  Schema,
+  Scope,
+  Stream,
+} from "effect";
 import { Toolkit } from "effect/ai";
 import { TurnAccess, TurnAccessError } from "../../src/conversation/access.ts";
 import {
@@ -669,6 +680,48 @@ describe("conversations with the supervisor", () => {
           .pipe(Effect.flip);
         assert.strictEqual(again._tag, "RequestAnswered");
         assert.lengthOf(setup.ran, 1, "the allowed call ran exactly once");
+      }).pipe(asOperator, Effect.provide(setup.layer));
+    }).pipe(Effect.scoped),
+  );
+
+  it.live("reports a request answered while its turn runs once the turn ends", () =>
+    Effect.gen(function* () {
+      const store = yield* memoryStore;
+      const gate = yield* Deferred.make<void>();
+      const setup = yield* conversations(store, {
+        scripts: [script("asked for a retry", Option.some(gate)), script("the run is retrying")],
+      });
+      yield* Ref.set(setup.calls, [
+        OperationCall.make({
+          operation: OperationName.make("retry"),
+          summary: "Retry a failed run",
+          arguments: { runId: "run-1" },
+          target: CallTarget.make("run run-1"),
+          scope: project,
+          permission: "operate",
+        }),
+      ]);
+      yield* Effect.gen(function* () {
+        const service = yield* Conversations;
+        const permissions = yield* Permissions;
+        const started = yield* service.start(request("Retry run 1"), as(ada));
+        const id = started.conversation.id;
+        const waiting = yield* permissions.ofConversation(id, Option.none()).pipe(
+          Effect.map(([entry]) => Option.fromUndefinedOr(entry)),
+          Effect.flatMap(Effect.fromOption),
+          Effect.retry(Schedule.spaced("5 millis")),
+          Effect.timeout("5 seconds"),
+          Effect.orDie,
+        );
+        yield* service.answer(id, waiting.request.id, "once", as(grace));
+        const running = yield* service.read(id);
+        assert.deepStrictEqual(states(running.turns), ["Running"]);
+        yield* Deferred.succeed(gate, undefined);
+        const done = yield* until(id, (turns) => turns[1]?.state._tag === "Succeeded");
+        assert.deepStrictEqual(
+          done.messages.map(({ role }) => role),
+          ["member", "supervisor", "usine", "supervisor"],
+        );
       }).pipe(asOperator, Effect.provide(setup.layer));
     }).pipe(Effect.scoped),
   );

@@ -1,6 +1,6 @@
 import type { PermissionGrant } from "@usine/core/access";
 import type { Conversation, MessageFormat, TurnMember } from "@usine/core/conversation";
-import type { PermissionRequest } from "@usine/core/permission-request";
+import { outcomeData, type PermissionRequest } from "@usine/core/permission-request";
 import type { RepositoryName } from "@usine/core/repository";
 import { DateTime, Effect, Option, Schema } from "effect";
 
@@ -37,42 +37,70 @@ const jsonText = (value: Schema.Json) =>
 /** `json` with every `<` escaped, so that data can't close the data block. */
 const fenced = (json: string) => json.replaceAll("<", "\\u003c");
 
-/** The outcome of one answered request, as the supervisor reads it. */
-const outcomeOf = ({ id, call, state }: PermissionRequest): Schema.Json => {
-  const request = {
-    request: id,
-    operation: call.operation,
-    arguments: call.arguments,
-    target: call.target,
-    project: call.scope._tag === "Project" ? call.scope.project : null,
-  };
-  switch (state._tag) {
-    case "Denied":
-      return { ...request, answer: "denied", by: state.by.login, outcome: "nothing ran" };
-    case "Ran":
-    case "Failed":
-    case "Interrupted": {
-      const answer =
-        state.allowance._tag === "AllowedOnce"
-          ? "allowed once"
-          : state.allowance._tag === "AllowedAlways"
-            ? "allowed always for the project"
-            : "covered by a standing grant";
-      const outcome =
-        state._tag === "Ran"
-          ? { outcome: "ran", result: state.result }
-          : state._tag === "Failed"
-            ? { outcome: "failed", error: state.error }
-            : {
-                outcome:
-                  "interrupted: usine stopped before it stored the outcome, so the call may or may not have run",
-              };
-      return { ...request, answer, by: state.allowance.by.login, ...outcome };
-    }
-    default:
-      return { ...request, answer: "none" };
+/** The most characters of outcome JSON that one turn's context carries. */
+export const OUTCOMES_LIMIT = 48_000;
+
+/**
+ * Returns the largest length that the details of `lengths` can each keep so that together they
+ * fit `budget`: details shorter than it stay whole, and the longest are cut to it.
+ */
+const commonCap = (lengths: ReadonlyArray<number>, budget: number) => {
+  const sorted = [...lengths].sort((left, right) => left - right);
+  let spent = 0;
+  for (const [index, length] of sorted.entries()) {
+    const rest = sorted.length - index;
+    if (spent + length * rest > budget) return Math.max(0, Math.floor((budget - spent) / rest));
+    spent += length;
   }
+  return Number.POSITIVE_INFINITY;
 };
+
+/**
+ * Returns the outcomes of `requests` as JSON lines that together stay within `OUTCOMES_LIMIT`.
+ * Each keeps its request, operation, target, answer, and status. When the results and errors don't
+ * fit, the longest are cut first, to one common length, each with a note that says so; without
+ * room for them, the arguments are left out too.
+ */
+const outcomeLines = Effect.fn("Conversations.outcomeLines")(function* (
+  requests: ReadonlyArray<PermissionRequest>,
+) {
+  const data = requests.map(outcomeData);
+  const render = (cap: number, withArguments: boolean) =>
+    Effect.forEach(data, ({ fields, detail }) => {
+      const kept = withArguments ? fields : { ...fields, arguments: "left out to fit the context" };
+      return jsonText(
+        Option.match(detail, {
+          onNone: () => kept,
+          onSome: ({ field, text }) =>
+            text.length <= cap
+              ? { ...kept, [field]: text }
+              : {
+                  ...kept,
+                  [field]: text.slice(0, cap),
+                  cut: `usine cut this ${field} at ${cap} of ${text.length} characters to fit the context. No tool reads the stored ${field}; read the target again with your tools.`,
+                },
+        }),
+      ).pipe(Effect.map(fenced));
+    });
+  const size = (lines: ReadonlyArray<string>) =>
+    lines.reduce((total, line) => total + line.length + 3, 0);
+  const whole = yield* render(Number.POSITIVE_INFINITY, true);
+  if (size(whole) <= OUTCOMES_LIMIT) return whole;
+  const lengths = data.map(({ detail }) =>
+    Option.match(detail, { onNone: () => 0, onSome: ({ text }) => text.length }),
+  );
+  for (const withArguments of [true, false]) {
+    const bare = yield* render(0, withArguments);
+    const room = OUTCOMES_LIMIT - size(bare);
+    // A cut detail's JSON escapes can be longer than its text, so a cap that misses is halved.
+    for (let cap = commonCap(lengths, room); cap >= 1; cap = Math.floor(cap / 2)) {
+      const lines = yield* render(cap, withArguments);
+      if (size(lines) <= OUTCOMES_LIMIT) return lines;
+    }
+    if (size(bare) <= OUTCOMES_LIMIT) return bare;
+  }
+  return yield* render(0, false);
+});
 
 /**
  * Returns the message that a turn sends to the supervisor: the turn's context, then the member's
@@ -100,13 +128,12 @@ export const turnPrompt = Effect.fn("Conversations.turnPrompt")(function* (conte
           `Needs you (${context.needsYou.length} of ${context.needsTotal}):`,
           ...context.needsYou.map((need) => `- ${fenced(need)}`),
         ];
+  const lines = input._tag === "Outcomes" ? yield* outcomeLines(input.requests) : [];
   const outcomes =
     input._tag === "Outcomes"
       ? [
           "Outcomes of the permission requests of the previous turn:",
-          ...(yield* Effect.forEach(input.requests, (request) =>
-            Effect.map(jsonText(outcomeOf(request)), (text) => `- ${fenced(text)}`),
-          )),
+          ...lines.map((line) => `- ${line}`),
         ]
       : [];
   return [

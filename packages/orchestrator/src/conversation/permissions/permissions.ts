@@ -1,4 +1,10 @@
-import { AccessDenied, permits, ProjectScope, RequestPermissions } from "@usine/core/access";
+import {
+  AccessDenied,
+  InstanceScope,
+  permits,
+  ProjectScope,
+  RequestPermissions,
+} from "@usine/core/access";
 import { ChangeBus, type ScopedChange } from "@usine/core/changes";
 import {
   type Conversation,
@@ -15,7 +21,6 @@ import {
   allow,
   AllowedAlways,
   AllowedOnce,
-  type Allowance,
   type AllowedRequest,
   type Answer,
   answeredByMember,
@@ -29,6 +34,7 @@ import {
   isGrantable,
   isWaiting,
   needsReport,
+  outcomeLine,
   type OperationCall,
   type PermissionRequest,
   PermissionRequestId,
@@ -51,7 +57,7 @@ import {
 } from "effect";
 import { ConversationNotFound, ConversationStore, type ConversationStoreError } from "../store.ts";
 import { ActingCalls, type ActorAccess, type Actor } from "./acting.ts";
-import { PermissionStore, type PermissionStoreError } from "./store.ts";
+import { type ActionAudience, PermissionStore, type PermissionStoreError } from "./store.ts";
 
 /** No permission request of the conversation has this ID. */
 export class PermissionRequestNotFound extends Schema.TaggedError<
@@ -69,7 +75,7 @@ export class RequestAnswered extends Schema.TaggedError<
   request: Schema.NonEmptyString,
 }) {}
 
-/** "Allow always" answered a call outside a project, which no standing grant can cover. */
+/** "Allow always" answered a call that no standing grant can cover. */
 export class NotGrantable extends Schema.TaggedError<
   NotGrantable,
   Brand.Brand<"@usine/orchestrator/conversation/permissions/NotGrantable">
@@ -85,7 +91,7 @@ export class GrantNotFound extends Schema.TaggedError<
   grant: Schema.NonEmptyString,
 }) {}
 
-/** A turn called an operation on a target outside its conversation's project. */
+/** A turn called an operation outside its conversation's project. */
 export class CallOutsideScope extends Schema.TaggedError<
   CallOutsideScope,
   Brand.Brand<"@usine/orchestrator/conversation/permissions/CallOutsideScope">
@@ -107,12 +113,6 @@ export interface GrantEntry {
   readonly revocable: boolean;
 }
 
-/** An applied answer, and the turn that usine queued to report the outcomes, if any. */
-export interface Answered {
-  readonly request: PermissionRequest;
-  readonly followUp: Option.Option<Turn>;
-}
-
 /**
  * Supervisor turns' permission requests and members' standing grants. A turn's call of an
  * operation that needs more than `read` runs at once under a standing grant whose member's access
@@ -125,8 +125,8 @@ export class Permissions extends Context.Service<
   {
     /**
      * Runs a running turn's `call` under a standing grant that covers it, or stores a waiting
-     * request, and returns the request. Fails when the call's target is in a project outside the
-     * conversation's.
+     * request, and returns the request. A conversation on a project can request only calls in
+     * that project: an operation outside a project, or on another project, fails.
      */
     readonly gate: (
       conversation: Conversation,
@@ -136,16 +136,19 @@ export class Permissions extends Context.Service<
     ) => Effect.Effect<PermissionRequest, CallOutsideScope | PermissionStoreError>;
     /**
      * Applies `by`'s answer to a waiting request once, runs an allowed call, and returns the
-     * request with its outcome. Needs `read` on the conversation's scope, and fails with
-     * `AccessDenied` when `by`'s access doesn't permit the call's operation in its scope.
+     * request with its outcome. Once the answer is stored, the call, its outcome, the turn that
+     * reports the outcomes, and `wake` for that turn's conversation finish even if the caller is
+     * interrupted. Needs `read` on the conversation's scope, and fails with `AccessDenied` when
+     * `by`'s access doesn't permit the call's operation in its scope.
      */
     readonly answer: (
       conversation: ConversationId,
       request: PermissionRequestId,
       answer: Answer,
       by: Actor,
+      wake: (conversation: ConversationId) => Effect.Effect<void>,
     ) => Effect.Effect<
-      Answered,
+      PermissionRequest,
       | AccessDenied
       | ConversationNotFound
       | PermissionRequestNotFound
@@ -205,41 +208,6 @@ const actorOf = (grant: StandingGrant): Actor => ({
   member: grant.member,
   credential: grant.credential,
 });
-
-/** Who allowed a call, in words. */
-const allowedBy = (allowance: Allowance, project: string) => {
-  switch (allowance._tag) {
-    case "AllowedOnce":
-      return `Allowed once by ${allowance.by.login}`;
-    case "AllowedAlways":
-      return `Allowed always for ${project} by ${allowance.by.login}`;
-    case "CoveredByGrant":
-      return `Covered by the grant of ${allowance.by.login}`;
-  }
-};
-
-const firstLine = (text: string) => text.split("\n").find((line) => line.trim() !== "") ?? text;
-
-/** The outcomes of `requests` as a Markdown list, one line each, for members. */
-const outcomesText = (requests: ReadonlyArray<PermissionRequest>) =>
-  requests
-    .map(({ call, state }) => {
-      const what = `- ${call.summary}: ${call.target}.`;
-      const project = call.scope._tag === "Project" ? call.scope.project : "the instance";
-      switch (state._tag) {
-        case "Denied":
-          return `${what} Denied by ${state.by.login}.`;
-        case "Ran":
-          return `${what} ${allowedBy(state.allowance, project)}. Ran.`;
-        case "Failed":
-          return `${what} ${allowedBy(state.allowance, project)}. Failed: ${firstLine(state.error)}`;
-        case "Interrupted":
-          return `${what} ${allowedBy(state.allowance, project)}. Interrupted before usine stored the outcome.`;
-        default:
-          return `${what} ${state._tag}.`;
-      }
-    })
-    .join("\n");
 
 /** A key that identifies the member and credential of `actor`. */
 const actorKey = ({ member, credential }: Actor) =>
@@ -328,7 +296,7 @@ export const permissionsLayer = Layer.effect(
           reports: turn.id,
           member: turn.member,
           credential: turn.credential,
-          body: MessageBody.make(outcomesText(reported)),
+          body: MessageBody.make(reported.map(outcomeLine).join("\n")),
           reply: turn.reply,
           at,
         }),
@@ -372,12 +340,8 @@ export const permissionsLayer = Layer.effect(
         }),
       );
 
-    /**
-     * Runs the allowed call of `request` as `actor` and stores its outcome. It runs in the layer's
-     * scope, so an interrupted caller, such as a canceled turn or a closed request, leaves it to
-     * finish and store the outcome.
-     */
-    const run = (request: AllowedRequest, actor: Actor) =>
+    /** Runs the allowed call of `request` as `actor` and stores its outcome. */
+    const settleCall = (request: AllowedRequest, actor: Actor) =>
       Effect.gen(function* () {
         const outcome = yield* acting.run(actor, request.call);
         const at = yield* now;
@@ -401,12 +365,17 @@ export const permissionsLayer = Layer.effect(
         });
         return settled;
       }).pipe(
-        Effect.withSpan("Permissions.run", {
+        Effect.withSpan("Permissions.settleCall", {
           attributes: { request: request.id, operation: request.call.operation },
         }),
-        Effect.forkIn(scope),
-        Effect.flatMap(Fiber.join),
       );
+
+    /**
+     * Runs `effect` in the layer's scope and waits for it, so an interrupted caller, such as a
+     * canceled turn or a closed HTTP request, leaves it to finish.
+     */
+    const detached = <A, E>(effect: Effect.Effect<A, E>) =>
+      effect.pipe(Effect.forkIn(scope), Effect.flatMap(Fiber.join));
 
     const grantEntry = (
       grant: StandingGrant,
@@ -473,18 +442,23 @@ export const permissionsLayer = Layer.effect(
           turn: turn.id,
           operation: call.operation,
         });
-        if (
-          conversation.scope._tag === "Project" &&
-          call.scope._tag === "Project" &&
-          call.scope.project !== conversation.scope.project
-        ) {
-          yield* Effect.logInfo("Supervisor call refused: its target is outside the project", {
-            conversation: conversation.id,
-            operation: call.operation,
-          });
-          return yield* CallOutsideScope.make({
-            message: `${call.target} was not found in project ${conversation.scope.project}.`,
-          });
+        // Every reader of a project conversation reads its requests and their results.
+        if (conversation.scope._tag === "Project") {
+          const { project } = conversation.scope;
+          const outside =
+            call.scope._tag === "Instance"
+              ? `${call.summary} is an operation outside a project. A conversation on project ${project} can request only operations in that project; ask for it in a conversation on the instance.`
+              : call.scope.project === project
+                ? undefined
+                : `${call.target} was not found in project ${project}.`;
+          if (outside !== undefined) {
+            yield* Effect.logInfo("Supervisor call refused: it is outside the project", {
+              conversation: conversation.id,
+              operation: call.operation,
+              scope: call.scope._tag,
+            });
+            return yield* CallOutsideScope.make({ message: outside });
+          }
         }
         const id = yield* newId;
         const fields = {
@@ -508,7 +482,7 @@ export const permissionsLayer = Layer.effect(
           );
           yield* store.create(request, Option.some(grant.value.id));
           yield* notify(request, Option.some(grant.value.id));
-          return yield* run(request, actorOf(grant.value)).pipe(
+          return yield* detached(settleCall(request, actorOf(grant.value))).pipe(
             Effect.catchTag("RequestConflict", ({ request: id }) =>
               Effect.die(new Error(`Permission request ${id} changed while its call ran`)),
             ),
@@ -526,104 +500,121 @@ export const permissionsLayer = Layer.effect(
         });
         return request;
       }),
-      answer: Effect.fn("Permissions.answer")(function* (conversationId, requestId, answer, by) {
-        yield* Effect.annotateCurrentSpan({
-          conversation: conversationId,
-          request: requestId,
-          answer,
-          member: by.member.login,
-        });
-        yield* readable(conversationId);
-        const found = yield* store.get(requestId);
-        const stored = Option.filter(found, ({ conversation }) => conversation === conversationId);
-        if (Option.isNone(stored))
-          return yield* PermissionRequestNotFound.make({ request: requestId });
-        const request = stored.value;
-        if (!isWaiting(request)) {
-          yield* Effect.logInfo("Answer ignored: the request has an answer", {
-            request: requestId,
-            state: request.state._tag,
-          });
-          return yield* RequestAnswered.make({ request: requestId });
-        }
-        if (answer === "always" && !isGrantable(request.call))
-          return yield* NotGrantable.make({ request: requestId });
-        const access = yield* accessOf(by);
-        if (!Option.getOrElse(access, () => noAccess).permits(request.call)) {
-          yield* Effect.logWarning("Answer refused: the member's access doesn't permit the call", {
-            request: requestId,
-            member: by.member.login,
-            operation: request.call.operation,
-          });
-          return yield* AccessDenied.make({ permission: request.call.permission });
-        }
-        const at = yield* now;
-        const conflict = () => RequestAnswered.make({ request: requestId });
-        if (answer === "deny") {
-          const denied = deny(request, by.member, at);
-          yield* store
-            .transition(request, denied, Option.none())
-            .pipe(Effect.catchTag("RequestConflict", () => Effect.fail(conflict())));
-          yield* notify(denied, Option.none());
-          yield* Effect.logInfo("Permission request denied", {
+      answer: Effect.fn("Permissions.answer")(
+        function* (conversationId, requestId, answer, by, wake) {
+          yield* Effect.annotateCurrentSpan({
             conversation: conversationId,
-            turn: request.turn,
             request: requestId,
+            answer,
             member: by.member.login,
           });
-          const followUp = yield* followUpOfRequest(denied);
-          return { request: denied, followUp };
-        }
-        const { scope: callScope } = request.call;
-        const grant =
-          answer === "always" && callScope._tag === "Project"
-            ? Option.some(
-                StandingGrant.make({
-                  id: StandingGrantId.make(`${requestId}:grant`),
-                  operation: request.call.operation,
-                  summary: request.call.summary,
-                  permission: request.call.permission,
-                  project: callScope.project,
-                  member: by.member,
-                  credential: by.credential,
-                  request: requestId,
-                  createdAt: at,
-                  lastUsedAt: Option.none(),
-                  revoked: Option.none(),
-                }),
-              )
-            : Option.none<StandingGrant>();
-        const allowed = allow(
-          request,
-          Option.match(grant, {
-            onNone: () => AllowedOnce.make({ by: by.member, at }),
-            onSome: ({ id }) => AllowedAlways.make({ by: by.member, at, grant: id }),
-          }),
-        );
-        yield* store
-          .transition(request, allowed, grant)
-          .pipe(Effect.catchTag("RequestConflict", () => Effect.fail(conflict())));
-        yield* notify(
-          allowed,
-          Option.map(grant, ({ id }) => id),
-        );
-        yield* Effect.logInfo("Permission request allowed", {
-          conversation: conversationId,
-          turn: request.turn,
-          request: requestId,
-          member: by.member.login,
-          answer,
-          grant: Option.getOrElse(
-            Option.map(grant, ({ id }) => id),
-            () => "none",
-          ),
-        });
-        const settled = yield* run(allowed, by).pipe(
-          Effect.catchTag("RequestConflict", () => Effect.fail(conflict())),
-        );
-        const followUp = yield* followUpOfRequest(settled);
-        return { request: settled, followUp };
-      }),
+          yield* readable(conversationId);
+          const found = yield* store.get(requestId);
+          const stored = Option.filter(
+            found,
+            ({ conversation }) => conversation === conversationId,
+          );
+          if (Option.isNone(stored))
+            return yield* PermissionRequestNotFound.make({ request: requestId });
+          const request = stored.value;
+          if (!isWaiting(request)) {
+            yield* Effect.logInfo("Answer ignored: the request has an answer", {
+              request: requestId,
+              state: request.state._tag,
+            });
+            return yield* RequestAnswered.make({ request: requestId });
+          }
+          if (answer === "always" && !isGrantable(request.call))
+            return yield* NotGrantable.make({ request: requestId });
+          const access = yield* accessOf(by);
+          if (!Option.getOrElse(access, () => noAccess).permits(request.call)) {
+            yield* Effect.logWarning(
+              "Answer refused: the member's access doesn't permit the call",
+              {
+                request: requestId,
+                member: by.member.login,
+                operation: request.call.operation,
+              },
+            );
+            return yield* AccessDenied.make({ permission: request.call.permission });
+          }
+          const at = yield* now;
+          const conflict = () => RequestAnswered.make({ request: requestId });
+          const { scope: callScope } = request.call;
+          const grant =
+            answer === "always" && callScope._tag === "Project"
+              ? Option.some(
+                  StandingGrant.make({
+                    id: StandingGrantId.make(`${requestId}:grant`),
+                    operation: request.call.operation,
+                    summary: request.call.summary,
+                    permission: request.call.permission,
+                    project: callScope.project,
+                    member: by.member,
+                    credential: by.credential,
+                    request: requestId,
+                    createdAt: at,
+                    lastUsedAt: Option.none(),
+                    revoked: Option.none(),
+                  }),
+                )
+              : Option.none<StandingGrant>();
+          /** Stores the answer, runs an allowed call, and reports the outcomes. */
+          const apply = Effect.gen(function* () {
+            if (answer === "deny") {
+              const denied = deny(request, by.member, at);
+              yield* store
+                .transition(request, denied, Option.none())
+                .pipe(Effect.catchTag("RequestConflict", () => Effect.fail(conflict())));
+              yield* notify(denied, Option.none());
+              yield* Effect.logInfo("Permission request denied", {
+                conversation: conversationId,
+                turn: request.turn,
+                request: requestId,
+                member: by.member.login,
+              });
+              return denied;
+            }
+            const allowed = allow(
+              request,
+              Option.match(grant, {
+                onNone: () => AllowedOnce.make({ by: by.member, at }),
+                onSome: ({ id }) => AllowedAlways.make({ by: by.member, at, grant: id }),
+              }),
+            );
+            yield* store
+              .transition(request, allowed, grant)
+              .pipe(Effect.catchTag("RequestConflict", () => Effect.fail(conflict())));
+            yield* notify(
+              allowed,
+              Option.map(grant, ({ id }) => id),
+            );
+            yield* Effect.logInfo("Permission request allowed", {
+              conversation: conversationId,
+              turn: request.turn,
+              request: requestId,
+              member: by.member.login,
+              answer,
+              grant: Option.getOrElse(
+                Option.map(grant, ({ id }) => id),
+                () => "none",
+              ),
+            });
+            return yield* settleCall(allowed, by).pipe(
+              Effect.catchTag("RequestConflict", () => Effect.fail(conflict())),
+            );
+          }).pipe(
+            Effect.tap((settled) =>
+              followUpOfRequest(settled).pipe(
+                Effect.flatMap((posted) =>
+                  Option.isSome(posted) ? wake(posted.value.conversation) : Effect.void,
+                ),
+              ),
+            ),
+          );
+          return yield* detached(apply);
+        },
+      ),
       ofConversation: Effect.fn("Permissions.ofConversation")(function* (id, reader) {
         yield* readable(id);
         const requests = yield* store.ofConversation(id);
@@ -691,8 +682,19 @@ export const permissionsLayer = Layer.effect(
       }),
       actions: Effect.fn("Permissions.actions")(function* (limit) {
         const permissions = yield* RequestPermissions;
-        const allowed = yield* store.actions(limit);
-        return allowed.filter(({ audience }) => permits(permissions, "read", audience));
+        const audience: ActionAudience = permits(permissions, "read", InstanceScope.make())
+          ? { _tag: "Everyone" }
+          : {
+              _tag: "Projects",
+              projects: [
+                ...new Set(
+                  permissions.flatMap(({ permission, scope }) =>
+                    permission === "read" && scope._tag === "Project" ? [scope.project] : [],
+                  ),
+                ),
+              ],
+            };
+        return yield* store.actions(limit, audience);
       }),
       recover,
     });

@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest";
-import { GitHubUserId, ProjectScope } from "@usine/core/access";
+import { type AccessScope, GitHubUserId, InstanceScope, ProjectScope } from "@usine/core/access";
 import { ConversationId, PostedWithSession, TurnId, TurnMember } from "@usine/core/conversation";
 import { OperatorLogin } from "@usine/core/operator";
 import {
@@ -21,7 +21,10 @@ import {
 } from "@usine/core/permission-request";
 import { ProjectId } from "@usine/core/project";
 import { DateTime, Effect, type Layer, Option, type Scope } from "effect";
-import { PermissionStore } from "../../../src/conversation/permissions/store.ts";
+import {
+  type ActionAudience,
+  PermissionStore,
+} from "../../../src/conversation/permissions/store.ts";
 
 export interface StoreFixture {
   /** Opens the same store in a fresh scope, preserving committed records. */
@@ -37,6 +40,7 @@ export interface StoreAdapter {
 const at = (minute: number) => DateTime.makeUnsafe(Date.UTC(2026, 10, 19, 9, minute));
 const ada = TurnMember.make({ id: GitHubUserId.make(7), login: OperatorLogin.make("ada") });
 const factory = ProjectScope.make({ project: ProjectId.make("factory") });
+const other = ProjectScope.make({ project: ProjectId.make("other") });
 const conversation = ConversationId.make("c1");
 
 const call = OperationCall.make({
@@ -48,11 +52,11 @@ const call = OperationCall.make({
   permission: "operate",
 });
 
-const waiting = (id: string, turn: string, minute: number) =>
+const waiting = (id: string, turn: string, minute: number, audience: AccessScope = factory) =>
   requested({
     id: PermissionRequestId.make(id),
     conversation,
-    audience: factory,
+    audience,
     turn: TurnId.make(turn),
     toolCall: Option.some(`tool-${id}`),
     call,
@@ -176,36 +180,43 @@ export const permissionStoreContract = (adapter: StoreAdapter) =>
       ),
     );
 
-    it.effect("lists allowed calls by latest answer, without waiting or denied requests", () =>
-      withStore((store) =>
-        Effect.gen(function* () {
-          const first = waiting("r1", "t1", 1);
-          const second = waiting("r2", "t1", 2);
-          const refused = waiting("r3", "t1", 3);
-          const open = waiting("r4", "t1", 4);
-          for (const request of [first, second, refused, open])
-            yield* store.create(request, Option.none());
-          yield* store.transition(
-            first,
-            allow(first, AllowedOnce.make({ by: ada, at: at(9) })),
-            Option.none(),
-          );
-          yield* store.transition(
-            second,
-            allow(second, AllowedOnce.make({ by: ada, at: at(5) })),
-            Option.none(),
-          );
-          yield* store.transition(refused, deny(refused, ada, at(6)), Option.none());
-          assert.deepStrictEqual(
-            (yield* store.actions(10)).map(({ id }) => id),
-            ["r1", "r2"],
-          );
-          assert.deepStrictEqual(
-            (yield* store.actions(1)).map(({ id }) => id),
-            ["r1"],
-          );
-        }),
-      ),
+    it.effect(
+      "lists the allowed calls of readable conversations by latest answer, then limits",
+      () =>
+        withStore((store) =>
+          Effect.gen(function* () {
+            const first = waiting("r1", "t1", 1);
+            const second = waiting("r2", "t1", 2);
+            const refused = waiting("r3", "t1", 3);
+            const open = waiting("r4", "t1", 4);
+            const elsewhere = waiting("r5", "t2", 5, other);
+            const onInstance = waiting("r6", "t3", 6, InstanceScope.make());
+            for (const request of [first, second, refused, open, elsewhere, onInstance])
+              yield* store.create(request, Option.none());
+            for (const [request, minute] of [
+              [first, 9],
+              [second, 5],
+              [elsewhere, 10],
+              [onInstance, 11],
+            ] as const)
+              yield* store.transition(
+                request,
+                allow(request, AllowedOnce.make({ by: ada, at: at(minute) })),
+                Option.none(),
+              );
+            yield* store.transition(refused, deny(refused, ada, at(6)), Option.none());
+            const ids = (limit: number, audience: ActionAudience) =>
+              Effect.map(store.actions(limit, audience), (requests) =>
+                requests.map(({ id }) => id),
+              );
+            const everyone = yield* ids(10, { _tag: "Everyone" });
+            assert.deepStrictEqual(everyone, ["r6", "r5", "r1", "r2"]);
+            const factoryOnly = yield* ids(1, { _tag: "Projects", projects: [factory.project] });
+            assert.deepStrictEqual(factoryOnly, ["r1"]);
+            const none = yield* ids(10, { _tag: "Projects", projects: [] });
+            assert.deepStrictEqual(none, []);
+          }),
+        ),
     );
 
     it.effect("records a grant's use with the request, and revokes a grant once", () =>

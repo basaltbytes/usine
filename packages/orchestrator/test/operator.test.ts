@@ -141,7 +141,7 @@ import {
 } from "../src/operator/transcript.ts";
 import { FailureView, LocalWorkerAccess, SshWorkerAccess } from "../src/operator/attempt.ts";
 import { PoolLimitNeed } from "../src/operator/need.ts";
-import { boardTaskRuns, Operator } from "../src/operator/operator.ts";
+import { boardTaskRuns, CallScopeTarget, Operator } from "../src/operator/operator.ts";
 import { jsonBytes, PAGE_BYTES } from "../src/operator/page.ts";
 import type { RunTextPageView, RunTranscriptPageView } from "../src/operator/run-pages.ts";
 import { ReadyOverview } from "../src/operator/overview.ts";
@@ -3508,3 +3508,25 @@ it.effect("authorizes historical run actions by current repository ownership", (
     );
   }),
 );
+
+describe("Operator.callScope", () => {
+  it.effect("resolves a call's target only for a caller who can read its scope", () =>
+    Effect.gen(function* () {
+      const fixtureInstance = yield* instance;
+      const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
+      const moved = yield* Ref.make<ItemLabelMutation | null>(null);
+      const reads = yield* Ref.make(0);
+      const revision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
+      yield* Effect.gen(function* () {
+        const operator = yield* Operator;
+        const target = CallScopeTarget.Run({ runId });
+        const resolved = yield* operator.callScope(fixtureInstance, target);
+        assert.deepStrictEqual(resolved.target, target);
+        const refused = yield* operator
+          .callScope(fixtureInstance, target)
+          .pipe(Effect.provideService(RequestPermissions, []), Effect.flip);
+        assert.strictEqual(refused._tag, "AccessDenied");
+      }).pipe(Effect.provide(testLayer(approved, moved, reads, revision)));
+    }),
+  );
+});

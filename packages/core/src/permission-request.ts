@@ -54,8 +54,23 @@ export interface OperationRequirement {
   readonly scope: AccessScope;
 }
 
-/** Whether a standing grant can cover `call`: only a call in a project can. */
-export const isGrantable = (call: OperationCall): boolean => call.scope._tag === "Project";
+/**
+ * The operations that send free text to a coding agent that can push: an operator message, and
+ * the task of an edit-and-retry or a run-again. A standing grant never covers them, so text from a
+ * pull request or an issue can't reach an agent without a member reading it first.
+ */
+const FREE_TEXT_OPERATIONS: ReadonlySet<string> = new Set([
+  "intervene",
+  "editAndRetry",
+  "runAgain",
+]);
+
+/**
+ * Whether a standing grant can cover `call`: a call in a project of an operation that sends no
+ * free text to a coding agent.
+ */
+export const isGrantable = (call: OperationRequirement): boolean =>
+  call.scope._tag === "Project" && !FREE_TEXT_OPERATIONS.has(call.operation);
 
 /**
  * Returns the grants that a credential limited to `requirement` has, within a member's grants:
@@ -293,6 +308,102 @@ export const reportIn = (request: PermissionRequest, turn: TurnId): PermissionRe
   answeredByMember(request) && Option.isNone(request.reportedIn)
     ? PermissionRequest.make({ ...request, reportedIn: Option.some(turn) })
     : request;
+
+const projectOf = ({ scope }: OperationCall) =>
+  scope._tag === "Project" ? scope.project : "the instance";
+
+/** Who allowed a call, in words. */
+const allowedBy = (allowance: Allowance, project: string) => {
+  switch (allowance._tag) {
+    case "AllowedOnce":
+      return `Allowed once by ${allowance.by.login}`;
+    case "AllowedAlways":
+      return `Allowed always for ${project} by ${allowance.by.login}`;
+    case "CoveredByGrant":
+      return `Covered by the grant of ${allowance.by.login}`;
+  }
+};
+
+const firstLine = (text: string) => text.split("\n").find((line) => line.trim() !== "") ?? text;
+
+/** Returns the outcome of `request` as one Markdown list item, for members. */
+export const outcomeLine = ({ call, state }: PermissionRequest): string => {
+  const what = `- ${call.summary}: ${call.target}.`;
+  switch (state._tag) {
+    case "Waiting":
+      return `${what} Waiting for an answer.`;
+    case "Denied":
+      return `${what} Denied by ${state.by.login}.`;
+    case "Allowed":
+      return `${what} ${allowedBy(state.allowance, projectOf(call))}. Running.`;
+    case "Ran":
+      return `${what} ${allowedBy(state.allowance, projectOf(call))}. Ran.`;
+    case "Failed":
+      return `${what} ${allowedBy(state.allowance, projectOf(call))}. Failed: ${firstLine(state.error)}`;
+    case "Interrupted":
+      return `${what} ${allowedBy(state.allowance, projectOf(call))}. Interrupted before usine stored the outcome.`;
+  }
+};
+
+/** The outcome of one request as the supervisor reads it, and the text that a cap may cut. */
+export interface OutcomeData {
+  /** The request, operation, arguments, target, project, answer, member, and status. */
+  readonly fields: { readonly [key: string]: Schema.Json };
+  /** The operation's result or error, under `field`, or `None` when the call has neither. */
+  readonly detail: Option.Option<{ readonly field: "result" | "error"; readonly text: string }>;
+}
+
+/** Returns the outcome of `request` as the supervisor reads it. */
+export const outcomeData = ({ id, call, state }: PermissionRequest): OutcomeData => {
+  const fields = {
+    request: id,
+    operation: call.operation,
+    arguments: call.arguments,
+    target: call.target,
+    project: call.scope._tag === "Project" ? call.scope.project : null,
+  };
+  switch (state._tag) {
+    case "Waiting":
+      return { fields: { ...fields, answer: "none", outcome: "waiting" }, detail: Option.none() };
+    case "Denied":
+      return {
+        fields: { ...fields, answer: "denied", by: state.by.login, outcome: "nothing ran" },
+        detail: Option.none(),
+      };
+    default: {
+      const answer =
+        state.allowance._tag === "AllowedOnce"
+          ? "allowed once"
+          : state.allowance._tag === "AllowedAlways"
+            ? "allowed always for the project"
+            : "covered by a standing grant";
+      const allowed = { ...fields, answer, by: state.allowance.by.login };
+      switch (state._tag) {
+        case "Allowed":
+          return { fields: { ...allowed, outcome: "running" }, detail: Option.none() };
+        case "Ran":
+          return {
+            fields: { ...allowed, outcome: "ran" },
+            detail: Option.some({ field: "result", text: state.result }),
+          };
+        case "Failed":
+          return {
+            fields: { ...allowed, outcome: "failed" },
+            detail: Option.some({ field: "error", text: state.error }),
+          };
+        case "Interrupted":
+          return {
+            fields: {
+              ...allowed,
+              outcome:
+                "interrupted: usine stopped before it stored the outcome, so the call may or may not have run",
+            },
+            detail: Option.none(),
+          };
+      }
+    }
+  }
+};
 
 /** Who revoked a standing grant, and when. */
 export class GrantRevocation extends Schema.Class<

@@ -1,6 +1,5 @@
 import type { WorkerPreflightView } from "@usine/orchestrator/operator";
 import { resolveLoopName } from "@usine/config/project";
-import type { AccessScope } from "@usine/core/access";
 import { requestActor } from "@usine/core/operator";
 import {
   AttentionAcknowledgement,
@@ -19,6 +18,7 @@ import type { WorkerName } from "@usine/core/worker";
 import {
   type BoardMove,
   type CallScopeTarget,
+  type ResolvedCall,
   type ConfigurationView,
   type DeskView,
   type FactoryOverview,
@@ -109,10 +109,10 @@ export class FactoryBackend extends Context.Service<
     ) => Effect.Effect<void, BackendError>;
     readonly cancel: (runId: RunId) => Effect.Effect<void, BackendError>;
     /**
-     * Returns the scope that a call on `target` checks its permission on. Fails with
-     * `AccessDenied` when the request can't read it.
+     * Returns `target` as the operation will resolve it, and the scope that a call on it checks
+     * its permission on. Fails with `AccessDenied` when the request can't read that scope.
      */
-    readonly callScope: (target: CallScopeTarget) => Effect.Effect<AccessScope, BackendError>;
+    readonly callScope: (target: CallScopeTarget) => Effect.Effect<ResolvedCall, BackendError>;
     readonly runWorkerPreflight: (
       worker: WorkerName,
     ) => Effect.Effect<WorkerPreflightView, BackendError>;

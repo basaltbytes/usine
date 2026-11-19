@@ -40,6 +40,7 @@ const requestColumns = (request: PermissionRequest) =>
   Effect.map(encode(RequestJson)(request), (value) => ({
     id: request.id,
     conversation_id: request.conversation,
+    audience_project: request.audience._tag === "Project" ? request.audience.project : null,
     turn_id: request.turn,
     state: request.state._tag,
     requested_at: DateTime.toEpochMillis(request.requestedAt),
@@ -61,12 +62,12 @@ export const sqlitePermissionStoreLayer = Layer.effect(
       table: "usine_permission_migrations",
       loader: Migrator.fromRecord({
         "0001_permissions": Effect.gen(function* () {
-          yield* sql`CREATE TABLE usine_permission_requests (id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, turn_id TEXT NOT NULL, state TEXT NOT NULL, requested_at INTEGER NOT NULL, answered_at INTEGER, report_due INTEGER NOT NULL, value TEXT NOT NULL)`;
+          yield* sql`CREATE TABLE usine_permission_requests (id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, audience_project TEXT, turn_id TEXT NOT NULL, state TEXT NOT NULL, requested_at INTEGER NOT NULL, answered_at INTEGER, report_due INTEGER NOT NULL, value TEXT NOT NULL)`;
           yield* sql`CREATE INDEX usine_permission_requests_conversation ON usine_permission_requests (conversation_id, requested_at)`;
           yield* sql`CREATE INDEX usine_permission_requests_turn ON usine_permission_requests (turn_id)`;
           yield* sql`CREATE INDEX usine_permission_requests_state ON usine_permission_requests (state)`;
           yield* sql`CREATE INDEX usine_permission_requests_report ON usine_permission_requests (report_due)`;
-          yield* sql`CREATE INDEX usine_permission_requests_answered ON usine_permission_requests (answered_at)`;
+          yield* sql`CREATE INDEX usine_permission_requests_answered ON usine_permission_requests (audience_project, answered_at)`;
           yield* sql`CREATE TABLE usine_standing_grants (id TEXT PRIMARY KEY, revoked INTEGER NOT NULL, created_at INTEGER NOT NULL, value TEXT NOT NULL)`;
           yield* sql`CREATE INDEX usine_standing_grants_revoked ON usine_standing_grants (revoked, created_at)`;
         }),
@@ -179,8 +180,13 @@ export const sqlitePermissionStoreLayer = Layer.effect(
           Effect.catchTag(["SqlError", "SchemaError"], failure("mark requests reported")),
         );
       }),
-      actions: Effect.fn("PermissionStore.actions")(function* (limit) {
-        return yield* sql`SELECT value FROM usine_permission_requests WHERE state NOT IN ('Waiting', 'Denied') ORDER BY answered_at DESC, id DESC LIMIT ${limit}`.pipe(
+      actions: Effect.fn("PermissionStore.actions")(function* (limit, audience) {
+        if (audience._tag === "Projects" && audience.projects.length === 0) return [];
+        const readable =
+          audience._tag === "Everyone"
+            ? sql`1 = 1`
+            : sql`audience_project IN ${sql.in(audience.projects)}`;
+        return yield* sql`SELECT value FROM usine_permission_requests WHERE state NOT IN ('Waiting', 'Denied') AND ${readable} ORDER BY answered_at DESC, id DESC LIMIT ${limit}`.pipe(
           Effect.flatMap(decodeRequests),
           Effect.catchTag(["SqlError", "SchemaError"], failure("read allowed calls")),
         );

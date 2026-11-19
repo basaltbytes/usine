@@ -1,3 +1,4 @@
+import type { AccessScope } from "@usine/core/access";
 import type { CycleBudgetAskId } from "@usine/core/cycle-budget";
 import type { LoopName } from "@usine/core/loop";
 import type { RepositoryName } from "@usine/core/repository";
@@ -13,3 +14,9 @@ export type CallScopeTarget = Data.TaggedEnum<{
   CycleBudgetAsk: { readonly askId: CycleBudgetAskId };
 }>;
 export const CallScopeTarget = Data.taggedEnum<CallScopeTarget>();
+
+/** A call's target as the operation will resolve it, such as a project-qualified loop, and its scope. */
+export interface ResolvedCall {
+  readonly target: CallScopeTarget;
+  readonly scope: AccessScope;
+}

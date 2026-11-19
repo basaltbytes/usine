@@ -7,6 +7,7 @@ import type {
   StandingGrant,
   StandingGrantId,
 } from "@usine/core/permission-request";
+import type { ProjectId } from "@usine/core/project";
 import { type Brand, Context, type Effect, type Option, Schema } from "effect";
 
 /** The permission store couldn't read or write. */
@@ -26,6 +27,11 @@ export class RequestConflict extends Schema.TaggedError<
   request: Schema.NonEmptyString,
   expected: Schema.NonEmptyString,
 }) {}
+
+/** Whose conversations a read of allowed calls covers: every one, or those on these projects. */
+export type ActionAudience =
+  | { readonly _tag: "Everyone" }
+  | { readonly _tag: "Projects"; readonly projects: ReadonlyArray<ProjectId> };
 
 /**
  * Stores supervisor turns' permission requests and members' standing grants. Every write is
@@ -68,9 +74,10 @@ export class PermissionStore extends Context.Service<
     readonly unreported: Effect.Effect<ReadonlyArray<TurnId>, PermissionStoreError>;
     /** Marks the requests of `turn` that a member answered as reported in `followUp`. */
     readonly report: (turn: TurnId, followUp: TurnId) => Effect.Effect<void, PermissionStoreError>;
-    /** The allowed calls, latest answer first, at most `limit`. */
+    /** The allowed calls in conversations of `audience`, latest answer first, at most `limit`. */
     readonly actions: (
       limit: number,
+      audience: ActionAudience,
     ) => Effect.Effect<ReadonlyArray<PermissionRequest>, PermissionStoreError>;
     /** The grants that are not revoked, oldest first. */
     readonly grants: Effect.Effect<ReadonlyArray<StandingGrant>, PermissionStoreError>;

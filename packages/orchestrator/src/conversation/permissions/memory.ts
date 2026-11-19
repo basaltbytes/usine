@@ -83,9 +83,14 @@ export const memoryPermissionStoreLayer = Layer.effect(
           return next;
         }).pipe(serialized);
       }),
-      actions: (limit) =>
+      actions: (limit, audience) =>
         Effect.map(all, (stored) =>
           stored
+            .filter(
+              ({ audience: scope }) =>
+                audience._tag === "Everyone" ||
+                (scope._tag === "Project" && audience.projects.includes(scope.project)),
+            )
             .flatMap((request) =>
               request.state._tag === "Waiting" || request.state._tag === "Denied"
                 ? []
