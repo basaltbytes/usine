@@ -704,8 +704,9 @@ export class RunDriver extends Context.Service<
           retryingStore(runId, "read the agent"),
         );
         const ran = yield* capacity.gate(
+          runId,
           Option.isNone(ended) && Option.isNone(reattaching(open))
-            ? Option.some({ runId, loop: submission.loop, worker, turn, brain })
+            ? Option.some({ loop: submission.loop, worker, turn, brain })
             : Option.none(),
           (observe) =>
             Option.match(ended, {

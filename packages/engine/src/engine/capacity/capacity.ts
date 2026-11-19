@@ -21,7 +21,6 @@ export interface EndedAttempt {
 
 /** The claim of a Run's new Attempt on its capacity group. */
 export interface CapacityClaimRequest<E, R> {
-  readonly runId: RunId;
   readonly loop: LoopName;
   readonly worker: WorkerName;
   readonly turn: Capacity.CapacityTurn;
@@ -80,14 +79,15 @@ export class ProviderCapacity extends Context.Service<
       readonly attempts: ReadonlyArray<Attempt>;
     }) => Effect.Effect<Capacity.CapacityTurn>;
     /**
-     * Runs `attempt`, unless `claim`, the claim of a new Attempt, finds the Run's group at
-     * capacity when it isn't the Run's turn: then the Run waits for the group, and `gate` returns
-     * `None`. `attempt` passes each transcript envelope to the observer it receives, and a
+     * Runs `attempt` of the Run `runId`, unless `claim`, the claim of a new Attempt, finds the
+     * Run's group at capacity when it isn't the Run's turn: then the Run waits for the group, and
+     * `gate` returns `None`. `attempt` passes each transcript envelope to the observer it receives, and a
      * child's `ProviderAnswered` releases the group. An Attempt that ended settles the group: a
      * success or a failure that the provider answered releases it, and an infrastructure failure
      * or a defect ends the Run's test of it. A capacity refusal is registered when the Run waits.
      */
     readonly gate: <A, E, R, E2 = never, R2 = never>(
+      runId: RunId,
       claim: Option.Option<CapacityClaimRequest<E2, R2>>,
       attempt: (observe: CapacityObserver) => Effect.Effect<Result.Result<EndedAttempt, A>, E, R>,
     ) => Effect.Effect<Option.Option<Result.Result<EndedAttempt, A>>, E | E2, R | R2>;
@@ -252,9 +252,10 @@ export class ProviderCapacity extends Context.Service<
       });
 
       const claim = Effect.fn("ProviderCapacity.claim")(function* <E, R>(
+        runId: RunId,
         request: CapacityClaimRequest<E, R>,
       ) {
-        const { runId, loop, worker } = request;
+        const { loop, worker } = request;
         yield* Effect.annotateCurrentSpan({ runId, worker });
         if ((yield* Ref.get(state)).groups.size === 0) {
           // Nothing is at capacity, so the Run's group is free and needs no read of its brain.
@@ -300,26 +301,28 @@ export class ProviderCapacity extends Context.Service<
         return claimed.claim;
       });
 
-      const gate = <A, E, R, E2 = never, R2 = never>(
+      const gate = Effect.fn("ProviderCapacity.gate")(function* <A, E, R, E2, R2>(
+        runId: RunId,
         request: Option.Option<CapacityClaimRequest<E2, R2>>,
         attempt: (observe: CapacityObserver) => Effect.Effect<Result.Result<EndedAttempt, A>, E, R>,
-      ) =>
-        Effect.gen(function* () {
-          if (Option.isSome(request) && (yield* claim(request.value)) === "Wait")
-            return Option.none<Result.Result<EndedAttempt, A>>();
-          const ran = yield* attempt(observe);
-          if (Result.isSuccess(ran)) {
-            const { attempt: ended, result } = ran.success;
-            yield* settleAtCapacity(
-              ended,
-              Result.match(result, {
-                onSuccess: () => "Succeeded" as const,
-                onFailure: ({ _tag }) => _tag,
-              }),
-            );
-          }
-          return Option.some(ran);
-        });
+      ) {
+        yield* Effect.annotateCurrentSpan({ runId });
+        if (Option.isSome(request) && (yield* claim(runId, request.value)) === "Wait")
+          return Option.none<Result.Result<EndedAttempt, A>>();
+        const ran = yield* attempt(observe);
+        if (Result.isSuccess(ran)) {
+          const { attempt: ended, result } = ran.success;
+          yield* Effect.annotateCurrentSpan({ attemptId: ended.id });
+          yield* settleAtCapacity(
+            ended,
+            Result.match(result, {
+              onSuccess: () => "Succeeded" as const,
+              onFailure: ({ _tag }) => _tag,
+            }),
+          );
+        }
+        return Option.some(ran);
+      });
 
       /** Waits until the Run's turn comes, and returns how its wait ended. */
       const waitTurn = Effect.fn("ProviderCapacity.waitTurn")(function* (runId: RunId) {
