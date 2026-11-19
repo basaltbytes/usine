@@ -110,9 +110,15 @@ When the orchestrator saves a revision through the operator API or reloads the s
 | `parse` | step | none | Parses and validates the changed entities. |
 | `restart` | step | none | Checks for changes that require a restart. |
 | `coordinator-brains` | step | 10-second limit for the whole step | Checks each agent's coordinator brain. |
-| `worker-preflight` | step | none | Runs preflight for added workers, added capacity, and new brains. |
+| `worker-preflight` | step | none | Runs preflight for added workers, added capacity, and new brains, without pulling an attempt image. |
 | `store` | step | none | Stores the revision. |
 | `apply` | step | none | Applies the revision to new work. |
+
+The `worker-preflight` step of a save or reload doesn't pull the attempt image of an SSH worker, so a registry download never delays a save. Preflight checks the image that the machine has. When the machine has none, a manifest request checks that the registry has the image, the harness checks wait for the next attempt's container, and the worker's harnesses show as deferred. The next attempt on that worker pulls the image. Preflight of a worker whose connection the revision changes works the same way. Startup, on-demand, and retried preflights pull the image.
+
+If the client of a save disconnects before the `store` step, the save stops, and the orchestrator logs `Configuration save interrupted by the client; nothing was saved` at Info level with the `step` that was running and the `expectedRevision`. No revision is stored. The `store` and `apply` steps finish even if the client disconnects.
+
+`GET /api/configuration/writes` lists the saves that run now: the revision each expects to replace (`expected`) and its `step`. A save waiting for another change shows `wait`. When a save takes more than 3 seconds, the configuration form shows its step, such as `Still saving: checking the workers (worker-preflight).`
 
 The UI refuses a revision that requires a restart, fails preflight, or runs out of time. CLI commands can save it while the process keeps the accepted configuration. A successful CLI exit confirms storage. Check logs for `Stored configuration applied; new runs use the new configuration` or `Configuration revision could not be applied; the running configuration is unchanged`. Correct rejected settings or restart to apply them. Send `SIGHUP` to the orchestrator process to request an explicit store reread.
 
