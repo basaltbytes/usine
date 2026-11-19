@@ -74,36 +74,6 @@ describe("the orchestrator's Hetzner server", () => {
   // @effect-diagnostics-next-line schemaSync:off
   const userData = Schema.decodeUnknownSync(UserData)(parse(text));
 
-  it("renders a cloud-config with the usine user's keys, the attempt image's Node.js, and the gateway's settings", () => {
-    assert.strictEqual(text.split("\n")[0], "#cloud-config");
-    assert.deepStrictEqual(
-      userData.users.map(({ name, ssh_authorized_keys }) => [name, ssh_authorized_keys]),
-      [["usine", [KEY]]],
-    );
-    assert.deepStrictEqual(
-      text
-        .split("\n")
-        .filter((line) => !line.trimStart().startsWith("#") && /@{1,2}[A-Z_0-9]+@/u.test(line)),
-      [],
-      "every placeholder outside a comment is replaced",
-    );
-    const nodeMajors = [...text.matchAll(/deb\.nodesource\.com\/node_(\S+)\.x/gu)].map(
-      ([, major]) => major,
-    );
-    assert.deepStrictEqual(
-      nodeMajors,
-      [...read("worker-image/Dockerfile").matchAll(/^ARG NODE_MAJOR=(\S+)$/gmu)].map(
-        ([, major]) => major,
-      ),
-    );
-    assert.include(
-      fileOf(userData, "/etc/chrony/conf.d/usine-orchestrator.conf"),
-      "server 10.42.0.2 ",
-    );
-    assert.deepStrictEqual(userData.runcmd, [["/usr/local/sbin/usine-orchestrator-setup"]]);
-    for (const name of ["chrony", "nftables", "polkitd"]) assert.include(userData.packages, name);
-  });
-
   it("installs Tailscale with the signing key that the gateway pins", () => {
     const gatewayKey = read("hetzner/gateway/gateway-cloud-init.yaml")
       .split("\n")

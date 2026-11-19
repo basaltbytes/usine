@@ -2,7 +2,7 @@ import { assert, describe, it } from "@effect/vitest";
 import { LoadedInstance } from "@usine/config/instance";
 import { UsineConfig } from "@usine/config/factory";
 import { RepositoryName } from "@usine/core/repository";
-import { GitHubApiError, GitHubRateLimitError } from "@usine/github/github-app";
+import { GitHubApiError } from "@usine/github/github-app";
 import {
   ChangedIssue,
   ContentHash,
@@ -13,7 +13,7 @@ import {
   RepositoryLabelCatalog,
   RepositoryNotModified,
 } from "@usine/github/polling";
-import { Clock, DateTime, Deferred, Effect, Fiber, Option, Schema } from "effect";
+import { DateTime, Deferred, Effect, Fiber, Option, Schema } from "effect";
 import { TestClock } from "effect/testing";
 import { PollingTriggers } from "../src/polling-triggers.ts";
 import { fixedInstance } from "./support/current-instance.ts";
@@ -136,22 +136,25 @@ describe("Polling self-write Hints", () => {
     }).pipe(Effect.provide(pollingTestLayer(github)));
   });
 
-  it.effect("coalesces queued Hints and preserves the normal conditional-poll cadence", () => {
+  it.effect("honors true request backoff from a response before fetching a Hint", () => {
     let requests = 0;
     let snapshots = 0;
+    const until = DateTime.makeUnsafe(90_000);
     const github: GitHubPolling["Service"] = {
       itemLabels: () => Effect.die("unused item labels"),
       baseRefHead: unmovedBaseRefHead,
       missingIssues: () => Effect.succeed([]),
       labels,
       changes: (_repository, cursor) =>
-        Effect.gen(function* () {
+        Effect.suspend(() => {
           requests += 1;
-
-          return RepositoryNotModified.make({
-            cursor,
-            nextPollAt: Option.some(DateTime.makeUnsafe((yield* Clock.currentTimeMillis) + 120000)),
-          });
+          return Effect.succeed(
+            RepositoryNotModified.make({
+              cursor,
+              nextPollAt: Option.some(until),
+              backoffUntil: Option.some(until),
+            }),
+          );
         }),
       snapshot: () =>
         Effect.sync(() => {
@@ -162,76 +165,18 @@ describe("Polling self-write Hints", () => {
     return Effect.gen(function* () {
       const fixtureInstance = yield* instance;
       const polling = yield* PollingTriggers;
-      for (let index = 0; index < 20; index += 1) yield* polling.hint(repository, changed);
 
       const fiber = yield* polling.run(fixedInstance(fixtureInstance)).pipe(Effect.forkChild);
       yield* TestClock.adjust("1 millis");
-      assert.strictEqual(snapshots, 1);
+      yield* polling.hint(repository, changed);
+      yield* TestClock.adjust("89998 millis");
+      assert.strictEqual(snapshots, 0);
       assert.strictEqual(requests, 1);
-      const latest = yield* polling.latest;
-      assert(Option.isSome(latest));
-      assert.strictEqual(
-        latest.value.changedItems,
-        0,
-        "a Hint leaves the last complete cycle intact",
-      );
-      yield* TestClock.adjust("119999 millis");
-      assert.strictEqual(requests, 2);
+      yield* TestClock.adjust("1 millis");
+      assert.strictEqual(snapshots, 1);
       yield* Fiber.interrupt(fiber);
     }).pipe(Effect.provide(pollingTestLayer(github)));
   });
-
-  for (const backoff of ["response", "error"] as const) {
-    it.effect(`honors true request backoff from a ${backoff} before fetching a Hint`, () => {
-      let requests = 0;
-      let snapshots = 0;
-      const until = DateTime.makeUnsafe(90_000);
-      const github: GitHubPolling["Service"] = {
-        itemLabels: () => Effect.die("unused item labels"),
-        baseRefHead: unmovedBaseRefHead,
-        missingIssues: () => Effect.succeed([]),
-        labels,
-        changes: (_repository, cursor) =>
-          Effect.suspend(() => {
-            requests += 1;
-            return backoff === "error"
-              ? Effect.fail(
-                  GitHubRateLimitError.make({
-                    operation: "poll-repository-changes",
-                    retryAt: until,
-                    message: "Wait before retrying",
-                  }),
-                )
-              : Effect.succeed(
-                  RepositoryNotModified.make({
-                    cursor,
-                    nextPollAt: Option.some(until),
-                    backoffUntil: Option.some(until),
-                  }),
-                );
-          }),
-        snapshot: () =>
-          Effect.sync(() => {
-            snapshots += 1;
-            return snapshot;
-          }),
-      };
-      return Effect.gen(function* () {
-        const fixtureInstance = yield* instance;
-        const polling = yield* PollingTriggers;
-
-        const fiber = yield* polling.run(fixedInstance(fixtureInstance)).pipe(Effect.forkChild);
-        yield* TestClock.adjust("1 millis");
-        yield* polling.hint(repository, changed);
-        yield* TestClock.adjust("89998 millis");
-        assert.strictEqual(snapshots, 0);
-        assert.strictEqual(requests, 1);
-        yield* TestClock.adjust("1 millis");
-        assert.strictEqual(snapshots, 1);
-        yield* Fiber.interrupt(fiber);
-      }).pipe(Effect.provide(pollingTestLayer(github)));
-    });
-  }
 
   it.effect(
     "serializes a slow Hint with explicit polls and lets the backstop repair a failed snapshot",

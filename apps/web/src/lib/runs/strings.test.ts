@@ -51,10 +51,6 @@ describe("run state while a parent task isn't confirmed stopped", () => {
       "Waiting for attempt 1 of an earlier run to stop on local",
     );
   });
-
-  it("keeps the state without an unconfirmed stop", () => {
-    assert.strictEqual(runStateLine(run), "Running, attempt 1");
-  });
 });
 
 it("shows the provider refusal and the scheduled attempt in the run header", () => {

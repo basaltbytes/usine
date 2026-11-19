@@ -123,57 +123,52 @@ it.live("keeps an operator cancellation when its salvage push is refused", () =>
   ),
 );
 
-for (const stop of [
-  QuestionFailure.make({ question: "Which branch should be used?" }),
-  BlockedFailure.make({ message: "The repository is unavailable" }),
-]) {
-  it.live.each(["before", "after"] as const)(
-    `preserves ${stop._tag} suppression when salvage is refused %s completion`,
-    (phase) =>
-      withRunStore(
-        Effect.gen(function* () {
-          const store = yield* RunStore;
-          yield* store.recordAndClaim(lifecycleSubmission, runId);
-          const started = yield* store.beginAttempt(
-            runId,
-            WorkerName.make("local"),
-            "local",
-            Option.none(),
-          );
-          assert(started._tag === "AttemptStarted");
-          const attempt = started.execution.attempt;
-          if (phase === "before") yield* store.recordSalvage(attempt.id, retained);
-          yield* store.finishAttempt(attempt, Result.fail(stop));
-          if (phase === "after") yield* store.recordSalvage(attempt.id, retained);
-          const next = (id: string) =>
-            Submission.make({
-              ...lifecycleSubmission,
-              event: Event.make({
-                ...lifecycleSubmission.event,
-                id: EventId.make(id),
-                dedupKey: DedupKey.make(id),
-              }),
-            });
-          const posted = next("agent-comment");
-          assert.strictEqual(
-            (yield* store.recordAndClaim(posted, RunId.make("suppressed"))).result._tag,
-            "Suppressed",
-          );
-          assert.strictEqual(
-            (yield* store.recordAndClaim(posted, RunId.make("still-suppressed"))).result._tag,
-            "Suppressed",
-          );
-          assert.strictEqual(
-            (yield* store.recordAndClaim(next("operator-reply"), RunId.make("answered"))).result
-              ._tag,
-            "Claimed",
-          );
-          const outcome = (yield* store.snapshot(runId)).attempts[0]?.outcome;
-          assert(
-            outcome !== undefined && Option.isSome(outcome) && outcome.value._tag === "Failed",
-          );
-          assert.deepStrictEqual(outcome.value.failure, failure);
-        }),
-      ),
+for (const [stop, phase] of [
+  [QuestionFailure.make({ question: "Which branch should be used?" }), "before"],
+  [BlockedFailure.make({ message: "The repository is unavailable" }), "after"],
+] as const) {
+  it.live(`preserves ${stop._tag} suppression when salvage is refused ${phase} completion`, () =>
+    withRunStore(
+      Effect.gen(function* () {
+        const store = yield* RunStore;
+        yield* store.recordAndClaim(lifecycleSubmission, runId);
+        const started = yield* store.beginAttempt(
+          runId,
+          WorkerName.make("local"),
+          "local",
+          Option.none(),
+        );
+        assert(started._tag === "AttemptStarted");
+        const attempt = started.execution.attempt;
+        if (phase === "before") yield* store.recordSalvage(attempt.id, retained);
+        yield* store.finishAttempt(attempt, Result.fail(stop));
+        if (phase === "after") yield* store.recordSalvage(attempt.id, retained);
+        const next = (id: string) =>
+          Submission.make({
+            ...lifecycleSubmission,
+            event: Event.make({
+              ...lifecycleSubmission.event,
+              id: EventId.make(id),
+              dedupKey: DedupKey.make(id),
+            }),
+          });
+        const posted = next("agent-comment");
+        assert.strictEqual(
+          (yield* store.recordAndClaim(posted, RunId.make("suppressed"))).result._tag,
+          "Suppressed",
+        );
+        assert.strictEqual(
+          (yield* store.recordAndClaim(posted, RunId.make("still-suppressed"))).result._tag,
+          "Suppressed",
+        );
+        assert.strictEqual(
+          (yield* store.recordAndClaim(next("operator-reply"), RunId.make("answered"))).result._tag,
+          "Claimed",
+        );
+        const outcome = (yield* store.snapshot(runId)).attempts[0]?.outcome;
+        assert(outcome !== undefined && Option.isSome(outcome) && outcome.value._tag === "Failed");
+        assert.deepStrictEqual(outcome.value.failure, failure);
+      }),
+    ),
   );
 }

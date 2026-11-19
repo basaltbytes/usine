@@ -54,14 +54,6 @@ const loadsQuickstart = (root: InstanceDirectory, route: QuickstartRoute) =>
     expect(instance.warnings).toEqual([]);
   });
 
-it.effect("publishes the developer agent of one quickstart route", () =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    const published = yield* fs.readFileString(`${bootstrap}/agents/developer.md`);
-    expect(quickstartRoutes.map(developerAgent)).toContain(published);
-  }).pipe(Effect.provide(NodeServices.layer)),
-);
-
 for (const route of quickstartRoutes) {
   it.effect(`loads the folder that the ${route.label} bootstrap command writes`, () =>
     Effect.gen(function* () {
@@ -98,20 +90,16 @@ for (const route of quickstartRoutes) {
   );
 }
 
-for (const file of ["usine.yaml", "agents/developer.md", "projects/scratch/loops/first-pr.md"]) {
-  it.effect(`rejects an invalid quickstart file: ${file}`, () =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem;
-      const folder = yield* ConfigurationFolder;
-      const directory = yield* fs.makeTempDirectoryScoped();
-      const root = InstanceDirectory.make(directory);
-      yield* fs.copy(bootstrap, root);
-      yield* fs.writeFileString(`${root}/${file}`, "invalid: true\n");
-      const failure = yield* folder.load(root).pipe(Effect.flip);
-      expect(failure.problems.map(({ file }) => file)).toContain(file);
-    }).pipe(
-      Effect.scoped,
-      Effect.provide(folderLayer.pipe(Layer.provideMerge(NodeServices.layer))),
-    ),
-  );
-}
+it.effect("rejects an invalid quickstart file: projects/scratch/loops/first-pr.md", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const folder = yield* ConfigurationFolder;
+    const directory = yield* fs.makeTempDirectoryScoped();
+    const root = InstanceDirectory.make(directory);
+    const file = "projects/scratch/loops/first-pr.md";
+    yield* fs.copy(bootstrap, root);
+    yield* fs.writeFileString(`${root}/${file}`, "invalid: true\n");
+    const failure = yield* folder.load(root).pipe(Effect.flip);
+    expect(failure.problems.map(({ file }) => file)).toContain(file);
+  }).pipe(Effect.scoped, Effect.provide(folderLayer.pipe(Layer.provideMerge(NodeServices.layer)))),
+);

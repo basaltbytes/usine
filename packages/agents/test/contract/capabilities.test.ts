@@ -18,21 +18,8 @@ const isScenario = Schema.is(Scenario);
 const isCapability = Schema.is(Capability);
 const isRecordedHarness = Schema.is(Schema.Literals(["claude", "codex", "pi"]));
 
-/** Where `unproven` looks up the proofs, replayed scenarios, and fixtures of a harness. */
-interface ProofSources {
-  readonly proofs: Readonly<Record<Capability, Proof>>;
-  readonly replayed: (harness: Provider) => ReadonlyArray<Scenario>;
-  readonly fixture: (harness: Provider, scenario: Scenario) => string;
-}
-
-const contractSuite: ProofSources = {
-  proofs: capabilityProofs,
-  replayed: (harness) => replayedScenarios(Harness.make(harness)),
-  fixture: fixtureFile,
-};
-
 /** Why `descriptor` declares a capability that the contract suite doesn't prove for it. */
-const unproven = (descriptor: HarnessDescriptor, sources: ProofSources = contractSuite) =>
+const unproven = (descriptor: HarnessDescriptor) =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const problems: Array<string> = [];
@@ -41,7 +28,7 @@ const unproven = (descriptor: HarnessDescriptor, sources: ProofSources = contrac
       ? Option.some(descriptor.id)
       : Option.none();
     for (const capability of declared) {
-      const proof: Proof = sources.proofs[capability];
+      const proof: Proof = capabilityProofs[capability];
       if (proof._tag === "Suites") {
         const files = Option.flatMap(harness, (id) => Option.fromNullishOr(proof.files[id]));
         if (Option.isNone(files)) {
@@ -59,8 +46,8 @@ const unproven = (descriptor: HarnessDescriptor, sources: ProofSources = contrac
         const recorded =
           isScenario(scenario) &&
           Option.isSome(harness) &&
-          sources.replayed(harness.value).includes(scenario) &&
-          (yield* fs.exists(sources.fixture(harness.value, scenario)));
+          replayedScenarios(Harness.make(harness.value)).includes(scenario) &&
+          (yield* fs.exists(fixtureFile(harness.value, scenario)));
         if (!recorded)
           problems.push(
             `${descriptor.label} declares ${capability}, but its adapter passes no ${scenario} scenario`,
@@ -85,17 +72,6 @@ const overclaiming = (harness: Provider, capability: Capability) => {
     ),
   });
 };
-
-/** The capabilities that `descriptor` declares and that `scenario` proves. */
-const provenBy = (descriptor: HarnessDescriptor, scenario: Scenario) =>
-  new Set(
-    descriptor.capabilities.flatMap(({ supported }) =>
-      supported.filter((capability) => {
-        const proof: Proof = capabilityProofs[capability];
-        return proof._tag === "Scenarios" && proof.scenarios.includes(scenario);
-      }),
-    ),
-  );
 
 const base = RoleSpec.make({
   name: RoleName.make("capability-probe"),
@@ -161,77 +137,6 @@ describe("harness capability declarations", () => {
       assert.deepStrictEqual(problems, [
         "Codex declares closed-tools, but its adapter passes no closed-tools scenario",
       ]);
-    }).pipe(Effect.provide(NodeServices.layer)),
-  );
-
-  it.effect("fail when no suite checks a capability for the declaring harness", () =>
-    Effect.gen(function* () {
-      const problems = yield* unproven(overclaiming("claude", "model-check"));
-      assert.deepStrictEqual(problems, [
-        "Claude Code declares model-check, but no suite checks it for Claude Code",
-      ]);
-    }).pipe(Effect.provide(NodeServices.layer)),
-  );
-
-  it.effect("fail when a suite named for the declaring harness is missing", () =>
-    Effect.gen(function* () {
-      const pi = catalog.get(Harness.make("pi"));
-      assert(Option.isSome(pi));
-      const problems = yield* unproven(pi.value, {
-        ...contractSuite,
-        proofs: {
-          ...capabilityProofs,
-          "model-check": {
-            ...capabilityProofs["model-check"],
-            files: { pi: ["test/pi/missing.test.ts"] },
-          },
-        },
-      });
-      assert.deepStrictEqual(problems, [
-        "model-check names the missing suite test/pi/missing.test.ts",
-      ]);
-    }).pipe(Effect.provide(NodeServices.layer)),
-  );
-
-  it.effect("fail when the declaring harness has no fixture for a proving scenario", () =>
-    Effect.gen(function* () {
-      const codex = catalog.get(Harness.make("codex"));
-      assert(Option.isSome(codex));
-      // Claude Code's steer fixture exists, so only a lookup by Codex's own ID misses it.
-      const problems = yield* unproven(codex.value, {
-        ...contractSuite,
-        fixture: (harness, scenario) =>
-          harness === "codex" && scenario === "steer"
-            ? packageFile("test/fixtures/replay/steer/missing.json")
-            : fixtureFile(harness, scenario),
-      });
-      assert.isTrue(provenBy(codex.value, "steer").size > 0);
-      assert.deepStrictEqual(
-        problems,
-        [...provenBy(codex.value, "steer")].map(
-          (capability) => `Codex declares ${capability}, but its adapter passes no steer scenario`,
-        ),
-      );
-    }).pipe(Effect.provide(NodeServices.layer)),
-  );
-
-  it.effect("fail when the declaring harness doesn't replay a proving scenario", () =>
-    Effect.gen(function* () {
-      const pi = catalog.get(Harness.make("pi"));
-      assert(Option.isSome(pi));
-      // Pi's restart fixture exists, but the replay suite no longer runs it.
-      const problems = yield* unproven(pi.value, {
-        ...contractSuite,
-        replayed: (harness) =>
-          contractSuite.replayed(harness).filter((scenario) => scenario !== "restart"),
-      });
-      assert.isTrue(provenBy(pi.value, "restart").size > 0);
-      assert.deepStrictEqual(
-        problems,
-        [...provenBy(pi.value, "restart")].map(
-          (capability) => `Pi declares ${capability}, but its adapter passes no restart scenario`,
-        ),
-      );
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 

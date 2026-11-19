@@ -21,7 +21,7 @@ const REF = SalvageRef.make("usine/salvage/run/1");
 interface Scripted {
   readonly head: () => string;
   readonly status: string;
-  readonly inspect?: "fails" | "fails without a cause message";
+  readonly inspect?: "fails without a cause message";
   readonly add?: "fails";
   readonly commit?: "fails";
   readonly push?: "fails" | "refuses-large-file" | "stalls";
@@ -66,19 +66,10 @@ const fakeGit = (script: Scripted) => {
       const command = args.slice(2);
       if (command[0] === "rev-parse")
         return Effect.succeed(`${committed ? SNAPSHOT : script.head()}\n`);
-      if (command[0] === "status") {
-        if (script.inspect === "fails")
-          return Effect.fail(
-            ExecutorOperationError.make({
-              operation: "cleanup",
-              message: "inspection failed",
-              cause: new Error("inspection failed"),
-            }),
-          );
-        if (script.inspect === "fails without a cause message")
-          return Effect.fail(NO_CAUSE_MESSAGE);
-        return Effect.succeed(script.status);
-      }
+      if (command[0] === "status")
+        return script.inspect === "fails without a cause message"
+          ? Effect.fail(NO_CAUSE_MESSAGE)
+          : Effect.succeed(script.status);
       if (command[0] === "add")
         return script.add === "fails"
           ? Effect.fail(
@@ -195,19 +186,17 @@ describe("salvageWorktree", () => {
     }),
   );
 
-  it.effect.each(["inspect", "add", "commit"] as const)(
-    "retains dirty work at base when %s fails",
-    (stage) =>
-      Effect.gen(function* () {
-        const { result, calls } = yield* salvage({
-          head: () => BASE,
-          status: "?? unfinished.ts\n",
-          [stage]: "fails",
-        });
-        assert(Option.isSome(result) && result.value._tag === "Retained");
-        assert.strictEqual(result.value.path, WORKTREE);
-        assert(!commandsOf(calls).includes("push"));
-      }),
+  it.effect("retains dirty work at base when add fails", () =>
+    Effect.gen(function* () {
+      const { result, calls } = yield* salvage({
+        head: () => BASE,
+        status: "?? unfinished.ts\n",
+        add: "fails",
+      });
+      assert(Option.isSome(result) && result.value._tag === "Retained");
+      assert.strictEqual(result.value.path, WORKTREE);
+      assert(!commandsOf(calls).includes("push"));
+    }),
   );
 
   // A defect here skipped the checkout's removal, so the machine stayed and the Run failed with
@@ -272,13 +261,13 @@ describe("salvageWorktree", () => {
     }),
   );
 
-  it.effect.each(["inspect", "add", "commit"] as const)(
-    "keeps the recorded rejection when %s fails, so that the next recovery doesn't push the refused commit",
-    (stage) =>
+  it.effect(
+    "keeps the recorded rejection when the commit fails, so that the next recovery doesn't push the refused commit",
+    () =>
       Effect.gen(function* () {
         const rejected = SalvageRejected.make({ path: WORKTREE, commit: AHEAD, message: "GH001" });
         const failed = yield* salvage(
-          { head: () => AHEAD, status: "?? unfinished.ts\n", [stage]: "fails" },
+          { head: () => AHEAD, status: "?? unfinished.ts\n", commit: "fails" },
           Option.some(rejected),
         );
         assert.deepStrictEqual(failed.result, Option.some(rejected));

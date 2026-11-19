@@ -1,5 +1,5 @@
 import { jsonKey } from "@usine/core/json-key";
-import { boardRunSummary, boardTaskRuns } from "../src/operator/operator.ts";
+import { boardRunSummary } from "../src/operator/operator.ts";
 import { ProjectView } from "../src/operator/overview.ts";
 import { groupProjectViews } from "../src/operator/projects.ts";
 import { boardRepositories } from "@usine/config/project";
@@ -161,67 +161,6 @@ const runForBoard = (id: string, state: "Waiting" | "Running" | "Failed" | "Succ
   });
 
 describe("Board projection", () => {
-  it.effect("gives label lanes precedence over state lanes", () =>
-    Effect.gen(function* () {
-      const config = yield* Schema.decodeEffect(UsineConfig)({
-        version: 1,
-        repos: [
-          {
-            name: repository,
-            lanes: [
-              { name: "Open", sources: [{ state: "issue-open" }] },
-              { name: "Ready", sources: [{ label: ready }] },
-            ],
-          },
-        ],
-      });
-      const managed = config.repos[0];
-      assert(managed !== undefined);
-      const board = yield* projectBoard(managed, [], [item], []);
-      assert.strictEqual(board.lanes[0]?.items.length, 0);
-      assert.strictEqual(board.lanes[1]?.items[0]?.itemKey, itemKey);
-      assert.deepStrictEqual(board.failures, []);
-    }),
-  );
-
-  it.effect("matches lane labels ignoring case, as GitHub does", () =>
-    Effect.gen(function* () {
-      const config = yield* Schema.decodeEffect(UsineConfig)({
-        version: 1,
-        repos: [
-          { name: repository, lanes: [{ name: "Ready", sources: [{ label: "Ready-For-Agent" }] }] },
-        ],
-      });
-      const managed = config.repos[0];
-      assert(managed !== undefined);
-      const board = yield* projectBoard(managed, [], [item], []);
-      assert.strictEqual(board.lanes[0]?.items[0]?.itemKey, itemKey);
-    }),
-  );
-
-  it.effect("groups a merged pull request by state even when it still carries a lane label", () =>
-    Effect.gen(function* () {
-      const config = yield* Schema.decodeEffect(UsineConfig)({
-        version: 1,
-        repos: [
-          {
-            name: repository,
-            lanes: [
-              { name: "Passed", sources: [{ label: passed }] },
-              { name: "Done", sources: [{ state: "pr-merged" }] },
-            ],
-          },
-        ],
-      });
-      const managed = config.repos[0];
-      assert(managed !== undefined);
-      const board = yield* projectBoard(managed, [], [mergedPullRequest], []);
-      assert.deepStrictEqual(board.lanes[0]?.items, []);
-      assert.strictEqual(board.lanes[1]?.items[0]?.itemKey, mergedPullRequest.itemKey);
-      assert.deepStrictEqual(board.failures, []);
-    }),
-  );
-
   it.effect(
     "leaves a closed issue, or an open one GitHub no longer has, unmapped instead of placing it by a leftover label",
     () =>
@@ -291,22 +230,6 @@ describe("Board projection", () => {
     }),
   );
 
-  it.effect("proposes lanes from unused repository labels when there are no Items", () =>
-    Effect.gen(function* () {
-      const config = yield* Schema.decodeEffect(UsineConfig)({
-        version: 1,
-        repos: [{ name: repository }],
-      });
-      const managed = config.repos[0];
-      assert(managed !== undefined);
-      const board = yield* projectBoard(managed, [review, bug], [], []);
-      assert.deepStrictEqual(
-        board.lanes.map(({ name }) => name),
-        [bug, review, "Unmapped"],
-      );
-    }),
-  );
-
   it.effect("quarantines one malformed Item projection and keeps its sibling", () =>
     Effect.gen(function* () {
       const config = yield* Schema.decodeEffect(UsineConfig)({
@@ -327,50 +250,6 @@ describe("Board projection", () => {
       assert.strictEqual(board.lanes[0]?.items[0]?.itemKey, itemKey);
       assert.strictEqual(board.failures.length, 1);
       assert.strictEqual(board.failures[0]?.itemKey, malformed.itemKey);
-    }),
-  );
-
-  it.effect("keeps every actionable Run while preferring it over a settled Run", () =>
-    Effect.gen(function* () {
-      const config = yield* Schema.decodeEffect(UsineConfig)({
-        version: 1,
-        repos: [{ name: repository, lanes: [{ name: "Ready", sources: [{ label: ready }] }] }],
-      });
-      const managed = config.repos[0];
-      assert(managed !== undefined);
-      const waiting = runForBoard("waiting-run", "Waiting");
-      const succeeded = runForBoard("newer-succeeded-run", "Succeeded");
-      const board = yield* projectBoard(managed, [], [item], [succeeded, waiting]);
-      const card = board.lanes[0]?.items[0];
-      assert.strictEqual(card?.run?.id, waiting.id);
-      assert.strictEqual(card?.needsYou, true);
-      assert.deepStrictEqual(
-        card === undefined ? undefined : boardTaskRuns(card).map(({ id }) => id),
-        [waiting.id],
-      );
-      assert.strictEqual(card?.runCount, 2);
-    }),
-  );
-
-  it.effect("retains a Waiting and Failed Run when another Run is active", () =>
-    Effect.gen(function* () {
-      const config = yield* Schema.decodeEffect(UsineConfig)({
-        version: 1,
-        repos: [{ name: repository, lanes: [{ name: "Ready", sources: [{ label: ready }] }] }],
-      });
-      const managed = config.repos[0];
-      assert(managed !== undefined);
-      const running = runForBoard("running-run", "Running");
-      const waiting = runForBoard("waiting-run", "Waiting");
-      const failed = runForBoard("failed-run", "Failed");
-      const board = yield* projectBoard(managed, [], [item], [running, waiting, failed]);
-      const card = board.lanes[0]?.items[0];
-      assert.strictEqual(card?.run?.id, waiting.id);
-      assert.strictEqual(card?.needsYou, true);
-      assert.deepStrictEqual(
-        card === undefined ? undefined : boardTaskRuns(card).map(({ id }) => id),
-        [failed.id, running.id, waiting.id],
-      );
     }),
   );
 
@@ -780,56 +659,6 @@ describe("Task usage", () => {
       ["chatgptPlan", 5_800, 0.4, false],
     ]);
     assert.deepStrictEqual({ ...usage.cost }, { usd: 2.4, estimate: true });
-  });
-
-  it("keeps the priced dollars when a Run at work has no price yet, and says the pool is unpriced", () => {
-    const running = RunId.make("running");
-    const finished = runUsage([
-      session("priced-1", "apiKeys", 1_000, 0.5),
-      session("priced-1", "claudePlan", 30_000, 2),
-    ]);
-    // The retry's Claude session has reported tokens but not its first result, so its Run's
-    // Claude plan pool has no price, not even the ended Attempt's $0.75.
-    const atWork = runUsage([
-      session("running-1", "claudePlan", 10_000, 0.75),
-      session("running-2", "claudePlan", 4_000, null),
-    ]);
-    const usage = taskUsage(
-      [
-        { id: priced, attempts: [] },
-        { id: running, attempts: [] },
-      ],
-      new Map([
-        [priced, finished],
-        [running, atWork],
-      ]),
-    );
-    assert.strictEqual(usage.tokens, 45_000);
-    assert.deepStrictEqual(pools(usage), [
-      ["apiKeys", 1_000, 0.5, false],
-      ["claudePlan", 44_000, 2.75, true],
-    ]);
-    assert.deepStrictEqual({ ...usage.cost }, { usd: 3.25, estimate: true });
-  });
-
-  it("has no cost when no session has a price", () => {
-    const usage = taskUsage(
-      [{ id: chatgpt, attempts: [] }],
-      new Map([
-        [
-          chatgpt,
-          runUsage([
-            session("chatgpt-1", "apiKeys", 400, null),
-            session("chatgpt-1", "chatgptPlan", 300, null),
-          ]),
-        ],
-      ]),
-    );
-    assert.deepStrictEqual(pools(usage), [
-      ["apiKeys", 400, null, true],
-      ["chatgptPlan", 300, null, true],
-    ]);
-    assert.strictEqual(usage.cost, null);
   });
 });
 

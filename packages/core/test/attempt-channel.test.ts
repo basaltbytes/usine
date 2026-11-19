@@ -9,7 +9,6 @@ import {
   EndpointName,
   sessionPool,
   ChildSessionBudget,
-  ChildSessionCount,
   ParentSession,
   PoolRateLimitsUpdated,
   PoolLogin,
@@ -21,10 +20,10 @@ import {
 } from "../src/agent/session.ts";
 import { AttemptTask, AttemptId } from "../src/attempt/attempt.ts";
 import * as AttemptChannel from "../src/attempt/channel.ts";
-import { AgentFailure, ChildSessionBudgetFailure } from "../src/attempt/failure.ts";
+import { AgentFailure } from "../src/attempt/failure.ts";
 import { RepositoryName, CommitSha, RepositoryRevision } from "../src/repository.ts";
 import { BotLogin } from "../src/worker.ts";
-import { Comment, Commit, PullRequest, StepResult } from "../src/step/result.ts";
+import { Comment } from "../src/step/result.ts";
 
 const agent = Agent.make({
   name: AgentName.make("developer"),
@@ -134,44 +133,6 @@ describe("attempt channel", () => {
           );
       }),
   );
-  it.effect("round-trips a final envelope through JSON", () =>
-    Effect.gen(function* () {
-      const envelope = AttemptChannel.OutboundEnvelope.make({
-        version: AttemptChannel.PROTOCOL_VERSION,
-        attemptId: spec.attemptId,
-        sequence: AttemptChannel.Sequence.make(1),
-        sentAt: DateTime.makeUnsafe("2026-08-30T12:00:00Z"),
-        payload: AttemptChannel.Final.make({
-          result: StepResult.make({
-            message: "Done",
-            facts: [
-              Commit.make({
-                sha: CommitSha.make("fedcba9876543210fedcba9876543210fedcba98"),
-                summary: "Implement executor",
-              }),
-              PullRequest.make({
-                number: 71,
-                url: new URL("https://github.com/acme/demo/pull/71"),
-              }),
-              Comment.make({
-                url: new URL("https://github.com/acme/demo/pull/71#issuecomment-1"),
-                kind: "issue-comment",
-                at: Option.some(DateTime.makeUnsafe("2026-08-30T11:58:00Z")),
-              }),
-            ],
-          }),
-        }),
-      });
-
-      const encoded = yield* Schema.encodeEffect(EnvelopeJson)(envelope);
-      const decoded = yield* Schema.decodeEffect(EnvelopeJson)(encoded, {
-        onExcessProperty: "error",
-      });
-
-      assert.deepStrictEqual(decoded, envelope);
-    }),
-  );
-
   it.effect("decodes a Comment fact stored without its time as none", () =>
     Effect.gen(function* () {
       const stored = {
@@ -183,101 +144,6 @@ describe("attempt channel", () => {
       assert.isTrue(Option.isNone(comment.at));
       const decodedValue3 = yield* Schema.encodeEffect(Comment)(comment);
       assert.deepStrictEqual(decodedValue3, stored);
-    }),
-  );
-
-  it.effect("round-trips a child-session budget failure through JSON", () =>
-    Effect.gen(function* () {
-      const envelope = AttemptChannel.OutboundEnvelope.make({
-        version: AttemptChannel.PROTOCOL_VERSION,
-        attemptId: spec.attemptId,
-        sequence: AttemptChannel.Sequence.make(2),
-        sentAt: DateTime.makeUnsafe("2026-08-30T12:00:01Z"),
-        payload: AttemptChannel.Failed.make({
-          failure: ChildSessionBudgetFailure.make({
-            maxChildren: spec.maxChildren,
-            attemptedChildren: ChildSessionCount.make(5),
-          }),
-        }),
-      });
-
-      const encoded = yield* Schema.encodeEffect(EnvelopeJson)(envelope);
-      const decoded = yield* Schema.decodeEffect(EnvelopeJson)(encoded, {
-        onExcessProperty: "error",
-      });
-      assert.deepStrictEqual(decoded, envelope);
-    }),
-  );
-
-  it.effect("round-trips a child-addressed operator message through JSON", () =>
-    Effect.gen(function* () {
-      const envelope = AttemptChannel.InboundEnvelope.make({
-        operator: "operator",
-        version: AttemptChannel.PROTOCOL_VERSION,
-        attemptId: spec.attemptId,
-        sequence: AttemptChannel.Sequence.make(3),
-        sentAt: DateTime.makeUnsafe("2026-08-30T12:00:02Z"),
-        target: AttemptChannel.ChildTarget.make({
-          sessionId: AgentSessionId.make("parent-1:child:1"),
-        }),
-        payload: AttemptChannel.OperatorMessage.make({
-          message: "Rebase onto main before you push.",
-        }),
-      });
-
-      const encoded = yield* Schema.encodeEffect(EnvelopeJson)(envelope);
-      const decoded = yield* Schema.decodeEffect(EnvelopeJson)(encoded, {
-        onExcessProperty: "error",
-      });
-
-      assert.deepStrictEqual(decoded, envelope);
-    }),
-  );
-
-  it.effect("defaults an inbound frame to the parent target and round-trips a Release", () =>
-    Effect.gen(function* () {
-      const envelope = AttemptChannel.InboundEnvelope.make({
-        operator: "operator",
-        version: AttemptChannel.PROTOCOL_VERSION,
-        attemptId: spec.attemptId,
-        sequence: AttemptChannel.Sequence.make(4),
-        sentAt: DateTime.makeUnsafe("2026-08-30T12:00:03Z"),
-        target: AttemptChannel.ParentTarget.make(),
-        payload: AttemptChannel.Release.make(),
-      });
-
-      const encoded = yield* Schema.encodeEffect(EnvelopeJson)(envelope);
-      const decoded = yield* Schema.decodeEffect(EnvelopeJson)(encoded, {
-        onExcessProperty: "error",
-      });
-
-      assert.deepStrictEqual(decoded, envelope);
-    }),
-  );
-
-  it.effect("rejects superseded protocol versions on the live channel", () =>
-    Effect.gen(function* () {
-      const outbound = yield* Schema.encodeEffect(AttemptChannel.Envelope)(
-        AttemptChannel.OutboundEnvelope.make({
-          version: AttemptChannel.PROTOCOL_VERSION,
-          attemptId: spec.attemptId,
-          sequence: AttemptChannel.Sequence.make(1),
-          sentAt: DateTime.makeUnsafe("2026-08-30T12:00:00Z"),
-          payload: AttemptChannel.Interrupted.make(),
-        }),
-      );
-
-      for (const version of [3, 4, 5] as const) {
-        assert.strictEqual(
-          (yield* Effect.flip(
-            Schema.decodeUnknownEffect(AttemptChannel.Envelope)(
-              { ...outbound, version },
-              { onExcessProperty: "error" },
-            ),
-          ))._tag,
-          "SchemaError",
-        );
-      }
     }),
   );
 

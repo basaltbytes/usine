@@ -125,7 +125,6 @@ const GATEWAY_PROVIDERS: LlmProviders = {
  *
  * - `calls` records each request the executor sent, before the admin API handles it.
  * - A detach of an attachment in `refusedDetaches` returns a server error.
- * - While `answering` is false, requests get no response.
  * - While `reportsProviders` is false, the provider list returns 404.
  * - `settled` waits until no admin request is in flight.
  */
@@ -136,9 +135,7 @@ export const fakeGateway = (
   const calls: Array<AdminCall> = [];
   const switches = {
     refusedDetaches: new Set<string>(),
-    answering: true,
     reportsProviders: true,
-    legacyProviders: false,
   };
   let inFlight = 0;
   const idle = Latch.makeUnsafe(true);
@@ -195,7 +192,7 @@ export const fakeGateway = (
           const forward = machine.state.forwards.find(
             (candidate) => candidate.port === port && candidate.live,
           );
-          const delivered = forward?.carries === true && switches.answering;
+          const delivered = forward?.carries === true;
           calls.push({
             method: request.method,
             path,
@@ -225,18 +222,6 @@ export const fakeGateway = (
             return HttpServerResponse.toClientResponse(HttpServerResponse.empty({ status: 404 }), {
               request,
             });
-          if (path === "/v1/providers" && switches.legacyProviders)
-            return HttpServerResponse.toClientResponse(
-              HttpServerResponse.jsonUnsafe({
-                providers: Object.entries(providers).flatMap(([protocol, provider]) =>
-                  Option.toArray(provider).map(() => ({
-                    provider: protocol === "anthropic-messages" ? "anthropic" : "openai",
-                    credential: "api-key",
-                  })),
-                ),
-              }),
-              { request },
-            );
           const response = yield* handler.pipe(
             Effect.provideService(
               HttpServerRequest.HttpServerRequest,

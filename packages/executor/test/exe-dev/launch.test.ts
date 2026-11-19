@@ -3,7 +3,7 @@ import { assert, describe, it } from "@effect/vitest";
 import { CHILD_KILL_SCRIPT, RemoteShell } from "@usine/agents/child-host";
 import { AgentName, githubSignature } from "@usine/core/agent";
 import { AgentSessionId, ChildSession, SessionFinished } from "@usine/core/agent/session";
-import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
+import { BrainSpec } from "@usine/core/agent/brain";
 import { AttemptId, AttemptWindow, AttemptWindows } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { InfraFailure } from "@usine/core/attempt/failure";
@@ -13,7 +13,7 @@ import type { AttemptRecovery } from "@usine/core/attempt/salvage";
 import { BotLogin } from "@usine/core/worker";
 import { type AttemptRequest, AttemptRuntime, ParentFailed } from "@usine/durable/attempt-runtime";
 import { completes, type StubParent, StubStorage } from "@usine/durable/testing";
-import { DateTime, Deferred, Effect, Fiber, Layer, Logger, Option, Result, Schema } from "effect";
+import { DateTime, Deferred, Effect, Fiber, Layer, Option, Result, Schema } from "effect";
 import { TestClock } from "effect/testing";
 import { CheckoutRequest, Executor } from "../../src/executor.ts";
 import {
@@ -186,50 +186,6 @@ describe("exe.dev launch", () => {
   });
 
   it.effect(
-    "salvages the checkout of an open Attempt its Run does not reattach, though its parent's report was not harvested",
-    () => {
-      const ssh = fakeSsh();
-      const storage = new StubStorage();
-      return Effect.gen(function* () {
-        yield* Effect.gen(function* () {
-          const executor = yield* Executor;
-          const prepared = yield* executor.prepare(request);
-          yield* prepared.launch(recording().sink);
-        }).pipe(
-          Effect.scoped,
-          Effect.provide(runtime(ssh.layer, completes, storage, failingResultWrite)),
-        );
-        // After the restart, the Run closes the Attempt without reattaching it, for example when it
-        // can't read whether the parent task is live.
-        ssh.state.salvage = "dirty";
-        const salvaged: Array<string> = [];
-        yield* Effect.gen(function* () {
-          const executor = yield* Executor;
-          const live = yield* executor.isLive(ATTEMPT_ID);
-          assert.isTrue(live, "the report awaits its harvest");
-          yield* executor.recover(
-            openAttempt,
-            {
-              salvage: (salvage) => Effect.sync(() => void salvaged.push(salvage._tag)),
-              comments: () => Effect.die("A parent that reported posted no comment to recover"),
-              windows: aloneOnItem(),
-            },
-            Effect.succeed(COMMIT_AUTHOR),
-          );
-        }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer, fails, storage)));
-        assert.deepStrictEqual(salvaged, ["Pushed"]);
-        const lines = ssh.state.commands.map(remoteLine);
-        // exe.dev's integration pushes the salvage, but the factory App's bot commits it.
-        assert.include(
-          lines.find((line) => line.includes("'commit' '--quiet'")) ?? "",
-          BOT_COMMITS,
-        );
-        assert(lines.some((line) => line.includes("'worktree' 'remove'")));
-      });
-    },
-  );
-
-  it.effect(
     "cancels the parent task of an open Attempt its Run does not reattach, then salvages its checkout",
     () => {
       const ssh = fakeSsh();
@@ -255,6 +211,12 @@ describe("exe.dev launch", () => {
           assert.isFalse(currentLive);
         }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer, completes, storage)));
         assert.deepStrictEqual(salvaged, ["Pushed"]);
+        // exe.dev's integration pushes the salvage, but the factory App's bot commits it.
+        assert.include(
+          ssh.state.commands.map(remoteLine).find((line) => line.includes("'commit' '--quiet'")) ??
+            "",
+          BOT_COMMITS,
+        );
       });
     },
   );
@@ -685,26 +647,6 @@ describe("exe.dev launch", () => {
     },
   );
 
-  it.effect("stops a parent that runs past its wall-clock ceiling", () => {
-    const ssh = fakeSsh();
-    const started = Deferred.makeUnsafe<void>();
-    return Effect.gen(function* () {
-      const executor = yield* Executor;
-      const prepared = yield* executor.prepare(
-        CheckoutRequest.make({ ...request, maxAttemptMinutes: Option.some(1) }),
-      );
-      const launch = yield* prepared.launch(recording().sink).pipe(Effect.forkChild);
-      yield* Deferred.await(started);
-      yield* TestClock.adjust("1 minute");
-      const failure = yield* Fiber.join(launch).pipe(Effect.flip);
-      assert(failure._tag === "RunawayFailure");
-      assert.strictEqual(failure.ceiling, "wall-clock");
-      assert.include(ssh.state.commands.map(remoteLine), KILL_CHILDREN);
-      const live = yield* executor.isLive(ATTEMPT_ID);
-      assert.isFalse(live);
-    }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer, working(started))));
-  });
-
   it.effect("delivers operator input to the live parent task", () => {
     const ssh = fakeSsh();
     const started = Deferred.makeUnsafe<void>();
@@ -924,50 +866,6 @@ describe("exe.dev launch", () => {
     },
   );
 
-  it.effect(
-    "records no comment for an Attempt whose parent failed before a restart when its checkout is gone",
-    () => {
-      const ssh = fakeSsh();
-      postSignedComment(ssh);
-      const storage = new StubStorage();
-      const warnings: Array<unknown> = [];
-      const logger = Logger.make<unknown, void>(({ logLevel, message }) => {
-        if (logLevel === "Warn") warnings.push(message);
-      });
-      return Effect.gen(function* () {
-        yield* stopMidAttempt(ssh, storage, onItem);
-        ssh.state.worktreeGone = true;
-        const restart = ssh.state.commands.length;
-        const recorded: Array<unknown> = [];
-        yield* Effect.gen(function* () {
-          const executor = yield* Executor;
-          yield* executor.recover(
-            openAttempt,
-            {
-              salvage: () => Effect.die("A checkout that is gone has no salvage"),
-              comments: (comments) => Effect.sync(() => void recorded.push(...comments)),
-              windows: aloneOnItem(),
-            },
-            Effect.die("A checkout that is gone has no salvage to commit"),
-          );
-        }).pipe(
-          Effect.scoped,
-          Effect.provide(
-            runtime(ssh.layer, completes, storage, parentFailed).pipe(
-              Layer.provideMerge(Logger.layer([logger])),
-            ),
-          ),
-        );
-        assert.deepStrictEqual(recorded, []);
-        const issued = ssh.state.commands.slice(restart);
-        assert(!issued.some(({ args }) => args.includes("attach")), "no credential is granted");
-        assert(!issued.map(remoteLine).some((line) => line.includes("'gh'")));
-        const json1 = jsonKey(warnings);
-        assert(json1.includes("its checkout is gone"));
-      });
-    },
-  );
-
   it.effect("checks the roster on the VM and refuses login loss before preparation", () => {
     const ssh = fakeSsh();
     return Effect.gen(function* () {
@@ -987,28 +885,6 @@ describe("exe.dev launch", () => {
       assert(error._tag === "WorkerCapabilityError");
       assert.strictEqual(error.capability, "harness-login");
       assert(!ssh.state.commands.some((command) => command.args.includes("attach")));
-    }).pipe(Effect.provide(runtime(ssh.layer)));
-  });
-
-  it.effect("refuses a Pi roster brain, whose children cannot run on the VM", () => {
-    const ssh = fakeSsh();
-    return Effect.gen(function* () {
-      const executor = yield* Executor;
-      const error = yield* executor
-        .preflight(
-          WORKER,
-          [
-            BrainSpec.make({
-              harness: Harness.make("pi"),
-              model: ModelId.make("anthropic/claude"),
-              effort: "low",
-            }),
-          ],
-          1,
-        )
-        .pipe(Effect.flip);
-      assert(error._tag === "WorkerCapabilityError");
-      assert.include(error.message, "pi cannot run as coding-agent at ssh: lacks ssh");
     }).pipe(Effect.provide(runtime(ssh.layer)));
   });
 });

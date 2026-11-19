@@ -280,9 +280,12 @@ describe("sandbox attach stream", () => {
         expect(sandbox.state.stored.value.held).toBe(true);
         expect(Option.isNone(sandbox.state.stored.value.credentials.github)).toBe(true);
         expect(sandbox.state.stored.value.credentials.providers).toEqual([]);
-        // The Durable Object restarts and registers the stored credentials again.
+        // The Durable Object restarts, sets the inactivity timeout, and registers the stored
+        // credentials again.
         const before = sandbox.state.interceptions.length;
+        const keepAlives = sandbox.state.keepAlives;
         yield* restore();
+        expect(sandbox.state.keepAlives).toBe(keepAlives + 1);
         expect(
           sandbox.state.interceptions.slice(before).map(({ _tag, host }) => `${_tag}:${host}`),
         ).toEqual([

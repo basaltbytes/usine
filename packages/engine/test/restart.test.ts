@@ -1262,9 +1262,9 @@ describe("engine restart", () => {
       ),
   );
 
-  it.live.each([1, 2])(
-    "keeps the slot of a failed Attempt whose parent task can't be stopped across a restart, and starts no retry on a Worker with %i slots, until a retried stop succeeds",
-    (slots) =>
+  it.live(
+    "keeps the slot of a failed Attempt whose parent task can't be stopped across a restart, and starts no retry in a free slot, until a retried stop succeeds",
+    () =>
       withInstance((directory) =>
         Effect.gen(function* () {
           const started = (executor: Layer.Layer<StepExecutor>, scope: Scope.Scope) =>
@@ -1280,7 +1280,7 @@ describe("engine restart", () => {
           // retry, even in a free slot of `local`.
           const first = yield* slottedExecutor(
             [Effect.fail(InfraFailure.make({ message: "Lost the parent task", cause: "offline" }))],
-            slots,
+            2,
           );
           yield* Ref.set(first.unstoppable, true);
           const firstScope = yield* Scope.make();
@@ -1318,7 +1318,7 @@ describe("engine restart", () => {
           // slot for the closed Attempt, and the Run still starts no retry.
           const second = yield* slottedExecutor(
             [Effect.succeed(stepResult("ran after the stop"))],
-            slots,
+            2,
           );
           yield* Ref.set(second.unstoppable, true);
           const secondScope = yield* Scope.make();

@@ -25,9 +25,12 @@ const cases = [
   },
 ];
 
-it.effect.each(
-  ["docker", "podman"].flatMap((runtime) => cases.map((entry) => ({ runtime, ...entry }))),
-)("creates $runtime containers with $setting memory-backed scratch storage", (entry) => {
+// The runtime doesn't change the limits, so the cases alternate between Docker and Podman.
+it.effect.each([
+  { runtime: "docker", ...cases[0]! },
+  { runtime: "podman", ...cases[1]! },
+  { runtime: "docker", ...cases[2]! },
+])("creates $runtime containers with $setting memory-backed scratch storage", (entry) => {
   const machine = fakeMachine();
   if (entry.runtime === "docker") machine.state.docker = "running";
   else

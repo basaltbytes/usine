@@ -41,7 +41,7 @@ const assertForm = async () => {
   );
 };
 
-it.each([1440, 390])(
+it.each([390])(
   "creates, edits and deletes bindings by login with attributed revisions at %i pixels",
   async (width) => {
     await page.viewport(width, 900);

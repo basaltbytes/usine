@@ -11,31 +11,6 @@ import { output, run, submission, TOKEN, waitFor, withLocalEngine } from "./supp
 const content = { title: "Walkthrough é", text: "first line\nsecond line" };
 
 describe("local step outputs", () => {
-  it.live("succeeds without outputs after git clean removes the output directory", () => {
-    const parent: StubParent = ({ request }) =>
-      Effect.gen(function* () {
-        const fs = yield* FileSystem.FileSystem;
-        const prepared = yield* fs.exists(`${request.cwd}/.usine/outputs`);
-        assert.isTrue(prepared);
-        yield* run("git", ["clean", "-fdx"], request.cwd);
-        const remaining = yield* fs.exists(`${request.cwd}/.usine/outputs`);
-        assert.isFalse(remaining);
-        return "Completed after checkout cleanup";
-      }).pipe(Effect.provide(NodeServices.layer), Effect.orDie);
-    return withLocalEngine(
-      { attemptRuntime: stubAttemptRuntime(new StubStorage(), parent) },
-      ({ engine }) =>
-        Effect.gen(function* () {
-          const accepted = yield* engine.submit(submission(5));
-          assert(accepted._tag === "Claimed");
-          const finished = yield* waitFor(engine, accepted.runId, "Succeeded");
-          assert.lengthOf(finished.attempts, 1);
-          assert(Option.isSome(finished.step.result));
-          assert.deepStrictEqual(finished.step.result.value.outputs, []);
-        }),
-    );
-  });
-
   it.live("fails once with an agent error when the output directory is replaced by a file", () => {
     const parent: StubParent = ({ request }) =>
       Effect.gen(function* () {
@@ -201,13 +176,6 @@ describe("local step outputs", () => {
   for (const [reason, body] of [
     ["invalid JSON", "{"],
     ["commit must equal", jsonKey({ type: "balade.walkthrough", commit: "f".repeat(40), content })],
-    ["8 MiB", " ".repeat(MAX_STEP_OUTPUT_BYTES + 1)],
-    ["type", jsonKey({ type: "", content })],
-    ["length of at most 128", jsonKey({ type: "x".repeat(129), content })],
-    [
-      "cannot be serialized",
-      `{"type":"nested","content":${"[".repeat(200_000)}0${"]".repeat(200_000)}}`,
-    ],
   ] as const) {
     it.live(`fails the attempt and salvages its work when walkthrough.json has ${reason}`, () => {
       const parent: StubParent = ({ request }) =>

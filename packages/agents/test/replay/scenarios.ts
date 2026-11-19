@@ -13,6 +13,7 @@ import {
   ChildRequest,
   SessionOperationError,
 } from "../../src/runtime.ts";
+import { ChildProcessLost } from "../../src/child-host/process.ts";
 import type { SessionScenario } from "./transcript.ts";
 
 export const waitScript = `const fs = require('node:fs');
@@ -104,6 +105,9 @@ export const runScenario = (
       if (scenario === "early-exit") {
         const failure = yield* backend.launch(base).pipe(Effect.flip);
         assert(Schema.is(SessionOperationError)(failure), "early exit is a transport failure");
+        assert(Schema.is(ChildProcessLost)(failure.cause), "the failure keeps the lost process");
+        assert.strictEqual(failure.cause.exitCode, 7);
+        assert.include(failure.cause.stderrTail, "replayed early exit");
         return [];
       }
       const running = yield* backend.launch(request);

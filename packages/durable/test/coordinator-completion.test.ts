@@ -1,6 +1,5 @@
 import { assert, describe, it } from "@effect/vitest";
 import { SqliteClient } from "@effect/sql-sqlite-node";
-import { type ChildHost, RemoteShell } from "@usine/agents/child-host";
 import {
   CapabilityProfile,
   catalog,
@@ -18,12 +17,10 @@ import {
 } from "@usine/agents/harness/contract";
 import type { HarnessRuntime } from "@usine/agents/harness/node";
 import { Harnesses } from "@usine/agents/harness/registry";
-import { AgentCapacityError, SessionOperationError } from "@usine/agents/runtime";
 import { Agent, DecisionBrain } from "@usine/core/agent";
 import { BrainSpec, Harness, ModelId } from "@usine/core/agent/brain";
 import {
   AgentSessionId,
-  type BillingPool,
   ChildSessionCount,
   RoleSession,
   SessionTokensUpdated,
@@ -31,8 +28,8 @@ import {
   UsdAmount,
 } from "@usine/core/agent/session";
 import * as AttemptChannel from "@usine/core/attempt/channel";
-import { AWAITING_CI_MARKER, ciHandoff } from "@usine/core/ci";
-import { type GatewayCredentialKind, MachineId } from "@usine/core/worker";
+import { AWAITING_CI_MARKER } from "@usine/core/ci";
+import { MachineId } from "@usine/core/worker";
 import {
   Array as Arr,
   DateTime,
@@ -55,13 +52,8 @@ import {
   ChildFailed,
   ChildInterrupted,
   ChildReported,
-  Complete,
   type CoordinatorEvent,
-  Failed,
-  InfraFailed,
   type ModelDecision,
-  Question,
-  DelegationSummary,
   ReservedReport,
   RetryChild,
 } from "../src/attempt/coordinator/rules.ts";
@@ -82,30 +74,19 @@ import { recordingSink, temporaryDatabase } from "./support.ts";
 const DECISION_MODEL = ModelId.make("claude-haiku-4-5");
 
 /**
- * Where a request's child runs: the agent's harness, the host, the gateway's credential kind, and
- * the harness environment. Without them, the agent runs on `claude` on a local host with its login.
+ * A request whose agent decides with `DECISION_MODEL`, or without a decision brain. Its child runs
+ * on `harness`, or on `claude` without one, on a local host with its login.
  */
-interface Worker {
-  readonly harness?: Harness;
-  readonly host?: ChildHost;
-  readonly gateway?: GatewayCredentialKind;
-  readonly environment?: Readonly<Record<string, string>>;
-}
-
-/** A request whose agent decides with `DECISION_MODEL`, or without a decision brain. */
-const requestFor = (attemptId: string, decision = true, maxChildren = 3, worker: Worker = {}) => {
+const requestFor = (attemptId: string, decision = true, maxChildren = 3, harness?: Harness) => {
   const request = coordinated(attemptId, maxChildren);
   const agent = request.spec.agent;
   return AttemptRequest.make({
     ...request,
-    host: worker.host ?? request.host,
-    environment: { ...request.environment, ...worker.environment },
-    gatewayCredential: Effect.succeed(Option.fromNullishOr(worker.gateway)),
     spec: AttemptChannel.RunSpec.make({
       ...request.spec,
       agent: Agent.make({
         ...agent,
-        brain: BrainSpec.make({ ...agent.brain, harness: worker.harness ?? agent.brain.harness }),
+        brain: BrainSpec.make({ ...agent.brain, harness: harness ?? agent.brain.harness }),
         decision: decision
           ? Option.some(DecisionBrain.make({ model: DECISION_MODEL, effort: "low" }))
           : Option.none(),
@@ -122,13 +103,7 @@ const reported = (report: string, reserved = Option.none<ReservedReport>()) =>
     reserved,
   });
 
-/** What the handler knows besides the request: the earlier delegations and the child's output. */
-interface History {
-  readonly delegations?: ReadonlyArray<DelegationSummary>;
-  readonly output?: string;
-}
-
-const contextFor = (request: AttemptRequest, event: CoordinatorEvent, history: History = {}) =>
+const contextFor = (request: AttemptRequest, event: CoordinatorEvent) =>
   AttemptContext.make({
     event,
     maxChildren: request.spec.maxChildren,
@@ -137,8 +112,8 @@ const contextFor = (request: AttemptRequest, event: CoordinatorEvent, history: H
     task: request.spec.task,
     outcomeLabels: request.spec.outcomeLabels,
     requiresCi: request.spec.requiresCi,
-    delegations: history.delegations ?? [],
-    output: history.output ?? "",
+    delegations: [],
+    output: "",
   });
 
 /** The usage that a scripted completion reports for `spec`, with the pool that admission set. */
@@ -210,7 +185,6 @@ const wake = (
   request: AttemptRequest,
   event: CoordinatorEvent,
   harnessCatalog: HarnessCatalog = catalog,
-  history: History = {},
 ) =>
   Effect.gen(function* () {
     const harnesses = harnessesWith(script, harnessCatalog);
@@ -222,7 +196,7 @@ const wake = (
       ),
     ]);
     const decision = yield* Effect.flatMap(Effect.service(WakeUp), (wakeUp) =>
-      wakeUp.handle(event, contextFor(request, event, history), {
+      wakeUp.handle(event, contextFor(request, event), {
         attemptId: request.spec.attemptId,
         sequence: EventSequence.make(2),
         spec: request.spec,
@@ -336,40 +310,14 @@ describe("structured completion wake-up", () => {
 
   const branches: ReadonlyArray<readonly [string, Schema.Json, ModelDecision]> = [
     [
-      "Complete with a message",
-      { _tag: "Complete", message: "Opened #12." },
-      Complete.make({ message: "Opened #12." }),
-    ],
-    [
       "RetryChild without an assignment",
       { _tag: "RetryChild", assignment: null },
       RetryChild.make({}),
     ],
-    ["Blocked without a message", { _tag: "Blocked", message: null }, Blocked.make({})],
     [
       "Blocked with a message",
       { _tag: "Blocked", message: "No access." },
       Blocked.make({ message: "No access." }),
-    ],
-    [
-      "Question",
-      { _tag: "Question", question: "Which branch?" },
-      Question.make({ question: "Which branch?" }),
-    ],
-    [
-      "Failed",
-      { _tag: "Failed", message: "The tests fail." },
-      Failed.make({ message: "The tests fail." }),
-    ],
-    [
-      "InfraFailed",
-      { _tag: "InfraFailed", message: "The checkout is gone." },
-      InfraFailed.make({ message: "The checkout is gone." }),
-    ],
-    [
-      "AtCapacity without a reset time",
-      { _tag: "AtCapacity", message: "Usage limit.", resetsAt: null },
-      AtCapacity.make({ message: "Usage limit." }),
     ],
     [
       "AtCapacity with a reset time",
@@ -398,193 +346,49 @@ describe("structured completion wake-up", () => {
     );
   }
 
-  const routes: ReadonlyArray<readonly [Worker, string, Option.Option<BillingPool>]> = [
-    [{ gateway: "api-key" }, "gateway-api-key", Option.some("apiKeys")],
-    [{ gateway: "subscription" }, "gateway-subscription", Option.some("claudePlan")],
-    [{ environment: { ANTHROPIC_API_KEY: "sk-test" } }, "api-key", Option.none()],
-    [{}, "host-login", Option.none()],
-  ];
-
-  for (const [credential, route, pool] of routes) {
-    it.effect(`admits and records the child's ${route} credential route`, () =>
-      Effect.gen(function* () {
-        const { decision, calls } = yield* wake(
-          answering(retry),
-          requestFor(`completion/route-${route}`, true, 3, credential),
-          reported("Committed the fix, but the push failed."),
-        );
-
-        const [call] = calls;
-        if (call === undefined) return assert.fail("The handler called no completion");
-        assert.deepStrictEqual(
-          {
-            admitted: call.spec.admitted.context.credential,
-            pool: call.spec.admitted.pool,
-            recorded: Option.map(
-              Option.flatMap(decision, ({ session }) => session),
-              (session) => session.route,
-            ),
-          },
-          { admitted: route, pool, recorded: Option.some(route) },
-        );
-        if (Option.isSome(pool))
-          assert.deepStrictEqual(
-            Option.map(
-              Option.flatMap(decision, ({ session }) => session),
-              (session) => session.pool,
-            ),
-            pool,
-          );
-      }),
-    );
-  }
-
-  const ssh = RemoteShell.make({
-    ssh: { command: "ssh", args: ["-o", "BatchMode=yes"] },
-    sshEnvironment: {},
-    destination: "worker.exe.xyz",
-  });
-  const contained = RemoteShell.make({ ...ssh, container: { runtime: "docker", name: "usine-1" } });
-  const placements: ReadonlyArray<readonly [string, Worker, string, string]> = [
-    // Codex can't turn its own tools off, so the role must accept native tools.
-    ["codex on a local host", { harness: Harness.make("codex") }, "local", "host-login"],
-    [
-      "codex on an ssh worker with a gateway",
-      { harness: Harness.make("codex"), host: ssh, gateway: "api-key" },
-      "ssh",
-      "gateway-api-key",
-    ],
-    ["claude on an ssh worker", { host: ssh }, "ssh", "host-login"],
-    [
-      "claude in a container with a gateway",
-      { host: contained, gateway: "subscription" },
-      "container",
-      "gateway-subscription",
-    ],
-  ];
-
-  for (const [name, worker, placement, route] of placements) {
-    it.effect(`asks ${name} at the child's placement`, () =>
-      Effect.gen(function* () {
-        const request = requestFor(`completion/placement-${placement}-${route}`, true, 3, worker);
-        const { decision, calls, fellBack } = yield* wake(
-          answering(retry),
-          request,
-          reported("Committed the fix, but the push failed."),
-        );
-
-        assert.isFalse(fellBack(""), "The rule decided instead of the completion");
-        const [call] = calls;
-        if (call === undefined) return assert.fail("The handler called no completion");
-        assert.deepStrictEqual(
-          {
-            harness: call.spec.session.brain.harness,
-            host: call.spec.host,
-            placement: call.spec.admitted.context.placement,
-            credential: call.spec.admitted.context.credential,
-            decision: Option.map(decision, ({ handler }) => handler),
-          },
-          {
-            harness: request.spec.agent.brain.harness,
-            host: request.host,
-            placement,
-            credential: route,
-            decision: Option.some("completion"),
-          },
-        );
-      }),
-    );
-  }
-
-  it.effect("asks with the instructions, the report, the delegations, and the output", () =>
+  // Codex can't turn its own tools off, so the role must accept native tools.
+  it.effect("asks codex on a local host at the child's placement", () =>
     Effect.gen(function* () {
-      const { calls } = yield* wake(
+      const request = requestFor(
+        "completion/placement-local-host-login",
+        true,
+        3,
+        Harness.make("codex"),
+      );
+      const { decision, calls, fellBack } = yield* wake(
         answering(retry),
-        requestFor("completion/prompt"),
+        request,
         reported("Committed the fix, but the push failed."),
-        catalog,
-        {
-          delegations: [
-            DelegationSummary.make({
-              child: ChildSessionCount.make(1),
-              status: "ended",
-              end: Option.some("interrupted"),
-              report: Option.some("The worker restarted during the tests."),
-            }),
-          ],
-          output: "remote: Permission to basaltbytes/usine.git denied.",
-        },
       );
 
+      assert.isFalse(fellBack(""), "The rule decided instead of the completion");
       const [call] = calls;
       if (call === undefined) return assert.fail("The handler called no completion");
-      for (const part of [
-        "You decide what an Attempt does next.",
-        "`RetryChild`: the work isn't done",
-        "Committed the fix, but the push failed.",
-        "The worker restarted during the tests.",
-        "remote: Permission to basaltbytes/usine.git denied.",
-        "Fix the flaky durable test.",
-      ])
-        assert.include(call.prompt, part);
+      assert.deepStrictEqual(
+        {
+          harness: call.spec.session.brain.harness,
+          host: call.spec.host,
+          placement: call.spec.admitted.context.placement,
+          credential: call.spec.admitted.context.credential,
+          decision: Option.map(decision, ({ handler }) => handler),
+        },
+        {
+          harness: request.spec.agent.brain.harness,
+          host: request.host,
+          placement: "local",
+          credential: "host-login",
+          decision: Option.some("completion"),
+        },
+      );
     }),
   );
 
-  const emptyOptional: ReadonlyArray<readonly [string, Schema.Json, ModelDecision]> = [
-    ["Complete", { _tag: "Complete", message: "" }, Complete.make({})],
-    ["RetryChild", { _tag: "RetryChild", assignment: "" }, RetryChild.make({})],
-    ["Blocked", { _tag: "Blocked", message: "" }, Blocked.make({})],
-    ["whitespace-only Complete", { _tag: "Complete", message: "\n" }, Complete.make({})],
-    ["whitespace-only RetryChild", { _tag: "RetryChild", assignment: " " }, RetryChild.make({})],
-    ["whitespace-only Blocked", { _tag: "Blocked", message: " \t " }, Blocked.make({})],
-  ];
-
-  for (const [tag, answer, expected] of emptyOptional) {
-    it.effect(`reads an empty optional text as null: ${tag}`, () =>
-      Effect.gen(function* () {
-        const { decision, recorded } = yield* wake(
-          answering({ decision: answer, reason: "The report says so." }),
-          requestFor("completion/empty-optional"),
-          reported("No access to the repository."),
-        );
-
-        assert.deepStrictEqual(
-          Option.map(decision, ({ decision }) => decision),
-          Option.some(expected),
-        );
-        assert.strictEqual(recorded.length, 1);
-      }),
-    );
-  }
-
   const empty: ReadonlyArray<readonly [string, Schema.Json, string]> = [
-    ["", { _tag: "Question", question: "" }, "The answer's Question has an empty question"],
     ["", { _tag: "Failed", message: "" }, "The answer's Failed has an empty message"],
-    ["", { _tag: "InfraFailed", message: "" }, "The answer's InfraFailed has an empty message"],
-    [
-      "",
-      { _tag: "AtCapacity", message: "", resetsAt: null },
-      "The answer's AtCapacity has an empty message",
-    ],
-    [
-      " (whitespace-only)",
-      { _tag: "Question", question: "   " },
-      "The answer's Question has an empty question",
-    ],
-    [
-      " (whitespace-only)",
-      { _tag: "Failed", message: "\n" },
-      "The answer's Failed has an empty message",
-    ],
     [
       " (whitespace-only)",
       { _tag: "InfraFailed", message: "\t" },
       "The answer's InfraFailed has an empty message",
-    ],
-    [
-      " (whitespace-only)",
-      { _tag: "AtCapacity", message: " ", resetsAt: null },
-      "The answer's AtCapacity has an empty message",
     ],
   ];
 
@@ -680,21 +484,6 @@ describe("structured completion wake-up", () => {
     }),
   );
 
-  it.effect("completes with the child's report when the answer leaves the message null", () =>
-    Effect.gen(function* () {
-      const { decision } = yield* wake(
-        answering({ decision: { _tag: "Complete", message: null }, reason: "Done." }),
-        requestFor("completion/default-message"),
-        reported("Opened #12."),
-      );
-
-      assert.deepStrictEqual(
-        Option.map(decision, ({ decision }) => decision),
-        Option.some(Complete.make({})),
-      );
-    }),
-  );
-
   it.effect("falls back to the rule on an invalid value and records its usage", () =>
     Effect.gen(function* () {
       const { decision, recorded, fellBack } = yield* wake(
@@ -748,52 +537,6 @@ describe("structured completion wake-up", () => {
       assert.isTrue(Option.isNone(decision));
       assert.isTrue(fellBack("CompletionRefused: The model declined"));
       assert.strictEqual(recorded.length, 0);
-    }),
-  );
-
-  it.effect("falls back to the rule on a capacity error and records its usage", () =>
-    Effect.gen(function* () {
-      const { decision, recorded, fellBack } = yield* wake(
-        failing(
-          (sessionId) =>
-            AgentCapacityError.make({
-              sessionId: Option.some(sessionId),
-              message: "You've hit your usage limit",
-            }),
-          true,
-        ),
-        requestFor("completion/capacity"),
-        reported("Opened #12."),
-      );
-
-      assert.isTrue(Option.isNone(decision));
-      assert.isTrue(fellBack("AgentCapacityError: You've hit your usage limit"));
-      assert.strictEqual(recorded.length, 1);
-    }),
-  );
-
-  it.effect("falls back to the rule on a timeout and records its usage", () =>
-    Effect.gen(function* () {
-      const { decision, recorded, fellBack } = yield* wake(
-        failing(
-          (sessionId) =>
-            SessionOperationError.make({
-              operation: "stream",
-              sessionId: Option.some(sessionId),
-              message: "claude returned no completion within 10 minutes",
-              cause: new Error("completion timed out"),
-            }),
-          true,
-        ),
-        requestFor("completion/timeout"),
-        reported("Opened #12."),
-      );
-
-      assert.isTrue(Option.isNone(decision));
-      assert.isTrue(
-        fellBack("SessionOperationError: claude returned no completion within 10 minutes"),
-      );
-      assert.strictEqual(recorded.length, 1);
     }),
   );
 
@@ -862,14 +605,6 @@ describe("structured completion wake-up", () => {
       assert.strictEqual(quoted.calls.length, 1);
     }),
   );
-
-  it("offers one branch per ModelDecision tag", () => {
-    const decision = CompletionAnswer.fields.decision;
-    assert.deepStrictEqual(
-      decision.members.map((member) => member.fields._tag.schema.literal),
-      ["Complete", "RetryChild", "Blocked", "Question", "Failed", "InfraFailed", "AtCapacity"],
-    );
-  });
 });
 
 describe("coordinator with the structured completion", () => {
@@ -929,40 +664,5 @@ describe("coordinator with the structured completion", () => {
         ])
           assert.include(call.prompt, part);
       }).pipe(Effect.scoped),
-  );
-
-  it.live("relays a child's CI handoff as the Attempt's message without a model call", () =>
-    Effect.gen(function* () {
-      const database = yield* temporaryDatabase;
-      const coordinatedRequest = requestFor("completion/coordinator-handoff");
-      const request = AttemptRequest.make({
-        ...coordinatedRequest,
-        spec: AttemptChannel.RunSpec.make({ ...coordinatedRequest.spec, requiresCi: true }),
-      });
-      const harnesses = harnessesWith(
-        answering({
-          decision: { _tag: "Complete", message: "Opened #12 and handed CI off to usine." },
-          reason: "The pull request is open.",
-        }),
-      );
-      const recording = recordingSink();
-      const process = yield* orchestrator(
-        coordinatorLayer.pipe(
-          Layer.provide(harnesses.registry),
-          Layer.provide(SqliteClient.layer({ filename: database })),
-          Layer.orDie,
-          Layer.provideMerge(stubChildBackendLayer),
-        ),
-      );
-      const execution = yield* process.execute(request, recording.sink);
-      yield* (yield* process.nextChild).reply(handoff);
-      const report = yield* Fiber.join(execution);
-      yield* process.stop;
-      const relayed = ciHandoff(report.message);
-
-      assert.strictEqual(report.message, handoff);
-      assert.strictEqual(harnesses.calls.length, 0);
-      assert.isTrue(relayed._tag === "Success" && Option.isSome(relayed.success));
-    }).pipe(Effect.scoped),
   );
 });

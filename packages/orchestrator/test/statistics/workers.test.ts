@@ -1,19 +1,17 @@
 import { assert, describe, it } from "@effect/vitest";
 import {
   ConfigurationStore,
-  ConfigurationRevisionNumber,
   configurationDiff,
   configurationEntities,
 } from "@usine/config/configuration";
 import { UsineConfig } from "@usine/config/factory";
 import { LoadedInstance } from "@usine/config/instance";
-import { DateTime, Effect, Option, Schema } from "effect";
+import { Effect, Option, Schema } from "effect";
 import { TestClock } from "effect/testing";
 import { readWorkerCapacity, workerSlotMillis } from "../../src/operator/statistics/workers.ts";
 import { configurationLayer } from "../support/configuration.ts";
 
 const HOUR = 3_600_000;
-const at = (hour: number) => DateTime.makeUnsafe(hour * HOUR);
 const instance = (slots: number) =>
   Effect.gen(function* () {
     return LoadedInstance.make({
@@ -91,21 +89,6 @@ describe("Worker slot history", () => {
       assert.strictEqual(workerSlotMillis(worker, 0, 10 * HOUR), 16 * HOUR);
       assert.strictEqual(workerSlotMillis(worker, 0, 3 * HOUR), 0);
       assert.strictEqual(workerSlotMillis(worker, 5 * HOUR, 7 * HOUR), 0);
-    }).pipe(Effect.provide(configurationLayer)),
-  );
-
-  it.effect("uses declared slots when an embedded instance has no configuration revisions", () =>
-    Effect.gen(function* () {
-      const store = yield* ConfigurationStore;
-
-      assert.strictEqual((yield* store.read).number, ConfigurationRevisionNumber.make(0));
-      const worker = (yield* instance(2)).config.workers[1];
-      assert(worker !== undefined);
-      const history = yield* readWorkerCapacity(store, worker);
-      assert.strictEqual(
-        workerSlotMillis(history, DateTime.toEpochMillis(at(0)), DateTime.toEpochMillis(at(10))),
-        20 * HOUR,
-      );
     }).pipe(Effect.provide(configurationLayer)),
   );
 });

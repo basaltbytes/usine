@@ -68,7 +68,7 @@ const emptyDelegation = (): MemoryDelegation => ({
  * A `DelegationJournal` and its `DelegationCall` that keep one delegation and its Attempt in
  * memory. `start` counts the delegation as the Attempt's next one within `budget`. A journal
  * operation named in `failing` fails with `JournalError`; the others never fail. `release` ends
- * the operator's Hold of a child, and `abort` completes the call's `aborted`.
+ * the operator's Hold of a child.
  */
 export const memoryJournal = (
   attempt: MemoryAttempt = emptyAttempt(),
@@ -76,7 +76,6 @@ export const memoryJournal = (
   budget = 3,
 ) => {
   const failing = new Set<keyof DelegationJournal>();
-  const aborted = Deferred.makeUnsafe<void>();
   const guarded =
     (operation: keyof DelegationJournal) =>
     <A, E>(effect: Effect.Effect<A, E>): Effect.Effect<A, E | JournalError> =>
@@ -201,7 +200,7 @@ export const memoryJournal = (
       Effect.sync(() => {
         published.push(details);
       }),
-    aborted: Deferred.await(aborted),
+    aborted: Effect.never,
     infrastructureFailed: (sessionId, message) =>
       Effect.sync(() => {
         attempt.reports.push({ _tag: "Infrastructure", sessionId, message });
@@ -222,6 +221,5 @@ export const memoryJournal = (
         if (waiter.sessionId === sessionId) yield* Deferred.succeed(waiter.ended, undefined);
         else waiting.push(waiter);
     });
-  const abort = Deferred.succeed(aborted, undefined).pipe(Effect.asVoid);
-  return { journal, call, attempt, delegation, published, failing, release, abort };
+  return { journal, call, attempt, delegation, published, failing, release };
 };

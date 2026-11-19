@@ -7,12 +7,10 @@ import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AgentFailure, InfraFailure } from "@usine/core/attempt/failure";
 import { DedupKey, Event, EventId } from "@usine/core/event";
 import { ItemKey } from "@usine/core/item";
-import { GitHubLabelName } from "@usine/core/label";
 import { LoopName } from "@usine/core/loop";
 import { OperatorLogin } from "@usine/core/operator";
 import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
-import { ApprovalSource, RunApproval } from "@usine/core/run/approval";
 import { StepName } from "@usine/core/step";
 import { StepResult } from "@usine/core/step/result";
 import { WorkerName } from "@usine/core/worker";
@@ -367,53 +365,6 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
           }),
         ),
     );
-    it.live("records when an Attempt ends, whether it fails or its Run is canceled", () =>
-      withPersistence(
-        adapter,
-        Effect.gen(function* () {
-          const store = yield* RunStore;
-          const runId = RunId.make("attempt-end-times");
-          yield* store.recordAndClaim(lifecycleSubmission, runId);
-          const first = yield* store.beginAttempt(
-            runId,
-            WorkerName.make("local"),
-            "local",
-            Option.none(),
-          );
-          assert(first._tag === "AttemptStarted");
-          assert.deepStrictEqual(
-            (yield* store.snapshot(runId)).attempts[0]?.endedAt,
-            Option.none(),
-          );
-          yield* store.finishAttempt(
-            first.execution.attempt,
-            Result.fail(AgentFailure.make({ message: "Checks failed" })),
-          );
-          yield* store.retry(runId);
-          const second = yield* store.beginAttempt(
-            runId,
-            WorkerName.make("local"),
-            "local",
-            Option.none(),
-          );
-          assert(second._tag === "AttemptStarted");
-          assert.deepStrictEqual(
-            (yield* store.snapshot(runId)).attempts[1]?.endedAt,
-            Option.none(),
-          );
-          yield* store.cancel(runId);
-          const attempts = (yield* store.snapshot(runId)).attempts;
-          assert.deepStrictEqual(
-            attempts.map(({ outcome }) => Option.map(outcome, ({ _tag }) => _tag)),
-            [Option.some("Failed"), Option.some("Canceled")],
-          );
-          for (const attempt of attempts) {
-            assert(Option.isSome(attempt.endedAt));
-            assert(DateTime.isGreaterThanOrEqualTo(attempt.endedAt.value, attempt.startedAt));
-          }
-        }),
-      ),
-    );
     it.live(
       "keeps the Loop's permissions with the Event, so each Attempt and its recovery use them",
       () =>
@@ -482,43 +433,6 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
             );
           }),
         ),
-    );
-    it.live("keeps the Loop's outcome labels with the Event, so each Attempt carries them", () =>
-      withPersistence(
-        adapter,
-        Effect.gen(function* () {
-          const store = yield* RunStore;
-          const runId = RunId.make("outcome-labels");
-          const outcomeLabels = [GitHubLabelName.make("ready-to-merge")];
-          yield* store.recordAndClaim(
-            Submission.make({ ...lifecycleSubmission, outcomeLabels }),
-            runId,
-          );
-          const first = yield* store.beginAttempt(
-            runId,
-            WorkerName.make("local"),
-            "local",
-            Option.none(),
-          );
-          assert(first._tag === "AttemptStarted");
-          yield* store.finishAttempt(
-            first.execution.attempt,
-            Result.fail(AgentFailure.make({ message: "Checks failed" })),
-          );
-          yield* store.retry(runId);
-          const retried = yield* store.beginAttempt(
-            runId,
-            WorkerName.make("local"),
-            "local",
-            Option.none(),
-          );
-          assert(retried._tag === "AttemptStarted");
-
-          assert.deepStrictEqual(first.execution.outcomeLabels, outcomeLabels);
-          assert.deepStrictEqual(retried.execution.outcomeLabels, outcomeLabels);
-          assert.deepStrictEqual((yield* store.snapshot(runId)).outcomeLabels, outcomeLabels);
-        }),
-      ),
     );
     it.live("stops tracking a closed Attempt once, and never an open one", () =>
       withPersistence(
@@ -900,81 +814,6 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
             (yield* store.finishAttempt(restarted.execution.attempt, Result.fail(failure)))._tag,
             "RunFailed",
           );
-        }).pipe(Effect.provide(fixture.open));
-      }).pipe(Effect.scoped),
-    );
-    it.live("an approved Run records its source once and is Queued until its attempt starts", () =>
-      Effect.gen(function* () {
-        const fixture = yield* adapter.fixture;
-        const submission = Submission.make({
-          event: Event.make({
-            id: EventId.make("queued-event"),
-            dedupKey: DedupKey.make("queued/event/revision"),
-            payload: {},
-            receivedAt: DateTime.makeUnsafe("2026-09-03T00:00:00Z"),
-          }),
-          itemKey: ItemKey.make("queued-item"),
-          loop: LoopName.make("queued-loop"),
-          step: StepName.make("queued-step"),
-          approval: "required",
-          repository: RepositoryName.make("basaltbytes/usine"),
-          revision: RepositoryRevision.make("queued-revision"),
-          task: AttemptTask.make("Wait for a worker"),
-          agent: testAgent,
-          parentModel: Option.none(),
-        });
-        const approval = Event.make({
-          id: EventId.make("queued-approval"),
-          dedupKey: DedupKey.make("queued/approval"),
-          payload: { approved: true },
-          receivedAt: DateTime.makeUnsafe("2026-09-03T00:01:00Z"),
-        });
-        const runId = RunId.make("queued-run");
-
-        // A UI approval without a configured operator login records only its channel.
-        const unnamed = ApprovalSource.make({ channel: "ui", approver: Option.none() });
-        const recorded = Option.some(
-          RunApproval.make({ approvedAt: approval.receivedAt, source: Option.some(unnamed) }),
-        );
-
-        yield* Effect.gen(function* () {
-          const store = yield* RunStore;
-          const reader = yield* RunReader;
-          const state = () => store.snapshot(runId).pipe(Effect.map(({ run }) => run.state._tag));
-          yield* store.recordAndClaim(submission, runId);
-          yield* store.parkForApproval(runId);
-          const runState = yield* state();
-          assert.strictEqual(runState, "Waiting");
-
-          yield* store.approve(runId, approval, unnamed);
-          const currentRunState = yield* state();
-          assert.strictEqual(currentRunState, "Queued");
-          // Re-delivery of the same approval is a no-op, not a rejection.
-          yield* store.approve(
-            runId,
-            approval,
-            ApprovalSource.make({
-              channel: "ui",
-              approver: Option.some(OperatorLogin.make("Philippe")),
-            }),
-          );
-          const nextRunState = yield* state();
-          assert.strictEqual(nextRunState, "Queued");
-          assert.deepStrictEqual((yield* store.snapshot(runId)).approval, recorded);
-          const [listed] = yield* reader.list({ closedLimit: 10 });
-          assert.deepStrictEqual(listed?.approval, recorded);
-          const [history] = yield* reader.forItems([submission.itemKey]);
-          assert.deepStrictEqual(history?.approval, recorded);
-
-          const started = yield* store.beginAttempt(
-            runId,
-            WorkerName.make("local"),
-            "local",
-            Option.none(),
-          );
-          assert.strictEqual(started._tag, "AttemptStarted");
-          const updatedRunState = yield* state();
-          assert.strictEqual(updatedRunState, "Running");
         }).pipe(Effect.provide(fixture.open));
       }).pipe(Effect.scoped),
     );

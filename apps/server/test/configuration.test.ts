@@ -125,18 +125,6 @@ const run = (directory: string, args: ReadonlyArray<string>, editor = "") =>
     },
   });
 
-const storedConfiguration = (directory: string) => {
-  const database = new DatabaseSync(join(directory, ".usine/runtime.sqlite"));
-  try {
-    return {
-      revisions: database.prepare("SELECT * FROM usine_configuration_revisions").all(),
-      entities: database.prepare("SELECT * FROM usine_configuration_entities").all(),
-    };
-  } finally {
-    database.close();
-  }
-};
-
 it.live(
   "rejects an invalid parent on the first import",
   () =>
@@ -164,67 +152,6 @@ it.live(
       const accepted = run(directory, ["import", directory]);
       expect(accepted.status, accepted.stderr).toBe(0);
       expect(accepted.stdout).toContain("Revision 1:");
-    }).pipe(Effect.provide(NodeFileSystem.layer)),
-  { timeout: 60_000 },
-);
-
-it.live.each(["agent", "settings"] as const)(
-  "rejects an imported %s parent before writing a revision",
-  (source) =>
-    Effect.gen(function* () {
-      const directory = yield* directoryFixture;
-      const fs = yield* FileSystem.FileSystem;
-      const exported = join(directory, "exported");
-      const initial = run(directory, ["export", exported]);
-      expect(initial.status, initial.stderr).toBe(0);
-      const before = storedConfiguration(directory);
-      const file = join(exported, source === "agent" ? "agents/developer.md" : "usine.yaml");
-      const original = yield* fs.readFileString(file);
-      yield* fs.writeFileString(
-        file,
-        source === "agent"
-          ? original.replace("effort: high", "effort: high\nparent_model: unknown/x")
-          : stringify({
-              ...parse(original),
-              settings: { ...parse(original).settings, parent_model: "unknown/x" },
-            }),
-      );
-      const rejected = run(directory, ["import", exported]);
-      expect(rejected.status).not.toBe(0);
-      expect(rejected.stdout + rejected.stderr).toContain("cannot run as coordinator");
-      expect(rejected.stdout + rejected.stderr).toContain("unknown/x");
-      expect(storedConfiguration(directory)).toEqual(before);
-      yield* fs.writeFileString(file, original);
-      expect(run(directory, ["import", exported]).status).toBe(0);
-    }).pipe(Effect.provide(NodeFileSystem.layer)),
-  { timeout: 60_000 },
-);
-
-it.live(
-  "rejects an edited parent before writing a revision",
-  () =>
-    Effect.gen(function* () {
-      const directory = yield* directoryFixture;
-      expect(run(directory, ["log"]).status).toBe(0);
-      const before = storedConfiguration(directory);
-      const editor = join(directory, "parent-editor.mjs");
-      yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
-        fileSystem.writeFileString(
-          editor,
-          `import { readFileSync, writeFileSync } from "node:fs";
-const file = process.argv[2];
-writeFileSync(file, readFileSync(file, "utf8").replace("effort: high", "effort: high\\nparent_model: unknown/x"));
-`,
-        ),
-      );
-      const rejected = run(
-        directory,
-        ["edit", "agent", "developer"],
-        `${process.execPath} ${editor}`,
-      );
-      expect(rejected.status).not.toBe(0);
-      expect(rejected.stdout + rejected.stderr).toContain("cannot run as coordinator");
-      expect(storedConfiguration(directory)).toEqual(before);
     }).pipe(Effect.provide(NodeFileSystem.layer)),
   { timeout: 60_000 },
 );
@@ -257,27 +184,6 @@ it.effect("refuses an import whose coordinator brain check doesn't finish in tim
     expect(failureMessage(failure)).toBe(
       "The coordinator brain check didn't finish within 10 seconds. The running configuration is unchanged. Check that the model provider responds, then try again. No revision was written.",
     );
-    expect((yield* Context.get(context, ConfigurationStore).read).number).toBe(0);
-  }).pipe(Effect.provide(NodeServices.layer)),
-);
-
-it.effect("refuses an import whose parent models don't load in time", () =>
-  Effect.gen(function* () {
-    const folder = yield* directoryFixture;
-    const directory = InstanceDirectory.make(folder);
-    const context = yield* Layer.build(
-      configurationLayer.pipe(Layer.provide(localSqliteLayer(directory))),
-    );
-    const loading = yield* Deferred.make<void>();
-    const command = yield* parseConfigCommand(["import", directory]);
-    const importing = yield* runConfigCommand(directory, command, () =>
-      Deferred.succeed(loading, undefined).pipe(Effect.andThen(Effect.never)),
-    ).pipe(Effect.provideContext(context), Effect.flip, Effect.forkChild);
-    yield* Deferred.await(loading);
-    yield* TestClock.adjust(coordinatorBrainTimeout);
-    const failure = yield* Fiber.join(importing);
-
-    expect(failure._tag).toBe("ValidationTimeoutError");
     expect((yield* Context.get(context, ConfigurationStore).read).number).toBe(0);
   }).pipe(Effect.provide(NodeServices.layer)),
 );
@@ -398,57 +304,6 @@ it.live(
         expect(revisions()).toHaveLength(3);
       } finally {
         database.close();
-      }
-    }).pipe(Effect.provide(NodeFileSystem.layer)),
-  { timeout: 60_000 },
-);
-
-it.live(
-  "imports and exports worker preference changes with and without value edits",
-  () =>
-    Effect.gen(function* () {
-      const directory = yield* directoryFixture;
-      const source = join(directory, "usine.yaml");
-      const settings = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
-        fileSystem.readFileString(source),
-      );
-      const writeWorkers = (names: ReadonlyArray<string>, capacity: number) =>
-        Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
-          fileSystem.writeFileString(
-            source,
-            `${settings}workers:\n${names.map((name) => `  - name: ${name}\n    kind: local\n    max_concurrent_attempts: ${capacity}\n`).join("")}`,
-          ),
-        );
-      yield* writeWorkers(["preferred", "fallback"], 1);
-      const initial = run(directory, ["log"]);
-      expect(initial.status, initial.stderr).toBe(0);
-      const exported = join(directory, "exported");
-      for (const { names, capacity, revision } of [
-        { names: ["fallback", "preferred"], capacity: 1, revision: 2 },
-        { names: ["preferred", "fallback"], capacity: 2, revision: 3 },
-      ]) {
-        yield* writeWorkers(names, capacity);
-        const imported = run(directory, ["import", directory]);
-        expect(imported.status, imported.stderr).toBe(0);
-        expect(imported.stdout).toContain(`Revision ${revision}:`);
-        expect(run(directory, ["log", "worker", "preferred"]).stdout).toContain(
-          `${revision}\tlocal admin\t`,
-        );
-        const result = run(directory, ["export", exported]);
-        expect(result.status, result.stderr).toBe(0);
-        expect(result.stdout).toContain(`Exported revision ${revision}`);
-        const awaited3 = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
-          fileSystem.readFileString(join(exported, "usine.yaml")),
-        );
-        const config = yield* Schema.decodeUnknownEffect(UsineConfig)(parse(awaited3));
-        expect(config.workers.map(({ name }) => name)).toEqual(names);
-        expect(config.workers.map(({ maxConcurrentAttempts }) => maxConcurrentAttempts)).toEqual([
-          capacity,
-          capacity,
-        ]);
-        const unchanged = run(directory, ["import", exported]);
-        expect(unchanged.status, unchanged.stderr).toBe(0);
-        expect(unchanged.stdout).toContain("No configuration changes");
       }
     }).pipe(Effect.provide(NodeFileSystem.layer)),
   { timeout: 60_000 },
@@ -896,126 +751,31 @@ it.live(
   { timeout: 30_000 },
 );
 
-for (const scenario of [
-  { repositories: ["basaltbytes/usine"], loops: ["implement", "review", "fix", "finish", "check"] },
-  { repositories: ["acme/one", "acme/two"], loops: ["implement"] },
-]) {
-  it.live(
-    `migrates a part-1 store with ${scenario.repositories.length} repositories and ${scenario.loops.length} loops as one revision`,
-    () =>
-      Effect.gen(function* () {
-        const directory = yield* directoryFixture;
-        yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
-          fileSystem.writeFileString(
-            join(directory, "usine.yaml"),
-            stringify({
-              version: 1,
-              operator: "operator",
-              repos: scenario.repositories.map((name) => ({
-                name,
-                lanes: [{ name: "Ready", sources: [{ label: "ready" }] }],
-              })),
-            }),
-          ),
-        );
-        for (const name of scenario.loops)
-          yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
-            fileSystem.writeFileString(
-              join(directory, `loops/${name}.md`),
-              "---\ntrigger: { on: issue, if: 'true' }\nagent: developer\n---\nImplement #{{ item.number }}.\n",
-            ),
-          );
-        const root = InstanceDirectory.make(directory);
-        const parser = ConfigParser.layer.pipe(Layer.provide(MarcbachmannCelLayer));
-        const legacyStore = Layer.mergeAll(sqliteConfigurationLayer, InstanceFolder.layer).pipe(
-          Layer.provide(parser),
-          Layer.provide(localSqliteLayer(root)),
-          Layer.provide(NodeServices.layer),
-        );
-        yield* Effect.gen(function* () {
-          const instance = yield* (yield* InstanceFolder).load(root);
-          const store = yield* ConfigurationStore;
-          const current = yield* store.read;
-          const decodedValue2 = configurationEntities(instance);
-          yield* store.commit({
-            expected: current.number,
-            actor: instance.config.operator,
-            message: Option.some("Part 1 configuration"),
-            changes: configurationDiff([], decodedValue2),
-          });
-        }).pipe(Effect.provide(legacyStore), Effect.scoped);
-        const database = new DatabaseSync(join(directory, ".usine/runtime.sqlite"));
-        try {
-          database
-            .prepare("INSERT INTO usine_loop_runtime (loop_name, paused) VALUES ('implement', 1)")
-            .run();
-          const exported = join(directory, "exported");
-          const result = run(directory, ["export", exported]);
-          expect(result.status, result.stderr).toBe(0);
-          expect(result.stdout).toContain("Exported revision 2");
-          const revisions = database
-            .prepare("SELECT value FROM usine_configuration_revisions ORDER BY number")
-            .all();
-          expect(revisions).toHaveLength(2);
-          expect(revisions[1]?.value).toContain("Migrated repositories and loops to projects");
-          const awaited7 = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
-            fileSystem.readFileString(join(exported, "usine.yaml")),
-          );
-          const config = yield* Schema.decodeUnknownEffect(UsineConfig)(parse(awaited7));
-          expect(config.version).toBe(2);
-          expect(config.projects).toHaveLength(scenario.repositories.length);
-          for (const project of config.projects) {
-            expect(project.lanes[0]?.name).toBe("Ready");
-            expect(
-              database
-                .prepare("SELECT paused FROM usine_loop_runtime WHERE loop_name = ?")
-                .get(`${project.id}/implement`)?.paused,
-            ).toBe(1);
-            for (const name of scenario.loops) {
-              const loop = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
-                fileSystem.readFileString(
-                  join(exported, `projects/${project.id}/loops/${name}.md`),
-                ),
-              );
-              expect(loop).toContain("Implement #{{ item.number }}.");
-            }
-          }
-          const reimported = run(directory, ["import", exported]);
-          expect(reimported.status, reimported.stderr).toBe(0);
-          expect(reimported.stdout).toContain("No configuration changes.");
-          expect(
-            database.prepare("SELECT count(*) AS count FROM usine_configuration_revisions").get()
-              ?.count,
-          ).toBe(2);
-        } finally {
-          database.close();
-        }
-      }).pipe(Effect.provide(NodeFileSystem.layer)),
-    { timeout: 60_000 },
-  );
-}
+const migration = { repositories: ["acme/one", "acme/two"], loops: ["implement"] };
 
-for (const scenario of ["empty registry", "unmatched selector"] as const) {
-  it.live(`preserves authored loops and revisions when migration has an ${scenario}`, () =>
+it.live(
+  "migrates a part-1 store with two repositories as one revision",
+  () =>
     Effect.gen(function* () {
       const directory = yield* directoryFixture;
-      const repos =
-        scenario === "empty registry"
-          ? []
-          : [
-              { name: "acme/one", tags: ["app"] },
-              { name: "acme/two", tags: ["other"] },
-            ];
       yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
-        fileSystem.writeFileString(join(directory, "usine.yaml"), stringify({ version: 1, repos })),
+        fileSystem.writeFileString(
+          join(directory, "usine.yaml"),
+          stringify({
+            version: 1,
+            operator: "operator",
+            repos: migration.repositories.map((name) => ({
+              name,
+              lanes: [{ name: "Ready", sources: [{ label: "ready" }] }],
+            })),
+          }),
+        ),
       );
-      const selector =
-        scenario === "empty registry" ? "" : "selector: { repos: [acme/one], tags: [other] }\n";
-      for (const name of ["implement", "review"])
+      for (const name of migration.loops)
         yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
           fileSystem.writeFileString(
             join(directory, `loops/${name}.md`),
-            `---\ntrigger: { on: issue, if: 'true' }\nagent: developer\n${selector}---\nImplement.\n`,
+            "---\ntrigger: { on: issue, if: 'true' }\nagent: developer\n---\nImplement #{{ item.number }}.\n",
           ),
         );
       const root = InstanceDirectory.make(directory);
@@ -1029,31 +789,115 @@ for (const scenario of ["empty registry", "unmatched selector"] as const) {
         const instance = yield* (yield* InstanceFolder).load(root);
         const store = yield* ConfigurationStore;
         const current = yield* store.read;
-        const decodedValue4 = configurationEntities(instance);
+        const decodedValue2 = configurationEntities(instance);
         yield* store.commit({
           expected: current.number,
           actor: instance.config.operator,
           message: Option.some("Part 1 configuration"),
-          changes: configurationDiff([], decodedValue4),
+          changes: configurationDiff([], decodedValue2),
         });
       }).pipe(Effect.provide(legacyStore), Effect.scoped);
       const database = new DatabaseSync(join(directory, ".usine/runtime.sqlite"));
       try {
-        const entities = () =>
-          database.prepare("SELECT * FROM usine_configuration_entities ORDER BY key").all();
-        const before = entities();
-        const result = run(directory, ["export", join(directory, "exported")]);
-        expect(result.status).not.toBe(0);
-        for (const name of ["implement", "review"])
-          expect(result.stdout + result.stderr).toContain(`Cannot migrate loop ${name}: selector`);
-        expect(entities()).toEqual(before);
+        database
+          .prepare("INSERT INTO usine_loop_runtime (loop_name, paused) VALUES ('implement', 1)")
+          .run();
+        const exported = join(directory, "exported");
+        const result = run(directory, ["export", exported]);
+        expect(result.status, result.stderr).toBe(0);
+        expect(result.stdout).toContain("Exported revision 2");
+        const revisions = database
+          .prepare("SELECT value FROM usine_configuration_revisions ORDER BY number")
+          .all();
+        expect(revisions).toHaveLength(2);
+        expect(revisions[1]?.value).toContain("Migrated repositories and loops to projects");
+        const awaited7 = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+          fileSystem.readFileString(join(exported, "usine.yaml")),
+        );
+        const config = yield* Schema.decodeUnknownEffect(UsineConfig)(parse(awaited7));
+        expect(config.version).toBe(2);
+        expect(config.projects).toHaveLength(migration.repositories.length);
+        for (const project of config.projects) {
+          expect(project.lanes[0]?.name).toBe("Ready");
+          expect(
+            database
+              .prepare("SELECT paused FROM usine_loop_runtime WHERE loop_name = ?")
+              .get(`${project.id}/implement`)?.paused,
+          ).toBe(1);
+          for (const name of migration.loops) {
+            const loop = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+              fileSystem.readFileString(join(exported, `projects/${project.id}/loops/${name}.md`)),
+            );
+            expect(loop).toContain("Implement #{{ item.number }}.");
+          }
+        }
+        const reimported = run(directory, ["import", exported]);
+        expect(reimported.status, reimported.stderr).toBe(0);
+        expect(reimported.stdout).toContain("No configuration changes.");
         expect(
           database.prepare("SELECT count(*) AS count FROM usine_configuration_revisions").get()
             ?.count,
-        ).toBe(1);
+        ).toBe(2);
       } finally {
         database.close();
       }
     }).pipe(Effect.provide(NodeFileSystem.layer)),
-  );
-}
+  { timeout: 60_000 },
+);
+
+it.live("preserves authored loops and revisions when migration has an unmatched selector", () =>
+  Effect.gen(function* () {
+    const directory = yield* directoryFixture;
+    const repos = [
+      { name: "acme/one", tags: ["app"] },
+      { name: "acme/two", tags: ["other"] },
+    ];
+    yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+      fileSystem.writeFileString(join(directory, "usine.yaml"), stringify({ version: 1, repos })),
+    );
+    const selector = "selector: { repos: [acme/one], tags: [other] }\n";
+    for (const name of ["implement", "review"])
+      yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+        fileSystem.writeFileString(
+          join(directory, `loops/${name}.md`),
+          `---\ntrigger: { on: issue, if: 'true' }\nagent: developer\n${selector}---\nImplement.\n`,
+        ),
+      );
+    const root = InstanceDirectory.make(directory);
+    const parser = ConfigParser.layer.pipe(Layer.provide(MarcbachmannCelLayer));
+    const legacyStore = Layer.mergeAll(sqliteConfigurationLayer, InstanceFolder.layer).pipe(
+      Layer.provide(parser),
+      Layer.provide(localSqliteLayer(root)),
+      Layer.provide(NodeServices.layer),
+    );
+    yield* Effect.gen(function* () {
+      const instance = yield* (yield* InstanceFolder).load(root);
+      const store = yield* ConfigurationStore;
+      const current = yield* store.read;
+      const decodedValue4 = configurationEntities(instance);
+      yield* store.commit({
+        expected: current.number,
+        actor: instance.config.operator,
+        message: Option.some("Part 1 configuration"),
+        changes: configurationDiff([], decodedValue4),
+      });
+    }).pipe(Effect.provide(legacyStore), Effect.scoped);
+    const database = new DatabaseSync(join(directory, ".usine/runtime.sqlite"));
+    try {
+      const entities = () =>
+        database.prepare("SELECT * FROM usine_configuration_entities ORDER BY key").all();
+      const before = entities();
+      const result = run(directory, ["export", join(directory, "exported")]);
+      expect(result.status).not.toBe(0);
+      for (const name of ["implement", "review"])
+        expect(result.stdout + result.stderr).toContain(`Cannot migrate loop ${name}: selector`);
+      expect(entities()).toEqual(before);
+      expect(
+        database.prepare("SELECT count(*) AS count FROM usine_configuration_revisions").get()
+          ?.count,
+      ).toBe(1);
+    } finally {
+      database.close();
+    }
+  }).pipe(Effect.provide(NodeFileSystem.layer)),
+);

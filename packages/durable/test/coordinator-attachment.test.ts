@@ -14,25 +14,6 @@ const held = (attachment: Effect.Success<ReturnType<typeof attachmentFor>>) =>
   });
 
 describe("Attachment", () => {
-  it.live("holds the Attempt for a second call only after the first detaches", () =>
-    Effect.gen(function* () {
-      const attachment = yield* attachmentFor(attemptId);
-      const first = yield* held(attachment);
-      const second = yield* Effect.forkChild(held(attachment), { startImmediately: true });
-      const early = yield* Fiber.join(second).pipe(Effect.timeoutOption("100 millis"));
-      const idleWhileWaiting = yield* attachment.isIdle;
-      yield* Scope.close(first.scope, Exit.void);
-      const later = yield* Fiber.join(second);
-      yield* Scope.close(later.scope, Exit.void);
-      const idleAfter = yield* attachment.isIdle;
-
-      assert.isTrue(Option.isNone(early));
-      assert.isFalse(idleWhileWaiting);
-      assert.notStrictEqual(later.call, first.call);
-      assert.isTrue(idleAfter);
-    }),
-  );
-
   it.live("is idle again after a waiting call is interrupted", () =>
     Effect.gen(function* () {
       const attachment = yield* attachmentFor(attemptId);

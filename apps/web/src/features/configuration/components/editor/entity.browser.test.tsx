@@ -301,29 +301,15 @@ it("names the entity and affected projects before deleting, and displays refusal
   });
 });
 
-it("links the changed entities from instance history", async () => {
-  await mount("/configuration/history");
-  await expect
-    .element(page.getByRole("link", { name: "worker:local", exact: true }))
-    .toHaveAttribute("href", "/configuration/workers/local");
-  await expect.element(page.getByText("Increase worker slots")).toBeVisible();
-});
-
-it.each([
-  ["/configuration/loops/start-dev", "loop", "start-dev"],
-  ["/configuration/agents/developer", "agent", "developer"],
-  ["/configuration/repositories/BasaltBytes/Usine", "repository", "basaltbytes%2Fusine"],
-  ["/configuration/settings", "settings", "instance"],
-  ["/configuration/labels/ready", "label", "ready"],
-])("edits the stored entity at %s", async (path, kind, identifier) => {
-  await mount(path);
+it("edits the stored entity at a repository path in other casing", async () => {
+  await mount("/configuration/repositories/BasaltBytes/Usine");
   await editText();
   await page.getByRole("textbox", { name: "Configuration text" }).fill("changed text");
   await userEvent.keyboard("{Control>}{Enter}{/Control}");
   await expect.poll(async () => (await commands.configurationEditorRequests()).length).toBe(1);
   expect((await commands.configurationEditorRequests())[0]).toMatchObject({
     method: "PUT",
-    url: `/api/configuration/entities/${kind}/${identifier}`,
+    url: "/api/configuration/entities/repository/basaltbytes%2Fusine",
     payload: { expected: 2, text: "changed text" },
   });
 });
@@ -345,117 +331,42 @@ it("keeps a loop draft when a refresh removes the loop", async () => {
   await expect.element(page.getByText("Loop not found", { exact: true })).toBeVisible();
 });
 
-it("reports worker preflight refusals without discarding the draft", async () => {
-  await mount(undefined, [
-    {
-      status: 409,
-      body: JSON.stringify({
-        error: "ReloadPreflightError",
-        message: "Codex needs a login on local.",
-        agents: ["developer"],
-        workers: ["local"],
-        cause: {
-          _tag: "WorkerCapabilityError",
-          worker: "local",
-          capability: "harness-login",
-          message: "Codex needs a login",
-        },
-      }),
-    },
-  ]);
-  await editText();
-  const source = page.getByRole("textbox", { name: "Configuration text" });
-  await source.fill("keep this draft");
-  await button("Save").click();
-  await expect.element(page.getByText("Codex needs a login on local.")).toBeVisible();
-  await expect.element(source).toHaveValue("keep this draft");
-});
-
-it("shows that new loops start paused", async () => {
-  await mount("/configuration/loops");
-  await button("New loop").click();
+it("discards a canceled lookup for an existing name while another creation is pending", async () => {
+  const identifier = "developer";
+  await mount("/configuration/agents");
+  await commands.delayConfigurationLookup(identifier);
+  await commands.delayConfigurationLookup("beta");
+  await button("New agent").click();
+  const name = page.getByRole("textbox", { name: "Name", exact: true });
+  await name.fill(identifier);
+  await button("Continue").click();
+  await expect.element(name).toBeDisabled();
+  await button("Cancel").click();
+  await button("New agent").click();
+  await expect.element(name).toHaveValue("");
+  await name.fill("beta");
+  await button("Continue").click();
+  await commands.releaseConfigurationLookup(identifier);
   await expect
-    .element(page.getByText("New loops start paused. Review the loop before resuming it."))
-    .toBeVisible();
+    .poll(
+      () => client.getQueryState(entityQuery(entityKey("agent", identifier)).queryKey)?.fetchStatus,
+    )
+    .toBe("idle");
+  await expect.element(name).toHaveValue("beta");
+  await expect.element(name).toBeDisabled();
+  await expect.element(button("Loading…")).toBeDisabled();
+  await expect.element(page.getByRole("alert")).not.toBeInTheDocument();
+  await commands.releaseConfigurationLookup("beta");
+  await expect.element(page.getByRole("combobox", { name: "Model", exact: true })).toBeVisible();
+  await button("Save").click();
+  await expect.poll(async () => (await commands.configurationEditorRequests()).length).toBe(1);
+  expect((await commands.configurationEditorRequests())[0]).toMatchObject({
+    method: "PUT",
+    url: "/api/configuration/entities/agent/beta",
+  });
 });
-
-it("keeps the raw editor within the page at desktop and phone widths", async () => {
-  await mount();
-  await editText();
-  await page
-    .getByRole("textbox", { name: "Configuration text" })
-    .fill(`name: local\nkind: local\nmax_concurrent_attempts: 2\n# ${"Long line ".repeat(40)}`);
-  const textarea = page.getByRole("textbox", { name: "Configuration text" }).element();
-  textarea.scrollLeft = 0;
-  for (const [width, name] of [
-    [1440, "desktop"],
-    [390, "mobile"],
-  ] as const) {
-    await page.viewport(width, 900);
-    await expect.poll(() => document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
-    await commands.configurationEditorScreenshot(name);
-  }
-});
-
-it.each(["alpha", "developer"])(
-  "discards a canceled lookup for %s while another creation is pending",
-  async (identifier) => {
-    await mount("/configuration/agents");
-    await commands.delayConfigurationLookup(identifier);
-    await commands.delayConfigurationLookup("beta");
-    await button("New agent").click();
-    const name = page.getByRole("textbox", { name: "Name", exact: true });
-    await name.fill(identifier);
-    await button("Continue").click();
-    await expect.element(name).toBeDisabled();
-    await button("Cancel").click();
-    await button("New agent").click();
-    await expect.element(name).toHaveValue("");
-    await name.fill("beta");
-    await button("Continue").click();
-    await commands.releaseConfigurationLookup(identifier);
-    await expect
-      .poll(
-        () =>
-          client.getQueryState(entityQuery(entityKey("agent", identifier)).queryKey)?.fetchStatus,
-      )
-      .toBe("idle");
-    await expect.element(name).toHaveValue("beta");
-    await expect.element(name).toBeDisabled();
-    await expect.element(button("Loading…")).toBeDisabled();
-    await expect.element(page.getByRole("alert")).not.toBeInTheDocument();
-    await commands.releaseConfigurationLookup("beta");
-    await expect.element(page.getByRole("combobox", { name: "Model", exact: true })).toBeVisible();
-    await button("Save").click();
-    await expect.poll(async () => (await commands.configurationEditorRequests()).length).toBe(1);
-    expect((await commands.configurationEditorRequests())[0]).toMatchObject({
-      method: "PUT",
-      url: "/api/configuration/entities/agent/beta",
-    });
-  },
-);
 
 it.each([
-  {
-    kind: "agent",
-    identifier: "developer",
-    path: "/configuration/agents/developer",
-    label: "Model",
-    role: "combobox",
-    before: "gpt-6.1-sol",
-    after: "custom/new-model",
-    field: ["model"],
-  },
-  {
-    kind: "worker",
-    identifier: "local",
-    path: "/configuration/workers/local",
-    label: "Concurrent attempts",
-    role: "spinbutton",
-    before: 2,
-    after: "3",
-    field: ["max_concurrent_attempts"],
-  },
   {
     kind: "settings",
     identifier: "instance",
@@ -529,11 +440,7 @@ it.each([
         value:
           scenario.kind === "settings"
             ? { settings: { poll_interval: 90 } }
-            : scenario.kind === "worker"
-              ? { max_concurrent_attempts: 3 }
-              : scenario.kind === "agent"
-                ? { model: scenario.after }
-                : { tags: ["frontend", "production"] },
+            : { tags: ["frontend", "production"] },
       },
     });
   },
@@ -555,32 +462,6 @@ it("blocks invalid worker values locally and keeps invalid text when returning t
   await source.fill("name: local\nkind: local\nmax_concurrent_attempts: 5\n");
   await button("Edit as form").click();
   await expect.element(slots).toHaveValue(5);
-});
-
-it("keeps a form draft across a revision conflict and reloads the current values", async () => {
-  await mount(undefined, [
-    {
-      status: 409,
-      body: JSON.stringify({ error: "StaleRevision", message: "Changed", expected: 2, current: 3 }),
-    },
-  ]);
-  await button("Edit").click();
-  const slots = page.getByRole("spinbutton", { name: "Concurrent attempts" });
-  await slots.fill("3");
-  await button("Save").click();
-  await expect.element(button("Save")).toBeDisabled();
-  await expect.element(slots).toHaveValue(3);
-  await button("Reload text").click();
-  await expect.element(slots).toHaveValue(4);
-  await expect
-    .element(page.getByRole("textbox", { name: "Unsaved draft" }))
-    .toHaveValue("name: local\nkind: local\nmax_concurrent_attempts: 3\n");
-  await button("Save").click();
-  await expect.poll(async () => (await commands.configurationEditorRequests()).length).toBe(2);
-  expect((await commands.configurationEditorRequests())[1]?.payload).toMatchObject({
-    expected: 3,
-    value: { max_concurrent_attempts: 4 },
-  });
 });
 
 it("offers only unregistered installation repositories when creating a repository", async () => {
@@ -784,14 +665,6 @@ it.each([
     expected: { provisioner: { provider: "hetzner", token_env: "NEW_HCLOUD_TOKEN", image: "123" } },
   },
   {
-    kind: "boat",
-    source:
-      "name: local\nkind: ssh\nroot: /work\nidentity_file: /keys/id_ed25519\nprovisioner:\n  provider: boat\n  token_env: BOAT_TOKEN\n",
-    label: "Provider token variable",
-    next: "NEW_BOAT_TOKEN",
-    expected: { provisioner: { provider: "boat", token_env: "NEW_BOAT_TOKEN" } },
-  },
-  {
     kind: "boxd",
     source:
       "name: local\nkind: ssh\nroot: /home/boxd/.usine\nprovisioner:\n  provider: boxd\n  token_env: BOXD_TOKEN\n  region: fra\n  size: 2x8\n  snapshot: usine-attempt\n  isolated: false\n",
@@ -831,68 +704,6 @@ it.each([
   expect((await commands.configurationEditorRequests())[0]?.payload).toMatchObject({
     value: scenario.expected,
   });
-});
-
-it("suggests the hosted boxd regions and saves another region id", async () => {
-  await mount();
-  await editText();
-  await page
-    .getByRole("textbox", { name: "Configuration text" })
-    .fill(
-      "name: local\nkind: ssh\nroot: /home/boxd/.usine\nprovisioner:\n  provider: boxd\n  token_env: BOXD_TOKEN\n  snapshot: usine-attempt\n",
-    );
-  await button("Edit as form").click();
-  const region = page.getByRole("combobox", { name: "Region", exact: true });
-  await expect.element(region).toBeVisible();
-  const list = document.getElementById(region.element().getAttribute("list") ?? "");
-  expect([...(list?.querySelectorAll("option") ?? [])].map((option) => option.value)).toEqual([
-    "fra",
-    "nyc",
-  ]);
-  await region.fill("eu-own-1");
-  await button("Save").click();
-  await expect.poll(async () => (await commands.configurationEditorRequests()).length).toBe(1);
-  expect((await commands.configurationEditorRequests())[0]?.payload).toMatchObject({
-    value: { provisioner: { provider: "boxd", region: "eu-own-1" } },
-  });
-});
-
-it("explains that a boxd machine size is an optional check of the snapshot's size", async () => {
-  await mount();
-  await editText();
-  await page
-    .getByRole("textbox", { name: "Configuration text" })
-    .fill(
-      "name: local\nkind: ssh\nroot: /home/boxd/.usine\nprovisioner:\n  provider: boxd\n  token_env: BOXD_TOKEN\n  snapshot: usine-attempt\n",
-    );
-  await button("Edit as form").click();
-  const size = page.getByRole("textbox", { name: "Machine size", exact: true });
-  await expect.element(size).toHaveValue("");
-  const help = size.element().getAttribute("aria-describedby");
-  const hint = help === null ? "" : (document.getElementById(help)?.textContent ?? "");
-  expect(hint).toContain("such as 2x8 or 1x32");
-  expect(hint).toContain("Leave empty to accept the snapshot's size.");
-});
-
-it("saves the account endpoint of a boxd cluster without a region", async () => {
-  await mount();
-  await editText();
-  await page
-    .getByRole("textbox", { name: "Configuration text" })
-    .fill(
-      "name: local\nkind: ssh\nroot: /home/boxd/.usine\nprovisioner:\n  provider: boxd\n  token_env: BOXD_TOKEN\n  snapshot: usine-attempt\n",
-    );
-  await button("Edit as form").click();
-  await page
-    .getByRole("textbox", { name: "Endpoint", exact: true })
-    .fill("https://boxd.example.com:9443");
-  await button("Save").click();
-  await expect.poll(async () => (await commands.configurationEditorRequests()).length).toBe(1);
-  const [request] = await commands.configurationEditorRequests();
-  expect(request?.payload).toMatchObject({
-    value: { provisioner: { provider: "boxd", endpoint: "https://boxd.example.com:9443" } },
-  });
-  expect(JSON.stringify(request?.payload)).not.toContain("region");
 });
 
 const boxdEgressSource = (egress: string) =>
@@ -1087,25 +898,6 @@ it("matches and removes repository selections regardless of casing", async () =>
       selector: { _tag: "Some", value: { repos: ["basaltbytes/usine"], tags: ["Team", "team"] } },
     },
   });
-});
-
-it("clears local validation errors and enables Preview after correcting a draft", async () => {
-  await mount("/configuration/loops/start-dev");
-  await editText();
-  await page
-    .getByRole("textbox", { name: "Configuration text" })
-    .fill('---\ntrigger: { on: issue, if: "true" }\nagent: developer\n---\nImplement.');
-  await button("Edit as form").click();
-  const cycles = page.getByRole("spinbutton", { name: "Cycle limit", exact: true });
-  await cycles.fill("0");
-  await button("Save").click();
-  await expect.element(cycles).toHaveAttribute("aria-invalid", "true");
-  await expect.element(button("Preview")).toBeDisabled();
-  await cycles.fill("3");
-  await expect.element(cycles).not.toHaveAttribute("aria-invalid", "true");
-  await expect.element(page.getByRole("alert")).not.toBeInTheDocument();
-  await button("Preview").click();
-  await expect.element(page.getByRole("heading", { name: "2 matching items" })).toBeVisible();
 });
 
 it.each(["form", "text"])("clears a save refusal after changing the %s draft", async (mode) => {

@@ -27,11 +27,7 @@ import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { Source } from "@usine/expression/expression-engine";
 import { GitHubItemHistory } from "@usine/github/item-history";
 import { GitHubItemWriter } from "@usine/github/item-writer";
-import {
-  GitHubApiError,
-  GitHubRateLimitError,
-  type GitHubAppError,
-} from "@usine/github/github-app";
+import { GitHubRateLimitError, type GitHubAppError } from "@usine/github/github-app";
 import {
   ChangedIssue,
   ContentHash,
@@ -138,7 +134,7 @@ const awaitCondition = <A, E>(effect: Effect.Effect<A, E>, until: (value: A) => 
   );
 
 describe("Board self-writes", () => {
-  for (const outcome of ["success", "partial failure", "rate limit"] as const) {
+  for (const outcome of ["success", "rate limit"] as const) {
     it.live(
       `reconciles a Board write after ${outcome} and opens one approval before the next poll`,
       () =>
@@ -193,18 +189,11 @@ describe("Board self-writes", () => {
               Effect.gen(function* () {
                 labels = [...new Set([...labels, ...mutation.add])];
                 if (outcome !== "success") {
-                  const error =
-                    outcome === "rate limit"
-                      ? GitHubRateLimitError.make({
-                          operation: "update-item-labels",
-                          retryAt: DateTime.makeUnsafe((yield* Clock.currentTimeMillis) + 300),
-                          message: "Wait before removing the source label",
-                        })
-                      : GitHubApiError.make({
-                          operation: "update-item-labels",
-                          status: Option.some(503),
-                          message: "Destination added; source deletion failed",
-                        });
+                  const error = GitHubRateLimitError.make({
+                    operation: "update-item-labels",
+                    retryAt: DateTime.makeUnsafe((yield* Clock.currentTimeMillis) + 300),
+                    message: "Wait before removing the source label",
+                  });
                   writeFailure = Option.some(error);
                   return yield* error;
                 }

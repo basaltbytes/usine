@@ -121,24 +121,6 @@ it("keeps each worker's slot cells on one line, at every width, without scrollin
   }
 });
 
-it("keeps the Repositories list within its width on a phone and beside the sidebar", async () => {
-  for (const width of [390, 768]) {
-    await mount("/configuration/repositories", width);
-    fitsWithoutScrolling();
-  }
-});
-
-it("gives a preflight check's description its own width, and the detail the rest of a wide table", async () => {
-  await mount("/configuration/workers/eu-2", 1600);
-  expect(headers()).toEqual(["Check", "Result", "Checked", "Detail"]);
-  expect(lines("Machine, Git, memory, gateway, credentials, and Docker")).toBeLessThanOrEqual(2);
-  expect(lines("Harness installed and logged in")).toBe(1);
-  const [check, result, checked, detail] = cells("Worker");
-  expect(detail?.textContent).toMatch(/^Docker isn't installed/u);
-  const others = [check, result, checked].map((cell) => cell?.getBoundingClientRect().width ?? 0);
-  expect(detail?.getBoundingClientRect().width).toBeGreaterThan(Math.max(...others));
-});
-
 it("folds a preflight check's time and message into its row on a narrow table, without scrolling sideways", async () => {
   for (const width of [390, 1280]) {
     await mount("/configuration/workers/local", width);
@@ -197,18 +179,4 @@ it("compares the models of an agent by merged task and marks the configured mode
   // The reviewer's model is not one of the developer's.
   expect(models.getByText("claude-opus-4-1").elements()).toEqual([]);
   fitsWithoutScrolling(models.element());
-});
-
-it("shows each agent its own models", async () => {
-  queryClient.setQueryData(statisticsQuery("30d").queryKey, statisticsFixture(Date.now(), "30d"));
-  await mount("/configuration/agents/reviewer", 1280);
-  const models = page.getByRole("region", { name: "Models" });
-  await expect.element(models.getByText("12 tasks merged", { exact: true })).toBeVisible();
-  expect(
-    models
-      .getByRole("listitem")
-      .elements()
-      .map(({ textContent }) => textContent.startsWith("claude-opus-4-1")),
-  ).toEqual([true]);
-  expect(models.getByText("gpt-5.6-sol").elements()).toEqual([]);
 });

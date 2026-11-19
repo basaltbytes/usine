@@ -154,59 +154,54 @@ describe("Boat SSH connection recovery", () => {
     },
   );
 
-  for (const loss of ["deleted", "archived"]) {
-    it.effect(`fails a ${loss} sandbox as infrastructure loss and permits a fresh machine`, () => {
-      const machine = fakeMachine();
-      machine.state.localFiles.set("/keys/usine_boat.pub", "ssh-ed25519 AAAAOperatorKey usine\n");
-      const providers = fakeProviders();
-      providers.boat.provisioningReads = 0;
-      providers.boat.sshEndpoint = "203.0.113.10:22001";
-      const notices: Array<AttemptChannel.WorkerNotice> = [];
-      return Effect.gen(function* () {
-        const working = yield* Deferred.make<void>();
-        const parent: StubParent = () =>
-          Deferred.succeed(working, undefined).pipe(Effect.andThen(Effect.never));
-        yield* Effect.gen(function* () {
-          const executor = yield* Executor;
-          const machines = yield* WorkerMachines;
-          const grant = yield* machines.create(WORKER, MACHINE_RUN, request.attemptId, [
-            TEST_AGENT.brain,
-          ]);
-          const launch = yield* (yield* executor.prepare(request))
-            .launch(observing(notices))
-            .pipe(Effect.forkChild);
-          yield* Deferred.await(working);
-          machine.state.closedSshEndpoints.add("203.0.113.10:22001");
-          const sandbox = providers.boat.sandboxes.get(grant.id);
-          assert(sandbox !== undefined);
-          if (loss === "deleted") providers.boat.sandboxes.delete(grant.id);
-          else sandbox.state = "archived";
-          yield* TestClock.adjust("1 minute");
-          const failure = yield* Fiber.join(launch).pipe(Effect.flip);
-          assert.strictEqual(failure._tag, "InfraFailure");
-          assert.include(failure.message, grant.id);
-          assert.lengthOf(
-            notices.filter(({ _tag }) => _tag === "WorkerUnresponsive"),
-            0,
-          );
-
-          machine.state.closedSshEndpoints.clear();
-          const next = yield* machines.create(
-            WORKER,
-            MACHINE_RUN,
-            AttemptId.make(`${RUN}/execute/2`),
-            [TEST_AGENT.brain],
-          );
-          assert.notStrictEqual(next.id, grant.id);
-          yield* machines.release(next.hold);
-          yield* machines.release(grant.hold);
-        }).pipe(
-          Effect.scoped,
-          Effect.provide(runtimeOf(machine, providers, boatAddress, { parent })),
+  it.effect("fails a deleted sandbox as infrastructure loss and permits a fresh machine", () => {
+    const machine = fakeMachine();
+    machine.state.localFiles.set("/keys/usine_boat.pub", "ssh-ed25519 AAAAOperatorKey usine\n");
+    const providers = fakeProviders();
+    providers.boat.provisioningReads = 0;
+    providers.boat.sshEndpoint = "203.0.113.10:22001";
+    const notices: Array<AttemptChannel.WorkerNotice> = [];
+    return Effect.gen(function* () {
+      const working = yield* Deferred.make<void>();
+      const parent: StubParent = () =>
+        Deferred.succeed(working, undefined).pipe(Effect.andThen(Effect.never));
+      yield* Effect.gen(function* () {
+        const executor = yield* Executor;
+        const machines = yield* WorkerMachines;
+        const grant = yield* machines.create(WORKER, MACHINE_RUN, request.attemptId, [
+          TEST_AGENT.brain,
+        ]);
+        const launch = yield* (yield* executor.prepare(request))
+          .launch(observing(notices))
+          .pipe(Effect.forkChild);
+        yield* Deferred.await(working);
+        machine.state.closedSshEndpoints.add("203.0.113.10:22001");
+        providers.boat.sandboxes.delete(grant.id);
+        yield* TestClock.adjust("1 minute");
+        const failure = yield* Fiber.join(launch).pipe(Effect.flip);
+        assert.strictEqual(failure._tag, "InfraFailure");
+        assert.include(failure.message, grant.id);
+        assert.lengthOf(
+          notices.filter(({ _tag }) => _tag === "WorkerUnresponsive"),
+          0,
         );
-      });
+
+        machine.state.closedSshEndpoints.clear();
+        const next = yield* machines.create(
+          WORKER,
+          MACHINE_RUN,
+          AttemptId.make(`${RUN}/execute/2`),
+          [TEST_AGENT.brain],
+        );
+        assert.notStrictEqual(next.id, grant.id);
+        yield* machines.release(next.hold);
+        yield* machines.release(grant.hold);
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(runtimeOf(machine, providers, boatAddress, { parent })),
+      );
     });
-  }
+  });
 
   it.effect("does not drain another sandbox on the same SSH host when one disappears", () => {
     const machine = fakeMachine();

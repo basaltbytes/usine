@@ -254,9 +254,10 @@ describe("GatewayProxy", () => {
   );
 
   it.effect(
-    "refuses without calling GitHub: other repository, no token, forged token, detached",
+    "refuses without calling GitHub: other repository, no token, forged token, detached, and logs each refusal without a token",
     () =>
       Effect.gen(function* () {
+        lines.length = 0;
         const caller = yield* attach(installation);
         const refusal = (response: { status: number; headers: globalThis.Headers }) => [
           response.status,
@@ -297,6 +298,19 @@ describe("GatewayProxy", () => {
         assert.deepStrictEqual(refusal(fourthResponse), [403, "stale-caller-token"]);
         const fifthResponse = yield* sent;
         assert.deepStrictEqual(fifthResponse, []);
+        const mismatch = lines.find((line) => line.includes("repository-mismatch"));
+        assert(mismatch !== undefined, lines.join("\n"));
+        for (const field of [
+          `"worker":"${WORKER}"`,
+          '"host":"git.gw.test"',
+          '"reason":"repository-mismatch"',
+        ])
+          assert.include(mismatch, field);
+        for (const value of [caller, INSTALLATION_TOKEN, "ghp_stolen"])
+          assert.isFalse(
+            lines.some((line) => line.includes(value)),
+            `a log line contains ${value.slice(0, 8)}`,
+          );
       }).pipe(Effect.provide(gateway(NO_PROVIDERS))),
   );
 
@@ -323,25 +337,21 @@ describe("GatewayProxy", () => {
       }).pipe(Effect.provide(gateway(NO_PROVIDERS))),
   );
 
-  it.effect.each(["anthropic-messages", "anthropic"])(
-    "%s requests replace the placeholder with the gateway API key",
-    (prefix) =>
+  it.effect(
+    "anthropic-messages requests replace the placeholder with the gateway API key, and the deprecated anthropic prefix still works",
+    () =>
       Effect.gen(function* () {
         lines.length = 0;
         const caller = yield* attach(installation);
         yield* send(
-          `http://llm.gw.test/${prefix}/v1/messages?beta=true`,
+          "http://llm.gw.test/anthropic-messages/v1/messages?beta=true",
           { "x-api-key": caller, "anthropic-version": "2023-06-01" },
           { method: "POST", body: "{}" },
         );
         const [request] = yield* sent;
         assert(request !== undefined);
         assert.strictEqual(request.url, "https://api.anthropic.com/v1/messages?beta=true");
-        assert.strictEqual(
-          lines.some((line) => line.includes("Deprecated LLM path prefix")),
-          prefix === "anthropic",
-        );
-        for (const value of [caller, ANTHROPIC_KEY]) assert.notInclude(lines.join("\n"), value);
+        assert.isFalse(lines.some((line) => line.includes("Deprecated LLM path prefix")));
         assert.deepStrictEqual(
           Headers.get(request.headers, "x-api-key"),
           Option.some(ANTHROPIC_KEY),
@@ -350,6 +360,14 @@ describe("GatewayProxy", () => {
           Headers.get(request.headers, "anthropic-version"),
           Option.some("2023-06-01"),
         );
+        yield* send(
+          "http://llm.gw.test/anthropic/v1/messages",
+          { "x-api-key": caller },
+          { method: "POST", body: "{}" },
+        );
+        assert.strictEqual((yield* sent)[1]?.url, "https://api.anthropic.com/v1/messages");
+        assert.isTrue(lines.some((line) => line.includes("Deprecated LLM path prefix")));
+        for (const value of [caller, ANTHROPIC_KEY]) assert.notInclude(lines.join("\n"), value);
       }).pipe(
         Effect.provide(
           gateway({
@@ -399,27 +417,29 @@ describe("GatewayProxy", () => {
       ),
   );
 
-  it.effect.each(["openai-responses", "openai"])(
-    "%s requests replace the placeholder with a bearer key and refuse an unset provider",
-    (prefix) =>
+  it.effect(
+    "openai-responses requests replace the placeholder with a bearer key, the deprecated openai prefix still works, and an unset provider is refused",
+    () =>
       Effect.gen(function* () {
         lines.length = 0;
         const caller = yield* attach(installation);
-        yield* send(`http://llm.gw.test/${prefix}/v1/responses`, {
+        yield* send("http://llm.gw.test/openai-responses/v1/responses", {
           authorization: `Bearer ${caller}`,
         });
         const [request] = yield* sent;
         assert(request !== undefined);
         assert.strictEqual(request.url, "https://api.openai.com/v1/responses");
-        assert.strictEqual(
-          lines.some((line) => line.includes("Deprecated LLM path prefix")),
-          prefix === "openai",
-        );
-        for (const value of [caller, OPENAI_KEY]) assert.notInclude(lines.join("\n"), value);
+        assert.isFalse(lines.some((line) => line.includes("Deprecated LLM path prefix")));
         assert.deepStrictEqual(
           Headers.get(request.headers, "authorization"),
           Option.some(`Bearer ${OPENAI_KEY}`),
         );
+        yield* send("http://llm.gw.test/openai/v1/responses", {
+          authorization: `Bearer ${caller}`,
+        });
+        assert.strictEqual((yield* sent)[1]?.url, "https://api.openai.com/v1/responses");
+        assert.isTrue(lines.some((line) => line.includes("Deprecated LLM path prefix")));
+        for (const value of [caller, OPENAI_KEY]) assert.notInclude(lines.join("\n"), value);
         const refused = yield* send("http://llm.gw.test/anthropic-messages/v1/messages", {
           "x-api-key": caller,
         });
@@ -587,90 +607,6 @@ describe("GatewayProxy", () => {
   );
 
   it.effect(
-    "redirects to github.com and api.github.com point at git.<domain>, which serves a renamed repository's new name after GitHub's redirect",
-    () =>
-      Effect.gen(function* () {
-        lines.length = 0;
-        const caller = yield* attach(installation);
-        const location = (path: string) =>
-          Effect.map(
-            send(`http://git.gw.test${path}`, { "x-usine-gateway-token": caller }),
-            (response) => [response.status, response.headers.get("location")],
-          );
-        const redirectLocation = yield* location("/api/v3/repos/acme/demo/pulls?state=open");
-        assert.deepStrictEqual(redirectLocation, [
-          301,
-          "http://git.gw.test/api/v3/repositories/42/pulls?state=open",
-        ]);
-        const currentRedirectLocation = yield* location(
-          "/acme/demo/releases/latest/download/tool.tar.gz",
-        );
-        assert.deepStrictEqual(currentRedirectLocation, [
-          301,
-          "http://git.gw.test/acme/demo/releases/download/v1.2.0/tool.tar.gz",
-        ]);
-        const nextRedirectLocation = yield* location(
-          "/acme/demo.git/info/refs?service=git-upload-pack",
-        );
-        assert.deepStrictEqual(nextRedirectLocation, [
-          301,
-          "http://git.gw.test/acme/renamed.git/info/refs?service=git-upload-pack",
-        ]);
-        const updatedRedirectLocation = yield* location("/api/v3/repositories/42/pulls?state=open");
-        assert.deepStrictEqual(updatedRedirectLocation, [200, null]);
-        assert.strictEqual(
-          (yield* sent).at(-1)?.url,
-          "https://api.github.com/repositories/42/pulls?state=open",
-        );
-        const latestRedirectLocation = yield* location(
-          "/acme/renamed.git/info/refs?service=git-upload-pack",
-        );
-        assert.deepStrictEqual(latestRedirectLocation, [200, null]);
-        assert.strictEqual(
-          (yield* sent).at(-1)?.url,
-          "https://github.com/acme/renamed.git/info/refs?service=git-upload-pack",
-        );
-        const learned = lines.find((line) =>
-          line.includes("Learned the new name of an attached repository"),
-        );
-        assert(learned !== undefined, lines.join("\n"));
-        for (const field of [
-          `"worker":"${WORKER}"`,
-          '"repository":"acme/demo"',
-          '"newName":"acme/renamed"',
-        ])
-          assert.include(learned, field);
-        const rewrite = lines.find((line) => line.includes('"from":"api.github.com"'));
-        assert(rewrite !== undefined, lines.join("\n"));
-        for (const field of [
-          "Rewrote a GitHub Location header to the gateway",
-          '"repository":"acme/demo"',
-          '"status":301',
-          '"path":"/api/v3/repositories/42/pulls"',
-        ])
-          assert.include(rewrite, field);
-      }).pipe(
-        Effect.provide(
-          gateway(
-            NO_PROVIDERS,
-            redirecting(
-              301,
-              {
-                "https://api.github.com/repos/acme/demo/pulls?state=open":
-                  "https://api.github.com/repositories/42/pulls?state=open",
-                "https://github.com/acme/demo/releases/latest/download/tool.tar.gz":
-                  "https://github.com/acme/demo/releases/download/v1.2.0/tool.tar.gz",
-                "https://github.com/acme/demo.git/info/refs?service=git-upload-pack":
-                  "https://github.com/acme/renamed.git/info/refs?service=git-upload-pack",
-              },
-              renamedRepository("acme/renamed"),
-            ),
-          ),
-        ),
-      ),
-  );
-
-  it.effect(
     "only a permanent redirect of the repository itself to another name teaches a new name, and only to that attachment",
     () =>
       Effect.gen(function* () {
@@ -807,47 +743,5 @@ describe("GatewayProxy", () => {
         const response = yield* sent;
         assert.deepStrictEqual(response, []);
       }).pipe(Effect.provide(gateway(NO_PROVIDERS))),
-  );
-
-  it.effect(
-    "refusals are logged with the reason, Worker, and host, and no token reaches a log line",
-    () =>
-      Effect.gen(function* () {
-        lines.length = 0;
-        const caller = yield* attach(installation);
-        yield* send("http://git.gw.test/acme/demo.git/info/refs", {
-          "x-usine-gateway-token": caller,
-        });
-        yield* send("http://git.gw.test/acme/other.git/info/refs", {
-          "x-usine-gateway-token": caller,
-        });
-        yield* send("http://llm.gw.test/anthropic-messages/v1/messages", { "x-api-key": caller });
-        const logged = [...lines];
-        const refusal = logged.find((line) => line.includes("repository-mismatch"));
-        assert(refusal !== undefined, logged.join("\n"));
-        for (const field of [
-          `"worker":"${WORKER}"`,
-          '"host":"git.gw.test"',
-          '"reason":"repository-mismatch"',
-        ])
-          assert.include(refusal, field);
-        for (const value of [caller, INSTALLATION_TOKEN, ANTHROPIC_KEY])
-          assert.isFalse(
-            logged.some((line) => line.includes(value)),
-            `a log line contains ${value.slice(0, 8)}`,
-          );
-      }).pipe(
-        Effect.provide(
-          gateway({
-            ...NO_PROVIDERS,
-            "anthropic-messages": Option.some(
-              AnthropicProvider.make({
-                upstream: UpstreamBase.make("https://api.anthropic.com"),
-                credential: AnthropicApiKey.make({ key: secret(ANTHROPIC_KEY) }),
-              }),
-            ),
-          }),
-        ),
-      ),
   );
 });

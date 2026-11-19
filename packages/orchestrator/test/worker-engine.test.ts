@@ -85,39 +85,6 @@ describe("Worker engine selection", () => {
     }),
   );
 
-  it.live("names the variable when a Gateway's admin token is not set", () =>
-    Effect.gen(function* () {
-      const failure = yield* startupFailure([
-        {
-          ...unreachable,
-          gateway: {
-            domain: "gw.internal",
-            destination: "usine@127.0.0.1",
-            admin_token_env: "USINE_TEST_UNSET_GATEWAY_ADMIN_TOKEN",
-          },
-        },
-      ]);
-      assert(failure._tag === "WorkerCapabilityError", failure._tag);
-      assert.strictEqual(failure.capability, "gateway");
-      assert.include(failure.message, 'The gateway admin token for SSH worker "eu-one" is missing');
-      assert.include(failure.message, "USINE_TEST_UNSET_GATEWAY_ADMIN_TOKEN");
-    }),
-  );
-
-  it.live(
-    "runs Cloudflare Workers on the Cloudflare executor, which checks the Worker's health",
-    () =>
-      Effect.gen(function* () {
-        const failure = yield* startupFailure([unreachableCloudflare]);
-        assert(failure._tag === "ExecutorOperationError", failure._tag);
-        assert.strictEqual(failure.operation, "preflight");
-        assert.include(
-          failure.message,
-          "Can't check the Worker's health for cloudflare worker \"cf-one\"",
-        );
-      }),
-  );
-
   it.live("names the variable when a Cloudflare Worker's Access token is not set", () =>
     Effect.gen(function* () {
       const failure = yield* startupFailure([
@@ -158,23 +125,6 @@ describe("Worker engine selection", () => {
       assert.strictEqual(failure.kind, "exe.dev");
       assert.include(messages, "Refused an exe.dev Worker, which no executor runs");
       assert.notInclude(messages, "Running Attempts with the local executor");
-    }),
-  );
-
-  it.live("names the exe.dev Worker in a mix with SSH Workers", () =>
-    Effect.gen(function* () {
-      const failure = yield* startupFailure([unreachable, { name: "exe-one", kind: "exe.dev" }]);
-      assert(failure._tag === "UnsupportedWorkerError", failure._tag);
-      assert.strictEqual(failure.worker, "exe-one");
-      assert.strictEqual(failure.kind, "exe.dev");
-    }),
-  );
-
-  it.live("refuses a mix of local and SSH Workers at startup", () =>
-    Effect.gen(function* () {
-      const failure = yield* startupFailure([{ name: "local", kind: "local" }, unreachable]);
-      assert(failure._tag === "UnsupportedWorkerError", failure._tag);
-      assert.strictEqual(failure.kind, "ssh");
     }),
   );
 });

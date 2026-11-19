@@ -227,19 +227,14 @@ interface FakeMachineState {
    * `socket-only`, the SSH user is in the docker group, but the machine has no docker CLI.
    */
   podmanInfo: string | undefined;
-  rootlessSessionError: string | undefined;
   limitsEnforced: boolean;
   runtimeExitCode: number;
-  memoryEvents: "counted" | "unreadable" | "empty";
-  /**
-   * With `no-kills`, the kernel logs are readable and name no process killed for memory; with
-   * `disconnects`, SSH loses the commands that read them.
-   */
-  kernelMemory: "readable" | "no-kills" | "unreadable" | "disconnects";
+  memoryEvents: "counted" | "unreadable";
+  /** With `no-kills`, the kernel logs are readable and name no process killed for memory. */
+  kernelMemory: "readable" | "no-kills" | "unreadable";
   /** How many processes a readable kernel log names as killed in a container. */
   kernelVictims: number;
   hostGroupId: string;
-  imageGroupId: string;
   docker: "absent" | "running" | "unusable" | "socket-only";
   /** The stderr of a failed image pull, and whether the image is on the machine anyway. */
   pullError: string | undefined;
@@ -258,9 +253,8 @@ interface FakeMachineState {
   freeDiskGib: number;
   storageFreeDiskGib: number;
   diskReadError: string | undefined;
-  storageProbe: "ready" | "info-fails" | "info-empty" | "df-fails";
+  storageProbe: "ready" | "df-fails";
   imageListError: string | undefined;
-  containerListError: string | undefined;
   imageRemovalError: string | undefined;
   /** The images that `docker image ls` lists, as `<ID> <repository> <tag> <created at>` lines. */
   workerImages: Array<string>;
@@ -417,14 +411,12 @@ export const fakeMachine = () => {
     gatewayAcceptsSsh: true,
     forwards: [],
     podmanInfo: undefined,
-    rootlessSessionError: undefined,
     limitsEnforced: true,
     runtimeExitCode: 0,
     memoryEvents: "counted",
     kernelMemory: "unreadable",
     kernelVictims: 1,
     hostGroupId: "1000",
-    imageGroupId: "1000",
     docker: "absent",
     pullError: undefined,
     imageOnMachine: true,
@@ -443,7 +435,6 @@ export const fakeMachine = () => {
     diskReadError: undefined,
     storageProbe: "ready",
     imageListError: undefined,
-    containerListError: undefined,
     imageRemovalError: undefined,
     workerImages: [],
     containerImageIds: [],
@@ -478,8 +469,8 @@ df() {
     *) printf '/dev/root 200000000 1048576 104857600 2%% %s\\n' "$2" ;;
   esac
 }
-docker() { [ "$1" = info ] && [ "$2" = --format ] && [ "$3" = '{{.DockerRootDir}}' ] || return 1; ${state.storageProbe === "info-fails" ? "return 1" : state.storageProbe === "info-empty" ? "return 0" : "printf '/var/lib/docker\\n'"}; }
-podman() { [ "$1" = info ] && [ "$2" = --format ] && [ "$3" = '{{.Store.GraphRoot}}' ] || return 1; ${state.storageProbe === "info-fails" ? "return 1" : state.storageProbe === "info-empty" ? "return 0" : "printf '/var/lib/podman\\n'"}; }
+docker() { [ "$1" = info ] && [ "$2" = --format ] && [ "$3" = '{{.DockerRootDir}}' ] || return 1; printf '/var/lib/docker\\n'; }
+podman() { [ "$1" = info ] && [ "$2" = --format ] && [ "$3" = '{{.Store.GraphRoot}}' ] || return 1; printf '/var/lib/podman\\n'; }
 `;
       const read = spawnSync("sh", ["-c", `${probes}\n${script}`, "sh", root, runtime], {
         encoding: "utf8",
@@ -530,7 +521,7 @@ podman() { [ "$1" = info ] && [ "$2" = --format ] && [ "$3" = '{{.Store.GraphRoo
 set -eu
 case "$*" in
   'ps --all --quiet --no-trunc')
-    ${state.containerListError === undefined ? containers.map(({ id }) => `printf '%s\\n' ${quote(id)}`).join("\n    ") : `printf '%s\\n' ${quote(state.containerListError)} >&2; exit 1`}
+    ${containers.map(({ id }) => `printf '%s\\n' ${quote(id)}`).join("\n    ")}
     ;;
   'container inspect --format '* )
     format=$4
@@ -596,10 +587,7 @@ PATH="$probe_dir:$PATH" sh -c "$1" sh "$2"
               )
             : oneShotHandle("docker\n27.5.1\n", 0);
     }
-    if (line.includes("loginctl show-user"))
-      return state.rootlessSessionError === undefined
-        ? oneShotHandle("", 0)
-        : oneShotHandle(state.rootlessSessionError, 1);
+    if (line.includes("loginctl show-user")) return oneShotHandle("", 0);
     if (line.includes("/sys/fs/cgroup/cpu.max"))
       return oneShotHandle("", state.limitsEnforced ? 0 : 1);
     if (line.startsWith("exec 'docker' 'pull' ")) {
@@ -629,7 +617,7 @@ PATH="$probe_dir:$PATH" sh -c "$1" sh "$2"
     if (words.includes("du")) return oneShotHandle(`${state.storeSizeKiB}\t/store\n`, 0);
     if (line.includes("--entrypoint"))
       return oneShotHandle(
-        `${state.hostUserId} ${state.hostGroupId} ${state.imageUserId} ${state.imageGroupId}\n`,
+        `${state.hostUserId} ${state.hostGroupId} ${state.imageUserId} ${state.hostGroupId}\n`,
         0,
       );
     if (line.includes("absolute=$3")) {
@@ -696,7 +684,6 @@ PATH="$probe_dir:$PATH" sh -c "$1" sh "$2"
       if (container === undefined) return oneShotHandle("", 1, `Error: No such container: ${name}`);
       if (state.memoryEvents === "unreadable")
         return oneShotHandle("", 1, "memory.events: permission denied");
-      if (state.memoryEvents === "empty") return oneShotHandle(`container ${container.id}\n`, 0);
       return oneShotHandle(
         `container ${container.id}\n` +
           (container.running
@@ -705,8 +692,6 @@ PATH="$probe_dir:$PATH" sh -c "$1" sh "$2"
         0,
       );
     }
-    if (line.includes("journalctl -k") && state.kernelMemory === "disconnects")
-      return oneShotHandle("", 255, "Connection to 203.0.113.7 closed by remote host.\n");
     // The collection script also checks the journal's readability, so it goes first.
     if (line.includes("journalctl -k --since")) {
       if (state.kernelMemory === "unreadable")

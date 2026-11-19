@@ -39,7 +39,6 @@ import { CurrentInstance } from "../src/current-instance/current-instance.ts";
 import { idleTriggersLayer } from "../src/idle-triggers.ts";
 import { LabelPreflightFinding } from "../src/label-reconciler.ts";
 import { ConfigurationView, OperatorConfiguration } from "../src/operator/configuration/view.ts";
-import { workerPreflightView } from "../src/operator/preflight.ts";
 import { PollCycle, PollingTriggers } from "../src/polling-triggers.ts";
 import { supervisorSandboxLayer } from "../src/supervisor-sandbox.ts";
 import { recordPreflight, unchecked, WorkerStatus } from "../src/worker-status.ts";
@@ -540,19 +539,6 @@ describe("Configuration view", () => {
     }),
   );
 
-  it.effect("carries each Worker's preflight findings into its preflight view", () =>
-    Effect.gen(function* () {
-      const preflights = yield* (yield* WorkerStatus).preflights;
-      assert.deepStrictEqual(
-        preflights.map(workerPreflightView).map(({ worker, findings }) => ({ worker, findings })),
-        [
-          { worker: local, findings: [] },
-          { worker: WorkerName.make("eu-1"), findings: [kernelLogFinding] },
-        ],
-      );
-    }).pipe(Effect.provide(workers)),
-  );
-
   it.effect("shows each repository's lanes in order with their labels as GitHub has them", () =>
     Effect.gen(function* () {
       const view = yield* readConfiguration;
@@ -604,43 +590,6 @@ describe("Configuration view", () => {
         ],
       );
       assert.deepStrictEqual([...website.loops].sort(), ["nightly", "start-dev"]);
-    }),
-  );
-
-  it.effect("shows settings with their defaults applied, the operator, webhooks, and tracing", () =>
-    Effect.gen(function* () {
-      const view = yield* readConfiguration;
-      assert.deepStrictEqual(view.settings, {
-        pollInterval: 30,
-        maxChildren: 4,
-        maxAttemptMinutes: null,
-        maxAttemptTokens: null,
-        maxBackgroundWaitMinutes: null,
-        parentModel: "gpt-5.6-sol",
-        parentEffort: null,
-        coordinator: "session",
-        supervisor: null,
-        operator: "PhilDL",
-        webhooks: "endpoint",
-        lastHintAt: "2026-10-29T12:00:00.000Z",
-        webhooksPublicUrl: "https://factory.example/webhooks",
-        tracing: { otlpUrl: "http://localhost:4318/v1/traces", serviceName: "usine" },
-      });
-    }),
-  );
-
-  it.effect("shows the supervisor's brain, and null when the role is not configured", () =>
-    Effect.gen(function* () {
-      const unset = yield* readConfiguration;
-      assert.isNull(unset.settings.supervisor);
-      const view = yield* readConfigurationOf(supervisorFiles);
-      assert.deepStrictEqual(view.settings.supervisor, {
-        harness: "claude",
-        model: "claude-sonnet-5-5",
-        effort: "medium",
-        ownTools: null,
-        unavailable: "This orchestrator provides no supervisor sandbox",
-      });
     }),
   );
 

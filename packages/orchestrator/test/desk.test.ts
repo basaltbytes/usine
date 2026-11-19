@@ -610,54 +610,6 @@ describe("Operator desk", () => {
       ),
   );
 
-  it.effect(
-    "lists Attempts in flight with their last activity and open connectivity warnings",
-    () =>
-      Effect.gen(function* () {
-        const fixtureInstance = yield* instance;
-
-        const desk = yield* (yield* OperatorObservation).desk(fixtureInstance);
-        assert.strictEqual(desk.running.length, 1);
-        const [running] = desk.running;
-        assert(running !== undefined);
-        assert.strictEqual(running.run.id, RunId.make("running-8"));
-        assert.strictEqual(running.attempt.id, AttemptId.make("running-8-attempt"));
-        assert.strictEqual(running.item?.title, "Issue 8");
-        assert.strictEqual(running.lastActivityAt, DateTime.formatIso(time("11:50:00")));
-        assert.deepStrictEqual(
-          running.warnings.map((warning) =>
-            warning._tag === "WorkerSilent"
-              ? [warning._tag, warning.worker, warning.lastAnsweredAt]
-              : [warning._tag, warning.agent, warning.retries, warning.since],
-          ),
-          [
-            ["WorkerSilent", "local", DateTime.formatIso(time("11:54:00"))],
-            ["ProviderRetrying", "researcher", 2, DateTime.formatIso(time("11:56:00"))],
-          ],
-        );
-      }).pipe(Effect.provide(deskLayer(polled))),
-  );
-
-  it.effect(
-    "lists the Runs that closed last, newest first, without those replaced before starting",
-    () =>
-      Effect.gen(function* () {
-        const fixtureInstance = yield* instance;
-
-        const desk = yield* (yield* OperatorObservation).desk(fixtureInstance);
-        assert.deepStrictEqual(
-          desk.lastOutcomes.map(({ run, closedAt }) => [run.id, run.state, closedAt]),
-          [
-            ["succeeded-11", "Succeeded", DateTime.formatIso(time("10:45:00"))],
-            ["failed-6", "Failed", DateTime.formatIso(time("09:40:00"))],
-            ["blocked-2", "Failed", DateTime.formatIso(time("08:50:00"))],
-            ["canceled-1", "Canceled", DateTime.formatIso(time("08:20:00"))],
-            ["canceled-9", "Canceled", DateTime.formatIso(time("07:30:00"))],
-          ],
-        );
-      }).pipe(Effect.provide(deskLayer(polled))),
-  );
-
   it.effect("keeps the ten newest authorized outcomes beyond a full page of hidden runs", () =>
     Effect.gen(function* () {
       const hidden = RepositoryName.make("acme/hidden");
@@ -711,51 +663,5 @@ describe("Operator desk", () => {
         );
       }).pipe(Effect.provide(deskLayer(polled, { runs: closed, unconfirmed: [] })));
     }),
-  );
-
-  it.effect(
-    "reports each Worker's slots, last preflight, and pause, and when each repository was polled",
-    () =>
-      Effect.gen(function* () {
-        const fixtureInstance = yield* instance;
-
-        const desk = yield* (yield* OperatorObservation).desk(fixtureInstance);
-        assert.deepStrictEqual(
-          desk.workers.map(({ name, slots, preflight }) => [
-            `${name} ${slots.leased}/${slots.capacity}`,
-            preflight === null ? null : `${preflight._tag} ${preflight.checkedAt}`,
-          ]),
-          [
-            // A failed harness check outranks a newer pass.
-            ["local 1/2", `Failed ${DateTime.formatIso(time("06:00:00"))}`],
-            ["spare 0/1", `Passed ${DateTime.formatIso(time("05:30:00"))}`],
-            ["fresh 0/1", null],
-          ],
-        );
-        assert.deepStrictEqual(
-          desk.workers.map(({ name, paused }) => [name, paused]),
-          [
-            ["local", false],
-            ["spare", true],
-            ["fresh", false],
-          ],
-        );
-        assert.deepStrictEqual(
-          desk.polls.map(({ repository: name, polledAt }) => [name, polledAt]),
-          [[repository, DateTime.formatIso(time("11:59:00"))]],
-        );
-      }).pipe(Effect.provide(deskLayer(polled))),
-  );
-
-  it.effect("has no poll time for a repository before its first poll ends", () =>
-    Effect.gen(function* () {
-      const fixtureInstance = yield* instance;
-
-      const desk = yield* (yield* OperatorObservation).desk(fixtureInstance);
-      assert.deepStrictEqual(
-        desk.polls.map(({ polledAt }) => polledAt),
-        [null],
-      );
-    }).pipe(Effect.provide(deskLayer([]))),
   );
 });

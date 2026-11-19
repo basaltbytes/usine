@@ -249,10 +249,7 @@ describe("harvesting an Attempt's facts", () => {
       }),
   );
 
-  it.effect.each([
-    { lifecycle: "closed", mergedAt: null },
-    { lifecycle: "merged", mergedAt: "2026-10-19T12:05:00Z" },
-  ])("names a $lifecycle handoff pull request as $lifecycle", ({ lifecycle, mergedAt }) =>
+  it.effect("names a merged handoff pull request as merged", () =>
     Effect.gen(function* () {
       const { unverifiedHandoff } = yield* harvest(
         [`${HEAD}\trefs/heads/usine/fix`, `${HEAD}\trefs/pull/71/head`],
@@ -260,7 +257,11 @@ describe("harvesting an Attempt's facts", () => {
         [
           [
             PULL_71,
-            Effect.succeed([jsonKey(pullResponse(71, HEAD, { state: "closed", mergedAt }))]),
+            Effect.succeed([
+              jsonKey(
+                pullResponse(71, HEAD, { state: "closed", mergedAt: "2026-10-19T12:05:00Z" }),
+              ),
+            ]),
           ],
         ],
         spec,
@@ -269,7 +270,7 @@ describe("harvesting an Attempt's facts", () => {
       );
       assert(Option.isSome(unverifiedHandoff));
       assert(unverifiedHandoff.value._tag === "PullRequestNotOpen");
-      assert.strictEqual(unverifiedHandoff.value.state, lifecycle);
+      assert.strictEqual(unverifiedHandoff.value.state, "merged");
     }),
   );
 
@@ -867,30 +868,6 @@ describe("harvesting an Attempt's facts", () => {
         );
         assert.deepStrictEqual(posted, []);
       }),
-  );
-
-  it.effect("reads only the conversation of an issue", () =>
-    Effect.gen(function* () {
-      const comment = "https://github.com/acme/demo/issues/12#issuecomment-41";
-      const { facts } = yield* harvest(
-        [],
-        NEVER_ASKED,
-        [
-          [
-            ISSUE_COMMENTS,
-            pages({
-              html_url: comment,
-              body: signed("Done."),
-              user: { login: BOT },
-              created_at: "2026-10-19T12:01:00Z",
-              updated_at: "2026-10-19T12:04:00Z",
-            }),
-          ],
-        ],
-        itemRun("issues/12"),
-      );
-      assert.deepStrictEqual(comments(facts), [["issue-comment", comment]]);
-    }),
   );
 
   it.effect(

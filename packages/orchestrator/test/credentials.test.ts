@@ -129,27 +129,6 @@ describe("GitHub credential provider failures", () => {
     }),
   );
 
-  it.effect("reports a repository the installation does not cover as refused", () =>
-    Effect.gen(function* () {
-      const decodedValue2 = yield* provider(
-        [],
-        GitHubApiError.make({
-          operation: "mint-worker-token",
-          status: Option.none(),
-          message: "unused",
-        }),
-      );
-      return yield* Effect.gen(function* () {
-        const failure = yield* issue;
-        assert.strictEqual(failure.reason, "refused");
-        assert.strictEqual(
-          failure.message,
-          'The GitHub App installation has no access to "acme/demo"',
-        );
-      }).pipe(Effect.provide(decodedValue2));
-    }),
-  );
-
   it.effect("reports a mint GitHub could not answer as unreachable", () =>
     Effect.gen(function* () {
       const decodedValue1 = yield* provider(

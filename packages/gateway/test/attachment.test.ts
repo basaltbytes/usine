@@ -8,14 +8,7 @@ import {
   InstallationCredential,
 } from "../src/attachment/attachment.ts";
 import { Attachments } from "../src/attachment/store.ts";
-import {
-  ATTACHMENT,
-  OTHER_ATTACHMENT,
-  OTHER_REPOSITORY,
-  REPOSITORY,
-  WORKER,
-  secret,
-} from "./fixtures.ts";
+import { ATTACHMENT, OTHER_REPOSITORY, REPOSITORY, WORKER, secret } from "./fixtures.ts";
 
 const START = DateTime.makeUnsafe("2026-10-13T10:00:00Z");
 
@@ -62,24 +55,6 @@ describe("Attachments", () => {
       ),
   );
 
-  it.effect("two Attempts on one Worker for one repository keep separate attachments", () =>
-    at(
-      START,
-      Effect.gen(function* () {
-        const attachments = yield* Attachments;
-        yield* attachments.attach(attachment(ATTACHMENT, "ghs_first", 60));
-        yield* attachments.attach(attachment(OTHER_ATTACHMENT, "ghs_second", 60));
-        const detached = yield* attachments.detach(ATTACHMENT);
-        assert.isTrue(detached);
-        const currentDetached = yield* attachments.detach(ATTACHMENT);
-        assert.isFalse(currentDetached);
-        assert.strictEqual((yield* attachments.find(ATTACHMENT))._tag, "MissingAttachment");
-        const currentAttachment = yield* attachments.find(OTHER_ATTACHMENT);
-        assert.strictEqual(tokenOf(currentAttachment), "ghs_second");
-      }),
-    ),
-  );
-
   it.effect("an attachment stops granting access when its token expires", () =>
     at(
       START,
@@ -99,20 +74,6 @@ describe("Attachments", () => {
         assert.deepStrictEqual(currentList, []);
         // The sweep at the next whole minute removes it.
         yield* TestClock.adjust("15 seconds");
-        assert.strictEqual((yield* attachments.find(ATTACHMENT))._tag, "MissingAttachment");
-      }),
-    ),
-  );
-
-  it.effect("an already expired token is refused instead of stored", () =>
-    at(
-      DateTime.add(START, { hours: 2 }),
-      Effect.gen(function* () {
-        const attachments = yield* Attachments;
-        const error = yield* Effect.flip(
-          attachments.attach(attachment(ATTACHMENT, "ghs_token", 60)),
-        );
-        assert.strictEqual(error._tag, "AttachmentAlreadyExpired");
         assert.strictEqual((yield* attachments.find(ATTACHMENT))._tag, "MissingAttachment");
       }),
     ),

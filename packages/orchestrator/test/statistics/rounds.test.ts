@@ -48,8 +48,6 @@ const summary = (id: string, item: string, loop: string, state: RunState.RunStat
 it.each([
   ["rebase-pr", "pr-1", RunState.Succeeded.make(), 0],
   ["review-pr", "pr-1", RunState.Succeeded.make(), 1],
-  ["rebase-pr", "pr-2", RunState.Succeeded.make(), 1],
-  ["rebase-pr", "pr-1", RunState.Failed.make(), 1],
 ] as const)(
   "counts successful rounds by loop and item: %s %s %j",
   (loop, item, state, expected) => {

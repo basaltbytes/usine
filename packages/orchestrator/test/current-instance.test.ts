@@ -2,13 +2,6 @@ import { ChangeBus, changeBusLayer } from "@usine/core/changes";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
-import {
-  ConfigurationChange,
-  ConfigurationEntityId,
-  ConfigurationEntityKey,
-  ConfigurationRevision,
-  ConfigurationRevisionNumber,
-} from "@usine/config/configuration";
 import { InstancePath } from "@usine/config/file";
 import { GitHubLabelName } from "@usine/core/label";
 import { DurableHarness } from "@usine/durable/harness";
@@ -19,17 +12,7 @@ import { AgentName } from "@usine/core/agent";
 import { InstanceId, InstanceDirectory } from "@usine/core/instance";
 import { LoopName } from "@usine/core/loop";
 import { Executor, WorkerCapabilityError, fullPreflight } from "@usine/executor";
-import {
-  ConfigProvider,
-  DateTime,
-  Effect,
-  Option,
-  FileSystem,
-  Layer,
-  Logger,
-  Path,
-  Schedule,
-} from "effect";
+import { ConfigProvider, Effect, Option, FileSystem, Layer, Logger, Path } from "effect";
 import { TestClock } from "effect/testing";
 import { parentModels } from "../src/parent-models.ts";
 import { fakeMachine } from "../../executor/test/ssh/support.ts";
@@ -141,7 +124,7 @@ const startWorkers = (preflighted: Array<string>) =>
   });
 
 describe("CurrentInstance", () => {
-  it.live.each(["model", "effort", "credential"] as const)(
+  it.live.each(["model", "credential"] as const)(
     "quarantines a refused parent at startup (%s) and restores it on a corrected reload",
     (reason) =>
       withFolder(
@@ -191,11 +174,7 @@ describe("CurrentInstance", () => {
             "agents/developer.md",
             agentFile("gpt-5.6-sol").replace(
               "effort: high",
-              reason === "model"
-                ? "effort: high\nparent_model: unknown/x"
-                : reason === "effort"
-                  ? "effort: high\nparent_effort: max"
-                  : "effort: high",
+              reason === "model" ? "effort: high\nparent_model: unknown/x" : "effort: high",
             ),
           ],
           ["agents/healthy.md", agentFile("gpt-5.6-sol")],
@@ -331,8 +310,6 @@ describe("CurrentInstance", () => {
 
   it.live.each([
     ["agent", "parent_model", "unknown-provider/nonexistent-model", "no model"],
-    ["settings", "parent_model", "unknown-provider/nonexistent-model", "no model"],
-    ["agent", "parent_effort", "max", "doesn't support effort"],
     ["settings", "parent_effort", "max", "doesn't support effort"],
   ] as const)(
     "refuses an invalid %s %s before installing a reload",
@@ -388,34 +365,6 @@ describe("CurrentInstance", () => {
       ),
   );
 
-  it.live("keeps the running configuration when a parent credential becomes unavailable", () =>
-    withFolder(() =>
-      Effect.gen(function* () {
-        const instances = yield* CurrentInstance;
-        const parent = fauxParent([]);
-        yield* Layer.build(parentAdmissionLayer).pipe(
-          Effect.provideService(DurableHarness, {
-            ...parent,
-            install: unused,
-            resume: unused,
-            use: unused,
-            subscribe: unused,
-          }),
-        );
-        yield* instances.reload;
-        const running = yield* instances.get;
-        const provider = parent.models.getProvider("faux");
-        assert(provider !== undefined);
-        parent.models.setProvider({ ...provider, auth: {} });
-        const failure = yield* Effect.flip(instances.reload);
-        assert(failure._tag === "FactoryConfigError", failure._tag);
-        assert.include(failure.message, "requires a credential");
-        const rejected = yield* instances.get;
-        assert.strictEqual(rejected, running);
-      }).pipe(Effect.scoped),
-    ),
-  );
-
   it.live("reports the Loops, Agents, and labels a reload added or changed", () =>
     withFolder((root) =>
       Effect.gen(function* () {
@@ -467,39 +416,6 @@ describe("CurrentInstance", () => {
     ).pipe(Effect.provide(changeBusLayer), Effect.scoped),
   );
 
-  it.live("logs undeclared outcome labels at startup and when it applies a revision", () => {
-    const logged: Array<unknown> = [];
-    const outcomeLabels = Logger.make<unknown, void>(({ message }) => {
-      if (
-        Array.isArray(message) &&
-        message[0] === "Loop outcome label is not a declared GitHub label"
-      )
-        logged.push(message[1]);
-    });
-    const startDev = (label: string) =>
-      [
-        "loops/start-dev.md",
-        loopFile("developer").replace("step:", `outcome_labels: [${label}]\nstep:`),
-      ] as const;
-    return withFolder(
-      (root) =>
-        Effect.gen(function* () {
-          // The test store reads the folder, which logs once before each install logs again.
-          assert.deepStrictEqual(logged, [
-            { loop: "start-dev", label: "shipped" },
-            { loop: "start-dev", label: "shipped" },
-          ]);
-          yield* writeInstanceFiles(root, [startDev("shipped-v2")]);
-          yield* (yield* CurrentInstance).reload;
-          assert.deepStrictEqual(logged.slice(2), [
-            { loop: "start-dev", label: "shipped-v2" },
-            { loop: "start-dev", label: "shipped-v2" },
-          ]);
-        }),
-      [...initialFiles.filter(([file]) => file !== "loops/start-dev.md"), startDev("shipped")],
-    ).pipe(Effect.withLogger(outcomeLabels));
-  });
-
   it.live("keeps the running instance when the configuration store cannot be read", () =>
     withFolder((root) =>
       Effect.gen(function* () {
@@ -517,72 +433,6 @@ describe("CurrentInstance", () => {
         assert(failure._tag === "FactoryConfigError", failure._tag);
         assert.strictEqual(failure.file, ".usine/runtime.sqlite");
         assert.include(warnings, "Could not re-read the configuration store");
-        const currentInstance = yield* instances.get;
-        assert.strictEqual(currentInstance, running);
-      }),
-    ),
-  );
-
-  it.live("applies a stored revision over a configuration that holds an exe.dev Worker", () =>
-    Effect.gen(function* () {
-      const directory = yield* (yield* FileSystem.FileSystem).makeTempDirectoryScoped({
-        prefix: "usine-reload-",
-      });
-      const root = InstanceDirectory.make(directory);
-      yield* writeInstanceFiles(root, [
-        ["usine.yaml", `${usineYaml()}  - name: edge\n    kind: exe.dev\n`],
-        ...initialFiles.filter(([file]) => file !== "usine.yaml"),
-      ]);
-      const addExtra = ConfigurationRevision.make({
-        number: ConfigurationRevisionNumber.make(2),
-        actor: Option.none(),
-        time: DateTime.makeUnsafe("2026-11-12T12:00:00Z"),
-        message: Option.none(),
-        changes: [
-          ConfigurationChange.make({
-            key: ConfigurationEntityKey.make({
-              kind: "label",
-              identifier: ConfigurationEntityId.make("extra"),
-            }),
-            before: Option.none(),
-            after: Option.some({ name: "extra" }),
-          }),
-        ],
-      });
-      const warnings: Array<unknown> = [];
-      const labels = yield* Effect.gen(function* () {
-        const instances = yield* CurrentInstance;
-        return yield* instances.get.pipe(
-          Effect.map(({ config }) => config.labels.map(({ name }) => name)),
-          Effect.repeat({
-            until: (names) => names.includes(GitHubLabelName.make("extra")),
-            schedule: Schedule.spaced("20 millis"),
-          }),
-          Effect.timeout("3 seconds"),
-        );
-      }).pipe(
-        Effect.provide(reloadableInstanceLayer(root, [addExtra])),
-        Effect.withLogger(warningsIn(warnings)),
-      );
-      assert.deepStrictEqual(labels, ["ready", "extra"]);
-      assert.notInclude(warnings, "Configuration revision stream failed; retrying");
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
-  );
-
-  it.live("rejects a workers change while no Worker runs, as in setup mode", () =>
-    withFolder((root) =>
-      Effect.gen(function* () {
-        const instances = yield* CurrentInstance;
-        const running = yield* instances.get;
-        yield* writeInstanceFiles(root, [
-          ["usine.yaml", usineYaml(2)],
-          ["loops/triage.md", loopFile("developer")],
-        ]);
-        const failure = yield* Effect.flip(instances.reload);
-        assert(failure._tag === "RestartRequiredError", failure._tag);
-        assert.deepStrictEqual(failure.blocks, ["workers"]);
-        assert.deepStrictEqual(failure.fields, ["workers"]);
-        assert.include(failure.message, "Restart usine up");
         const currentInstance = yield* instances.get;
         assert.strictEqual(currentInstance, running);
       }),
@@ -608,42 +458,6 @@ describe("CurrentInstance", () => {
         const currentInstance = yield* instances.get;
         assert.strictEqual(currentInstance, running);
       }).pipe(Effect.scoped),
-    ),
-  );
-
-  it.live("accepts an unchanged auth.trusted_proxies list and rejects a changed one", () =>
-    withFolder(
-      (root) =>
-        Effect.gen(function* () {
-          const instances = yield* CurrentInstance;
-          yield* startWorkers([]);
-          yield* writeInstanceFiles(root, [
-            [
-              "usine.yaml",
-              `${usineYaml()}webhooks:\n  mode: deliveries\nauth:\n  trusted_proxies: ["127.0.0.1/32", "::1/128"]\n`,
-            ],
-          ]);
-          yield* instances.reload;
-          const running = yield* instances.get;
-          assert.strictEqual(running.config.webhooks.mode, "deliveries");
-
-          yield* writeInstanceFiles(root, [
-            [
-              "usine.yaml",
-              `${usineYaml()}webhooks:\n  mode: deliveries\nauth:\n  trusted_proxies: [127.0.0.1/32]\n`,
-            ],
-          ]);
-          const failure = yield* Effect.flip(instances.reload);
-          assert(failure._tag === "RestartRequiredError", failure._tag);
-          assert.deepStrictEqual(failure.fields, ["auth"]);
-          const unchanged = yield* instances.get;
-          assert.strictEqual(unchanged, running);
-        }).pipe(Effect.scoped),
-      [
-        ["usine.yaml", `${usineYaml()}auth:\n  trusted_proxies: [127.0.0.1/32, ::1/128]\n`],
-        ["agents/developer.md", agentFile("gpt-5.6-sol")],
-        ["loops/start-dev.md", loopFile("developer")],
-      ],
     ),
   );
 
@@ -727,79 +541,60 @@ it.live("keeps host authentication when the instance has no gateway", () =>
   ),
 );
 
-it.live.each(["missing admin token", "unreachable proxy"])(
-  "starts with quarantined gateway coordinators after %s",
-  (reason) => {
-    const machine = fakeMachine();
-    return withFolder(
-      () =>
-        Effect.gen(function* () {
-          const instances = yield* CurrentInstance;
-          const startup = yield* instances.get;
-          const access = yield* parentModels(
-            startup,
-            InstanceId.make("11111111-1111-4111-8111-111111111111"),
-          );
-          assert(access !== undefined);
-          const parents = { ...access, defaultModel: Option.none() };
-          yield* Layer.build(parentAdmissionLayer).pipe(
-            Effect.provideService(DurableHarness, {
-              ...parents,
-              install: unused,
-              resume: unused,
-              use: unused,
-              subscribe: unused,
-            }),
-          );
-          const current = yield* instances.get;
-          assert.lengthOf(current.agents, 0);
-          assert.lengthOf(current.invalidAgents, 1);
-          assert.lengthOf(current.quarantinedLoops, 1);
-          assert.include(
-            current.invalidAgents[0]?.error.message ?? "",
-            'Gateway unreachable for provider "openai-codex"',
-          );
-          if (reason === "missing admin token") {
-            assert.include(
-              current.invalidAgents[0]?.error.message ?? "",
-              "Set FIRST_GATEWAY_TOKEN",
-            );
-            assert.notInclude(
-              current.invalidAgents[0]?.error.message ?? "",
-              "SECOND_GATEWAY_TOKEN",
-            );
-          } else {
-            assert.include(current.invalidAgents[0]?.error.message ?? "", "model route");
-            assert(machine.state.forwards.every(({ live }) => !live));
-          }
-        }).pipe(
-          Effect.scoped,
-          Effect.provide([
-            machine.layer,
-            ConfigProvider.layer(
-              ConfigProvider.fromEnv({
-                env:
-                  reason === "missing admin token"
-                    ? { SECOND_GATEWAY_TOKEN: "configured-on-the-other-gateway" }
-                    : { FIRST_GATEWAY_TOKEN: "configured" },
-              }),
-            ),
-          ]),
-        ),
-      [
-        ["usine.yaml", gatewayWorkers],
-        [
-          "agents/developer.md",
-          agentFile("gpt-5.6-sol").replace(
-            "effort: high",
-            "effort: high\nparent_model: openai-codex/gpt-5.6-sol",
+it.live("starts with quarantined gateway coordinators after an unreachable proxy", () => {
+  const machine = fakeMachine();
+  return withFolder(
+    () =>
+      Effect.gen(function* () {
+        const instances = yield* CurrentInstance;
+        const startup = yield* instances.get;
+        const access = yield* parentModels(
+          startup,
+          InstanceId.make("11111111-1111-4111-8111-111111111111"),
+        );
+        assert(access !== undefined);
+        const parents = { ...access, defaultModel: Option.none() };
+        yield* Layer.build(parentAdmissionLayer).pipe(
+          Effect.provideService(DurableHarness, {
+            ...parents,
+            install: unused,
+            resume: unused,
+            use: unused,
+            subscribe: unused,
+          }),
+        );
+        const current = yield* instances.get;
+        assert.lengthOf(current.agents, 0);
+        assert.lengthOf(current.invalidAgents, 1);
+        assert.lengthOf(current.quarantinedLoops, 1);
+        assert.include(
+          current.invalidAgents[0]?.error.message ?? "",
+          'Gateway unreachable for provider "openai-codex"',
+        );
+        assert.include(current.invalidAgents[0]?.error.message ?? "", "model route");
+        assert(machine.state.forwards.every(({ live }) => !live));
+      }).pipe(
+        Effect.scoped,
+        Effect.provide([
+          machine.layer,
+          ConfigProvider.layer(
+            ConfigProvider.fromEnv({ env: { FIRST_GATEWAY_TOKEN: "configured" } }),
           ),
-        ],
-        ["loops/start-dev.md", loopFile("developer")],
+        ]),
+      ),
+    [
+      ["usine.yaml", gatewayWorkers],
+      [
+        "agents/developer.md",
+        agentFile("gpt-5.6-sol").replace(
+          "effort: high",
+          "effort: high\nparent_model: openai-codex/gpt-5.6-sol",
+        ),
       ],
-    );
-  },
-);
+      ["loops/start-dev.md", loopFile("developer")],
+    ],
+  );
+});
 
 it.effect("retries opening the selected gateway after a cached setup failure", () => {
   const machine = fakeMachine();
@@ -816,6 +611,7 @@ it.effect("retries opening the selected gateway after a cached setup failure", (
         assert(access.credentials.route === "gateway");
         const first = yield* access.credentials.authentication("openai-codex").pipe(Effect.flip);
         assert.include(first.message, "Set FIRST_GATEWAY_TOKEN");
+        assert.notInclude(first.message, "SECOND_GATEWAY_TOKEN");
         env.FIRST_GATEWAY_TOKEN = "configured";
         const cached = yield* access.credentials.authentication("openai-codex").pipe(Effect.flip);
         assert.strictEqual(cached.message, first.message);

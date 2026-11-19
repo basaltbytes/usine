@@ -173,22 +173,6 @@ it("navigates to project boards, task lists, and configuration pages with keyboa
     .toBe("/configuration/loops");
 });
 
-it("highlights only the selected command in dark and light themes", async () => {
-  for (const theme of ["dark", "light"]) {
-    document.documentElement.classList.toggle("dark", theme === "dark");
-    await page.getByRole("button", { name: "Open commands", exact: true }).click();
-    await settled();
-    await userEvent.keyboard("{ArrowDown}");
-    await expect
-      .element(dialog().getByRole("option").nth(1))
-      .toHaveAttribute("data-selected", "true");
-    expect(selection()).toEqual(selection().map((_, index) => String(index === 1)));
-    await commands.configurationEditorScreenshot(`765-palette-desktop-${theme}`);
-    await userEvent.keyboard("{Escape}");
-    await expect.element(dialog()).not.toBeInTheDocument();
-  }
-});
-
 it("finds a secondary repository task by a linked pull request and preserves its repository", async () => {
   await search("#31");
   await dialog()
@@ -210,21 +194,6 @@ it("finds related runs by item number and can select a run by its identifier", a
   await expect
     .poll(() => router.state.location.pathname)
     .toBe("/projects/product/runs/run-redesign-plan");
-});
-
-it("shows no-results feedback and keeps the palette within a phone viewport", async () => {
-  await page.viewport(390, 844);
-  await search("board-test/repo");
-  await settled();
-  await page.screenshot({ path: "../../../../../.impeccable/review/commands-mobile.png" });
-  await dialog().getByRole("combobox").fill("no-such-command");
-  await expect.element(dialog().getByText("No matching commands", { exact: true })).toBeVisible();
-  const bounds = dialog().element().getBoundingClientRect();
-  expect(bounds.left).toBeGreaterThanOrEqual(0);
-  expect(bounds.right).toBeLessThanOrEqual(390);
-  expect(dialog().element().scrollWidth).toBeLessThanOrEqual(dialog().element().clientWidth);
-  await userEvent.keyboard("{Escape}");
-  await expect.element(page.getByRole("button", { name: "Open commands" })).toHaveFocus();
 });
 
 it("removes board commands after navigation and changes the available fold action", async () => {

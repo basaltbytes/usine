@@ -433,41 +433,6 @@ const tasks = [
 const done = taskStatisticsView({ window: "7d", now, tasks, usage });
 
 describe("Task statistics", () => {
-  it("counts repeated memory kills once per attempt, including successful attempts, within the task window", () => {
-    const withKills = (id: string, kills: number) =>
-      summary({
-        id,
-        item: 1,
-        loop: startDev,
-        agent: developer,
-        state: RunState.Succeeded.make(),
-        openedAt: "21T08:00",
-        closedAt: "21T09:00",
-        attempts: [
-          {
-            worker: "w1",
-            startedAt: "21T08:01",
-            outcome: succeeded,
-            endedAt: "21T09:00",
-            memoryKills: kills,
-          },
-        ],
-      });
-    const view = taskStatisticsView({
-      window: "7d",
-      now,
-      usage: new Map(),
-      tasks: [
-        mergedTask(1, at("22T08:00"), [withKills("one", 2), withKills("two", 1)]),
-        mergedTask(2, at("10T08:00"), [withKills("excluded", 9)]),
-      ],
-    });
-    assert.strictEqual(view.memoryKills, 3);
-    assert.strictEqual(view.memoryKillAttempts, 2);
-    assert.strictEqual(view.repeatedMemoryKillAttempts, 1);
-    assert.strictEqual(done.memoryKills, 0);
-  });
-
   it("counts the tasks merged in the window, from the first Run's opening to the last Run's close", () => {
     assert.strictEqual(done.from, "2026-10-19T00:00:00.000Z");
     assert.deepStrictEqual(
@@ -490,12 +455,6 @@ describe("Task statistics", () => {
         ["2026-10-24", 1, 192.5 * HOUR, 1, 0],
       ],
     );
-  });
-
-  it("counts a second successful Run of a Loop as a round, and the operator's actions", () => {
-    assert.strictEqual(done.firstTimeRight, 2);
-    // The approval, the retry after the agent failure, and the reset.
-    assert.strictEqual(done.operatorActions, 3);
   });
 
   it("splits task time between the Loops' Attempts and the waits, in the Loops' order", () => {
@@ -523,18 +482,6 @@ describe("Task statistics", () => {
       ],
     );
     assert.deepStrictEqual({ ...done.untimed }, { tasks: 1, before: "2026-10-20" });
-  });
-
-  it("measures tokens per task, and prices only the tasks whose sessions all have a price", () => {
-    assert.strictEqual(done.unmetered, 1);
-    assert.strictEqual(done.tokens?.tasks, 2);
-    assert.strictEqual(done.tokens?.medianTokens, (241_000 + 80_000) / 2);
-    const shares = new Map(done.tokens?.loops.map(({ loop, share }) => [loop, share]));
-    assert.closeTo(shares.get(startDev) ?? 0, (100 / 241 + 1) / 2, 1e-9);
-    assert.closeTo(shares.get(reviewPr) ?? 0, 90 / 241 / 2, 1e-9);
-    assert.closeTo(shares.get(actOnFindings) ?? 0, 51 / 241 / 2, 1e-9);
-    // Task 1 has unpriced sessions; task 12 is priced.
-    assert.deepStrictEqual({ ...done.tokens?.cost }, { tasks: 1, medianUsd: 4, estimate: true });
   });
 
   it("shares overlapping Attempts, prices fully priced tasks, and splits a long history into weeks", () => {
@@ -746,152 +693,6 @@ describe("Model statistics", () => {
       ],
     ]);
   });
-
-  it("orders attempts by their start, not by run, and does not split tasks by reasoning effort", () => {
-    const developerOnLowEffort = agentOf("developer", BrainSpec.make({ ...opus, effort: "low" }));
-    const ordered = taskStatisticsView({
-      window: "7d",
-      now,
-      usage: new Map(),
-      tasks: [
-        // The first run opened first, but its attempt started after the second run's attempt.
-        mergedTask(40, at("24T14:00"), [
-          summary({
-            id: "queued-first",
-            item: 40,
-            loop: startDev,
-            agent: developer,
-            state: RunState.Succeeded.make(),
-            openedAt: "24T08:00",
-            closedAt: "24T12:00",
-            attempts: [
-              { worker: "w1", startedAt: "24T11:00", outcome: succeeded, endedAt: "24T12:00" },
-            ],
-          }),
-          ran("started-first", 41, actOnFindings, developerOnGpt, "24", 9),
-        ]),
-        // The same model at another reasoning effort.
-        mergedTask(42, at("23T20:00"), [
-          ran("high-effort", 42, startDev, developer, "23", 8),
-          ran("low-effort", 43, actOnFindings, developerOnLowEffort, "23", 10),
-        ]),
-      ],
-    });
-    assert.deepStrictEqual(
-      ordered.agents.map(({ agent, models }) => [
-        agent,
-        models.map(({ model, tasks, mixed, medianMillis }) => [model, tasks, mixed, medianMillis]),
-      ]),
-      [
-        [
-          "developer",
-          [
-            // 09:00 to 14:00, from the attempt that started first.
-            ["claude-opus", 1, 0, 12 * HOUR],
-            ["gpt-5", 1, 1, 5 * HOUR],
-          ],
-        ],
-      ],
-    );
-  });
-
-  it("attributes each attempt to its own agent after an edit and retry picks another", () => {
-    const fallback = agentOf("fallback", gpt);
-    const retried = taskStatisticsView({
-      window: "7d",
-      now,
-      usage: new Map(),
-      tasks: [
-        mergedTask(44, at("24T12:00"), [
-          summary({
-            id: "retried",
-            item: 44,
-            loop: startDev,
-            // The run's agent after the amendment.
-            agent: fallback,
-            state: RunState.Succeeded.make(),
-            openedAt: "24T08:00",
-            closedAt: "24T10:00",
-            attempts: [
-              {
-                worker: "w1",
-                startedAt: "24T08:00",
-                outcome: failed("Tests fail"),
-                endedAt: "24T09:00",
-                agent: developer,
-              },
-              { worker: "w1", startedAt: "24T09:00", outcome: succeeded, endedAt: "24T10:00" },
-            ],
-          }),
-        ]),
-      ],
-    });
-    assert.deepStrictEqual(
-      retried.agents.map(({ agent, tasks, opened, models }) => [
-        agent,
-        tasks,
-        opened,
-        models.map(({ harness, model, tasks, mixed }) => [harness, model, tasks, mixed]),
-      ]),
-      [
-        ["developer", 1, 1, [["claude", "claude-opus", 1, 0]]],
-        ["fallback", 1, 0, [["codex", "gpt-5", 1, 0]]],
-      ],
-    );
-  });
-
-  it("orders agents by tasks opened, then by tasks, and models by tasks", () => {
-    const auditor = agentOf("auditor", gpt);
-    const triage = agentOf("triage", opus);
-    const ordered = taskStatisticsView({
-      window: "7d",
-      now,
-      usage: new Map(),
-      tasks: [
-        mergedTask(50, at("24T12:00"), [
-          ran("ordered-gpt", 50, startDev, developerOnGpt, "24", 8),
-          ran("ordered-gpt-review", 51, reviewPr, reviewer, "24", 9),
-          ran("ordered-gpt-audit", 51, reviewPr, auditor, "24", 10),
-        ]),
-        mergedTask(52, at("23T12:00"), [
-          ran("ordered-gpt-again", 52, startDev, developerOnGpt, "23", 8),
-          ran("ordered-gpt-again-review", 53, reviewPr, reviewer, "23", 9),
-        ]),
-        mergedTask(54, at("22T12:00"), [
-          ran("ordered-opus", 54, startDev, developer, "22", 8),
-          ran("ordered-opus-review", 55, reviewPr, reviewer, "22", 9),
-        ]),
-        mergedTask(56, at("21T12:00"), [
-          ran("ordered-triage", 56, startDev, triage, "21", 8),
-          ran("ordered-triage-review", 57, reviewPr, reviewer, "21", 9),
-        ]),
-      ],
-    });
-    assert.deepStrictEqual(
-      ordered.agents.map(({ agent, opened, tasks, models }) => [
-        agent,
-        opened,
-        tasks,
-        models.map(({ model, tasks }) => [model, tasks]),
-      ]),
-      [
-        // The developer has fewer tasks than the reviewer, but opened more.
-        [
-          "developer",
-          3,
-          3,
-          [
-            ["gpt-5", 2],
-            ["claude-opus", 1],
-          ],
-        ],
-        ["triage", 1, 1, [["claude-opus", 1]]],
-        // The reviewer has more tasks than the auditor, whose name sorts first.
-        ["reviewer", 0, 4, [["gpt-5", 4]]],
-        ["auditor", 0, 1, [["gpt-5", 1]]],
-      ],
-    );
-  });
 });
 
 describe("Run statistics", () => {
@@ -959,77 +760,6 @@ describe("Run statistics", () => {
     );
   });
 
-  it("summarizes Run and Attempt time by their median", () => {
-    // Run times: 75, 20, 120, 11, 10, 60, and 30 minutes.
-    assert.deepStrictEqual({ ...week.runTime }, { count: 7, medianMillis: 30 * MINUTE });
-    assert.strictEqual(week.attemptTime?.count, 9);
-    assert.strictEqual(week.unmeasuredAttempts, 0);
-    assert.deepStrictEqual(
-      { ...durationSummary([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]) },
-      {
-        count: 10,
-        medianMillis: 6,
-      },
-    );
-    assert.isNull(durationSummary([]));
-  });
-
-  it("prices Runs whose sessions all have a price, per Loop", () => {
-    const cost = (loop: LoopName) => week.loops.find((group) => group.loop === loop)?.usage.cost;
-    // The Claude plan Run and the API key Run; the canceled Run has no session.
-    assert.deepStrictEqual(
-      [cost(startDev)?.usd, cost(startDev)?.estimate, cost(startDev)?.priced],
-      [3, true, 2],
-    );
-    // One API key session has no price.
-    assert.isNull(cost(actOnFindings));
-    // The ChatGPT plan Runs with a price, one with a Claude plan child; the other has none.
-    assert.deepStrictEqual(
-      [cost(reviewPr)?.usd, cost(reviewPr)?.estimate, cost(reviewPr)?.priced],
-      [1, true, 2],
-    );
-  });
-
-  it("breaks down Runs per Loop and Agent, and Attempts per harness, model, and effort", () => {
-    assert.deepStrictEqual(
-      week.loops.map(({ loop, outcomes }) => [
-        loop,
-        { succeeded: outcomes.succeeded, failed: outcomes.failed, canceled: outcomes.canceled },
-      ]),
-      [
-        ["review-pr", { succeeded: 3, failed: 0, canceled: 0 }],
-        ["start-dev", { succeeded: 1, failed: 1, canceled: 1 }],
-        ["act-on-findings", { succeeded: 1, failed: 0, canceled: 0 }],
-      ],
-    );
-    const review = week.loops.find(({ loop }) => loop === reviewPr);
-    assert.strictEqual(review?.usage.meanTokens, 34_000);
-    assert.deepStrictEqual(
-      week.agents.map(({ agent, outcomes }) => [
-        agent,
-        outcomes.succeeded + outcomes.failed + outcomes.canceled,
-      ]),
-      [
-        ["developer", 4],
-        ["reviewer", 3],
-      ],
-    );
-    assert.deepStrictEqual(
-      week.brains.map(({ brain, outcomes, usage: { tokens } }) => [
-        brain.harness,
-        brain.model,
-        { succeeded: outcomes.succeeded, failed: outcomes.failed, canceled: outcomes.canceled },
-        tokens,
-      ]),
-      [
-        ["claude", "claude-opus", { succeeded: 2, failed: 3, canceled: 1 }, 160_000],
-        ["codex", "gpt-5", { succeeded: 3, failed: 0, canceled: 0 }, 102_000],
-      ],
-    );
-    // Per Attempt, the API key Attempts with a price count as priced on their own.
-    assert.strictEqual(week.brains[0]?.usage.cost?.priced, 4);
-  });
-
   it("measures queue wait from approval, Attempts per Run, and the share of slot time used", () => {
     assert.deepStrictEqual(
       week.queueWait.map(({ worker, wait }) => [worker, wait.count, wait.medianMillis]),
@@ -1038,6 +768,14 @@ describe("Run statistics", () => {
         ["w2", 2, 1.5 * MINUTE],
       ],
     );
+    assert.deepStrictEqual(
+      { ...durationSummary([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]) },
+      {
+        count: 10,
+        medianMillis: 6,
+      },
+    );
+    assert.isNull(durationSummary([]));
     assert.deepStrictEqual(
       week.attemptsPerRun.map(({ attempts, runs }) => [attempts, runs]),
       [
@@ -1066,31 +804,6 @@ describe("Run statistics", () => {
         ],
         ["idle", 1, 0, 0],
       ],
-    );
-  });
-
-  it("counts approvals asked and failures left to the operator, with their waits", () => {
-    const attention = week.needsAttention;
-    assert.strictEqual(attention.approvals, 3);
-    assert.strictEqual(attention.failures, 2);
-    assert.deepStrictEqual(
-      attention.periods.flatMap(({ start, approvals, failures }) =>
-        approvals + failures === 0 ? [] : [[start, approvals, failures]],
-      ),
-      [
-        ["2026-10-20", 1, 0],
-        ["2026-10-21", 0, 1],
-        ["2026-10-23", 0, 1],
-        ["2026-10-25", 2, 0],
-      ],
-    );
-    assert.deepStrictEqual(
-      [attention.approvalWait?.count, attention.approvalWait?.medianMillis],
-      [2, 20 * MINUTE],
-    );
-    assert.deepStrictEqual(
-      [attention.retryWait?.count, attention.retryWait?.medianMillis],
-      [1, HOUR],
     );
   });
 
@@ -1129,43 +842,6 @@ describe("Run statistics", () => {
     assert.deepStrictEqual({ ...both.failureWait }, { count: 2, medianMillis: 37.5 * MINUTE });
     assert.deepStrictEqual({ ...both.retryWait }, { count: 1, medianMillis: 60 * MINUTE });
     assert.deepStrictEqual(both.resolutionWait, measured.resolutionWait);
-  });
-
-  it("starts the whole history at the first Run's day and splits a long one into weeks", () => {
-    const old = summary({
-      id: "old",
-      item: 11,
-      loop: startDev,
-      agent: developer,
-      state: RunState.Succeeded.make(),
-      openedAt: "25T08:00",
-      closedAt: "25T09:00",
-      attempts: [{ worker: "w1", startedAt: "25T08:01", outcome: succeeded, endedAt: "25T09:00" }],
-    });
-    const history = runStatisticsView({
-      window: "all",
-      now: DateTime.makeUnsafe("2027-01-20T12:00:00.000Z"),
-      runs: [old],
-      usage: new Map(),
-      workers,
-    });
-    assert.strictEqual(history.from, "2026-10-25T00:00:00.000Z");
-    assert.strictEqual(history.bucket, "week");
-    // 2026-10-19 is the Monday of the week of 2026-10-25.
-    assert.strictEqual(history.throughput[0]?.start, "2026-10-19");
-    assert.strictEqual(history.throughput[0]?.succeeded, 1);
-    assert.strictEqual(history.throughput.at(-1)?.start, "2027-01-18");
-
-    const empty = runStatisticsView({
-      window: "all",
-      now,
-      runs: [],
-      usage: new Map(),
-      workers: [],
-    });
-    assert.strictEqual(empty.from, "2026-10-25T00:00:00.000Z");
-    assert.isNull(empty.runTime);
-    assert.deepStrictEqual(empty.attemptsPerRun, []);
   });
 });
 

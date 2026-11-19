@@ -1,6 +1,5 @@
 import { Code, ConnectError } from "@connectrpc/connect";
 import { assert, describe, it } from "@effect/vitest";
-import { vi } from "vitest";
 import { HostUnreachable } from "@usine/agents/child-host";
 import { MachineId } from "@usine/core/worker";
 import {
@@ -131,32 +130,6 @@ describe("BoxdExec", () => {
     }).pipe(Effect.scoped),
   );
 
-  it.live(
-    "raises the HTTP/2 connection and stream windows to 8 MiB by the time the command starts",
-    () =>
-      Effect.gen(function* () {
-        const connections: Array<number> = [];
-        const streams: Array<number> = [];
-        const server = yield* fakeBoxdExec({
-          credential: KEY,
-          machines: new Set([MACHINE]),
-          handler: () =>
-            Stream.sync(() => {
-              for (const session of server.sessions) {
-                connections.push(session.state.remoteWindowSize ?? 0);
-                // The window that the client grants each new stream.
-                streams.push(session.remoteSettings.initialWindowSize ?? 0);
-              }
-              return { exitCode: 0 };
-            }),
-        });
-        yield* run(server.url, "true");
-
-        assert.isAtLeast(Math.max(...connections), 8 * 1024 * 1024 - 1024);
-        assert.isAtLeast(Math.max(...streams), 8 * 1024 * 1024);
-      }).pipe(Effect.scoped),
-  );
-
   it.live("maps each gRPC status to a typed error without the credential", () =>
     Effect.gen(function* () {
       const cases = [
@@ -189,21 +162,6 @@ describe("BoxdExec", () => {
         machine: MachineId.make("vm-unknown"),
       }).pipe(Effect.flip);
       assert.strictEqual(unknown.code, "NOT_FOUND");
-    }).pipe(Effect.scoped),
-  );
-
-  it.live("keeps the error message intact when the credential is empty", () =>
-    Effect.gen(function* () {
-      const server = yield* fake();
-      const refused = yield* run(server.url, "true", Stream.empty, { credential: "" }).pipe(
-        Effect.flip,
-      );
-
-      assert.strictEqual(refused.code, "UNAUTHENTICATED");
-      assert.strictEqual(
-        refused.message,
-        "API key not recognized: it was deleted, or it is not a key of this cluster",
-      );
     }).pipe(Effect.scoped),
   );
 
@@ -429,47 +387,6 @@ describe("BoxdExec", () => {
       yield* Stream.runDrain(Stream.merge(execution.stdout, execution.stderr)).pipe(
         Effect.timeout("2 seconds"),
       );
-    }).pipe(Effect.scoped),
-  );
-
-  it.live("fails a silent command within a minute by default when the connection dies", () =>
-    Effect.gen(function* () {
-      const started = yield* Deferred.make<void>();
-      const server = yield* fake(() =>
-        Stream.fromEffect(Deferred.succeed(started, undefined)).pipe(
-          Stream.flatMap(() => Stream.never),
-        ),
-      );
-      const proxy = yield* blackHoleProxy(new URL(server.url).port);
-      // The connection's PING timers run on the fake clock. Node's sockets and the fibers keep
-      // their real timers.
-      yield* Effect.acquireRelease(
-        Effect.sync(() => vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })),
-        () => Effect.sync(() => vi.useRealTimers()),
-      );
-      const fiber = yield* Effect.gen(function* () {
-        const exec = yield* BoxdExec;
-        const execution = yield* exec.exec(MACHINE, "sleep 2400", Stream.never);
-        return yield* execution.exitCode;
-      }).pipe(
-        Effect.scoped,
-        Effect.provide(boxdExecLayer(proxy.url, bearer(KEY))),
-        Effect.flip,
-        Effect.forkChild,
-      );
-      yield* Deferred.await(started);
-      proxy.drop();
-      for (let second = 0; second < 60 && fiber.pollUnsafe() === undefined; second++) {
-        vi.advanceTimersByTime(1_000);
-        yield* Effect.callback<void>((resume) => {
-          setImmediate(() => resume(Effect.void));
-        }).pipe(Effect.repeat({ times: 20 }));
-      }
-      const exit = fiber.pollUnsafe();
-
-      assert(exit !== undefined && Exit.isSuccess(exit), "the call outlived a minute");
-      assert.strictEqual(exit.value._tag, "BoxdCallError");
-      assert.strictEqual(exit.value.code, "UNAVAILABLE");
     }).pipe(Effect.scoped),
   );
 

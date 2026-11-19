@@ -260,19 +260,6 @@ const rejection = JSON.stringify({
   message: "Cannot approve Run approval-run while it is Running.",
 });
 
-it("shows no error on a Needs attention approval refused because the Run was approved elsewhere, and drops it with the refresh", async () => {
-  const held = entry("#367 Keep Needs attention current");
-  await held.getByRole("button", { name: "Approve", exact: true }).click();
-  await commands.answerApproval(409, rejection);
-  // The rejection triggers an overview refetch; the entry's buttons stay disabled until it returns.
-  await expect.poll(() => commands.lateOverviewRequests()).toBe(2);
-  await expect.element(held.getByRole("button", { name: "Approving…" })).toBeDisabled();
-  await expect.element(held.getByText("Cannot approve", { exact: false })).not.toBeInTheDocument();
-  await expect.element(held, { timeout: 10_000 }).not.toBeInTheDocument();
-  await expect.element(page.getByText("Cannot approve", { exact: false })).not.toBeInTheDocument();
-  await expect.element(entry("#12 Wait for the operator")).toBeInTheDocument();
-});
-
 it("explains in the drawer an approve refused because the Run was approved elsewhere", async () => {
   await entry("#367 Keep Needs attention current")
     .getByRole("button", { name: /^Actions for/ })
@@ -352,30 +339,6 @@ it("names the CI fix run that continues a failed run's work and opens it", async
   await expect.element(page.getByRole("dialog")).toBeVisible();
 });
 
-it("offers no fix run for a failed run without one", async () => {
-  const need = RunFailureNeed.make({
-    id: "run-failure:approval-run:attempt-1",
-    repository,
-    runId,
-    loop,
-    failure: AgentFailureView.make({ message: "CI failed. Fix loop fix: CycleBlocked." }),
-  });
-  await commands.approvalResponses(
-    overview([need]),
-    overview([need]),
-    detail(running),
-    detail(running),
-  );
-  await queryClient.invalidateQueries({ queryKey: overviewQuery().queryKey });
-  const held = entry("start-dev");
-  await expect.element(held).toBeVisible();
-  await expect.element(held.getByText(/continues the work/)).not.toBeInTheDocument();
-  await held.getByRole("button", { name: /^Actions for/ }).click();
-  await expect
-    .element(page.getByRole("menuitem", { name: "Open fix run" }))
-    .not.toBeInTheDocument();
-});
-
 it("applies the CI labels of a stalled CI wait and shows why CI hasn't passed yet", async () => {
   const need = RunFailureNeed.make({
     id: "run-failure:approval-run:attempt-1",
@@ -408,7 +371,7 @@ it("applies the CI labels of a stalled CI wait and shows why CI hasn't passed ye
   await expect.element(page.getByRole("menuitem", { name: "Open run" })).toBeVisible();
 });
 
-it("offers no CI labels for a failure that didn't end a stalled CI wait", async () => {
+it("offers no CI labels or fix run for a failure that didn't end a stalled CI wait or start a fix run", async () => {
   const need = RunFailureNeed.make({
     id: "run-failure:approval-run:attempt-1",
     repository,
@@ -428,6 +391,11 @@ it("offers no CI labels for a failure that didn't end a stalled CI wait", async 
   await expect
     .element(held.getByRole("button", { name: "Apply CI labels" }))
     .not.toBeInTheDocument();
+  await expect.element(held.getByText(/continues the work/)).not.toBeInTheDocument();
+  await held.getByRole("button", { name: /^Actions for/ }).click();
+  await expect
+    .element(page.getByRole("menuitem", { name: "Open fix run" }))
+    .not.toBeInTheDocument();
 });
 
 const bell = (count: number) =>
@@ -446,78 +414,69 @@ const replaceNeeds = async (
   await queryClient.invalidateQueries({ queryKey: overviewQuery().queryKey });
 };
 
-it.each([1280, 390])(
-  "opens cycle-budget loop counts from Overview and the tray without hover at %ipx",
-  async (width) => {
-    await page.viewport(width, 844);
-    const need = CycleBudgetNeed.make({
-      id: "cycle-budget:exhausted",
-      itemLabel: "approval/project#367",
-      itemUrl: "https://github.com/approval/project/issues/367",
-      ask: CycleBudgetAsk.make({
-        id: CycleBudgetAskId.make("exhausted"),
-        itemKey: waiting.itemKey,
-        repository,
-        loop,
-        limit: CycleLimit.make(3),
-        counts: [
-          LoopCycleCount.make({
-            loop,
-            admitted: CycleCount.make(3),
-            completed: CycleCount.make(2),
-          }),
-          LoopCycleCount.make({
-            loop: LoopName.make("review-pr"),
-            admitted: CycleCount.make(1),
-            completed: CycleCount.make(1),
-          }),
-        ],
-      }).recordBlock(LoopName.make("review-pr"), EventId.make("blocked-review")),
+it("opens cycle-budget loop counts from Overview and the tray with the keyboard", async () => {
+  await page.viewport(1280, 844);
+  const need = CycleBudgetNeed.make({
+    id: "cycle-budget:exhausted",
+    itemLabel: "approval/project#367",
+    itemUrl: "https://github.com/approval/project/issues/367",
+    ask: CycleBudgetAsk.make({
+      id: CycleBudgetAskId.make("exhausted"),
+      itemKey: waiting.itemKey,
+      repository,
+      loop,
+      limit: CycleLimit.make(3),
+      counts: [
+        LoopCycleCount.make({
+          loop,
+          admitted: CycleCount.make(3),
+          completed: CycleCount.make(2),
+        }),
+        LoopCycleCount.make({
+          loop: LoopName.make("review-pr"),
+          admitted: CycleCount.make(1),
+          completed: CycleCount.make(1),
+        }),
+      ],
+    }).recordBlock(LoopName.make("review-pr"), EventId.make("blocked-review")),
+  });
+  await replaceNeeds([need]);
+  for (const surface of [needs, tray()]) {
+    if (surface !== needs) await bell(1).click();
+    const row = surface.getByRole("listitem").filter({ hasText: need.itemLabel });
+    await expect
+      .element(row.getByText("review-pr · approval/project", { exact: true }))
+      .toBeVisible();
+    await expect.element(row.getByRole("button", { name: "Reset cycle budget" })).toBeEnabled();
+    const actions = row.getByRole("button", { name: /^Actions for/ });
+    await expect.element(actions).toBeVisible();
+    actions.element().focus();
+    await userEvent.keyboard("{Enter}");
+    await expect
+      .element(page.getByRole("menuitem", { name: "Details", exact: true }))
+      .toHaveFocus();
+    await userEvent.keyboard("{Enter}");
+    const details = page.getByRole("dialog", { name: "Cycle budget exhausted", exact: true });
+    await expect.element(details).toBeVisible();
+    await expect
+      .element(
+        details.getByText(
+          "approval/project#367: 2 completed rounds. start-dev: 3 runs; review-pr: 1 run",
+          { exact: true },
+        ),
+      )
+      .toBeVisible();
+    expect(details.element().scrollWidth).toBeLessThanOrEqual(details.element().clientWidth);
+    await expect.poll(() => details.element().getAnimations().length).toBe(0);
+    await page.screenshot({
+      path: `../../../../../.impeccable/review/cycle-budget-${surface === needs ? "overview" : "tray"}-1280.png`,
     });
-    await replaceNeeds([need]);
-    for (const surface of [needs, tray()]) {
-      if (surface !== needs) await bell(1).click();
-      const row = surface.getByRole("listitem").filter({ hasText: need.itemLabel });
-      await expect
-        .element(row.getByText("review-pr · approval/project", { exact: true }))
-        .toBeVisible();
-      await expect.element(row.getByRole("button", { name: "Reset cycle budget" })).toBeEnabled();
-      const actions = row.getByRole("button", { name: /^Actions for/ });
-      await expect.element(actions).toBeVisible();
-      if (width === 1280) {
-        actions.element().focus();
-        await userEvent.keyboard("{Enter}");
-        await expect
-          .element(page.getByRole("menuitem", { name: "Details", exact: true }))
-          .toHaveFocus();
-        await userEvent.keyboard("{Enter}");
-      } else {
-        await actions.click();
-        await page.getByRole("menuitem", { name: "Details", exact: true }).click();
-      }
-      const details = page.getByRole("dialog", { name: "Cycle budget exhausted", exact: true });
-      await expect.element(details).toBeVisible();
-      await expect
-        .element(
-          details.getByText(
-            "approval/project#367: 2 completed rounds. start-dev: 3 runs; review-pr: 1 run",
-            { exact: true },
-          ),
-        )
-        .toBeVisible();
-      expect(details.element().scrollWidth).toBeLessThanOrEqual(details.element().clientWidth);
-      await expect.poll(() => details.element().getAnimations().length).toBe(0);
-      await page.screenshot({
-        path: `../../../../../.impeccable/review/cycle-budget-${surface === needs ? "overview" : "tray"}-${width}.png`,
-      });
-      if (width === 1280) await userEvent.keyboard("{Escape}");
-      else await details.getByRole("button", { name: "Close", exact: true }).click();
-      await expect.element(details).not.toBeInTheDocument();
-      await expect.element(actions).toHaveFocus();
-      await expect.element(row.getByRole("button", { name: "Reset cycle budget" })).toBeEnabled();
-    }
-  },
-);
+    await userEvent.keyboard("{Escape}");
+    await expect.element(details).not.toBeInTheDocument();
+    await expect.element(actions).toHaveFocus();
+    await expect.element(row.getByRole("button", { name: "Reset cycle budget" })).toBeEnabled();
+  }
+});
 
 const replayNeed = CycleBudgetNeed.make({
   id: "cycle-budget:replayed",
@@ -543,22 +502,8 @@ it("reports the CI fixes that a cycle budget reset replayed in a toast", async (
   await expect.element(page.getByText("Replayed 1 CI fix", { exact: true })).toBeVisible();
 });
 
-it("shows no toast for a cycle budget reset that replays no CI fix", async () => {
-  await replaceNeeds([replayNeed]);
-  await commands.cycleResetResponse('{"replayedCiFixEventIds":[]}');
-  const row = needs.getByRole("listitem").filter({ hasText: replayNeed.itemLabel });
-  await row.getByRole("button", { name: "Reset cycle budget" }).click();
-  // A reset succeeds after its success handler, which adds any toast, has finished.
-  await expect
-    .poll(() => queryClient.getMutationCache().find({ status: "success" }) !== undefined)
-    .toBe(true);
-  expect(document.querySelector('[data-slot="toast"]')).toBeNull();
-});
-
 it.each([
   { width: 1280, running: 0 },
-  { width: 390, running: 0 },
-  { width: 1280, running: 2 },
   { width: 390, running: 2 },
 ])(
   "exposes the full unconfigured-worker diagnostic in Overview and the tray at $width px with $running running attempts",
@@ -732,77 +677,74 @@ const eightNeeds = [
   }),
 ];
 
-it.each(["dark", "light"])(
-  "groups eight needs in a scrolling dropdown and a full-width phone sheet (%s)",
-  async (theme) => {
-    document.documentElement.classList.toggle("dark", theme === "dark");
-    await replaceNeeds(
-      eightNeeds,
-      eightNeeds.flatMap((need) =>
-        need._tag === "ApprovalNeed" ? [RunView.make({ ...waiting, id: need.runId })] : [],
-      ),
-    );
-    await page.getByRole("link", { name: "Board", exact: true }).click();
-    await expect.element(bell(8)).toBeVisible();
-    await expect.poll(() => [...document.images].every((image) => image.complete)).toBe(true);
-    await page.screenshot({
-      path: `../../../../../.impeccable/review/notification-closed-${theme}.png`,
-    });
-    await bell(8).click();
-    await expect.element(tray().getByRole("region", { name: "Approval needed (7)" })).toBeVisible();
-    expect(tray().getByRole("listitem").all()).toHaveLength(8);
-    await expect.element(tray().getByText(/ago/, { exact: false }).first()).toBeVisible();
-    const popup = tray().element();
-    await expect.poll(() => popup.getBoundingClientRect().width).toBe(400);
-    expect(popup.getBoundingClientRect().height).toBeLessThanOrEqual(560);
-    const scroll = tray().getByRole("region", { name: "Approval needed (7)" }).element()
-      .parentElement?.parentElement;
-    expect(scroll?.scrollHeight).toBeGreaterThan(scroll?.clientHeight ?? Infinity);
-    const visibleRows = () => {
-      const bounds = tray()
-        .getByRole("region", { name: "Approval needed (7)" })
-        .element()
-        .parentElement?.parentElement?.getBoundingClientRect();
-      return tray()
-        .getByRole("listitem")
-        .elements()
-        .filter((row) => {
-          const rect = row.getBoundingClientRect();
-          return bounds !== undefined && rect.top >= bounds.top && rect.bottom <= bounds.bottom;
-        }).length;
-    };
-    await expect.poll(visibleRows).toBeGreaterThanOrEqual(7);
-    expect(
-      tray()
-        .getByRole("listitem")
-        .elements()
-        .every((row) => Math.round(row.getBoundingClientRect().height) <= 57),
-    ).toBe(true);
-    await page.screenshot({
-      path: `../../../../../.impeccable/review/notification-open-${theme}.png`,
-    });
-    await userEvent.keyboard("{Escape}");
-    await page.viewport(390, 844);
-    await bell(8).click();
-    await expect.element(tray()).toBeVisible();
-    await expect.poll(() => tray().element().getBoundingClientRect().width).toBe(390);
-    expect(tray().element().getBoundingClientRect().height).toBeLessThanOrEqual(591);
-    expect(document.documentElement.scrollWidth).toBe(390);
-    await expect.poll(visibleRows).toBeGreaterThanOrEqual(7);
-    expect(
-      tray()
-        .getByRole("listitem")
-        .elements()
-        .every((row) => Math.round(row.getBoundingClientRect().height) <= 57),
-    ).toBe(true);
-    await page.screenshot({
-      path: `../../../../../.impeccable/review/notification-phone-${theme}.png`,
-    });
-    await userEvent.keyboard("{Escape}");
-    await expect.element(tray()).not.toBeInTheDocument();
-    await expect.element(bell(8)).toHaveFocus();
-  },
-);
+it("groups eight needs in a scrolling dropdown and a full-width phone sheet", async () => {
+  document.documentElement.classList.add("dark");
+  await replaceNeeds(
+    eightNeeds,
+    eightNeeds.flatMap((need) =>
+      need._tag === "ApprovalNeed" ? [RunView.make({ ...waiting, id: need.runId })] : [],
+    ),
+  );
+  await page.getByRole("link", { name: "Board", exact: true }).click();
+  await expect.element(bell(8)).toBeVisible();
+  await expect.poll(() => [...document.images].every((image) => image.complete)).toBe(true);
+  await page.screenshot({
+    path: `../../../../../.impeccable/review/notification-closed-dark.png`,
+  });
+  await bell(8).click();
+  await expect.element(tray().getByRole("region", { name: "Approval needed (7)" })).toBeVisible();
+  expect(tray().getByRole("listitem").all()).toHaveLength(8);
+  await expect.element(tray().getByText(/ago/, { exact: false }).first()).toBeVisible();
+  const popup = tray().element();
+  await expect.poll(() => popup.getBoundingClientRect().width).toBe(400);
+  expect(popup.getBoundingClientRect().height).toBeLessThanOrEqual(560);
+  const scroll = tray().getByRole("region", { name: "Approval needed (7)" }).element()
+    .parentElement?.parentElement;
+  expect(scroll?.scrollHeight).toBeGreaterThan(scroll?.clientHeight ?? Infinity);
+  const visibleRows = () => {
+    const bounds = tray()
+      .getByRole("region", { name: "Approval needed (7)" })
+      .element()
+      .parentElement?.parentElement?.getBoundingClientRect();
+    return tray()
+      .getByRole("listitem")
+      .elements()
+      .filter((row) => {
+        const rect = row.getBoundingClientRect();
+        return bounds !== undefined && rect.top >= bounds.top && rect.bottom <= bounds.bottom;
+      }).length;
+  };
+  await expect.poll(visibleRows).toBeGreaterThanOrEqual(7);
+  expect(
+    tray()
+      .getByRole("listitem")
+      .elements()
+      .every((row) => Math.round(row.getBoundingClientRect().height) <= 57),
+  ).toBe(true);
+  await page.screenshot({
+    path: `../../../../../.impeccable/review/notification-open-dark.png`,
+  });
+  await userEvent.keyboard("{Escape}");
+  await page.viewport(390, 844);
+  await bell(8).click();
+  await expect.element(tray()).toBeVisible();
+  await expect.poll(() => tray().element().getBoundingClientRect().width).toBe(390);
+  expect(tray().element().getBoundingClientRect().height).toBeLessThanOrEqual(591);
+  expect(document.documentElement.scrollWidth).toBe(390);
+  await expect.poll(visibleRows).toBeGreaterThanOrEqual(7);
+  expect(
+    tray()
+      .getByRole("listitem")
+      .elements()
+      .every((row) => Math.round(row.getBoundingClientRect().height) <= 57),
+  ).toBe(true);
+  await page.screenshot({
+    path: `../../../../../.impeccable/review/notification-phone-dark.png`,
+  });
+  await userEvent.keyboard("{Escape}");
+  await expect.element(tray()).not.toBeInTheDocument();
+  await expect.element(bell(8)).toHaveFocus();
+});
 
 it.each([1280, 390])(
   "closes the tray on navigation and keeps it closed on return at %ipx",

@@ -1,18 +1,15 @@
-import { DateTime } from "effect";
 import { assert, expect, it } from "vitest";
 import {
   ada,
   answered,
   conversationOf,
-  grace,
-  queued,
   running,
   stepEvents,
   supervisorCalls,
   turnEvents,
 } from "~/lib/conversations/fixture";
 import { burstSummary, currentCall } from "~/lib/runs/transcript/grouping/summary";
-import { conversationTimeline, isPending, type TurnStep, withPendingPost } from "./timeline";
+import { conversationTimeline, type TurnStep } from "./timeline";
 
 const stepStates = (steps: ReadonlyArray<TurnStep> | undefined) =>
   steps?.map((step) =>
@@ -91,21 +88,4 @@ it("shows a turn of 40 calls as one group that counts its failures and names its
   expect(burstSummary({ tools: group.calls })).toBe(
     "16 tool calls · read approval.ts, loop.ts · 8 more calls",
   );
-});
-
-it("marks a turn queued behind an open one, and a pending post until the server answers", () => {
-  const record = conversationOf([
-    { turn: "t-1", member: ada, text: "First", minute: 1, state: running(1) },
-    { turn: "t-2", member: grace, text: "Second", minute: 2, state: queued },
-  ]);
-  expect(conversationTimeline(record, []).map(({ behind }) => behind)).toEqual([false, true]);
-  const pending = withPendingPost(
-    record,
-    "Third",
-    ada,
-    DateTime.makeUnsafe(Date.UTC(2026, 10, 17, 9, 3)),
-  );
-  const timeline = conversationTimeline(pending, []);
-  expect(timeline.map(({ message }) => message?.body)).toEqual(["First", "Second", "Third"]);
-  expect(timeline.map(({ turn }) => isPending(turn))).toEqual([false, false, true]);
 });

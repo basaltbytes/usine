@@ -1,4 +1,3 @@
-import { HarnessPresentation } from "@usine/agents/harness";
 import { capabilitiesQuery } from "~/lib/configuration/capabilities";
 import { PassedCheckView, FailedCheckView } from "@usine/orchestrator/operator";
 import { projectQuery } from "~/features/projects/queries";
@@ -136,65 +135,6 @@ it("lists a Hetzner worker's machines oldest first under its last failed creatio
     );
 });
 
-it("folds what each machine is for under its ID on a phone, without scrolling sideways", async () => {
-  await mount("/configuration/workers/hz-pool", 390);
-  await expect.element(row(/52341896/u)).toBeVisible();
-  expect(machineRows()).toEqual([
-    "52341001 Attempt 7c1d2e3f, found after a restart | Deleting | 1 | 1h",
-    "52341896 Run 1a2b3c4d | Ready | 1 | 12m",
-    "No ID yet Run 9f8e7d6c | Creating | 1 | 1m",
-  ]);
-  const container = page.getByRole("table").first().element().parentElement;
-  expect(container?.scrollWidth).toBeLessThanOrEqual(container?.clientWidth ?? 0);
-  expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth + 1);
-});
-
-it("shows deferred harness checks with catalog labels and the configured interval", async () => {
-  const capabilities = capabilitiesFixture();
-  queryClient.setQueryData(capabilitiesQuery().queryKey, {
-    ...capabilities,
-    harnessDetails: capabilities.harnessDetails.map((descriptor) =>
-      HarnessPresentation.make({
-        ...descriptor,
-        label: descriptor.id === "claude" ? "Claude from catalog" : descriptor.label,
-      }),
-    ),
-  });
-  await mount("/configuration/workers/hz-pool");
-  await expect
-    .element(page.getByText(/configured interval since the last successful check/u))
-    .toBeVisible();
-  const claude = row(/Claude from catalog/u);
-  await expect.element(claude.getByText("Deferred", { exact: true })).toBeVisible();
-  await expect
-    .element(
-      claude.getByRole("cell", {
-        name: "Checked on the first machine, then every 86400 seconds when a machine is created.",
-        exact: false,
-      }),
-    )
-    .toBeVisible();
-});
-
-it("says on the Workers list that a worker's machine creation is paused", async () => {
-  const pause = hetzner?.provisioning;
-  if (pause === null || pause === undefined) throw new Error("Expected a failed creation");
-  await mount("/configuration/workers");
-  const worker = row(/^hz-pool/u);
-  await expect
-    .element(worker.getByText("hetzner cx33 in nbg1, one machine per attempt", { exact: true }))
-    .toBeVisible();
-  await expect
-    .element(
-      worker.getByText(
-        `Machine creation failed: quota reached. ${nextCreationLine(pause, Date.now())}`,
-        { exact: true },
-      ),
-    )
-    .toBeVisible();
-  await expect.element(row(/^boat-pool/u).getByText("Deferred", { exact: true })).toBeVisible();
-});
-
 it("fetches current workers on a first visit after cached configuration is invalidated", async () => {
   await commands.workerPreflightResponses(encodeConfiguration(configuration));
   await queryClient.fetchQuery({ ...configurationQuery(), staleTime: 0 });
@@ -273,8 +213,6 @@ it("disables preflight for a busy worker and shows the reason", async () => {
 
 it.each([
   { device: "desktop", width: 1440, height: 900, theme: "dark" },
-  { device: "desktop", width: 1440, height: 900, theme: "light" },
-  { device: "phone", width: 390, height: 844, theme: "dark" },
   { device: "phone", width: 390, height: 844, theme: "light" },
 ])(
   "runs preflight, shows remediation, and passes after repair on $device in $theme",

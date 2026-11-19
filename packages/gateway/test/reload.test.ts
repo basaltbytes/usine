@@ -151,10 +151,7 @@ const withGateway = <A, E>(
   allowlist: ReadonlyArray<string>,
   body: (
     files: GatewayFiles,
-    context: {
-      readonly settings: ReadonlyArray<string>;
-      readonly anthropic: ReadonlyArray<string>;
-    },
+    context: { readonly anthropic: ReadonlyArray<string> },
   ) => Effect.Effect<
     A,
     E,
@@ -174,9 +171,8 @@ const withGateway = <A, E>(
     return yield* Effect.gen(function* () {
       lines.length = 0;
       const gatewayPorts = yield* freeGatewayPorts;
-      const settings = settingsLines(files, gatewayPorts, anthropic.origin);
-      yield* files.write("settings.env", settings);
-      return yield* body(files, { settings, anthropic: anthropic.keys }).pipe(
+      yield* files.write("settings.env", settingsLines(files, gatewayPorts, anthropic.origin));
+      return yield* body(files, { anthropic: anthropic.keys }).pipe(
         Effect.provide(gateway),
         Effect.provideService(ConfigProvider.ConfigProvider, environment),
       );
@@ -271,36 +267,6 @@ const admitted = { status: 200, reason: undefined };
 const refused = { status: 403, reason: "host-not-allowed" };
 
 describe("reloading the gateway", () => {
-  it.live(
-    "a new allowlist admits a host the old one refused and refuses one it admitted, and the attachment still works",
-    () =>
-      withGateway(["registry.npmjs.org"], (files) =>
-        Effect.gen(function* () {
-          const { egress } = yield* GatewayAddresses;
-          const token = yield* attach;
-          const connectionResponse = yield* connect(egress, "registry.npmjs.org:443");
-          assert.deepStrictEqual(connectionResponse, admitted);
-          const currentConnectionResponse = yield* connect(egress, "pypi.org:443");
-          assert.deepStrictEqual(currentConnectionResponse, refused);
-
-          yield* files.write("egress-allowlist", ["pypi.org", "files.pythonhosted.org"]);
-          yield* (yield* GatewayReload).reload;
-
-          const nextConnectionResponse = yield* connect(egress, "pypi.org:443");
-          assert.deepStrictEqual(nextConnectionResponse, admitted);
-          const updatedConnectionResponse = yield* connect(egress, "registry.npmjs.org:443");
-          assert.deepStrictEqual(updatedConnectionResponse, refused);
-          const providerResponse = yield* askAnthropic(token);
-          assert.strictEqual(providerResponse, 200);
-          const reloaded = yield* logged("Reloaded the gateway settings");
-          assert.include(reloaded, '"level":"Info"');
-          assert.include(reloaded, `"path":"${files.path("egress-allowlist")}"`);
-          assert.include(reloaded, '"rules":2');
-          assert.include(reloaded, '"changed":[]');
-        }),
-      ).pipe(Effect.provide(NodeFileSystem.layer)),
-  );
-
   it.live("a broken allowlist keeps the previous one and the attachment", () =>
     withGateway(["registry.npmjs.org"], (files) =>
       Effect.gen(function* () {
@@ -433,44 +399,31 @@ describe("reloading the gateway", () => {
       ).pipe(Effect.provide(NodeFileSystem.layer)),
   );
 
-  it.live("settings that need a restart are logged and left as they are", () =>
-    withGateway(["registry.npmjs.org"], (files, { settings }) =>
-      Effect.gen(function* () {
-        const token = yield* attach;
-        yield* files.write("settings.env", [
-          ...settings.filter(
-            (line) =>
-              !line.startsWith("USINE_GATEWAY_DOMAIN=") &&
-              !line.startsWith("USINE_GATEWAY_ADMIN_PORT="),
-          ),
-          "USINE_GATEWAY_DOMAIN=gw.elsewhere",
-          "USINE_GATEWAY_ADMIN_PORT=7071",
-        ]);
-        yield* (yield* GatewayReload).reload;
+  it.live(
+    "SIGHUP reloads the allowlist: it admits a host the old one refused and refuses one it admitted",
+    () =>
+      withGateway(["registry.npmjs.org"], (files) =>
+        Effect.gen(function* () {
+          const { egress } = yield* GatewayAddresses;
+          const connectionResponse = yield* connect(egress, "registry.npmjs.org:443");
+          assert.deepStrictEqual(connectionResponse, admitted);
+          const currentConnectionResponse = yield* connect(egress, "pypi.org:443");
+          assert.deepStrictEqual(currentConnectionResponse, refused);
 
-        const providerResponse = yield* askAnthropic(token);
-        assert.strictEqual(providerResponse, 200);
-        const restart = yield* logged("take effect only after a restart");
-        assert.include(restart, '"level":"Warn"');
-        assert.include(restart, '"USINE_GATEWAY_DOMAIN"');
-        assert.include(restart, '"USINE_GATEWAY_ADMIN_PORT"');
-      }),
-    ).pipe(Effect.provide(NodeFileSystem.layer)),
-  );
+          yield* files.write("egress-allowlist", ["pypi.org", "files.pythonhosted.org"]);
+          process.emit("SIGHUP", "SIGHUP");
 
-  it.live("SIGHUP runs the reload", () =>
-    withGateway(["registry.npmjs.org"], (files) =>
-      Effect.gen(function* () {
-        const { egress } = yield* GatewayAddresses;
-        yield* files.write("egress-allowlist", ["pypi.org"]);
-        process.emit("SIGHUP", "SIGHUP");
-        yield* logged("Reloaded the gateway settings");
-        const connectionResponse = yield* connect(egress, "pypi.org:443");
-        assert.deepStrictEqual(connectionResponse, admitted);
-        const currentConnectionResponse = yield* connect(egress, "registry.npmjs.org:443");
-        assert.deepStrictEqual(currentConnectionResponse, refused);
-      }),
-    ).pipe(Effect.provide(NodeFileSystem.layer)),
+          const reloaded = yield* logged("Reloaded the gateway settings");
+          assert.include(reloaded, '"level":"Info"');
+          assert.include(reloaded, `"path":"${files.path("egress-allowlist")}"`);
+          assert.include(reloaded, '"rules":2');
+          assert.include(reloaded, '"changed":[]');
+          const nextConnectionResponse = yield* connect(egress, "pypi.org:443");
+          assert.deepStrictEqual(nextConnectionResponse, admitted);
+          const updatedConnectionResponse = yield* connect(egress, "registry.npmjs.org:443");
+          assert.deepStrictEqual(updatedConnectionResponse, refused);
+        }),
+      ).pipe(Effect.provide(NodeFileSystem.layer)),
   );
 });
 

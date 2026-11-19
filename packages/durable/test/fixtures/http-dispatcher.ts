@@ -28,10 +28,6 @@ const directory = InstanceDirectory.make(process.argv[2]);
 const scenario = process.argv[3];
 const initialDispatcher = getGlobalDispatcher();
 const initialFetch = globalThis.fetch;
-// This fixture intercepts the fetch function installed by the vendor SDK.
-// @effect-diagnostics-next-line globalFetch:off
-const customFetch: typeof globalThis.fetch = (...args) => initialFetch(...args);
-if (scenario === "custom") globalThis.fetch = customFetch;
 
 const origin = createServer((request, response) => {
   if (request.url === "/broken") {
@@ -155,11 +151,8 @@ try {
   // This fixture verifies the SDK bridge’s process-wide environment mutation.
   // @effect-diagnostics-next-line processEnv:off
   assert.strictEqual(process.env.HTTPS_PROXY, proxyUrl);
-  if (scenario === "custom") assert.strictEqual(globalThis.fetch, customFetch);
-  else {
-    assert.notStrictEqual(globalThis.fetch, initialFetch);
-    assert.strictEqual(globalThis.fetch, undiciFetch);
-  }
+  assert.notStrictEqual(globalThis.fetch, initialFetch);
+  assert.strictEqual(globalThis.fetch, undiciFetch);
   await openHarness();
   assert.strictEqual(getGlobalDispatcher(), dispatcher);
 

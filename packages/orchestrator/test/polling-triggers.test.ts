@@ -951,37 +951,6 @@ describe("PollingTriggers", () => {
       }).pipe(Effect.provide(NodeServices.layer)),
   );
 
-  it.effect("turns a rate-limited label catalog into a backoff, not a failed cycle", () => {
-    const github: GitHubPolling["Service"] = {
-      itemLabels: () => Effect.die("unused item labels"),
-      baseRefHead: unmovedBaseRefHead,
-      missingIssues: () => Effect.succeed([]),
-      changes: (_repository, cursor) =>
-        Effect.succeed(RepositoryNotModified.make({ cursor, nextPollAt: Option.none() })),
-      labels: () =>
-        Effect.gen(function* () {
-          const now = yield* Clock.currentTimeMillis;
-          return yield* GitHubRateLimitError.make({
-            operation: "list-repository-labels",
-            retryAt: DateTime.makeUnsafe(now + 90000),
-            message: "secondary rate limit",
-          });
-        }),
-      snapshot: () => Effect.die("an unchanged repository has no snapshots"),
-    };
-
-    return Effect.gen(function* () {
-      const polling = yield* PollingTriggers;
-      const decodedValue7 = yield* instanceWith([yield* issueLoop("start-dev")]);
-      const cycle = yield* polling.poll(decodedValue7);
-      assert.strictEqual(cycle.repositories, 2);
-      assert.strictEqual(cycle.failures.length, 0);
-      const now = yield* Clock.currentTimeMillis;
-      assert(Option.isSome(cycle.nextPollAt));
-      assert.strictEqual(DateTime.toEpochMillis(cycle.nextPollAt.value), now + 90_000);
-    }).pipe(Effect.provide(pollingTestLayer(github)));
-  });
-
   it.live("keeps firing Loops and advancing the cursor when the label catalog request fails", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;

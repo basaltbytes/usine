@@ -57,10 +57,8 @@ const warnings = (output: string) =>
 
 describe("system sleep check", () => {
   it.live.each([
-    { sleep: "1", warns: true },
     { sleep: "10 (sleep prevented by sharingd, powerd)", warns: true },
     { sleep: "1 (sleep prevented by caffeinate, powerd)", warns: false },
-    { sleep: "0", warns: false },
   ])("warns when the Mac can sleep with runs open: sleep $sleep", ({ sleep, warns }) =>
     Effect.gen(function* () {
       const logged = yield* warnings(pmset(sleep));

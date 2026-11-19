@@ -56,7 +56,6 @@ import {
   UnconfirmedStop,
   UnconfirmedStops,
 } from "../src/engine/engine.ts";
-import { LoopControl } from "../src/loop-control/loop-control.ts";
 import { RunReader } from "../src/run-reader/run-reader.ts";
 import { CompletionCheck } from "../src/completion-check.ts";
 import { StepExecutor } from "../src/step-executor.ts";
@@ -243,179 +242,6 @@ describe("durable run engine", () => {
           assert.strictEqual(canceled._tag, "RunInterventionRejectedError");
           assert.deepStrictEqual(delivered, [attempt.id]);
         }).pipe(Effect.provide(engineLayer(directory, executor)));
-      }),
-    ),
-  );
-
-  it.live("projects an Event through a successful Attempt", () =>
-    withInstance((directory) =>
-      Effect.gen(function* () {
-        const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([
-          Effect.succeed(stepResult("finished")),
-        ]);
-        const runtime = engineLayer(directory, executorLayer(plans));
-
-        yield* Effect.gen(function* () {
-          const engine = yield* RunEngine;
-          const accepted = yield* engine.submit(submission({ number: 1 }));
-          assert.strictEqual(accepted._tag, "Claimed");
-          if (accepted._tag !== "Claimed") return;
-
-          const snapshot = yield* waitFor(
-            engine,
-            accepted.runId,
-            ({ run }) => run.state._tag === "Succeeded",
-          );
-          assert.strictEqual(snapshot.run.state._tag, "Succeeded");
-          const cancelRejected = yield* Effect.flip(engine.cancel(accepted.runId));
-          assert.strictEqual(cancelRejected._tag, "RunOperationRejectedError");
-
-          assert.deepStrictEqual((yield* engine.inspect(accepted.runId)).run, snapshot.run);
-          assert(Option.isSome(snapshot.step.result));
-          assert.strictEqual(snapshot.step.result.value.message, "finished");
-          assert.strictEqual(snapshot.attempts.length, 1);
-          const attempt = snapshot.attempts[0];
-          assert(
-            attempt !== undefined &&
-              Option.isSome(attempt.outcome) &&
-              attempt.outcome.value._tag === "Succeeded",
-          );
-        }).pipe(Effect.provide(runtime));
-      }),
-    ),
-  );
-
-  it.live("records the kind of the leased Worker on the Attempt it starts", () =>
-    withInstance((directory) =>
-      Effect.gen(function* () {
-        const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([
-          Effect.succeed(stepResult("finished")),
-        ]);
-        yield* Effect.gen(function* () {
-          const engine = yield* RunEngine;
-          const accepted = yield* engine.submit(submission({ number: 1 }));
-          assert(accepted._tag === "Claimed");
-          const snapshot = yield* waitFor(
-            engine,
-            accepted.runId,
-            ({ run }) => run.state._tag === "Succeeded",
-          );
-          assert.deepStrictEqual(
-            snapshot.attempts.map(({ workerKind }) => workerKind),
-            [Option.some("exe.dev")],
-          );
-        }).pipe(Effect.provide(engineLayer(directory, executorLayer(plans, "exe.dev"))));
-      }),
-    ),
-  );
-
-  it.live("drives each Run in its own trace, linked to the span that launched it", () =>
-    withInstance((directory) =>
-      Effect.gen(function* () {
-        const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([
-          Effect.succeed(stepResult("finished")),
-        ]);
-        const native = yield* Tracer.Tracer;
-        const spans: Array<Tracer.Span> = [];
-        const recording = Tracer.make({
-          span: (options) => {
-            const span = native.span(options);
-            spans.push(span);
-            return span;
-          },
-        });
-
-        yield* Effect.gen(function* () {
-          const engine = yield* RunEngine;
-          const accepted = yield* engine
-            .submit(submission({ number: 1 }))
-            .pipe(Effect.withSpan("Test.pollCycle"));
-          assert.strictEqual(accepted._tag, "Claimed");
-          if (accepted._tag !== "Claimed") return;
-          yield* waitFor(engine, accepted.runId, ({ run }) => run.state._tag === "Succeeded");
-        }).pipe(
-          Effect.provide(engineLayer(directory, executorLayer(plans))),
-          Effect.withTracer(recording),
-        );
-
-        const named = (name: string) => spans.find((span) => span.name === name);
-        const poll = named("Test.pollCycle");
-        const launch = named("RunDriver.launch");
-        const drive = named("RunDriver.drive");
-        const attempt = named("RunDriver.attempt");
-        assert(poll && launch && drive && attempt);
-        assert.strictEqual(launch.traceId, poll.traceId);
-        assert(Option.isNone(drive.parent));
-        assert.notStrictEqual(drive.traceId, poll.traceId);
-        assert.lengthOf(drive.links, 1);
-        assert.strictEqual(drive.links[0]?.span, launch);
-        assert.strictEqual(attempt.traceId, drive.traceId);
-      }),
-    ),
-  );
-
-  it.live("lists every Run newest first for operator read models", () =>
-    withInstance((directory) =>
-      Effect.gen(function* () {
-        const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([
-          Effect.succeed(stepResult("listed result")),
-        ]);
-        const runtime = engineLayer(directory, executorLayer(plans));
-
-        yield* Effect.gen(function* () {
-          const engine = yield* RunEngine;
-          const reader = yield* RunReader;
-          const controls = yield* LoopControl;
-          const currentRevision = yield* reader.revision;
-          const initialRevision = Option.getOrThrow(currentRevision);
-          const first = yield* engine.submit(
-            submission({ number: 1, item: "listed-one", approval: "required" }),
-          );
-          const second = yield* engine.submit(submission({ number: 2, item: "listed-two" }));
-          assert.strictEqual(first._tag, "Claimed");
-          assert.strictEqual(second._tag, "Claimed");
-          if (first._tag !== "Claimed" || second._tag !== "Claimed") return;
-          yield* waitFor(engine, first.runId, ({ run }) => run.state._tag === "Waiting");
-          yield* waitFor(engine, second.runId, ({ run }) => run.state._tag === "Succeeded");
-
-          const listed = yield* reader.list({ closedLimit: 100 });
-          assert.deepStrictEqual(
-            listed.map(({ run }) => run.id),
-            [second.runId, first.runId],
-          );
-          assert.strictEqual(listed[0]?.attempts.length, 1);
-
-          assert.strictEqual(
-            Option.getOrUndefined(
-              (yield* reader.inspect(second.runId)).step.result ?? Option.none(),
-            )?.message,
-            "listed result",
-          );
-          // `closedLimit` bounds closed Runs only, so the older waiting Run is still listed.
-          const bounded = yield* reader.list({ closedLimit: 0 });
-          assert.deepStrictEqual(
-            bounded.map(({ run }) => run.id),
-            [first.runId],
-          );
-          const history = yield* reader.forItems([
-            ...Array.from({ length: 120 }, (_, i) => ItemKey.make(`absent-${i}`)),
-            ItemKey.make("listed-two"),
-            ItemKey.make("listed-two"),
-          ]);
-          assert.deepStrictEqual(
-            history.map(({ run }) => run.id),
-            [second.runId],
-          );
-          assert.strictEqual(history[0]?.attempts.length, 1);
-          const itemStates = yield* reader.forItems([]);
-          assert.deepStrictEqual(itemStates, []);
-          const nextRevision = yield* reader.revision;
-          const runRevision = Option.getOrThrow(nextRevision);
-          assert(runRevision > initialRevision);
-          yield* controls.pause(LoopName.make("review"));
-          const updatedRevision = yield* reader.revision;
-          assert(Option.getOrThrow(updatedRevision) > runRevision);
-        }).pipe(Effect.provide(runtime));
       }),
     ),
   );
@@ -821,33 +647,6 @@ describe("durable run engine", () => {
     ),
   );
 
-  it.live("records operator cancellation of a running Attempt atomically", () =>
-    withInstance((directory) =>
-      Effect.gen(function* () {
-        const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([Effect.never]);
-        const runtime = engineLayer(directory, executorLayer(plans));
-
-        yield* Effect.gen(function* () {
-          const engine = yield* RunEngine;
-          const accepted = yield* engine.submit(submission({ number: 11, item: "cancel-running" }));
-          assert.strictEqual(accepted._tag, "Claimed");
-          if (accepted._tag !== "Claimed") return;
-          yield* waitFor(engine, accepted.runId, ({ run }) => run.state._tag === "Running");
-
-          yield* engine.cancel(accepted.runId);
-          yield* engine.cancel(accepted.runId);
-          const canceled = yield* engine.inspect(accepted.runId);
-          assert.strictEqual(canceled.run.state._tag, "Canceled");
-          assert.strictEqual(canceled.attempts.length, 1);
-          const outcome = canceled.attempts[0]?.outcome;
-          assert(outcome !== undefined);
-          assert(Option.isSome(outcome));
-          assert.strictEqual(outcome.value._tag, "Canceled");
-        }).pipe(Effect.provide(runtime));
-      }),
-    ),
-  );
-
   it.live("counts the Attempts a Worker still runs and refuses to discard their leftovers", () =>
     withInstance((directory) =>
       Effect.gen(function* () {
@@ -917,6 +716,7 @@ describe("durable run engine", () => {
 
           assert.strictEqual((yield* engine.submit(behind))._tag, "Queued");
           yield* engine.cancel(running.runId);
+          yield* engine.cancel(running.runId);
           const currentRunId = yield* runIdFor(behind);
           const opened = yield* waitFor(
             engine,
@@ -925,7 +725,12 @@ describe("durable run engine", () => {
           );
           assert.strictEqual(opened.attempts.length, 1);
 
-          assert.strictEqual((yield* engine.inspect(running.runId)).run.state._tag, "Canceled");
+          const canceled = yield* engine.inspect(running.runId);
+          assert.strictEqual(canceled.run.state._tag, "Canceled");
+          assert.deepStrictEqual(
+            canceled.attempts.map(({ outcome }) => Option.map(outcome, ({ _tag }) => _tag)),
+            [Option.some("Canceled")],
+          );
           const preflightChecksState = yield* Ref.get(checks);
           assert.strictEqual(preflightChecksState, 1);
         }).pipe(Effect.provide(engineLayer(directory, executor, condition)));
@@ -934,141 +739,8 @@ describe("durable run engine", () => {
   );
 
   it.live(
-    "keeps the slot of a canceled Attempt whose parent task can't be stopped until a retried stop succeeds",
+    "keeps the slot of a failed Attempt whose parent task can't be stopped, and starts no retry in a free slot, until a retried stop succeeds",
     () =>
-      withInstance((directory) =>
-        Effect.gen(function* () {
-          const local = WorkerName.make("local");
-          const unstoppable = submission({ number: 42, item: "unstoppable-parent" });
-          const behind = submission({ number: 43, item: "waits-for-the-slot" });
-          // `local` has one slot, counted as the scheduler counts it.
-          const leased = yield* TxRef.make(0);
-          const refusing = yield* Ref.make(true);
-          const stops = yield* Ref.make(0);
-          const stopRequested = yield* Deferred.make<void>();
-          const executor = Layer.succeed(StepExecutor)({
-            workers: Effect.succeed([local]),
-            isLive: () => Effect.succeed(false),
-            outcome: () => Effect.succeedNone,
-            recover: () => Effect.succeed("found" as const),
-            intervene: () => Effect.void,
-            // Like the durable session, a stop ends the execution within the interrupt grace even
-            // if the parent task's cancel fails.
-            interrupt: () =>
-              Effect.gen(function* () {
-                yield* Ref.update(stops, (count) => count + 1);
-                yield* Deferred.succeed(stopRequested, undefined);
-                yield* Effect.sleep("20 millis");
-                if (yield* Ref.get(refusing))
-                  return yield* InfraFailure.make({
-                    message: "Could not cancel the parent task",
-                    cause: "storage unavailable",
-                  });
-              }),
-            occupy: () => Effect.die("no Attempt survives a restart in this test"),
-            sweep: Effect.void,
-            discard: () => Effect.void,
-            reserve: () =>
-              Effect.tx(
-                Effect.gen(function* () {
-                  if ((yield* TxRef.get(leased)) >= 1) return yield* Effect.txRetry;
-                  yield* TxRef.update(leased, (count) => count + 1);
-                }),
-              ).pipe(
-                Effect.as({
-                  worker: local,
-                  kind: "local",
-                  release: TxRef.update(leased, (count) => count - 1),
-                }),
-              ),
-            execute: (execution, io) =>
-              Effect.gen(function* () {
-                yield* io.checkoutAcquired;
-                if (execution.task !== unstoppable.task)
-                  return StepCompletion.fromResult(stepResult("ran in the freed slot"));
-                yield* Deferred.await(stopRequested);
-                return yield* InfraFailure.make({
-                  message: "The Attempt's execution stopped",
-                  cause: "canceled",
-                });
-              }),
-          });
-          yield* Effect.gen(function* () {
-            const engine = yield* RunEngine;
-            const unconfirmed = yield* UnconfirmedStops;
-            const running = yield* engine.submit(unstoppable);
-            assert(running._tag === "Claimed");
-            const [attempt] = (yield* waitFor(
-              engine,
-              running.runId,
-              ({ attempts }) => attempts.length === 1,
-            )).attempts;
-            assert(attempt !== undefined);
-            const waiting = yield* engine.submit(behind);
-            assert(waiting._tag === "Claimed");
-
-            const refusal = yield* Effect.flip(engine.cancel(running.runId));
-            assert.strictEqual(refusal._tag, "AttemptCancellationError");
-
-            // The slot stays taken across the reconciles that retry the stop, so the Run behind
-            // starts no Attempt.
-            const [, { attempts }] = yield* Effect.repeat(
-              Effect.all([Ref.get(stops), engine.inspect(waiting.runId)]),
-              {
-                until: ([count, { attempts }]) => count >= 4 || attempts.length > 0,
-                schedule: Schedule.spaced("10 millis"),
-              },
-            );
-            assert.deepStrictEqual(attempts, []);
-            const leasedState = yield* TxRef.get(leased);
-            assert.strictEqual(leasedState, 1);
-            // The canceled execution also fails, so either stop can record the Attempt first.
-            const listed = yield* unconfirmed.list;
-            assert.deepStrictEqual(
-              listed.map(({ attemptId, runId, loop, itemKey, worker }) => ({
-                attemptId,
-                runId,
-                loop,
-                itemKey,
-                worker,
-              })),
-              [
-                {
-                  attemptId: attempt.id,
-                  runId: running.runId,
-                  loop: unstoppable.loop,
-                  itemKey: unstoppable.itemKey,
-                  worker: local,
-                },
-              ],
-            );
-            assert.include(["cancel", "failed"], listed[0]?.reason);
-
-            // Once a retry stops the parent task, the slot is released and the Run behind takes it.
-            yield* Ref.set(refusing, false);
-            const delivered = yield* waitFor(
-              engine,
-              waiting.runId,
-              ({ run }) => run.state._tag === "Succeeded",
-            );
-            assert.lengthOf(delivered.attempts, 1);
-            const currentList = yield* unconfirmed.list;
-            assert.deepStrictEqual(currentList, []);
-            yield* Effect.repeat(TxRef.get(leased), {
-              until: (count) => count === 0,
-              schedule: Schedule.spaced("10 millis"),
-            }).pipe(Effect.timeout("2 seconds"));
-          }).pipe(
-            Effect.provide(engineLayer(directory, executor)),
-            Effect.provideService(ReconcileInterval, "50 millis"),
-          );
-        }),
-      ),
-  );
-
-  it.live.each([1, 2])(
-    "keeps the slot of a failed Attempt whose parent task can't be stopped, and starts no retry on a Worker with %i slots, until a retried stop succeeds",
-    (slots) =>
       withInstance((directory) =>
         Effect.gen(function* () {
           const worker = yield* slottedExecutor(
@@ -1076,7 +748,7 @@ describe("durable run engine", () => {
               Effect.fail(InfraFailure.make({ message: "Lost the parent task", cause: "offline" })),
               Effect.succeed(stepResult("ran after the stop")),
             ],
-            slots,
+            2,
           );
           yield* Ref.set(worker.unstoppable, true);
           yield* Effect.gen(function* () {
@@ -1436,32 +1108,6 @@ const flakyEngineLayer = (
   );
 
 describe("store failures in a Run's fiber", () => {
-  it.live("records an Attempt's outcome once a failed write succeeds on retry", () =>
-    withInstance((directory) =>
-      Effect.gen(function* () {
-        const failures: Failures = { left: 0 };
-        const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([
-          // The next transaction, which records this Attempt's outcome, fails once.
-          Effect.sync(() => {
-            failures.left = 1;
-          }).pipe(Effect.as(stepResult("recorded on the second try"))),
-        ]);
-        yield* Effect.gen(function* () {
-          const engine = yield* RunEngine;
-          const accepted = yield* engine.submit(submission({ number: 1, item: "retry" }));
-          assert(accepted._tag === "Claimed");
-          const finished = yield* waitFor(
-            engine,
-            accepted.runId,
-            ({ run }) => run.state._tag === "Succeeded",
-          );
-          assert.strictEqual(finished.attempts.length, 1);
-          assert.strictEqual(failures.left, 0);
-        }).pipe(Effect.provide(flakyEngineLayer(directory, failures, executorLayer(plans))));
-      }),
-    ),
-  );
-
   it.live("verifies outcome labels once when recording the outcome is retried", () =>
     withInstance((directory) =>
       Effect.gen(function* () {

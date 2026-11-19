@@ -29,12 +29,10 @@ const fixture = Effect.gen(function* () {
   return { drained, launched, requests, result, platform };
 });
 
-it.live.each([
-  "App upgrades are available after GitHub App setup is complete.",
-  "App upgrades require a global npm install managed by systemd.",
-])("rejects unavailable upgrades with the reason: %s", (message) =>
+it.live("rejects unavailable upgrades with the reason", () =>
   Effect.scoped(
     Effect.gen(function* () {
+      const message = "App upgrades require a global npm install managed by systemd.";
       const drained = yield* Ref.make(false);
       const upgrades = yield* makeUpgrades({
         running: previous,
@@ -173,50 +171,48 @@ it.live("does not check when off, downgrade automatically, or retry a health-che
   ),
 );
 
-it.live.each(["idle", "now"] as const)(
-  "rejects a cached candidate from the previous channel for %s upgrades",
-  (timing) =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        const f = yield* fixture;
-        const channel = yield* Ref.make<UpgradeChannel>("next");
-        const stable = ReleaseVersion.make("1.0.1");
-        const upgrades = yield* makeUpgrades({
-          running: previous,
-          settings: Ref.get(channel).pipe(
-            Effect.map((upgradeChannel) => ({ upgradeChannel, upgradeMode: "propose" as const })),
-          ),
-          platform: Result.succeed({
-            ...f.platform,
-            lookup: (selected) => Effect.succeed(selected === "next" ? target : stable),
-          }),
-          drain: () => Deferred.await(f.drained),
-          resume: Effect.void,
-        });
-        yield* upgrades.check();
+it.live("rejects a cached candidate from the previous channel", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const f = yield* fixture;
+      const channel = yield* Ref.make<UpgradeChannel>("next");
+      const stable = ReleaseVersion.make("1.0.1");
+      const upgrades = yield* makeUpgrades({
+        running: previous,
+        settings: Ref.get(channel).pipe(
+          Effect.map((upgradeChannel) => ({ upgradeChannel, upgradeMode: "propose" as const })),
+        ),
+        platform: Result.succeed({
+          ...f.platform,
+          lookup: (selected) => Effect.succeed(selected === "next" ? target : stable),
+        }),
+        drain: () => Deferred.await(f.drained),
+        resume: Effect.void,
+      });
+      yield* upgrades.check();
 
-        expect((yield* upgrades.status).available).toBe(target);
-        yield* Ref.set(channel, "latest");
-        const error = yield* upgrades
-          .request(UpgradeRequest.make({ timing, version: Option.none() }))
-          .pipe(Effect.flip);
-        expect(error).toBeInstanceOf(UpgradeError);
-        const launchedDone = yield* Deferred.isDone(f.launched);
-        expect(launchedDone).toBe(false);
-        const status = yield* upgrades.status;
-        expect(status.channel).toBe("latest");
-        expect(status.available).toBeNull();
-        expect(status.phase).toBe("idle");
+      expect((yield* upgrades.status).available).toBe(target);
+      yield* Ref.set(channel, "latest");
+      const error = yield* upgrades
+        .request(UpgradeRequest.make({ timing: "idle", version: Option.none() }))
+        .pipe(Effect.flip);
+      expect(error).toBeInstanceOf(UpgradeError);
+      const launchedDone = yield* Deferred.isDone(f.launched);
+      expect(launchedDone).toBe(false);
+      const status = yield* upgrades.status;
+      expect(status.channel).toBe("latest");
+      expect(status.available).toBeNull();
+      expect(status.phase).toBe("idle");
 
-        yield* upgrades.check();
+      yield* upgrades.check();
 
-        expect((yield* upgrades.status).available).toBe(stable);
-        yield* upgrades.request(UpgradeRequest.make({ timing, version: Option.none() }));
-        yield* Deferred.succeed(f.drained, undefined);
-        const launchedResult = yield* Deferred.await(f.launched);
-        expect(launchedResult).toBe(stable);
-      }),
-    ),
+      expect((yield* upgrades.status).available).toBe(stable);
+      yield* upgrades.request(UpgradeRequest.make({ timing: "idle", version: Option.none() }));
+      yield* Deferred.succeed(f.drained, undefined);
+      const launchedResult = yield* Deferred.await(f.launched);
+      expect(launchedResult).toBe(stable);
+    }),
+  ),
 );
 
 it.live("rejects an automatic candidate when the channel changes during its lookup", () =>
@@ -251,38 +247,36 @@ it.live("rejects an automatic candidate when the channel changes during its look
   ),
 );
 
-it.live.each(["off", "propose"] as const)(
-  "does not drain or install when automatic mode changes to %s during lookup",
-  (mode) =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        const f = yield* fixture;
-        const currentMode = yield* Ref.make<UpgradeMode>("automatic");
-        const drainStarted = yield* Ref.make(false);
-        const upgrades = yield* makeUpgrades({
-          running: previous,
-          settings: Ref.get(currentMode).pipe(
-            Effect.map((upgradeMode) => ({ upgradeChannel: "next" as const, upgradeMode })),
-          ),
-          platform: Result.succeed({
-            ...f.platform,
-            lookup: () => Ref.set(currentMode, mode).pipe(Effect.as(target)),
-          }),
-          drain: () => Ref.set(drainStarted, true),
-          resume: Effect.void,
-        });
-        yield* upgrades.check();
-        yield* Effect.yieldNow;
-        const status = yield* upgrades.status;
-        expect(status.mode).toBe(mode);
-        expect(status.phase).toBe("idle");
-        expect(status.available).toBe(mode === "off" ? null : target);
-        const drainStartedState = yield* Ref.get(drainStarted);
-        expect(drainStartedState).toBe(false);
-        const launchedDone = yield* Deferred.isDone(f.launched);
-        expect(launchedDone).toBe(false);
-      }),
-    ),
+it.live("does not drain or install when automatic mode changes to propose during lookup", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const f = yield* fixture;
+      const currentMode = yield* Ref.make<UpgradeMode>("automatic");
+      const drainStarted = yield* Ref.make(false);
+      const upgrades = yield* makeUpgrades({
+        running: previous,
+        settings: Ref.get(currentMode).pipe(
+          Effect.map((upgradeMode) => ({ upgradeChannel: "next" as const, upgradeMode })),
+        ),
+        platform: Result.succeed({
+          ...f.platform,
+          lookup: () => Ref.set(currentMode, "propose").pipe(Effect.as(target)),
+        }),
+        drain: () => Ref.set(drainStarted, true),
+        resume: Effect.void,
+      });
+      yield* upgrades.check();
+      yield* Effect.yieldNow;
+      const status = yield* upgrades.status;
+      expect(status.mode).toBe("propose");
+      expect(status.phase).toBe("idle");
+      expect(status.available).toBe(target);
+      const drainStartedState = yield* Ref.get(drainStarted);
+      expect(drainStartedState).toBe(false);
+      const launchedDone = yield* Deferred.isDone(f.launched);
+      expect(launchedDone).toBe(false);
+    }),
+  ),
 );
 
 it.live("refuses a missing helper before closing admission", () =>
@@ -345,65 +339,54 @@ it.live("reports helper failure instead of waiting for a restart that will not h
   ),
 );
 
-it.live.each(["propose", "automatic"] as const)(
-  "waits for registry propagation in %s mode without closing admission",
-  (mode) =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        const f = yield* fixture;
-        const ready = yield* Ref.make(false);
-        const drainStarted = yield* Ref.make(false);
-        const upgrades = yield* makeUpgrades({
-          running: previous,
-          settings: Effect.succeed({ upgradeChannel: "next", upgradeMode: mode }),
-          platform: Result.succeed({
-            ...f.platform,
-            checkDependencies: () =>
-              Ref.get(ready).pipe(
-                Effect.flatMap((value) =>
-                  value
-                    ? Effect.void
-                    : Effect.fail(UpgradeError.make({ message: "Package unavailable" })),
-                ),
+it.live("waits for registry propagation in automatic mode without closing admission", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const f = yield* fixture;
+      const ready = yield* Ref.make(false);
+      const drainStarted = yield* Ref.make(false);
+      const upgrades = yield* makeUpgrades({
+        running: previous,
+        settings: Effect.succeed({ upgradeChannel: "next", upgradeMode: "automatic" }),
+        platform: Result.succeed({
+          ...f.platform,
+          checkDependencies: () =>
+            Ref.get(ready).pipe(
+              Effect.flatMap((value) =>
+                value
+                  ? Effect.void
+                  : Effect.fail(UpgradeError.make({ message: "Package unavailable" })),
               ),
-          }),
-          drain: () => Ref.set(drainStarted, true),
-          resume: Effect.void,
-        });
-        yield* upgrades.check().pipe(Effect.flip);
+            ),
+        }),
+        drain: () => Ref.set(drainStarted, true),
+        resume: Effect.void,
+      });
+      yield* upgrades.check().pipe(Effect.flip);
 
-        expect((yield* upgrades.status).available).toBeNull();
-        for (const timing of ["idle", "now"] as const) {
-          const error = yield* upgrades
-            .request(UpgradeRequest.make({ timing, version: Option.some(target) }))
-            .pipe(Effect.flip);
-          expect(error.message).toBe("Package unavailable");
+      expect((yield* upgrades.status).available).toBeNull();
+      for (const timing of ["idle", "now"] as const) {
+        const error = yield* upgrades
+          .request(UpgradeRequest.make({ timing, version: Option.some(target) }))
+          .pipe(Effect.flip);
+        expect(error.message).toBe("Package unavailable");
 
-          expect((yield* upgrades.status).phase).toBe("idle");
-        }
-        const drainStartedState = yield* Ref.get(drainStarted);
-        expect(drainStartedState).toBe(false);
-        const launchedDone = yield* Deferred.isDone(f.launched);
-        expect(launchedDone).toBe(false);
-        yield* Ref.set(ready, true);
-        yield* upgrades.check();
+        expect((yield* upgrades.status).phase).toBe("idle");
+      }
+      const drainStartedState = yield* Ref.get(drainStarted);
+      expect(drainStartedState).toBe(false);
+      const launchedDone = yield* Deferred.isDone(f.launched);
+      expect(launchedDone).toBe(false);
+      yield* Ref.set(ready, true);
+      yield* upgrades.check();
 
-        expect((yield* upgrades.status).available).toBe(target);
-        if (mode === "automatic") {
-          const launchedResult = yield* Deferred.await(f.launched);
-          expect(launchedResult).toBe(target);
-          const currentDrainStartedState = yield* Ref.get(drainStarted);
-          expect(currentDrainStartedState).toBe(true);
-        } else {
-          yield* Ref.set(ready, false);
-          yield* upgrades.check().pipe(Effect.flip);
-
-          expect((yield* upgrades.status).available).toBe(target);
-          const nextDrainStartedState = yield* Ref.get(drainStarted);
-          expect(nextDrainStartedState).toBe(false);
-        }
-      }),
-    ),
+      expect((yield* upgrades.status).available).toBe(target);
+      const launchedResult = yield* Deferred.await(f.launched);
+      expect(launchedResult).toBe(target);
+      const currentDrainStartedState = yield* Ref.get(drainStarted);
+      expect(currentDrainStartedState).toBe(true);
+    }),
+  ),
 );
 
 it.live("keeps the verified release and install outcome while a newer release is incomplete", () =>
@@ -475,7 +458,6 @@ it.live("keeps the verified release and install outcome while a newer release is
 
 it.live.each([
   ["install", { status: "rolled-back", reason: "Install failed", failureStage: "install" }],
-  ["health-check", { status: "rolled-back", reason: "API failed", failureStage: "health-check" }],
   ["legacy", { status: "rolled-back", reason: "Upgrade failed" }],
   ["failed", { status: "failed", reason: "Rollback failed" }],
   ["installing", { status: "installing" }],

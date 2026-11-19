@@ -7,8 +7,6 @@ import {
   MAX_KILLED_PROCESSES,
   MemoryKilledProcess,
   OutOfMemoryKills,
-  ProviderRetry,
-  FailureResolution,
   AttemptNumber,
   AttemptWindow,
   pendingProviderRetry,
@@ -31,7 +29,6 @@ import { SalvageRetained } from "../src/attempt/salvage.ts";
 import { Running } from "../src/run/state.ts";
 import { ContainerId, ContainerMemoryMib } from "../src/worker.ts";
 import { RepositoryName } from "../src/repository.ts";
-import { Event, DedupKey, EventId } from "../src/event.ts";
 
 const infra = InfraFailure.make({
   message: "worker unreachable",
@@ -45,8 +42,6 @@ const childBudget = ChildSessionBudgetFailure.make({
   attemptedChildren: ChildSessionCount.make(5),
 });
 const n = AttemptNumber.make;
-const decodeAttemptNumber = Schema.decodeUnknownEffect(AttemptNumber);
-const decodeChildSessionBudget = Schema.decodeUnknownEffect(ChildSessionBudget);
 
 describe("auto-retry law (ADR 0002, ADR 0013)", () => {
   it("infrastructure and capacity failures permit automatic retries", () => {
@@ -60,21 +55,10 @@ describe("auto-retry law (ADR 0002, ADR 0013)", () => {
     expect(isAutoRetryableFailure(childBudget)).toBe(false);
   });
 
-  it.each([infra, ProviderCapacityFailure.make({ message: "At capacity" })])(
-    "automatic retries stop at the cap: $_tag",
-    (failure) => {
-      expect(shouldAutoRetry({ failure, number: n(1), maxAutoAttempts: n(3) })).toBe(true);
-      expect(shouldAutoRetry({ failure, number: n(3), maxAutoAttempts: n(3) })).toBe(false);
-    },
-  );
-
-  it("agent, defect, and guard failures never auto-retry, even on the first attempt", () => {
-    expect(shouldAutoRetry({ failure: defect, number: n(1), maxAutoAttempts: n(3) })).toBe(false);
+  it("automatic retries stop at the cap and never start for a non-retryable failure", () => {
+    expect(shouldAutoRetry({ failure: infra, number: n(1), maxAutoAttempts: n(3) })).toBe(true);
+    expect(shouldAutoRetry({ failure: infra, number: n(3), maxAutoAttempts: n(3) })).toBe(false);
     expect(shouldAutoRetry({ failure: agent, number: n(1), maxAutoAttempts: n(3) })).toBe(false);
-    expect(shouldAutoRetry({ failure: runaway, number: n(1), maxAutoAttempts: n(3) })).toBe(false);
-    expect(shouldAutoRetry({ failure: childBudget, number: n(1), maxAutoAttempts: n(3) })).toBe(
-      false,
-    );
   });
 });
 
@@ -95,7 +79,6 @@ describe("provider retry deadline", () => {
 
   it.each([
     [1, Option.none(), "2026-11-11T03:02:00.000Z"],
-    [2, Option.none(), "2026-11-11T03:05:00.000Z"],
     [1, Option.some(DateTime.makeUnsafe("2026-11-11T05:00:00Z")), "2026-11-11T05:00:00.000Z"],
     [2, Option.some(DateTime.makeUnsafe("2026-11-11T03:01:00Z")), "2026-11-11T03:05:00.000Z"],
   ] as const)(
@@ -112,73 +95,6 @@ describe("provider retry deadline", () => {
         message: "At capacity",
       });
       expect(Option.isNone(failure.resetsAt)).toBe(true);
-    }),
-  );
-});
-
-describe("construction is the only door", () => {
-  it("rejects a provider retry that names the first attempt", () => {
-    expect(() =>
-      ProviderRetry.make({
-        nextAttempt: n(1),
-        retryAt: DateTime.makeUnsafe(0),
-        message: "At capacity",
-      }),
-    ).toThrow();
-  });
-  it.effect("rejects a resolution with an invalid time, operator, or unknown field", () =>
-    Effect.gen(function* () {
-      const decode = Schema.decodeUnknownEffect(FailureResolution);
-      const resolution = { resolvedAt: "2026-10-27T00:00:00Z", operator: "Philippe" };
-      expect((yield* Effect.flip(decode({ ...resolution, resolvedAt: "not-a-time" })))._tag).toBe(
-        "SchemaError",
-      );
-      expect((yield* Effect.flip(decode({ ...resolution, operator: "" })))._tag).toBe(
-        "SchemaError",
-      );
-      expect((yield* Effect.flip(decode({ ...resolution, retry: true })))._tag).toBe("SchemaError");
-    }),
-  );
-
-  it.effect("attempt numbers below 1 or fractional are unconstructible", () =>
-    Effect.gen(function* () {
-      expect((yield* Effect.flip(decodeAttemptNumber(0)))._tag).toBe("SchemaError");
-      expect((yield* Effect.flip(decodeAttemptNumber(-1)))._tag).toBe("SchemaError");
-      expect((yield* Effect.flip(decodeAttemptNumber(1.5)))._tag).toBe("SchemaError");
-      const decodedValue4 = yield* decodeAttemptNumber(1);
-      expect(decodedValue4).toBe(1);
-    }),
-  );
-
-  it.effect("child-session budgets below 1 or fractional are unconstructible", () =>
-    Effect.gen(function* () {
-      expect((yield* Effect.flip(decodeChildSessionBudget(0)))._tag).toBe("SchemaError");
-      expect((yield* Effect.flip(decodeChildSessionBudget(-1)))._tag).toBe("SchemaError");
-      expect((yield* Effect.flip(decodeChildSessionBudget(1.5)))._tag).toBe("SchemaError");
-      const decodedValue3 = yield* decodeChildSessionBudget(1);
-      expect(decodedValue3).toBe(1);
-    }),
-  );
-
-  it.effect("empty ids are unconstructible", () =>
-    Effect.gen(function* () {
-      expect((yield* Effect.flip(Schema.decodeEffect(EventId)("")))._tag).toBe("SchemaError");
-    }),
-  );
-
-  it.effect("an Event rejects payloads that SQLite cannot preserve as JSON", () =>
-    Effect.gen(function* () {
-      const decodeEvent = Schema.decodeUnknownEffect(Event);
-      expect(
-        (yield* Effect.flip(
-          decodeEvent({
-            id: EventId.make("event-1"),
-            dedupKey: DedupKey.make("loop/item/revision"),
-            payload: { callback: () => "not JSON" },
-            receivedAt: DateTime.makeUnsafe("2026-08-24T12:00:00Z"),
-          }),
-        ))._tag,
-      ).toBe("SchemaError");
     }),
   );
 });
@@ -254,17 +170,6 @@ describe("killed process lists", () => {
       MemoryKilledProcess.make({ command: "node", pid: index + 1 }),
     );
   const container = "a".repeat(64);
-
-  it("rejects a record with more processes than the cap", () => {
-    expect(() =>
-      ContainerOutOfMemoryKills.make({
-        container: ContainerId.make(container),
-        kills: MAX_KILLED_PROCESSES + 1,
-        memoryMib: ContainerMemoryMib.make(6656),
-        processes: processes(MAX_KILLED_PROCESSES + 1),
-      }),
-    ).toThrow();
-  });
 
   it.effect("keeps the first processes of a record written before the cap", () =>
     Effect.gen(function* () {

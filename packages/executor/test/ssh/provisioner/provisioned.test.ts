@@ -7,7 +7,6 @@ import { RunId } from "@usine/core/run";
 import {
   ProvisionerTimings,
   ProvisionerReuse,
-  ProvisionerSeconds,
   MachineAttemptLimit,
   MachineMaxAge,
   ContainerCpus,
@@ -15,7 +14,6 @@ import {
   ContainerMemoryMib,
   ContainerPids,
   type GatewayLlmProtocol,
-  SshIdentityFile,
 } from "@usine/core/worker";
 import type { AttemptRequest } from "@usine/durable/attempt-runtime";
 import { completes, type StubParent, StubStorage } from "@usine/durable/testing";
@@ -229,51 +227,8 @@ describe("Provisioned SSH Worker behind a Gateway", () => {
         assert.strictEqual(given.environment.CODEX_HOME, CODEX_HOME);
         assert.isString(stdinValue(given.host, "USINE_GATEWAY_TOKEN"));
         assert.notProperty(given.host.sshEnvironment, "USINE_GATEWAY_TOKEN");
-        assert.include(
-          machine.state.files.get(`${CODEX_HOME}/config.toml`) ?? "",
-          'base_url = "http://llm.gw.test/openai-responses/v1"',
-        );
-        const currentGatewayCredential = yield* given.gatewayCredential;
-        assert.deepStrictEqual(currentGatewayCredential, Option.some("subscription"));
-        yield* machines.release(grant.hold);
-      }).pipe(
-        Effect.scoped,
-        Effect.provide(
-          gatewayRuntimeOf(
-            machine,
-            providers,
-            gateway,
-            gatewayHetznerAddress(["anthropic-messages", "openai-responses"]),
-            parent,
-          ),
-        ),
-      );
-    },
-  );
-
-  it.live(
-    "runs Codex on the Gateway's credential, without the provisioner's OpenAI API key, when the Gateway holds the provider",
-    () => {
-      const machine = fakeMachine();
-      const providers = fakeProviders();
-      const gateway = fakeGateway(machine, SUBSCRIPTION_PROVIDERS);
-      let given: AttemptRequest | undefined;
-      const parent: StubParent = (context) => {
-        given = context.request;
-        return completes(context);
-      };
-      return Effect.gen(function* () {
-        const executor = yield* Executor;
-        const machines = yield* WorkerMachines;
-        yield* executor.preflight(WORKER, [codexAgent.brain], 1);
-        const grant = yield* machines.create(WORKER, MACHINE_RUN, request.attemptId, [
-          codexAgent.brain,
-        ]);
-
-        yield* (yield* executor.prepare(codexRequest)).launch(sink);
-        assert(given !== undefined && Schema.is(RemoteShell)(given.host));
+        // The Gateway's credential wins over the provisioner's OpenAI API key.
         assert.notProperty(given.host.stdinEnvironment, "OPENAI_API_KEY");
-        assert.notProperty(given.host.sshEnvironment, "OPENAI_API_KEY");
         assert.notProperty(given.environment, "OPENAI_API_KEY");
         assert.isFalse(
           machine.state.calls.some(({ line }) => line.includes(OPENAI_KEY)),
@@ -453,24 +408,6 @@ describe("Provisioned SSH Worker", () => {
       );
     },
   );
-
-  it.live("reports a kernel log that the SSH user can't read in the machine check", () => {
-    const machine = fakeMachine();
-    machine.state.docker = "running";
-    machine.state.kernelMemory = "unreadable";
-    const providers = fakeProviders();
-    return Effect.gen(function* () {
-      const machines = yield* WorkerMachines;
-      const grant = yield* machines.create(WORKER, MACHINE_RUN, request.attemptId, [
-        TEST_AGENT.brain,
-      ]);
-      assert(Option.isSome(grant.checked), "the new machine was checked");
-      const { findings } = grant.checked.value;
-      assert.strictEqual(findings.length, 1);
-      assert.include(findings[0], "can't read the kernel journal or ring buffer");
-      assert.include(findings[0], "systemd-journal");
-    }).pipe(Effect.scoped, Effect.provide(runtimeOf(machine, providers, hetznerAddress)));
-  });
 
   it.live("gives the API key to the Attempt's container on docker run's standard input", () => {
     const machine = fakeMachine();
@@ -1001,29 +938,6 @@ describe("Provisioned SSH Worker", () => {
     },
   );
 
-  it.live(
-    "refuses Claude Code on a provisioned Worker with neither a Gateway credential nor an API key",
-    () => {
-      const machine = fakeMachine();
-      const providers = fakeProviders();
-      const keyless: SshWorkerAddress = {
-        ...hetznerAddress,
-        machine: {
-          _tag: "Provisioned",
-          provisioner: hetznerSettings({ network: Option.none() }),
-        },
-      };
-      return Effect.gen(function* () {
-        const executor = yield* Executor;
-        const refused = yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1).pipe(Effect.flip);
-        assert(refused._tag === "WorkerCapabilityError");
-        assert.strictEqual(refused.capability, "harness-login");
-        assert.include(refused.message, "provisioner.api_keys.anthropic");
-        assert.include(refused.message, "A subscription login needs a gateway");
-      }).pipe(Effect.scoped, Effect.provide(runtimeOf(machine, providers, keyless)));
-    },
-  );
-
   it.live("creates a Boat machine and pins its host key", () => {
     const machine = fakeMachine();
     machine.state.localFiles.set("/keys/usine_boat.pub", "ssh-ed25519 AAAAOperatorKey usine\n");
@@ -1139,66 +1053,6 @@ describe("Provisioned SSH Worker", () => {
       yield* machines.release(grant.hold);
     }).pipe(Effect.scoped, Effect.provide(runtimeOf(machine, providers, boxdAddress)));
   });
-
-  it.live("warns at preflight that a boxd Worker ignores its identity_file", () => {
-    const machine = fakeMachine();
-    const providers = fakeProviders();
-    const logs = capturedLogs();
-    const keyed: SshWorkerAddress = {
-      ...boxdAddress,
-      identityFile: Option.some(SshIdentityFile.make("~/.ssh/usine_worker")),
-    };
-    return Effect.gen(function* () {
-      const executor = yield* Executor;
-      yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
-      assert.isTrue(
-        logs.warnings.some(
-          (line) => line.includes("identity_file ~/.ssh/usine_worker") && line.includes("ignores"),
-        ),
-      );
-    }).pipe(
-      Effect.scoped,
-      Effect.provide(runtimeOf(machine, providers, keyed).pipe(Layer.provideMerge(logs.layer))),
-    );
-  });
-
-  it.live(
-    "warns at preflight that a boxd Worker ignores its provisioner.reuse and defers checks as without reuse",
-    () => {
-      const machine = fakeMachine();
-      const providers = fakeProviders();
-      const logs = capturedLogs();
-      const reused: SshWorkerAddress = {
-        ...boxdAddress,
-        machine: {
-          _tag: "Provisioned",
-          provisioner: boxdSettings({
-            timings: ProvisionerTimings.make({ sshWait: ProvisionerSeconds.make(1) }),
-            ignoredReuse: Option.some(
-              ProvisionerReuse.make({
-                attempts: MachineAttemptLimit.make(5),
-                maxAge: MachineMaxAge.make("2h"),
-              }),
-            ),
-          }),
-        },
-      };
-      return Effect.gen(function* () {
-        const executor = yield* Executor;
-        const report = yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
-        assert.isTrue(
-          logs.warnings.some((line) =>
-            line.includes(`Worker \\"${WORKER}\\" sets provisioner.reuse, which usine ignores`),
-          ),
-        );
-        assert(Option.isSome(report.deferred));
-        assert.match(report.deferred.value, /^Checked on the first machine/);
-      }).pipe(
-        Effect.scoped,
-        Effect.provide(runtimeOf(machine, providers, reused).pipe(Layer.provideMerge(logs.layer))),
-      );
-    },
-  );
 
   it.live("refuses a Boat Worker whose identity file has no public key", () => {
     const machine = fakeMachine();

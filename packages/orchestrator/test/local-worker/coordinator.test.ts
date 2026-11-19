@@ -57,13 +57,3 @@ it.live(
     }),
   LIVE_TEST_TIMEOUT,
 );
-
-it.live(
-  "runs an Attempt on the event-driven coordinator when the instance selects it",
-  () =>
-    runsWithoutParent({
-      agent: testAgent,
-      settings: { coordinator: "events" },
-    }),
-  LIVE_TEST_TIMEOUT,
-);

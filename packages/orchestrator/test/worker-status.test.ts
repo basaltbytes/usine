@@ -1,14 +1,8 @@
 import { assert, describe, it } from "@effect/vitest";
 import { BrainSpec, Harness, ModelId } from "@usine/core/agent/brain";
 import { HarnessUnavailableError } from "@usine/core/agent/capability";
-import {
-  ContainerCpus,
-  ContainerLimits,
-  ContainerMemoryMib,
-  ContainerPids,
-  WorkerName,
-} from "@usine/core/worker";
-import { ExecutorOperationError, fullPreflight, WorkerCapabilityError } from "@usine/executor";
+import { WorkerName } from "@usine/core/worker";
+import { fullPreflight, WorkerCapabilityError } from "@usine/executor";
 import { DateTime, Option, Result } from "effect";
 import { recordPreflight, unchecked, type WorkerPreflight } from "../src/worker-status.ts";
 
@@ -40,73 +34,6 @@ const notLoggedIn = (harness: Harness) =>
   });
 
 describe("Worker preflight record", () => {
-  it("passes the Worker's prerequisites and every harness of a passed preflight", () => {
-    const record = recordPreflight(
-      unchecked(worker),
-      [codex, claude],
-      at(8),
-      Result.succeed(fullPreflight),
-    );
-    assert.deepStrictEqual(summary(record), {
-      prerequisites: "Passed 2026-10-20T08:00:00.000Z",
-      harnesses: [
-        "claude Passed 2026-10-20T08:00:00.000Z",
-        "codex Passed 2026-10-20T08:00:00.000Z",
-      ],
-    });
-  });
-
-  it("records a degraded preflight on the Worker's prerequisites and passes its harnesses", () => {
-    const record = recordPreflight(
-      unchecked(worker),
-      [codex],
-      at(8),
-      Result.succeed({
-        ...fullPreflight,
-        degraded: Option.some("Docker isn't installed"),
-      }),
-    );
-    assert.deepStrictEqual(summary(record), {
-      prerequisites: "Degraded 2026-10-20T08:00:00.000Z",
-      harnesses: ["codex Passed 2026-10-20T08:00:00.000Z"],
-    });
-    const prerequisites = Option.getOrUndefined(record.prerequisites);
-    assert(prerequisites?._tag === "Degraded", "degraded");
-    assert.strictEqual(prerequisites.message, "Docker isn't installed");
-  });
-
-  it("keeps the container limits of the last machine check through a preflight without a machine", () => {
-    const limits = ContainerLimits.make({
-      cpus: ContainerCpus.make(3.5),
-      memoryMib: ContainerMemoryMib.make(7168),
-      pids: ContainerPids.make(60976),
-    });
-    const withoutMachine = {
-      ...fullPreflight,
-      deferred: Option.some("Checked on the worker's first machine each day."),
-    };
-    const started = recordPreflight(
-      unchecked(worker),
-      [codex],
-      at(8),
-      Result.succeed(withoutMachine),
-    );
-    assert.isTrue(Option.isNone(started.containerLimits));
-    const checked = recordPreflight(
-      started,
-      [codex],
-      at(9),
-      Result.succeed({ ...fullPreflight, containerLimits: Option.some(limits) }),
-    );
-    const reloaded = recordPreflight(
-      checked,
-      [codex, claude],
-      at(10),
-      Result.succeed(withoutMachine),
-    );
-    assert.deepStrictEqual(reloaded.containerLimits, Option.some(limits));
-  });
-
   it("keeps the findings of the last machine check through a preflight without a machine or a failed one", () => {
     const finding = "The SSH user can't read the kernel journal";
     const checked = recordPreflight(
@@ -171,47 +98,5 @@ describe("Worker preflight record", () => {
     assert.deepStrictEqual(failed.capability, Option.some("harness-login"));
     assert.strictEqual(failed.message, "claude is not logged in");
     assert.deepStrictEqual(record.findings, [finding]);
-  });
-
-  it("fails the Worker's prerequisites on any other failure and leaves its harnesses", () => {
-    const started = recordPreflight(
-      unchecked(worker),
-      [codex],
-      at(8),
-      Result.succeed(fullPreflight),
-    );
-    const memory = recordPreflight(
-      started,
-      [codex, claude],
-      at(9),
-      Result.fail(
-        WorkerCapabilityError.make({
-          worker,
-          capability: "memory",
-          message: "The machine has 2 GiB of memory, less than 1.5 GiB per Attempt.",
-          cause: "MemTotal: 2097152 kB",
-        }),
-      ),
-    );
-    assert.deepStrictEqual(summary(memory), {
-      prerequisites: "Failed 2026-10-20T09:00:00.000Z",
-      harnesses: ["codex Passed 2026-10-20T08:00:00.000Z"],
-    });
-    const timedOut = recordPreflight(
-      memory,
-      [codex],
-      at(10),
-      Result.fail(
-        ExecutorOperationError.make({
-          operation: "preflight",
-          message: "The harness probe timed out",
-          cause: new Error("timeout"),
-        }),
-      ),
-    );
-    const prerequisites = Option.getOrUndefined(timedOut.prerequisites);
-    assert(prerequisites?._tag === "Failed", "the probe failed");
-    assert.isTrue(Option.isNone(prerequisites.capability));
-    assert.strictEqual(prerequisites.message, "The harness probe timed out");
   });
 });

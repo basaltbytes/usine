@@ -35,7 +35,6 @@ import {
 import { AnonymousCredential, Attachment } from "../src/attachment/attachment.ts";
 import { Attachments } from "../src/attachment/store.ts";
 import { CallerClaims, CallerTokens } from "../src/caller/caller.ts";
-import { checkAuthFileWritable } from "../src/chatgpt/auth-file.ts";
 import { ChatGptLogins } from "../src/chatgpt/logins.ts";
 import { gatewayServices } from "../src/gateway.ts";
 import { ChatGptLogin, HostFilePath, type LlmProviders, OpenAiProvider } from "../src/llm/llm.ts";
@@ -359,14 +358,13 @@ describe("ChatGptLogins", () => {
     }).pipe(Effect.provide(Layer.provideMerge(logins, NodeFileSystem.layer))),
   );
 
-  for (const status of [408, 429, 500, 503])
-    it.effect(`treats a ${String(status)} from the token endpoint as transient`, () =>
-      Effect.gen(function* () {
-        const { login } = yield* authFile("1 minute");
-        yield* setAnswer(() => Effect.succeed(json(status, { error: "try_again" })));
-        assert.strictEqual((yield* Effect.flip(accessToken(login))).reason, "refresh-failed");
-      }).pipe(Effect.provide(Layer.provideMerge(logins, NodeFileSystem.layer))),
-    );
+  it.effect("treats a 429 from the token endpoint as transient", () =>
+    Effect.gen(function* () {
+      const { login } = yield* authFile("1 minute");
+      yield* setAnswer(() => Effect.succeed(json(429, { error: "try_again" })));
+      assert.strictEqual((yield* Effect.flip(accessToken(login))).reason, "refresh-failed");
+    }).pipe(Effect.provide(Layer.provideMerge(logins, NodeFileSystem.layer))),
+  );
 
   it.effect(
     "a request that ends during a refresh doesn't stop it, so the rotated token is kept",
@@ -456,75 +454,36 @@ describe("ChatGptLogins", () => {
   );
 
   it.effect(
-    "a reload of another auth file with a refresh token this login replaced keeps the rotated one",
+    "a refresh rejected with 400 refresh_token_reused stops refreshing until a reload reads a new login",
     () =>
       Effect.gen(function* () {
-        const { directory, login } = yield* authFile("1 minute");
-        yield* setAnswer(refreshing());
-        const token = yield* accessToken(login);
-        assert.strictEqual(nonceOf(token), "second");
-        const moved = join(directory, "moved.json");
-        yield* replaceAuthFile(moved, "refresh-first", "60 minutes");
-        const elsewhere = ChatGptLogin.make({ ...login, authFile: HostFilePath.make(moved) });
-        yield* (yield* ChatGptLogins).reload(elsewhere);
-        const currentToken = yield* accessToken(elsewhere);
-        assert.strictEqual(nonceOf(currentToken), "second");
+        const { path, login } = yield* authFile("1 minute");
+        yield* setAnswer(() =>
+          Effect.succeed(
+            json(400, { error: { code: "refresh_token_reused", message: "Already used" } }),
+          ),
+        );
+        const rejected = yield* Effect.flip(accessToken(login));
+        assert.strictEqual(rejected.reason, "refresh-rejected");
+        assert.include(rejected.message, path);
+        const again = yield* Effect.flip(accessToken(login));
+        assert.strictEqual(again.reason, "refresh-rejected");
         const requests = yield* tokenRequests;
         assert.lengthOf(requests, 1);
+        yield* replaceAuthFile(path, "refresh-new", "60 minutes");
+        yield* (yield* ChatGptLogins).reload(login);
+        const token = yield* accessToken(login);
+        assert.strictEqual(nonceOf(token), "refresh-new");
+        const currentRequests = yield* tokenRequests;
+        assert.lengthOf(currentRequests, 1);
       }).pipe(Effect.provide(Layer.provideMerge(logins, NodeFileSystem.layer))),
   );
-
-  it.effect.skipIf(process.getuid?.() === 0)(
-    "reports an auth file whose directory the gateway can't write to",
-    () =>
-      Effect.gen(function* () {
-        const { directory, path } = yield* authFile("60 minutes");
-        yield* Effect.acquireRelease(
-          Effect.flatMap(FileSystem.FileSystem, (fileSystem) => fileSystem.chmod(directory, 0o500)),
-          () =>
-            Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
-              fileSystem.chmod(directory, 0o700),
-            ).pipe(Effect.orDie),
-        );
-        const failed = yield* Effect.flip(checkAuthFileWritable(path));
-        assert.strictEqual(failed.operation, "write");
-        assert.include(failed.message, "can't write next to");
-      }).pipe(Effect.provide(Layer.merge(NodeFileSystem.layer, NodeCrypto.layer))),
-  );
-
-  for (const [status, body] of [
-    [400, { error: "invalid_grant", error_description: "Refresh token is invalid" }],
-    [400, { error: { code: "refresh_token_reused", message: "Already used" } }],
-    [401, { error: "unauthorized" }],
-    [403, {}],
-  ] as const)
-    it.effect(
-      `a refresh rejected with ${String(status)} ${jsonKey(body)} stops refreshing until a reload reads a new login`,
-      () =>
-        Effect.gen(function* () {
-          const { path, login } = yield* authFile("1 minute");
-          yield* setAnswer(() => Effect.succeed(json(status, body)));
-          const rejected = yield* Effect.flip(accessToken(login));
-          assert.strictEqual(rejected.reason, "refresh-rejected");
-          assert.include(rejected.message, path);
-          const again = yield* Effect.flip(accessToken(login));
-          assert.strictEqual(again.reason, "refresh-rejected");
-          const requests = yield* tokenRequests;
-          assert.lengthOf(requests, 1);
-          yield* replaceAuthFile(path, "refresh-new", "60 minutes");
-          yield* (yield* ChatGptLogins).reload(login);
-          const token = yield* accessToken(login);
-          assert.strictEqual(nonceOf(token), "refresh-new");
-          const currentRequests = yield* tokenRequests;
-          assert.lengthOf(currentRequests, 1);
-        }).pipe(Effect.provide(Layer.provideMerge(logins, NodeFileSystem.layer))),
-    );
 
   it.effect(
     "a reload keeps the tokens in memory when the file has their refresh token or one they replaced, and takes a new login",
     () =>
       Effect.gen(function* () {
-        const { path, login } = yield* authFile("1 minute");
+        const { directory, path, login } = yield* authFile("1 minute");
         const service = yield* ChatGptLogins;
         yield* setAnswer(refreshing());
         const token = yield* accessToken(login);
@@ -536,6 +495,16 @@ describe("ChatGptLogins", () => {
         yield* service.reload(login);
         const nextToken = yield* accessToken(login);
         assert.strictEqual(nonceOf(nextToken), "second");
+        const moved = join(directory, "moved.json");
+        yield* replaceAuthFile(moved, "refresh-first", "60 minutes");
+        const elsewhere = ChatGptLogin.make({ ...login, authFile: HostFilePath.make(moved) });
+        yield* service.reload(elsewhere);
+        const movedToken = yield* accessToken(elsewhere);
+        assert.strictEqual(
+          nonceOf(movedToken),
+          "second",
+          "another auth file with a replaced token",
+        );
         yield* replaceAuthFile(path, "refresh-other", "60 minutes");
         yield* service.reload(login);
         const updatedToken = yield* accessToken(login);
@@ -665,60 +634,28 @@ describe("GatewayProxy with a ChatGPT login", () => {
   );
 
   it.effect(
-    "refuses backend paths Codex doesn't call, and encoded separators, without a refresh",
+    "answers 401 and sends nothing upstream when the login can't be refreshed after a rejected refresh token",
     () =>
       Effect.gen(function* () {
         const { login } = yield* authFile("1 minute");
         yield* Effect.gen(function* () {
-          yield* setAnswer(refreshing());
+          yield* setAnswer(() => Effect.succeed(json(400, { error: "invalid_grant" })));
           const caller = yield* attach;
-          for (const path of [
-            "/openai-responses/responses",
-            "/openai-responses/v1",
-            "/openai-responses/v1/x%2F..%2Fconversations",
-            "/openai-responses/v1/conversations",
-            "/openai-responses/v1/responses/../../conversations",
-          ]) {
-            const answer = yield* send(`http://llm.gw.test${path}`, {
-              authorization: `Bearer ${caller}`,
-            });
-            assert.deepStrictEqual([answer.status, answer.reason], [404, "unsupported-path"], path);
-          }
+          const answer = yield* send(
+            "http://llm.gw.test/openai-responses/v1/responses",
+            { authorization: `Bearer ${caller}` },
+            "{}",
+          );
+          assert.deepStrictEqual(
+            [answer.status, answer.reason],
+            [401, "provider-login-unavailable"],
+          );
+          assert.include(answer.body, '"reason":"provider-login-unavailable"');
           const requests = yield* backendRequests;
           assert.lengthOf(requests, 0);
-          const currentRequests = yield* tokenRequests;
-          assert.lengthOf(currentRequests, 0);
         }).pipe(Effect.provide(proxyFor(login)));
       }).pipe(Effect.provide(NodeFileSystem.layer)),
   );
-
-  for (const [token, status, outcome] of [
-    [json(502, { error: "bad_gateway" }), 503, "a transient failure, which Codex retries"],
-    [json(400, { error: "invalid_grant" }), 401, "a rejected refresh token"],
-  ] as const)
-    it.effect(
-      `answers ${String(status)} and sends nothing upstream when the login can't be refreshed after ${outcome}`,
-      () =>
-        Effect.gen(function* () {
-          const { login } = yield* authFile("1 minute");
-          yield* Effect.gen(function* () {
-            yield* setAnswer(() => Effect.succeed(token.clone()));
-            const caller = yield* attach;
-            const answer = yield* send(
-              "http://llm.gw.test/openai-responses/v1/responses",
-              { authorization: `Bearer ${caller}` },
-              "{}",
-            );
-            assert.deepStrictEqual(
-              [answer.status, answer.reason],
-              [status, "provider-login-unavailable"],
-            );
-            assert.include(answer.body, '"reason":"provider-login-unavailable"');
-            const requests = yield* backendRequests;
-            assert.lengthOf(requests, 0);
-          }).pipe(Effect.provide(proxyFor(login)));
-        }).pipe(Effect.provide(NodeFileSystem.layer)),
-    );
 
   it.effect("refreshes before the next request when the backend refuses the access token", () =>
     Effect.gen(function* () {

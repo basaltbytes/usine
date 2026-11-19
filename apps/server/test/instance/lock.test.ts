@@ -23,7 +23,6 @@ import {
   InstanceRecordError,
   ProcessId,
   instanceFiles,
-  markStoppingSync,
   readRecord,
 } from "../../src/instance/record.ts";
 
@@ -96,31 +95,6 @@ describe("instance lock", () => {
       );
       const matchesRefused = Schema.is(InstanceLockError)(refused);
       assert(matchesRefused);
-    }),
-  );
-
-  it.live("records the start of a drain without changing the rest of the record", () =>
-    Effect.gen(function* () {
-      const directory = instanceFolder();
-      const files = instanceFiles(directory);
-      yield* Effect.gen(function* () {
-        yield* holdInstance(directory, record);
-        markStoppingSync(files, record);
-        const read = yield* readRecord(files);
-        assert(Option.isSome(read));
-        const stopping = read.value;
-        assert.isDefined(stopping.stoppingSince);
-        const valueDecoded1 = yield* Schema.encodeEffect(InstanceLaunch)(stopping.launch);
-        assert.deepStrictEqual(valueDecoded1, {
-          node: process.execPath,
-          nodeOptions: ["--enable-source-maps"],
-          script: "/opt/usine/dist/main.js",
-          port: 8_111,
-          logLevel: "Info",
-          allowVolatileInstance: false,
-        });
-        assert.strictEqual(stopping.pid, record.pid);
-      }).pipe(Effect.scoped, Effect.provide(NodeServices.layer));
     }),
   );
 

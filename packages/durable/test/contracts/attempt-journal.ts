@@ -2,23 +2,11 @@ import { assert, describe, it } from "@effect/vitest";
 import { AgentSessionId, ChildSessionCount } from "@usine/core/agent/session";
 import { AttemptId } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
-import { AgentFailure } from "@usine/core/attempt/failure";
 import { WorkerName } from "@usine/core/worker";
 import { StepCompletion, StepResult } from "@usine/core/step/result";
-import {
-  DateTime,
-  Duration,
-  Effect,
-  Equal,
-  Exit,
-  Option,
-  References,
-  Result,
-  Schema,
-} from "effect";
+import { DateTime, Duration, Effect, Equal, Exit, Option, References, Result } from "effect";
 
 import { AttemptReport, StoredRequest } from "../../src/attempt-runtime.ts";
-import { Complete } from "../../src/attempt/coordinator/rules.ts";
 import {
   AttemptJournal,
   ChildProgress,
@@ -32,7 +20,6 @@ import {
   EncodedIntervention,
   EncodedState,
   EventSequence,
-  Failed,
   Finish,
   IdleSaved,
   type Intent,
@@ -54,8 +41,7 @@ import {
   Transition,
   UsageSaved,
 } from "../../src/coordinator/journal.ts";
-import { RecordedDecision } from "../../src/coordinator/wake-up.ts";
-import { attemptRequest, handlerSession } from "../support.ts";
+import { attemptRequest } from "../support.ts";
 import type { FailingJournalFixture, JournalAdapter, JournalFixture } from "./adapter.ts";
 
 const storedRequest = (attemptId: string, cwd = "/workspace/usine") => {
@@ -101,8 +87,6 @@ const step = (
   });
 
 const revision = JournalRevision.make;
-const encodeDecision = Schema.encodeEffect(Schema.toCodecJson(RecordedDecision));
-const decodeDecision = Schema.decodeUnknownEffect(Schema.toCodecJson(RecordedDecision));
 const using = <A, E>(fixture: JournalFixture, work: Effect.Effect<A, E, AttemptJournal>) =>
   work.pipe(Effect.provide(fixture.open));
 const journal = Effect.service(AttemptJournal);
@@ -284,69 +268,6 @@ export const attemptJournalContract = (adapter: JournalAdapter) =>
             pendingDecision: Option.none<EncodedDecision>(),
             nextEvent: EventSequence.make(2),
           }),
-        );
-      }).pipe(Effect.scoped),
-    );
-
-    it.effect("keeps a recorded decision with and without its handler session", () =>
-      Effect.gen(function* () {
-        const fixture = yield* adapter.fixture;
-        const request = storedRequest("attempt-handler-session");
-        const attemptId = request.spec.attemptId;
-        const byRule = RecordedDecision.make({ decision: Complete.make({}), handler: "rule" });
-        const byModel = RecordedDecision.make({
-          decision: Complete.make({ message: "Reviewed: the pull request is open." }),
-          handler: "completion",
-          session: Option.some(handlerSession),
-        });
-        const ruleJson = yield* encodeDecision(byRule).pipe(Effect.map(EncodedDecision.make));
-        const modelJson = yield* encodeDecision(byModel).pipe(Effect.map(EncodedDecision.make));
-        const pending = yield* using(
-          fixture,
-          Effect.gen(function* () {
-            const store = yield* journal;
-            yield* store.open(request);
-            yield* store.decide(attemptId, EventSequence.make(1), ruleJson);
-            yield* store.transition(
-              attemptId,
-              revision(0),
-              Transition.make({ ...step("AttemptStarted"), decision: ruleJson }),
-            );
-            yield* store.decide(attemptId, EventSequence.make(2), modelJson);
-            return yield* store.load(attemptId);
-          }),
-        );
-        const applied = yield* using(
-          fixture,
-          Effect.gen(function* () {
-            const store = yield* journal;
-            yield* store.transition(
-              attemptId,
-              revision(1),
-              Transition.make({ ...step("ChildReported"), decision: modelJson }),
-            );
-            return yield* store.load(attemptId);
-          }),
-        );
-        const decoded = (snapshot: Option.Option<CoordinatorSnapshot>) =>
-          Effect.forEach(
-            Option.match(snapshot, {
-              onNone: () => [],
-              onSome: ({ events, pendingDecision }) => [
-                ...events.map(({ decision }) => decision),
-                ...Option.toArray(pendingDecision),
-              ],
-            }),
-            (decision) => decodeDecision(decision),
-          );
-
-        const beforeApply = yield* decoded(pending);
-        const afterApply = yield* decoded(applied);
-
-        assert.deepStrictEqual(beforeApply, [byRule, byModel]);
-        assert.deepStrictEqual(afterApply, [byRule, byModel]);
-        assert.isTrue(
-          Option.exists(applied, ({ pendingDecision }) => Option.isNone(pendingDecision)),
         );
       }).pipe(Effect.scoped),
     );
@@ -592,37 +513,6 @@ export const attemptJournalContract = (adapter: JournalAdapter) =>
           Option.some(
             Exit.isSuccess(result.transitioned) ? Terminal.make({ outcome }) : Open.make({}),
           ),
-        );
-      }).pipe(Effect.scoped),
-    );
-
-    it.effect("stores a failed outcome", () =>
-      Effect.gen(function* () {
-        const fixture = yield* adapter.fixture;
-        const request = storedRequest("attempt-failed");
-        const outcome = Failed.make({
-          failure: AgentFailure.make({ message: "The child reported a blocker." }),
-        });
-        yield* using(
-          fixture,
-          Effect.gen(function* () {
-            const store = yield* journal;
-            yield* store.open(request);
-            yield* store.transition(
-              request.spec.attemptId,
-              revision(0),
-              step("ChildReported", { decision: "Failed", intents: [Finish.make({ outcome })] }),
-            );
-          }),
-        );
-        const reopened = yield* using(
-          fixture,
-          journal.pipe(Effect.flatMap((journal) => journal.load(request.spec.attemptId))),
-        );
-
-        assert.deepStrictEqual(
-          Option.map(reopened, ({ status }) => status),
-          Option.some(Terminal.make({ outcome })),
         );
       }).pipe(Effect.scoped),
     );

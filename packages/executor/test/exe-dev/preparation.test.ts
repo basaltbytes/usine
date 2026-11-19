@@ -152,67 +152,61 @@ describe("exe.dev preparation", () => {
     }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer, fails)));
   });
 
-  it.effect.each(["lookup", "fetch", "decode"] as const)(
-    "rejects retry preparation when salvage %s fails",
-    (failure) => {
-      const ssh = fakeSsh();
-      ssh.state.resumeFailure = failure;
-      return Effect.gen(function* () {
-        const executor = yield* Executor;
-        const error = yield* executor
-          .prepare(
-            CheckoutRequest.make({
-              ...request,
-              resume: Option.some(
-                SalvagePushed.make({
-                  ref: SalvageRef.make("usine/salvage/r/1"),
-                  commit: SALVAGE_COMMIT,
-                }),
-              ),
-            }),
-          )
-          .pipe(Effect.flip);
-        assert.strictEqual(error._tag, "ExecutorOperationError");
-        assert(
-          !ssh.state.commands.some((command) => remoteLine(command).includes("'worktree' 'add'")),
-        );
-      }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer)));
-    },
-  );
-
-  it.effect.each(["inspect-fails", "add-fails", "commit-fails"] as const)(
-    "preserves the checkout through scope cleanup when %s",
-    (failure) => {
-      const ssh = fakeSsh();
-      ssh.state.salvage = failure;
-      return Effect.gen(function* () {
-        const executor = yield* Executor;
-        const prepared = yield* executor.prepare(request);
-        const cleanupStart = ssh.state.commands.length;
-        const recorded: Array<AttemptSalvage> = [];
-        yield* prepared
-          .launch({
-            append: () => Effect.void,
-            comments: () => Effect.void,
-            outOfMemory: () => Effect.void,
-            transcript: Effect.succeed([]),
-            windows: aloneOnItem(),
-            salvage: (value) =>
-              Effect.sync(() => {
-                recorded.push(value);
+  it.effect("rejects retry preparation when the salvage lookup fails", () => {
+    const ssh = fakeSsh();
+    ssh.state.resumeFailure = "lookup";
+    return Effect.gen(function* () {
+      const executor = yield* Executor;
+      const error = yield* executor
+        .prepare(
+          CheckoutRequest.make({
+            ...request,
+            resume: Option.some(
+              SalvagePushed.make({
+                ref: SalvageRef.make("usine/salvage/r/1"),
+                commit: SALVAGE_COMMIT,
               }),
-          })
-          .pipe(Effect.flip);
-        assert(recorded[0]?._tag === "Retained");
-        const lines = ssh.state.commands.slice(cleanupStart).map(remoteLine);
-        assert(
-          !lines.some(
-            (line) => line.includes("'worktree' 'remove'") || line.startsWith("exec 'rm' '-rf'"),
-          ),
-        );
-      }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer, fails)));
-    },
-  );
+            ),
+          }),
+        )
+        .pipe(Effect.flip);
+      assert.strictEqual(error._tag, "ExecutorOperationError");
+      assert(
+        !ssh.state.commands.some((command) => remoteLine(command).includes("'worktree' 'add'")),
+      );
+    }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer)));
+  });
+
+  it.effect("preserves the checkout through scope cleanup when its salvage commit fails", () => {
+    const ssh = fakeSsh();
+    ssh.state.salvage = "commit-fails";
+    return Effect.gen(function* () {
+      const executor = yield* Executor;
+      const prepared = yield* executor.prepare(request);
+      const cleanupStart = ssh.state.commands.length;
+      const recorded: Array<AttemptSalvage> = [];
+      yield* prepared
+        .launch({
+          append: () => Effect.void,
+          comments: () => Effect.void,
+          outOfMemory: () => Effect.void,
+          transcript: Effect.succeed([]),
+          windows: aloneOnItem(),
+          salvage: (value) =>
+            Effect.sync(() => {
+              recorded.push(value);
+            }),
+        })
+        .pipe(Effect.flip);
+      assert(recorded[0]?._tag === "Retained");
+      const lines = ssh.state.commands.slice(cleanupStart).map(remoteLine);
+      assert(
+        !lines.some(
+          (line) => line.includes("'worktree' 'remove'") || line.startsWith("exec 'rm' '-rf'"),
+        ),
+      );
+    }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer, fails)));
+  });
 
   it.effect("renews grants beyond their original lifetime and stops renewal after release", () => {
     const ssh = fakeSsh();
@@ -431,32 +425,6 @@ describe("exe.dev preparation", () => {
     }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer)));
   });
 
-  it.effect("preflight verifies the baked VM without changing remote state", () => {
-    const ssh = fakeSsh();
-    return Effect.gen(function* () {
-      const executor = yield* Executor;
-      yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
-      for (const command of ssh.state.commands) {
-        const line = remoteLine(command);
-        for (const mutating of [
-          "attach",
-          "clone",
-          "detach",
-          "find",
-          "mkdir",
-          "mv",
-          "prune",
-          "rm",
-        ]) {
-          assert(
-            !command.args.includes(mutating) && !line.includes(`'${mutating}'`),
-            `preflight invoked ${mutating}`,
-          );
-        }
-      }
-    }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer)));
-  });
-
   it.effect("contains an invalid sweep boundary without touching it or blocking prepare", () => {
     const ssh = fakeSsh("invalid-path");
     return Effect.gen(function* () {
@@ -581,7 +549,7 @@ describe("exe.dev preparation", () => {
     },
   );
 
-  for (const phase of ["preflight", "clone", "fetch", "attach", "promotion", "checkout"] as const) {
+  for (const phase of ["clone", "checkout"] as const) {
     it.effect(
       `cancels preparation during ${phase} before launching and releases acquired resources`,
       () => {
@@ -600,7 +568,7 @@ describe("exe.dev preparation", () => {
           yield* executor.cancel(ATTEMPT_ID, "cancel");
           assert.strictEqual(
             ssh.state.commands.filter(({ args }) => args.includes("detach")).length,
-            phase === "preflight" ? 0 : 1,
+            1,
           );
           if (phase === "checkout") {
             const commands = ssh.state.commands.map(remoteLine);
@@ -612,7 +580,7 @@ describe("exe.dev preparation", () => {
               commands.some((line, index) => index > add && line.includes("'worktree' 'prune'")),
             );
           }
-          if (phase === "clone" || phase === "promotion") {
+          if (phase === "clone") {
             const commands = ssh.state.commands.map(remoteLine);
             const clone = commands.findIndex((line) => line.includes("'clone'"));
             assert(

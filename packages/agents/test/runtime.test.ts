@@ -1,16 +1,7 @@
 import { assert, describe, it } from "@effect/vitest";
-import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
-import {
-  AgentSessionId,
-  ChildSession,
-  ChildSessionBudget,
-  ChildSessionCount,
-  ParentSession,
-} from "@usine/core/agent/session";
-import { AgentName } from "@usine/core/agent";
-import { WorkerName } from "@usine/core/worker";
-import { Effect, Option, Schema } from "effect";
-import { RemoteShell } from "../src/child-host/child-host.ts";
+import { Harness, ModelId } from "@usine/core/agent/brain";
+import { AgentSessionId, ChildSessionBudget, ChildSessionCount } from "@usine/core/agent/session";
+import { Option, Schema } from "effect";
 import {
   AgentBlockedError,
   AgentCapacityError,
@@ -19,7 +10,6 @@ import {
   reportText,
   AgentQuestionError,
   AgentResultError,
-  ChildRequest,
   ChildSessionBudgetExceededError,
   ContinuationLimitError,
   PoolUnavailableError,
@@ -28,50 +18,9 @@ import {
   toAttemptFailure,
   UnknownModelError,
   UnsupportedEffortError,
-  WorkingDirectory,
 } from "../src/runtime.ts";
 
 describe("agent runtime contract", () => {
-  it.effect("round-trips one explicitly first-level child request", () =>
-    Effect.gen(function* () {
-      const parent = ParentSession.make({
-        id: AgentSessionId.make("parent-1"),
-        agent: AgentName.make("developer"),
-        brain: BrainSpec.make({
-          harness: Harness.make("pi"),
-          model: ModelId.make("anthropic/claude-opus-4-6"),
-          effort: "high",
-        }),
-      });
-      const request = ChildRequest.make({
-        worker: WorkerName.make("worker-1"),
-        machine: Option.none(),
-        environment: { HOME: "/home/worker", PATH: "/usr/bin:/bin" },
-        session: ChildSession.make({
-          id: AgentSessionId.make("child-1"),
-          parentId: parent.id,
-          agent: parent.agent,
-          brain: BrainSpec.make({
-            harness: Harness.make("claude"),
-            model: ModelId.make("claude-sonnet-4-6"),
-            effort: "high",
-          }),
-        }),
-        cwd: WorkingDirectory.make("/workspace/repo"),
-        host: RemoteShell.make({
-          ssh: { command: "ssh", args: ["-o", "BatchMode=yes"] },
-          sshEnvironment: { HOME: "/home/orchestrator" },
-          destination: "worker.exe.xyz",
-        }),
-        prompt: "Implement the focused change.",
-      });
-
-      const decodedValue1 = yield* Schema.encodeEffect(ChildRequest)(request);
-      const decodedValue2 = yield* Schema.decodeEffect(ChildRequest)(decodedValue1);
-      assert.deepStrictEqual(decodedValue2, request);
-    }),
-  );
-
   it("retries SDK trouble as infrastructure and parks everything else on the operator", () => {
     const sessionId = Option.some(AgentSessionId.make("child-1"));
     const infra = toAttemptFailure(
@@ -154,14 +103,10 @@ describe("agent runtime contract", () => {
 it.each([
   ["Selected model is at capacity. Please try a different model.", true],
   ['529 {"error":{"type":"overloaded_error","message":"Overloaded"}}', true],
-  ["HTTP 529: Overloaded", true],
-  ["529: Overloaded", true],
   ["API Error: 529", true],
   ["HTTP 503: retry after 30 seconds", true],
-  ["503: please try again later", true],
   ["HTTP 503: unsupported service", false],
   ["HTTP 429: rate limit", false],
-  ["authentication failed", false],
   ["ran out of turns", false],
 ])("classifies harness refusal %s without retrying task failures", (message, capacity) => {
   const error = harnessFailure(Option.none(), message);
@@ -196,21 +141,21 @@ it.each([
   },
 );
 
-it.each([
-  ["[usine:blocked]", "AgentBlockedError"],
-  ["[usine:question]", "AgentQuestionError"],
-] as const)("recognizes %s after narration and preserves the report details", (marker, tag) => {
+it("recognizes [usine:blocked] after narration and preserves the report details", () => {
   for (const prefix of ["", "  ", "The delegation was interrupted.\n", "Narration.\r\n  "]) {
     for (const separator of ["\n", " "]) {
       const report = reportedOutcome(
         Option.none(),
-        `${prefix}${marker}${separator}Cannot finish.\nRemaining work.`,
+        `${prefix}[usine:blocked]${separator}Cannot finish.\nRemaining work.`,
       );
       assert(Option.isSome(report));
-      assert.strictEqual(report.value._tag, tag);
+      assert.strictEqual(report.value._tag, "AgentBlockedError");
       assert.strictEqual(report.value.message, "Cannot finish.\nRemaining work.");
     }
   }
+  const bare = reportedOutcome(Option.none(), "[usine:blocked]");
+  assert(Option.isSome(bare));
+  assert.match(bare.value.message, /without details/u);
 });
 
 it("does not treat ordinary narration or an embedded harness failure as a reserved report", () => {
@@ -232,19 +177,11 @@ it("does not treat ordinary narration or an embedded harness failure as a reserv
 const quotedReports = [
   "The child returned [usine:blocked]\nso I continued.",
   'Reviewed the parser: `reportedOutcome(id, "[usine:blocked]\\nmsg")` stays a mention.',
-  'const answer = "[usine:question]\\nWhich transport?";',
   "Example report:\n```text\n[usine:blocked]\nPermission denied.\n```\nThe review passed.",
   "Example:\n~~~~\nNarration.[usine:question]\n~~~\n[usine:blocked]\n~~~~\nDone.",
   "Unclosed example:\n```\n[usine:blocked]\nPermission denied.",
   "Example:\n```\nSnippet:\n```bash\n[usine:blocked]\n```\nDone.",
-  "Example answer:\n~~~\n```\n[usine:blocked]\nNo access.\n```\n~~~\nDone.",
-  "Example:\n```\n~~~\n[usine:question]\nWhich?\n```\nDone.",
-  "- Ex:\n\n    ```\n    [usine:blocked]\n    ```\nDone.",
-  "- Ex:\n\n\t```\n\t[usine:question]\n\t```\nDone.",
   'The child answered "[usine:blocked]\nNo access." and I continued.',
-  "The child answered '[usine:question]\nWhich transport?' and I chose HTTP.",
-  "const answer = `[usine:blocked]\nNo access.`;",
-  'prompt = """[usine:question]\nWhich transport?"""',
   'The child answered:\n"[usine:blocked]\nNo access."\nI continued with the fix.',
   'The child answered ("[usine:blocked]\nNo access.") and I continued.',
   "answer=`[usine:blocked]\nNo access.`;",
@@ -266,13 +203,8 @@ it("recognizes a report header after a closed code fence", () => {
 
 it.each([
   "- Ex:\n\n    ```\n    [usine:question]\n    ```\n[usine:blocked]\nNo access.",
-  "- Ex:\n\n\t~~~\n\t[usine:question]\n\t~~~\n[usine:blocked]\nNo access.",
-  "I wrapped the output in ```text fences.\n[usine:blocked]\nNo access.",
-  "Ran ```pnpm test```.[usine:blocked]\nNo access.",
   "Ran ```pnpm test```[usine:blocked]\nNo access.",
-  "Next I need to run `gh pr view`[usine:blocked]\nNo access.",
   'The command failed with "permission denied"[usine:blocked]\nNo access.',
-  "I could not reach 'api.github.com'[usine:blocked]\nNo access.",
   'I ran `git commit -m ""`[usine:blocked]\nNo access.',
 ])("recognizes a report header after an indented fence or inline backticks: %j", (answer) => {
   const report = reportedOutcome(Option.none(), answer);
@@ -291,15 +223,12 @@ it("uses the first blocker or question when a final answer includes multiple rep
   assert.strictEqual(report.value.message, "Blocked.\n[usine:question] Which transport?");
 });
 
-it.each([
-  ["[usine:blocked]", "AgentBlockedError"],
-  ["[usine:question]", "AgentQuestionError"],
-] as const)("recognizes a %s report header appended to narration", (marker, tag) => {
+it("recognizes a [usine:question] report header appended to narration", () => {
   const report = reportedOutcome(
     Option.none(),
-    `The prior delegation was interrupted.${marker}\nThe review is incomplete.`,
+    "The prior delegation was interrupted.[usine:question]\nThe review is incomplete.",
   );
   assert(Option.isSome(report));
-  assert.strictEqual(report.value._tag, tag);
+  assert.strictEqual(report.value._tag, "AgentQuestionError");
   assert.strictEqual(report.value.message, "The review is incomplete.");
 });

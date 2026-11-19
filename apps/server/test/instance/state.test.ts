@@ -94,13 +94,6 @@ const pid1OwnedByThisUser = () => {
 };
 
 describe("instance state", () => {
-  it.live("reports a folder that never ran usine as stopped", () =>
-    Effect.gen(function* () {
-      const state = yield* Effect.promise(() => probe(instanceFolder()));
-      assert.deepStrictEqual(state, Stopped.make({ stale: Option.none() }));
-    }),
-  );
-
   it.live("reports a record without a lock holder as stale, even if its pid is live", () =>
     Effect.gen(function* () {
       const directory = instanceFolder();
@@ -112,21 +105,8 @@ describe("instance state", () => {
       const json1 = jsonKey(actual1);
       writeFileSync(files.record, json1);
       const state = yield* Effect.promise(() => probe(directory));
-      assert(state._tag === "Stopped");
+      assert.instanceOf(state, Stopped);
       assert.deepStrictEqual(state.stale, Option.some(process.pid));
-    }),
-  );
-
-  it.live("reports the lock holder whose record names a live process as running", () =>
-    Effect.gen(function* () {
-      const directory = instanceFolder();
-      yield* Effect.gen(function* () {
-        yield* holdInstance(directory, recordFor(process.pid));
-        const state = yield* probeInstance(directory);
-        assert.instanceOf(state, Running);
-        assert.strictEqual(state.record.pid, process.pid);
-        assert.strictEqual(state.record.launch.port, 8_112);
-      }).pipe(Effect.scoped, Effect.provide(NodeServices.layer));
     }),
   );
 

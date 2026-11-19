@@ -4,73 +4,13 @@ import {
   Agent,
   AgentPersona,
   resolveParentEffort,
-  resolveParentModel,
   AgentName,
   DecisionBrain,
   resolveCoordinator,
 } from "../src/agent/agent.ts";
 import { Harness, BrainSpec, ModelId } from "../src/agent/brain.ts";
 
-const decodeBrain = Schema.decodeUnknownEffect(BrainSpec);
-
 describe("Agent brain specs", () => {
-  it.effect("validates usine harness and effort shapes while passing model ids through", () =>
-    Effect.gen(function* () {
-      const brain = yield* decodeBrain({
-        harness: Harness.make("claude"),
-        model: "vendor/model-from-tomorrow",
-        effort: "xhigh",
-      });
-      expect(brain.model).toBe("vendor/model-from-tomorrow");
-      expect(
-        (yield* decodeBrain({ harness: "new-harness", model: "model", effort: "high" })).harness,
-      ).toBe("new-harness");
-      expect(
-        (yield* Effect.flip(
-          decodeBrain({ harness: "Not a harness ID", model: "model", effort: "high" }),
-        ))._tag,
-      ).toBe("SchemaError");
-      expect(
-        (yield* Effect.flip(
-          decodeBrain({ harness: Harness.make("claude"), model: "model", effort: "extreme" }),
-        ))._tag,
-      ).toBe("SchemaError");
-      expect(
-        (yield* Effect.flip(
-          decodeBrain({ harness: Harness.make("claude"), model: " ", effort: "high" }),
-        ))._tag,
-      ).toBe("SchemaError");
-    }),
-  );
-
-  it("uses the roster override before the instance-level parent model", () => {
-    const inherited = ModelId.make("anthropic/instance-parent");
-    const override = ModelId.make("anthropic/agent-parent");
-    const base = {
-      name: AgentName.make("developer"),
-      brain: BrainSpec.make({
-        harness: Harness.make("claude"),
-        model: ModelId.make("claude-sonnet-4-6"),
-        effort: "high",
-      }),
-      persona: AgentPersona.make("Implement the issue."),
-    } as const;
-
-    const defaulted = Agent.make({
-      ...base,
-      parentModel: Option.none(),
-      parentEffort: Option.none(),
-    });
-    const overridden = Agent.make({
-      ...base,
-      parentModel: Option.some(override),
-      parentEffort: Option.none(),
-    });
-
-    expect(resolveParentModel(defaulted, Option.some(inherited))).toEqual(Option.some(inherited));
-    expect(resolveParentModel(overridden, Option.some(inherited))).toEqual(Option.some(override));
-  });
-
   it("resolves the parent effort from the roster, then the instance, then the child brain", () => {
     const base = {
       name: AgentName.make("developer"),

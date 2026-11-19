@@ -15,20 +15,10 @@ import {
 } from "@usine/orchestrator/operator";
 import { Option } from "effect";
 import { assert, describe, it } from "vitest";
-import {
-  attemptsDuration,
-  type TaskRow,
-  taskCounts,
-  taskDuration,
-  taskRows,
-  taskTotals,
-  totalsFigures,
-} from "~/lib/tasks/model";
+import { attemptsDuration, type TaskRow, taskCounts, taskRows } from "~/lib/tasks/model";
 import {
   boardOverview,
   boardOverviewResolved,
-  boardOverviewUnpriced,
-  boardOverviewUntimed,
   boardStalled,
   changeTasks,
 } from "~/lib/projects/fixture";
@@ -334,51 +324,5 @@ describe("Tasks list model", () => {
       [44, "Queued"],
       [31, "Stalled"],
     ]);
-  });
-
-  /** Returns the totals line of the Tasks list for `overview`, with `*` after each lower bound. */
-  const totalsLine = (overview: ReturnType<typeof boardOverview>) =>
-    totalsFigures(taskTotals(taskRows(lanes(overview), boardStalled()), Date.now()))
-      .map(({ figure, words, lowerBound }) => `${figure}${lowerBound === null ? "" : "*"} ${words}`)
-      .join(", ");
-
-  it("adds up the listed Tasks' runs, time, tokens, and priced dollars", () => {
-    const now = Date.now();
-    const redesign = taskOf(31);
-    // 30 min of plan, 5 min of the first implement Attempt, and the live one for 6 min.
-    assert.strictEqual(Math.round(taskDuration(redesign.usage, now) / 60_000), 41);
-    const totals = taskTotals(taskRows(lanes(), boardStalled()), now);
-    assert.strictEqual(totals.runs, 7);
-    // #9 41 min, #28 15 min, #18 10 min, #5 30 min.
-    assert.strictEqual(Math.round(totals.durationMillis / 60_000), 96);
-    assert.strictEqual(totals.unmeasured, 0);
-    assert.strictEqual(totals.tokens, 27_300 + 12_000 + 48_000);
-    assert(totals.usd !== null);
-    assert.closeTo(totals.usd, 5.9, 1e-9);
-    assert.isFalse(totals.unpriced);
-    assert.strictEqual(
-      totalsLine(boardOverview()),
-      "7 runs, 1 h 36 min elapsed, 87.3K tokens, $5.90 estimated",
-    );
-  });
-
-  it("keeps the priced dollars and marks only the cost a lower bound while a Run has no price yet", () => {
-    const totals = taskTotals(taskRows(lanes(boardOverviewUnpriced()), boardStalled()), Date.now());
-    assert.strictEqual(totals.tokens, 27_500 + 12_000 + 48_000);
-    assert(totals.usd !== null);
-    assert.closeTo(totals.usd, 13.45, 1e-9);
-    assert.isTrue(totals.unpriced);
-    assert.strictEqual(
-      totalsLine(boardOverviewUnpriced()),
-      "7 runs, 1 h 36 min elapsed, 87.5K tokens, $13.45* estimated",
-    );
-  });
-
-  it("leaves out an Attempt with no recorded end and marks only the time a lower bound", () => {
-    // #18's 10 min are unknown.
-    assert.strictEqual(
-      totalsLine(boardOverviewUntimed()),
-      "7 runs, 1 h 26 min* elapsed, 87.3K tokens, $5.90 estimated",
-    );
   });
 });

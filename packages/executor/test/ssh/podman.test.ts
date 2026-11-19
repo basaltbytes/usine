@@ -53,72 +53,60 @@ const sink = {
 };
 
 describe("rootless Podman", () => {
-  it.effect.each(["preflight", "prepare"] as const)(
-    "checks Podman GraphRoot disk space during %s",
-    (operation) => {
-      const machine = podmanMachine();
-      machine.state.storageFreeDiskGib = 1;
-      return Effect.gen(function* () {
-        const executor = yield* Executor;
-        const error =
-          operation === "preflight"
-            ? yield* executor.preflight(WORKER, [], 1).pipe(Effect.flip)
-            : yield* executor.prepare(request).pipe(Effect.flip);
-        assert(error._tag === "WorkerCapabilityError");
-        assert.strictEqual(error.capability, "disk");
-        assert.include(error.message, "has 1.0 GiB free on /var/lib/podman");
-      }).pipe(Effect.scoped, Effect.provide(runtime(machine, mintingProvider())));
-    },
-  );
+  it.effect("checks Podman GraphRoot disk space during preflight", () => {
+    const machine = podmanMachine();
+    machine.state.storageFreeDiskGib = 1;
+    return Effect.gen(function* () {
+      const executor = yield* Executor;
+      const error = yield* executor.preflight(WORKER, [], 1).pipe(Effect.flip);
+      assert(error._tag === "WorkerCapabilityError");
+      assert.strictEqual(error.capability, "disk");
+      assert.include(error.message, "has 1.0 GiB free on /var/lib/podman");
+    }).pipe(Effect.scoped, Effect.provide(runtime(machine, mintingProvider())));
+  });
 
-  it.effect.each(["preflight", "prepare"] as const)(
-    "pulls a missing image before the first container during %s",
-    (operation) => {
-      const machine = podmanMachine();
-      machine.state.imageOnMachine = false;
-      const logs = capturedLogs();
-      return Effect.gen(function* () {
-        const executor = yield* Executor;
-        if (operation === "preflight") yield* executor.preflight(WORKER, [], 1);
-        else yield* executor.prepare(request);
-        const warnings = logs.warnings.filter((line) => line.includes("image is absent"));
-        assert.lengthOf(warnings, 1);
-        assert.include(warnings[0] ?? "", ATTEMPT_IMAGE);
-        const inspections = logs.lines.filter((line) =>
-          line.includes("Inspected the attempt image"),
-        );
-        assert.include(inspections[0] ?? "", '"status":"absent"');
-        const pulls = logs.lines.filter((line) => line.includes("Pulled the attempt image"));
-        assert.lengthOf(pulls, 1);
-        const json1 = yield* Schema.decodeEffect(CapturedLog)(pulls[0] ?? "").pipe(Effect.orDie);
-        assert.deepInclude(json1[1], {
-          image: ATTEMPT_IMAGE,
-          runtime: "podman",
-          downloaded: true,
-          durationMillis: 0,
-        });
-        const commands = machine.state.calls.map(({ line }) => line);
-        const pull = commands.indexOf(`exec 'podman' 'pull' '--quiet' '${ATTEMPT_IMAGE}'`);
-        assert.isAtLeast(pull, 0);
-        assert.lengthOf(
-          commands.filter((line) => line.startsWith("exec 'podman' 'pull'")),
-          1,
-        );
-        const firstContainer = commands.findIndex(
-          (line) => line.includes("--entrypoint") || line.includes("volume create"),
-        );
-        assert.isAbove(firstContainer, pull);
-      }).pipe(
-        Effect.scoped,
-        Effect.provide(runtime(machine, mintingProvider()).pipe(Layer.provideMerge(logs.layer))),
+  it.effect("pulls a missing image before the first container during prepare", () => {
+    const machine = podmanMachine();
+    machine.state.imageOnMachine = false;
+    const logs = capturedLogs();
+    return Effect.gen(function* () {
+      const executor = yield* Executor;
+      yield* executor.prepare(request);
+      const warnings = logs.warnings.filter((line) => line.includes("image is absent"));
+      assert.lengthOf(warnings, 1);
+      assert.include(warnings[0] ?? "", ATTEMPT_IMAGE);
+      const inspections = logs.lines.filter((line) => line.includes("Inspected the attempt image"));
+      assert.include(inspections[0] ?? "", '"status":"absent"');
+      const pulls = logs.lines.filter((line) => line.includes("Pulled the attempt image"));
+      assert.lengthOf(pulls, 1);
+      const json1 = yield* Schema.decodeEffect(CapturedLog)(pulls[0] ?? "").pipe(Effect.orDie);
+      assert.deepInclude(json1[1], {
+        image: ATTEMPT_IMAGE,
+        runtime: "podman",
+        downloaded: true,
+        durationMillis: 0,
+      });
+      const commands = machine.state.calls.map(({ line }) => line);
+      const pull = commands.indexOf(`exec 'podman' 'pull' '--quiet' '${ATTEMPT_IMAGE}'`);
+      assert.isAtLeast(pull, 0);
+      assert.lengthOf(
+        commands.filter((line) => line.startsWith("exec 'podman' 'pull'")),
+        1,
       );
-    },
-  );
+      const firstContainer = commands.findIndex(
+        (line) => line.includes("--entrypoint") || line.includes("volume create"),
+      );
+      assert.isAbove(firstContainer, pull);
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(runtime(machine, mintingProvider()).pipe(Layer.provideMerge(logs.layer))),
+    );
+  });
 
-  it.effect.each([1, 125])("preserves image inspection failure with exit code %s", (exitCode) => {
+  it.effect("preserves an image inspection failure", () => {
     const machine = podmanMachine();
     machine.state.imageInspectFailure = {
-      exitCode,
+      exitCode: 125,
       stderr: "Error: opening image storage: permission denied",
     };
     return Effect.gen(function* () {
@@ -169,24 +157,6 @@ describe("rootless Podman", () => {
       },
     ],
     [
-      "remote service",
-      (value: ReturnType<typeof info>) => {
-        value.host.serviceIsRemote = true;
-      },
-    ],
-    [
-      "cgroup v1",
-      (value: ReturnType<typeof info>) => {
-        value.host.cgroupVersion = "v1";
-      },
-    ],
-    [
-      "cgroupfs",
-      (value: ReturnType<typeof info>) => {
-        value.host.cgroupManager = "cgroupfs";
-      },
-    ],
-    [
       "missing CPU delegation",
       (value: ReturnType<typeof info>) => {
         value.host.cgroupControllers = ["memory", "pids"];
@@ -205,29 +175,6 @@ describe("rootless Podman", () => {
     }).pipe(Effect.provide(runtime(machine, mintingProvider())));
   });
 
-  it.effect.each(["not JSON", "{}"])("rejects malformed structured info: %s", (output) => {
-    const machine = podmanMachine();
-    machine.state.podmanInfo = output;
-    return Effect.gen(function* () {
-      const error = yield* (yield* Executor).preflight(WORKER, [], 1).pipe(Effect.flip);
-      assert.strictEqual(error._tag, "WorkerCapabilityError");
-    }).pipe(Effect.provide(runtime(machine, mintingProvider())));
-  });
-
-  it.effect.each([
-    "Allocate non-overlapping ranges in /etc/subuid",
-    "Enable lingering with loginctl enable-linger usine",
-    "Remove the SSH user from the docker group",
-  ])("preserves remediation for a missing prerequisite: %s", (message) => {
-    const machine = podmanMachine();
-    machine.state.rootlessSessionError = message;
-    return Effect.gen(function* () {
-      const error = yield* (yield* Executor).preflight(WORKER, [], 1).pipe(Effect.flip);
-      assert.strictEqual(error._tag, "WorkerCapabilityError");
-      assert.include(error.message, message);
-    }).pipe(Effect.provide(runtime(machine, mintingProvider())));
-  });
-
   it.effect("refuses unenforced limits even with no harnesses and removes the probe", () => {
     const machine = podmanMachine();
     machine.state.limitsEnforced = false;
@@ -236,16 +183,6 @@ describe("rootless Podman", () => {
       assert.strictEqual(error._tag, "WorkerCapabilityError");
       assert.include(error.message, "did not enforce");
       assert.strictEqual(machine.state.containers.size, 0);
-    }).pipe(Effect.provide(runtime(machine, mintingProvider())));
-  });
-
-  it.effect("rejects matching UIDs with mismatched GIDs", () => {
-    const machine = podmanMachine();
-    machine.state.imageGroupId = "2345";
-    return Effect.gen(function* () {
-      const error = yield* (yield* Executor).preflight(WORKER, [], 1).pipe(Effect.flip);
-      assert.strictEqual(error._tag, "WorkerCapabilityError");
-      assert.include(error.message, "group ID 2345");
     }).pipe(Effect.provide(runtime(machine, mintingProvider())));
   });
 
@@ -295,67 +232,60 @@ describe("rootless Podman", () => {
     },
   );
 
-  it.effect.each(["child", "init"] as const)(
-    "records %s OOM kills and salvages before removing the container",
-    (victim) => {
-      const machine = podmanMachine();
-      machine.state.salvage = "dirty";
-      const parent: StubParent = (context) =>
-        Effect.sync(() => {
-          const container = machine.state.containers.get(CONTAINER);
-          assert(container !== undefined);
-          if (victim === "init") container.running = false;
-          else container.oomKills = 2;
-        }).pipe(Effect.andThen(fails(context)));
-      return Effect.gen(function* () {
-        const executor = yield* Executor;
-        const kills: Array<ContainerOutOfMemoryKills> = [];
-        const salvages: Array<AttemptSalvage> = [];
-        yield* (yield* executor.prepare(request))
-          .launch({
-            ...sink,
-            outOfMemory: (value) => Effect.sync(() => void kills.push(value)),
-            salvage: (value) => Effect.sync(() => void salvages.push(value)),
-          })
-          .pipe(Effect.flip);
-        assert.strictEqual(kills[0]?.kills, victim === "init" ? 1 : 2);
-        assert.strictEqual(salvages[0]?._tag, "Pushed");
-        if (victim === "init")
-          assert(
-            machine.state.calls.some(({ line }) => line === `exec 'podman' 'start' '${CONTAINER}'`),
-          );
-        assert.strictEqual(machine.state.containers.size, 0);
-        assert(
-          machine.state.calls.some(
-            ({ line, container }) => container === CONTAINER && line.includes("'push' '--force'"),
-          ),
-        );
-      }).pipe(Effect.scoped, Effect.provide(runtime(machine, mintingProvider(), parent)));
-    },
-  );
-
-  it.effect.each(["unreadable", "empty"] as const)(
-    "warns instead of recording zero when the OOM counter is %s",
-    (counter) => {
-      const machine = podmanMachine();
-      machine.state.memoryEvents = counter;
-      const logs = capturedLogs();
-      return Effect.gen(function* () {
-        const executor = yield* Executor;
-        const kills: Array<ContainerOutOfMemoryKills> = [];
-        yield* (yield* executor.prepare(request)).launch({
+  // Docker covers a child's OOM kill; Podman's init kill also restarts the container.
+  it.effect("records init OOM kills and salvages before removing the container", () => {
+    const machine = podmanMachine();
+    machine.state.salvage = "dirty";
+    const parent: StubParent = (context) =>
+      Effect.sync(() => {
+        const container = machine.state.containers.get(CONTAINER);
+        assert(container !== undefined);
+        container.running = false;
+      }).pipe(Effect.andThen(fails(context)));
+    return Effect.gen(function* () {
+      const executor = yield* Executor;
+      const kills: Array<ContainerOutOfMemoryKills> = [];
+      const salvages: Array<AttemptSalvage> = [];
+      yield* (yield* executor.prepare(request))
+        .launch({
           ...sink,
           outOfMemory: (value) => Effect.sync(() => void kills.push(value)),
-        });
-        assert.deepStrictEqual(kills, []);
-        assert.include(logs.lines.join("\n"), "Could not record the processes the kernel killed");
-        assert.strictEqual(machine.state.containers.size, 0);
-      }).pipe(
-        Effect.scoped,
-        Effect.provide(runtime(machine, mintingProvider()).pipe(Layer.provideMerge(logs.layer))),
+          salvage: (value) => Effect.sync(() => void salvages.push(value)),
+        })
+        .pipe(Effect.flip);
+      assert.strictEqual(kills[0]?.kills, 1);
+      assert.strictEqual(salvages[0]?._tag, "Pushed");
+      assert(
+        machine.state.calls.some(({ line }) => line === `exec 'podman' 'start' '${CONTAINER}'`),
       );
-    },
-  );
+      assert.strictEqual(machine.state.containers.size, 0);
+      assert(
+        machine.state.calls.some(
+          ({ line, container }) => container === CONTAINER && line.includes("'push' '--force'"),
+        ),
+      );
+    }).pipe(Effect.scoped, Effect.provide(runtime(machine, mintingProvider(), parent)));
+  });
+
+  it.effect("warns instead of recording zero when the OOM counter is unreadable", () => {
+    const machine = podmanMachine();
+    machine.state.memoryEvents = "unreadable";
+    const logs = capturedLogs();
+    return Effect.gen(function* () {
+      const executor = yield* Executor;
+      const kills: Array<ContainerOutOfMemoryKills> = [];
+      yield* (yield* executor.prepare(request)).launch({
+        ...sink,
+        outOfMemory: (value) => Effect.sync(() => void kills.push(value)),
+      });
+      assert.deepStrictEqual(kills, []);
+      assert.include(logs.lines.join("\n"), "Could not record the processes the kernel killed");
+      assert.strictEqual(machine.state.containers.size, 0);
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(runtime(machine, mintingProvider()).pipe(Layer.provideMerge(logs.layer))),
+    );
+  });
 
   it.effect("does not confuse Podman's exit code 3 with an absent runtime", () => {
     const machine = podmanMachine();

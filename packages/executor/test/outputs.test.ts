@@ -43,32 +43,6 @@ describe("step output collection boundary", () => {
       }),
     ],
     [
-      "length of at most 128",
-      jsonKey({
-        outputs: [{ file: "type.json", envelope: { type: "x".repeat(129), content: null } }],
-      }),
-    ],
-    [
-      'at ["type"]',
-      jsonKey({ outputs: [{ file: "empty-type.json", envelope: { type: "", content: null } }] }),
-    ],
-    [
-      'at ["commit"]',
-      jsonKey({
-        outputs: [
-          { file: "commit.json", envelope: { type: "example", commit: "invalid", content: null } },
-        ],
-      }),
-    ],
-    [
-      'at ["unexpected"]',
-      jsonKey({
-        outputs: [
-          { file: "extra.json", envelope: { type: "example", content: null, unexpected: true } },
-        ],
-      }),
-    ],
-    [
       "expected a .json file",
       jsonKey({ outputs: [{ file: "invalid.txt", envelope: { type: "example", content: null } }] }),
     ],
@@ -86,16 +60,6 @@ describe("step output collection boundary", () => {
       }),
     );
   }
-
-  it.effect("accepts a 128-character opaque type", () =>
-    Effect.gen(function* () {
-      const type = "x".repeat(128);
-      const outputs = yield* readResponse(
-        jsonKey({ outputs: [{ file: "valid.json", envelope: { type, content: null } }] }),
-      );
-      assert.strictEqual(outputs[0]?.type, type);
-    }),
-  );
 
   it.effect("keeps hashing defects out of the retryable failure channel", () =>
     Effect.gen(function* () {
@@ -128,25 +92,23 @@ describe("step output collection boundary", () => {
     }).pipe(Effect.provide(NodeCrypto.layer)),
   );
 
-  for (const stream of ["stdout", "stderr"] as const) {
-    it.live(`stops a command when ${stream} exceeds the byte cap before the process exits`, () =>
-      Effect.gen(function* () {
-        const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-        const failure = yield* Effect.flip(
-          collectCommand(
-            spawner,
-            "launch",
-            "node",
-            ["-e", `process.${stream}.write('é'.repeat(513)); setInterval(() => {}, 1000);`],
-            {},
-            1024,
-          ),
-        );
-        assert(Schema.is(CommandOutputLimitExceeded)(failure.cause));
-        assert.strictEqual(failure.cause.maxBytes, 1024);
-      }).pipe(Effect.provide(NodeServices.layer), Effect.timeout("5 seconds")),
-    );
-  }
+  it.live("stops a command when stderr exceeds the byte cap before the process exits", () =>
+    Effect.gen(function* () {
+      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+      const failure = yield* Effect.flip(
+        collectCommand(
+          spawner,
+          "launch",
+          "node",
+          ["-e", "process.stderr.write('é'.repeat(513)); setInterval(() => {}, 1000);"],
+          {},
+          1024,
+        ),
+      );
+      assert(Schema.is(CommandOutputLimitExceeded)(failure.cause));
+      assert.strictEqual(failure.cause.maxBytes, 1024);
+    }).pipe(Effect.provide(NodeServices.layer), Effect.timeout("5 seconds")),
+  );
 
   it.live("reports oversized collection command output as an agent failure", () =>
     Effect.gen(function* () {

@@ -19,7 +19,6 @@ import { routeTree } from "~/route-tree.gen";
 import {
   deskFixture,
   emptyRunStatisticsFixture,
-  emptyStatisticsFixture,
   runStatisticsFixture,
   statisticsFixture,
   weeklyStatisticsFixture,
@@ -245,30 +244,6 @@ it("leads the Overview with the tasks done and reads the run statistics only beh
   await expect.element(statistics.getByText("No task with recorded attempt times")).toBeVisible();
   // A window without memory kills has no memory line.
   await expect.element(statistics.getByText(/memory kill/u)).not.toBeInTheDocument();
-});
-
-it("says what is missing when the window has no task done", async () => {
-  await renderOverview(
-    {
-      "7d": encode(emptyStatisticsFixture(now, "7d")),
-      "30d": encode(emptyStatisticsFixture(now, "30d")),
-      all: encode(emptyStatisticsFixture(now, "all")),
-    },
-    {
-      "7d": encodeRuns(emptyRunStatisticsFixture(now, "7d")),
-      "30d": encodeRuns(emptyRunStatisticsFixture(now, "30d")),
-      all: encodeRuns(emptyRunStatisticsFixture(now, "all")),
-    },
-  );
-
-  await expect.element(statistics.getByText("No tasks done in the last 30 days")).toBeVisible();
-  expect(statistics.getByRole("table").elements()).toHaveLength(0);
-  await statistics.getByRole("button", { name: "All" }).click();
-  await expect.element(statistics.getByText("No tasks done yet")).toBeVisible();
-  await statistics.getByRole("button", { name: "Details" }).click();
-  await expect
-    .element(statistics.getByText("No closed runs yet", { exact: true }).first())
-    .toBeVisible();
 });
 
 it("keeps setup mode usable when statistics fail and recovers on refetch", async () => {

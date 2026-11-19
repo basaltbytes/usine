@@ -126,61 +126,61 @@ describe("supervisor image preparation", () => {
     }).pipe(Effect.scoped, Effect.provide(NodeFileSystem.layer)),
   );
 
-  for (const progress of ["Trying to pull image...\n", "Copying layer...\n".repeat(1000)]) {
-    it.effect(
-      `drains pull output and logs the failure after ${progress.length} characters of progress`,
-      () =>
-        Effect.gen(function* () {
-          const fs = yield* FileSystem.FileSystem;
-          const root = yield* fs.makeTempDirectoryScoped();
-          const warnings: Array<unknown> = [];
-          const encoder = new TextEncoder();
-          const denial = "Error: registry access denied\n";
-          const chunks = Array.from({ length: 32 }, () => encoder.encode("progress".repeat(2000)));
-          let drainedBytes = 0;
-          const stdout = Stream.fromIterable(chunks).pipe(
-            Stream.tap((chunk) =>
-              Effect.sync(() => {
-                drainedBytes += chunk.length;
-              }),
-            ),
+  // The progress is longer than the 8 KiB tail that the failure keeps.
+  it.effect(
+    "drains pull output and logs the failure after more progress than the failure keeps",
+    () =>
+      Effect.gen(function* () {
+        const progress = "Copying layer...\n".repeat(1000);
+        const fs = yield* FileSystem.FileSystem;
+        const root = yield* fs.makeTempDirectoryScoped();
+        const warnings: Array<unknown> = [];
+        const encoder = new TextEncoder();
+        const denial = "Error: registry access denied\n";
+        const chunks = Array.from({ length: 32 }, () => encoder.encode("progress".repeat(2000)));
+        let drainedBytes = 0;
+        const stdout = Stream.fromIterable(chunks).pipe(
+          Stream.tap((chunk) =>
+            Effect.sync(() => {
+              drainedBytes += chunk.length;
+            }),
+          ),
+        );
+        yield* Effect.gen(function* () {
+          yield* sandboxAt(root);
+          yield* TestClock.withLive(
+            Effect.sleep("10 millis").pipe(Effect.repeat({ until: () => warnings.length > 0 })),
           );
-          yield* Effect.gen(function* () {
-            yield* sandboxAt(root);
-            yield* TestClock.withLive(
-              Effect.sleep("10 millis").pipe(Effect.repeat({ until: () => warnings.length > 0 })),
-            );
-            assert.strictEqual(drainedBytes, 32 * 2000 * "progress".length);
-            assert.deepStrictEqual(warnings, [
-              [
-                "Supervisor image preparation failed; retrying in one minute",
-                {
-                  image,
-                  message: `Cannot pull the supervisor image: ${(progress + denial).slice(-8192).trim()}`,
-                },
-              ],
-            ]);
-          }).pipe(
-            Effect.scoped,
-            Effect.provide([
-              podman([], [], {
-                starts: true,
-                pull: {
-                  stdout,
-                  stderr: Stream.make(encoder.encode(progress), encoder.encode(denial)),
-                  exitCode: 125,
-                },
+          assert.strictEqual(drainedBytes, 32 * 2000 * "progress".length);
+          assert.deepStrictEqual(warnings, [
+            [
+              "Supervisor image preparation failed; retrying in one minute",
+              {
+                image,
+                message: `Cannot pull the supervisor image: ${(progress + denial).slice(-8192).trim()}`,
+              },
+            ],
+          ]);
+        }).pipe(
+          Effect.scoped,
+          Effect.provide([
+            podman([], [], {
+              starts: true,
+              pull: {
+                stdout,
+                stderr: Stream.make(encoder.encode(progress), encoder.encode(denial)),
+                exitCode: 125,
+              },
+            }),
+            Logger.layer([
+              Logger.make<unknown, void>(({ logLevel, message }) => {
+                if (logLevel === "Warn") warnings.push(message);
               }),
-              Logger.layer([
-                Logger.make<unknown, void>(({ logLevel, message }) => {
-                  if (logLevel === "Warn") warnings.push(message);
-                }),
-              ]),
             ]),
-          );
-        }).pipe(Effect.scoped, Effect.provide(NodeFileSystem.layer)),
-    );
-  }
+          ]),
+        );
+      }).pipe(Effect.scoped, Effect.provide(NodeFileSystem.layer)),
+  );
 
   it.live("opens with a cached image during a registry outage without pulling", () =>
     Effect.gen(function* () {

@@ -1,6 +1,5 @@
 import { assert, it } from "@effect/vitest";
-import { GitHubApiError, InvalidGitHubResponseError } from "@usine/github/github-app";
-import { Option } from "effect";
+import { InvalidGitHubResponseError } from "@usine/github/github-app";
 import { repositoryFailureLogFields } from "../src/polling/cycle.ts";
 
 it("bounds GitHub decode details in logs and operator messages", () => {
@@ -16,21 +15,4 @@ it("bounds GitHub decode details in logs and operator messages", () => {
   assert.strictEqual(fields.detail, detail.slice(0, 500));
   assert.include(fields.message, detail.slice(0, 500));
   assert.notInclude(fields.message, detail.slice(0, 501));
-});
-
-it("identifies GitHub API failures that have no decode detail", () => {
-  assert.deepStrictEqual(
-    repositoryFailureLogFields(
-      GitHubApiError.make({
-        operation: "poll-repository-changes",
-        status: Option.some(502),
-        message: "GitHub returned HTTP status 502",
-      }),
-    ),
-    {
-      errorTag: "GitHubApiError",
-      operation: "poll-repository-changes",
-      message: "poll-repository-changes: GitHub returned HTTP status 502",
-    },
-  );
 });

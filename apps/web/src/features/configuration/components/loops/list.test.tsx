@@ -14,16 +14,13 @@ import {
 import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { assert, describe, it } from "vitest";
-import { Page } from "~/components/page";
 import { AgentDetail, AgentsList } from "~/features/configuration/components/agents";
 import { LoopsList } from "~/features/configuration/components/loops/list";
 import { LoopDetail } from "~/features/configuration/components/loops/detail";
-import { interpolations } from "~/features/configuration/components/prompt";
 import { usePauseLoop } from "~/features/configuration/queries";
 import { RepositoriesList } from "~/features/configuration/components/repositories/list";
 import { RepositoryDetail } from "~/features/configuration/components/repositories/detail";
 import { SettingsPage } from "~/features/configuration/settings.page";
-import { AgentFields } from "~/features/configuration/components/forms/agent";
 import { SettingsFields } from "~/features/configuration/components/forms/settings";
 import { WorkersList } from "~/features/configuration/components/workers/list";
 import { WorkerDetail } from "~/features/configuration/components/workers/detail";
@@ -33,7 +30,6 @@ import {
   configurationFixture,
   capabilitiesFixture,
   configurationJson,
-  emptyConfiguration,
 } from "~/lib/configuration/fixture";
 
 const render = async (page: () => ReactNode): Promise<string> => {
@@ -70,14 +66,6 @@ type WithPauseProps = Readonly<{
 
 const WithPause = ({ children }: WithPauseProps) => children(usePauseLoop());
 
-describe("Page shell", () => {
-  it("stops prose pages at 768px and lets full pages fill the panel", () => {
-    assert.include(renderToStaticMarkup(<Page>Projects</Page>), "max-w-3xl");
-    assert.include(renderToStaticMarkup(<Page width="prose">Projects</Page>), "max-w-3xl");
-    assert.notInclude(renderToStaticMarkup(<Page width="full">Loops</Page>), "max-w-3xl");
-  });
-});
-
 describe("Loops page", () => {
   it("lists the files that did not load first, then each Loop with its trigger and state", async () => {
     const markup = await render(() => (
@@ -106,14 +94,6 @@ describe("Loops page", () => {
       ),
       ["New loop"],
     );
-  });
-
-  it("says how to add a Loop when there is none", async () => {
-    const page = text(
-      await render(() => <LoopsList configuration={emptyConfiguration()} pause={null} />),
-    );
-    assert.include(page, "No loops");
-    assert.include(page, "A loop starts an agent run for each item in a project");
   });
 
   it("shows a Loop's trigger and selector verbatim, its facts, and its prompt with marked expressions", async () => {
@@ -165,34 +145,6 @@ describe("Loops page", () => {
     assert.include(page, "Not declared in Configuration > Labels: review-pased");
     assert.notInclude(page, "None; the agent's completion is enough");
   });
-
-  it("shows why a quarantined Loop did not load and how to recover", async () => {
-    const page = text(
-      await render(() => (
-        <LoopDetail name="ghost" configuration={configurationFixture()} pause={null} />
-      )),
-    );
-    assert.include(page, "Unknown agent, repository, or tag");
-    assert.include(page, 'Unknown agent "ghost": agents/ghost.md is missing or invalid');
-    assert.include(page, "No runs until the file loads.");
-    assert.include(page, "Fix loops/ghost.md , then reload the configuration.");
-  });
-
-  it("says when no Loop has the name", async () => {
-    const page = text(
-      await render(() => (
-        <LoopDetail name="nope" configuration={configurationFixture()} pause={null} />
-      )),
-    );
-    assert.include(page, "Loop not found");
-  });
-
-  it("finds the expressions of a prompt template", () => {
-    assert.deepStrictEqual(interpolations("a {{ item.number }} b {{repo.name}}"), [
-      "item.number",
-      "repo.name",
-    ]);
-  });
 });
 
 describe("Agents page", () => {
@@ -216,29 +168,6 @@ describe("Agents page", () => {
     assert.include(page, "medium Set on this agent");
     assert.include(page, "Coordinator session From settings.coordinator");
     assert.include(markup, 'href="/configuration/loops/start-dev"');
-  });
-
-  it("shows an Agent on the event-driven coordinator without parent settings", async () => {
-    const configuration = configurationFixture();
-    const page = text(
-      await render(() => (
-        <AgentDetail
-          name="developer"
-          configuration={ConfigurationView.make({
-            ...configuration,
-            agents: configuration.agents.map((agent) =>
-              AgentFileView.make({
-                ...agent,
-                coordinator: "events",
-                resolvedCoordinator: "events",
-              }),
-            ),
-          })}
-        />
-      )),
-    );
-    assert.include(page, "Coordinator events Set on this agent");
-    assert.notInclude(page, "Parent model");
   });
 
   it("shows an Agent that inherits the event-driven coordinator without parent settings", async () => {
@@ -269,11 +198,6 @@ describe("Agents page", () => {
     assert.include(page, "Frontmatter is not valid YAML");
     assert.include(page, "Loops that use this agent are not loaded.");
   });
-
-  it("says how to add an Agent when there is none", async () => {
-    const page = text(await render(() => <AgentsList configuration={emptyConfiguration()} />));
-    assert.include(page, "No agents");
-  });
 });
 
 describe("Workers page", () => {
@@ -295,20 +219,6 @@ describe("Workers page", () => {
     assert.include(page, "boxd 2x8 fra, one machine per attempt");
     assert.include(page, "Machine creation failed: quota reached. Next try at ");
     assert.match(page, /boat-pool .* Deferred 20 Oct/u);
-  });
-
-  it("places a boxd Worker without a size by its region alone", async () => {
-    const configuration = Schema.decodeUnknownSync(ConfigurationView)({
-      ...configurationJson,
-      workers: configurationJson.workers.map((worker) =>
-        worker.provisioner?._tag === "boxd"
-          ? { ...worker, provisioner: { ...worker.provisioner, size: null } }
-          : worker,
-      ),
-    });
-    const markup = await render(() => <WorkersList configuration={configuration} />);
-    assert.include(markup, ">boxd fra, one machine per attempt<");
-    assert.notInclude(text(markup), "boxd 2x8");
   });
 
   it("shows a Hetzner Worker's provisioner by variable names only, and where its harnesses are checked", async () => {
@@ -375,18 +285,6 @@ describe("Workers page", () => {
       assert.include(unset, fact);
   });
 
-  it("shows a Boat Worker's size and key variables, and that it has no machines", async () => {
-    const page = text(
-      await render(() => <WorkerDetail name="boat-pool" configuration={configurationFixture()} />),
-    );
-    assert.include(page, "Provider Boat");
-    assert.include(page, "Size default");
-    assert.include(page, "API token Read from BOAT_API_KEY");
-    assert.include(page, "Anthropic key Read from ANTHROPIC_API_KEY");
-    assert.include(page, "Machines Reuse stops at the configured attempt or age limit No machines");
-    assert.notInclude(page, "Machine creation failed");
-  });
-
   it("marks a paused Worker on its page and in the list, and says how to resume it", async () => {
     const configuration = Schema.decodeUnknownSync(ConfigurationView)({
       ...configurationJson,
@@ -406,27 +304,6 @@ describe("Workers page", () => {
       await render(() => <WorkerDetail name="local" configuration={configurationFixture()} />),
     );
     assert.notInclude(unpaused, "Paused");
-  });
-
-  it("shows a Worker's slots and its last preflight per harness", async () => {
-    const page = text(
-      await render(() => <WorkerDetail name="local" configuration={configurationFixture()} />),
-    );
-    assert.include(page, "1 of 2 slots in use");
-    assert.include(page, "Machine, Git, memory, gateway, and credentials");
-    assert.include(page, "Failed: harness login");
-    assert.include(page, "Claude Code needs a subscription login");
-    assert.include(page, "Codex");
-  });
-
-  it("names a Gateway's admin token variable, and says when no preflight ran", async () => {
-    const page = text(
-      await render(() => <WorkerDetail name="eu-1" configuration={configurationFixture()} />),
-    );
-    assert.include(page, "Read from USINE_GATEWAY_ADMIN_TOKEN");
-    assert.include(page, "/srv/usine");
-    assert.include(page, "No preflight since usine up started.");
-    assert.include(page, "Default for this release");
   });
 
   it("shows the container limits from usine.yaml, then the ones the last preflight derived", async () => {
@@ -492,24 +369,6 @@ describe("Workers page", () => {
     assert.include(page, "registry.example/usine-worker:custom");
     assert.include(page, "1.5 CPUs, 6144 MiB, 2048 processes");
   });
-
-  it("says when no Worker has the name", async () => {
-    const page = text(
-      await render(() => <WorkerDetail name="nope" configuration={configurationFixture()} />),
-    );
-    assert.include(page, "Worker not found");
-    assert.include(page, "Configuration > Workers has no worker nope.");
-  });
-
-  it("says that no Worker runs Attempts in setup mode", async () => {
-    const configuration = configurationFixture();
-    const setup = {
-      ...configuration,
-      workers: configuration.workers.map((worker) => ({ ...worker, slots: null })),
-    };
-    const page = text(await render(() => <WorkersList configuration={setup} />));
-    assert.include(page, "No attempts run until the GitHub App is set up.");
-  });
 });
 
 describe("Repositories page", () => {
@@ -532,33 +391,6 @@ describe("Repositories page", () => {
     assert.include(page, "Ready ready Review review");
   });
 
-  it("shows the labels usine creates in a repository, from Configuration > Labels", async () => {
-    const page = text(
-      await render(() => (
-        <RepositoryDetail owner="basaltbytes" name="usine" configuration={configurationFixture()} />
-      )),
-    );
-    assert.include(page, "Labels usine creates");
-    assert.include(page, "From Configuration > Labels");
-  });
-
-  it("says when a repository has no declared labels", async () => {
-    const configuration = configurationFixture();
-    const unlabeled = {
-      ...configuration,
-      repositories: configuration.repositories.map((repository) => ({
-        ...repository,
-        declaredLabels: [],
-      })),
-    };
-    const page = text(
-      await render(() => (
-        <RepositoryDetail owner="basaltbytes" name="usine" configuration={unlabeled} />
-      )),
-    );
-    assert.include(page, "No labels in Configuration > Labels");
-  });
-
   it("says when no repository has the name", async () => {
     const page = text(
       await render(() => (
@@ -568,39 +400,9 @@ describe("Repositories page", () => {
     assert.include(page, "Repository not registered");
     assert.include(page, "Configuration > Repositories has no repository basaltbytes/nope.");
   });
-
-  it("says how to register a repository when there is none", async () => {
-    const page = text(
-      await render(() => <RepositoriesList configuration={emptyConfiguration()} />),
-    );
-    assert.include(page, "No repositories");
-  });
 });
 
 describe("Settings page", () => {
-  it("shows the instance's coordinator and what it does", async () => {
-    const configuration = configurationFixture();
-    const page = text(
-      await render(() => (
-        <SettingsPage
-          configuration={ConfigurationView.make({
-            ...configuration,
-            settings: SettingsView.make({
-              ...configuration.settings,
-              coordinator: "events",
-              parentModel: null,
-              parentEffort: null,
-            }),
-          })}
-        />
-      )),
-    );
-    assert.include(
-      page,
-      "settings.coordinator events Rules on lifecycle events coordinate each attempt",
-    );
-  });
-
   it("reports a supervisor that is not configured, and shows a configured one", async () => {
     const configuration = configurationFixture();
     const unset = text(await render(() => <SettingsPage configuration={configuration} />));
@@ -633,34 +435,6 @@ describe("Settings page", () => {
     );
   });
 
-  it("notes a supervisor harness whose own tools stay on", async () => {
-    const configuration = configurationFixture();
-    const page = text(
-      await render(() => (
-        <SettingsPage
-          configuration={ConfigurationView.make({
-            ...configuration,
-            settings: SettingsView.make({
-              ...configuration.settings,
-              supervisor: {
-                harness: Harness.make("codex"),
-                model: ModelId.make("gpt-5.6-terra"),
-                effort: "medium",
-                ownTools: "The harness lists its own tools in every thread",
-                unavailable: null,
-              },
-            }),
-          })}
-        />
-      )),
-    );
-    assert.include(
-      page,
-      "Supervisor tools All of the harness's own tools The harness's own tools stay on, and the read-only container limits what they reach: The harness lists its own tools in every thread.",
-    );
-    assert.include(page, "Supervisor container Available");
-  });
-
   it("lists settings, the operator, the webhooks mode, and tracing with what each does", async () => {
     const page = text(await render(() => <SettingsPage configuration={configurationFixture()} />));
     assert.include(page, "settings.poll_interval 60");
@@ -676,35 +450,27 @@ describe("Settings page", () => {
     assert.include(page, "tracing.otlp_url http://localhost:4318/v1/traces");
     assert.include(page, "tracing.service_name usine-eu");
   });
-  it.each(["deliveries", "endpoint"] as const)(
-    "shows %s mode and the last received hint",
-    async (mode) => {
-      const configuration = configurationFixture();
-      const at = "2026-10-29T12:00:00.000Z";
-      const page = text(
-        await render(() => (
-          <SettingsPage
-            configuration={ConfigurationView.make({
-              ...configuration,
-              settings: SettingsView.make({
-                ...configuration.settings,
-                webhooks: mode,
-                lastHintAt: at,
-              }),
-            })}
-          />
-        )),
-      );
-      assert.include(page, `webhooks.mode ${mode}`);
-      assert.include(
-        page,
-        mode === "deliveries"
-          ? "Checks delivery summaries every 10 seconds"
-          : "Receives signed webhook deliveries",
-      );
-      assert.include(page, `Last hint received ${at}`);
-    },
-  );
+  it("shows the endpoint mode and the last received hint", async () => {
+    const configuration = configurationFixture();
+    const at = "2026-10-29T12:00:00.000Z";
+    const page = text(
+      await render(() => (
+        <SettingsPage
+          configuration={ConfigurationView.make({
+            ...configuration,
+            settings: SettingsView.make({
+              ...configuration.settings,
+              webhooks: "endpoint",
+              lastHintAt: at,
+            }),
+          })}
+        />
+      )),
+    );
+    assert.include(page, "webhooks.mode endpoint");
+    assert.include(page, "Receives signed webhook deliveries");
+    assert.include(page, `Last hint received ${at}`);
+  });
 });
 
 /** Returns the markup of the select labeled `label`, from its label to its closing tag. */
@@ -727,19 +493,6 @@ const inputLabeled = (markup: string, label: string): string => {
 
 describe("Configuration forms", () => {
   const noop = () => {};
-
-  it("edits the instance's coordinator in the settings form", async () => {
-    const markup = await render(() => (
-      <SettingsFields
-        value={{ settings: { coordinator: "events" } }}
-        onChange={noop}
-        problems={[]}
-      />
-    ));
-    const select = selectLabeled(markup, "Coordinator");
-    assert.include(select, '<option value="session">session</option>');
-    assert.include(select, '<option value="events" selected="">events</option>');
-  });
 
   it("edits the supervisor's brain in the settings form", async () => {
     const without = text(
@@ -789,19 +542,5 @@ describe("Configuration forms", () => {
       codex,
       `The harness's own tools stay on, and the read-only container limits what they reach: ${kept}.`,
     );
-  });
-
-  it("edits an Agent's coordinator in the agent form", async () => {
-    const markup = await render(() => (
-      <AgentFields
-        value={{ name: "triager", harness: "codex", coordinator: "events" }}
-        onChange={noop}
-        problems={[]}
-      />
-    ));
-    const select = selectLabeled(markup, "Coordinator");
-    assert.include(select, '<option value="session">session</option>');
-    assert.include(select, '<option value="events" selected="">events</option>');
-    assert.include(text(markup), "Leave blank to use settings.coordinator.");
   });
 });

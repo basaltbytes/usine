@@ -69,14 +69,6 @@ export const rawThroughTunnel = (proxy: Listener, authority: string, bytes: stri
     socket.write(bytes);
   });
 
-/** Closes a tunnel after the 200 response without writing anything, and returns when the proxy closes it too. */
-export const abandonedTunnel = (proxy: Listener, authority: string) =>
-  tunnel(proxy, authority, (socket, done) => {
-    socket.on("error", () => socket.destroy());
-    socket.once("close", () => done("closed"));
-    socket.end();
-  });
-
 /** Opens a tunnel and keeps it open without writing, so the proxy waits for a ClientHello. */
 export const silentTunnel = (proxy: Listener, authority: string) =>
   Effect.callback<Socket>((resume) => {

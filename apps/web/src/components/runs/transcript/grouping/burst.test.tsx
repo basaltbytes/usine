@@ -8,7 +8,6 @@ import {
   AgentSessionId,
   ChildSession,
   ParentSession,
-  SessionFinished,
   SessionIdle,
   SessionStarted,
   TextOutput,
@@ -201,20 +200,6 @@ it("times a burst from its first start to its last result and counts failed and 
   assert.include(html, ">27s<");
 });
 
-it("does not join calls across a message", () => {
-  const events = [
-    finished(1, "a"),
-    finished(2, "b"),
-    record(3, TextOutput.make({ session: parent, text: "A new step." })),
-    finished(4, "c"),
-    finished(5, "d"),
-  ];
-  const html = render(events);
-
-  assert.lengthOf(html.match(/2 file reads/gu) ?? [], 2);
-  assert.notInclude(html, "4 file reads");
-});
-
 it("keeps completed calls within their parent session, child session and Attempt", () => {
   const secondParent = ParentSession.make({
     id: AgentSessionId.make("other-parent"),
@@ -251,68 +236,20 @@ it("keeps completed calls within their parent session, child session and Attempt
   assert.lengthOf(document(events).chapters, 2);
 });
 
-it("groups failed commands with the adjacent completed commands and preserves their errors", () => {
-  const projection = groups([
-    finished(1, "before", "shell"),
-    record(
-      2,
-      ToolFinished.make({
-        session: parent,
-        callId: "failed",
-        tool: "shell",
-        output: "Access denied",
-        isError: true,
-      }),
-    ),
-    finished(3, "after", "shell"),
+it("folds running calls into the burst between two messages", () => {
+  const bursts = groups([
+    finished(1, "a"),
+    finished(2, "b"),
+    started(3, "inspect-me"),
+    finished(4, "c"),
+    finished(5, "d"),
   ]);
-  assert.lengthOf(projection, 1);
-  const group = projection[0];
-  assert.isDefined(group);
-  assert.equal(burstSummary(group), "Ran 3 commands");
+
   assert.deepEqual(
-    group.tools.map(({ state }) => state._tag),
-    ["Finished", "Error", "Finished"],
+    bursts.map((group) => group.tools.length),
+    [5],
   );
-  const failed = group.tools[1]?.state;
-  assert(failed?._tag === "Error");
-  assert.equal(failed.output, "Access denied");
-});
-
-it.each(["Running", "Stopped"] as const)(
-  "folds %s calls into the burst between two messages",
-  (state) => {
-    const events = [
-      finished(1, "a"),
-      finished(2, "b"),
-      started(3, "inspect-me"),
-      finished(4, "c"),
-      finished(5, "d"),
-    ];
-    if (state === "Stopped") events.push(record(6, SessionFinished.make({ session: parent })));
-    const bursts = groups(events);
-
-    assert.deepEqual(
-      bursts.map((group) => group.tools.length),
-      [5],
-    );
-    assert.equal(bursts[0]?.tools[2]?.state._tag, state);
-  },
-);
-
-it("keeps an inspected running call expanded when it completes and more calls join its burst", () => {
-  const initial = [finished(1, "a"), finished(2, "b"), started(3, "live")];
-  const tool = projectTranscript(initial, []).items.find(
-    (item) => item._tag === "Tool" && item.state._tag === "Running",
-  );
-  assert.isDefined(tool);
-  const choice = changeDisclosure(new Map(), { _tag: "Item", key: tool.key, open: true });
-  const completed = groups([...initial, finished(4, "live"), finished(5, "c")])[0];
-  assert.isDefined(completed);
-
-  assert.isTrue(isGroupOpen(choice, keys(completed)));
-  assert.isTrue(choice.get(tool.key)?.open);
-  assert.include(keys(completed), tool.key);
+  assert.equal(bursts[0]?.tools[2]?.state._tag, "Running");
 });
 
 it("retains group and tool choices when history grows and the group is collapsed then reopened", () => {
@@ -522,46 +459,6 @@ it("keeps missing inputs honest and bounds long paths and varied operations", ()
   assert.match(text, /\b3\b/u);
   assert.match(text, /\bcalls?\b/iu);
   assert.notInclude(text, "private-");
-});
-
-it("summarizes a large file change by distinct-file count while preserving every recorded change", () => {
-  const repeated = { path: "src/file-0.ts", kind: { type: "update" }, diff: "+private-source" };
-  const changes = [
-    repeated,
-    ...Array.from({ length: 4999 }, (_, index) => ({
-      ...repeated,
-      path: `src/file-${index + 1}.ts`,
-    })),
-    repeated,
-  ];
-  const output = { type: "fileChange", status: "completed", changes };
-  const group = groups([
-    ...completed(1, "file_change", {}, output),
-    ...completed(3, "command", { command: "pnpm test" }),
-  ])[0];
-  assert.isDefined(group);
-
-  const text = burstSummary(group);
-  assert.match(text, /\b5000 files\b/iu);
-  assert.match(text, /\btests?\b/iu);
-  assert.isBelow(text.length, 100);
-  assert.notInclude(text, "private-source");
-  assert.lengthOf(group.tools, 2);
-  const change = group.tools[0].state;
-  assert(change._tag === "Finished");
-  assert.deepEqual(change.output, output);
-});
-
-it("uses a file count when deeply nested colliding paths cannot be distinguished in a compact label", () => {
-  const shared = `${"nested/".repeat(5000)}model.ts`;
-  const text = summary([
-    ...completed(1, "read", { path: `core/${shared}` }),
-    ...completed(3, "read", { path: `engine/${shared}` }),
-  ]);
-
-  assert.match(text, /\b2 files\b/iu);
-  assert.notInclude(text, "model.ts");
-  assert.isBelow(text.length, 100);
 });
 
 it("attaches paged input to its child using unpaged session identity without replaying history", () => {

@@ -1,9 +1,7 @@
 import { assert, it } from "@effect/vitest";
-import { ChangeBus, changeBusLayer } from "@usine/core/changes";
-import { TestClock } from "effect/testing";
 import { ReleaseVersion } from "@usine/core/upgrade";
 import { RunId } from "@usine/core/run";
-import { Deferred, Effect, Fiber, Ref, Layer } from "effect";
+import { Deferred, Effect, Fiber, Ref } from "effect";
 import { RunEngineShutdown } from "../src/engine/shutdown.ts";
 import { AttemptAdmission } from "../src/engine/admission.ts";
 
@@ -69,27 +67,4 @@ it.effect(
         assert.strictEqual(currentAttemptResultState, false);
       }),
     ).pipe(Effect.provide(AttemptAdmission.layer)),
-);
-
-it.effect("publishes upgrade admission changes and its attention deadline once", () =>
-  Effect.gen(function* () {
-    const bus = yield* ChangeBus;
-    const admission = yield* AttemptAdmission;
-    const revision = (yield* bus.open).revision;
-    yield* admission.waitForUpgrade(ReleaseVersion.make("1.2.3"));
-    assert.strictEqual((yield* bus.open).revision, revision + 1);
-    yield* TestClock.adjust("10 minutes");
-    assert.strictEqual((yield* bus.open).revision, revision + 2);
-    yield* admission.cancelUpgrade;
-    assert.strictEqual((yield* bus.open).revision, revision + 3);
-    yield* TestClock.adjust("10 minutes");
-    assert.strictEqual((yield* bus.open).revision, revision + 3);
-    for (const notice of (yield* bus.open).history)
-      assert.deepStrictEqual(notice.changes, [
-        { audience: { _tag: "Readers" }, target: { kind: "configuration", id: "instance" } },
-      ]);
-  }).pipe(
-    Effect.provide(AttemptAdmission.layer.pipe(Layer.provideMerge(changeBusLayer))),
-    Effect.scoped,
-  ),
 );

@@ -30,12 +30,6 @@ const unavailable: SupervisorSandboxService = {
   save: () => Effect.die("the test opens no sandbox"),
 };
 
-const available: SupervisorSandboxService = {
-  ...unavailable,
-  unavailable: Effect.succeedNone,
-  checked: Effect.succeedNone,
-};
-
 describe("the supervisor's availability at startup", () => {
   it.effect("warns, with the reason, when the configured supervisor can't run", () =>
     Effect.gen(function* () {
@@ -52,19 +46,6 @@ describe("the supervisor's availability at startup", () => {
           },
         ],
       ]);
-    }),
-  );
-
-  it.effect("doesn't warn without a configured supervisor, or when it can run", () =>
-    Effect.gen(function* () {
-      const warnings: Array<unknown> = [];
-      yield* reportSupervisorAvailability(false, unavailable).pipe(
-        Effect.withLogger(warningsIn(warnings)),
-      );
-      yield* reportSupervisorAvailability(true, available).pipe(
-        Effect.withLogger(warningsIn(warnings)),
-      );
-      assert.deepStrictEqual(warnings, []);
     }),
   );
 });

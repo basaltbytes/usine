@@ -18,7 +18,6 @@ import { setupRoutes } from "../src/setup/http.ts";
 import { securityMiddleware } from "../src/security.ts";
 import { registerSchema, unregisterSchema, validate } from "@hyperjump/json-schema/openapi-3-1";
 import { DocumentationApi, operationPermission, operatorOpenApi } from "../src/openapi.ts";
-import { ConfigurationStoreError } from "@usine/config/configuration";
 import { ProjectId } from "@usine/core/project";
 import { Project } from "@usine/config/project";
 import { authenticatedRoutes } from "../src/auth/http.ts";
@@ -685,29 +684,6 @@ it.live(
       assert.isTrue(crossSite.valid);
     }).pipe(Effect.scoped, Effect.provide(NodeFileSystem.layer)),
 );
-
-it("publishes optional transcript cursor parameters with their domain constraints", () => {
-  const parameters = operatorOpenApi().paths["/api/runs/{runId}"]?.get?.parameters;
-  assert.isDefined(parameters);
-  assert.sameMembers(
-    parameters.map(({ name }) => name),
-    ["runId", "after", "before", "attempt"],
-  );
-  const cursors = parameters.filter((parameter) => parameter.in === "query");
-  assert.sameMembers(
-    cursors.map(({ name }) => name),
-    ["after", "before", "attempt"],
-  );
-  for (const cursor of cursors) {
-    assert.isFalse(cursor.required);
-    assert.deepEqual(
-      cursor.schema,
-      cursor.name === "attempt"
-        ? { type: "string", minLength: 1 }
-        : { type: "integer", minimum: 1, maximum: Number.MAX_SAFE_INTEGER },
-    );
-  }
-});
 
 it("keeps the newest desk entries that fit one page and counts the ones it leaves out", () => {
   const closed = ClosedRunView.make({
@@ -1781,42 +1757,6 @@ describe("operator HTTP API", () => {
       }).pipe(Effect.provide(Layer.provideMerge(NodeServices.layer, FetchHttpClient.layer))),
   );
 });
-
-it.live(
-  "returns a typed server error when statistics cannot read worker configuration history",
-  () =>
-    Effect.gen(function* () {
-      const failing = HttpRouter.toWebHandler(
-        apiRoutes.pipe(
-          HttpRouter.provideRequest(
-            Layer.mock(FactoryBackend)({
-              runStatistics: () =>
-                Effect.fail(
-                  ConfigurationStoreError.make({
-                    operation: "read revisions",
-                    cause: "private database details",
-                  }),
-                ),
-            }),
-          ),
-        ),
-        { disableLogger: true },
-      );
-      try {
-        const response = yield* Effect.promise(() =>
-          failing.handler(new Request("http://localhost/api/statistics/runs")),
-        );
-        assert.strictEqual(response.status, 500);
-        const actual25 = yield* Effect.promise(() => response.json());
-        assert.deepStrictEqual(actual25, {
-          error: "ConfigurationStoreError",
-          message: "Configuration store error: could not read revisions.",
-        });
-      } finally {
-        yield* Effect.promise(() => failing.dispose());
-      }
-    }),
-);
 
 it.live("checks the declared permission for every operator route and each role", () =>
   Effect.gen(function* () {

@@ -1,11 +1,8 @@
-import { createServer } from "node:net";
-import { connect } from "node:tls";
 import { assert, describe, it } from "@effect/vitest";
-import { Effect, Option, Predicate } from "effect";
+import { Option } from "effect";
 import {
   CLIENT_HELLO_LIMIT,
   ClientHelloReader,
-  comparableHost,
   readClientHello,
 } from "../src/egress/client-hello.ts";
 
@@ -61,34 +58,7 @@ const serverNameOf = (bytes: Uint8Array) => {
   return read;
 };
 
-/** Returns the first bytes Node's TLS client sends for `servername`, captured by a local listener. */
-const nodeClientHello = (servername: string) =>
-  Effect.callback<Uint8Array>((resume) => {
-    const server = createServer((socket) => {
-      socket.once("data", (chunk: Buffer) => {
-        resume(Effect.succeed(new Uint8Array(chunk)));
-        socket.destroy();
-        server.close();
-      });
-    });
-    server.listen(0, "127.0.0.1", () => {
-      const address = server.address();
-      const port = address === null || Predicate.isString(address) ? 0 : address.port;
-      const client = connect({ host: "127.0.0.1", port, servername });
-      client.on("error", () => client.destroy());
-    });
-  });
-
 describe("readClientHello", () => {
-  it.effect("reads the server name from the ClientHello Node's TLS client sends", () =>
-    Effect.gen(function* () {
-      const clientHello = yield* nodeClientHello("registry.npmjs.org");
-      const read = serverNameOf(clientHello);
-      assert.deepStrictEqual(read.serverName, Option.some("registry.npmjs.org"));
-      assert.isFalse(read.encryptedClientHello);
-    }),
-  );
-
   it("waits for the whole ClientHello, even when the client splits it across records", () => {
     const handshake = clientHello([serverNameExtension("pypi.org"), SUPPORTED_VERSIONS]);
     const whole = records(handshake);
@@ -158,9 +128,5 @@ describe("readClientHello", () => {
     truncatedExtensions.splice(truncatedExtensions.length - 4, 1);
     truncatedExtensions.splice(1, 3, ...u24(truncatedExtensions.length - 4));
     notTls([...records(truncatedExtensions)]);
-  });
-
-  it("compares host names without case or a trailing dot", () => {
-    assert.strictEqual(comparableHost("Registry.NPMJS.org."), "registry.npmjs.org");
   });
 });

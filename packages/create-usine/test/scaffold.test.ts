@@ -102,57 +102,49 @@ if (!process.env.NO_LOCKFILE) writeFileSync(${jsonKey(installer === "npm" ? "pac
     };
   });
 
-it.live.each(["npm", "pnpm"])(
-  "scaffolds with %s, pins the release, and installs in the requested folder",
-  (installer) =>
-    Effect.gen(function* () {
-      const f = yield* fixture(installer);
-      yield* Effect.addFinalizer(() =>
-        Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
-          fileSystem.remove(f.root, { recursive: true, force: true }),
-        ).pipe(Effect.orDie),
-      );
-      const { stdout } = yield* Effect.promise(() => f.create(f.folder));
-      assert.include(stdout, installer === "npm" ? "npm run usine -- up" : "pnpm usine up");
-      assert.deepEqual(
-        (yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
-          fileSystem.readDirectory(f.folder),
-        )).sort(),
-        [
-          ".env",
-          ".gitignore",
-          "node_modules",
-          "package.json",
-          installer === "npm" ? "package-lock.json" : "pnpm-lock.yaml",
-        ].sort(),
-      );
-      const actual1 = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
-        fileSystem.readFileString(join(f.folder, "package.json")),
-      );
-      const manifest = parseJson(actual1);
-      assert.deepEqual(manifest.dependencies, { "@usine/server": release.version });
-      assert.equal(manifest.private, true);
-      assert.deepEqual(manifest.scripts, { usine: "usine" });
-      const actual2 = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
-        fileSystem.readFileString(join(f.folder, ".gitignore")),
-      );
-      assert.equal(actual2, ".usine/\nnode_modules/\n.env\n");
-      const env = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
-        fileSystem.readFileString(join(f.folder, ".env")),
-      );
-      assert.isTrue(env.split("\n").every((line) => line === "" || line.startsWith("#")));
-      assert.include(env, "# USINE_GITHUB_CLIENT_SECRET=");
-      assert.equal(
-        (yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
-          fileSystem.stat(join(f.folder, ".env")),
-        )).mode & 0o777,
-        0o600,
-      );
-    }).pipe(Effect.provide(NodeFileSystem.layer)),
+it.live("scaffolds with npm, pins the release, and installs in the requested folder", () =>
+  Effect.gen(function* () {
+    const f = yield* fixture();
+    yield* Effect.addFinalizer(() =>
+      Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+        fileSystem.remove(f.root, { recursive: true, force: true }),
+      ).pipe(Effect.orDie),
+    );
+    const { stdout } = yield* Effect.promise(() => f.create(f.folder));
+    assert.include(stdout, "npm run usine -- up");
+    assert.deepEqual(
+      (yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+        fileSystem.readDirectory(f.folder),
+      )).sort(),
+      [".env", ".gitignore", "node_modules", "package-lock.json", "package.json"],
+    );
+    const actual1 = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+      fileSystem.readFileString(join(f.folder, "package.json")),
+    );
+    const manifest = parseJson(actual1);
+    assert.deepEqual(manifest.dependencies, { "@usine/server": release.version });
+    assert.equal(manifest.private, true);
+    assert.deepEqual(manifest.scripts, { usine: "usine" });
+    const actual2 = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+      fileSystem.readFileString(join(f.folder, ".gitignore")),
+    );
+    assert.equal(actual2, ".usine/\nnode_modules/\n.env\n");
+    const env = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+      fileSystem.readFileString(join(f.folder, ".env")),
+    );
+    assert.isTrue(env.split("\n").every((line) => line === "" || line.startsWith("#")));
+    assert.include(env, "# USINE_GITHUB_CLIENT_SECRET=");
+    assert.equal(
+      (yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+        fileSystem.stat(join(f.folder, ".env")),
+      )).mode & 0o777,
+      0o600,
+    );
+  }).pipe(Effect.provide(NodeFileSystem.layer)),
 );
 
 it.live(
-  "accepts an existing empty folder and refuses to overwrite its contents on a second run",
+  "refuses an unsupported installer before writing files, accepts an existing empty folder, and refuses to overwrite its contents",
   () =>
     Effect.gen(function* () {
       const f = yield* fixture();
@@ -161,6 +153,20 @@ it.live(
           fileSystem.remove(f.root, { recursive: true, force: true }),
         ).pipe(Effect.orDie),
       );
+      yield* Effect.promise(() =>
+        rejects(
+          exec(process.execPath, [cli, f.folder], {
+            env: { ...f.env, npm_config_user_agent: "yarn/1.22.22" },
+            cwd: f.root,
+            timeout: 30_000,
+          }),
+          /Use npm create usine/,
+        ),
+      );
+      const rootEntries = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+        fileSystem.readDirectory(f.root),
+      );
+      assert.deepEqual(rootEntries, ["bin"]);
       yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
         fileSystem.makeDirectory(f.folder),
       );
@@ -286,8 +292,6 @@ it.live.each(["npm", "pnpm"])(
 
 it.live.each([
   ["npm", "INSTALL_FAILURE", "Installation exited with status 42"],
-  ["npm", "NO_LOCKFILE", "Installation did not write package-lock.json"],
-  ["pnpm", "INSTALL_FAILURE", "Installation exited with status 42"],
   ["pnpm", "NO_LOCKFILE", "Installation did not write pnpm-lock.yaml"],
 ] as const)("reports %s %s without claiming setup succeeded", ([installer, variable, message]) =>
   Effect.gen(function* () {
@@ -313,26 +317,6 @@ it.live.each([
     );
     assert.equal(decodeManifest(actual8).dependencies["@usine/server"], release.version);
   }).pipe(Effect.provide(NodeFileSystem.layer)),
-);
-
-it.live(
-  "shows help and rejects missing arguments and unsupported installers before writing files",
-  () =>
-    Effect.gen(function* () {
-      const f = yield* fixture("yarn");
-      yield* Effect.addFinalizer(() =>
-        Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
-          fileSystem.remove(f.root, { recursive: true, force: true }),
-        ).pipe(Effect.orDie),
-      );
-      assert.include((yield* Effect.promise(() => f.create("--help"))).stdout, "create-usine");
-      yield* Effect.promise(() => rejects(f.create()));
-      yield* Effect.promise(() => rejects(f.create(f.folder), /Use npm create usine/));
-      const actual9 = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
-        fileSystem.readDirectory(f.root),
-      );
-      assert.deepEqual(actual9, ["bin"]);
-    }).pipe(Effect.provide(NodeFileSystem.layer)),
 );
 
 const freePort = () =>

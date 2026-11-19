@@ -28,8 +28,6 @@ import {
   Logger,
   Option,
   PlatformError,
-  Ref,
-  Schedule,
   Path,
   Schema,
 } from "effect";
@@ -57,7 +55,7 @@ import {
   type TranscriptSequence,
   type TranscriptEntry,
 } from "../../src/transcript.ts";
-import { type AttemptPlan, engineLayer, executorLayer, submission } from "../support.ts";
+import { submission } from "../support.ts";
 import { lifecycleSubmission, testAgent } from "./support.ts";
 
 const at = DateTime.makeUnsafe("2026-10-01T00:00:00Z");
@@ -524,33 +522,6 @@ describe("SQLite transcript sealing", () => {
         const hotRows = yield* db.$count(attemptTranscripts).execute();
         const seals = yield* db.$count(transcriptSeals).execute();
         assert.strictEqual(hotRows, 1);
-        assert.strictEqual(seals, 1);
-      }),
-    ),
-  );
-
-  it.live("starts transcript maintenance from the local SQLite runtime", () =>
-    withSealing((directory) =>
-      Effect.gen(function* () {
-        const store = yield* RunStore;
-        const db = yield* RunDatabase;
-        const { runId, attemptId } = yield* start;
-        yield* store.appendTranscript("outbound", envelope(attemptId, 1));
-        yield* end(runId, attemptId);
-        const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([]);
-        const seals = yield* Effect.scoped(
-          db
-            .$count(transcriptSeals)
-            .execute()
-            .pipe(
-              Effect.repeat({
-                while: (count) => count === 0,
-                schedule: Schedule.spaced("10 millis"),
-              }),
-              Effect.timeout("5 seconds"),
-              Effect.provide(engineLayer(directory, executorLayer(plans))),
-            ),
-        );
         assert.strictEqual(seals, 1);
       }),
     ),

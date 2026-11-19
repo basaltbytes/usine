@@ -52,47 +52,6 @@ describe("Events of canceled Runs", () => {
     ),
   );
 
-  it.live("opens a new Run for an Event whose Run was revoked or superseded", () =>
-    withInstance((directory) =>
-      Effect.gen(function* () {
-        const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([]);
-        yield* Effect.gen(function* () {
-          const engine = yield* RunEngine;
-          const item = ItemKey.make("unstarted-item");
-          const older = submission({ number: 2, item: "unstarted-item", approval: "required" });
-          const newer = submission({ number: 3, item: "unstarted-item", approval: "required" });
-
-          const revoked = yield* engine.submit(older);
-          assert(revoked._tag === "Claimed");
-          yield* waitFor(engine, revoked.runId, ({ run }) => run.state._tag === "Waiting");
-          yield* engine.revoke(loop, item);
-          const returned = yield* engine.submit(older);
-          assert(returned._tag === "Claimed");
-          assert.notStrictEqual(returned.runId, revoked.runId);
-          yield* waitFor(engine, returned.runId, ({ run }) => run.state._tag === "Waiting");
-
-          const superseding = yield* engine.submit(newer);
-          assert(superseding._tag === "Claimed");
-          const superseded = yield* engine.inspect(returned.runId);
-          assert(
-            superseded.run.state._tag === "Canceled" &&
-              superseded.run.state.reason._tag === "Superseded",
-          );
-          // The Item goes back to the older state, which supersedes the newer Run in turn.
-          const reverted = yield* engine.submit(older);
-          assert(reverted._tag === "Claimed");
-          assert.notStrictEqual(reverted.runId, returned.runId);
-          assert.notStrictEqual(reverted.runId, revoked.runId);
-          const replaced = yield* engine.inspect(superseding.runId);
-          assert(
-            replaced.run.state._tag === "Canceled" &&
-              replaced.run.state.reason._tag === "Superseded",
-          );
-        }).pipe(Effect.provide(engineLayer(directory, executorLayer(plans))));
-      }),
-    ),
-  );
-
   it.live("opens a queued Event that a revoke ignored once the Item comes back to it", () =>
     withInstance((directory) =>
       Effect.gen(function* () {

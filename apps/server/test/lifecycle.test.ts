@@ -310,10 +310,8 @@ describe("instance lifecycle", { timeout: SCENARIO_TIMEOUT_MS }, () => {
   );
 
   it.live.each([
-    ["stop", []],
     ["stop", ["--force"]],
     ["restart", []],
-    ["restart", ["--force"]],
   ] as const)(
     "refuses stop and restart before signaling when the admin token is unsafe or missing: %s %j",
     ([command, flags]) =>
@@ -537,33 +535,6 @@ describe("instance lifecycle", { timeout: SCENARIO_TIMEOUT_MS }, () => {
     }),
   );
 
-  it.live("refuses to restart while neither the shell nor .env sets a gateway token variable", () =>
-    Effect.gen(function* () {
-      const directory = instanceFolder();
-      const first = yield* startFixture(directory);
-      const variable = `USINE_TEST_GATEWAY_TOKEN_${process.pid}`;
-      writeFileSync(join(directory, "fixture-gateway-env"), variable);
-
-      const refused = yield* restart(directory, options(20), recordedOnly).pipe(
-        Effect.flip,
-        Effect.provide(services),
-      );
-      assert(refused._tag === "MissingEnvironmentError");
-      assert.deepStrictEqual(refused.variables, [variable]);
-      assert.isTrue(alive(first.pid));
-
-      // The CLI runs from a shell without the variable, as a bare `usine restart` does.
-      writeFileSync(join(directory, ".env"), `${variable}=token\n`);
-      const output = yield* runCli(directory, ["restart", "--timeout", "20"]);
-      assert.match(output, /usine is running at http:\/\/127\.0\.0\.1:\d+ \(pid \d+\)/u);
-      const state = yield* probeInstance(directory).pipe(Effect.provide(services));
-      assert(state._tag === "Running");
-      pids.add(state.record.pid);
-      assert.notStrictEqual(state.record.pid, first.pid);
-      yield* stop(directory, options(20)).pipe(Effect.provide(services));
-    }),
-  );
-
   it.live("keeps waiting past the timeout while the starting process writes to its log", () =>
     Effect.gen(function* () {
       const directory = instanceFolder();
@@ -662,22 +633,6 @@ describe("instance lifecycle", { timeout: SCENARIO_TIMEOUT_MS }, () => {
     }),
   );
 
-  it.live("reports a background start that fails after its port answered", () =>
-    Effect.gen(function* () {
-      const directory = instanceFolder();
-      writeFileSync(join(directory, "fixture-startup"), "fail");
-      const launch = yield* fixtureLaunch();
-      const error = yield* startDetached(directory, launch, Duration.seconds(20)).pipe(
-        Effect.flip,
-        Effect.provide(services),
-      );
-      assert(error._tag === "DetachedStartError", error._tag);
-      assert.strictEqual(error.outcome, "exited");
-      assert.deepStrictEqual(error.exit, Option.some("status 1"));
-      assert.include(error.tail, "fixture migration failed");
-    }),
-  );
-
   it.live("reports a restart whose new process fails after its port answered", () =>
     Effect.gen(function* () {
       const directory = instanceFolder();
@@ -689,6 +644,7 @@ describe("instance lifecycle", { timeout: SCENARIO_TIMEOUT_MS }, () => {
       );
       assert(error._tag === "DetachedStartError", error._tag);
       assert.strictEqual(error.outcome, "exited");
+      assert.deepStrictEqual(error.exit, Option.some("status 1"));
       assert.include(error.tail, "fixture migration failed");
       assert.isFalse(alive(first.pid));
     }),

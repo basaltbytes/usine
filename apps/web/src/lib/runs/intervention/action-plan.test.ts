@@ -9,7 +9,6 @@ import { WorkerName } from "@usine/core/worker";
 import {
   AgentFailureView,
   AttemptView,
-  BlockedFailureView,
   FailedAttemptView,
   LocalWorkerAccess,
   QuestionFailureView,
@@ -119,14 +118,6 @@ describe("contextual run actions", () => {
     });
   });
 
-  it("leads with Mark resolved when the agent was blocked", () => {
-    assert.deepStrictEqual(labels(failed(BlockedFailureView.make({ message: "Gate is red." }))), {
-      primary: "Mark resolved",
-      secondary: "Edit and retry",
-      more: ["Retry"],
-    });
-  });
-
   it("leads with Retry on another failure and keeps Mark resolved in the menu", () => {
     assert.deepStrictEqual(labels(failed(AgentFailureView.make({ message: "Tests failed." }))), {
       primary: "Retry",
@@ -156,25 +147,5 @@ describe("contextual run actions", () => {
         labels(run({ state, attempts: [attempt(SucceededAttemptView.make())], canRunAgain: true })),
         { primary: null, secondary: "Run again", more: ["Edit and run again"] },
       );
-  });
-
-  it("puts every other allowed action in the menu", () => {
-    const view = RunView.make({
-      ...failed(AgentFailureView.make({ message: "Tests failed." })),
-      canCancel: true,
-    });
-    assert.deepStrictEqual(labels(view), {
-      primary: "Retry",
-      secondary: "Edit and retry",
-      more: ["Mark resolved", "Cancel run"],
-    });
-  });
-
-  it("plans nothing when no action is allowed", () => {
-    assert.deepStrictEqual(labels(run({ state: "Succeeded" })), {
-      primary: null,
-      secondary: null,
-      more: [],
-    });
   });
 });

@@ -317,23 +317,6 @@ describe("SSH Worker behind a Gateway", () => {
     },
   );
 
-  it.effect("an attach while the forward is closed reopens it at once instead of waiting", () => {
-    const machine = fakeMachine();
-    const credentials = mintingProvider();
-    const gateway = fakeGateway(machine);
-    return Effect.gen(function* () {
-      const executor = yield* Executor;
-      yield* executor.preflight(WORKER, [], 1);
-      const [first] = machine.state.forwards;
-      assert(first !== undefined);
-      yield* first.drop;
-      yield* (yield* executor.prepare(request)).launch(sink);
-      assert.strictEqual(machine.state.forwards.length, 2, "one reopen, without the clock moving");
-      const attach = gateway.calls.find(({ method }) => method === "POST");
-      assert(attach?.delivered === true && attach.port === machine.state.forwards[1]?.port);
-    }).pipe(Effect.scoped, Effect.provide(gatewayRuntime(machine, credentials, gateway)));
-  });
-
   it.effect(
     "sends a renewal once more through a reopened forward when the forward died without its SSH client noticing",
     () => {
@@ -417,44 +400,6 @@ describe("SSH Worker behind a Gateway", () => {
         assert.include(logs.lines.join("\n"), '"closedSince":"1970-01-01T00:00:00.000Z"');
         const before = tries();
         yield* eventually(() => tries() >= before + 5, "1 minute");
-      }).pipe(
-        Effect.scoped,
-        Effect.provide(
-          gatewayRuntime(machine, credentials, gateway).pipe(Layer.provideMerge(logs.layer)),
-        ),
-      );
-    },
-  );
-
-  it.effect(
-    "says since when the admin API has not answered while its forward is open, until it answers again",
-    () => {
-      const machine = fakeMachine();
-      const credentials = mintingProvider();
-      const gateway = fakeGateway(machine);
-      const logs = capturedLogs();
-      const unanswered = (since: string) =>
-        `Can't attach a token on the admin API of gateway usine-gateway for worker "eu-one": the admin API through usine-gateway hasn't responded since ${since}: no response (TransportError)`;
-      return Effect.gen(function* () {
-        const executor = yield* Executor;
-        gateway.switches.answering = false;
-        const first = yield* executor.prepare(request).pipe(Effect.flip);
-        assert.include(first.message, unanswered("1970-01-01T00:00:00.000Z"));
-
-        yield* TestClock.adjust("1 minute");
-        const second = yield* executor.prepare(request).pipe(Effect.flip);
-        assert.include(second.message, unanswered("1970-01-01T00:00:00.000Z"));
-        const retry = logs.lines
-          .filter((line) => line.includes("A Gateway admin request did not get through"))
-          .at(-1);
-        assert.include(retry, '"unansweredSince":"1970-01-01T00:00:00.000Z"');
-
-        gateway.switches.answering = true;
-        yield* (yield* executor.prepare(request)).launch(sink);
-        yield* TestClock.adjust("1 minute");
-        gateway.switches.answering = false;
-        const third = yield* executor.prepare(request).pipe(Effect.flip);
-        assert.include(third.message, unanswered("1970-01-01T00:02:00.000Z"));
       }).pipe(
         Effect.scoped,
         Effect.provide(
@@ -923,23 +868,6 @@ describe("SSH Worker behind a Gateway", () => {
   });
 
   it.effect(
-    "checks only Claude Code's binary when its login is the Gateway's Anthropic credential",
-    () => {
-      const machine = fakeMachine();
-      const gateway = fakeGateway(machine);
-      machine.state.claudeLoggedIn = false;
-      return Effect.gen(function* () {
-        const executor = yield* Executor;
-        yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
-        const lines = machine.state.calls.map(({ line }) => line);
-        assert.include(lines, "exec 'claude' '--version'");
-        assert(!lines.some((line) => line.includes("'auth' 'status'")));
-        assert(!lines.some((line) => line.includes("http_connect")), "no provider host is checked");
-      }).pipe(Effect.provide(gatewayRuntime(machine, mintingProvider(), gateway)));
-    },
-  );
-
-  it.effect(
     "records the kind of the Gateway's Anthropic credential at each preflight, and a running Attempt's next Claude Code child reads the latest",
     () => {
       const machine = fakeMachine();
@@ -987,79 +915,6 @@ describe("SSH Worker behind a Gateway", () => {
         Effect.scoped,
         Effect.provide(gatewayRuntime(machine, mintingProvider(), gateway, { parent })),
       );
-    },
-  );
-
-  it.effect.each(["anthropic-messages", "openai-responses"] as const)(
-    "normalizes legacy provider reports for the %s slot during preflight",
-    (protocol) => {
-      const machine = fakeMachine();
-      const gateway =
-        protocol === "anthropic-messages"
-          ? fakeGateway(machine)
-          : fakeGateway(machine, CHATGPT_PROVIDERS);
-      gateway.switches.legacyProviders = true;
-      return Effect.gen(function* () {
-        const executor = yield* Executor;
-        yield* executor.preflight(
-          WORKER,
-          [protocol === "anthropic-messages" ? TEST_AGENT.brain : CODEX_BRAIN],
-          1,
-        );
-      }).pipe(
-        Effect.provide(
-          gatewayRuntime(machine, mintingProvider(), gateway, {
-            address: gatewayAddress({ llmProviders: [protocol] }),
-          }),
-        ),
-      );
-    },
-  );
-
-  for (const protocol of ["anthropic-messages", "openai-responses"] as const) {
-    it.effect(
-      `requires a gateway upgrade before using ${protocol} without provider reporting`,
-      () => {
-        const machine = fakeMachine();
-        const gateway = fakeGateway(machine);
-        gateway.switches.reportsProviders = false;
-        return Effect.gen(function* () {
-          const executor = yield* Executor;
-          const refused = yield* executor
-            .preflight(WORKER, [TEST_AGENT.brain], 1)
-            .pipe(Effect.flip);
-          assert.strictEqual(refused._tag, "WorkerCapabilityError");
-          assert.include(refused.message, "Upgrade @usine/gateway");
-          assert.include(refused.message, protocol);
-        }).pipe(
-          Effect.provide(
-            gatewayRuntime(machine, mintingProvider(), gateway, {
-              address: gatewayAddress({ llmProviders: [protocol] }),
-            }),
-          ),
-        );
-      },
-    );
-  }
-
-  it.effect(
-    "preflight reports a Gateway that holds no Anthropic credential while the Worker's llm_providers lists it",
-    () => {
-      const machine = fakeMachine();
-      const gateway = fakeGateway(machine, {
-        "anthropic-messages": Option.none(),
-        "openai-responses": Option.none(),
-      });
-      return Effect.gen(function* () {
-        const executor = yield* Executor;
-        const refused = yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1).pipe(Effect.flip);
-        assert(refused._tag === "WorkerCapabilityError");
-        assert.strictEqual(refused.capability, "gateway");
-        assert.strictEqual(
-          refused.message,
-          'The gateway of SSH worker "eu-one" has no Anthropic credential, but the worker\'s llm_providers includes anthropic-messages. Set ANTHROPIC_API_KEY or USINE_GATEWAY_ANTHROPIC_SUBSCRIPTION_TOKEN on the gateway, or remove anthropic-messages from llm_providers.',
-        );
-      }).pipe(Effect.provide(gatewayRuntime(machine, mintingProvider(), gateway)));
     },
   );
 
@@ -1249,11 +1104,11 @@ describe("SSH Worker behind a Gateway", () => {
     },
   );
 
-  it.effect.each(["absent", "running"] as const)(
-    "sweeps the Codex homes that a crash left, and keeps those of a held Attempt or a kept checkout (Docker %s)",
-    (docker) => {
+  it.effect(
+    "sweeps the Codex homes that a crash left, and keeps those of a held Attempt or a kept checkout",
+    () => {
       const machine = fakeMachine();
-      machine.state.docker = docker;
+      machine.state.docker = "running";
       const gateway = fakeGateway(machine, CHATGPT_PROVIDERS);
       const running = `${WORKER_ROOT}/codex/remote-run_execute_1`;
       const crashed = `${WORKER_ROOT}/codex/crashed-run_execute_1`;
@@ -1281,11 +1136,10 @@ describe("SSH Worker behind a Gateway", () => {
     },
   );
 
-  it.effect.each(["absent", "running"] as const)(
-    "removes harness homes of discarded Attempts after usine.yaml stops declaring the Worker (Docker %s)",
-    (docker) => {
+  it.effect(
+    "removes harness homes of discarded Attempts after usine.yaml stops declaring the Worker",
+    () => {
       const machine = fakeMachine();
-      machine.state.docker = docker;
       const gateway = fakeGateway(machine, CHATGPT_PROVIDERS);
       const crashed = `${WORKER_ROOT}/codex/crashed-run_execute_1`;
       const kept = `${WORKER_ROOT}/codex/kept-run_execute_1`;

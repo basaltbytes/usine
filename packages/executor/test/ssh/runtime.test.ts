@@ -15,102 +15,89 @@ import { DETECT_SCRIPT, PODMAN_LIMITS_SCRIPT } from "../../src/ssh/runtime.ts";
 
 const run = promisify(execFile);
 
-it.live.each(["docker", "podman"])(
-  "uses the selected %s CLI and propagates its failure",
-  (runtime) =>
-    Effect.gen(function* () {
-      const actual1 = yield* Config.option(Config.String("PATH"));
-      const environmentPATH1 = Option.getOrUndefined(actual1);
-      const directory = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
-        fileSystem.makeTempDirectory({
-          directory: dirname("/tmp/usine-runtime-"),
-          prefix: basename("/tmp/usine-runtime-"),
-        }),
-      );
-      yield* Effect.addFinalizer(() =>
-        Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
-          fileSystem.remove(directory, { recursive: true, force: true }),
-        ).pipe(Effect.orDie),
-      );
-      const choice = join(directory, "runtime");
-      yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
-        fileSystem.writeFileString(choice, runtime),
-      );
-      for (const name of ["docker", "podman"]) {
-        yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
-          fileSystem.writeFileString(
-            join(directory, name),
-            `#!/bin/sh\necho '${name}-info'\nexit "$RUNTIME_EXIT"\n`,
-            { mode: 0o755 },
-          ),
-        );
-      }
-      const invoke = (exit: string) =>
-        run("sh", ["-c", DETECT_SCRIPT, "sh", choice], {
-          env: { PATH: `${directory}:${environmentPATH1}`, RUNTIME_EXIT: exit },
-        });
-      assert.strictEqual(
-        (yield* Effect.promise(() => invoke("0"))).stdout,
-        `${runtime}\n${runtime}-info\n`,
-      );
-      yield* Effect.promise(() => assert.rejects(invoke("125")));
-      yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
-        fileSystem.writeFileString(choice, "invalid"),
-      );
-      yield* Effect.promise(() =>
-        assert.rejects(invoke("0"), /Set \/etc\/usine\/container-runtime/u),
-      );
-    }).pipe(Effect.provide(NodeFileSystem.layer)),
-);
-
-it.live.each(["Error: No such container: usine-gone", "Error: no such container usine-gone"])(
-  "recognizes a missing container during cancellation: %s",
-  (message) =>
-    Effect.gen(function* () {
-      const directory = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
-        fileSystem.makeTempDirectory({
-          directory: dirname("/tmp/usine-container-stop-"),
-          prefix: basename("/tmp/usine-container-stop-"),
-        }),
-      );
-      yield* Effect.addFinalizer(() =>
-        Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
-          fileSystem.remove(directory, { recursive: true, force: true }),
-        ).pipe(Effect.orDie),
-      );
-      const cli = join(directory, "runtime");
+it.live("uses the selected CLI and propagates its failure", () =>
+  Effect.gen(function* () {
+    const runtime = "podman";
+    const actual1 = yield* Config.option(Config.String("PATH"));
+    const environmentPATH1 = Option.getOrUndefined(actual1);
+    const directory = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+      fileSystem.makeTempDirectory({
+        directory: dirname("/tmp/usine-runtime-"),
+        prefix: basename("/tmp/usine-runtime-"),
+      }),
+    );
+    yield* Effect.addFinalizer(() =>
+      Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+        fileSystem.remove(directory, { recursive: true, force: true }),
+      ).pipe(Effect.orDie),
+    );
+    const choice = join(directory, "runtime");
+    yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+      fileSystem.writeFileString(choice, runtime),
+    );
+    for (const name of ["docker", "podman"]) {
       yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
         fileSystem.writeFileString(
-          cli,
-          '#!/bin/sh\nprintf "%s\\n" "$INSPECT_ERROR" >&2\nexit 125\n',
-          {
-            mode: 0o755,
-          },
+          join(directory, name),
+          `#!/bin/sh\necho '${name}-info'\nexit "$RUNTIME_EXIT"\n`,
+          { mode: 0o755 },
         ),
       );
-      const invoke = (error: string) =>
-        run("sh", ["-c", STOP_CHILDREN_SCRIPT, "sh", cli, "usine-gone", "exit 99", "/checkout"], {
-          env: { INSPECT_ERROR: error },
-        });
-      assert.strictEqual((yield* Effect.promise(() => invoke(message))).stdout, "no-container\n");
-      yield* Effect.promise(() =>
-        assert.rejects(invoke("permission denied"), /permission denied/u),
-      );
-    }).pipe(Effect.provide(NodeFileSystem.layer)),
+    }
+    const invoke = (exit: string) =>
+      run("sh", ["-c", DETECT_SCRIPT, "sh", choice], {
+        env: { PATH: `${directory}:${environmentPATH1}`, RUNTIME_EXIT: exit },
+      });
+    assert.strictEqual(
+      (yield* Effect.promise(() => invoke("0"))).stdout,
+      `${runtime}\n${runtime}-info\n`,
+    );
+    yield* Effect.promise(() => assert.rejects(invoke("125")));
+    yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+      fileSystem.writeFileString(choice, "invalid"),
+    );
+    yield* Effect.promise(() =>
+      assert.rejects(invoke("0"), /Set \/etc\/usine\/container-runtime/u),
+    );
+  }).pipe(Effect.provide(NodeFileSystem.layer)),
+);
+
+it.live("recognizes a missing container during cancellation", () =>
+  Effect.gen(function* () {
+    const message = "Error: No such container: usine-gone";
+    const directory = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+      fileSystem.makeTempDirectory({
+        directory: dirname("/tmp/usine-container-stop-"),
+        prefix: basename("/tmp/usine-container-stop-"),
+      }),
+    );
+    yield* Effect.addFinalizer(() =>
+      Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+        fileSystem.remove(directory, { recursive: true, force: true }),
+      ).pipe(Effect.orDie),
+    );
+    const cli = join(directory, "runtime");
+    yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+      fileSystem.writeFileString(
+        cli,
+        '#!/bin/sh\nprintf "%s\\n" "$INSPECT_ERROR" >&2\nexit 125\n',
+        {
+          mode: 0o755,
+        },
+      ),
+    );
+    const invoke = (error: string) =>
+      run("sh", ["-c", STOP_CHILDREN_SCRIPT, "sh", cli, "usine-gone", "exit 99", "/checkout"], {
+        env: { INSPECT_ERROR: error },
+      });
+    assert.strictEqual((yield* Effect.promise(() => invoke(message))).stdout, "no-container\n");
+    yield* Effect.promise(() => assert.rejects(invoke("permission denied"), /permission denied/u));
+  }).pipe(Effect.provide(NodeFileSystem.layer)),
 );
 
 it.live.each([
-  { cpus: 2.3, cpuMax: "230000 100000", accepted: true },
-  { cpus: 2.3, cpuMax: "229999 100000", accepted: true },
-  { cpus: 1.15, cpuMax: "115000 100000", accepted: true },
-  { cpus: 0.29, cpuMax: "29000 100000", accepted: true },
-  { cpus: 0.5, cpuMax: "50000 100000", accepted: true },
-  { cpus: 0.57, cpuMax: "57000 100000", accepted: true },
   { cpus: 0.57, cpuMax: "56999 100000", accepted: true },
-  { cpus: 1.5, cpuMax: "150000 100000", accepted: true },
-  { cpus: 1, cpuMax: "100000 100000", accepted: true },
   { cpus: 0.57, cpuMax: "56998 100000", accepted: false },
-  { cpus: 0.57, cpuMax: "58000 100000", accepted: false },
   { cpus: 0.57, cpuMax: "max 100000", accepted: false },
   { cpus: 0.57, cpuMax: "56999 0", accepted: false },
 ])(

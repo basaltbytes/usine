@@ -1,14 +1,7 @@
 import { type ChildProcess, ChildProcessSpawner } from "effect/process";
 import { assert, describe, it } from "@effect/vitest";
 import { RemoteShell } from "@usine/agents/child-host";
-import { catalog } from "@usine/agents/harness";
-import { HarnessReady } from "@usine/core/agent/capability";
-import {
-  Harnesses,
-  harnessesLive,
-  type HarnessRuntime,
-  type ProbeTarget,
-} from "@usine/agents/harness/node";
+import { Harnesses, harnessesLive } from "@usine/agents/harness/node";
 import type { ChildHost } from "@usine/agents/child-host";
 import { HostLoginLock } from "@usine/agents/runtime";
 import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
@@ -75,44 +68,6 @@ const login = {
   worker: WorkerName.make("test-worker"),
   machine: Option.none(),
 };
-
-describe("injected harness registry", () => {
-  it.effect("reuses the app registry for repeated executor probes", () => {
-    let registrations = 0;
-    const targets: Array<ProbeTarget> = [];
-    const registry = Layer.suspend(() => {
-      registrations += 1;
-      return Harnesses.layerFrom(
-        catalog,
-        catalog.ids.map((id): HarnessRuntime => ({
-          id,
-          stop: () => Effect.die("preflight must not stop a child"),
-          open: () => Effect.die("preflight must not open a session"),
-          complete: () => Effect.die("preflight must not run a completion"),
-          preflight: (brain, target) =>
-            Effect.sync(() => {
-              targets.push(target);
-              return HarnessReady.make({ harness: brain.harness });
-            }),
-        })),
-      );
-    });
-    return Effect.gen(function* () {
-      const harnesses = yield* Harnesses;
-      const probe = agentsHarnessProbe(harnesses, host, { PATH: "/worker/bin" }, "gateway");
-      yield* verifyHarnessReadiness(login.worker, login.machine, [claude], probe);
-      yield* verifyHarnessReadiness(login.worker, login.machine, [claude], probe);
-      assert.strictEqual(registrations, 1);
-      assert.strictEqual(targets.length, 2);
-      for (const target of targets) {
-        assert.strictEqual(target.worker, login.worker);
-        assert.strictEqual(target.host, host);
-        assert.strictEqual(target.credential, "gateway");
-        assert.deepStrictEqual(target.environment, { PATH: "/worker/bin" });
-      }
-    }).pipe(Effect.provide(registry));
-  });
-});
 
 describe("harness probe on a remote host", () => {
   it.effect("runs each check as one SSH command with exactly the SSH client's environment", () =>

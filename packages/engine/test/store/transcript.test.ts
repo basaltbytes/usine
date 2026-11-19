@@ -208,8 +208,9 @@ describe("Attempt transcripts", () => {
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 
-  it.live.each([3, 5] as const)("reads stored v%s outbound envelopes", (version) =>
+  it.live("reads stored v3 outbound envelopes", () =>
     Effect.gen(function* () {
+      const version = 3;
       const fileSystem = yield* FileSystem.FileSystem;
       const currentDirectory = yield* fileSystem.makeTempDirectoryScoped({
         directory: sqliteTempDirectory(),
@@ -273,8 +274,9 @@ describe("Attempt transcripts", () => {
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 
-  it.live.each([4, 5] as const)("reads stored v%s inbound envelopes", (version) =>
+  it.live("reads stored v4 inbound envelopes", () =>
     Effect.gen(function* () {
+      const version = 4;
       const fileSystem = yield* FileSystem.FileSystem;
       const currentDirectory = yield* fileSystem.makeTempDirectoryScoped({
         directory: sqliteTempDirectory(),

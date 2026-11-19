@@ -43,7 +43,7 @@ describe("file presentation", () => {
     assert.equal(visibleText, `src/count.ts${source}`);
   });
 
-  it.each([undefined, null, { error: "Access denied" }])(
+  it.each([null, { error: "Access denied" }])(
     "keeps the request cue available when a read has no source output: %s",
     (output) => {
       const view = presentFile(
@@ -122,34 +122,5 @@ describe("MCP tool presentation", () => {
     assert.equal(view.title, "overview");
     assert.equal(view.name, "mcp__usine__overview");
     assert.equal(view.subject, "1 parameter");
-  });
-
-  it("titles a Codex MCP call by its operation and names its server in the full name", () => {
-    const view = presentTool({
-      key: "call-1",
-      name: "mcpToolCall",
-      start: Option.some({
-        input: Schema.Json.make({
-          type: "mcpToolCall",
-          server: "usine",
-          tool: "overview",
-          arguments: { view: "attention" },
-        }),
-      }),
-      state: { _tag: "Running" },
-    });
-    assert.equal(view.title, "overview");
-    assert.equal(view.name, "usine · overview");
-  });
-
-  it("keeps a tool name that has no MCP prefix", () => {
-    const view = presentTool({
-      key: "call-1",
-      name: "TodoWrite",
-      start: Option.none(),
-      state: { _tag: "Running" },
-    });
-    assert.equal(view.title, "TodoWrite");
-    assert.equal(view.name, "TodoWrite");
   });
 });

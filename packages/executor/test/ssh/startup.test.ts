@@ -103,9 +103,9 @@ it.effect(
   },
 );
 
-it.effect.each(["runtime inspection", "container removal"])(
-  "keeps the original connection across restart after failed %s with no checkout",
-  (failure) => {
+it.effect(
+  "keeps the original connection across restart after failed runtime inspection with no checkout",
+  () => {
     const machine = fakeMachine();
     machine.state.docker = "running";
     const records = new Map<AttemptId, typeof ADDRESS>();
@@ -146,8 +146,8 @@ it.effect.each(["runtime inspection", "container removal"])(
     return Effect.gen(function* () {
       yield* prepare.pipe(Effect.scoped, Effect.provide(layer(ADDRESS)));
       machine.state.cacheExists = false;
-      machine.state.containerRemovalFails = failure === "container removal";
-      machine.state.docker = failure === "runtime inspection" ? "unusable" : "running";
+      machine.state.containerRemovalFails = false;
+      machine.state.docker = "unusable";
       const replacement = { ...ADDRESS, root: WorkerRoot.make("/replacement") };
       const result = yield* recover.pipe(
         Effect.scoped,

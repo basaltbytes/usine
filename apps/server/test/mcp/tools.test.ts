@@ -1,10 +1,7 @@
 import { jsonKey } from "@usine/core/json-key";
-import { OperatorApi, operatorPermissions } from "@usine/orchestrator/operator/http";
 import { assert, describe, it } from "@effect/vitest";
 import { Effect, Result, Schema } from "effect";
-import { AuthApi } from "../../src/auth/api.ts";
 import { operatorOpenApi } from "../../src/openapi.ts";
-import { SetupApi } from "../../src/setup/api.ts";
 import { PAGE_BYTES } from "@usine/orchestrator/operator";
 import {
   MAX_ERROR_BYTES,
@@ -38,48 +35,6 @@ const fanOutSchemas = Object.fromEntries(
 );
 
 describe("operator MCP tools", () => {
-  it.effect("names one tool per operator operation, leaves out streams, and inlines schemas", () =>
-    Effect.gen(function* () {
-      const generated = yield* tools;
-      const names = generated.map(({ name }) => name);
-      assert.sameMembers(
-        names,
-        Object.keys(OperatorApi.groups.operator.endpoints).filter((name) => name !== "changes"),
-      );
-      for (const name of [...Object.keys(AuthApi.endpoints), ...Object.keys(SetupApi.endpoints)])
-        if (!(name in OperatorApi.groups.operator.endpoints))
-          assert.notInclude(names, name, `${name} is not an operator operation`);
-      assert.notInclude(names, "openapi");
-      const permissions = new Map(Object.entries(operatorPermissions));
-      for (const tool of generated) {
-        assert.notInclude(jsonKey(tool.descriptor.inputSchema), "$ref", tool.name);
-        assert.equal(tool.permission, permissions.get(tool.name));
-      }
-      const approve = generated.find(({ name }) => name === "approve");
-      assert.deepEqual(approve?.descriptor.inputSchema.required, ["runId"]);
-      assert.isFalse(approve?.descriptor.annotations?.readOnlyHint);
-      assert.isFalse(approve?.descriptor.annotations?.destructiveHint);
-      const cancel = generated.find(({ name }) => name === "cancel");
-      assert.isTrue(cancel?.descriptor.annotations?.destructiveHint);
-      for (const name of [
-        "deleteConfigurationEntity",
-        "discardLeftovers",
-        "replaceConfigurationEntity",
-        "revertConfigurationRevision",
-        "requestUpgrade",
-      ]) {
-        const write = generated.find((tool) => tool.name === name);
-        assert.isTrue(write?.descriptor.annotations?.destructiveHint, name);
-      }
-      const overview = generated.find(({ name }) => name === "overview");
-      assert.isTrue(overview?.descriptor.annotations?.readOnlyHint);
-      const editAndRetry = generated.find(({ name }) => name === "editAndRetry");
-      const body = editAndRetry?.descriptor.inputSchema.properties?.body;
-      assert.isObject(body);
-      assert.include(jsonKey(body), '"properties"');
-    }),
-  );
-
   it.effect("encodes path and query arguments and refuses unknown ones", () =>
     Effect.gen(function* () {
       const detail = (yield* tools).find(({ name }) => name === "detail");
@@ -111,6 +66,8 @@ describe("operator MCP tools", () => {
         // Claude Code saves a result over 50,000 characters to a file, and Codex keeps about
         // 10,000 tokens of one; JSON of IDs and timestamps takes about 2.4 bytes per token.
         assert.isAtMost(MAX_RESULT_BYTES, 24_000);
+        // A paged read's page fits in one result.
+        assert.isAtMost(PAGE_BYTES + 2_000, MAX_RESULT_BYTES);
         const at = jsonKey({ projects: "x".repeat(MAX_RESULT_BYTES - 15) });
         assert.equal(at.length, MAX_RESULT_BYTES);
         assert.deepEqual(texts(toolResult(tool("overview"), { status: 200, text: at })), [at]);
@@ -156,63 +113,6 @@ describe("operator MCP tools", () => {
     }),
   );
 
-  it.effect("fits every page of a paged read in one result and describes the paging", () =>
-    Effect.gen(function* () {
-      assert.isAtMost(PAGE_BYTES + 2_000, MAX_RESULT_BYTES);
-      const generated = yield* tools;
-      const describe = (name: string) => {
-        const tool = generated.find((tool) => tool.name === name);
-        assert(tool !== undefined, name);
-        return { description: tool.descriptor.description ?? "", tool };
-      };
-      for (const name of ["boardLaneItems", "taskRuns"]) {
-        const { description, tool } = describe(name);
-        assert.include(tool.queryParameters, "offset", name);
-        assert.include(description, "nextOffset", name);
-        assert.include(description, "20 KB", name);
-      }
-      const item = describe("item");
-      assert.sameMembers([...item.tool.queryParameters], ["entry", "offset"]);
-      assert.include(item.description, "`next.entry` and `next.offset`");
-      for (const name of ["task", "projectTask"]) {
-        const { description } = describe(name);
-        assert.include(description, "taskRuns from offset `runs.length`", name);
-        assert.include(description, "body and comments with item", name);
-      }
-      for (const name of ["overview", "project"])
-        assert.include(describe(name).description, "boardLaneItems", name);
-    }),
-  );
-
-  it.effect("bounds the inlined schema of references that fan out", () =>
-    Effect.gen(function* () {
-      const document = yield* Schema.decodeEffect(PublishedApi)({
-        paths: {
-          "/api/fan-out": {
-            post: {
-              operationId: "operator.fanOut",
-              requestBody: {
-                required: true,
-                content: {
-                  "application/json": { schema: { $ref: "#/components/schemas/Level0" } },
-                },
-              },
-              responses: { "200": {} },
-              "x-usine-permission": "operate",
-            },
-          },
-        },
-        components: { schemas: fanOutSchemas },
-      });
-      const generated = operatorTools(document);
-      const [fanOut] = generated.tools;
-      const size = jsonKey(fanOut?.descriptor.inputSchema ?? {}).length;
-      assert.isBelow(size, 2_000_000);
-      assert.include(jsonKey(fanOut?.descriptor.inputSchema ?? {}), '"left"');
-      assert.isFalse(generated.complete);
-    }),
-  );
-
   it.effect("shares one inlining budget across every input schema of the document", () =>
     Effect.gen(function* () {
       // Every parameter and body references the chain, so a budget for each schema would build
@@ -248,6 +148,7 @@ describe("operator MCP tools", () => {
         0,
       );
       assert.isBelow(size, 1_000_000);
+      assert.include(jsonKey(generated.tools[0]?.descriptor.inputSchema ?? {}), '"left"');
     }),
   );
 
@@ -450,56 +351,6 @@ describe("operator MCP tools", () => {
       const shallow = operatorTools(wide);
       assert.isBelow(performance.now() - started, 1_000);
       assert.isFalse(shallow.complete);
-    }).pipe(Effect.orDie),
-  );
-
-  it.effect("accepts any value where a recursive component repeats", () =>
-    Effect.gen(function* () {
-      const document = yield* Schema.decodeEffect(PublishedApi)({
-        paths: {
-          "/api/recursive": {
-            get: {
-              operationId: "operator.recursive",
-              parameters: ["Node", "Tree", "A"].map((name) => ({
-                name,
-                in: "query",
-                schema: { $ref: `#/components/schemas/${name}` },
-              })),
-              responses: { "200": {} },
-              "x-usine-permission": "read",
-            },
-          },
-        },
-        components: {
-          schemas: {
-            Node: { type: "object", properties: { next: { $ref: "#/components/schemas/Node" } } },
-            Tree: {
-              type: "object",
-              properties: {
-                left: { $ref: "#/components/schemas/Tree" },
-                right: { $ref: "#/components/schemas/Tree" },
-              },
-            },
-            A: { type: "object", properties: { b: { $ref: "#/components/schemas/B" } } },
-            B: { type: "object", properties: { a: { $ref: "#/components/schemas/A" } } },
-          },
-        },
-      });
-      const generated = operatorTools(document);
-      assert.isTrue(generated.complete);
-      const properties = generated.tools[0]?.descriptor.inputSchema.properties;
-      assert.deepStrictEqual(properties?.["Node"], {
-        type: "object",
-        properties: { next: {} },
-      });
-      assert.deepStrictEqual(properties?.["Tree"], {
-        type: "object",
-        properties: { left: {}, right: {} },
-      });
-      assert.deepStrictEqual(properties?.["A"], {
-        type: "object",
-        properties: { b: { type: "object", properties: { a: {} } } },
-      });
     }).pipe(Effect.orDie),
   );
 

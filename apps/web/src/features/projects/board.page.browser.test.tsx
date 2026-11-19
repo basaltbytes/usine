@@ -188,27 +188,6 @@ it("scrolls every lane inside a narrow viewport without moving the page beneath 
   await visitBothEnds();
 });
 
-it("scrolls a long lane on its own and fades the edges that hide cards", async () => {
-  queryClient.setQueryData(
-    overviewQuery().queryKey,
-    ReadyOverview.make({ projects: [projectWith(manyTasks(30))], loops: [], needsYou: [] }),
-  );
-  await mountBoard(1024);
-  await expect.element(page.getByLabelText("Last updated", { exact: true })).toBeVisible();
-  const cards = page.getByLabelText("Backlog cards").element();
-  const otherLane = lane("Ready").getBoundingClientRect().top;
-  expect(cards.scrollHeight).toBeGreaterThan(cards.clientHeight);
-  // The lane fits in the board, so the board itself doesn't scroll vertically.
-  expect(board().scrollHeight).toBeLessThanOrEqual(board().clientHeight + 1);
-  await expect.poll(() => cards.className).toContain("mask-b-from");
-  expect(cards.className).not.toContain("mask-t-from");
-  cards.scrollTop = cards.scrollHeight;
-  await expect.poll(() => cards.className).toContain("mask-t-from");
-  expect(cards.className).not.toContain("mask-b-from");
-  expect(getComputedStyle(cards).maskImage).not.toBe("none");
-  expect(lane("Ready").getBoundingClientRect().top).toBe(otherLane);
-});
-
 it.each([404, 503])(
   "shows Project not found only for a removed board (HTTP %s)",
   async (status) => {

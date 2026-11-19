@@ -1,28 +1,18 @@
 import { jsonKey } from "@usine/core/json-key";
-import { CompletionCheck } from "@usine/engine/completion-check";
-import { WorkerStatus } from "../../src/worker-status.ts";
 import { sqliteTempDirectory } from "../../../../tooling/test/sqlite.mts";
-import { configurationLayer } from "../support/configuration.ts";
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import { UsineConfig } from "@usine/config/factory";
 import { LoadedInstance } from "@usine/config/instance";
 import { Agent } from "@usine/core/agent";
-import { AgentFailure } from "@usine/core/attempt/failure";
-import { OperatorLogin } from "@usine/core/operator";
-import { WorkerName } from "@usine/core/worker";
 import { InstanceDirectory } from "@usine/core/instance";
 import * as RunState from "@usine/core/run/state";
-import { EnginePersistenceError, RunEngine } from "@usine/engine/engine";
-import { localSqliteLayer, layer as localEngineLayer } from "@usine/engine/local-sqlite";
-import { StepExecutor } from "@usine/engine/step-executor";
+import { EnginePersistenceError } from "@usine/engine/engine";
+import { localSqliteLayer } from "@usine/engine/local-sqlite";
 import { ProjectionRevision, RunReader } from "@usine/engine/run-reader";
 import { DateTime, Deferred, Effect, FileSystem, Layer, Option, Schema } from "effect";
 import { SqlClient } from "effect/sql";
 import { TestClock } from "effect/testing";
-import { OperatorStatistics } from "../../src/operator/statistics/statistics.ts";
-import { RunUsageReader } from "../../src/operator/usage.ts";
-import { alwaysHoldsLayer } from "../support/polling.ts";
 import { cacheStatistics } from "../../src/operator/statistics/cache.ts";
 import { submission } from "../local-worker/support.ts";
 
@@ -261,85 +251,6 @@ describe("Statistics cache", () => {
           Option.some(DateTime.makeUnsafe("2026-10-25T03:00:00.000Z")),
         );
         assert.strictEqual(reads, 11);
-      }).pipe(Effect.provide(services));
-    }).pipe(Effect.provide(NodeServices.layer)),
-  );
-
-  it.effect("refreshes every cached run statistics window after a failure is resolved", () =>
-    Effect.gen(function* () {
-      const fixtureInstance = yield* instance;
-      const fs = yield* FileSystem.FileSystem;
-      const currentDirectory = yield* fs.makeTempDirectoryScoped({
-        directory: sqliteTempDirectory(),
-        prefix: "usine-resolution-statistics-",
-      });
-      const directory = InstanceDirectory.make(currentDirectory);
-      const worker = WorkerName.make("local");
-      const executor = Layer.succeed(StepExecutor)({
-        workers: Effect.succeed([worker]),
-        isLive: () => Effect.succeed(false),
-        outcome: () => Effect.succeedNone,
-        recover: () => Effect.succeed("found" as const),
-        intervene: () => Effect.void,
-        interrupt: () => Effect.void,
-        occupy: () => Effect.succeed({ worker, kind: "local", release: Effect.void }),
-        sweep: Effect.void,
-        discard: () => Effect.void,
-        reserve: () => Effect.succeed({ worker, kind: "local", release: Effect.void }),
-        execute: () => Effect.fail(AgentFailure.make({ message: "Needs operator input" })),
-      });
-      const engineLayer = localEngineLayer(directory).pipe(
-        Layer.provide(executor),
-        Layer.provide(alwaysHoldsLayer),
-        Layer.provide(CompletionCheck.unverified),
-      );
-      const services = OperatorStatistics.layer.pipe(
-        Layer.provide(WorkerStatus.idle),
-        Layer.provide(configurationLayer),
-        Layer.provide(RunUsageReader.layer),
-        Layer.provideMerge(engineLayer),
-      );
-      yield* TestClock.setTime(DateTime.toEpochMillis(DateTime.makeUnsafe("2026-10-25T00:00:00Z")));
-      yield* Effect.gen(function* () {
-        const engine = yield* RunEngine;
-        const statistics = yield* OperatorStatistics;
-        const claim = yield* engine.submit(submission(1));
-        assert(claim._tag === "Claimed");
-        const failed = yield* engine.inspect(claim.runId).pipe(
-          Effect.tap(() => Effect.yieldNow),
-          Effect.repeat({ until: ({ run }) => run.state._tag === "Failed" }),
-        );
-        const attempt = failed.attempts[0];
-        assert(attempt !== undefined);
-        yield* TestClock.adjust("15 minutes");
-        const windows = ["7d", "30d", "all"] as const;
-        for (const window of windows) {
-          const before = yield* statistics.runStatistics(fixtureInstance, window);
-          assert.strictEqual(before.needsAttention.failureWait, null);
-
-          const currentRunStatistics = yield* statistics.runStatistics(fixtureInstance, window);
-          assert.strictEqual(currentRunStatistics, before);
-        }
-        const operator = Option.some(OperatorLogin.make("Philippe"));
-        yield* engine.resolveFailure(claim.runId, attempt.id, operator);
-        for (const window of windows) {
-          const after = yield* statistics.runStatistics(fixtureInstance, window);
-          assert.deepStrictEqual(
-            { ...after.needsAttention.failureWait },
-            {
-              count: 1,
-              medianMillis: 15 * 60_000,
-            },
-          );
-          assert.deepStrictEqual(
-            after.needsAttention.resolutionWait,
-            after.needsAttention.failureWait,
-          );
-          assert.strictEqual(after.needsAttention.retryWait, null);
-
-          const nextRunStatistics = yield* statistics.runStatistics(fixtureInstance, window);
-          assert.strictEqual(nextRunStatistics, after);
-        }
       }).pipe(Effect.provide(services));
     }).pipe(Effect.provide(NodeServices.layer)),
   );

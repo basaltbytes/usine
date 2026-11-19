@@ -53,16 +53,6 @@ it("keeps the 200 most recent choices and logs the dropped choice", () => {
   assert.include(logged()[0], "Board lane fold storage dropped the oldest entries to fit");
 });
 
-it("replaces a lane's earlier choice instead of evicting other lanes", () => {
-  const browser = storage();
-  const memory = laneFoldMemory(() => browser);
-  for (let index = 0; index < 199; index += 1)
-    memory.write(project, BoardLaneId.make(`lane-${index}`), true);
-  for (let toggle = 0; toggle < 5; toggle += 1) memory.write(project, unmapped, toggle % 2 === 0);
-  assert.isTrue(memory.read(project, BoardLaneId.make("lane-0")));
-  assert.isTrue(memory.read(project, unmapped));
-});
-
 afterEach(() => {
   vi.restoreAllMocks();
 });

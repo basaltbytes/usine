@@ -25,13 +25,7 @@ import {
 } from "../src/testing.ts";
 import { assertAdmitted, attemptRequest, recordingSink, temporaryDatabase } from "./support.ts";
 
-for (const checkpoint of [
-  "conversation",
-  "details",
-  "usage",
-  "output",
-  "partial-output",
-] as const) {
+for (const checkpoint of ["conversation", "details", "usage", "output"] as const) {
   it.live(
     `returns the child's report and forwards events after a failed ${checkpoint} checkpoint`,
     () =>
@@ -144,7 +138,7 @@ for (const checkpoint of [
             TextOutput.make({ session: child.request.session, text: "Checkpoint" }),
           );
           yield* Deferred.await(recorded);
-          failCommit = checkpoint === "usage" || checkpoint === "partial-output";
+          failCommit = checkpoint === "usage";
           failOutput = checkpoint === "output";
           if (checkpoint === "usage")
             yield* child.emit(

@@ -87,8 +87,6 @@ export interface RuntimeState {
   starts: boolean;
   /** Whether `run` of a turn's sandbox, but not of the startup check's, never exits. */
   hangStart?: boolean;
-  /** The error with which every `run` fails. */
-  rejectStart?: string;
   rejectLimits?: boolean;
   image?: Answer;
   pull?: Answer;
@@ -155,8 +153,6 @@ export const podman = (
           containers.delete(args[2]!);
         }
         if (args[0] === "run") {
-          if (relay.rejectStart !== undefined)
-            return { stdout: "", stderr: relay.rejectStart, exitCode: 125 };
           const sources = args.flatMap((arg, index) =>
             args[index - 1] === "--mount" && arg.startsWith("type=bind")
               ? [arg.match(/"source=((?:[^"]|"")*)"/u)?.[1]?.replaceAll('""', '"')]

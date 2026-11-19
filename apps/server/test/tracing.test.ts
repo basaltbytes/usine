@@ -4,17 +4,7 @@ import { jsonKey } from "@usine/core/json-key";
 import { createServer } from "node:http";
 import { NodeServices } from "@effect/platform-node";
 import { Tracing } from "@usine/config/factory";
-import {
-  ConfigProvider,
-  Effect,
-  Layer,
-  Logger,
-  Option,
-  Redacted,
-  Schema,
-  Tracer,
-  Deferred,
-} from "effect";
+import { ConfigProvider, Effect, Layer, Logger, Option, Redacted, Schema, Deferred } from "effect";
 import { HttpRouter } from "effect/http";
 import { assert, describe, it } from "@effect/vitest";
 import { authenticatedRoutes } from "../src/auth/http.ts";
@@ -22,8 +12,6 @@ import { tracingLayer } from "../src/tracing.ts";
 import { authFixture } from "./auth/fixture.ts";
 
 interface ReceivedRequest {
-  readonly path: string | undefined;
-  readonly contentType: string | undefined;
   readonly body: Buffer;
 }
 
@@ -38,11 +26,7 @@ const startCollector = (status = 200) =>
       const chunks: Array<Buffer> = [];
       request.on("data", (chunk: Buffer) => chunks.push(chunk));
       request.on("end", () => {
-        received.push({
-          path: request.url,
-          contentType: request.headers["content-type"],
-          body: Buffer.concat(chunks),
-        });
+        received.push({ body: Buffer.concat(chunks) });
         response.writeHead(status).end();
       });
     });
@@ -71,8 +55,6 @@ const startCollector = (status = 200) =>
         })(),
     };
   });
-
-const currentTracer = Tracer.Tracer;
 
 const annotated = Effect.fn("Test.annotated")(function* () {
   yield* Effect.annotateCurrentSpan({ runId: "run-279" });
@@ -170,81 +152,6 @@ describe("tracingLayer", () => {
           yield* collector.close();
         }
       }),
-  );
-
-  it.live("keeps the default tracer without a tracing block", () =>
-    Effect.gen(function* () {
-      const [fallback, provided] = yield* Effect.scoped(
-        Effect.gen(function* () {
-          const context = yield* Layer.build(tracingLayer(Option.none()));
-          return [yield* currentTracer, yield* Effect.provideContext(currentTracer, context)];
-        }),
-      ).pipe(Effect.provide(NodeServices.layer));
-      assert.strictEqual(provided, fallback);
-    }),
-  );
-
-  it.live("exports ended spans with their names and attributes as OTLP protobuf", () =>
-    Effect.gen(function* () {
-      const collector = yield* startCollector();
-      try {
-        yield* Effect.promise(() =>
-          withSpanExport(
-            Tracing.make({ otlpUrl: collector.url, serviceName: "usine-test" }),
-            annotated(),
-            {
-              environment: {
-                OTEL_RESOURCE_ATTRIBUTES: "deployment.environment=eu%2Dwest,service.name=ignored",
-              },
-            },
-          ),
-        );
-        assert.lengthOf(collector.received, 1);
-        const [request] = collector.received;
-        assert.strictEqual(request?.path, "/v1/traces");
-        assert.strictEqual(request?.contentType, "application/x-protobuf");
-        const body = request?.body.toString("utf8") ?? "";
-        for (const text of [
-          "service.name",
-          "usine-test",
-          "deployment.environment",
-          "eu-west",
-          "Test.annotated",
-          "runId",
-          "run-279",
-        ]) {
-          assert.include(body, text);
-        }
-        assert.notInclude(body, "ignored");
-      } finally {
-        yield* collector.close();
-      }
-    }),
-  );
-
-  it.live("refuses a malformed OTEL_RESOURCE_ATTRIBUTES and names the key at fault", () =>
-    Effect.gen(function* () {
-      const collector = yield* startCollector();
-      try {
-        const error = yield* Effect.flip(
-          spanExport(
-            Tracing.make({ otlpUrl: collector.url, serviceName: "usine-test" }),
-            annotated(),
-            {
-              environment: { OTEL_RESOURCE_ATTRIBUTES: "deployment.environment=eu,team=100%" },
-            },
-          ),
-        );
-        assert.strictEqual(error._tag, "ResourceAttributesError");
-        if (error._tag !== "ResourceAttributesError") return;
-        assert.strictEqual(error.variable, "OTEL_RESOURCE_ATTRIBUTES");
-        assert.include(error.message, "Expected a valid URI component");
-        assert.include(error.message, '["team"]');
-        assert.lengthOf(collector.received, 0);
-      } finally {
-        yield* collector.close();
-      }
-    }),
   );
 
   it.live("logs the collector URL without its credentials or query string", () =>

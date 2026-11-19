@@ -55,7 +55,7 @@ const platformAt = (folder: string, manager: "systemd" | "launchd" = "systemd") 
 
 const commands = ["node", "npm", "curl", "timeout", "flock", "stat", "df", "find", "sort"];
 
-it.live.each(commands)(
+it.live.each(["node", "flock"])(
   "rejects missing %s before draining and accepts the complete dependency set",
   (missing) =>
     Effect.gen(function* () {

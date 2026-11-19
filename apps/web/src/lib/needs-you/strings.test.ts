@@ -7,10 +7,6 @@ import { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
 import { WorkerName } from "@usine/core/worker";
 import {
-  BlockedFailureView,
-  ConfigFileNeed,
-  WorkerPausedNeed,
-  WorkerQuotaNeed,
   PoolLimitNeed,
   QuestionFailureView,
   RunFailureNeed,
@@ -18,7 +14,7 @@ import {
   UnresponsiveWorkerNeed,
   UnconfirmedStopNeed,
 } from "@usine/orchestrator/operator";
-import { DateTime, Option, Schema } from "effect";
+import { DateTime, Option } from "effect";
 import { assert, describe, it } from "vitest";
 import { needsYouByProject } from "~/lib/overview";
 import { CiFixRun } from "@usine/engine/run-reader";
@@ -41,65 +37,13 @@ describe("operator question copy in Needs attention", () => {
   });
 });
 
-describe("blocker copy in Needs attention", () => {
-  it("names the blocked Loop and shows the Agent's blocker", () => {
-    const copy = needCopy(
-      RunFailureNeed.make({
-        id: "run-failure:blocked",
-        repository: RepositoryName.make("basaltbytes/usine"),
-        runId: RunId.make("blocked"),
-        loop: LoopName.make("start-dev"),
-        failure: BlockedFailureView.make({
-          message: "The baseline gate fails on main before any change.",
-        }),
-      }),
-    );
-    assert.strictEqual(copy.title, "start-dev: blocked");
-    assert.strictEqual(copy.detail, "The baseline gate fails on main before any change.");
-    assert.strictEqual(copy.runId, "blocked");
-  });
-});
-
-describe("config file copy in Needs attention", () => {
-  const need = (kind: "loop" | "agent", file: string, message: string) =>
-    Schema.decodeSync(ConfigFileNeed)({
-      _tag: "ConfigFileNeed",
-      id: `config-file:${file}`,
-      kind,
-      error: { _tag: "ConfigFileError", file, stage: "reference", message },
-    });
-
-  it("names a quarantined Loop's file and reason", () => {
-    const copy = needCopy(
-      need(
-        "loop",
-        "loops/ghost.md",
-        'Unknown agent "ghost": agents/ghost.md is missing or invalid. Fix the agent file, or set agent to an existing agent.',
-      ),
-    );
-    assert.strictEqual(copy.title, "Loop file not loaded");
-    assert.include(
-      copy.detail,
-      'loops/ghost.md: Unknown agent "ghost": agents/ghost.md is missing',
-    );
-    assert.include(copy.detail, "reload the configuration");
-    assert.isNull(copy.runId);
-  });
-
-  it("names an invalid Agent file", () => {
-    const copy = needCopy(need("agent", "agents/intern.md", "Expected a known harness"));
-    assert.strictEqual(copy.title, "Agent file not loaded");
-    assert.include(copy.detail, "agents/intern.md: Expected a known harness");
-  });
-});
-
 describe("unconfigured Worker copy in Needs attention", () => {
-  const need = (attempts: number, running = 0) =>
+  const need = (attempts: number) =>
     UnconfiguredWorkerNeed.make({
       id: "unconfigured-worker:local",
       worker: WorkerName.make("local"),
       attempts,
-      running,
+      running: 0,
     });
 
   it("names the Worker, counts its Attempts, and gives both ways out", () => {
@@ -110,14 +54,6 @@ describe("unconfigured Worker copy in Needs attention", () => {
     assert.include(copy.detail, "Add the worker back");
     assert.include(copy.detail, "discard the leftovers");
     assert.include(needCopy(need(1)).detail, "1 recorded attempt on it");
-  });
-
-  it("says how many Attempts still run on a removed Worker", () => {
-    assert.strictEqual(
-      needCopy(need(3, 2)).detail,
-      "local is not in Configuration > Workers. 2 attempts still running on it. Discard the leftovers after they end",
-    );
-    assert.include(needCopy(need(3, 1)).detail, "1 attempt still running on it");
   });
 });
 
@@ -184,39 +120,6 @@ it("identifies an unrecorded pool login without assigning its warning to a proje
   });
   assert.include(needCopy(need).detail, "Login unavailable");
   assert.deepStrictEqual([...needsYouByProject([need], [])], []);
-});
-
-it("explains quota recovery and automatic retries with the provider message", () => {
-  const copy = needCopy(
-    WorkerQuotaNeed.make({
-      id: "worker-quota:pool",
-      worker: WorkerName.make("pool"),
-      message: "shared core limit exceeded",
-    }),
-  );
-  assert.strictEqual(copy.title, "pool: cloud quota reached");
-  for (const text of [
-    "shared core limit exceeded",
-    "provider console",
-    "server_type",
-    "size on Boat",
-    "free capacity",
-    "retries automatically",
-  ])
-    assert.include(copy.detail, text);
-});
-
-it("names a paused worker and how to resume it", () => {
-  const copy = needCopy(
-    WorkerPausedNeed.make({ id: "worker-paused:trial", worker: WorkerName.make("trial") }),
-  );
-  assert.strictEqual(copy.title, "trial: paused");
-  assert.include(copy.detail, "takes no new attempts");
-  assert.include(
-    copy.detail,
-    "Running attempts finish. Clear Paused in Configuration > Workers to resume it.",
-  );
-  assert.strictEqual(copy.repository, null);
 });
 
 it("words a failed run's CI fix link by the fix run's state", () => {

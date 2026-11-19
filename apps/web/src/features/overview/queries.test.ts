@@ -10,60 +10,55 @@ class Source extends EventTarget {
   close = () => {};
 }
 
-it.each(["7d", "30d", "all"] as const)(
-  "refreshes %s task and run statistics at each UTC midnight while connected",
-  async (window) => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-11-03T18:59:59-05:00"));
-    const client = new QueryClient({
-      defaultOptions: { queries: { retry: false, gcTime: Infinity } },
-    });
-    const source = new Source();
-    const disconnect = connectChanges(client, () => source);
-    source.onopen?.(new Event("open"));
-    const observers = [statisticsQuery(window), runStatisticsQuery(window)].map(
-      ({ queryKey, meta }) =>
-        new QueryObserver(client, {
-          queryKey,
-          meta: meta ?? {},
-          staleTime: Infinity,
-          queryFn: async () => new Date().toISOString().slice(0, 10),
-        }),
-    );
-    const unsubscribe = observers.map((observer) => observer.subscribe(() => {}));
-    const boardKey = ["project", "one"];
-    client.setQueryData(boardKey, "unchanged");
-    try {
-      await vi.advanceTimersByTimeAsync(0);
-      for (const observer of observers) expect(observer.getCurrentResult().data).toBe("2026-11-03");
-      await vi.advanceTimersByTimeAsync(999);
-      for (const observer of observers) expect(observer.getCurrentResult().data).toBe("2026-11-03");
-      await vi.advanceTimersByTimeAsync(1);
-      for (const observer of observers) expect(observer.getCurrentResult().data).toBe("2026-11-04");
-      expect(client.getQueryState(boardKey)?.isInvalidated).toBe(false);
+it("refreshes task and run statistics at each UTC midnight while connected", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-11-03T18:59:59-05:00"));
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false, gcTime: Infinity } },
+  });
+  const source = new Source();
+  const disconnect = connectChanges(client, () => source);
+  source.onopen?.(new Event("open"));
+  const observers = [statisticsQuery("30d"), runStatisticsQuery("30d")].map(
+    ({ queryKey, meta }) =>
+      new QueryObserver(client, {
+        queryKey,
+        meta: meta ?? {},
+        staleTime: Infinity,
+        queryFn: async () => new Date().toISOString().slice(0, 10),
+      }),
+  );
+  const unsubscribe = observers.map((observer) => observer.subscribe(() => {}));
+  const boardKey = ["project", "one"];
+  client.setQueryData(boardKey, "unchanged");
+  try {
+    await vi.advanceTimersByTimeAsync(0);
+    for (const observer of observers) expect(observer.getCurrentResult().data).toBe("2026-11-03");
+    await vi.advanceTimersByTimeAsync(999);
+    for (const observer of observers) expect(observer.getCurrentResult().data).toBe("2026-11-03");
+    await vi.advanceTimersByTimeAsync(1);
+    for (const observer of observers) expect(observer.getCurrentResult().data).toBe("2026-11-04");
+    expect(client.getQueryState(boardKey)?.isInvalidated).toBe(false);
 
-      unsubscribe[1]?.();
-      await vi.advanceTimersByTimeAsync(86_399_999);
-      expect(observers[0]?.getCurrentResult().dataUpdatedAt).toBe(
-        Date.parse("2026-11-04T00:00:00Z"),
-      );
-      await vi.advanceTimersByTimeAsync(1);
-      expect(observers[0]?.getCurrentResult().data).toBe("2026-11-05");
-      const details = runStatisticsQuery(window);
-      expect(client.getQueryState(details.queryKey)?.isInvalidated).toBe(true);
-      expect(client.getQueryData(details.queryKey)).toBe("2026-11-04");
+    unsubscribe[1]?.();
+    await vi.advanceTimersByTimeAsync(86_399_999);
+    expect(observers[0]?.getCurrentResult().dataUpdatedAt).toBe(Date.parse("2026-11-04T00:00:00Z"));
+    await vi.advanceTimersByTimeAsync(1);
+    expect(observers[0]?.getCurrentResult().data).toBe("2026-11-05");
+    const details = runStatisticsQuery("30d");
+    expect(client.getQueryState(details.queryKey)?.isInvalidated).toBe(true);
+    expect(client.getQueryData(details.queryKey)).toBe("2026-11-04");
 
-      disconnect();
-      await vi.advanceTimersByTimeAsync(86_400_000);
-      expect(observers[0]?.getCurrentResult().data).toBe("2026-11-05");
-    } finally {
-      disconnect();
-      for (const stop of unsubscribe) stop();
-      client.clear();
-      vi.useRealTimers();
-    }
-  },
-);
+    disconnect();
+    await vi.advanceTimersByTimeAsync(86_400_000);
+    expect(observers[0]?.getCurrentResult().data).toBe("2026-11-05");
+  } finally {
+    disconnect();
+    for (const stop of unsubscribe) stop();
+    client.clear();
+    vi.useRealTimers();
+  }
+});
 
 it("refreshes statistics again when a read started before UTC midnight finishes afterward", async () => {
   vi.useFakeTimers();

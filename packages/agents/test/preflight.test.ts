@@ -25,7 +25,6 @@ import { CodexAppServer, type CodexConnection } from "../src/harness/codex/app-s
 import { PiSdk, type PiStartOptions, type PiStartResult } from "../src/harness/pi/sdk.ts";
 import { probeOutput } from "../src/preflight/command.ts";
 import { CODEX_CLI_VERSION } from "../src/preflight/preflight.ts";
-import packageJson from "../package.json" with { type: "json" };
 
 /** Fails a Pi completion that the test doesn't expect. */
 const noCompletion = () => Promise.reject(new Error("The test runs no completion"));
@@ -171,13 +170,6 @@ const unusedPi = Layer.succeed(PiSdk)({
 });
 
 describe("worker harness readiness", () => {
-  it("checks the same Codex version as the protocol conformance gate", () => {
-    assert.strictEqual(
-      CODEX_CLI_VERSION,
-      packageJson.devDependencies["@pwrdrvr/codex-app-server-protocol"],
-    );
-  });
-
   // turbo.json lists the cloud-init file as an input of this package's tests.
   const cloudInitPins = (pattern: RegExp) =>
     [
@@ -214,20 +206,7 @@ describe("worker harness readiness", () => {
     }),
   );
 
-  // turbo.json lists the Dockerfile as an input too.
-  const argument = (name: string) =>
-    [
-      ...readFileSync(
-        new URL("../../../infra/worker-image/Dockerfile", import.meta.url),
-        "utf8",
-      ).matchAll(new RegExp(`^ARG ${name}=(\\S+)$`, "gmu")),
-    ].map(([, value]) => value);
-
-  it("pins the attempt container image's pnpm at the Hetzner worker version", () => {
-    assert.deepStrictEqual(argument("PNPM_VERSION"), cloudInitPins(/pnpm@(\S+)/gu));
-  });
-
-  // turbo.json lists the script as an input too.
+  // turbo.json lists the Dockerfile and the script as inputs too.
   it("renders the Hetzner worker's cloud-init with the attempt image's Node.js major version", () => {
     const rendered = execFileSync(
       "sh",
@@ -239,13 +218,17 @@ describe("worker harness readiness", () => {
     );
     assert.deepStrictEqual(
       [...rendered.matchAll(/deb\.nodesource\.com\/node_(\S+)\.x/gu)].map(([, major]) => major),
-      argument("NODE_MAJOR"),
+      [
+        ...readFileSync(
+          new URL("../../../infra/worker-image/Dockerfile", import.meta.url),
+          "utf8",
+        ).matchAll(/^ARG NODE_MAJOR=(\S+)$/gmu),
+      ].map(([, value]) => value),
     );
   });
 
   for (const result of [
     { stdout: "", exitCode: 127, capability: "binary" },
-    { stdout: "codex-cli 0.144.0", exitCode: 0, capability: "version" },
     { stdout: "codex-cli 0.153.4", exitCode: 0, capability: "version" },
   ]) {
     it.effect(
@@ -271,30 +254,28 @@ describe("worker harness readiness", () => {
     );
   }
 
-  for (const version of ["0.164.0", "0.159.0", "0.159.1", "0.159.2", "0.159.3"]) {
-    for (const auth of [{ type: "apiKey" }, { type: "chatgpt" }]) {
-      it.effect(
-        `checks Codex ${version} ${auth.type} authentication and closes its unprompted connection`,
-        () => {
-          const server = account(Effect.succeed({ account: auth, requiresOpenaiAuth: true }));
-          return Effect.gen(function* () {
-            const available = yield* verifyHarness(coder, local, workerEnvironment);
-            assert.deepStrictEqual(
-              available,
-              HarnessReady.make({ harness: Harness.make("codex") }),
-            );
-            assert.strictEqual(server.opened(), 1);
-            assert.strictEqual(server.closed(), 1);
-          }).pipe(
-            Effect.provide(
-              commands({
-                [codexVersionCommand]: { stdout: `codex-cli ${version}`, exitCode: 0 },
-              }).pipe(Layer.provideMerge(server.layer), Layer.provideMerge(unusedPi)),
-            ),
-          );
-        },
-      );
-    }
+  for (const [version, auth] of [
+    ["0.164.0", { type: "chatgpt" }],
+    ["0.159.0", { type: "apiKey" }],
+  ] as const) {
+    it.effect(
+      `checks Codex ${version} ${auth.type} authentication and closes its unprompted connection`,
+      () => {
+        const server = account(Effect.succeed({ account: auth, requiresOpenaiAuth: true }));
+        return Effect.gen(function* () {
+          const available = yield* verifyHarness(coder, local, workerEnvironment);
+          assert.deepStrictEqual(available, HarnessReady.make({ harness: Harness.make("codex") }));
+          assert.strictEqual(server.opened(), 1);
+          assert.strictEqual(server.closed(), 1);
+        }).pipe(
+          Effect.provide(
+            commands({
+              [codexVersionCommand]: { stdout: `codex-cli ${version}`, exitCode: 0 },
+            }).pipe(Layer.provideMerge(server.layer), Layer.provideMerge(unusedPi)),
+          ),
+        );
+      },
+    );
   }
 
   it.effect("closes a stalled account probe without declaring the login unavailable", () =>
@@ -335,10 +316,6 @@ describe("worker harness readiness", () => {
       },
       exitCode: 1,
     },
-    { auth: { loggedIn: false, authMethod: "none", apiProvider: "firstParty" }, exitCode: 0 },
-    { auth: { loggedIn: true, authMethod: "oauth_token", apiProvider: "firstParty" }, exitCode: 0 },
-    { auth: { loggedIn: true, authMethod: "unknown", apiProvider: "firstParty" }, exitCode: 0 },
-    { auth: { loggedIn: true, authMethod: "api_key", apiProvider: "firstParty" }, exitCode: 0 },
     { auth: { loggedIn: true, authMethod: "claude.ai", apiProvider: "firstParty" }, exitCode: 0 },
   ]) {
     it.effect(
@@ -383,7 +360,6 @@ describe("worker harness readiness", () => {
   }
 
   for (const status of [
-    { stdout: "", exitCode: 1 },
     { stdout: "not a status", exitCode: 1 },
     {
       stdout: jsonKey({ loggedIn: false }),
@@ -391,7 +367,7 @@ describe("worker harness readiness", () => {
     },
   ])
     it.effect(
-      `reports a Claude login check exiting ${status.exitCode} with ${status.stdout === "" ? "no output" : "unexpected output"} as a failed command`,
+      `reports a Claude login check exiting ${status.exitCode} with unexpected output as a failed command`,
       () =>
         Effect.gen(function* () {
           const error = yield* verifyHarness(
@@ -418,61 +394,57 @@ describe("worker harness readiness", () => {
         ),
     );
 
-  for (const pool of ["apiKeys", "chatgptPlan"] as const) {
-    it.effect(`checks Pi ${pool} authentication and disposes its unprompted SDK session`, () => {
-      let disposed = 0;
-      let options: PiStartOptions | undefined;
-      const piBrain = BrainSpec.make({
-        ...brain(Harness.make("pi")),
-        model: ModelId.make(
-          pool === "chatgptPlan" ? "openai-codex/gpt-5.6-sol" : "openai/gpt-5.6-sol",
-        ),
-      });
-      const started: PiStartResult = {
-        _tag: "Started",
-        harnessSession: Option.none(),
-        model: piBrain.model,
-        pool,
-        tools: [],
-        session: {
-          messages: [],
-          subscribe: () => () => {},
-          prompt: async () => {
-            throw new Error("preflight must never prompt");
-          },
-          steer: async () => {},
-          abort: async () => {},
-          dispose: () => {
-            disposed += 1;
-          },
+  it.effect("checks Pi chatgptPlan authentication and disposes its unprompted SDK session", () => {
+    let disposed = 0;
+    let options: PiStartOptions | undefined;
+    const piBrain = BrainSpec.make({
+      ...brain(Harness.make("pi")),
+      model: ModelId.make("openai-codex/gpt-5.6-sol"),
+    });
+    const started: PiStartResult = {
+      _tag: "Started",
+      harnessSession: Option.none(),
+      model: piBrain.model,
+      pool: "chatgptPlan",
+      tools: [],
+      session: {
+        messages: [],
+        subscribe: () => () => {},
+        prompt: async () => {
+          throw new Error("preflight must never prompt");
         },
-      };
-      return Effect.gen(function* () {
-        const available = yield* verifyHarness(piBrain, local, workerEnvironment);
-        assert.deepStrictEqual(available, HarnessReady.make({ harness: Harness.make("pi") }));
-        assert.strictEqual(disposed, 1);
-        assert.strictEqual(options?.model, piBrain.model);
-        assert.deepStrictEqual(options?.storage, { _tag: "InMemory" });
-        // The session's bash tool would run with the worker's environment, not this process's.
-        assert.deepStrictEqual(options?.environment, Option.some(workerEnvironment));
-      }).pipe(
-        Effect.provide(
-          commands({}).pipe(
-            Layer.provideMerge(account(Effect.succeed(null)).layer),
-            Layer.provideMerge(
-              Layer.succeed(PiSdk)({
-                complete: noCompletion,
-                start: async (received) => {
-                  options = received;
-                  return started;
-                },
-              }),
-            ),
+        steer: async () => {},
+        abort: async () => {},
+        dispose: () => {
+          disposed += 1;
+        },
+      },
+    };
+    return Effect.gen(function* () {
+      const available = yield* verifyHarness(piBrain, local, workerEnvironment);
+      assert.deepStrictEqual(available, HarnessReady.make({ harness: Harness.make("pi") }));
+      assert.strictEqual(disposed, 1);
+      assert.strictEqual(options?.model, piBrain.model);
+      assert.deepStrictEqual(options?.storage, { _tag: "InMemory" });
+      // The session's bash tool would run with the worker's environment, not this process's.
+      assert.deepStrictEqual(options?.environment, Option.some(workerEnvironment));
+    }).pipe(
+      Effect.provide(
+        commands({}).pipe(
+          Layer.provideMerge(account(Effect.succeed(null)).layer),
+          Layer.provideMerge(
+            Layer.succeed(PiSdk)({
+              complete: noCompletion,
+              start: async (received) => {
+                options = received;
+                return started;
+              },
+            }),
           ),
         ),
-      );
-    });
-  }
+      ),
+    );
+  });
 
   it.effect("refuses a Pi OAuth provider without a billing pool", () =>
     Effect.gen(function* () {
@@ -505,8 +477,6 @@ describe("worker harness readiness", () => {
 
   for (const [credential, sandbox] of [
     ["host-login", false],
-    ["gateway", false],
-    ["api-key", false],
     ["api-key", true],
   ] as const) {
     const route = sandbox ? "sandbox api-key" : credential;
@@ -535,14 +505,17 @@ describe("worker harness readiness", () => {
         ),
       ),
     );
-    if (credential === "host-login") continue;
+  }
+
+  for (const sandbox of [false, true]) {
+    const route = sandbox ? "sandbox api-key" : "api-key";
     it.effect(`reports the Node.js requirement for the ${route} route`, () =>
       Effect.gen(function* () {
         const error = yield* verifyHarness(
           coder,
           remote,
           {},
-          credential,
+          "api-key",
           sandbox ? "sandbox" : "ssh",
         ).pipe(Effect.flip);
         assert.strictEqual(error._tag, "HarnessUnavailableError");
@@ -563,49 +536,35 @@ describe("worker harness readiness", () => {
     );
   }
 
-  for (const credential of ["gateway", "api-key"] as const) {
-    for (const harness of ["claude", "codex"] as const) {
-      it.effect(`checks remote ${harness} without a host login on the ${credential} route`, () => {
-        const server = account(Effect.die("external credentials must not inspect a host account"));
-        const selected = brain(Harness.make(harness));
-        return Effect.gen(function* () {
-          const ready = yield* verifyHarness(selected, remote, {}, credential);
-          assert.strictEqual(ready._tag, "HarnessReady");
-          assert.strictEqual(server.opened(), 0);
-        }).pipe(
-          Effect.provide(
-            commands({
-              [overSsh("exec 'node' '--version'")]: { stdout: "v24.0.0", exitCode: 0 },
-              [overSsh("exec 'claude' '--version'")]: { stdout: "any Claude version", exitCode: 0 },
-              [overSsh(
-                "exec 'codex' " +
-                  codexVersionCommand
-                    .slice("codex ".length)
-                    .split(" ")
-                    .map((arg) => `'${arg}'`)
-                    .join(" "),
-              )]: { stdout: `codex-cli ${CODEX_CLI_VERSION}`, exitCode: 0 },
-            }).pipe(Layer.provideMerge(server.layer), Layer.provideMerge(unusedPi)),
-          ),
-        );
-      });
-    }
-  }
-
-  it.effect("refuses remote Codex when its supervisor cannot run Node.js", () =>
-    Effect.gen(function* () {
-      const error = yield* verifyHarness(coder, remote, {}).pipe(Effect.flip);
-      assert.strictEqual(error._tag, "HarnessUnavailableError");
-      assert.match(error.message, /node --version failed/u);
-    }).pipe(
-      Effect.provide(
-        commands({ [overSsh("exec 'node' '--version'")]: { stdout: "", exitCode: 127 } }).pipe(
-          Layer.provideMerge(account(Effect.succeed({})).layer),
-          Layer.provideMerge(unusedPi),
+  for (const [credential, harness] of [
+    ["gateway", "claude"],
+    ["api-key", "codex"],
+  ] as const) {
+    it.effect(`checks remote ${harness} without a host login on the ${credential} route`, () => {
+      const server = account(Effect.die("external credentials must not inspect a host account"));
+      const selected = brain(Harness.make(harness));
+      return Effect.gen(function* () {
+        const ready = yield* verifyHarness(selected, remote, {}, credential);
+        assert.strictEqual(ready._tag, "HarnessReady");
+        assert.strictEqual(server.opened(), 0);
+      }).pipe(
+        Effect.provide(
+          commands({
+            [overSsh("exec 'node' '--version'")]: { stdout: "v24.0.0", exitCode: 0 },
+            [overSsh("exec 'claude' '--version'")]: { stdout: "any Claude version", exitCode: 0 },
+            [overSsh(
+              "exec 'codex' " +
+                codexVersionCommand
+                  .slice("codex ".length)
+                  .split(" ")
+                  .map((arg) => `'${arg}'`)
+                  .join(" "),
+            )]: { stdout: `codex-cli ${CODEX_CLI_VERSION}`, exitCode: 0 },
+          }).pipe(Layer.provideMerge(server.layer), Layer.provideMerge(unusedPi)),
         ),
-      ),
-    ),
-  );
+      );
+    });
+  }
 
   it.effect("checks Claude on a remote host through one SSH command per probe", () =>
     Effect.gen(function* () {

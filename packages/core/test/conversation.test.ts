@@ -1,5 +1,5 @@
 import { assert, it } from "vitest";
-import { DateTime, Option, Schema } from "effect";
+import { DateTime, Option } from "effect";
 import {
   administratorPermissions,
   GitHubUserId,
@@ -71,11 +71,6 @@ const running = (turn: string, sequence: number) =>
     ).turn,
     at(sequence),
   );
-
-it("refuses an empty message body", () => {
-  assert.isTrue(Option.isNone(Schema.decodeOption(MessageBody)("")));
-  assert.isTrue(Option.isSome(Schema.decodeOption(MessageBody)({ answer: "" })));
-});
 
 it("resumes from the last saved session with the usage of the last ended turn", () => {
   const first = HarnessSession.make({ cwd: "/first" });

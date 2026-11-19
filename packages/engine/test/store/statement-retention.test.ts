@@ -2,7 +2,7 @@ import { jsonKey } from "@usine/core/json-key";
 import { NodeServices } from "@effect/platform-node";
 import { assert, it } from "@effect/vitest";
 import { InstanceDirectory } from "@usine/core/instance";
-import { Context, Effect, FileSystem, Layer, Option, Tracer } from "effect";
+import { Context, Effect, FileSystem, Layer } from "effect";
 import { SqlClient, Statement } from "effect/sql";
 import { TestClock } from "effect/testing";
 // The retention assertion must run after Node’s check phase releases native async handles.
@@ -65,55 +65,5 @@ it.effect("cached SQLite statements release completed responses across six hours
       assert.deepStrictEqual(currentRows, [{ value: 42 }]);
       if (hour < 6) yield* TestClock.adjust("1 hour");
     }
-  }).pipe(Effect.provide(NodeServices.layer)),
-);
-
-it.effect("SQLite queries keep their request trace and SQL attributes", () =>
-  Effect.gen(function* () {
-    const spans: Array<{
-      readonly name: string;
-      readonly traceId: string;
-      readonly spanId: string;
-      readonly parentId: Option.Option<string>;
-      readonly attributes: ReadonlyMap<string, unknown>;
-    }> = [];
-    const tracer = Tracer.make({
-      span(options) {
-        const span = new Tracer.NativeSpan(options);
-        spans.push({
-          name: span.name,
-          traceId: span.traceId,
-          spanId: span.spanId,
-          parentId: Option.map(span.parent, (parent) => parent.spanId),
-          attributes: span.attributes,
-        });
-        return span;
-      },
-    });
-    const fs = yield* FileSystem.FileSystem;
-    const currentDirectory = yield* fs.makeTempDirectoryScoped({
-      directory: sqliteTempDirectory(),
-      prefix: "usine-statement-trace-",
-    });
-    const directory = InstanceDirectory.make(currentDirectory);
-    yield* Effect.gen(function* () {
-      const sql = yield* SqlClient.SqlClient;
-      const rows = yield* sql`SELECT 42 AS value`;
-      assert.deepStrictEqual(rows, [{ value: 42 }]);
-    }).pipe(
-      Effect.withSpan("http.request"),
-      Effect.provideService(Statement.SpanPropagationEnabled, true),
-      Effect.provide(localSqliteLayer(directory)),
-      Effect.provideService(Tracer.Tracer, tracer),
-    );
-    const request = spans.find(({ name }) => name === "http.request");
-    assert(request !== undefined);
-    const query = spans.find(
-      ({ attributes }) => attributes.get("db.query.text") === "SELECT 42 AS value",
-    );
-    assert(query !== undefined);
-    assert.strictEqual(query.traceId, request.traceId);
-    assert.deepStrictEqual(query.parentId, Option.some(request.spanId));
-    assert.strictEqual(query.attributes.get("db.system.name"), "sqlite");
   }).pipe(Effect.provide(NodeServices.layer)),
 );

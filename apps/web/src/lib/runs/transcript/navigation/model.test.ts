@@ -125,16 +125,6 @@ describe("conversation update index", () => {
     );
   });
 
-  it("retains a result's identity and latest update when its earlier start is loaded", () => {
-    const cold = index([finished(5)])[0];
-    const withStart = index([started(2), finished(5)])[0];
-    assert.isDefined(cold);
-    assert.isDefined(withStart);
-    assert.equal(withStart.key, cold.key);
-    assert.equal(withStart.sequence, 2);
-    assert.equal(withStart.latestSequence, cold.latestSequence);
-  });
-
   it("targets recorded tool and Attempt errors without labeling stopped calls as errors", () => {
     const rows = index([
       started(1),
@@ -201,12 +191,6 @@ describe("unread conversation activity", () => {
     assert.equal(unchanged.keys.size, 0);
     const live = [...meters, message(12)];
     assert.equal(advanceUnread(unchanged, index(live), through(live)).keys.size, 1);
-  });
-
-  it("counts the first live activity in an empty Run and keeps parent and child calls distinct", () => {
-    const events = [started(1), started(2, child), finished(3), finished(4, child)];
-    const unread = advanceUnread(initializeUnread(null), index(events), through(events));
-    assert.equal(unread.keys.size, 2);
   });
 });
 

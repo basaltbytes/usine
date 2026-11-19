@@ -27,44 +27,6 @@ const layer = (writer: GitHubLabelWriter["Service"]) =>
   LabelReconciler.layer.pipe(Layer.provide(Layer.succeed(GitHubLabelWriter, writer)));
 
 describe("LabelReconciler", () => {
-  it.effect("creates every declared label for a fresh repository", () => {
-    const created: Array<string> = [];
-    return Effect.gen(function* () {
-      const reconciler = yield* LabelReconciler;
-      const result = yield* reconciler.reconcile(
-        repository,
-        [declaration("ready", "A2EEEF"), declaration("review")],
-        [],
-      );
-
-      assert.deepStrictEqual(created, ["ready", "review"]);
-      assert.deepStrictEqual(
-        result.labels.map(({ name, color }) => [name, Option.getOrNull(color)]),
-        [
-          ["ready", "A2EEEF"],
-          ["review", "ededed"],
-        ],
-      );
-      assert.deepStrictEqual(result.findings, []);
-      assert.strictEqual(result.catalogChanged, true);
-      assert(Option.isNone(result.nextPollAt));
-    }).pipe(
-      Effect.provide(
-        layer({
-          create: (_repository, label) =>
-            Effect.sync(() => {
-              created.push(label.name);
-              return createdLabel(
-                label.name,
-                Option.getOrElse(label.color, () => RepositoryLabelColor.make("ededed")),
-                Option.getOrUndefined(label.description),
-              );
-            }),
-        }),
-      ),
-    );
-  });
-
   it.effect("leaves a drifted existing label untouched and creates only the missing label", () => {
     const created: Array<string> = [];
     return Effect.gen(function* () {

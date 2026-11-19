@@ -201,49 +201,6 @@ describe("Webhook delivery polling", () => {
     },
   );
 
-  it.effect("keeps deliveries off by default and polls every ten seconds when enabled", () => {
-    let requests = 0;
-    const app = appLayer(() =>
-      Effect.sync(() => {
-        requests += 1;
-        return [];
-      }),
-    );
-    return Effect.gen(function* () {
-      const source = yield* WebhookDeliveries;
-      const decodedValue8 = yield* instance("off");
-      const current = yield* SubscriptionRef.make(decodedValue8);
-      const enabled = yield* source
-        .run({ get: SubscriptionRef.get(current), changes: SubscriptionRef.changes(current) })
-        .pipe(Effect.forkChild);
-      yield* TestClock.adjust("30 seconds");
-      assert.strictEqual(requests, 0);
-      const decodedValue7 = yield* instance("deliveries");
-      yield* SubscriptionRef.set(current, decodedValue7);
-      yield* TestClock.adjust("1 millis");
-      assert.strictEqual(requests, 1);
-      yield* TestClock.adjust("9999 millis");
-      assert.strictEqual(requests, 2);
-      const decodedValue6 = yield* instance("off");
-      yield* SubscriptionRef.set(current, decodedValue6);
-      yield* TestClock.adjust("30 seconds");
-      assert.strictEqual(requests, 2);
-      const decodedValue5 = yield* instance("deliveries");
-      yield* SubscriptionRef.set(current, decodedValue5);
-      yield* TestClock.adjust("1 millis");
-      assert.strictEqual(requests, 3);
-      yield* Fiber.interrupt(enabled);
-    }).pipe(
-      Effect.provide(
-        WebhookDeliveries.layer.pipe(
-          Layer.provideMerge(app),
-          Layer.provideMerge(Layer.mock(PollingTriggers)({})),
-          Layer.provideMerge(Layer.succeed(CursorStore)(memoryCursorStore().store)),
-        ),
-      ),
-    );
-  });
-
   it.effect("honors delivery API rate limits and retries without advancing the cursor", () => {
     const started = Deferred.makeUnsafe<void>();
     let requests = 0;

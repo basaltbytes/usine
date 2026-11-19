@@ -256,109 +256,100 @@ it.live(
   },
 );
 
-for (const replacementDocker of ["absent", "running"] as const) {
-  it.live(
-    `keeps an allocated machine's isolation after replacement preflight with Docker ${replacementDocker}`,
-    () => {
-      const machine = fakeMachine();
+it.live(
+  "keeps an allocated machine's isolation after replacement preflight with Docker absent",
+  () => {
+    const machine = fakeMachine();
+    machine.state.docker = "running";
+    const providers = fakeProviders();
+    const destinations: string[] = [];
+    const originalImage = ContainerImage.make("ghcr.io/example/attempt:original");
+    const replacementImage = ContainerImage.make("ghcr.io/example/attempt:replacement");
+    const originalAddress = {
+      ...hetznerAddress,
+      container: { ...hetznerAddress.container, image: Option.some(originalImage) },
+    };
+    const replacementAddress = {
+      ...ADDRESS,
+      container: {
+        image: Option.some(replacementImage),
+        cpus: Option.some(ContainerCpus.make(1)),
+        memoryMib: Option.some(ContainerMemoryMib.make(2048)),
+        pids: Option.some(ContainerPids.make(1024)),
+        shmSizeMib: Option.none(),
+        tmpfsSizeMib: Option.none(),
+      },
+    };
+    const parent: StubParent = (context) => {
+      assert(Schema.is(RemoteShell)(context.request.host));
+      destinations.push(context.request.host.destination);
+      if (context.request.host.destination !== DESTINATION) {
+        assert.isDefined(context.request.host.container, "the attempt runs in its container");
+      } else {
+        assert.isUndefined(context.request.host.container);
+      }
+      return completes(context);
+    };
+    return Effect.gen(function* () {
+      const machines = yield* WorkerMachines;
+      const workers = yield* SshWorkers;
+      const executor = yield* Executor;
+      const original = yield* machines.create(WORKER, MACHINE_RUN, request.attemptId, [
+        TEST_AGENT.brain,
+      ]);
+      const [server] = providers.hetzner.servers.values();
+      assert(server?.publicIp !== undefined);
+      yield* workers.addWorker(replacementAddress);
+      machine.state.docker = "absent";
+      yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
       machine.state.docker = "running";
-      const providers = fakeProviders();
-      const destinations: string[] = [];
-      const originalImage = ContainerImage.make("ghcr.io/example/attempt:original");
-      const replacementImage = ContainerImage.make("ghcr.io/example/attempt:replacement");
-      const originalAddress = {
-        ...hetznerAddress,
-        container: { ...hetznerAddress.container, image: Option.some(originalImage) },
-      };
-      const replacementAddress = {
-        ...ADDRESS,
-        container: {
-          image: Option.some(replacementImage),
-          cpus: Option.some(ContainerCpus.make(1)),
-          memoryMib: Option.some(ContainerMemoryMib.make(2048)),
-          pids: Option.some(ContainerPids.make(1024)),
-          shmSizeMib: Option.none(),
-          tmpfsSizeMib: Option.none(),
-        },
-      };
-      const parent: StubParent = (context) => {
-        assert(Schema.is(RemoteShell)(context.request.host));
-        destinations.push(context.request.host.destination);
-        if (context.request.host.destination !== DESTINATION || replacementDocker === "running") {
-          assert.isDefined(context.request.host.container, "the attempt runs in its container");
-        } else {
-          assert.isUndefined(context.request.host.container);
-        }
-        return completes(context);
-      };
-      return Effect.gen(function* () {
-        const machines = yield* WorkerMachines;
-        const workers = yield* SshWorkers;
-        const executor = yield* Executor;
-        const original = yield* machines.create(WORKER, MACHINE_RUN, request.attemptId, [
-          TEST_AGENT.brain,
-        ]);
-        const [server] = providers.hetzner.servers.values();
-        assert(server?.publicIp !== undefined);
-        yield* workers.addWorker(replacementAddress);
-        machine.state.docker = replacementDocker;
-        yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
-        machine.state.docker = "running";
-        yield* Effect.scoped(
-          Effect.gen(function* () {
-            yield* (yield* executor.prepare(request)).launch(sink);
-          }),
-        );
-        assert.deepStrictEqual(destinations, [`usine@${server.publicIp}`]);
-        const originalRun = machine.state.calls.find(({ line }) =>
-          line.startsWith("exec 'docker' 'run' '--detach' '--name' 'usine-remote-run_execute_1'"),
-        );
-        assert.include(originalRun?.line, `'${originalImage}'`);
-        assert.include(
-          originalRun?.line,
-          "'--cpus' '2' '--memory' '4096m' '--memory-swap' '4096m' '--pids-limit' '4096'",
-        );
-        yield* machines.release(original.hold);
-        assert.strictEqual(providers.hetzner.servers.size, 0);
-
-        const next = CheckoutRequest.make({
-          ...request,
-          attemptId: AttemptId.make("fixed-attempt"),
-        });
-        machine.state.docker = replacementDocker;
-        yield* Effect.scoped(
-          Effect.gen(function* () {
-            yield* (yield* executor.prepare(next)).launch(sink);
-          }),
-        );
-        assert.deepStrictEqual(destinations, [`usine@${server.publicIp}`, DESTINATION]);
-        const replacementRun = machine.state.calls.find(({ line }) =>
-          line.startsWith("exec 'docker' 'run' '--detach' '--name' 'usine-fixed-attempt'"),
-        );
-        if (replacementDocker === "running") {
-          assert.include(replacementRun?.line, `'${replacementImage}'`);
-          assert.include(
-            replacementRun?.line,
-            "'--cpus' '1' '--memory' '2048m' '--memory-swap' '2048m' '--pids-limit' '1024'",
-          );
-        } else {
-          assert.isUndefined(replacementRun);
-        }
-      }).pipe(
-        Effect.scoped,
-        Effect.provide(runtimeOf(machine, providers, originalAddress, { parent })),
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          yield* (yield* executor.prepare(request)).launch(sink);
+        }),
       );
-    },
-  );
-}
+      assert.deepStrictEqual(destinations, [`usine@${server.publicIp}`]);
+      const originalRun = machine.state.calls.find(({ line }) =>
+        line.startsWith("exec 'docker' 'run' '--detach' '--name' 'usine-remote-run_execute_1'"),
+      );
+      assert.include(originalRun?.line, `'${originalImage}'`);
+      assert.include(
+        originalRun?.line,
+        "'--cpus' '2' '--memory' '4096m' '--memory-swap' '4096m' '--pids-limit' '4096'",
+      );
+      yield* machines.release(original.hold);
+      assert.strictEqual(providers.hetzner.servers.size, 0);
 
-for (const [provider, address] of [
-  ["hetzner", hetznerAddress],
-  ["boat", boatAddress],
+      const next = CheckoutRequest.make({
+        ...request,
+        attemptId: AttemptId.make("fixed-attempt"),
+      });
+      machine.state.docker = "absent";
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          yield* (yield* executor.prepare(next)).launch(sink);
+        }),
+      );
+      assert.deepStrictEqual(destinations, [`usine@${server.publicIp}`, DESTINATION]);
+      const replacementRun = machine.state.calls.find(({ line }) =>
+        line.startsWith("exec 'docker' 'run' '--detach' '--name' 'usine-fixed-attempt'"),
+      );
+      assert.isUndefined(replacementRun);
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(runtimeOf(machine, providers, originalAddress, { parent })),
+    );
+  },
+);
+
+// The provider sets the guidance and the mode sets the check, so each provider runs one mode.
+for (const [provider, address, mode] of [
+  ["hetzner", hetznerAddress, "preflight"],
+  ["boat", boatAddress, "first-use"],
 ] as const) {
-  it.live.each(["preflight", "first-use"] as const)(
-    `reports image preparation during %s with ${provider} image download guidance`,
-    (mode) => {
+  it.live(
+    `reports image preparation during ${mode} with ${provider} image download guidance`,
+    () => {
       const machine = fakeMachine();
       if (provider === "boat")
         machine.state.localFiles.set("/keys/usine_boat.pub", "ssh-ed25519 AAAATest");

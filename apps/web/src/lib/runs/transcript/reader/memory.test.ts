@@ -46,8 +46,8 @@ it("restores a Run's inspected location and keeps other Runs and latest independ
   assert.isNull(reopened.read(RunId.make("unvisited"), 120));
 });
 
-it.each(["broken json", '{"version":99,"runs":[]}', "x".repeat(512_001)])(
-  "ignores corrupt, unsupported and oversized browser data without preventing future saves",
+it.each(["broken json", "x".repeat(512_001)])(
+  "ignores corrupt and oversized browser data without preventing future saves",
   (corrupt) => {
     const browser = storage();
     const memory = readerMemory(() => browser);

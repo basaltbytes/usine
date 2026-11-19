@@ -105,7 +105,7 @@ interface FakeSshState {
   /** Whether the VM's Claude Code reports a subscription login. */
   claudeLoggedIn: boolean;
   /** The remote operation that hangs until its SSH client is killed. */
-  hangPreparation: "none" | "preflight" | "clone" | "fetch" | "attach" | "promotion" | "checkout";
+  hangPreparation: "none" | "clone" | "checkout";
   parked: boolean;
   failAttach: boolean;
   failStop: boolean;
@@ -113,9 +113,9 @@ interface FakeSshState {
   /** Whether the Attempt's worktree was removed from the VM outside the executor. */
   worktreeGone: boolean;
   /** The worktree state that salvage finds after an unsuccessful Attempt. */
-  salvage: "clean" | "dirty" | "push-fails" | "inspect-fails" | "add-fails" | "commit-fails";
+  salvage: "clean" | "dirty" | "push-fails" | "commit-fails";
   salvageCommitted: boolean;
-  resumeFailure?: "lookup" | "fetch" | "decode";
+  resumeFailure?: "lookup";
   /** GitHub's `--slurp` pages for the conversation comments of Item 42. */
   issueComments: string;
   /** Called each time `gh` lists Item 42's conversation comments, before it responds. */
@@ -197,11 +197,7 @@ export const fakeSsh = (sweepMode: SweepMode = "valid") => {
         return oneShotHandle("", 255, "lost reply after attachment");
       if (line.startsWith("exec 'mv' ")) state.cacheExists = true;
       if (
-        (state.hangPreparation === "preflight" && line.startsWith("exec 'claude'")) ||
         (state.hangPreparation === "clone" && line.includes("'clone'")) ||
-        (state.hangPreparation === "fetch" && line.includes("'fetch'")) ||
-        (state.hangPreparation === "attach" && command.args.includes("attach")) ||
-        (state.hangPreparation === "promotion" && line.startsWith("exec 'mv' ")) ||
         (state.hangPreparation === "checkout" && line.includes("'worktree' 'add'"))
       ) {
         state.parked = true;
@@ -281,14 +277,10 @@ export const fakeSsh = (sweepMode: SweepMode = "valid") => {
         if (line.includes("'rev-parse'")) {
           return oneShotHandle(`${state.salvageCommitted ? SALVAGE_COMMIT : COMMIT}\n`, 0);
         }
-        if (line.includes("'status'")) {
-          if (state.salvage === "inspect-fails") return oneShotHandle("", 128, "inspection failed");
+        if (line.includes("'status'"))
           return oneShotHandle(state.salvage === "clean" ? "" : " M src/index.ts\n", 0);
-        }
         if (line.includes("'diff' '--cached'"))
           return oneShotHandle(state.salvage === "clean" ? "" : "src/index.ts\0", 0);
-        if (line.includes("'add'") && state.salvage === "add-fails")
-          return oneShotHandle("", 128, "index.lock exists");
         if (line.includes("'commit'")) {
           if (state.salvage === "commit-fails") return oneShotHandle("", 128, "commit failed");
           state.salvageCommitted = true;
@@ -303,15 +295,10 @@ export const fakeSsh = (sweepMode: SweepMode = "valid") => {
         if (state.resumeFailure === "lookup") return oneShotHandle("", 128, "HTTP 503");
         return oneShotHandle(`${COMMIT}\trefs/heads/usine/salvage/r/1\n`, 0);
       }
-      if (line.includes("'fetch'") && line.includes("refs/heads/usine/salvage/")) {
-        if (state.resumeFailure === "fetch") return oneShotHandle("", 128, "HTTP 503");
+      if (line.includes("'fetch'") && line.includes("refs/heads/usine/salvage/"))
         state.salvageCommitted = true;
-      }
-      if (line.includes("'git' '--git-dir'") && line.includes("'rev-parse'")) {
-        if (state.resumeFailure === "decode" && state.salvageCommitted)
-          return oneShotHandle("invalid\n", 0);
+      if (line.includes("'git' '--git-dir'") && line.includes("'rev-parse'"))
         return oneShotHandle(`${COMMIT}\n`, 0);
-      }
       return oneShotHandle("{}\n", 0);
     }),
   );
