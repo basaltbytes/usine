@@ -48,7 +48,7 @@ import { LoopControl } from "../loop-control/loop-control.ts";
 import { CycleBudgets } from "../cycle-budget/cycle-budget.ts";
 import { BoardMoves } from "../board-moves/board-moves.ts";
 import { AttemptAdmission } from "./admission.ts";
-import { type CapacityWait, ProviderCapacity } from "./capacity.ts";
+import { type CapacityWait, ProviderCapacity } from "./capacity/capacity.ts";
 import { RunDriver } from "./run-driver.ts";
 import { UnconfirmedStop, UnconfirmedStops } from "./unconfirmed-stops.ts";
 
@@ -115,7 +115,9 @@ const makeRunEngine = Effect.gen(function* () {
       return;
     }
     if (outcome === "Forced") {
-      yield* driver.retryNow(runId);
+      // A fiber that doesn't wait now takes the retry at its next claim; `launch` keeps it.
+      yield* capacity.force(runId);
+      yield* driver.launch(runId);
       return;
     }
     yield* Effect.logDebug("Retry changed nothing; the Run already waits for its next Attempt", {
@@ -362,7 +364,7 @@ export class RunEngine extends Context.Service<
     readonly cancelUpgrade: Effect.Effect<void>;
     /** The pending upgrade and the runs it defers in this process. */
     readonly upgradeDrain: Effect.Effect<Option.Option<UpgradeDrain>>;
-    /** The pools at capacity in this process and the Runs that wait for them. */
+    /** The capacity groups at capacity in this process and the Runs that wait for them. */
     readonly capacityWaits: Effect.Effect<ReadonlyArray<CapacityWait>>;
     /** Records the approval Event and its source, and opens the Run's approval gate. A repeated approval keeps the first source. */
     readonly approve: (
@@ -420,7 +422,7 @@ export class RunEngine extends Context.Service<
     /**
      * Requests another Attempt for a failed Run with its existing Event, applying the request's
      * task and Agent if set. A Run that waits after a capacity refusal starts its next Attempt
-     * now, which tests the provider's pool. The Attempt records the request as its start reason.
+     * now, which tests its capacity group. The Attempt records the request as its start reason.
      */
     readonly retry: (runId: RunId, request?: RetryRequest) => Effect.Effect<void, RunEngineError>;
     /**
@@ -543,4 +545,4 @@ export {
 } from "./error.ts";
 
 export { UpgradeDrain, UpgradeWait } from "./upgrade.ts";
-export { CapacityPool, CapacityWait } from "./capacity.ts";
+export { CapacityGroup, capacityGroupKey, CapacityWait } from "./capacity/capacity.ts";

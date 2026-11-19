@@ -3,14 +3,21 @@ import { Agent, AgentName } from "@usine/core/agent";
 import { BrainSpec, Harness, ModelId } from "@usine/core/agent/brain";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { ProviderCapacityFailure } from "@usine/core/attempt/failure";
-import { AgentSessionId, ChildSession, TextOutput } from "@usine/core/agent/session";
+import {
+  type AgentSessionEvent,
+  AgentSessionId,
+  ChildSession,
+  ParentSession,
+  ProviderAnswered,
+  TextOutput,
+} from "@usine/core/agent/session";
 import type { RunId } from "@usine/core/run";
 import { StepCompletion } from "@usine/core/step/result";
 import { WorkerName } from "@usine/core/worker";
 import { DateTime, Deferred, Duration, Effect, Layer, Option, Ref } from "effect";
 import { TestClock } from "effect/testing";
 import { RetryRequest, RunEngine, Submission } from "../src/engine/engine.ts";
-import { StepExecutor } from "../src/step-executor.ts";
+import { type StepExecution, StepExecutor } from "../src/step-executor.ts";
 import { engineLayer, stepResult, submission, testAgent, withInstance } from "./support.ts";
 
 const refusal =
@@ -31,19 +38,62 @@ interface Started {
   readonly at: number;
 }
 
+/** How the scripted provider runs an Attempt that it accepts. */
+interface Accepted {
+  /** Whether the Attempt's child reports the provider's `ProviderAnswered` first. */
+  readonly answers: boolean;
+  /** Accepted Attempts wait for these in turn; the last one holds every later Attempt. */
+  readonly holds: ReadonlyArray<Deferred.Deferred<void>>;
+}
+
+const immediately: Accepted = { answers: false, holds: [] };
+
+/** Returns an outbound transcript envelope of `event` from a session of `execution`'s Attempt. */
+const sessionEnvelope = (
+  execution: StepExecution,
+  sequence: number,
+  at: number,
+  event: (session: {
+    readonly parent: ParentSession;
+    readonly child: ChildSession;
+  }) => AgentSessionEvent,
+) => {
+  const { attempt } = execution;
+  const parent = ParentSession.make({
+    id: AgentSessionId.make(`${attempt.id}/parent`),
+    agent: attempt.agent,
+    brain: attempt.brain,
+  });
+  const child = ChildSession.make({
+    id: AgentSessionId.make(`${attempt.id}/child`),
+    parentId: parent.id,
+    agent: attempt.agent,
+    brain: attempt.brain,
+  });
+  return AttemptChannel.OutboundEnvelope.make({
+    version: AttemptChannel.PROTOCOL_VERSION,
+    attemptId: attempt.id,
+    sequence: AttemptChannel.Sequence.make(sequence),
+    sentAt: DateTime.makeUnsafe(at),
+    payload: AttemptChannel.SessionEvent.make({ event: event({ parent, child }) }),
+  });
+};
+
 /**
  * A provider that refuses Claude requests until `limitEndsAt`, in milliseconds since the epoch of
- * the test clock, without a reset time unless `resetsAt` is set. Codex requests always succeed.
- * With `hold`, an accepted Attempt reports its child's first answer, then runs until `hold`.
+ * the test clock, without a reset time unless `resetsAt` is set. Codex requests always succeed. A
+ * refused Attempt first reports Claude Code's synthetic usage-limit answer from its child and a
+ * parent model answer, neither of which is the provider of the child accepting a request.
  */
 const scriptedProvider = (
   limitEndsAt: number,
+  accepted: Accepted = immediately,
   resetsAt: Option.Option<number> = Option.none(),
-  hold: Option.Option<Deferred.Deferred<void>> = Option.none(),
 ) =>
   Effect.gen(function* () {
     const starts = yield* Ref.make<ReadonlyArray<Started>>([]);
     const leased = yield* Ref.make(0);
+    const acceptedCount = yield* Ref.make(0);
     const local = WorkerName.make("local");
     const executor = Layer.succeed(StepExecutor)({
       workers: Effect.succeed([local]),
@@ -68,39 +118,63 @@ const scriptedProvider = (
           const at = yield* Effect.clockWith((clock) => clock.currentTimeMillis);
           const { harness } = execution.attempt.brain;
           yield* Ref.update(starts, (seen) => [...seen, { runId: execution.run.id, harness, at }]);
-          if (harness === "claude" && at < limitEndsAt)
+          if (harness === "claude" && at < limitEndsAt) {
+            yield* io.append(
+              "outbound",
+              sessionEnvelope(execution, 1, at, ({ parent }) =>
+                ProviderAnswered.make({ session: parent }),
+              ),
+            );
+            yield* io.append(
+              "outbound",
+              sessionEnvelope(execution, 2, at, ({ child }) =>
+                TextOutput.make({
+                  session: child,
+                  text: "You've hit your limit · resets 5am (UTC)",
+                }),
+              ),
+            );
             return yield* ProviderCapacityFailure.make({
               message: refusal,
               resetsAt: Option.map(resetsAt, (millis) => DateTime.makeUnsafe(millis)),
             });
-          if (Option.isSome(hold)) {
-            const { attempt } = execution;
+          }
+          if (accepted.answers)
             yield* io.append(
               "outbound",
-              AttemptChannel.OutboundEnvelope.make({
-                version: AttemptChannel.PROTOCOL_VERSION,
-                attemptId: attempt.id,
-                sequence: AttemptChannel.Sequence.make(1),
-                sentAt: DateTime.makeUnsafe(at),
-                payload: AttemptChannel.SessionEvent.make({
-                  event: TextOutput.make({
-                    session: ChildSession.make({
-                      id: AgentSessionId.make(`${attempt.id}/child`),
-                      parentId: AgentSessionId.make(`${attempt.id}/parent`),
-                      agent: attempt.agent,
-                      brain: attempt.brain,
-                    }),
-                    text: "Reading the issue",
-                  }),
-                }),
-              }),
+              sessionEnvelope(execution, 1, at, ({ child }) =>
+                ProviderAnswered.make({ session: child }),
+              ),
             );
-            yield* Deferred.await(hold.value);
-          }
+          const index = yield* Ref.getAndUpdate(acceptedCount, (count) => count + 1);
+          const hold = accepted.holds[Math.min(index, accepted.holds.length - 1)];
+          if (hold !== undefined) yield* Deferred.await(hold);
           return StepCompletion.fromResult(stepResult("done"));
         }),
     });
     return { starts, leased, executor };
+  });
+
+/** Returns the Runs of `runIds` whose latest Attempt is still open. */
+const openRuns = (engine: RunEngine["Service"], runIds: ReadonlyArray<RunId>) =>
+  Effect.forEach(runIds, (runId) => engine.inspect(runId)).pipe(
+    Effect.map((snapshots) =>
+      snapshots.flatMap(({ run, attempts }) => {
+        const last = attempts.at(-1);
+        return last !== undefined && Option.isNone(last.outcome) ? [run.id] : [];
+      }),
+    ),
+  );
+
+/** Yields until `count` Runs of `runIds` have an open Attempt, and returns them. */
+const awaitOpen = (engine: RunEngine["Service"], runIds: ReadonlyArray<RunId>, count: number) =>
+  Effect.gen(function* () {
+    for (let tries = 0; tries < 500; tries += 1) {
+      const open = yield* openRuns(engine, runIds);
+      if (open.length >= count) return open;
+      yield* Effect.yieldNow;
+    }
+    return yield* openRuns(engine, runIds);
   });
 
 /** Lets the Run fibers run until each Run satisfies `done`. */
@@ -135,28 +209,39 @@ const claimed = (engine: RunEngine["Service"], next: Submission) =>
 
 describe("provider capacity without a reset time", () => {
   it.effect(
-    "keeps the Runs through a two-hour limit and tests the pool once per backoff step",
+    "keeps the Runs through a two-hour limit and tests the group once per backoff step",
     () =>
       withInstance((directory) =>
         Effect.gen(function* () {
           const provider = yield* scriptedProvider(minutes(120));
           yield* Effect.gen(function* () {
             const engine = yield* RunEngine;
-            const claude = yield* Effect.forEach([1, 2, 3], (number) =>
+            const first = yield* Effect.forEach([1, 2, 3], (number) =>
               claimed(engine, submission({ number, item: `item-${number}` })),
             );
+            yield* settle(engine, first);
+            const initial = (yield* Ref.get(provider.starts)).filter(
+              ({ harness }) => harness === "claude",
+            );
+            assert.isAtMost(initial.length, 3);
+
+            // While Claude refuses, a Codex Run on the same Worker runs, and a new Claude Run
+            // waits without an Attempt.
             const codex = yield* claimed(
               engine,
               Submission.make({ ...submission({ number: 4, item: "item-4" }), agent: codexAgent }),
             );
             const [other] = yield* settle(engine, [codex], (state) => state === "Succeeded");
             assert.strictEqual(other?.run.state._tag, "Succeeded");
+            const late = yield* claimed(engine, submission({ number: 5, item: "item-5" }));
+            const claude = [...first, late];
             yield* settle(engine, claude);
-            const initial = (yield* Ref.get(provider.starts)).filter(
+            const beforeLate = (yield* Ref.get(provider.starts)).filter(
               ({ harness }) => harness === "claude",
             );
-            assert.isAtMost(initial.length, 3);
+            assert.strictEqual(beforeLate.length, initial.length);
             const waits = yield* engine.capacityWaits;
+            assert.include(waits[0]?.runIds ?? [], late);
             assert.strictEqual(waits.length, 1);
             assert.strictEqual(waits[0]?.message, refusal);
             assert.strictEqual(
@@ -166,7 +251,7 @@ describe("provider capacity without a reset time", () => {
             const waitingLeases = yield* Ref.get(provider.leased);
             assert.strictEqual(waitingLeases, 0);
 
-            // Stops a minute before and at each expected test of the pool, then past the limit.
+            // Stops a minute before and at each expected test of the group, then past the limit.
             let elapsed = 0;
             for (const checkpoint of [4, 5, 19, 20, 49, 50, 109, 110, 169, 170, 240]) {
               yield* TestClock.adjust(Duration.minutes(checkpoint - elapsed));
@@ -189,13 +274,14 @@ describe("provider capacity without a reset time", () => {
             const later = (yield* Ref.get(provider.starts))
               .filter(({ harness, at }) => harness === "claude" && at > 0)
               .map(({ at }) => at);
-            // One Attempt tests the pool at 5, 20, 50, and 110 minutes; the one at 170 minutes,
+            // One Attempt tests the group at 5, 20, 50, and 110 minutes; the one at 170 minutes,
             // within one 60-minute step of the limit's end, succeeds and releases the others.
             assert.deepStrictEqual(later, [
               minutes(5),
               minutes(20),
               minutes(50),
               minutes(110),
+              minutes(170),
               minutes(170),
               minutes(170),
               minutes(170),
@@ -211,12 +297,12 @@ describe("provider capacity without a reset time", () => {
   );
 
   it.effect(
-    "releases the waiting Runs at the first answer of the Attempt that tests the pool",
+    "releases the waiting Runs at the first answer of the Attempt that tests the group",
     () =>
       withInstance((directory) =>
         Effect.gen(function* () {
           const hold = yield* Deferred.make<void>();
-          const provider = yield* scriptedProvider(minutes(10), Option.none(), Option.some(hold));
+          const provider = yield* scriptedProvider(minutes(10), { answers: true, holds: [hold] });
           yield* Effect.gen(function* () {
             const engine = yield* RunEngine;
             const runs = yield* Effect.forEach([1, 2], (number) =>
@@ -226,13 +312,7 @@ describe("provider capacity without a reset time", () => {
             yield* TestClock.adjust(Duration.minutes(5));
             yield* settle(engine, runs);
             yield* TestClock.adjust(Duration.minutes(15));
-            for (let count = 0; count < 500; count += 1) {
-              const open = (yield* Effect.forEach(runs, (runId) => engine.inspect(runId))).filter(
-                (snapshot) => Option.isNone(snapshot.attempts.at(-1)?.outcome ?? Option.none()),
-              );
-              if (open.length === runs.length) break;
-              yield* Effect.yieldNow;
-            }
+            yield* awaitOpen(engine, runs, runs.length);
             const accepted = (yield* Ref.get(provider.starts))
               .filter(({ at }) => at === minutes(20))
               .map(({ runId }) => runId)
@@ -248,10 +328,52 @@ describe("provider capacity without a reset time", () => {
       ),
   );
 
+  it.effect(
+    "releases the waiting Runs when the Attempt that tests the group succeeds without an answer",
+    () =>
+      withInstance((directory) =>
+        Effect.gen(function* () {
+          const probe = yield* Deferred.make<void>();
+          const rest = yield* Deferred.make<void>();
+          // A worker image that predates `ProviderAnswered` reports no answer.
+          const provider = yield* scriptedProvider(minutes(10), {
+            answers: false,
+            holds: [probe, rest],
+          });
+          yield* Effect.gen(function* () {
+            const engine = yield* RunEngine;
+            const runs = yield* Effect.forEach([1, 2, 3], (number) =>
+              claimed(engine, submission({ number, item: `item-${number}` })),
+            );
+            yield* settle(engine, runs);
+            yield* TestClock.adjust(Duration.minutes(5));
+            yield* settle(engine, runs);
+            yield* TestClock.adjust(Duration.minutes(15));
+            const testing = yield* awaitOpen(engine, runs, 1);
+            const waiting = runs.filter((runId) => !testing.includes(runId));
+            yield* settle(engine, waiting);
+            const alone = yield* openRuns(engine, runs);
+            assert.deepStrictEqual(alone, testing);
+            yield* Deferred.succeed(probe, undefined);
+            // Both other Runs start together; one at a time would mean each tests the group.
+            const others = yield* awaitOpen(engine, waiting, 2);
+            assert.sameMembers([...others], waiting);
+            yield* Deferred.succeed(rest, undefined);
+            const done = yield* settle(engine, runs, (state) => state === "Succeeded");
+            assert.lengthOf(done, 3);
+          }).pipe(Effect.provide(engineLayer(directory, provider.executor)));
+        }),
+      ),
+  );
+
   it.effect("waits until a reported reset time", () =>
     withInstance((directory) =>
       Effect.gen(function* () {
-        const provider = yield* scriptedProvider(minutes(180), Option.some(minutes(180)));
+        const provider = yield* scriptedProvider(
+          minutes(180),
+          immediately,
+          Option.some(minutes(180)),
+        );
         yield* Effect.gen(function* () {
           const engine = yield* RunEngine;
           const runId = yield* claimed(engine, submission({ number: 1 }));
