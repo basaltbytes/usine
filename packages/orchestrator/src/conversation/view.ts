@@ -27,6 +27,7 @@ import {
   PermissionRequestId,
   RequestState,
   StandingGrantId,
+  WritePermission,
 } from "@usine/core/permission-request";
 import { ProjectId } from "@usine/core/project";
 import { Effect, Option, Schema } from "effect";
@@ -173,6 +174,8 @@ export const PermissionRequestView = Schema.Struct({
   target: CallTarget,
   /** The project of the target, or null for an operation outside a project. */
   project: Schema.NullOr(ProjectId),
+  /** The permission that answering needs on the call's scope. */
+  permission: WritePermission,
   /** Whether `always` is an answer: only a call in a project can have a standing grant. */
   grantable: Schema.Boolean,
   requestedAt: Schema.DateTimeUtc,
@@ -197,6 +200,7 @@ export const requestView = ({
   arguments: request.call.arguments,
   target: request.call.target,
   project: request.call.scope._tag === "Project" ? request.call.scope.project : null,
+  permission: request.call.permission,
   grantable: isGrantable(request.call),
   requestedAt: request.requestedAt,
   state: request.state,

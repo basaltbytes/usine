@@ -42006,6 +42006,14 @@
                               }
                             ]
                           },
+                          "permission": {
+                            "type": "string",
+                            "enum": [
+                              "operate",
+                              "maintain",
+                              "admin"
+                            ]
+                          },
                           "grantable": {
                             "type": "boolean"
                           },
@@ -42059,6 +42067,7 @@
                           "arguments",
                           "target",
                           "project",
+                          "permission",
                           "grantable",
                           "requestedAt",
                           "state",
@@ -43018,6 +43027,14 @@
                               }
                             ]
                           },
+                          "permission": {
+                            "type": "string",
+                            "enum": [
+                              "operate",
+                              "maintain",
+                              "admin"
+                            ]
+                          },
                           "grantable": {
                             "type": "boolean"
                           },
@@ -43071,6 +43088,7 @@
                           "arguments",
                           "target",
                           "project",
+                          "permission",
                           "grantable",
                           "requestedAt",
                           "state",
@@ -46980,6 +46998,14 @@
                         }
                       ]
                     },
+                    "permission": {
+                      "type": "string",
+                      "enum": [
+                        "operate",
+                        "maintain",
+                        "admin"
+                      ]
+                    },
                     "grantable": {
                       "type": "boolean"
                     },
@@ -47033,6 +47059,7 @@
                     "arguments",
                     "target",
                     "project",
+                    "permission",
                     "grantable",
                     "requestedAt",
                     "state",
@@ -49392,6 +49419,14 @@
                               }
                             ]
                           },
+                          "permission": {
+                            "type": "string",
+                            "enum": [
+                              "operate",
+                              "maintain",
+                              "admin"
+                            ]
+                          },
                           "grantable": {
                             "type": "boolean"
                           },
@@ -49445,6 +49480,7 @@
                           "arguments",
                           "target",
                           "project",
+                          "permission",
                           "grantable",
                           "requestedAt",
                           "state",
