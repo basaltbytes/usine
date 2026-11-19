@@ -9,7 +9,9 @@ import { signInResponses } from "./src/features/sign-in/browser-fixture.ts";
 import { loopEditorResponses } from "./src/features/configuration/components/forms/loop/browser-fixture.ts";
 import {
   delayConfigurationLookup,
+  delayConfigurationSave,
   releaseConfigurationLookup,
+  releaseConfigurationSave,
   configurationEditorResponses,
   configurationEditorScreenshot,
   configurationEditorRequests,
@@ -134,6 +136,8 @@ export default mergeConfig(
                 loopEditorResponses,
                 delayConfigurationLookup,
                 releaseConfigurationLookup,
+                delayConfigurationSave,
+                releaseConfigurationSave,
                 configurationEditorResponses,
                 configurationHistoryResponses,
                 configurationEditorRequests,

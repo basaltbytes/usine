@@ -23,6 +23,7 @@ import { useConfigurationWrite } from "~/features/configuration/queries";
 import { editorCopy, formCopy } from "~/features/configuration/strings";
 import { Conflict } from "./conflict";
 import { WriteFailure } from "./failure";
+import { SaveProgress } from "./save-progress";
 import { SourceEditor } from "./source";
 
 type Draft =
@@ -195,6 +196,7 @@ export const ConfigurationEditorForm = ({
           {editorCopy.cancel}
         </CommandButton>
       </div>
+      {write.isPending && <SaveProgress expected={base.number} />}
       {draft !== null && <SourceEditor label={editorCopy.draft} value={draft} />}
     </form>
   );

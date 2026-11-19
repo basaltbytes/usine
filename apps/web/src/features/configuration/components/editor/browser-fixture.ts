@@ -41,6 +41,37 @@ export const releaseConfigurationLookup = async (
   lookups.get(page)?.delete(identifier);
 };
 
+const saves = new WeakMap<Page, Promise<Route>>();
+
+/**
+ * Holds the next save of worker `local` until `releaseConfigurationSave`, and lists it as a
+ * running save at `step`.
+ */
+export const delayConfigurationSave = async ({ page }: { readonly page: Page }, step: string) => {
+  let receive: (route: Route) => void;
+  saves.set(
+    page,
+    new Promise<Route>((resolve) => {
+      receive = resolve;
+    }),
+  );
+  await page.route("**/api/configuration/writes", (route) =>
+    route.fulfill({ json: [{ expected: 2, step }] }),
+  );
+  await page.route("**/api/configuration/entities/worker/local", (route) =>
+    route.request().method() === "PUT" ? receive(route) : route.fallback(),
+  );
+};
+
+export const releaseConfigurationSave = async ({ page }: { readonly page: Page }) => {
+  const save = saves.get(page);
+  if (save === undefined) throw new Error("No delayed save");
+  const route = await save;
+  await route.fallback();
+  await page.unroute("**/api/configuration/entities/worker/local");
+  saves.delete(page);
+};
+
 const requests = new WeakMap<Page, WriteRequest[]>();
 
 export const configurationEditorRequests = ({ page }: { readonly page: Page }) =>

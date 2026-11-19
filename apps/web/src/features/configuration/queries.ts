@@ -219,6 +219,16 @@ export const useWorkerPreflight = (worker: WorkerName) => {
   return { ...mutation, isPending: pending };
 };
 
+/** Polls the configuration saves that run now, for a save that takes a while. */
+export const configurationWritesQuery = () =>
+  queryOptions({
+    queryKey: [...configurationEditorKeys, "writes"],
+    queryFn: () => api((client) => client.configurationWrites({})),
+    refetchInterval: 1000,
+    staleTime: 0,
+    meta: { refreshLabel: "Configuration saves", changes: changes.kind("configuration") },
+  });
+
 export const configurationHeadQuery = () =>
   queryOptions({
     queryKey: [...configurationEditorKeys, "head"],

@@ -77,6 +77,7 @@ import {
 } from "effect/http-api";
 import { RestartBlock } from "../current-instance/changes.ts";
 import { ConfigurationWriteProgress, RevisionStep } from "../current-instance/steps.ts";
+export { ConfigurationWriteProgress, RevisionStep } from "../current-instance/steps.ts";
 import type { InstanceReloadError } from "../current-instance/current-instance.ts";
 import { BoardLaneId } from "./board.ts";
 import { CycleBudgetResetView } from "./need.ts";

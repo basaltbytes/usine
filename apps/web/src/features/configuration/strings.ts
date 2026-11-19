@@ -11,6 +11,7 @@ import type {
   WorkerConfigurationView,
 } from "@usine/orchestrator/operator";
 import type { ConfigurationEntityKind } from "@usine/config/configuration";
+import type { RevisionStep } from "@usine/orchestrator/operator/http";
 import { windowPhrase } from "~/lib/strings";
 
 export const plural = (count: number, noun: string): string =>
@@ -242,11 +243,25 @@ export const emptyListCopy = {
 export const noProjectForLoop = "Creating a loop requires a project.";
 export const openProjects = "Open Projects";
 
+/** What each step of a configuration save does, as a slow save shows it. */
+const saveSteps = {
+  wait: "waiting for another configuration change to finish",
+  read: "reading the stored configuration",
+  parse: "checking the configuration",
+  restart: "checking for changes that need a restart",
+  "coordinator-brains": "checking the coordinator brains",
+  "worker-preflight": "checking the workers",
+  store: "storing the revision",
+  apply: "applying the revision",
+} as const satisfies Record<RevisionStep, string>;
+
 export const editorCopy = {
   localOperator: "Local operator",
   edit: "Edit",
   save: "Save",
   saving: "Saving…",
+  savingSlowly: "Still saving…",
+  saveStep: (step: RevisionStep) => `Still saving: ${saveSteps[step]} (${step}).`,
   cancel: "Cancel",
   delete: "Delete",
   confirmDelete: "Confirm delete",
