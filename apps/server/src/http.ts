@@ -596,6 +596,7 @@ const handlers = HttpApiBuilder.group(
       .handle("configurationHead", () =>
         fromConfiguration((editor) => editor.head).pipe(Effect.map((number) => ({ number }))),
       )
+      .handle("configurationWrites", () => fromConfiguration((editor) => editor.writes))
       .handle("configurationCapabilities", () =>
         Effect.succeed({
           harnesses: catalog.ids,

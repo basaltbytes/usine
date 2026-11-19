@@ -59,6 +59,7 @@ const instances = Effect.gen(function* () {
     reload: unused(),
     commit: unused,
     registerParentAdmission: () => Effect.void,
+    writes: Effect.succeed([]),
     registerWorkers: () => Effect.void,
   });
 });

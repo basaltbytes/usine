@@ -1,4 +1,5 @@
-import { Clock, Effect, Exit, Schema, type Semaphore } from "effect";
+import { ConfigurationRevisionNumber } from "@usine/config/configuration";
+import { type Brand, Clock, Effect, Exit, Schema, type Semaphore } from "effect";
 
 /**
  * A step of a configuration save or reload: waiting for the running one, reading the store,
@@ -18,6 +19,17 @@ export const RevisionStep = Schema.Literals([
 ]);
 /** A step of a configuration save or reload. */
 export type RevisionStep = typeof RevisionStep.Type;
+
+/** A configuration save that runs now, and its step. */
+export class ConfigurationWriteProgress extends Schema.Class<
+  ConfigurationWriteProgress,
+  Brand.Brand<"@usine/orchestrator/current-instance/steps/ConfigurationWriteProgress">
+>("@usine/orchestrator/ConfigurationWriteProgress")({
+  /** The revision that the save expects to replace. */
+  expected: ConfigurationRevisionNumber,
+  /** The step that runs now: `wait` while another configuration change runs. */
+  step: RevisionStep,
+}) {}
 
 const outcome = (exit: Exit.Exit<unknown, unknown>) =>
   Exit.isSuccess(exit) ? "passed" : Exit.hasInterrupts(exit) ? "interrupted" : "failed";

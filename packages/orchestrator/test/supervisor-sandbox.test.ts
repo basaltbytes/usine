@@ -118,6 +118,7 @@ for (const settings of [
                 commit: () => Effect.die("no commit"),
                 registerWorkers: () => Effect.void,
                 registerParentAdmission: () => Effect.void,
+                writes: Effect.succeed([]),
               }),
             ),
           ),

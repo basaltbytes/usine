@@ -35,6 +35,7 @@ import {
   CurrentInstance,
   type InstanceReloadError,
 } from "../../current-instance/current-instance.ts";
+import type { ConfigurationWriteProgress } from "../../current-instance/steps.ts";
 import {
   ConfigurationEntityRequest,
   ConfigurationEntityView,
@@ -81,6 +82,8 @@ export class ConfigurationEditor extends Context.Service<
      * problems without writing.
      */
     readonly head: Effect.Effect<ConfigurationRevisionNumber, ConfigurationEditorError>;
+    /** Lists the configuration saves that run now, with the step that each runs. */
+    readonly writes: Effect.Effect<ReadonlyArray<ConfigurationWriteProgress>>;
     readonly checkLoop: (input: LoopDraft) => Effect.Effect<LoopCheck, ConfigurationEditorError>;
     /**
      * Evaluates `input` against stored items and optionally renders a prompt. It does not submit
@@ -218,6 +221,7 @@ export class ConfigurationEditor extends Context.Service<
 
       return ConfigurationEditor.of({
         head: Effect.map(store.read, ({ number }) => number),
+        writes: current.writes,
         checkLoop: (input) =>
           requirePermission("maintain", loopScope(input.name)).pipe(
             Effect.andThen(loops.checkLoop(input)),

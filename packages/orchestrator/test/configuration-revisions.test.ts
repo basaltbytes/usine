@@ -195,6 +195,14 @@ const stepLogger = (steps: Array<StepLog>, messages: Array<unknown> = []) =>
     steps.push(...Option.toArray(Schema.decodeUnknownOption(StepLog)(message[1])));
   });
 
+/** A logger that appends the message and fields of each line to `entries`. */
+const entryLogger = (entries: Array<readonly [unknown, unknown]>) =>
+  Logger.make<unknown, void>(({ message }) => {
+    if (Array.isArray(message)) entries.push([message[0], message[1]]);
+  });
+
+const nothingSaved = "Configuration save interrupted by the client; nothing was saved";
+
 /** Runs `effect` with a tracer that appends each span it starts to `spans`. */
 const recordingSpans =
   (spans: Array<Tracer.Span>) =>
@@ -409,6 +417,7 @@ it.effect("logs every step of a save that waits behind a running save", () => {
 
 it.effect("logs the wait of a save whose caller gives up and releases the queue", () => {
   const steps: Array<StepLog> = [];
+  const messages: Array<unknown> = [];
   const spans: Array<Tracer.Span> = [];
   return Effect.gen(function* () {
     const { store, revision, current, edit, save } = yield* revisionFixture;
@@ -433,6 +442,7 @@ it.effect("logs the wait of a save whose caller gives up and releases the queue"
       durationMillis: 30_000,
       outcome: "interrupted",
     });
+    expect(messages.filter((message) => message === nothingSaved)).toHaveLength(2);
     expect((yield* store.read).number).toBe(revision.number);
     stuck = false;
     yield* save(revision.number, edit("Third."));
@@ -440,11 +450,43 @@ it.effect("logs the wait of a save whose caller gives up and releases the queue"
     expect(unordered(stepSpans(spans))).toEqual(unordered(steps));
   }).pipe(
     Effect.scoped,
-    Effect.withLogger(stepLogger(steps)),
+    Effect.withLogger(stepLogger(steps, messages)),
     recordingSpans(spans),
     Effect.provide(NodeServices.layer),
   );
 });
+
+it.effect(
+  "logs that nothing was saved when the client interrupts a save during the worker preflight",
+  () => {
+    const entries: Array<readonly [unknown, unknown]> = [];
+    return Effect.gen(function* () {
+      const { store, revision, current, edit, save } = yield* revisionFixture;
+      const preflighting = yield* Deferred.make<void>();
+      yield* current.registerWorkers(() =>
+        Deferred.succeed(preflighting, undefined).pipe(Effect.andThen(Effect.never)),
+      );
+      const saving = yield* save(revision.number, edit("Interrupted.")).pipe(Effect.forkChild);
+      yield* Deferred.await(preflighting);
+      const running = yield* current.writes;
+      expect(running.map(({ expected, step }) => ({ expected, step }))).toEqual([
+        { expected: revision.number, step: "worker-preflight" },
+      ]);
+
+      yield* Fiber.interrupt(saving);
+
+      expect(entries.filter(([message]) => message === nothingSaved)).toEqual([
+        [nothingSaved, { step: "worker-preflight", expectedRevision: revision.number }],
+      ]);
+      expect((yield* store.read).number).toBe(revision.number);
+      expect(yield* current.writes).toEqual([]);
+    }).pipe(
+      Effect.scoped,
+      Effect.withLogger(entryLogger(entries)),
+      Effect.provide(NodeServices.layer),
+    );
+  },
+);
 
 it.effect("keeps following stored revisions after one times out its brain check", () => {
   const steps: Array<StepLog> = [];

@@ -210,6 +210,7 @@ describe("TriggerCondition", () => {
           changes: SubscriptionRef.changes(current),
           reload: Effect.die("the test swaps the instance itself"),
           registerParentAdmission: () => Effect.void,
+          writes: Effect.succeed([]),
           registerWorkers: () => Effect.void,
           commit: () => Effect.die("the test swaps the instance itself"),
         });

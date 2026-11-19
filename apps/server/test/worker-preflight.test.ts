@@ -151,6 +151,7 @@ it.live(
           reload: Effect.die("unused"),
           commit: () => Effect.die("unused"),
           registerParentAdmission: () => Effect.void,
+          writes: Effect.succeed([]),
           registerWorkers: () => Effect.void,
         });
         const app = Layer.mock(GitHubApp)({

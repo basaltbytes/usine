@@ -10,6 +10,7 @@ export const fixedInstance = (instance: LoadedInstance): CurrentInstance["Servic
   commit: () => Effect.die("this test never writes configuration"),
   reload: Effect.die("this test's instance is never reloaded"),
   registerParentAdmission: () => Effect.void,
+  writes: Effect.succeed([]),
   registerWorkers: () => Effect.void,
 });
 

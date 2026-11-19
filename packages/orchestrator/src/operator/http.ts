@@ -76,7 +76,7 @@ import {
   OpenApi,
 } from "effect/http-api";
 import { RestartBlock } from "../current-instance/changes.ts";
-import { RevisionStep } from "../current-instance/steps.ts";
+import { ConfigurationWriteProgress, RevisionStep } from "../current-instance/steps.ts";
 import type { InstanceReloadError } from "../current-instance/current-instance.ts";
 import { BoardLaneId } from "./board.ts";
 import { CycleBudgetResetView } from "./need.ts";
@@ -1107,6 +1107,15 @@ export const OperatorApi = operatorApi.add(
           OpenApi.Description,
           "Returns the revision number used to detect stale configuration writes.",
         ),
+      HttpApiEndpoint.get("configurationWrites", "/api/configuration/writes", {
+        success: Schema.Array(ConfigurationWriteProgress),
+        error: configurationWriteErrors,
+      })
+        .annotate(OpenApi.Summary, "List running configuration saves")
+        .annotate(
+          OpenApi.Description,
+          "Returns each configuration save that runs now, by the revision it expects, with the step it runs: `wait` while another configuration change runs, then `read`, `parse`, `restart`, `coordinator-brains`, `worker-preflight`, `store`, and `apply`.",
+        ),
       HttpApiEndpoint.get("configurationCapabilities", "/api/configuration/capabilities", {
         success: Schema.Struct({
           harnesses: Schema.Array(Harness),
@@ -1330,6 +1339,7 @@ export const operatorPermissions = {
   previewLoop: "read",
   configurationCapabilities: "read",
   configurationHead: "read",
+  configurationWrites: "read",
   configurationRepositories: "admin",
   configurationLabels: "read",
   configurationRevisions: "read",
