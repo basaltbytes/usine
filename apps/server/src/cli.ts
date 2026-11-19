@@ -1,7 +1,7 @@
 import { LoginProvider } from "@usine/gateway/credentials";
 import type { HttpServerError } from "effect/http";
 import { UiOrigin } from "@usine/config/factory";
-import { UpgradeChannel } from "@usine/core/upgrade";
+import { ReleaseVersion, UpgradeChannel } from "@usine/core/upgrade";
 import { ConfigCommand, parseConfigCommand } from "./configuration/command.ts";
 import { tmpdir } from "node:os";
 // volatileRoots and volatileRoot synchronously normalize paths for CLI validation.
@@ -615,10 +615,13 @@ export const volatileRoot = (
 };
 
 const PackageMetadataFromJson = Schema.fromJsonString(
-  Schema.Struct({ version: Schema.NonEmptyString }),
+  Schema.Struct({
+    version: Schema.NonEmptyString,
+    dependencies: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
+  }),
 );
 
-export const packageVersion = Effect.fn("Cli.packageVersion")(function* () {
+const packageMetadata = Effect.fn("Cli.packageMetadata")(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const packagePath = yield* path
@@ -627,10 +630,23 @@ export const packageVersion = Effect.fn("Cli.packageVersion")(function* () {
   const source = yield* fileSystem
     .readFileString(packagePath)
     .pipe(Effect.mapError((cause) => CliVersionError.make({ cause })));
-  const metadata = yield* Schema.decodeEffect(PackageMetadataFromJson)(source).pipe(
+  return yield* Schema.decodeEffect(PackageMetadataFromJson)(source).pipe(
     Effect.mapError((cause) => CliVersionError.make({ cause })),
   );
+});
+
+export const packageVersion = Effect.fn("Cli.packageVersion")(function* () {
+  const metadata = yield* packageMetadata();
   return metadata.version;
+});
+
+/**
+ * Returns the `@usine/gateway` release that this server was published with, which its gateways
+ * should run. Returns `None` for a workspace build, whose dependency isn't a release version.
+ */
+export const gatewayRelease = Effect.fn("Cli.gatewayRelease")(function* () {
+  const metadata = yield* packageMetadata();
+  return Schema.decodeUnknownOption(ReleaseVersion)(metadata.dependencies?.["@usine/gateway"]);
 });
 
 const AddressInUse = Schema.Struct({ code: Schema.Literal("EADDRINUSE") });

@@ -95,7 +95,7 @@ workers:
       destination: test-gateway
       admin_port: ${admin.port}
       admin_token_env: TEST_GATEWAY_ADMIN_TOKEN
-${["missing-token", "unreachable", "outdated"]
+${["missing-token", "unreachable", "outdated", "older-gateway"]
   .map(
     (destination) => `  - name: ${destination}
     kind: ssh
@@ -126,7 +126,7 @@ ${["missing-token", "unreachable", "outdated"]
         });
         yield* fs.writeFileString(
           `${directory}/ssh`,
-          '#!/bin/sh\nfor arg do\ncase "$arg" in\nunreachable) exit 255;;\noutdated) printf \'{}\'; exit 0;;\nesac\ndone\nfor last do :; done\nexec sh -c "$last"\n',
+          "#!/bin/sh\nfor arg do\ncase \"$arg\" in\nunreachable) exit 255;;\noutdated) printf '{}'; exit 0;;\nolder-gateway) cat >/dev/null; printf '\\n404'; exit 22;;\nesac\ndone\nfor last do :; done\nexec sh -c \"$last\"\n",
           { mode: 0o700 },
         );
         const native = yield* ChildProcessSpawner.ChildProcessSpawner;
@@ -182,18 +182,31 @@ ${["missing-token", "unreachable", "outdated"]
         const logins = Context.get(loginContext, ProviderLogins);
         yield* Effect.gen(function* () {
           const status = yield* logins.status;
-          assert.lengthOf(status.targets, 4);
+          assert.lengthOf(status.targets, 5);
           for (const destination of status.targets) {
             if (destination.target === "test-gateway") assert("providers" in destination);
             else assert("error" in destination);
           }
+          const older = status.targets.find(({ target }) => target === "older-gateway");
+          assert(older !== undefined && "error" in older);
+          assert.strictEqual(
+            older.error,
+            "Gateway older-gateway is older than this orchestrator: it has no provider-credentials admin API. Install the @usine/gateway release that matches this orchestrator on it.",
+          );
           const before = destinations.length;
           const login = yield* logins.begin("test-gateway", "chatgpt");
           yield* Effect.sleep("20 millis");
           assert.equal(starts, 1);
           assert.deepEqual(destinations.slice(before), ["test-gateway"]);
           yield* logins.cancel(login.id);
-          for (const target of ["missing-token", "unreachable", "outdated", "removed", "local"]) {
+          for (const target of [
+            "missing-token",
+            "unreachable",
+            "outdated",
+            "older-gateway",
+            "removed",
+            "local",
+          ]) {
             const failure = yield* logins.begin(target, "chatgpt").pipe(Effect.flip);
             assert.equal(failure._tag, "ProviderCredentialError");
           }
