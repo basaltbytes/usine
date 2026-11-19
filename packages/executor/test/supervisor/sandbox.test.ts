@@ -21,6 +21,7 @@ import {
   Option,
   Redacted,
   Result,
+  Schema,
   Scope,
 } from "effect";
 import { HttpServerRequest } from "effect/http";
@@ -658,8 +659,9 @@ describe("the supervisor's source", () => {
       yield* git(cache, "config", "fetch.unpackLimit", "1");
       yield* git(cache, "config", "maintenance.autoDetach", "true");
       const trace = `${root}/git.trace`;
+      const events = `${root}/git.events`;
       const traced = ChildProcessSpawner.make((command) =>
-        native.spawn(ChildProcess.setEnv(command, { GIT_TRACE: trace })),
+        native.spawn(ChildProcess.setEnv(command, { GIT_TRACE: trace, GIT_TRACE2_EVENT: events })),
       );
       const sources = yield* makeSupervisorSources(root, origin.origin).pipe(
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, traced),
@@ -669,8 +671,9 @@ describe("the supervisor's source", () => {
         yield* origin.commit(`round ${round}\n`);
         yield* sources.prepare([repository]).pipe(Effect.scoped);
         const packs = yield* fs.readDirectory(`${cache}/objects/pack`);
-        assert.lengthOf(
-          packs.filter((name) => name.endsWith(".pack")),
+        // The cache has no refs, so gc writes one cruft pack from Git 2.41 and loose objects before.
+        assert.isAtMost(
+          packs.filter((name) => name.endsWith(".pack")).length,
           1,
           "automatic maintenance consolidates the fetched packs before returning",
         );
@@ -679,6 +682,26 @@ describe("the supervisor's source", () => {
       assert.include(commands, "maintenance run --auto");
       assert.include(commands, "git repack", "automatic maintenance repacked the fetched objects");
       assert.notInclude(commands, "--detach", "maintenance stays inside the fetch process");
+      const TraceEvent = Schema.fromJsonString(
+        Schema.Struct({
+          sid: Schema.String,
+          event: Schema.String,
+          argv: Schema.optionalKey(Schema.Array(Schema.String)),
+        }),
+      );
+      const lines = (yield* fs.readFileString(events)).trim().split("\n");
+      const logged = yield* Effect.forEach(lines, (line) => Schema.decodeEffect(TraceEvent)(line));
+      const fetches = logged.filter(
+        (event) => event.event === "start" && event.argv?.includes("fetch") === true,
+      );
+      assert.lengthOf(fetches, 2);
+      for (const fetch of fetches) {
+        // Git gives each child process its parent's session id followed by `/`.
+        const tree = logged.filter(
+          (event) => event.sid === fetch.sid || event.sid.startsWith(`${fetch.sid}/`),
+        );
+        assert.strictEqual(tree.at(-1)?.sid, fetch.sid, "no process the fetch started outlives it");
+      }
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
