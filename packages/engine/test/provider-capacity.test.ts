@@ -61,6 +61,10 @@ interface Accepted {
 
 const immediately: Accepted = { answers: false, holds: [] };
 
+const gateway = GatewayCredentialHolder.make({ destination: SshDestination.make("usine@gateway") });
+/** Makes the Gateway the holder of every harness's credential on every Worker. */
+const behindGateway = Layer.succeed(CredentialHolders)({ current: Effect.succeed(() => gateway) });
+
 /** Returns an outbound transcript envelope of `event` from a session of `execution`'s Attempt. */
 const sessionEnvelope = (
   execution: StepExecution,
@@ -373,20 +377,15 @@ describe("provider capacity without a reset time", () => {
     () =>
       withInstance((directory) =>
         Effect.gen(function* () {
+          const hold = yield* Deferred.make<void>();
           // The Run of item-1 gets every slot on `local`, and the Run of item-2 on `remote`.
           const provider = yield* scriptedProvider(
             minutes(30),
-            immediately,
+            { answers: true, holds: [hold] },
             Option.none(),
             ["local", "remote"],
             (item) => (item === "item-1" ? "local" : "remote"),
           );
-          const gateway = GatewayCredentialHolder.make({
-            destination: SshDestination.make("usine@gateway"),
-          });
-          const holders = Layer.succeed(CredentialHolders)({
-            current: Effect.succeed(() => gateway),
-          });
           yield* Effect.gen(function* () {
             const engine = yield* RunEngine;
             const first = yield* claimed(engine, submission({ number: 1, item: "item-1" }));
@@ -403,13 +402,15 @@ describe("provider capacity without a reset time", () => {
             assert.sameMembers([...(wait?.runIds ?? [])], runs);
 
             let elapsed = 0;
-            for (const checkpoint of [4, 5, 19, 20, 49, 50]) {
+            for (const checkpoint of [4, 5, 19, 20, 49]) {
               yield* TestClock.adjust(Duration.minutes(checkpoint - elapsed));
               elapsed = checkpoint;
               yield* settle(engine, runs);
             }
-            // One Attempt tests the group at each step, on either Worker; the one at 50 minutes
-            // succeeds and releases the Run on the other Worker.
+            // One Attempt tests the group at each step, on either Worker. The provider answers
+            // the one at 50 minutes, which releases the Run on the other Worker while it runs.
+            yield* TestClock.adjust(Duration.minutes(1));
+            yield* awaitOpen(engine, runs, runs.length);
             const starts = yield* Ref.get(provider.starts);
             assert.deepStrictEqual(
               starts.map(({ at }) => at / minutes(1)),
@@ -419,12 +420,15 @@ describe("provider capacity without a reset time", () => {
               starts.filter(({ at }) => at === minutes(50)).map(({ worker }) => worker),
               ["local", "remote"],
             );
-            const done = yield* settle(engine, runs, (state) => state === "Succeeded");
-            assert.lengthOf(done, 2);
             const released = yield* engine.capacityWaits;
             assert.deepStrictEqual(released, []);
+            yield* Deferred.succeed(hold, undefined);
+            const done = yield* settle(engine, runs, (state) => state === "Succeeded");
+            assert.lengthOf(done, 2);
           }).pipe(
-            Effect.provide(engineLayer(directory, provider.executor).pipe(Layer.provide(holders))),
+            Effect.provide(
+              engineLayer(directory, provider.executor).pipe(Layer.provide(behindGateway)),
+            ),
           );
         }),
       ),
@@ -526,6 +530,58 @@ describe("provider capacity without a reset time", () => {
         }).pipe(Effect.provide(engineLayer(directory, provider.executor)));
       }),
     ),
+  );
+
+  it.effect(
+    "rebuilds a Gateway group's backoff from a waiting Run's refusals on every Worker behind it after a restart",
+    () =>
+      withInstance((directory) =>
+        Effect.gen(function* () {
+          // The Run's Attempts alternate between `local` and `remote`.
+          const provider = yield* scriptedProvider(minutes(600), immediately, Option.none(), [
+            "local",
+            "remote",
+          ]);
+          const engine = engineLayer(directory, provider.executor).pipe(
+            Layer.provide(behindGateway),
+          );
+          const scope = yield* Scope.make();
+          const services = yield* Scope.provide(Layer.build(engine), scope);
+          const before = Context.get(services, RunEngine);
+          const runId = yield* claimed(before, submission({ number: 1 }));
+          yield* settle(before, [runId]);
+          let elapsed = 0;
+          for (const checkpoint of [5, 20, 50]) {
+            yield* TestClock.adjust(Duration.minutes(checkpoint - elapsed));
+            elapsed = checkpoint;
+            yield* settle(before, [runId]);
+          }
+          const refused = yield* Ref.get(provider.starts);
+          assert.deepStrictEqual(
+            refused.map(({ worker, at }) => [worker, at / minutes(1)]),
+            [
+              ["local", 0],
+              ["remote", 5],
+              ["local", 20],
+              ["remote", 50],
+            ],
+          );
+          yield* Scope.close(scope, Exit.void);
+
+          yield* Effect.gen(function* () {
+            const restarted = yield* RunEngine;
+            yield* settle(restarted, [runId]);
+            // The Gateway's group counts the refusals on both Workers, so it waits 60 minutes.
+            const [wait] = yield* restarted.capacityWaits;
+            assert.deepStrictEqual(wait?.group.holder, gateway);
+            assert.strictEqual(wait?.refusals, 4);
+            assert.strictEqual(
+              DateTime.toEpochMillis(wait?.nextTryAt ?? DateTime.makeUnsafe(0)),
+              minutes(110),
+            );
+          }).pipe(Effect.provide(engine));
+        }),
+      ),
   );
 
   it.effect(

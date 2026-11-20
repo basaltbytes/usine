@@ -3,7 +3,12 @@ import { Harness, ModelId } from "@usine/core/agent/brain";
 import { AttemptId } from "@usine/core/attempt";
 import { LoopName } from "@usine/core/loop";
 import { RunId } from "@usine/core/run";
-import { WorkerCredentialHolder, WorkerName } from "@usine/core/worker";
+import {
+  GatewayCredentialHolder,
+  SshDestination,
+  WorkerCredentialHolder,
+  WorkerName,
+} from "@usine/core/worker";
 import { DateTime, Duration, Option } from "effect";
 import {
   answered,
@@ -110,6 +115,20 @@ describe("capacity state", () => {
       (group, index) => claimAt(marked, run(`new-${index}`), 1, group)[0].claim,
     );
     assert.deepStrictEqual(claims, ["Free", "Free", "Wait"]);
+  });
+
+  it("keeps a Worker and a Gateway with the same name in separate groups", () => {
+    const worker = CapacityGroup.make({
+      ...claude,
+      holder: WorkerCredentialHolder.make({ worker: WorkerName.make("usine-gateway") }),
+    });
+    const gateway = CapacityGroup.make({
+      ...claude,
+      holder: GatewayCredentialHolder.make({ destination: SshDestination.make("usine-gateway") }),
+    });
+    const marked = refusedAll(refusal(run("a"), 0, 0, worker));
+    assert.strictEqual(claimAt(marked, run("b"), 1, gateway)[0].claim, "Free");
+    assert.strictEqual(claimAt(marked, run("c"), 1, worker)[0].claim, "Wait");
   });
 
   it("elects one waiting Run to test the group at its next try", () => {
