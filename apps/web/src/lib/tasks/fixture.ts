@@ -318,8 +318,12 @@ const writable = (name: string, label: string, tasks: ReadonlyArray<TaskView>) =
     items: tasks.map(card),
   });
 
-/** Returns an overview whose Board has both Tasks, plus a Ready lane as a move target. */
-export const taskOverview = () =>
+/** Returns an overview whose Board has the Backlog, Ready, In review, and Done lanes. */
+const boardOverview = (
+  backlog: ReadonlyArray<TaskView>,
+  inReview: ReadonlyArray<TaskView>,
+  done: ReadonlyArray<TaskView>,
+) =>
   ReadyOverview.make({
     loops: [],
     needsYou: [],
@@ -341,18 +345,118 @@ export const taskOverview = () =>
         board: BoardView.make({
           failures: [],
           lanes: [
-            writable("Backlog", "backlog", [quietTask()]),
+            writable("Backlog", "backlog", backlog),
             writable("Ready", "ready-for-agent", []),
-            writable("In review", "ready-for-review", [fullTask()]),
+            writable("In review", "ready-for-review", inReview),
             ReadOnlyBoardLaneView.make({
               id: BoardLaneId.make("authored:Done"),
               name: LaneName.make("Done"),
               sources: [StateLaneSource.make({ state: "issue-closed" })],
               origin: "authored",
-              items: [],
+              items: done.map(card),
             }),
           ],
         }),
       }),
     ],
   });
+
+/** Returns an overview whose Board has both Tasks, plus a Ready lane as a move target. */
+export const taskOverview = () => boardOverview([quietTask()], [fullTask()], []);
+
+/** Returns a Task of `issue` and its pull request `pr`, the current item, with one Run of `loop`. */
+const pairedTask = (
+  issue: TaskItemView,
+  pr: TaskItemView,
+  loop: string,
+  state: "Succeeded" | "Running",
+  openedAt: string,
+) =>
+  TaskView.make({
+    ...quietTask(),
+    number: issue.number,
+    title: issue.title,
+    current: pr.itemKey,
+    items: [issue, pr],
+    runs: [
+      run(`run-${pr.number}`, pr.number, loop, state, openedAt, [
+        state === "Succeeded"
+          ? attempt(`run-${pr.number}`, 1, openedAt, SucceededAttemptView.make(), openedAt)
+          : attempt(`run-${pr.number}`, 1, openedAt, null, null),
+      ]),
+    ],
+  });
+
+const lint = item(
+  1338,
+  "issue",
+  "Lint: effect and memo disable comments pass without a reason",
+  "issue-open",
+);
+
+/**
+ * Returns `taskOverview` with the tasks of a day's summary: two merged pull requests with their
+ * closed issues, a running task with a long title, and an issue whose run failed.
+ */
+export const summaryOverview = () =>
+  boardOverview(
+    [
+      quietTask(),
+      TaskView.make({
+        ...quietTask(),
+        number: lint.number,
+        title: lint.title,
+        current: lint.itemKey,
+        items: [lint],
+        runs: [
+          run("run-1338", 1338, "start-dev", "Failed", "2026-10-06T05:00:00.000Z", [
+            attempt(
+              "run-1338",
+              1,
+              "2026-10-06T05:00:00.000Z",
+              FailedAttemptView.make({
+                failure: AgentFailureView.make({ message: "The lint check failed" }),
+              }),
+              "2026-10-06T05:20:00.000Z",
+            ),
+          ]),
+        ],
+      }),
+    ],
+    [
+      fullTask(),
+      pairedTask(
+        item(
+          1342,
+          "issue",
+          "Shutdown: an open change stream logs a member store error after the stores close",
+          "issue-open",
+        ),
+        item(1359, "pr", "End open change streams before the server's stores close", "pr-open"),
+        "finish-pr",
+        "Running",
+        "2026-10-06T08:30:00.000Z",
+      ),
+    ],
+    [
+      pairedTask(
+        item(
+          1321,
+          "issue",
+          "Web: enable React Compiler and remove manual memoization",
+          "issue-closed",
+        ),
+        item(1337, "pr", "Enable the React Compiler in the web app", "pr-merged"),
+        "review-pr",
+        "Succeeded",
+        "2026-10-06T07:00:00.000Z",
+      ),
+      pairedTask(
+        item(1327, "issue", "Statistics: count a task once across its runs", "issue-closed"),
+        item(1352, "pr", "Count a task once in the statistics", "pr-merged"),
+        "review-pr",
+        "Succeeded",
+        "2026-10-06T06:00:00.000Z",
+      ),
+    ],
+  );

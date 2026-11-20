@@ -77,13 +77,13 @@ const task = (number: number, from: RepositoryName | null = null): Reference => 
 
 const resolvedTask = (reference: Reference, input = data()) => {
   const resolution = resolveReference(reference, input);
-  return resolution._tag === "Task" ? resolution.task.number : resolution;
+  return resolution._tag === "Task" ? [resolution.task.number, resolution.item.number] : resolution;
 };
 
-it("resolves any item of a task on the board to that task", () => {
-  expect(resolvedTask(task(40))).toBe(42);
-  expect(resolvedTask(task(41))).toBe(42);
-  expect(resolvedTask(task(12, repository))).toBe(12);
+it("resolves any item of a task on the board to that task and the item it names", () => {
+  expect(resolvedTask(task(40))).toEqual([42, 40]);
+  expect(resolvedTask(task(41))).toEqual([42, 41]);
+  expect(resolvedTask(task(12, repository))).toEqual([12, 12]);
 });
 
 it("links a number that no card has to GitHub in the project's repository", () => {

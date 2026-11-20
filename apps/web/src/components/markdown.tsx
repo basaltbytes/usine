@@ -88,10 +88,20 @@ const MarkdownImage = ({ src, alt }: MarkdownImageProps) => {
   );
 };
 
+type MarkdownTableProps = ComponentProps<"table"> & { node?: unknown };
+
+// A table wraps its cells to fit the column; under 448px it keeps each cell on one line and scrolls.
+const MarkdownTable = ({ node: _node, className, ...props }: MarkdownTableProps) => (
+  <div className="@container overflow-x-auto">
+    <table {...props} className={cn("@max-md:w-max @max-md:max-w-none", className)} />
+  </div>
+);
+
 // Only `remarkReferences` makes reference elements, so they render only inside a reference scope.
 const COMPONENTS: Components = {
   a: MarkdownLink,
   img: MarkdownImage,
+  table: MarkdownTable,
   [REFERENCE_ELEMENT]: Reference,
 };
 

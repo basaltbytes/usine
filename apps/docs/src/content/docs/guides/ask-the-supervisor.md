@@ -24,7 +24,8 @@ To stop the running turn, select **Stop**, the square button that replaces the s
 
 The turn's texts, its answer, and the messages of the conversation link what they name:
 
-- A task on the project's board, written `#<number>` or `<owner>/<name>#<number>`, shows as a chip with the task's mark, number, title, and status, in the colors of the Tasks list. It opens the task page. The chip follows the board, so a task that closes or moves to another status shows its current state without a reload. A number that no card has opens the issue or pull request on GitHub.
+- A task on the project's board, written `#<number>` or `<owner>/<name>#<number>`, shows as a chip with the mark, number, and title of the issue or pull request that the text names, and the task's status, in the colors of the Tasks list. It opens the task page. In a sentence, the chip cuts a long title and shows it whole in a tooltip; the status is never cut. In a table cell, the chip shows the mark, the number, and the status mark, and its tooltip shows the title and status. The chip follows the board, so a task that closes or moves to another status shows its current state without a reload. A number that no card has opens the issue or pull request on GitHub.
+- A table that is wider than the conversation scrolls sideways.
 - A run on the board, written as its ID, shows its state mark and loop, and opens the run page. Another run ID, such as an older closed run's, is a link to its run page.
 - A source line, written `<owner>/<name>/<path>:<line>` in a code span, opens that line on GitHub at the commit that the turn read.
 - A loop, agent, or worker name in a code span opens its configuration page, and a label of the repository shows as its badge.
