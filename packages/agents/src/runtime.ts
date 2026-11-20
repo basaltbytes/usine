@@ -194,6 +194,11 @@ export class ChildRequest extends Schema.Class<
   maxBackgroundWaitMinutes: Schema.OptionFromOptionalKey(
     Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
   ).pipe(Schema.withConstructorDefault(Effect.succeed(Option.none<number>()))),
+  /**
+   * Whether the child may keep working after its provider reports a request on usage credits.
+   * Without it, the child ends with `AgentCapacityError` at the first such report.
+   */
+  allowUsageCredits: Schema.Boolean.pipe(Schema.withConstructorDefault(Effect.succeed(false))),
 }) {}
 
 /** The final message a parent or child session returns. */
