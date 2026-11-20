@@ -249,8 +249,12 @@ The billing source for an attempt's usage: API keys, the Claude plan, or the Cha
 _Avoid_: budget, account, quota
 
 **Capacity group**:
-The harness and model of an attempt's children on one worker, which a provider capacity refusal applies to. Runs that need a group at capacity wait without an attempt, and one attempt at a time tests it.
+The harness and model of an attempt's children and the credential holder of that harness, which a provider capacity refusal applies to. Runs that need a group at capacity wait without an attempt, and one attempt at a time tests it.
 _Avoid_: pool, billing pool, quota
+
+**Credential holder**:
+The gateway or worker that holds the credential a harness uses on a worker: the gateway when its `llm_providers` lists the harness's provider, and the worker otherwise.
+_Avoid_: credential owner, account
 
 **Runaway guard**:
 Optional per-attempt limits on wall-clock time and tokens, set in `usine.yaml`. Exceeding a limit fails the attempt without an automatic retry.
