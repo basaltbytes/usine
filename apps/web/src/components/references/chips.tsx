@@ -11,8 +11,7 @@ import { deskQuery } from "~/lib/desk/queries";
 import { taskNumber, taskRow } from "~/lib/tasks/model";
 import { statusLine } from "~/lib/tasks/status";
 
-// A chip is at most one line of the text around it tall, so a line with one keeps its height.
-const CHIP = "max-h-lh max-w-full align-text-bottom";
+const CHIP = "h-6 max-w-full align-text-bottom leading-6";
 // Text that wraps but shows one line: a narrow table column can cut it short with an ellipsis.
 const ONE_LINE = "min-w-0 line-clamp-1 whitespace-normal break-all";
 
