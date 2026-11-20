@@ -96,6 +96,18 @@ describe("harness catalog", () => {
       );
   });
 
+  it("gives a harness the Gateway's credential only when the Gateway lists the harness's protocol", () => {
+    const claude = Harness.make("claude");
+    const codexId = Harness.make("codex");
+    assert.isTrue(catalog.gatewayHolds(claude, ["anthropic-messages"]));
+    assert.isTrue(catalog.gatewayHolds(codexId, ["anthropic-messages", "openai-responses"]));
+    assert.isFalse(catalog.gatewayHolds(claude, ["openai-responses"]));
+    assert.isFalse(catalog.gatewayHolds(claude, []));
+    // Pi has no provider credential, and an unknown harness has no descriptor.
+    assert.isFalse(catalog.gatewayHolds(pi.id, ["anthropic-messages", "openai-responses"]));
+    assert.isFalse(catalog.gatewayHolds(Harness.make("unknown"), ["anthropic-messages"]));
+  });
+
   it("generates both Dockerfiles, cloud-init, and the published image tag from the descriptors", () => {
     const read = (path: string) =>
       readFileSync(new URL(`../../../${path}`, import.meta.url), "utf8");

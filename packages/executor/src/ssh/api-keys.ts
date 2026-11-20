@@ -15,14 +15,7 @@ export const gatewayHolds = (
   gateway: Option.Option<MachineGateway>,
   harness: Harness,
 ): boolean =>
-  Option.exists(gateway, ({ settings }) =>
-    Option.exists(
-      Option.flatMap(catalog.get(harness), (descriptor) =>
-        Option.map(descriptor.worker.credential, ({ protocol }) => protocol),
-      ),
-      (protocol) => settings.llmProviders.includes(protocol),
-    ),
-  );
+  Option.exists(gateway, ({ settings }) => catalog.gatewayHolds(harness, settings.llmProviders));
 
 /**
  * Returns the API key that each Attempt on a Worker's machine gets for `harness`, or `None` if

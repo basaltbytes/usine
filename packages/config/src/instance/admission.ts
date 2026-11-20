@@ -19,15 +19,11 @@ export const brainAdmissionProblems = (
   agents.flatMap((file) =>
     config.workers.flatMap((worker) => {
       const brain = file.agent.brain;
-      const provider = Option.flatMap(
-        catalog.get(brain.harness),
-        (descriptor) => descriptor.worker.credential,
-      );
       const gateway =
         worker.kind === "ssh" &&
-        Option.isSome(worker.gateway) &&
-        Option.isSome(provider) &&
-        worker.gateway.value.llmProviders.includes(provider.value.protocol);
+        Option.exists(worker.gateway, ({ llmProviders }) =>
+          catalog.gatewayHolds(brain.harness, llmProviders),
+        );
       const context = AdmissionContext.make({
         placement:
           worker.kind === "local"

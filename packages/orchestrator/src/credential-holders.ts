@@ -18,10 +18,7 @@ export const credentialHolderOf = (workers: ReadonlyArray<Worker>): CredentialHo
     const worker = declared.get(name);
     const gateway = worker?.kind === "ssh" ? worker.gateway : Option.none();
     const served = Option.filter(gateway, ({ llmProviders }) =>
-      Option.exists(
-        Option.flatMap(catalog.get(harness), (descriptor) => descriptor.worker.credential),
-        ({ protocol }) => llmProviders.includes(protocol),
-      ),
+      catalog.gatewayHolds(harness, llmProviders),
     );
     return Option.match(served, {
       onSome: ({ destination }) => GatewayCredentialHolder.make({ destination }),
