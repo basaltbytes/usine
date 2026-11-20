@@ -61,6 +61,16 @@ it("reads a code span as a task, a run, a source line, or a name", () => {
   );
 });
 
+it("reads a code span with a commit, a digest, an attempt ID, or uppercase hex as a name", () => {
+  for (const code of [
+    "0f3c9a1b2d4e5f60718293a4b5c6d7e8f9a0b1c2",
+    `sha256:${run}${run}`,
+    `${run}/review/1`,
+    run.toUpperCase(),
+  ])
+    expect(codeReference(code)).toEqual(Option.some({ _tag: "Name", name: code }));
+});
+
 it("leaves a code span that can't be a reference as code", () => {
   for (const code of ["", "const x = () => 1;", "x".repeat(101), "-flag", "a b`c"])
     expect(codeReference(code)).toEqual(Option.none());
