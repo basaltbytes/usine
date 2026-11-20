@@ -52,6 +52,8 @@ type ItemMarkProps = {
   readonly linked?: boolean;
   /** Whether to show `#number` after the icon; an icon alone still has `itemLabel` as its name. */
   readonly numbered?: boolean;
+  /** Whether `itemLabel` shows as a tooltip; pass `false` inside an element with its own tooltip. */
+  readonly tooltip?: boolean;
   readonly className?: string;
 };
 
@@ -65,6 +67,7 @@ export const ItemMark = ({
   size = "inline",
   linked = true,
   numbered = true,
+  tooltip = true,
   className,
 }: ItemMarkProps) => {
   const { icon: Glyph, tone } = lookOf(item);
@@ -86,7 +89,7 @@ export const ItemMark = ({
     </>
   );
   return (
-    <TextTooltip text={label} repeats>
+    <TextTooltip text={tooltip ? label : undefined} repeats>
       {linked ? (
         <a
           href={item.url}

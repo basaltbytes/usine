@@ -15,7 +15,11 @@ import {
   referenceProject,
   resolveReference,
 } from "~/lib/references/resolve";
-import { decodeReferenceMark, type Reference as WrittenReference } from "~/lib/references/syntax";
+import {
+  decodeReferenceMark,
+  type ReferencePlace,
+  type Reference as WrittenReference,
+} from "~/lib/references/syntax";
 import { projectTasksQuery } from "~/lib/tasks/queries";
 
 const configurationLink = (kind: ConfigurationKind, name: string) => {
@@ -31,16 +35,24 @@ const configurationLink = (kind: ConfigurationKind, name: string) => {
 
 type ResolvedProps = {
   readonly reference: WrittenReference;
+  readonly place: ReferencePlace;
   readonly data: ReferenceData;
   /** The reference as written: its text, or its code span. */
   readonly written: ReactNode;
 };
 
-const Resolved = ({ reference, data, written }: ResolvedProps) => {
+const Resolved = ({ reference, place, data, written }: ResolvedProps) => {
   const resolution = resolveReference(reference, data);
   switch (resolution._tag) {
     case "Task":
-      return <TaskChip project={resolution.project} task={resolution.task} />;
+      return (
+        <TaskChip
+          project={resolution.project}
+          task={resolution.task}
+          item={resolution.item}
+          place={place}
+        />
+      );
     case "Run":
       return <RunChip project={resolution.project} run={resolution.run} />;
     case "RunPage":
@@ -72,16 +84,17 @@ const Resolved = ({ reference, data, written }: ResolvedProps) => {
 type BoardReferenceProps = ResolvedProps & { readonly project: ProjectId };
 
 /** Resolves a reference with the full view of `project`, which the Tasks list reads too. */
-const BoardReference = ({ project, reference, data, written }: BoardReferenceProps) => {
+const BoardReference = ({ project, data, ...props }: BoardReferenceProps) => {
   const { data: view } = useQuery(projectTasksQuery(project));
   // The query keeps the previous project's view while another loads.
   const board = view !== undefined && projectId(view) === project ? view : undefined;
-  return <Resolved reference={reference} data={{ ...data, board }} written={written} />;
+  return <Resolved {...props} data={{ ...data, board }} />;
 };
 
 type ScopedReferenceProps = Omit<ResolvedProps, "data"> & { readonly scope: ReferenceScope };
 
-const ScopedReference = ({ scope, reference, written }: ScopedReferenceProps) => {
+const ScopedReference = ({ scope, ...props }: ScopedReferenceProps) => {
+  const { reference } = props;
   const { data: overview } = useQuery(overviewQuery());
   const { data: configuration } = useQuery({
     ...configurationQuery(),
@@ -90,9 +103,9 @@ const ScopedReference = ({ scope, reference, written }: ScopedReferenceProps) =>
   const project = referenceProject(reference, scope, overview?.projects ?? []);
   const data: ReferenceData = { scope, board: undefined, configuration };
   return project === undefined ? (
-    <Resolved reference={reference} data={data} written={written} />
+    <Resolved {...props} data={data} />
   ) : (
-    <BoardReference project={project} reference={reference} data={data} written={written} />
+    <BoardReference {...props} project={project} data={data} />
   );
 };
 
@@ -111,6 +124,11 @@ export const Reference = ({ value, children }: ReferenceProps) => {
   return scope === undefined || Option.isNone(mark) ? (
     written
   ) : (
-    <ScopedReference scope={scope} reference={mark.value.reference} written={written} />
+    <ScopedReference
+      scope={scope}
+      reference={mark.value.reference}
+      place={mark.value.place}
+      written={written}
+    />
   );
 };

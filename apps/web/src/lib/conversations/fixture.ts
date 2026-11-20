@@ -268,22 +268,28 @@ export const markdownAnswer = [
 ].join("\n");
 
 /**
- * An answer that names tasks, runs, a source line, configuration, and labels of `taskOverview`'s
- * project in a heading, a paragraph, a list, and a table.
+ * An answer that names tasks, runs, a source line, configuration, and labels of `summaryOverview`'s
+ * project in a heading, paragraphs, a list, and a table with a pull request and an issue column.
  */
 export const referenceAnswer = [
   "### Where #40 stands",
   "",
   "#40 waits on review: `run-again` is running, and `run-approve` waits for approval. Its pull request carries `ready-for-review`.",
   "",
+  "#1337 (React Compiler, issue #1321) passed its last two reviews and merged this morning.",
+  "",
   "- #12 waits in the backlog with no run.",
+  "- #1342 runs again after its first review asked for a test of the shutdown order.",
+  "- #1338 was already fixed in #1321, so the failed run can be closed.",
   "- The reader keeps its place in `basaltbytes/usine/apps/web/src/components/runs/transcript/reader-line.tsx:48`.",
   "- `review-pr` runs with the `developer` agent on `eu-1`.",
   "",
-  "| Task | Run | Label |",
-  "| --- | --- | --- |",
-  "| #40 | `run-again` | `ready-for-review` |",
-  "| #12 | None | `bug` |",
+  "| PR | Issue | Run | Label | Reviews | Result |",
+  "| --- | --- | --- | --- | --- | --- |",
+  "| #42 | #40 | `run-again` | `ready-for-review` | 1 | Waits on review |",
+  "| #1359 | #1342 | None | `bug` | 1 | Fixing the review |",
+  "| #1337 | #1321 | None | None | 2 | Merged |",
+  "| #1352 | #1327 | None | None | 2 | Merged |",
   "",
   "Open [the task list](/projects/basaltbytes-usine/tasks) for the rest.",
 ].join("\n");

@@ -3,6 +3,7 @@ import type { ProjectId } from "@usine/core/project";
 import { canonicalRepositoryName, type RepositoryName } from "@usine/core/repository";
 import type { RunId } from "@usine/core/run";
 import {
+  type BoardItemLink,
   boardTaskRuns,
   type BoardTaskView,
   type ConfigurationView,
@@ -28,7 +29,13 @@ export type ConfigurationKind = "loop" | "agent" | "worker";
 
 /** What a reference opens, or `Text` when usine knows nothing it names. */
 export type Resolution =
-  | { readonly _tag: "Task"; readonly project: ProjectId; readonly task: BoardTaskView }
+  /** A task on the board, and its item whose number the text wrote. */
+  | {
+      readonly _tag: "Task";
+      readonly project: ProjectId;
+      readonly task: BoardTaskView;
+      readonly item: BoardItemLink;
+    }
   | { readonly _tag: "Run"; readonly project: ProjectId; readonly run: RunSummaryView }
   /** A run ID that the board doesn't show, such as an older closed run, on its run page. */
   | { readonly _tag: "RunPage"; readonly project: ProjectId; readonly run: RunId }
@@ -83,15 +90,16 @@ const resolveTask = (
   board: ProjectView,
 ): Resolution => {
   const within = repository ?? scope.repository;
-  const tasks = boardTasks(board).filter(
-    (task) =>
-      (within === undefined || sameRepository(task.repository, within)) &&
-      task.items.some((item) => item.number === number),
-  );
-  const [task] = tasks;
-  if (task !== undefined)
-    return tasks.length === 1
-      ? { _tag: "Task", project: projectId(board), task }
+  const named = boardTasks(board).flatMap((task) => {
+    const item = task.items.find((member) => member.number === number);
+    return item !== undefined && (within === undefined || sameRepository(task.repository, within))
+      ? [{ task, item }]
+      : [];
+  });
+  const [found] = named;
+  if (found !== undefined)
+    return named.length === 1
+      ? { _tag: "Task", project: projectId(board), ...found }
       : { _tag: "Text" };
   const repositories = boardRepositories(board);
   const on =

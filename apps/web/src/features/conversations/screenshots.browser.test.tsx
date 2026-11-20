@@ -53,7 +53,7 @@ import {
 import { deskQuery } from "~/lib/desk/queries";
 import { overviewQuery, projectId } from "~/lib/overview";
 import { sessionQuery } from "~/lib/permissions";
-import { taskOverview, taskRepository } from "~/lib/tasks/fixture";
+import { summaryOverview, taskOverview, taskRepository } from "~/lib/tasks/fixture";
 import { projectTasksQuery } from "~/lib/tasks/queries";
 import { routeTree } from "~/route-tree.gen";
 import "~/index.css";
@@ -157,6 +157,8 @@ type Scene = {
   readonly permissions?: ReadonlyArray<PermissionGrant>;
   readonly arrange: (server: ConversationServer, supervisor: PermissionServer) => void;
   readonly ready: string;
+  /** The overview the scene shows; `taskOverview` by default. */
+  readonly overview?: () => FactoryOverview;
   /** Runs once the scene is ready, before the capture. */
   readonly act?: () => Promise<void>;
 };
@@ -340,7 +342,7 @@ const permissionScenes: ReadonlyArray<Scene> = [
   },
 ];
 
-/** An answer whose references resolve on `taskOverview`'s board, with the source the turn read. */
+/** An answer whose references resolve on `summaryOverview`'s board, with the source the turn read. */
 const referencing = () =>
   conversationOf(
     [
@@ -366,13 +368,26 @@ const referenceScenes: ReadonlyArray<Scene> = [
   {
     name: "answer-references",
     path: `/conversations?conversation=${conversationId}`,
+    overview: summaryOverview,
     arrange: (server) => server.conversations.set(conversationId, referencing()),
-    ready: "Document the cycle budget reset",
+    ready: "Count a task once in the statistics",
+    act: async () => {
+      const heading = page.getByRole("heading", { name: /stands$/u }).last();
+      heading.element().scrollIntoView({ block: "start" });
+      await expect.element(heading).toBeInViewport();
+    },
+  },
+  {
+    name: "answer-references-table",
+    path: `/conversations?conversation=${conversationId}`,
+    overview: summaryOverview,
+    arrange: (server) => server.conversations.set(conversationId, referencing()),
+    ready: "Count a task once in the statistics",
   },
 ];
 
-const board = () => {
-  const [project] = taskOverview().projects;
+const board = (overview: FactoryOverview = taskOverview()) => {
+  const [project] = overview.projects;
   if (project === undefined) throw new Error("The task overview has no project");
   return project;
 };
@@ -406,11 +421,13 @@ it.each(
     await commands.reducedMotion(true);
     try {
       for (const scene of captured) {
+        const overview = (scene.overview ?? taskOverview)();
+        const view = board(overview);
         const fake = conversationServer(async (url) =>
           url.pathname === "/api/overview"
-            ? encodedResponse(FactoryOverview, taskOverview())
-            : url.pathname === `/api/projects/${projectId(board())}`
-              ? encodedResponse(ProjectView, board())
+            ? encodedResponse(FactoryOverview, overview)
+            : url.pathname === `/api/projects/${projectId(view)}`
+              ? encodedResponse(ProjectView, view)
               : url.pathname === "/api/desk"
                 ? encodedResponse(DeskView, emptyDesk)
                 : encodedResponse(Schema.Array(Schema.Never), []),
@@ -419,8 +436,8 @@ it.each(
         scene.arrange(fake.server, supervisor.server);
         answer = supervisor.fetch;
         const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-        queryClient.setQueryData(overviewQuery().queryKey, taskOverview());
-        queryClient.setQueryData(projectTasksQuery(projectId(board())).queryKey, board());
+        queryClient.setQueryData(overviewQuery().queryKey, overview);
+        queryClient.setQueryData(projectTasksQuery(projectId(view)).queryKey, view);
         queryClient.setQueryData(deskQuery().queryKey, emptyDesk);
         queryClient.setQueryData(configurationQuery().queryKey, configurationFixture());
         queryClient.setQueryData(sessionQuery().queryKey, {

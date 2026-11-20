@@ -2,36 +2,52 @@ import { useQuery } from "@tanstack/react-query";
 import { Link, linkOptions } from "@tanstack/react-router";
 import type { ProjectId } from "@usine/core/project";
 import type { BoardTaskView, RunSummaryView } from "@usine/orchestrator/operator";
-import { cardIdentity } from "~/components/item/identity";
+import type { TitledItem } from "~/components/item/identity";
 import { ItemMark } from "~/components/item/mark";
 import { StateMark, StatusBadge } from "~/components/status-badge";
+import { TextTooltip } from "~/components/text-tooltip";
 import { Badge } from "~/components/ui/badge";
 import { useNow } from "~/hooks/use-now";
 import { deskQuery } from "~/lib/desk/queries";
+import type { ReferencePlace } from "~/lib/references/syntax";
 import { taskNumber, taskRow } from "~/lib/tasks/model";
 import { statusLine } from "~/lib/tasks/status";
+import { cn } from "~/lib/utils";
 
 // A chip is at most one line of the text around it tall, so a line with one keeps its height.
 const CHIP = "max-h-lh max-w-full align-text-bottom";
-// Text that wraps but shows one line: a narrow table column can cut it short with an ellipsis.
-const ONE_LINE = "min-w-0 line-clamp-1 whitespace-normal break-all";
+// A title in a sentence stops at 160px, about 24 characters, so a sentence with two chips takes at
+// most one more line than its plain text in a 520px column.
+const SENTENCE_TITLE = "max-w-40";
 
 type TaskChipProps = {
   readonly project: ProjectId;
   readonly task: BoardTaskView;
+  /** The task's item that the text names. */
+  readonly item: TitledItem;
+  readonly place: ReferencePlace;
 };
 
 /**
- * Renders a task as the Tasks list shows it, linked to its task page: its name's mark and title,
- * then its status mark and words if it has a run. A stalled task's status comes from the desk.
+ * Renders a task as the Tasks list shows it, linked to its task page: `item`'s mark and title, then
+ * the task's status mark and words if it has a run. A stalled task's status comes from the desk.
+ * Only the title is cut: in a sentence at `SENTENCE_TITLE`, and anywhere to fit the column. In a
+ * table cell, the title and the status words show in the tooltip instead.
  */
-export const TaskChip = ({ project, task }: TaskChipProps) => {
+export const TaskChip = ({ project, task, item, place }: TaskChipProps) => {
   const now = useNow(30_000);
   const { data: desk } = useQuery(deskQuery());
-  const { origin } = cardIdentity(task);
   const row = taskRow(task, desk?.notMoving ?? []);
   const status = row === undefined ? undefined : statusLine(row, now);
-  return (
+  const cell = place === "cell";
+  // A done task shows its done item's icon, unless `item` is that item and its mark shows it.
+  const mark =
+    status === undefined ? null : status.state !== "Done" ? (
+      <StateMark state={status.state} className="mx-0.75" />
+    ) : item.number === task.number ? null : (
+      <ItemMark item={task} linked={false} numbered={false} tooltip={!cell} />
+    );
+  const chip = (
     <Badge
       variant="outline"
       data-not-typeset
@@ -46,19 +62,44 @@ export const TaskChip = ({ project, task }: TaskChipProps) => {
         />
       }
     >
-      <ItemMark item={origin} linked={false} />
-      <span className={ONE_LINE}>{origin.title}</span>
-      {status !== undefined && (
-        <span className="inline-flex min-w-0 items-center gap-1.5 text-muted-foreground">
-          {status.state === "Done" ? (
-            <ItemMark item={task} linked={false} numbered={false} />
-          ) : (
-            <StateMark state={status.state} className="mx-0.75" />
-          )}
-          <span className={ONE_LINE}>{status.words}</span>
-        </span>
+      <ItemMark item={item} linked={false} tooltip={!cell} />
+      {cell ? (
+        <span className="sr-only">{item.title}</span>
+      ) : (
+        <TextTooltip text={item.title} repeats>
+          <span className={cn("min-w-0 truncate", place === "text" && SENTENCE_TITLE)}>
+            {item.title}
+          </span>
+        </TextTooltip>
       )}
+      {status !== undefined &&
+        (cell ? (
+          <>
+            {mark}
+            <span className="sr-only">{status.words}</span>
+          </>
+        ) : (
+          <span
+            className={cn(
+              "inline-flex shrink-0 items-center gap-1.5 text-muted-foreground",
+              mark === null && "ml-0.75",
+            )}
+          >
+            {mark}
+            {status.words}
+          </span>
+        ))}
     </Badge>
+  );
+  return cell ? (
+    <TextTooltip
+      text={status === undefined ? item.title : `${item.title} · ${status.words}`}
+      repeats
+    >
+      {chip}
+    </TextTooltip>
+  ) : (
+    chip
   );
 };
 

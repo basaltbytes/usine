@@ -22,9 +22,13 @@ export const Reference = Schema.Union([
 ]);
 export type Reference = typeof Reference.Type;
 
-/** A reference as the Markdown tree carries it, and whether it was a code span. */
+/** Where a reference is written: in a heading, a table cell, or other text. */
+export const ReferencePlace = Schema.Literals(["heading", "cell", "text"]);
+export type ReferencePlace = typeof ReferencePlace.Type;
+
+/** A reference as the Markdown tree carries it, whether it was a code span, and where it is. */
 const ReferenceMark = Schema.fromJsonString(
-  Schema.Struct({ reference: Reference, code: Schema.Boolean }),
+  Schema.Struct({ reference: Reference, code: Schema.Boolean, place: ReferencePlace }),
 );
 const encodeMark = Schema.encodeSync(ReferenceMark);
 
@@ -117,35 +121,39 @@ const marked = (
   type: "text" | "inlineCode",
   value: string,
   reference: Reference,
+  place: ReferencePlace,
 ): MarkdownNode => ({
   type,
   value,
   data: {
     hName: REFERENCE_ELEMENT,
-    hProperties: { value: encodeMark({ reference, code: type === "inlineCode" }) },
+    hProperties: { value: encodeMark({ reference, code: type === "inlineCode", place }) },
   },
 });
 
 // Text inside a link is already a link, and code blocks and raw HTML stay as written.
 const UNMARKED = new Set(["link", "linkReference", "code", "html", "definition"]);
 
-const markReferences = (node: MarkdownNode): void => {
+const placeOf = (node: MarkdownNode, around: ReferencePlace): ReferencePlace =>
+  node.type === "heading" ? "heading" : node.type === "tableCell" ? "cell" : around;
+
+const markReferences = (node: MarkdownNode, place: ReferencePlace): void => {
   if (node.children === undefined) return;
   node.children = node.children.flatMap((child): ReadonlyArray<MarkdownNode> => {
     if (child.type === "text")
       return textReferences(child.value ?? "").map((part) =>
         part._tag === "Text"
           ? { type: "text", value: part.text }
-          : marked("text", part.text, part.reference),
+          : marked("text", part.text, part.reference, place),
       );
     if (child.type === "inlineCode")
       return [
         Option.match(codeReference(child.value ?? ""), {
           onNone: () => child,
-          onSome: (reference) => marked("inlineCode", child.value ?? "", reference),
+          onSome: (reference) => marked("inlineCode", child.value ?? "", reference, place),
         }),
       ];
-    if (!UNMARKED.has(child.type)) markReferences(child);
+    if (!UNMARKED.has(child.type)) markReferences(child, placeOf(child, place));
     return [child];
   });
 };
@@ -155,4 +163,4 @@ const markReferences = (node: MarkdownNode): void => {
  * elements whose `value` is their `ReferenceMark`. Code blocks, raw HTML, and link text stay as
  * written.
  */
-export const remarkReferences = () => markReferences;
+export const remarkReferences = () => (tree: MarkdownNode) => markReferences(tree, "text");

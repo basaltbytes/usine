@@ -29,8 +29,9 @@ import type { ReferenceScope } from "~/lib/references/resolve";
 import { taskRows } from "~/lib/tasks/model";
 import { statusLine } from "~/lib/tasks/status";
 import { projectTasksQuery } from "~/lib/tasks/queries";
-import { taskOverview, taskRepository } from "~/lib/tasks/fixture";
+import { summaryOverview, taskOverview, taskRepository } from "~/lib/tasks/fixture";
 import { routeTree } from "~/route-tree.gen";
+import "~/index.css";
 
 const project = ProjectId.make("basaltbytes-usine");
 const revision = CommitSha.make("0123456789abcdef0123456789abcdef01234567");
@@ -105,15 +106,55 @@ const render = (markdown: string, within: ReferenceScope | null = scope) => {
 
 const link = (name: RegExp | string) => page.getByRole("link", { name });
 
-it("shows a task on the board as a chip that opens its task page", async () => {
-  render("Task #42 waits on review.");
-  const chip = link(/Rework the conversation reader/u);
+it("shows the item that the text names as a chip that opens its task page", async () => {
+  render("#42 fixes issue #40.");
+  for (const [title, mark] of [
+    ["Fix the flaky reader test", "Pull request #42, open"],
+    ["Rework the conversation reader", "Issue #40, open"],
+  ] as const) {
+    const chip = link(new RegExp(title, "u"));
+    await expect
+      .element(chip)
+      .toHaveAttribute(
+        "href",
+        "/projects/basaltbytes-usine/tasks/40?repository=basaltbytes%2Fusine",
+      );
+    expect(chip.element().textContent).toContain("Running fix-ci");
+    expect(chip.element().getAttribute("target")).toBeNull();
+    await expect.element(chip.getByRole("img", { name: mark })).toBeVisible();
+  }
+});
+
+it("cuts only the title of a chip in a narrow column, never its status", async () => {
+  queryClient.setQueryData(projectTasksQuery(project).queryKey, board(summaryOverview()));
+  host.style.width = "240px";
+  render("### #1342\n\n#1342 runs again.");
+  const words = page.getByText("Running finish-pr");
+  const titles = page.getByText(/^Shutdown: an open change stream/u);
+  await expect.poll(() => words.elements().length).toBe(2);
+  for (const [index, status] of words.elements().entries()) {
+    const title = titles.elements()[index];
+    assert(title !== undefined);
+    expect(title.scrollWidth).toBeGreaterThan(title.clientWidth);
+    expect(status.scrollWidth).toBeLessThanOrEqual(status.clientWidth);
+    expect(status.getBoundingClientRect().right).toBeLessThanOrEqual(
+      host.getBoundingClientRect().right,
+    );
+  }
+});
+
+it("shows a chip in a table cell as its mark and status mark, with the title and status in a tooltip", async () => {
+  render(["| PR | Issue |", "| --- | --- |", "| #42 | #40 |"].join("\n"));
+  const chip = link(/Pull request #42, open/u);
+  await expect.element(chip.getByRole("img", { name: "Pull request #42, open" })).toBeVisible();
+  // The title is for screen readers only, so the chip takes no room for it.
+  expect(chip.getByText("Fix the flaky reader test").element().getBoundingClientRect().width).toBe(
+    1,
+  );
+  await chip.hover();
   await expect
-    .element(chip)
-    .toHaveAttribute("href", "/projects/basaltbytes-usine/tasks/40?repository=basaltbytes%2Fusine");
-  expect(chip.element().textContent).toContain("Running fix-ci");
-  expect(chip.element().getAttribute("target")).toBeNull();
-  await expect.element(chip.getByRole("img", { name: "Issue #40, open" })).toBeVisible();
+    .element(page.getByText("Fix the flaky reader test · Running fix-ci", { exact: true }))
+    .toBeVisible();
 });
 
 /** Returns the board where #42's failed start-dev run, which the desk lists as stalled, is its status. */
