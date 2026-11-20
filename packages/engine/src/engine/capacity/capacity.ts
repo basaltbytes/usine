@@ -439,7 +439,21 @@ export class ProviderCapacity extends Context.Service<
       }) {
         yield* Effect.annotateCurrentSpan({ runId: run.runId });
         const holderOf = yield* holders.current;
-        const { streak } = capacityRefusals(run.attempts, holderOf);
+        const { streak, elsewhere } = capacityRefusals(run.attempts, holderOf);
+        const [newest] = streak;
+        if (newest !== undefined && elsewhere.length > 0)
+          yield* Effect.logInfo(
+            "The Run's wait counts only its capacity refusals in the group of its newest one; its refusals in other groups neither move the wait nor lengthen it",
+            {
+              runId: run.runId,
+              ...groupFields(capacityGroupOf(newest.brain, newest.worker, holderOf)),
+              refusals: streak.length,
+              elsewhere: elsewhere.map((attempt) => ({
+                attemptId: attempt.id,
+                ...groupFields(capacityGroupOf(attempt.brain, attempt.worker, holderOf)),
+              })),
+            },
+          );
         // The streak is in one group, so a Run that waits for another group skips all of it.
         for (const attempt of streak)
           if ((yield* refused(attempt, run.loop, holderOf)) === "Elsewhere") break;
