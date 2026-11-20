@@ -19,6 +19,7 @@ import {
 } from "./changes/reads.ts";
 import { Changes } from "./changes/changes.ts";
 import { conditionalReads } from "./conditional-reads.ts";
+import { encodedFile, responseCompression } from "./compression.ts";
 import type { StartupListener } from "./listener.ts";
 import { RequestPermissions, InstanceScope, ProjectScope, permits } from "@usine/core/access";
 import { DocumentationApi, operatorOpenApi } from "./openapi.ts";
@@ -694,7 +695,7 @@ export const staticRoutes = (webRoot: string) =>
     Effect.gen(function* () {
       const path = yield* Path.Path;
       const assetsRoot = path.resolve(webRoot, "assets");
-      const applicationShell = HttpServerResponse.file(path.resolve(webRoot, "index.html"));
+      const applicationShell = encodedFile(path.resolve(webRoot, "index.html"));
       return HttpRouter.addAll([
         HttpRouter.route("GET", "/", applicationShell),
         HttpRouter.route("GET", "/assets/*", (request) =>
@@ -704,7 +705,7 @@ export const staticRoutes = (webRoot: string) =>
             if (!asset.startsWith(`${assetsRoot}${path.sep}`)) {
               return HttpServerResponse.text("Not found", { status: 404 });
             }
-            return yield* HttpServerResponse.file(asset).pipe(
+            return yield* encodedFile(asset).pipe(
               Effect.catch((error) =>
                 Effect.logDebug("Static asset could not be served", {
                   asset,
@@ -799,6 +800,7 @@ export const serverLayer = (
     authenticated.routes,
     webhooks,
     securityMiddleware(auth.authentication),
+    responseCompression,
     requestBodyLimit,
   ).pipe(HttpRouter.provideRequest(Layer.mergeAll(backend, services, conversations)));
   return Layer.effectDiscard(

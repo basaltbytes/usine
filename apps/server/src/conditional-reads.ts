@@ -16,7 +16,9 @@ export const conditionalReads = HttpRouter.middleware((handler) =>
           response.body.contentType !== "application/json"
         )
           return Effect.succeed(response);
-        const etag = `"${createHash("sha256").update(response.body.body).digest("hex")}"`;
+        // Weak, so that the validator holds for every content encoding of the representation.
+        const tag = `"${createHash("sha256").update(response.body.body).digest("hex")}"`;
+        const etag = `W/${tag}`;
         const headers = {
           etag,
           "cache-control": "private, no-cache",
@@ -28,7 +30,7 @@ export const conditionalReads = HttpRouter.middleware((handler) =>
           ?.split(",")
           .some(
             (candidate) =>
-              candidate.trim().replace(/^W\//u, "") === etag || candidate.trim() === "*",
+              candidate.trim().replace(/^W\//u, "") === tag || candidate.trim() === "*",
           );
         return Effect.succeed(
           matches === true
