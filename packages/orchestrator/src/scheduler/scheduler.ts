@@ -20,6 +20,7 @@ import {
   type MachineHold,
   type WorkerMachines,
 } from "@usine/executor";
+import { CredentialHolders } from "@usine/engine/engine";
 import { StepExecutor, type WorkerLease } from "@usine/engine/step-executor";
 import { GitHubApp, type GitHubAppError, isRefusal } from "@usine/github/github-app";
 import {
@@ -52,6 +53,7 @@ import {
   restartRequired,
   type WorkerReload,
 } from "../current-instance/current-instance.ts";
+import { credentialHolderOf } from "../credential-holders.ts";
 import { type LeaseCandidate, aheadCount, leaseOrder, passedCount } from "../lease-order.ts";
 import { type ProvisioningPause, type QueuedRun, WorkerStatus } from "../worker-status.ts";
 
@@ -285,7 +287,8 @@ const anyWorker: ExecutorWorkers = { add: () => Effect.void, remove: () => Effec
 
 /**
  * Schedules Attempts over the Workers in `leaseOrder` and adapts the Executor to the engine's
- * `StepExecutor` port. A removed Worker stays until its last Attempt ends.
+ * `StepExecutor` port. A removed Worker stays until its last Attempt ends. Also provides the
+ * engine's `CredentialHolders` of the declared Workers, which follow each accepted reload.
  */
 export const stepExecutorLayer = (
   config: UsineConfig,
@@ -1093,6 +1096,11 @@ export const stepExecutorLayer = (
               ),
             ),
       });
-      return Context.make(StepExecutor, stepExecutor).pipe(Context.add(WorkerStatus, status));
+      return Context.make(StepExecutor, stepExecutor).pipe(
+        Context.add(WorkerStatus, status),
+        Context.add(CredentialHolders, {
+          current: Ref.get(declaredWorkers).pipe(Effect.map(credentialHolderOf)),
+        }),
+      );
     }),
   );

@@ -53,7 +53,7 @@ import {
 } from "effect";
 import { TestClock } from "effect/testing";
 import { completionCheckLayer } from "../src/completion-check.ts";
-import { runSummaryView, runView } from "../src/operator/projection.ts";
+import { declaredWorkers, runSummaryView, runView } from "../src/operator/projection.ts";
 import { gitHubItemKey } from "../src/polling/repository-sync.ts";
 import { engineItemChecksLayer } from "../src/runtime.ts";
 import { sqliteTempDirectory } from "../../../tooling/test/sqlite.mts";
@@ -846,7 +846,7 @@ it.live("fails without re-running the agent when the attempt added no outcome la
       assert(outcome !== undefined && Option.isSome(outcome) && outcome.value._tag === "Failed");
       assert.strictEqual(outcome.value.failure._tag, "AgentFailure");
       // The run detail shows the rejected report next to the failure; Run lists omit it.
-      const view = runView(finished, new Set(), new Map());
+      const view = runView(finished, new Set(), declaredWorkers([]));
       assert.deepStrictEqual(
         view.attempts.map(({ outcome }) =>
           outcome?._tag === "Failed" ? [outcome.failure._tag, outcome.report] : null,
@@ -854,8 +854,8 @@ it.live("fails without re-running the agent when the attempt added no outcome la
         [["AgentFailure", "Review published."]],
       );
       assert.deepStrictEqual(
-        runSummaryView(summarizeRun(finished), new Set(), new Map()).attempts.map(({ outcome }) =>
-          outcome?._tag === "Failed" ? outcome.report : undefined,
+        runSummaryView(summarizeRun(finished), new Set(), declaredWorkers([])).attempts.map(
+          ({ outcome }) => (outcome?._tag === "Failed" ? outcome.report : undefined),
         ),
         [null],
       );

@@ -51,7 +51,7 @@ import { RunId, Run } from "@usine/core/run";
 import { ApprovalSource, RunApproval } from "@usine/core/run/approval";
 import { StepName, Step } from "@usine/core/step";
 import { StepResult } from "@usine/core/step/result";
-import { SshDestination, WorkerName } from "@usine/core/worker";
+import { SshDestination, WorkerCredentialHolder, WorkerName } from "@usine/core/worker";
 import { AgentFile } from "@usine/config/agent";
 import { GitHubLabelName } from "@usine/core/label";
 import { IssueTrigger } from "@usine/config/trigger";
@@ -3285,7 +3285,7 @@ it.effect(
               group: CapacityGroup.make({
                 harness: brain.harness,
                 model: brain.model,
-                worker: WorkerName.make("local"),
+                holder: WorkerCredentialHolder.make({ worker: WorkerName.make("local") }),
               }),
               message: "You've hit your limit",
               since: refusedAt,
@@ -3363,7 +3363,7 @@ it.effect("shows the group's next try on a Run that waits for it without an Atte
       group: CapacityGroup.make({
         harness: brain.harness,
         model: brain.model,
-        worker: WorkerName.make("local"),
+        holder: WorkerCredentialHolder.make({ worker: WorkerName.make("local") }),
       }),
       message: "You've hit your limit",
       since: refusedAt,

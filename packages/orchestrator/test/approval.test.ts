@@ -23,7 +23,7 @@ import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { DateTime, Effect, FileSystem, Layer, Logger, Option, Schema, Schedule } from "effect";
 import { sqliteTempDirectory } from "../../../tooling/test/sqlite.mts";
 import { triggerSubmission } from "../src/trigger-submission.ts";
-import { runView } from "../src/operator/projection.ts";
+import { declaredWorkers, runView } from "../src/operator/projection.ts";
 import { alwaysHoldsLayer } from "./support/polling.ts";
 
 const condition = 'item.labelEvents["ready-for-agent"].actor.type != "User"';
@@ -167,7 +167,7 @@ for (const scenario of [
         const [summary] = yield* reader.list({ closedLimit: 10 });
         expect(snapshot.approvalReason).toEqual(submission.approvalReason);
         expect(summary?.approvalReason).toEqual(submission.approvalReason);
-        expect(runView(snapshot, new Set(), new Map()).approvalReason).toBe(
+        expect(runView(snapshot, new Set(), declaredWorkers([])).approvalReason).toBe(
           Option.getOrNull(submission.approvalReason),
         );
       }).pipe(Effect.provide(observationLayer(directory)));

@@ -70,7 +70,7 @@ import {
 import { fixedConfigLayer } from "../support/current-instance.ts";
 import { testAppLayer, testBotAccount } from "../support/github-app.ts";
 import { alwaysHoldsLayer } from "../support/polling.ts";
-import { runView } from "../../src/operator/projection.ts";
+import { declaredWorkers, runView } from "../../src/operator/projection.ts";
 import {
   aloneOnItem,
   LIVE_TEST_TIMEOUT,
@@ -337,7 +337,10 @@ describe("local worker", () => {
             snapshot.step.result.value.facts.map((fact) => fact._tag),
             ["Commit"],
           );
-          assert.strictEqual(runView(snapshot, new Set(), new Map()).pullRequestUrl, null);
+          assert.strictEqual(
+            runView(snapshot, new Set(), declaredWorkers([])).pullRequestUrl,
+            null,
+          );
         }),
       ),
     LIVE_TEST_TIMEOUT,
@@ -402,7 +405,7 @@ describe("local worker", () => {
             [71],
           );
           assert.strictEqual(
-            runView(snapshot, new Set(), new Map()).pullRequestUrl,
+            runView(snapshot, new Set(), declaredWorkers([])).pullRequestUrl,
             "https://github.com/acme/demo/pull/71",
           );
         }),

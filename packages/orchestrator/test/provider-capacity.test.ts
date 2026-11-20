@@ -30,8 +30,11 @@ import { savedSettings, TriggerCondition, TriggerRecheck } from "@usine/engine/t
 import { CompletionCheck } from "@usine/engine/completion-check";
 import { DateTime, Effect, FileSystem, Layer, Option, Schema, Stream } from "effect";
 import { TestClock } from "effect/testing";
-import { runView } from "../src/operator/projection.ts";
+import { declaredWorkers, runView } from "../src/operator/projection.ts";
+import { credentialHolderOf } from "../src/credential-holders.ts";
 
+/** Each Worker holds its own credential: none is declared with a Gateway. */
+const ownLogins = credentialHolderOf([]);
 const capacityMessage = "Selected model is at capacity. Please try a different model.";
 const brain = BrainSpec.make({
   harness: Harness.make("codex"),
@@ -213,14 +216,14 @@ it.effect.each(["success", "restart", "cancel", "repeated", "ordinary"] as const
           );
           if (scenario === "ordinary") {
             assert.strictEqual(failed.run.state._tag, "Failed");
-            assert.isNull(runView(failed, new Set(), new Map()).providerRetry);
+            assert.isNull(runView(failed, new Set(), declaredWorkers([])).providerRetry);
             assert.strictEqual(calls, 1);
             return accepted.runId;
           }
-          const retry = pendingProviderRetry(failed.run.state, failed.attempts);
+          const retry = pendingProviderRetry(failed.run.state, failed.attempts, ownLogins);
           assert(Option.isSome(retry));
           assert.strictEqual(DateTime.toEpochMillis(retry.value.retryAt), 300_000);
-          const view = runView(failed, new Set(), new Map());
+          const view = runView(failed, new Set(), declaredWorkers([]));
           assert.strictEqual(view.providerRetry?.message, capacityMessage);
           assert.strictEqual(view.providerRetry?.nextAttempt, 2);
           assert.isTrue(view.canRetry);
@@ -245,7 +248,9 @@ it.effect.each(["success", "restart", "cancel", "repeated", "ordinary"] as const
                 Option.isSome(s.attempts[1]?.endedAt ?? Option.none()) &&
                 !leased,
             );
-            const next = Option.getOrNull(pendingProviderRetry(second.run.state, second.attempts));
+            const next = Option.getOrNull(
+              pendingProviderRetry(second.run.state, second.attempts, ownLogins),
+            );
             assert.strictEqual(next?.nextAttempt, 3);
             assert.strictEqual(
               DateTime.toEpochMillis(next?.retryAt ?? DateTime.makeUnsafe(0)),
@@ -264,7 +269,10 @@ it.effect.each(["success", "restart", "cancel", "repeated", "ordinary"] as const
                 !leased,
             );
             assert.strictEqual(third.run.state._tag, "Running");
-            assert.strictEqual(runView(third, new Set(), new Map()).providerRetry?.nextAttempt, 4);
+            assert.strictEqual(
+              runView(third, new Set(), declaredWorkers([])).providerRetry?.nextAttempt,
+              4,
+            );
             yield* engine.retry(
               accepted.runId,
               RetryRequest.make({ requestedBy: Option.none(), amendment: Option.none() }),

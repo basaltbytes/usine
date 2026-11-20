@@ -172,6 +172,7 @@ import {
   runDuration,
   runView,
   runSummaryView,
+  declaredWorkers,
   workerAccesses,
 } from "./projection.ts";
 import { RunUsageReader, type RunUsageView, taskHistoryUsage, runUsageSource } from "./usage.ts";
@@ -334,10 +335,10 @@ const makeOperatorObservation = Effect.gen(function* () {
       { concurrency: "unbounded" },
     );
     const paused = new Set(states.filter((state) => state.paused).map((state) => state.loop));
-    const access = workerAccesses(instance.config.workers);
+    const runWorkers = declaredWorkers(instance.config.workers);
     const waits = quotaWaits(provisioning);
     const views = snapshots.map((snapshot) =>
-      runSummaryView(snapshot, paused, access, waits, engineWaits),
+      runSummaryView(snapshot, paused, runWorkers, waits, engineWaits),
     );
     const runsByRepository = new Map<string, Array<(typeof views)[number]>>();
     for (const view of views) {
@@ -373,7 +374,7 @@ const makeOperatorObservation = Effect.gen(function* () {
           }
           const merged = new Map((runsByRepository.get(name) ?? []).map((run) => [run.id, run]));
           for (const saved of history.runs) {
-            const view = runSummaryView(saved, paused, access, waits, engineWaits);
+            const view = runSummaryView(saved, paused, runWorkers, waits, engineWaits);
             merged.set(view.id, view);
           }
           const projectRuns = [...merged.values()].sort(
@@ -639,7 +640,7 @@ const makeOperatorObservation = Effect.gen(function* () {
       let run = allRuns.get(runId);
       if (run === undefined) {
         const summary = yield* reader.summary(runId);
-        run = runSummaryView(summary, paused, access, waits, engineWaits);
+        run = runSummaryView(summary, paused, runWorkers, waits, engineWaits);
       }
       const attempt = run.attempts.find(({ id }) => id === attemptId);
       if (attempt === undefined) {
@@ -910,7 +911,7 @@ const makeOperatorObservation = Effect.gen(function* () {
     return {
       snapshot,
       paused,
-      access: workerAccesses(instance.config.workers),
+      runWorkers: declaredWorkers(instance.config.workers),
       waits: quotaWaits(provisioning),
       engineWaits,
       agentDefinitionChanged:
@@ -929,7 +930,7 @@ const makeOperatorObservation = Effect.gen(function* () {
     runId: RunId,
     request: TranscriptRequest = ColdTranscriptRequest.make(),
   ) {
-    const { snapshot, paused, access, waits, engineWaits, ...context } = yield* runContext(
+    const { snapshot, paused, runWorkers, waits, engineWaits, ...context } = yield* runContext(
       instance,
       runId,
     );
@@ -946,7 +947,7 @@ const makeOperatorObservation = Effect.gen(function* () {
     );
     return RunDetailView.make({
       ...context,
-      run: runView(snapshot, paused, access, waits, engineWaits),
+      run: runView(snapshot, paused, runWorkers, waits, engineWaits),
       eventDedupKey: snapshot.event.dedupKey,
       eventPayload: snapshot.event.payload,
       transcript: transcript.events,
@@ -956,16 +957,14 @@ const makeOperatorObservation = Effect.gen(function* () {
   });
 
   const brief = Effect.fn("Operator.brief")(function* (instance: LoadedInstance, runId: RunId) {
-    const { snapshot, paused, access, waits, engineWaits, usage, ...context } = yield* runContext(
-      instance,
-      runId,
-    );
+    const { snapshot, paused, runWorkers, waits, engineWaits, usage, ...context } =
+      yield* runContext(instance, runId);
     const report = EffectArray.findLast(snapshot.attempts, (attempt) =>
       Option.exists(attempt.result, ({ message }) => message !== ""),
     );
     const view = RunBriefView.make({
       ...context,
-      run: runSummaryView(summarizeRun(snapshot), paused, access, waits, engineWaits),
+      run: runSummaryView(summarizeRun(snapshot), paused, runWorkers, waits, engineWaits),
       task: textExcerpt(snapshot.task),
       resultMessage: Option.match(snapshot.step.result, {
         onNone: () => null,
@@ -1626,7 +1625,7 @@ const makeOperator = Effect.gen(function* () {
       // Place each card as the Board does, so the move records the lane that the card left.
       const summaries = yield* reader.forItems(storedItems.map(({ itemKey }) => itemKey));
       const runEvents = yield* readRunningEvents(reader, summaries);
-      const access = workerAccesses(instance.config.workers);
+      const runWorkers = declaredWorkers(instance.config.workers);
       const board = yield* projectBoard(
         repository,
         Option.match(labelProjection, {
@@ -1635,7 +1634,7 @@ const makeOperator = Effect.gen(function* () {
         }),
         storedItems,
         // Placement reads no pause state, so these views leave every Loop unpaused.
-        summaries.map((summary) => runSummaryView(summary, new Set(), access)),
+        summaries.map((summary) => runSummaryView(summary, new Set(), runWorkers)),
         [],
         new Map(),
         new Map(),

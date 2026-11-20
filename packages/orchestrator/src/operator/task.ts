@@ -41,7 +41,7 @@ import {
   BoardLaneId,
   BoardProjectNotFoundError,
 } from "./board.ts";
-import { readRunningEvents, runSummaryView, workerAccesses } from "./projection.ts";
+import { readRunningEvents, runSummaryView, declaredWorkers } from "./projection.ts";
 import { RunSummaryView } from "./run.ts";
 
 /**
@@ -248,7 +248,7 @@ const makeTaskReader = Effect.gen(function* () {
     const summaries = yield* reader.forItems(stored.map(({ itemKey }) => itemKey));
     const runEvents = yield* readRunningEvents(reader, summaries);
     const paused = new Set(states.filter((state) => state.paused).map((state) => state.loop));
-    const access = workerAccesses(instance.config.workers);
+    const runWorkers = declaredWorkers(instance.config.workers);
     const waits = quotaWaits(provisioning);
     const board = yield* projectBoard(
       managed,
@@ -257,7 +257,7 @@ const makeTaskReader = Effect.gen(function* () {
         onSome: ({ labels }) => labels.map(({ name }) => name),
       }),
       stored,
-      summaries.map((summary) => runSummaryView(summary, paused, access, waits)),
+      summaries.map((summary) => runSummaryView(summary, paused, runWorkers, waits)),
       asks.map(({ itemKey }) => itemKey),
       new Map(),
       new Map(),
@@ -340,7 +340,7 @@ const makeTaskReader = Effect.gen(function* () {
           DateTime.toEpochMillis(b.run.openedAt) - DateTime.toEpochMillis(a.run.openedAt) ||
           b.run.id.localeCompare(a.run.id),
       );
-    const runs = memberRuns.map((summary) => runSummaryView(summary, paused, access, waits));
+    const runs = memberRuns.map((summary) => runSummaryView(summary, paused, runWorkers, waits));
     const summary = TaskView.make({
       repository: managed.name,
       number: first.number,

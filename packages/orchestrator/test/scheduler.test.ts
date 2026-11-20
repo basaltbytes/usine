@@ -16,8 +16,15 @@ import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
 import { Run, RunId } from "@usine/core/run";
 import * as RunState from "@usine/core/run/state";
 import { Step, StepName } from "@usine/core/step";
-import { ContainerImage, type WorkerKind, WorkerName } from "@usine/core/worker";
-import { Submission } from "@usine/engine/engine";
+import {
+  ContainerImage,
+  GatewayCredentialHolder,
+  SshDestination,
+  type WorkerKind,
+  WorkerCredentialHolder,
+  WorkerName,
+} from "@usine/core/worker";
+import { CredentialHolders, Submission } from "@usine/engine/engine";
 import { StepExecution, StepExecutor } from "@usine/engine/step-executor";
 import {
   Executor,
@@ -131,6 +138,50 @@ describe("Worker scheduler startup", () => {
         ]);
       }).pipe(Effect.scoped, Effect.provide(changeBusLayer)),
     ),
+  );
+
+  it.effect("gives the engine the Gateway as the credential holder of the Workers behind it", () =>
+    Effect.gen(function* () {
+      const behindGateway = (name: string) =>
+        ({
+          name,
+          kind: "ssh",
+          destination: `usine@${name}`,
+          root: "/srv/usine",
+          gateway: {
+            domain: "gw.test",
+            destination: "usine-gateway",
+            admin_token_env: "GATEWAY_TOKEN",
+            llm_providers: ["anthropic-messages"],
+          },
+        }) as const;
+      const config = yield* Schema.decodeEffect(UsineConfig)({
+        version: 1,
+        repos: [],
+        workers: [behindGateway("build-1"), behindGateway("build-2")],
+      });
+      const context = yield* Layer.build(
+        stepExecutorLayer(config, []).pipe(
+          Layer.provide(MarcbachmannCelLayer),
+          Layer.provide(
+            Layer.mock(Executor)({ kind: "ssh", preflight: () => Effect.succeed(fullPreflight) }),
+          ),
+          Layer.provide(fixedConfigLayer(config)),
+          Layer.provide(testAppLayer),
+        ),
+      );
+      const holderOf = yield* Context.get(context, CredentialHolders).current;
+      const gateway = GatewayCredentialHolder.make({
+        destination: SshDestination.make("usine-gateway"),
+      });
+      const claude = Harness.make("claude");
+      assert.deepStrictEqual(holderOf(build1, claude), gateway);
+      assert.deepStrictEqual(holderOf(build2, claude), gateway);
+      assert.deepStrictEqual(
+        holderOf(build1, Harness.make("codex")),
+        WorkerCredentialHolder.make({ worker: build1 }),
+      );
+    }).pipe(Effect.scoped),
   );
 
   it.effect("fails startup with the worker message when every worker fails preflight", () =>

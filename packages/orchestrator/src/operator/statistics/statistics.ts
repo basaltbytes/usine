@@ -22,7 +22,7 @@ import {
 } from "effect";
 import { type ProjectedItem, projectedItem } from "../../board/items.ts";
 import { taskCards } from "../../board/tasks.ts";
-import { runSummaryView } from "../projection.ts";
+import { declaredWorkers, runSummaryView } from "../projection.ts";
 import { RunUsageReader, runUsageSource } from "../usage.ts";
 import { cacheStatistics } from "./cache.ts";
 import { readWorkerCapacity } from "./workers.ts";
@@ -98,7 +98,7 @@ const makeStatistics = Effect.gen(function* () {
     const cards = taskCards(
       repository,
       items,
-      history.map((summary) => runSummaryView(summary, new Set(), new Map())),
+      history.map((summary) => runSummaryView(summary, new Set(), declaredWorkers([]))),
       [],
       new Map(),
       new Map(),
