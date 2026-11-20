@@ -18,7 +18,7 @@ import { ProjectId } from "@usine/core/project";
 import { RepositoryName } from "@usine/core/repository";
 import { LoopName } from "@usine/core/loop";
 import { CurrentInstance } from "@usine/orchestrator/current-instance";
-import { Deferred, Effect, Exit, Fiber, Layer, Schema, Scope, Stream } from "effect";
+import { Deferred, Effect, Exit, Fiber, Layer, Logger, Schema, Scope, Stream } from "effect";
 import { HttpServerRequest } from "effect/http";
 import { TestClock } from "effect/testing";
 import { FactoryBackend } from "../src/backend.ts";
@@ -252,8 +252,17 @@ it.effect("revalidates credentials before a write can reveal an identifier", () 
   }),
 );
 
-it.effect("ends open streams before the routes close and the member store follows", () =>
-  Effect.gen(function* () {
+it.effect("ends open streams before the routes close and the member store follows", () => {
+  const logs: Array<{
+    readonly level: string;
+    readonly message: unknown;
+    readonly fields: unknown;
+  }> = [];
+  const logger = Logger.make<unknown, void>(({ logLevel, message }) => {
+    const [text, fields] = Array.isArray(message) ? message : [message];
+    logs.push({ level: logLevel, message: text, fields });
+  });
+  return Effect.gen(function* () {
     let storeOpen = true;
     let checks = 0;
     const verify = Effect.suspend(() => {
@@ -262,6 +271,7 @@ it.effect("ends open streams before the routes close and the member store follow
         ? Effect.void
         : Effect.fail(AuthError.make({ status: 500, message: "The member store is unavailable." }));
     });
+    const { revision } = yield* Effect.scoped((yield* ChangeBus).open);
     const routes = yield* Scope.make();
     const layer = yield* live;
     const changes = yield* Layer.buildWithScope(layer, routes);
@@ -281,8 +291,22 @@ it.effect("ends open streams before the routes close and the member store follow
     assert.strictEqual(exit._tag, "Success");
     assert.isAbove(opened, 0);
     assert.strictEqual(checks, opened);
-  }).pipe(Effect.provide(changeBusLayer)),
-);
+    assert.deepStrictEqual(
+      logs.filter(({ level }) => level === "Warn" || level === "Error"),
+      [],
+    );
+    assert.deepStrictEqual(
+      logs.filter(({ message }) => message === "Change stream ended because its routes closed"),
+      [
+        {
+          level: "Info",
+          message: "Change stream ended because its routes closed",
+          fields: { resume: revision },
+        },
+      ],
+    );
+  }).pipe(Effect.provide(Layer.merge(changeBusLayer, Logger.layer([logger]))));
+});
 
 it.effect("waits for a running credential check before the routes close", () =>
   Effect.gen(function* () {
@@ -390,7 +414,7 @@ it.effect("runs no credential check and sends no notice published after the rout
 );
 
 it.effect(
-  "runs no credential check and sends nothing on a stream opened after the routes close",
+  "runs no credential check and sends no notice on a stream opened after the routes close",
   () =>
     Effect.gen(function* () {
       let checks = 0;
@@ -401,19 +425,25 @@ it.effect(
       const layer = yield* live;
       const changes = yield* Layer.buildWithScope(layer, routes);
       const bus = yield* ChangeBus;
-      const { revision } = yield* Effect.scoped(bus.open);
+      const pending = (yield* Effect.scoped(bus.open)).revision;
       yield* bus.publish([
         { audience: InstanceScope.make(), target: { kind: "worker", id: "replayed" } },
       ]);
+      const current = (yield* Effect.scoped(bus.open)).revision;
       yield* Scope.close(routes, Exit.void);
 
-      for (const cursor of [undefined, revision]) {
+      const cases: ReadonlyArray<readonly [number | undefined, ReadonlyArray<string>]> = [
+        [undefined, []],
+        [pending, []],
+        [current, [": heartbeat\n\n"]],
+      ];
+      for (const [cursor, expected] of cases) {
         const stream = yield* open(cursor).pipe(
           Effect.provideService(ChangeAccess, verify),
           Effect.provideContext(changes),
         );
         const frames = yield* Stream.runCollect(stream);
-        assert.deepStrictEqual(frames, []);
+        assert.deepStrictEqual(frames, expected);
       }
       assert.strictEqual(checks, 0);
     }).pipe(Effect.provide(changeBusLayer)),
