@@ -11,7 +11,7 @@ import { deskQuery } from "~/lib/desk/queries";
 import { taskNumber, taskRow } from "~/lib/tasks/model";
 import { statusLine } from "~/lib/tasks/status";
 
-const CHIP = "h-6 max-w-full align-text-bottom leading-6";
+const CHIP = "max-w-full align-text-bottom";
 // Text that wraps but shows one line: a narrow table column can cut it short with an ellipsis.
 const ONE_LINE = "min-w-0 line-clamp-1 whitespace-normal break-all";
 
@@ -33,6 +33,7 @@ export const TaskChip = ({ project, task }: TaskChipProps) => {
   return (
     <Badge
       variant="outline"
+      size="tall"
       data-not-typeset
       className={CHIP}
       render={
@@ -70,6 +71,7 @@ type RunChipProps = {
 export const RunChip = ({ project, run }: RunChipProps) => (
   <Badge
     variant="outline"
+    size="tall"
     data-not-typeset
     className={CHIP}
     render={
