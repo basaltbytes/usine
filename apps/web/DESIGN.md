@@ -326,7 +326,7 @@ Compact and quiet, mostly 28px tall.
 ### Chips
 - **Label chip:** a 20px pill in the GitHub label's colour: text in the colour (dark ones lifted toward white for contrast), border at 40% alpha, fill at 12%. Used for lane sources, card labels (three, then a muted `+n` chip), and GitHub change lines.
 - **Plain chip:** hairline outline, muted text, for item states as lane sources.
-- **Reference chip:** a task or run that usine text names: the plain chip's outline at 20px, never taller than one line of the text around it, opening its page in the app. A task chip has its item mark, title, and Tasks list status (the state mark, or a done item's icon, then the words in subtext0); in a narrow column the title and words cut to one line with an ellipsis. A run chip has the run's state mark and loop.
+- **Reference chip:** a task or run that usine text names: the plain chip's outline at 24px with a 24px line height, opening its page in the app. A task chip has its item mark, title, and Tasks list status (the state mark, or a done item's icon, then the words in subtext0); in a narrow column the title and words cut to one line with an ellipsis. A run chip has the run's state mark and loop.
 - Run state is otherwise not a chip but the dot and word from Colors.
 
 ### Filter
