@@ -51,6 +51,7 @@ import {
 import { collectLogs } from "../logs.ts";
 import { assertProvenCapabilities } from "./capabilities.ts";
 import { listedTools } from "./host-tools.ts";
+import { isJsonObject, type Transcript } from "../replay/transcript.ts";
 import {
   operatorToolHandlers,
   operatorTools,
@@ -202,6 +203,46 @@ const recordedPools = {
 const unresumable = lacking(["resume-session"], "This test's harness reopens no saved session");
 const unsteerable = lacking(["steer", "interrupt"], "This test's harness takes no interventions");
 
+/**
+ * Reports, after the first assistant message, that the request ran on usage credits after the
+ * five-hour window rejected it, in the shape that Claude Code 2.1.311 emits.
+ */
+const onUsageCredits = (transcript: Transcript): Transcript => {
+  const first = transcript.entries.findIndex(
+    (entry) =>
+      entry.type === "emit_inbound" &&
+      isJsonObject(entry.payload) &&
+      entry.payload.type === "assistant",
+  );
+  const answered = transcript.entries[first];
+  assert(answered?.type === "emit_inbound", "the recorded session answers");
+  const report = {
+    type: "emit_inbound" as const,
+    port: answered.port,
+    payload: {
+      type: "rate_limit_event",
+      rate_limit_info: {
+        status: "rejected",
+        resetsAt: 1_794_459_600,
+        rateLimitType: "five_hour",
+        utilization: 1,
+        overageStatus: "allowed",
+        isUsingOverage: true,
+        overageInUse: true,
+      },
+      session_id: "$SESSION_1",
+    },
+  };
+  return {
+    ...transcript,
+    entries: [
+      ...transcript.entries.slice(0, first + 1),
+      report,
+      ...transcript.entries.slice(first + 1),
+    ],
+  };
+};
+
 const started = (events: ReadonlyArray<AgentSessionEvent>) =>
   events.flatMap((event) => (event._tag === "ToolStarted" ? [event.tool] : []));
 const finished = (events: ReadonlyArray<AgentSessionEvent>) =>
@@ -351,6 +392,29 @@ describe("the supervisor role", () => {
         }).pipe(Effect.provide(NodeServices.layer), Effect.timeout("20 seconds")),
       30_000,
     );
+
+  it.live(
+    "claude: keeps answering after a request on usage credits",
+    () =>
+      Effect.gen(function* () {
+        const logs = collectLogs(["Info", "Warn"]);
+        const { replies } = yield* runSupervisorScenario("claude", "replay", {
+          transform: onUsageCredits,
+        }).pipe(Effect.provide(logs.layer));
+        const [first, second] = replies;
+        assert.include(first.message, WAITING_RUN);
+        assert.include(second.message, RESUMED);
+        assert.deepStrictEqual(
+          logs.records.flatMap(({ level, message }) =>
+            Array.isArray(message) && String(message[0]).includes("usage credits")
+              ? [[level, message[0]]]
+              : [],
+          ),
+          [["Info", "Claude child runs on usage credits, which its spec allows"]],
+        );
+      }).pipe(Effect.provide(NodeServices.layer), Effect.timeout("20 seconds")),
+    30_000,
+  );
 
   it("admits every harness that serves usine tools, and says which keep all their own tools", () => {
     const closedTools = codex.capabilities

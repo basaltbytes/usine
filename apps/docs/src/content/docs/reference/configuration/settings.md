@@ -16,7 +16,7 @@ Fields in this table belong to `settings`.
 | `max_attempt_minutes` | integer ≥ 1 | unlimited | Wall-clock minutes per attempt, excluding operator holds and orchestrator downtime. |
 | `max_attempt_tokens` | integer ≥ 1 | unlimited | Tokens per attempt across all its sessions. |
 | `max_background_wait_minutes` | integer ≥ 1 | unlimited | Minutes a child that answered waits for its background tasks to start a turn. When the limit passes, the child returns its answer and its background tasks stop. See [Background work](#background-work). |
-| `allow_usage_credits` | boolean | `false` | Whether a child keeps working on usage credits after its subscription plan reaches its usage limit. See [Usage credits](#usage-credits). |
+| `allow_usage_credits` | boolean | `false` | Whether a Claude Code child keeps working on usage credits after its Claude subscription plan reaches its usage limit. Other harnesses ignore it. See [Usage credits](#usage-credits). |
 | `supervisor` | object | not configured | The harness, model, and effort of the supervisor. See [Supervisor](#supervisor). |
 | `upgrade_channel` | `latest` or `next` | `latest` | npm channel checked for global installations managed by systemd or launchd. |
 | `upgrade_mode` | `off`, `propose`, or `automatic` | `propose` | Disable upgrade checks, offer upgrades, or upgrade after admitted attempts finish. |
@@ -44,9 +44,9 @@ Set `max_background_wait_minutes` to bound that wait. Claude Code children apply
 
 ### Usage credits
 
-When a Claude subscription reaches its plan's usage limit and the account has usage credits turned on, Claude Code keeps working and bills the credits. Claude Code reports the plan's status after each request, and by default usine stops a Claude Code child at the first report that the request ran on usage credits. That request is already billed to the credits; the child makes no other. The attempt ends with a capacity refusal whose message names `settings.allow_usage_credits`, and the run waits in its capacity group until the plan window resets, as after a usage limit. See [Retry a failed run](/guides/retry-a-run/#a-run-that-waits-for-its-provider).
+When a Claude subscription reaches its plan's usage limit and the account has usage credits turned on, Claude Code keeps working and bills the credits. Claude Code reports a change in the plan's rate-limit status after the request that caused it. By default, usine closes a Claude Code child at the first report that a request ran on usage credits. That request is already billed to the credits. Other requests that Claude Code sent before usine closed the child, such as those of parallel subagents, can be billed too. The attempt ends with a capacity refusal whose message names `settings.allow_usage_credits`, and the run waits in its capacity group until the plan window resets, as after a usage limit. See [Retry a failed run](/guides/retry-a-run/#a-run-that-waits-for-its-provider).
 
-Set `allow_usage_credits: true` to let children keep working on usage credits. An attempt applies the value that it started with. The setting covers attempts only: the supervisor keeps working on usage credits.
+Set `allow_usage_credits: true` to let Claude Code children keep working on usage credits. An attempt applies the value that it started with. The setting covers attempts only: the supervisor keeps working on usage credits. Other harnesses ignore the setting.
 
 Effort values are `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max`. The selected model and harness must support the value. See [Agents](/reference/configuration/agents/#agent).
 

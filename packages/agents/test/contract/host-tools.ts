@@ -20,7 +20,7 @@ import { Harnesses } from "../../src/harness/registry.ts";
 import type { HarnessRuntime } from "../../src/harness/runtime.ts";
 import { type NativeTools, RolePlacements, RoleSpec } from "../../src/harness/role.ts";
 import { RestartState } from "../../src/runtime.ts";
-import { openFixture, openPiFixture } from "../replay/fixture.ts";
+import { type FixtureOptions, openFixture, openPiFixture } from "../replay/fixture.ts";
 import type { Transcript } from "../replay/transcript.ts";
 
 /** The harnesses whose adapters serve a usine tool set. */
@@ -181,16 +181,17 @@ export const toolFixture = (
   provider: ToolProvider,
   scenario: ToolScenario | "supervisor",
   mode: "record" | "replay",
+  options: FixtureOptions = {},
 ) =>
   Effect.gen(function* () {
     if (provider === "pi") {
-      const fixture = yield* openPiFixture(scenario, mode);
+      const fixture = yield* openPiFixture(scenario, mode, options);
       return {
         ...fixture,
         harnesses: registered("pi", piRuntime).pipe(Layer.provide(fixture.harness)),
       };
     }
-    const fixture = yield* openFixture(provider, scenario, mode);
+    const fixture = yield* openFixture(provider, scenario, mode, options);
     assert("harness" in fixture, `${scenario} replays through the runtime layers`);
     return {
       ...fixture,

@@ -69,8 +69,8 @@ const groups = (
         key: "settings.allow_usage_credits",
         value: mono(String(settings.allowUsageCredits)),
         effect: settings.allowUsageCredits
-          ? "Children keep working on usage credits after the plan's usage limit."
-          : "A child stops at its first request on usage credits, and the attempt waits for the plan limit to reset.",
+          ? "Claude Code children keep working on usage credits after the plan's usage limit."
+          : "A Claude Code child stops at its first request on usage credits, and the attempt waits for the plan limit to reset.",
       },
     ],
   ],

@@ -123,25 +123,20 @@ export const rejectedUntil = (message: Schema.Json): Option.Option<DateTime.Utc>
 export interface UsageCreditsReport {
   /**
    * The reset time of the plan window that the report names, or `None` for a report without one or
-   * on the credits' own limit.
+   * on the `overage` limit, whose reset is the credits' own.
    */
   readonly planResetsAt: Option.Option<DateTime.Utc>;
 }
 
 /**
- * Reads whether a rate-limit report says that its request ran on usage credits:
- * `isUsingOverage`, `overageInUse`, or the `overage` limit type. Returns `None` for a request on
- * plan limits and for a report that doesn't decode.
+ * Reads whether a rate-limit report says that its request ran on usage credits: `isUsingOverage`
+ * or `overageInUse`. Returns `None` for a request on plan limits, including a report on the
+ * `overage` limit without either flag, and for a report that doesn't decode.
  */
 export const usageCredits = (message: Schema.Json): Option.Option<UsageCreditsReport> =>
   decodeRateLimitOption(message).pipe(
     Option.map(({ rate_limit_info: info }) => info),
-    Option.filter(
-      (info) =>
-        info.isUsingOverage === true ||
-        info.overageInUse === true ||
-        info.rateLimitType === "overage",
-    ),
+    Option.filter((info) => info.isUsingOverage === true || info.overageInUse === true),
     Option.map((info) => ({
       planResetsAt:
         info.rateLimitType === "overage"

@@ -14,6 +14,7 @@ import {
   SupervisorSeat,
   SupervisorTurn,
 } from "../../src/harness/supervisor/turn.ts";
+import type { FixtureOptions } from "../replay/fixture.ts";
 import type { Transcript } from "../replay/transcript.ts";
 import { type ToolProvider, toolFixture } from "./host-tools.ts";
 
@@ -85,9 +86,13 @@ const recordedRoutes = {
 } satisfies Record<SupervisorProvider, CredentialRoute>;
 
 /** The two turns of the supervisor scenario on `provider`, and the recorded traffic. */
-export const runSupervisorScenario = (provider: SupervisorProvider, mode: "record" | "replay") =>
+export const runSupervisorScenario = (
+  provider: SupervisorProvider,
+  mode: "record" | "replay",
+  options: FixtureOptions = {},
+) =>
   Effect.gen(function* () {
-    const fixture = yield* toolFixture(provider, "supervisor", mode);
+    const fixture = yield* toolFixture(provider, "supervisor", mode, options);
     const { worker, cwd, environment } = fixture.request;
     const host = yield* replayContainerHost(fixture.tape);
     // The session reads the instance's source from its working directory, one directory per

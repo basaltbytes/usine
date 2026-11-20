@@ -819,6 +819,7 @@ const makeClaudeSessions = Effect.gen(function* () {
         });
         return;
       }
+      if (yield* channel.isTerminal) return;
       yield* Effect.logWarning(
         "Claude child ran a request on usage credits, which its spec doesn't allow; stopping it",
         { sessionId: session.id, resetsAt },
@@ -868,10 +869,9 @@ const makeClaudeSessions = Effect.gen(function* () {
         }
         const reported = yield* provider.read(message);
         if (Option.isSome(reported.rateLimits)) yield* channel.emit(reported.rateLimits.value);
-        if (Option.isSome(reported.usageCredits)) {
+        if (Option.isSome(reported.usageCredits))
           yield* reportUsageCredits(reported.usageCredits.value);
-          if (yield* channel.isTerminal) return;
-        } else if (Option.isSome(reported.rejectedUntil))
+        else if (Option.isSome(reported.rejectedUntil))
           yield* Effect.logWarning("Claude reports that its usage limit rejects requests", {
             sessionId: session.id,
             resetsAt: DateTime.formatIso(reported.rejectedUntil.value),

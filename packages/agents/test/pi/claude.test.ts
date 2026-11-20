@@ -3335,7 +3335,7 @@ describe("Claude child backend", () => {
     it.effect.each([
       {
         name: "isUsingOverage",
-        messages: [onCredits],
+        messages: [onCredits, onCredits],
         resetsAt: Option.some("2026-11-11T05:00:00.000Z"),
       },
       {
@@ -3352,7 +3352,7 @@ describe("Claude child backend", () => {
         resetsAt: Option.some("2026-11-11T17:00:00.000Z"),
       },
       {
-        name: "the overage limit, after a used-up plan window",
+        name: "overageInUse on the overage limit, after a used-up plan window",
         messages: [
           report({
             status: "allowed_warning",
@@ -3360,13 +3360,15 @@ describe("Claude child backend", () => {
             utilization: 1,
             resetsAt: 1_794_373_200,
           }),
-          report({ rateLimitType: "overage", resetsAt: 1_796_083_200 }),
+          report({ rateLimitType: "overage", resetsAt: 1_796_083_200, overageInUse: true }),
         ],
         resetsAt: Option.some("2026-11-11T05:00:00.000Z"),
       },
       {
-        name: "the overage limit, without a used-up plan window",
-        messages: [report({ rateLimitType: "overage", resetsAt: 1_796_083_200 })],
+        name: "overageInUse on the overage limit, without a used-up plan window",
+        messages: [
+          report({ rateLimitType: "overage", resetsAt: 1_796_083_200, overageInUse: true }),
+        ],
         resetsAt: Option.none(),
       },
     ])("stops the child mid-turn at a report of $name", ({ messages, resetsAt }) =>
@@ -3391,7 +3393,11 @@ describe("Claude child backend", () => {
           Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk), Layer.provideMerge(logs.layer))),
         );
         assert.isTrue(query.closed, "closing the stopped child closes Claude Code");
-        assert.isTrue(logs.lines.some((line) => line.includes("ran a request on usage credits")));
+        assert.lengthOf(
+          logs.lines.filter((line) => line.includes("ran a request on usage credits")),
+          1,
+          "the stop is logged once",
+        );
         assert.isFalse(
           logs.lines.some((line) => line.includes("usage limit rejects requests")),
           "a request on usage credits is no rejected request",
@@ -3403,7 +3409,7 @@ describe("Claude child backend", () => {
       const sdk = Layer.succeed(ClaudeSdk)({
         open: () => scripted([working, onCredits, onCredits, ...answered]),
       });
-      const logs = infoLines();
+      const logs = logLines(["Info", "Warn"]);
       return Effect.scoped(
         Effect.gen(function* () {
           const session = yield* (yield* ChildBackend).launch(
@@ -3424,28 +3430,57 @@ describe("Claude child backend", () => {
             1,
             "the first request on usage credits is logged once",
           );
+          assert.isFalse(
+            logs.lines.some((line) => line.includes("usage limit rejects requests")),
+            "a request on usage credits is no rejected request",
+          );
         }).pipe(
           Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk), Layer.provideMerge(logs.layer))),
         ),
       );
     });
 
-    it.effect("keeps a child working when a report has usage credits that it doesn't use", () => {
+    it.effect.each([
+      {
+        name: "has usage credits turned on",
+        message: report({
+          status: "allowed_warning",
+          rateLimitType: "five_hour",
+          utilization: 0.9,
+          resetsAt: 1_794_373_200,
+          isUsingOverage: false,
+          overageStatus: "allowed",
+          overageEnabled: true,
+        }),
+      },
+      {
+        // Claude Code names the first window past a warning threshold, the credits' own when no
+        // plan window has passed one, for a request that the plan served.
+        name: "warns on the overage limit for a request that the plan served",
+        message: report({
+          status: "allowed_warning",
+          rateLimitType: "overage",
+          utilization: 0.8,
+          resetsAt: 1_796_083_200,
+          overageStatus: "allowed",
+          isUsingOverage: false,
+          surpassedThreshold: 0.75,
+        }),
+      },
+      {
+        name: "rejects requests on the overage limit because the credits are spent",
+        message: report({
+          status: "rejected",
+          rateLimitType: "overage",
+          utilization: 1,
+          resetsAt: 1_796_083_200,
+          overageStatus: "rejected",
+          overageDisabledReason: "out_of_credits",
+        }),
+      },
+    ])("keeps a child working when a report $name", ({ message }) => {
       const sdk = Layer.succeed(ClaudeSdk)({
-        open: () =>
-          scripted([
-            working,
-            report({
-              status: "allowed_warning",
-              rateLimitType: "five_hour",
-              utilization: 0.9,
-              resetsAt: 1_794_373_200,
-              isUsingOverage: false,
-              overageStatus: "allowed",
-              overageEnabled: true,
-            }),
-            ...answered,
-          ]),
+        open: () => scripted([working, message, ...answered]),
       });
       return Effect.scoped(
         Effect.gen(function* () {

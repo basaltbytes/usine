@@ -421,7 +421,7 @@ describe("Settings page", () => {
     );
     assert.include(
       page,
-      "settings.allow_usage_credits false A child stops at its first request on usage credits, and the attempt waits for the plan limit to reset.",
+      "settings.allow_usage_credits false A Claude Code child stops at its first request on usage credits, and the attempt waits for the plan limit to reset.",
     );
     assert.include(page, "operator PhilDL");
     assert.include(page, "webhooks.mode off");
