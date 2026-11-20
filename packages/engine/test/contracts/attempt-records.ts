@@ -21,6 +21,7 @@ import { StepResult } from "@usine/core/step/result";
 import { ContainerId, ContainerMemoryMib, WorkerName } from "@usine/core/worker";
 import { Effect, Option, Result } from "effect";
 
+import { plainRetry } from "../../src/engine/retry.ts";
 import { Submission } from "../../src/engine/submission.ts";
 import { RunStore } from "../../src/store/store.ts";
 import { lifecycleSubmission } from "../store/fixtures.ts";
@@ -96,7 +97,7 @@ export const attemptRecordsContract = (adapter: PersistenceAdapter) => {
               Result.fail(AgentFailure.make({ message: "Guard tripped" })),
             );
             yield* store.recordSalvage(started.execution.attempt.id, pushed);
-            yield* store.retry(retriedRun);
+            yield* store.retry(retriedRun, plainRetry, Option.none());
             const resumed = yield* store.beginAttempt(
               retriedRun,
               WorkerName.make("local"),
@@ -121,7 +122,7 @@ export const attemptRecordsContract = (adapter: PersistenceAdapter) => {
                 message: "remote rejected",
               }),
             );
-            yield* store.retry(retriedRun);
+            yield* store.retry(retriedRun, plainRetry, Option.none());
             const fresh = yield* store.beginAttempt(
               retriedRun,
               WorkerName.make("local"),
@@ -152,7 +153,7 @@ export const attemptRecordsContract = (adapter: PersistenceAdapter) => {
                 "The checkout has files larger than GitHub's 100 MiB limit, which the salvage can't push: dataset.csv (100.0 MiB)",
             });
             yield* store.recordSalvage(fresh.execution.attempt.id, partlyPushed);
-            yield* store.retry(retriedRun);
+            yield* store.retry(retriedRun, plainRetry, Option.none());
             const afterPartial = yield* store.beginAttempt(
               retriedRun,
               WorkerName.make("local"),
@@ -298,7 +299,7 @@ export const attemptRecordsContract = (adapter: PersistenceAdapter) => {
               reattached.execution.attempt,
               Result.fail(AgentFailure.make({ message: "The test gate was killed" })),
             );
-            yield* store.retry(runId);
+            yield* store.retry(runId, plainRetry, Option.none());
             const retried = yield* store.beginAttempt(
               runId,
               WorkerName.make("local"),
