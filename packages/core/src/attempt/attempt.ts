@@ -4,14 +4,15 @@ import {
   DateTime,
   Duration,
   Effect,
-  Equal,
+  Match,
   Option,
   Schema,
   SchemaTransformation,
 } from "effect";
 import { Agent, AgentName } from "../agent/agent.ts";
-import { BrainSpec, ModelId } from "../agent/brain.ts";
+import { BrainSpec, Harness, ModelId } from "../agent/brain.ts";
 import { closedStruct } from "../closed-struct.ts";
+import { jsonKey } from "../json-key.ts";
 import { OperatorActor } from "../operator.ts";
 import type { RunState } from "../run/state.ts";
 import { RunId } from "../run/run.ts";
@@ -20,6 +21,7 @@ import { StepName } from "../step/step.ts";
 import {
   ContainerId,
   ContainerMemoryMib,
+  CredentialHolder,
   type CredentialHolderOf,
   WorkerKind,
   WorkerName,
@@ -322,28 +324,75 @@ export const capacityRefusal = (
   );
 
 /**
- * Returns the Attempts of `attempts`, ordered oldest to newest, that a capacity wait follows, newest
- * first: the consecutive capacity refusals since the last Attempt that the provider didn't refuse,
- * in the capacity group of the newest one. A group is a child harness and model, and the holder of
- * the credential that the harness used on the Attempt's Worker, which `holderOf` returns. A refusal
- * in another group neither moves the wait nor lengthens its backoff.
+ * The harness and model of an Attempt's child sessions, and the holder of the credential that the
+ * harness used, which a provider capacity refusal applies to. Workers behind one Gateway that holds
+ * the credential share a group, and a model can have its own usage limit.
  */
-export const capacityRefusalStreak = <A extends Pick<Attempt, "outcome" | "worker" | "brain">>(
+export class CapacityGroup extends Schema.Class<
+  CapacityGroup,
+  Brand.Brand<"@usine/core/attempt/attempt/CapacityGroup">
+>("CapacityGroup")({
+  /** The harness of the Attempt's child sessions. */
+  harness: Harness,
+  /** The model of the Attempt's child sessions. */
+  model: ModelId,
+  /** The Worker or Gateway that holds the credential the harness used. */
+  holder: CredentialHolder,
+}) {}
+
+/** Returns the capacity group of `brain` on `worker`, whose credential holder `holderOf` returns. */
+export const capacityGroupOf = (
+  brain: Pick<BrainSpec, "harness" | "model">,
+  worker: WorkerName,
+  holderOf: CredentialHolderOf,
+): CapacityGroup =>
+  CapacityGroup.make({
+    harness: brain.harness,
+    model: brain.model,
+    holder: holderOf(worker, brain.harness),
+  });
+
+/** Identifies `group` in the engine's capacity state and in the operator's attention entries. */
+export const capacityGroupKey = ({ holder, harness, model }: CapacityGroup): string =>
+  jsonKey([
+    holder._tag,
+    Match.valueTags(holder, {
+      Worker: ({ worker }) => worker,
+      Gateway: ({ destination }) => destination,
+    }),
+    harness,
+    model,
+  ]);
+
+/** A Run's consecutive capacity refusals since the last Attempt that the provider didn't refuse. */
+export interface CapacityRefusals<A> {
+  /** The refusals in the capacity group of the newest one, newest first, which a wait follows. */
+  readonly streak: ReadonlyArray<A>;
+  /** The refusals in other groups, newest first, which neither move the wait nor lengthen it. */
+  readonly elsewhere: ReadonlyArray<A>;
+}
+
+/**
+ * Returns the consecutive capacity refusals that end `attempts`, ordered oldest to newest, split
+ * by whether they are in the capacity group of the newest one. `holderOf` returns the holder of
+ * the credential that each Attempt's harness used on its Worker.
+ */
+export const capacityRefusals = <A extends Pick<Attempt, "outcome" | "worker" | "brain">>(
   attempts: ReadonlyArray<A>,
   holderOf: CredentialHolderOf,
-): ReadonlyArray<A> => {
-  const streak = EffectArray.takeWhile(EffectArray.reverse(attempts), (attempt) =>
+): CapacityRefusals<A> => {
+  const refusals = EffectArray.takeWhile(EffectArray.reverse(attempts), (attempt) =>
     Option.isSome(capacityRefusal(attempt)),
   );
-  const [newest] = streak;
-  if (newest === undefined) return [];
-  const holder = holderOf(newest.worker, newest.brain.harness);
-  return streak.filter(
-    ({ worker, brain }) =>
-      brain.harness === newest.brain.harness &&
-      brain.model === newest.brain.model &&
-      Equal.equals(holderOf(worker, brain.harness), holder),
-  );
+  const [newest] = refusals;
+  if (newest === undefined) return { streak: [], elsewhere: [] };
+  const keyOf = ({ brain, worker }: A) =>
+    capacityGroupKey(capacityGroupOf(brain, worker, holderOf));
+  const key = keyOf(newest);
+  return {
+    streak: refusals.filter((attempt) => keyOf(attempt) === key),
+    elsewhere: refusals.filter((attempt) => keyOf(attempt) !== key),
+  };
 };
 
 /**
@@ -420,9 +469,9 @@ export const awaitsProviderRetry = (
 /**
  * Returns a pending capacity retry from persisted state, including after an orchestrator restart.
  * `attempts` must be ordered oldest to newest. Returns `None` unless `awaitsProviderRetry`. The
- * retry starts no earlier than `capacityBackoff` of the refusals of `capacityRefusalStreak`, with
- * the credential holders of `holderOf`, after the latest one ended, and no earlier than the latest
- * usage-limit reset time that those refusals report.
+ * retry starts no earlier than `capacityBackoff` of the refusals of the `capacityRefusals` streak,
+ * with the credential holders of `holderOf`, after the latest one ended, and no earlier than the
+ * latest usage-limit reset time that those refusals report.
  */
 export const pendingProviderRetry = (
   state: RunState,
@@ -432,7 +481,7 @@ export const pendingProviderRetry = (
   const latest = latestRefusal(state, attempts);
   if (Option.isNone(latest)) return Option.none();
   const { last, endedAt, refusal } = latest.value;
-  const streak = capacityRefusalStreak(attempts, holderOf);
+  const { streak } = capacityRefusals(attempts, holderOf);
   const backoff = DateTime.addDuration(endedAt, capacityBackoff(streak.length));
   const resets = streak.flatMap((attempt) =>
     Option.toArray(Option.flatMap(capacityRefusal(attempt), ({ resetsAt }) => resetsAt)),

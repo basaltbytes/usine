@@ -13,7 +13,7 @@ import {
 } from "@usine/core/access";
 import { ProjectId } from "@usine/core/project";
 import { ReleaseVersion } from "@usine/core/upgrade";
-import { CapacityGroup, CapacityWait, UpgradeDrain, UpgradeWait } from "@usine/engine/engine";
+import { CapacityWait, UpgradeDrain, UpgradeWait } from "@usine/engine/engine";
 import { WebhookHealth } from "../src/webhooks.ts";
 import { testAppLayer } from "./support/github-app.ts";
 import { pollingTestLayer } from "./support/polling.ts";
@@ -43,6 +43,7 @@ import {
   AttemptNumber,
   AttemptContext,
   AttemptTask,
+  CapacityGroup,
 } from "@usine/core/attempt";
 import { DedupKey, EventId, Event } from "@usine/core/event";
 import { ItemKey, ItemNumber as CoreItemNumber, ItemNumber } from "@usine/core/item";

@@ -1,6 +1,12 @@
 import { InstanceScope } from "@usine/core/access";
 import type { BrainSpec } from "@usine/core/agent/brain";
-import { type Attempt, capacityRefusalStreak } from "@usine/core/attempt";
+import {
+  type Attempt,
+  type CapacityGroup,
+  capacityGroupKey,
+  capacityGroupOf,
+  capacityRefusals,
+} from "@usine/core/attempt";
 import type * as AttemptChannel from "@usine/core/attempt/channel";
 import type { AttemptFailure } from "@usine/core/attempt/failure";
 import { ChangeBus, type ScopedChange } from "@usine/core/changes";
@@ -23,7 +29,7 @@ import {
 import { CredentialHolders } from "./holders.ts";
 import * as Capacity from "./state.ts";
 
-export { CapacityGroup, capacityGroupKey, CapacityWait, type CapacityTurn } from "./state.ts";
+export { CapacityWait, type CapacityTurn } from "./state.ts";
 export { CredentialHolders } from "./holders.ts";
 
 /** An Attempt that ran under `ProviderCapacity.gate`, and its executor result. */
@@ -60,7 +66,7 @@ const holderFields = (holder: CredentialHolder) =>
     Gateway: ({ destination }) => ({ holder: holder._tag, gateway: destination }),
   });
 
-const groupFields = (group: Capacity.CapacityGroup) => ({
+const groupFields = (group: CapacityGroup) => ({
   ...holderFields(group.holder),
   harness: group.harness,
   model: group.model,
@@ -173,7 +179,7 @@ export class ProviderCapacity extends Context.Service<
           return;
         }
         const group = refusal.value.group;
-        const key = Capacity.capacityGroupKey(group);
+        const key = capacityGroupKey(group);
         const recorded = yield* Ref.modify(state, (current) =>
           Capacity.refused(current, refusal.value),
         );
@@ -221,7 +227,7 @@ export class ProviderCapacity extends Context.Service<
         end: Capacity.AttemptEnd,
       ) {
         const holderOf = yield* holders.current;
-        const group = Capacity.capacityGroupOf(attempt.brain, attempt.worker, holderOf);
+        const group = capacityGroupOf(attempt.brain, attempt.worker, holderOf);
         const fields = {
           runId: attempt.runId,
           attemptId: attempt.id,
@@ -300,7 +306,7 @@ export class ProviderCapacity extends Context.Service<
         }
         const brain = yield* request.brain;
         const holderOf = yield* holders.current;
-        const group = Capacity.capacityGroupOf(brain, worker, holderOf);
+        const group = capacityGroupOf(brain, worker, holderOf);
         const now = yield* DateTime.now;
         const claimed = yield* Ref.modify(state, (current) =>
           Capacity.claim(current, { runId, loop, group, turn: request.turn, now }),
@@ -313,7 +319,7 @@ export class ProviderCapacity extends Context.Service<
             "The Run elected to test a group at capacity got a slot for another group; the Runs waiting for the first group elect another",
             { ...fields, left: claimed.left },
           );
-        const wait = Capacity.waitFor(current, Capacity.capacityGroupKey(group));
+        const wait = Capacity.waitFor(current, capacityGroupKey(group));
         if (claimed.claim === "Free" || Option.isNone(wait)) {
           if (others.length > 0) yield* announce(others);
           return claimed.claim;
@@ -331,10 +337,7 @@ export class ProviderCapacity extends Context.Service<
               : "The Run's Attempt tests the group at capacity; the other Runs that need it keep waiting",
             logged,
           );
-        yield* announce([
-          ...Capacity.waitersOf(current, Capacity.capacityGroupKey(group)),
-          ...others,
-        ]);
+        yield* announce([...Capacity.waitersOf(current, capacityGroupKey(group)), ...others]);
         return claimed.claim;
       });
 
@@ -436,8 +439,9 @@ export class ProviderCapacity extends Context.Service<
       }) {
         yield* Effect.annotateCurrentSpan({ runId: run.runId });
         const holderOf = yield* holders.current;
+        const { streak } = capacityRefusals(run.attempts, holderOf);
         // The streak is in one group, so a Run that waits for another group skips all of it.
-        for (const attempt of capacityRefusalStreak(run.attempts, holderOf))
+        for (const attempt of streak)
           if ((yield* refused(attempt, run.loop, holderOf)) === "Elsewhere") break;
         return yield* waitTurn(run.runId);
       });

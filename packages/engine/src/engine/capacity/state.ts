@@ -1,57 +1,17 @@
-import { Harness, ModelId, type BrainSpec } from "@usine/core/agent/brain";
 import {
   type Attempt,
   type AttemptId,
   capacityBackoff,
+  CapacityGroup,
+  capacityGroupKey,
+  capacityGroupOf,
   capacityRefusal,
 } from "@usine/core/attempt";
 import type { AttemptFailure } from "@usine/core/attempt/failure";
-import { jsonKey } from "@usine/core/json-key";
 import type { LoopName } from "@usine/core/loop";
 import { RunId } from "@usine/core/run";
-import { CredentialHolder, type CredentialHolderOf, type WorkerName } from "@usine/core/worker";
-import { Array as EffectArray, type Brand, DateTime, Match, Option, Order, Schema } from "effect";
-
-/**
- * The harness and model of an Attempt's child sessions, and the holder of the credential that the
- * harness used, which a provider capacity refusal applies to. Workers behind one Gateway that holds
- * the credential share a group, and a model can have its own usage limit.
- */
-export class CapacityGroup extends Schema.Class<
-  CapacityGroup,
-  Brand.Brand<"@usine/engine/engine/capacity/state/CapacityGroup">
->("@usine/engine/CapacityGroup")({
-  /** The harness of the Attempt's child sessions. */
-  harness: Harness,
-  /** The model of the Attempt's child sessions. */
-  model: ModelId,
-  /** The Worker or Gateway that holds the credential the harness used. */
-  holder: CredentialHolder,
-}) {}
-
-/** Returns the capacity group of `brain` on `worker`, whose credential holder `holderOf` returns. */
-export const capacityGroupOf = (
-  brain: Pick<BrainSpec, "harness" | "model">,
-  worker: WorkerName,
-  holderOf: CredentialHolderOf,
-): CapacityGroup =>
-  CapacityGroup.make({
-    harness: brain.harness,
-    model: brain.model,
-    holder: holderOf(worker, brain.harness),
-  });
-
-/** Identifies `group` in the capacity state and in the operator's attention entries. */
-export const capacityGroupKey = ({ holder, harness, model }: CapacityGroup): string =>
-  jsonKey([
-    holder._tag,
-    Match.valueTags(holder, {
-      Worker: ({ worker }) => worker,
-      Gateway: ({ destination }) => destination,
-    }),
-    harness,
-    model,
-  ]);
+import type { CredentialHolderOf } from "@usine/core/worker";
+import { Array as EffectArray, type Brand, DateTime, Option, Order, Schema } from "effect";
 
 /** A capacity group whose provider refuses requests, and the Runs that wait for it. */
 export class CapacityWait extends Schema.Class<

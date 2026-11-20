@@ -11,7 +11,8 @@ import {
   AttemptNumber,
   AttemptWindow,
   capacityBackoff,
-  capacityRefusalStreak,
+  type CapacityRefusals,
+  capacityRefusals,
   pendingProviderRetry,
   shouldAutoRetry,
   totalOutOfMemoryKills,
@@ -131,6 +132,13 @@ describe("provider retry deadline", () => {
     brain,
   });
   const ownLogins: CredentialHolderOf = (worker) => WorkerCredentialHolder.make({ worker });
+  const numbers = ({
+    streak,
+    elsewhere,
+  }: CapacityRefusals<{ readonly number: AttemptNumber }>) => ({
+    streak: streak.map(({ number }) => number),
+    elsewhere: elsewhere.map(({ number }) => number),
+  });
   const retryAt = (refusals: number, resetsAt: Option.Option<DateTime.Utc>) =>
     pendingProviderRetry(
       Running.make(),
@@ -226,14 +234,32 @@ describe("provider retry deadline", () => {
       refused(5, Option.none()),
       refused(6, Option.none()),
     ];
-    expect(capacityRefusalStreak(attempts, ownLogins).map(({ number }) => number)).toStrictEqual([
-      6, 5, 3,
-    ]);
-    expect(
-      capacityRefusalStreak(attempts.slice(0, 4), ownLogins).map(({ number }) => number),
-    ).toStrictEqual([4]);
-    expect(capacityRefusalStreak(attempts.slice(0, 2), ownLogins)).toStrictEqual([]);
-    expect(capacityRefusalStreak([], ownLogins)).toStrictEqual([]);
+    expect(numbers(capacityRefusals(attempts, ownLogins))).toStrictEqual({
+      streak: [6, 5, 3],
+      elsewhere: [4],
+    });
+    expect(numbers(capacityRefusals(attempts.slice(0, 4), ownLogins))).toStrictEqual({
+      streak: [4],
+      elsewhere: [3],
+    });
+    expect(numbers(capacityRefusals(attempts.slice(0, 2), ownLogins))).toStrictEqual({
+      streak: [],
+      elsewhere: [],
+    });
+    expect(numbers(capacityRefusals([], ownLogins))).toStrictEqual({ streak: [], elsewhere: [] });
+  });
+
+  it("keeps the refusals of another harness out of the streak when an edit and retry keeps the model", () => {
+    const codex = BrainSpec.make({ ...opus, harness: Harness.make("codex") });
+    const attempts = [
+      refused(1, Option.none()),
+      refused(2, Option.none()),
+      refused(3, Option.none(), "local", codex),
+    ];
+    expect(numbers(capacityRefusals(attempts, ownLogins))).toStrictEqual({
+      streak: [3],
+      elsewhere: [2, 1],
+    });
   });
 
   it("counts only the refusals since the last Attempt that the provider didn't refuse", () => {
