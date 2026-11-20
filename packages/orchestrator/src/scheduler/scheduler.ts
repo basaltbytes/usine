@@ -980,6 +980,7 @@ export const stepExecutorLayer = (
                 maxAttemptMinutes: settings.maxAttemptMinutes,
                 maxAttemptTokens: settings.maxAttemptTokens,
                 maxBackgroundWaitMinutes: settings.maxBackgroundWaitMinutes,
+                allowUsageCredits: settings.allowUsageCredits,
                 salvageRef: salvageRefFor(execution.run.id, execution.attempt.number),
                 resume: execution.resume,
                 reattach: execution.reattach,

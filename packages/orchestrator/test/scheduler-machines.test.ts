@@ -59,7 +59,7 @@ const unused = () => Effect.die("unused");
 const configWithTimings = (
   timings: Record<string, number>,
   slots = 1,
-  settings: Record<string, number> = {},
+  settings: Record<string, number | boolean> = {},
 ) =>
   Schema.decodeEffect(UsineConfig)({
     version: 1,
@@ -304,6 +304,23 @@ describe("Worker scheduler on a provisioned Worker", () => {
         yield* steps.discard(WorkerName.make("retired"), [attempt]);
         assert.deepStrictEqual(discarded, [`retired ${attempt}`]);
       }).pipe(Effect.scoped),
+  );
+
+  it.effect("copies settings.allow_usage_credits to the checkout", () =>
+    Effect.gen(function* () {
+      const fake = yield* fakeMachines();
+      const config = yield* configWithTimings({}, 1, { allow_usage_credits: true });
+      const context = yield* scheduler(fake.machines, config);
+      const steps = Context.get(context, StepExecutor);
+      const run = RunId.make("run-credits");
+      const lease = yield* steps.reserve(run, submission(1), Option.none());
+      const attempt = AttemptId.make("run-credits/execute/1");
+      yield* steps.execute(executionOf(run, attempt), sink).pipe(Effect.flip);
+      const checkout = checkouts.find(({ attemptId }) => attemptId === attempt);
+      assert(checkout !== undefined, "the scheduler prepares the checkout");
+      assert.isTrue(checkout.allowUsageCredits);
+      yield* lease.release;
+    }).pipe(Effect.scoped),
   );
 
   it.effect("keeps the same attempt after capacity failures without quota attention", () =>

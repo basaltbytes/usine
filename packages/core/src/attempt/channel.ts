@@ -66,6 +66,14 @@ export class RunSpec extends Schema.Class<
     Schema.withDecodingDefaultKey(Effect.succeed(null)),
     Schema.withConstructorDefault(Effect.succeed(Option.none<number>())),
   ),
+  /**
+   * Whether the children may keep working on usage credits after the plan's usage limit. Decodes
+   * as `false` for older Attempts.
+   */
+  allowUsageCredits: Schema.Boolean.pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed(false)),
+    Schema.withConstructorDefault(Effect.succeed(false)),
+  ),
   /** The reasoning effort of a `session` Attempt's Pi parent session. */
   parentEffort: Effort,
   /**

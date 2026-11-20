@@ -682,6 +682,15 @@ export class Settings extends Schema.Class<Settings, Brand.Brand<"@usine/config/
    */
   maxBackgroundWaitMinutes: Schema.OptionFromOptionalKey(PositiveInt),
   /**
+   * Whether a child may keep working on usage credits after the plan's usage limit; decoding
+   * defaults to `false`. Without it, the child stops at its first request on usage credits, and the
+   * Attempt waits for the plan limit to reset.
+   */
+  allowUsageCredits: Schema.Boolean.pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed(false)),
+    Schema.withConstructorDefault(Effect.succeed(false)),
+  ),
+  /**
    * The harness, model, and effort of the supervisor role, or `None` when the instance runs no
    * supervisor. Admission refuses a brain whose harness can't serve the role.
    */
@@ -762,6 +771,7 @@ const SettingsFromYaml = Settings.pipe(
     maxAttemptMinutes: "max_attempt_minutes",
     maxAttemptTokens: "max_attempt_tokens",
     maxBackgroundWaitMinutes: "max_background_wait_minutes",
+    allowUsageCredits: "allow_usage_credits",
     supervisorLimits: "supervisor_limits",
     supervisorImagePullTimeoutMinutes: "supervisor_image_pull_timeout_minutes",
   }),
