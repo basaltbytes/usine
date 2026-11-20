@@ -5,7 +5,12 @@ import { AttemptId, AttemptNumber } from "@usine/core/attempt";
 import { LoopName } from "@usine/core/loop";
 import { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
-import { WorkerName } from "@usine/core/worker";
+import {
+  GatewayCredentialHolder,
+  SshDestination,
+  WorkerCredentialHolder,
+  WorkerName,
+} from "@usine/core/worker";
 import {
   PoolLimitNeed,
   ProviderCapacityNeed,
@@ -135,13 +140,14 @@ it("words a failed run's CI fix link by the fix run's state", () => {
 });
 
 it("shows a capacity group at capacity once, with its next try and waiting runs, outside any project", () => {
+  const group = CapacityGroup.make({
+    harness: Harness.make("claude"),
+    model: ModelId.make("claude-sonnet-4-6"),
+    holder: WorkerCredentialHolder.make({ worker: WorkerName.make("local") }),
+  });
   const need = ProviderCapacityNeed.make({
     id: "provider-capacity:local",
-    group: CapacityGroup.make({
-      harness: Harness.make("claude"),
-      model: ModelId.make("claude-sonnet-4-6"),
-      worker: WorkerName.make("local"),
-    }),
+    group,
     message: "This request would exceed your account's rate limit.",
     since: "2026-11-13T23:44:00.000Z",
     nextTryAt: "2026-11-14T00:44:00.000Z",
@@ -152,4 +158,17 @@ it("shows a capacity group at capacity once, with its next try and waiting runs,
   assert.include(copy.detail, "4 runs wait without failing");
   assert.include(copy.detail, "exceed your account's rate limit");
   assert.deepStrictEqual([...needsYouByProject([need], [])], []);
+  const shared = needCopy(
+    ProviderCapacityNeed.make({
+      ...need,
+      group: CapacityGroup.make({
+        ...group,
+        holder: GatewayCredentialHolder.make({ destination: SshDestination.make("usine@gateway") }),
+      }),
+    }),
+  );
+  assert.include(
+    shared.title,
+    "claude claude-sonnet-4-6 through gateway usine@gateway: at capacity since",
+  );
 });

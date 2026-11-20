@@ -3,6 +3,7 @@ import { RunId } from "@usine/core/run";
 import type {
   CycleBudgetNeed,
   NeedView,
+  ProviderCapacityNeed,
   RunFailureNeed,
   UnresponsiveWorkerNeed,
 } from "@usine/orchestrator/operator";
@@ -22,6 +23,13 @@ export interface NeedCopy {
 export const cycleBudgetCounts = (ask: CycleBudgetNeed["ask"]): string =>
   `${ask.completedCycles} completed rounds. ${ask.counts.map(({ loop, admitted }) => `${loop}: ${admitted} ${admitted === 1 ? "run" : "runs"}`).join("; ")}`;
 
+/** Returns where a capacity group's credential is, for example `on local` or `through gateway usine@gateway`. */
+const credentialPlace = (holder: ProviderCapacityNeed["group"]["holder"]): string =>
+  Match.valueTags(holder, {
+    Worker: ({ worker }) => `on ${worker}`,
+    Gateway: ({ destination }) => `through gateway ${destination}`,
+  });
+
 export const needCopy = (need: NeedView): NeedCopy =>
   Match.valueTags(need, {
     UpgradeDrainNeed: ({ wait, deferredRuns }) => ({
@@ -31,7 +39,7 @@ export const needCopy = (need: NeedView): NeedCopy =>
       runId: null,
     }),
     ProviderCapacityNeed: ({ group, message, since, nextTryAt, waitingRuns }) => ({
-      title: `${group.harness} ${group.model} on ${group.worker}: at capacity since ${timestampLabel(since)}`,
+      title: `${group.harness} ${group.model} ${credentialPlace(group.holder)}: at capacity since ${timestampLabel(since)}`,
       detail: `Next try at ${timestampLabel(nextTryAt)}. ${waitingRuns} ${waitingRuns === 1 ? "run waits" : "runs wait"} without failing; retry a run to try now. ${message}`,
       repository: null,
       runId: null,

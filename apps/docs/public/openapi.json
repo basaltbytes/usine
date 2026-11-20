@@ -72596,14 +72596,60 @@
             "type": "string",
             "pattern": "\\S"
           },
+          "holder": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CredentialHolder_WorkerEncoded"
+              },
+              {
+                "$ref": "#/components/schemas/CredentialHolder_GatewayEncoded"
+              }
+            ]
+          }
+        },
+        "required": [
+          "harness",
+          "model",
+          "holder"
+        ],
+        "additionalProperties": false
+      },
+      "CredentialHolder_GatewayEncoded": {
+        "type": "object",
+        "properties": {
+          "_tag": {
+            "type": "string",
+            "enum": [
+              "Gateway"
+            ]
+          },
+          "destination": {
+            "type": "string",
+            "pattern": "^(?:[A-Za-z0-9._-]+@)?(?:[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?|[0-9A-Fa-f]{0,4}(?::[0-9A-Fa-f]{0,4}){2,7})$"
+          }
+        },
+        "required": [
+          "_tag",
+          "destination"
+        ],
+        "additionalProperties": false
+      },
+      "CredentialHolder_WorkerEncoded": {
+        "type": "object",
+        "properties": {
+          "_tag": {
+            "type": "string",
+            "enum": [
+              "Worker"
+            ]
+          },
           "worker": {
             "type": "string",
             "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
           }
         },
         "required": [
-          "harness",
-          "model",
+          "_tag",
           "worker"
         ],
         "additionalProperties": false
