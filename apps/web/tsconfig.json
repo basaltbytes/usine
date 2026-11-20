@@ -5,6 +5,7 @@
     "vite.config.ts",
     "vitest.config.ts",
     "react-compiler.ts",
+    "precompress.ts",
     "react-compiler.test.ts"
   ],
   "compilerOptions": {
