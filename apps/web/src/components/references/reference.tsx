@@ -43,6 +43,17 @@ const Resolved = ({ reference, data, written }: ResolvedProps) => {
       return <TaskChip project={resolution.project} task={resolution.task} />;
     case "Run":
       return <RunChip project={resolution.project} run={resolution.run} />;
+    case "RunPage":
+      return (
+        <Link
+          {...linkOptions({
+            to: "/projects/$project/runs/$run",
+            params: { project: resolution.project, run: resolution.run },
+          })}
+        >
+          {written}
+        </Link>
+      );
     case "Label":
       return <LabelBadge name={resolution.label.name} label={resolution.label} />;
     case "Configuration":
@@ -89,8 +100,9 @@ type ReferenceProps = ComponentProps<"data"> & { readonly node?: unknown };
 
 /**
  * Renders a reference that `remarkReferences` marked: a task or a run as a chip, a label as its
- * badge, a source line or an item that the board doesn't show as a GitHub link, and a loop, agent,
- * or worker name as a link to its configuration page. Anything else stays as written.
+ * badge, a source line or an item that the board doesn't show as a GitHub link, a run ID that the
+ * board doesn't show as a link to its run page, and a loop, agent, or worker name as a link to its
+ * configuration page. Anything else stays as written.
  */
 export const Reference = ({ value, children }: ReferenceProps) => {
   const scope = use(ReferenceScopeContext);

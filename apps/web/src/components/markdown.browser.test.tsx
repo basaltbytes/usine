@@ -87,20 +87,43 @@ it("opens a path that a route matches in the app, and keeps an unknown or unsafe
             "[script](javascript:alert(1))",
             "[data](data:text/html,hi)",
             "[web](https://example.com/a)",
+            "[home elsewhere](https://example.com/)",
+            "[tasks elsewhere](https://other.example/projects/basaltbytes-usine/tasks)",
           ].join(" ")}
         </Markdown>
       </RouterContextProvider>,
     ),
   );
-  expect([...host.querySelectorAll("a")].map((link) => link.textContent)).toEqual(["task", "web"]);
-  const task = page.getByRole("link", { name: "task" });
-  expect(task.element().getAttribute("href")).toBe(
-    "/projects/basaltbytes-usine/tasks/40?repository=basaltbytes/usine#runs",
-  );
+  expect([...host.querySelectorAll("a")].map((link) => link.textContent)).toEqual([
+    "task",
+    "web",
+    "home elsewhere",
+    "tasks elsewhere",
+  ]);
+  const task = page.getByRole("link", { name: "task", exact: true });
+  await expect
+    .element(task)
+    .toHaveAttribute(
+      "href",
+      "/projects/basaltbytes-usine/tasks/40?repository=basaltbytes%2Fusine#runs",
+    );
   expect(task.element().getAttribute("target")).toBeNull();
+  // A URL on another origin stays external, even when its path is a page of the app.
+  for (const [name, href] of [
+    ["home elsewhere", "https://example.com/"],
+    ["tasks elsewhere", "https://other.example/projects/basaltbytes-usine/tasks"],
+  ] as const) {
+    const external = page.getByRole("link", { name, exact: true }).element();
+    expect([external.getAttribute("href"), external.getAttribute("target")]).toEqual([
+      href,
+      "_blank",
+    ]);
+  }
   const navigate = vi.spyOn(router, "navigate").mockResolvedValue();
   await task.click();
-  expect(navigate).toHaveBeenCalledWith({
-    href: "/projects/basaltbytes-usine/tasks/40?repository=basaltbytes/usine#runs",
-  });
+  expect(navigate).toHaveBeenCalledWith(
+    expect.objectContaining({
+      href: "/projects/basaltbytes-usine/tasks/40?repository=basaltbytes/usine#runs",
+    }),
+  );
 });

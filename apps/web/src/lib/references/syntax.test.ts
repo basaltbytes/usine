@@ -33,8 +33,10 @@ it("leaves numbers and IDs inside words, paths, and longer IDs as text", () => {
     expect(textReferences(text).every(({ _tag }) => _tag === "Text")).toBe(true);
 });
 
-it("reads a code span as a task, a source line, or a name", () => {
+it("reads a code span as a task, a run, a source line, or a name", () => {
   expect(codeReference("#40")).toEqual(Option.some({ _tag: "Task", repository: null, number: 40 }));
+  expect(codeReference(run)).toEqual(Option.some({ _tag: "Run", run }));
+  expect(codeReference("run-again")).toEqual(Option.some({ _tag: "Name", name: "run-again" }));
   expect(
     codeReference(" basaltbytes/usine/packages/executor/src/supervisor/storage.ts:36 "),
   ).toEqual(

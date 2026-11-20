@@ -1,6 +1,7 @@
 import type { TurnSource } from "@usine/core/conversation";
 import type { ProjectId } from "@usine/core/project";
 import { canonicalRepositoryName, type RepositoryName } from "@usine/core/repository";
+import type { RunId } from "@usine/core/run";
 import {
   boardTaskRuns,
   type BoardTaskView,
@@ -29,6 +30,8 @@ export type ConfigurationKind = "loop" | "agent" | "worker";
 export type Resolution =
   | { readonly _tag: "Task"; readonly project: ProjectId; readonly task: BoardTaskView }
   | { readonly _tag: "Run"; readonly project: ProjectId; readonly run: RunSummaryView }
+  /** A run ID that the board doesn't show, such as an older closed run, on its run page. */
+  | { readonly _tag: "RunPage"; readonly project: ProjectId; readonly run: RunId }
   | { readonly _tag: "Label"; readonly label: LabelView }
   | { readonly _tag: "Configuration"; readonly kind: ConfigurationKind; readonly name: string }
   /** An issue or pull request that the board doesn't show, or a source line, on GitHub. */
@@ -155,7 +158,8 @@ const resolveSource = (
 /**
  * Returns what `reference` opens with `data`: a task or a run on the board, a source line on
  * GitHub at the commit the turn read, a loop, agent, or worker page, or a repository label. A
- * name is looked up in that order, then as a run ID.
+ * name is looked up in that order, then as the ID of a run on the board. A run ID that the board
+ * doesn't show opens the run page in the board's project.
  */
 export const resolveReference = (reference: Reference, data: ReferenceData): Resolution => {
   const { scope, board, configuration } = data;
@@ -168,15 +172,16 @@ export const resolveReference = (reference: Reference, data: ReferenceData): Res
   switch (reference._tag) {
     case "Task":
       return resolveTask(reference, scope, board);
-    case "Run":
+    case "Run": {
+      const run = boardRun(board, reference.run);
+      return run === undefined
+        ? { _tag: "RunPage", project: projectId(board), run: reference.run }
+        : { _tag: "Run", project: projectId(board), run };
+    }
     case "Name": {
-      const id = reference._tag === "Run" ? reference.run : reference.name;
-      const label =
-        reference._tag === "Name"
-          ? board.labels?.find((candidate) => candidate.name === reference.name)
-          : undefined;
+      const label = board.labels?.find((candidate) => candidate.name === reference.name);
       if (label !== undefined) return { _tag: "Label", label };
-      const run = boardRun(board, id);
+      const run = boardRun(board, reference.name);
       return run === undefined ? { _tag: "Text" } : { _tag: "Run", project: projectId(board), run };
     }
   }

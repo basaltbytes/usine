@@ -3,7 +3,15 @@ import { createMemoryHistory, createRouter, RouterContextProvider } from "@tanst
 import { TurnSource } from "@usine/core/conversation";
 import { ProjectId } from "@usine/core/project";
 import { CommitSha } from "@usine/core/repository";
-import { BoardItemLink, BoardTaskView, DeskView } from "@usine/orchestrator/operator";
+import {
+  BoardItemLink,
+  boardRunSummary,
+  BoardTaskView,
+  boardTaskRuns,
+  DeskView,
+  RunFailedView,
+  StalledItemView,
+} from "@usine/orchestrator/operator";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, assert, beforeEach, expect, it } from "vitest";
@@ -19,6 +27,7 @@ import { overviewQuery } from "~/lib/overview";
 import { changeTasks } from "~/lib/projects/fixture";
 import type { ReferenceScope } from "~/lib/references/resolve";
 import { taskRows } from "~/lib/tasks/model";
+import { statusLine } from "~/lib/tasks/status";
 import { projectTasksQuery } from "~/lib/tasks/queries";
 import { taskOverview, taskRepository } from "~/lib/tasks/fixture";
 import { routeTree } from "~/route-tree.gen";
@@ -107,24 +116,67 @@ it("shows a task on the board as a chip that opens its task page", async () => {
   await expect.element(chip.getByRole("img", { name: "Issue #40, open" })).toBeVisible();
 });
 
-it("gives a task the mark and tone that the Tasks list gives it", async () => {
-  const [row] = taskRows(board().board.lanes, []);
-  assert(row !== undefined);
-  render("See #40.");
-  await expect.element(link(/Rework the conversation reader/u)).toBeVisible();
-  const chip = host.querySelector("[data-slot=state-mark]");
-  const listed = document.createElement("div");
-  document.body.append(listed);
-  const listRoot = createRoot(listed);
-  flushSync(() => listRoot.render(<Status row={row} now={Date.now()} />));
-  const tone = (mark: Element | null | undefined) =>
-    [...(mark?.classList ?? [])].filter((name) => name.startsWith("text-"));
-  try {
-    expect(tone(chip)).toEqual(["text-run-active"]);
-    expect(tone(listed.querySelector("[data-slot=state-mark]"))).toEqual(tone(chip));
-  } finally {
-    flushSync(() => listRoot.unmount());
-    listed.remove();
+/** Returns the board where #42's failed start-dev run, which the desk lists as stalled, is its status. */
+const stalledBoard = () => {
+  const view = board(
+    changeTasks(taskOverview(), (task) =>
+      task.number === 42
+        ? BoardTaskView.make({
+            ...task,
+            ...boardRunSummary(
+              boardTaskRuns(task).filter(({ state }) => state !== "Running" && state !== "Waiting"),
+              null,
+              task.items,
+            ),
+          })
+        : task,
+    ),
+  );
+  const task = view.board.lanes.flatMap(({ items }) => items).find(({ number }) => number === 42);
+  const failed = task === undefined ? undefined : boardTaskRuns(task).find(isFailed);
+  const item = task?.items[0];
+  assert(failed !== undefined && item !== undefined);
+  const stall = StalledItemView.make({
+    repository: failed.repository,
+    loop: failed.loop,
+    item,
+    reason: RunFailedView.make({ run: failed }),
+  });
+  return { view, desk: DeskView.make({ ...emptyDesk, notMoving: [stall] }) };
+};
+
+const isFailed = ({ state }: { readonly state: string }) => state === "Failed";
+
+it("gives a task the mark, tone, and status that the Tasks list gives it, stalls included", async () => {
+  for (const { view, desk, expected } of [
+    { view: board(), desk: emptyDesk, expected: "text-run-active" },
+    { ...stalledBoard(), expected: "text-run-failed" },
+  ]) {
+    queryClient.setQueryData(projectTasksQuery(project).queryKey, view);
+    queryClient.setQueryData(deskQuery().queryKey, desk);
+    const [row] = taskRows(view.board.lanes, desk.notMoving);
+    assert(row !== undefined);
+    render("See #40.");
+    const chip = link(/Rework the conversation reader/u);
+    await expect.element(chip).toBeVisible();
+    const listed = document.createElement("div");
+    document.body.append(listed);
+    const listRoot = createRoot(listed);
+    flushSync(() => listRoot.render(<Status row={row} now={Date.now()} />));
+    const tone = (mark: Element | null | undefined) =>
+      [...(mark?.classList ?? [])].filter((name) => name.startsWith("text-"));
+    try {
+      await expect
+        .poll(() => tone(chip.element().querySelector("[data-slot=state-mark]")))
+        .toEqual([expected]);
+      expect(tone(listed.querySelector("[data-slot=state-mark]"))).toEqual([expected]);
+      const { words } = statusLine(row, Date.now());
+      expect(listed.textContent).toContain(words);
+      expect(chip.element().textContent).toContain(words);
+    } finally {
+      flushSync(() => listRoot.unmount());
+      listed.remove();
+    }
   }
 });
 
@@ -157,6 +209,17 @@ it("links a number that isn't a task to GitHub, and keeps a task the member can'
   render("See #40.", { ...scope, project: hidden });
   await expect.element(page.getByText("See #40.")).toBeVisible();
   expect(host.querySelectorAll("a")).toHaveLength(0);
+});
+
+it("links a run ID that the board doesn't show to its run page", async () => {
+  const closed = "0f3c9a1b2d4e5f60718293a4b5c6d7e8";
+  render(`Run ${closed} failed last week, and \`${closed}\` is the same run.`);
+  const runs = link(closed);
+  await expect.poll(() => runs.elements().length).toBe(2);
+  for (const run of runs.elements()) {
+    expect(run.getAttribute("href")).toBe(`/projects/basaltbytes-usine/runs/${closed}`);
+    expect(run.getAttribute("target")).toBeNull();
+  }
 });
 
 it("keeps references inside code blocks and links as written", async () => {

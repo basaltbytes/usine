@@ -1,4 +1,4 @@
-import { type AnyRouter, useRouter } from "@tanstack/react-router";
+import { type AnyRouter, Link, useRouter } from "@tanstack/react-router";
 import { Schema } from "effect";
 import { type ComponentProps, createContext, use } from "react";
 import ReactMarkdown, { type Components, type Options } from "react-markdown";
@@ -42,32 +42,24 @@ const InsideLink = createContext(false);
 
 type MarkdownLinkProps = ComponentProps<"a"> & { node?: unknown };
 
-const MarkdownLink = ({ node: _node, href, children, ...props }: MarkdownLinkProps) => {
+// A page of the app opens in place and another site in a new tab, whatever target the props carry.
+const MarkdownLink = ({
+  node: _node,
+  href,
+  target: _target,
+  children,
+  ...props
+}: MarkdownLinkProps) => {
   // Markdown outside a router, as in a component test, links no page of the app.
   const router: AnyRouter | null = useRouter({ warn: false });
   const page = appHref(href, router);
   const target = linkTarget(href);
-  return page !== undefined && router !== null ? (
+  return page !== undefined ? (
     <InsideLink value={true}>
-      <a
-        {...props}
-        href={router.history.createHref(page)}
-        onClick={(event) => {
-          // A modified or middle click opens the page in a new tab or window, as for any link.
-          if (
-            event.button !== 0 ||
-            event.metaKey ||
-            event.ctrlKey ||
-            event.shiftKey ||
-            event.altKey
-          )
-            return;
-          event.preventDefault();
-          void router.navigate({ href: page });
-        }}
-      >
+      {/* Typed with a string path, so `href` names the page that `appHref` matched, with no `to`. */}
+      <Link<AnyRouter, string, string> {...props} href={page}>
         {children}
-      </a>
+      </Link>
     </InsideLink>
   ) : target === undefined ? (
     <span>{children}</span>

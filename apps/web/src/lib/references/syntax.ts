@@ -9,7 +9,7 @@ const LineNumber = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1));
 export const Reference = Schema.Union([
   /** `#<number>`, or `<owner>/<name>#<number>`. */
   Schema.TaggedStruct("Task", { repository: Schema.NullOr(RepositoryName), number: ItemNumber }),
-  /** A run ID in text: 32 lowercase hex digits. */
+  /** A run ID, in text or a code span: 32 lowercase hex digits. */
   Schema.TaggedStruct("Run", { run: RunId }),
   /** `<path>:<line>` or `<path>:<line>-<end>` in a code span. */
   Schema.TaggedStruct("Source", {
@@ -17,7 +17,7 @@ export const Reference = Schema.Union([
     line: LineNumber,
     end: Schema.NullOr(LineNumber),
   }),
-  /** Any other single-line code span, such as a loop, agent, worker, or label name, or a run ID. */
+  /** Any other single-line code span, such as a loop, agent, worker, or label name. */
   Schema.TaggedStruct("Name", { name: Schema.NonEmptyString }),
 ]);
 export type Reference = typeof Reference.Type;
@@ -33,12 +33,14 @@ export const decodeReferenceMark = Schema.decodeUnknownOption(ReferenceMark);
 
 const REPOSITORY = String.raw`[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+`;
 const NUMBER = String.raw`[1-9]\d{0,8}`;
+const RUN = String.raw`[0-9a-f]{32}`;
 /** A task or a run ID that isn't part of a longer word, path, or ID. */
 const IN_TEXT = new RegExp(
-  String.raw`(?<![\w/#&.-])(?:(?:(?<repository>${REPOSITORY}))?#(?<number>${NUMBER})(?![\w-])|(?<run>[0-9a-f]{32})(?![\w-]))`,
+  String.raw`(?<![\w/#&.-])(?:(?:(?<repository>${REPOSITORY}))?#(?<number>${NUMBER})(?![\w-])|(?<run>${RUN})(?![\w-]))`,
   "gu",
 );
 const TASK = new RegExp(String.raw`^(?:(?<repository>${REPOSITORY}))?#(?<number>${NUMBER})$`, "u");
+const RUN_ID = new RegExp(`^${RUN}$`, "u");
 const SOURCE = new RegExp(
   String.raw`^(?<path>[^\s:]*/[^\s:]+):(?<line>${NUMBER})(?:-(?<end>${NUMBER}))?$`,
   "u",
@@ -82,6 +84,7 @@ export const codeReference = (code: string): Option.Option<Reference> => {
   const value = code.trim();
   const task = TASK.exec(value)?.groups;
   if (task !== undefined) return Option.some(taskOf(task["repository"], task["number"] ?? ""));
+  if (RUN_ID.test(value)) return Option.some({ _tag: "Run", run: RunId.make(value) });
   const source = SOURCE.exec(value)?.groups;
   if (source !== undefined) {
     const line = Number(source["line"]);

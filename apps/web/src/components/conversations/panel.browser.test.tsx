@@ -1,7 +1,13 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
 import { type PermissionGrant, PermissionGrant as Grant } from "@usine/core/access";
-import { Conversation, ConversationId, ConversationTitle } from "@usine/core/conversation";
+import {
+  Conversation,
+  ConversationId,
+  ConversationTitle,
+  TurnSource,
+} from "@usine/core/conversation";
+import { CommitSha } from "@usine/core/repository";
 import { FactoryOverview } from "@usine/orchestrator/operator";
 import { ChangeNotice, PostedView } from "@usine/orchestrator/operator/http";
 import { Schema } from "effect";
@@ -30,7 +36,7 @@ import {
 } from "~/lib/conversations/fixture";
 import { overviewQuery } from "~/lib/overview";
 import { sessionQuery } from "~/lib/permissions";
-import { taskOverview } from "~/lib/tasks/fixture";
+import { taskOverview, taskRepository } from "~/lib/tasks/fixture";
 import { routeTree } from "~/route-tree.gen";
 import "~/index.css";
 
@@ -404,6 +410,40 @@ it("shows an image in a supervisor message as a link, so its URL loads only on a
   await expect.element(link).toHaveAttribute("href", "https://example.com/p.png?d=secret");
   await expect.element(link).toHaveAttribute("rel", "noopener noreferrer");
   expect(panel().element().querySelectorAll("img")).toHaveLength(0);
+});
+
+it("links a source line in each answer to GitHub at the commit that its turn read", async () => {
+  const [before, after] = ["a", "b"].map((digit) => CommitSha.make(digit.repeat(40)));
+  const path = "basaltbytes/usine/packages/core/src/conversation.ts";
+  const answer = (minute: number, text: string, revision: CommitSha | undefined) => ({
+    turn: `t-${minute}`,
+    member: ada,
+    text,
+    minute,
+    state: answered(minute),
+    answer: `Read \`${path}:36\`.`,
+    sources:
+      revision === undefined ? [] : [TurnSource.make({ repository: taskRepository, revision })],
+  });
+  server.conversations.set(
+    conversationId,
+    conversationOf([
+      answer(1, "Where does the store open?", before),
+      answer(3, "And now?", after),
+      answer(5, "And without source?", undefined),
+    ]),
+  );
+  await mount(`/tokens?conversation=${conversationId}`);
+  const lines = messages().getByRole("link", { name: `${path}:36`, exact: true });
+  await expect
+    .poll(() => lines.elements().map((line) => line.getAttribute("href")))
+    .toEqual(
+      [before, after].map(
+        (revision) =>
+          `https://github.com/basaltbytes/usine/blob/${revision}/packages/core/src/conversation.ts#L36`,
+      ),
+    );
+  expect(messages().getByText(`${path}:36`).elements()).toHaveLength(3);
 });
 
 it("shows the setup reason and no composer while the supervisor isn't set up", async () => {

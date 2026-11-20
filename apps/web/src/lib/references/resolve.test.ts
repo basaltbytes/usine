@@ -3,9 +3,10 @@ import { ItemNumber } from "@usine/core/item";
 import { ProjectId } from "@usine/core/project";
 import { CommitSha, RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
-import type { ProjectView } from "@usine/orchestrator/operator";
+import { BoardItemLink, BoardTaskView, ProjectView } from "@usine/orchestrator/operator";
 import { assert, expect, it } from "vitest";
 import { configurationFixture } from "~/lib/configuration/fixture";
+import { changeTasks } from "~/lib/projects/fixture";
 import {
   type ReferenceData,
   type ReferenceScope,
@@ -24,10 +25,41 @@ const scope: ReferenceScope = {
   sources: [TurnSource.make({ repository, revision })],
 };
 
-const board = (): ProjectView => {
-  const view = taskOverview().projects[0];
+const board = (overview = taskOverview()): ProjectView => {
+  const view = overview.projects[0];
   assert(view !== undefined);
   return view;
+};
+
+const other = RepositoryName.make("acme/web");
+
+/**
+ * Returns the board of a project with a second repository, `acme/web`, whose task has items #40
+ * and #7 in place of the backlog task #12. `basaltbytes/usine` has #40 too.
+ */
+const twoRepositories = (): ProjectView => {
+  const view = board(
+    changeTasks(taskOverview(), (task) =>
+      task.number === 12
+        ? BoardTaskView.make({
+            ...task,
+            repository: other,
+            title: "Port the reader",
+            number: ItemNumber.make(7),
+            items: [40, 7].map((number) => {
+              const [item] = task.items;
+              assert(item !== undefined);
+              return BoardItemLink.make({
+                ...item,
+                number: ItemNumber.make(number),
+                url: `https://github.com/${other}/issues/${number}`,
+              });
+            }),
+          })
+        : task,
+    ),
+  );
+  return ProjectView.make({ ...view, repositories: [repository, other] });
 };
 
 const data = (overrides: Partial<ReferenceData> = {}): ReferenceData => ({
@@ -82,8 +114,43 @@ it("finds a run on the board by its ID", () => {
     "fix-ci",
     "Running",
   ]);
-  expect(resolveReference({ _tag: "Run", run: RunId.make("run-gone") }, data())).toEqual({
+});
+
+it("opens the run page of a run ID that the board doesn't show", () => {
+  const closed = RunId.make("0f3c9a1b2d4e5f60718293a4b5c6d7e8");
+  expect(resolveReference({ _tag: "Run", run: closed }, data())).toEqual({
+    _tag: "RunPage",
+    project,
+    run: closed,
+  });
+  expect(resolveReference({ _tag: "Run", run: closed }, data({ board: undefined }))).toEqual({
     _tag: "Text",
+  });
+});
+
+it("resolves a number in the repository it names, or the scope's, and keeps one that two repositories have as text", () => {
+  const input = (repositoryScope?: RepositoryName) =>
+    data({ board: twoRepositories(), scope: { ...scope, repository: repositoryScope } });
+  const named = (reference: Reference, within?: RepositoryName) => {
+    const resolution = resolveReference(reference, input(within));
+    return resolution._tag === "Task"
+      ? [resolution.task.repository, resolution.task.number]
+      : resolution;
+  };
+  expect(named(task(40, repository))).toEqual([repository, 42]);
+  expect(named(task(40, other))).toEqual([other, 7]);
+  expect(named(task(40), other)).toEqual([other, 7]);
+  expect(named(task(40), repository)).toEqual([repository, 42]);
+  expect(named(task(40))).toEqual({ _tag: "Text" });
+  expect(named(task(7))).toEqual([other, 7]);
+  // #7 is only on acme/web's card, so basaltbytes/usine#7 is the issue on GitHub.
+  expect(named(task(7, repository))).toEqual({
+    _tag: "GitHub",
+    url: "https://github.com/basaltbytes/usine/issues/7",
+  });
+  expect(named(task(7), repository)).toEqual({
+    _tag: "GitHub",
+    url: "https://github.com/basaltbytes/usine/issues/7",
   });
 });
 

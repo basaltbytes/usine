@@ -104,10 +104,13 @@ const outcomeLines = Effect.fn("Conversations.outcomeLines")(function* (
 
 /**
  * Returns how the answer names what usine shows on a page: the forms that usine links in an
- * answer, and the paths of the pages that the supervisor can link to itself.
+ * answer, and the paths of the pages that the supervisor can link to itself. Only a project's
+ * board resolves `#<number>`, a run ID, and a label, so an instance turn gets none of them.
  */
 const referenceLines = ({ conversation, repositories }: TurnContext) => [
-  `usine links these references in an answer when they exist: a task as ${conversation.scope._tag === "Project" ? "#<number> in the project or " : ""}<owner>/<name>#<number>, a run as its ID, and a loop, agent, worker, or label as its name in a code span.`,
+  conversation.scope._tag === "Project"
+    ? "usine links these references in an answer when they exist: a task as #<number> in the project or <owner>/<name>#<number>, a run as its ID, and a loop, agent, worker, or label as its name in a code span."
+    : "usine links these references in an answer when they exist: a task as <owner>/<name>#<number>, and a loop, agent, or worker as its name in a code span.",
   ...(repositories.length === 0
     ? []
     : [
