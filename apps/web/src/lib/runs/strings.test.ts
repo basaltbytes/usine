@@ -71,6 +71,26 @@ it("shows the provider refusal and the scheduled attempt in the run header", () 
   assert.include(line, "attempt 2 at 2026-10-29 02:04");
 });
 
+it("shows that another run's attempt tests the provider in place of a past next try", () => {
+  const line = runStateLine({
+    id: RunId.make("capacity"),
+    state: "Pending",
+    attempts: [],
+    upgradeWait: null,
+    machineWait: null,
+    providerRetry: ProviderRetry.make({
+      message: "You've hit your limit",
+      nextAttempt: AttemptNumber.make(1),
+      retryAt: DateTime.makeUnsafe(new Date(2026, 9, 29, 2, 4)),
+      testedByAnotherRun: true,
+    }),
+  });
+  assert.strictEqual(
+    line,
+    "Provider at capacity: You've hit your limit Next try: attempt 1 after another run's attempt tests the provider.",
+  );
+});
+
 it("shows the assigned worker quota refusal while a persisted attempt waits for its machine", () => {
   const line = runStateLine({
     id: RunId.make("quota"),

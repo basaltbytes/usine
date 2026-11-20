@@ -442,6 +442,14 @@ export class ProviderRetry extends Schema.Class<
     retryAt: Schema.DateTimeUtcFromString,
     /** The provider's latest capacity refusal. */
     message: Schema.NonEmptyString,
+    /**
+     * Whether another run's attempt tests the capacity group now. The next attempt then starts
+     * after that test, and `retryAt` can be past.
+     */
+    testedByAnotherRun: Schema.Boolean.pipe(
+      Schema.withDecodingDefaultKey(Effect.succeed(false)),
+      Schema.withConstructorDefault(Effect.succeed(false)),
+    ),
   }),
 ) {}
 
