@@ -6,7 +6,7 @@ import { AttemptFailure } from "@usine/core/attempt/failure";
 import { AttemptOutcome } from "@usine/core/attempt/outcome";
 import { LoopName } from "@usine/core/loop";
 import * as RunState from "@usine/core/run/state";
-import { SshDestination, type WorkerName } from "@usine/core/worker";
+import { type CredentialHolderOf, SshDestination, type WorkerName } from "@usine/core/worker";
 import {
   type RunSnapshot,
   type RunSummary,
@@ -51,6 +51,7 @@ import {
   TranscriptPageCursor,
   TranscriptEventView,
 } from "./transcript.ts";
+import { credentialHolderOf } from "../credential-holders.ts";
 import type { MachineQuotaWait } from "./machines.ts";
 import { ApprovalView, RunDurationView, RunSummaryView, RunView } from "./run.ts";
 
@@ -116,6 +117,20 @@ const workerAccess = (worker: ConfigWorker): WorkerAccess => {
 /** Returns how the operator accesses each of `workers`. */
 export const workerAccesses = (workers: ReadonlyArray<ConfigWorker>): WorkerAccesses =>
   new Map(workers.map((worker) => [worker.name, workerAccess(worker)]));
+
+/** The Workers declared in `usine.yaml`, as the operator's views of Runs read them. */
+export interface DeclaredWorkers {
+  /** How the operator accesses each Worker. */
+  readonly accesses: WorkerAccesses;
+  /** Who holds the credential that each harness uses on each Worker. */
+  readonly holderOf: CredentialHolderOf;
+}
+
+/** Returns the operator's view of the declared `workers`. */
+export const declaredWorkers = (workers: ReadonlyArray<ConfigWorker>): DeclaredWorkers => ({
+  accesses: workerAccesses(workers),
+  holderOf: credentialHolderOf(workers),
+});
 
 /** Returns the operator's view of `attempt`, with `report`, the final report it kept, if any. */
 const attemptSummaryView = (
@@ -243,17 +258,18 @@ export const readEngineWaits = (
 
 /**
  * Returns the Run's wait for provider capacity: the next try and latest refusal of the capacity
- * group that the engine lists the Run as waiting for, or else its pending capacity retry. The
- * group's next try is when the engine starts the Run's next Attempt, with or without a refused
- * Attempt of its own.
+ * group that the engine lists the Run as waiting for, or else its pending capacity retry, with the
+ * credential holders of `holderOf`. The group's next try is when the engine starts the Run's next
+ * Attempt, with or without a refused Attempt of its own.
  */
 const providerRetryOf = (
   snapshot: RunSummary,
   capacity: EngineWaits["capacity"],
+  holderOf: CredentialHolderOf,
 ): Option.Option<ProviderRetry> => {
   const group = capacity.find(({ runIds }) => runIds.includes(snapshot.run.id));
   if (group === undefined || !RunState.isOpen(snapshot.run.state))
-    return pendingProviderRetry(snapshot.run.state, snapshot.attempts);
+    return pendingProviderRetry(snapshot.run.state, snapshot.attempts, holderOf);
   return Option.some(
     ProviderRetry.make({
       nextAttempt: AttemptNumber.make((snapshot.attempts.at(-1)?.number ?? 0) + 1),
@@ -264,18 +280,18 @@ const providerRetryOf = (
 };
 
 /**
- * Returns the operator's view of a saved Run. `pausedLoops` gives the paused Loops and `workers`
- * how each Attempt's Worker is accessed.
+ * Returns the operator's view of a saved Run. `pausedLoops` gives the paused Loops, and `workers`
+ * how each Attempt's Worker is accessed and who holds the credential its harness used.
  */
 export const runSummaryView = (
   snapshot: RunSummary,
   pausedLoops: ReadonlySet<LoopName>,
-  workers: WorkerAccesses,
+  workers: DeclaredWorkers,
   waits: ReadonlyMap<RunId, MachineQuotaWait> = new Map(),
   { upgrade, capacity }: EngineWaits = noEngineWaits,
 ): RunSummaryView => {
   const actions = RunState.operatorActions(snapshot.run.state);
-  const providerRetry = providerRetryOf(snapshot, capacity);
+  const providerRetry = providerRetryOf(snapshot, capacity, workers.holderOf);
   const unresolved = !Option.contains(
     snapshot.resolvedFailureAttemptId,
     snapshot.attempts.at(-1)?.id,
@@ -299,7 +315,7 @@ export const runSummaryView = (
     machineWait: actions.canCancel ? (waits.get(snapshot.run.id) ?? null) : null,
     openedAt: DateTime.formatIso(snapshot.run.openedAt),
     closedAt: Option.match(snapshot.closedAt, { onNone: () => null, onSome: DateTime.formatIso }),
-    attempts: snapshot.attempts.map((attempt) => attemptSummaryView(attempt, workers)),
+    attempts: snapshot.attempts.map((attempt) => attemptSummaryView(attempt, workers.accesses)),
     approvalReason: Option.getOrNull(snapshot.approvalReason),
     approval: Option.match(snapshot.approval, {
       onNone: () => null,
@@ -323,7 +339,7 @@ export const runSummaryView = (
 export const runView = (
   snapshot: RunSnapshot,
   pausedLoops: ReadonlySet<LoopName>,
-  workers: WorkerAccesses,
+  workers: DeclaredWorkers,
   waits: ReadonlyMap<RunId, MachineQuotaWait> = new Map(),
   engine: EngineWaits = noEngineWaits,
 ): RunView =>
@@ -338,7 +354,7 @@ export const runView = (
       AttemptView.make({
         ...attemptSummaryView(
           attempt,
-          workers,
+          workers.accesses,
           Option.getOrNull(Option.map(attempt.result, ({ message }) => message)),
         ),
         task: attempt.task,

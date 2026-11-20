@@ -19,7 +19,7 @@ import { PullRequestTrigger } from "@usine/config/trigger";
 import { AgentName, AgentPersona } from "@usine/core/agent";
 import { Harness, ModelId } from "@usine/core/agent/brain";
 import { AttemptTask } from "@usine/core/attempt";
-import { runSummaryView, runView } from "../src/operator/projection.ts";
+import { declaredWorkers, runSummaryView, runView } from "../src/operator/projection.ts";
 import { runNeedsAttention } from "../src/board/items.ts";
 import { CiPolicy } from "@usine/core/ci";
 import { CycleGeneration, CycleLimit } from "@usine/core/cycle-budget";
@@ -562,7 +562,8 @@ it.effect("polling an open CI wait releases response bodies across six simulated
       const poll = monitor.reconcile(fixtureInstance, Option.none()).pipe(
         Effect.andThen(engine.inspect(runId)),
         Effect.map(
-          (snapshot) => new ResponseBody(jsonKey(runView(snapshot, new Set(), new Map()))),
+          (snapshot) =>
+            new ResponseBody(jsonKey(runView(snapshot, new Set(), declaredWorkers([])))),
         ),
         Effect.withSpan("http.request"),
         Effect.asVoid,
@@ -785,16 +786,18 @@ it.live(
           const mutations = yield* Ref.get(setup.mutations);
           assert.deepStrictEqual(mutations, []);
           assert.strictEqual((yield* Ref.get(setup.tasks)).length, 1);
-          const view = runView(failed, new Set(), new Map());
+          const view = runView(failed, new Set(), declaredWorkers([]));
           assert.strictEqual(runNeedsAttention(view, false), true);
           // The CI-failed Attempt keeps the report that handed off to CI; Run lists omit it.
           const projected = view.attempts.at(-1)?.outcome;
           assert(projected?._tag === "Failed");
           assert.isNotNull(projected.report);
           assert.isTrue(projected.report.startsWith("[usine:awaiting-ci]\n"));
-          const listed = runSummaryView(summarizeRun(failed), new Set(), new Map()).attempts.at(
-            -1,
-          )?.outcome;
+          const listed = runSummaryView(
+            summarizeRun(failed),
+            new Set(),
+            declaredWorkers([]),
+          ).attempts.at(-1)?.outcome;
           assert(listed?._tag === "Failed");
           assert.isNull(listed.report);
         }).pipe(Effect.provide(setup.runtime));
@@ -897,7 +900,7 @@ it.live("a workflow run still queued at the deadline names the run and how to re
           failure.message,
           "test (web) has been running for 31 min; its last successful run took 6 min.",
         );
-        assert.strictEqual(runView(stalled, new Set(), new Map()).canApplyCiLabels, true);
+        assert.strictEqual(runView(stalled, new Set(), declaredWorkers([])).canApplyCiLabels, true);
         assert.strictEqual((yield* Ref.get(setup.mutations)).length, 0);
         assert.strictEqual((yield* Ref.get(setup.tasks)).length, 1);
       }).pipe(Effect.provide(setup.runtime));
@@ -1700,7 +1703,7 @@ it.live("a later green run on the same head applies the recorded labels and reso
 
         const resolved = yield* engine.inspect(runId);
         assert.isTrue(Option.contains(resolved.resolvedFailureAttemptId, attemptId));
-        const view = runView(resolved, new Set(), new Map());
+        const view = runView(resolved, new Set(), declaredWorkers([]));
         assert.strictEqual(view.canApplyCiLabels, false);
         assert.strictEqual(runNeedsAttention(view, false), false);
         assert.deepStrictEqual(
@@ -1991,7 +1994,10 @@ it.live("a conflicting head without checks starts one fix before the CI deadline
         assert.strictEqual((yield* Ref.get(setup.tasks)).length, 2);
 
         assert.strictEqual((yield* Ref.get(setup.mutations)).length, 0);
-        assert.strictEqual(runNeedsAttention(runView(source, new Set(), new Map()), false), false);
+        assert.strictEqual(
+          runNeedsAttention(runView(source, new Set(), declaredWorkers([])), false),
+          false,
+        );
       }).pipe(Effect.provide(setup.runtime));
     }),
   ).pipe(Effect.provide(NodeServices.layer)),
@@ -2033,7 +2039,7 @@ it.live("red CI observed after the deadline starts one budgeted fix with failure
         assert.strictEqual(settled.run.state.fixLoop, loop.name);
         const fix = yield* engine.inspect(settled.run.state.fixRunId);
         assert.strictEqual(fix.run.loop, loop.name);
-        const projected = runView(settled, new Set(), new Map());
+        const projected = runView(settled, new Set(), declaredWorkers([]));
         assert.strictEqual(runNeedsAttention(projected, false), false);
 
         assert.strictEqual((yield* Ref.get(setup.mutations)).length, 0);
@@ -2311,7 +2317,7 @@ it.live("an exhausted fix-loop budget leaves a failed source run needing attenti
 
         const source = yield* (yield* RunEngine).inspect(runId);
         assert.strictEqual(source.run.state._tag, "Failed");
-        const projected = runView(source, new Set(), new Map());
+        const projected = runView(source, new Set(), declaredWorkers([]));
         assert.strictEqual(runNeedsAttention(projected, false), true);
 
         assert.strictEqual((yield* (yield* CycleBudgets).asks).length, 1);

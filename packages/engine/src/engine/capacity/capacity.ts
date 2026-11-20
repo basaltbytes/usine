@@ -7,11 +7,24 @@ import { ChangeBus, type ScopedChange } from "@usine/core/changes";
 import type { LoopName } from "@usine/core/loop";
 import type { RunId } from "@usine/core/run";
 import type { StepCompletion } from "@usine/core/step/result";
-import type { WorkerName } from "@usine/core/worker";
-import { Context, DateTime, Deferred, Duration, Effect, Layer, Option, Ref, Result } from "effect";
+import type { CredentialHolder, CredentialHolderOf, WorkerName } from "@usine/core/worker";
+import {
+  Context,
+  DateTime,
+  Deferred,
+  Duration,
+  Effect,
+  Layer,
+  Match,
+  Option,
+  Ref,
+  Result,
+} from "effect";
+import { CredentialHolders } from "./holders.ts";
 import * as Capacity from "./state.ts";
 
 export { CapacityGroup, capacityGroupKey, CapacityWait, type CapacityTurn } from "./state.ts";
+export { CredentialHolders } from "./holders.ts";
 
 /** An Attempt that ran under `ProviderCapacity.gate`, and its executor result. */
 export interface EndedAttempt {
@@ -41,8 +54,14 @@ const providerAnswered = (envelope: AttemptChannel.Envelope): boolean =>
   envelope.payload.event._tag === "ProviderAnswered" &&
   envelope.payload.event.session._tag === "ChildSession";
 
+const holderFields = (holder: CredentialHolder) =>
+  Match.valueTags(holder, {
+    Worker: ({ worker }) => ({ holder: holder._tag, worker }),
+    Gateway: ({ destination }) => ({ holder: holder._tag, gateway: destination }),
+  });
+
 const groupFields = (group: Capacity.CapacityGroup) => ({
-  worker: group.worker,
+  ...holderFields(group.holder),
   harness: group.harness,
   model: group.model,
 });
@@ -106,6 +125,7 @@ export class ProviderCapacity extends Context.Service<
     ProviderCapacity,
     Effect.gen(function* () {
       const bus = yield* ChangeBus;
+      const holders = yield* CredentialHolders;
       const state = yield* Ref.make(Capacity.emptyCapacity);
       const initial = yield* Deferred.make<void>();
       const changed = yield* Ref.make(initial);
@@ -140,10 +160,11 @@ export class ProviderCapacity extends Context.Service<
       const refused = Effect.fn("ProviderCapacity.refused")(function* (
         attempt: Attempt,
         loop: LoopName,
+        holderOf: CredentialHolderOf,
       ) {
         const fields = { runId: attempt.runId, attemptId: attempt.id };
         yield* Effect.annotateCurrentSpan(fields);
-        const refusal = Capacity.refusalOf(attempt, loop);
+        const refusal = Capacity.refusalOf(attempt, loop, holderOf);
         if (Option.isNone(refusal)) {
           yield* Effect.logInfo(
             "The capacity refusal has no end time; the Run waits for no group after it",
@@ -199,8 +220,15 @@ export class ProviderCapacity extends Context.Service<
         attempt: Attempt,
         end: Capacity.AttemptEnd,
       ) {
-        const group = Capacity.capacityGroupOf(attempt.brain, attempt.worker);
-        const fields = { runId: attempt.runId, attemptId: attempt.id, end, ...groupFields(group) };
+        const holderOf = yield* holders.current;
+        const group = Capacity.capacityGroupOf(attempt.brain, attempt.worker, holderOf);
+        const fields = {
+          runId: attempt.runId,
+          attemptId: attempt.id,
+          worker: attempt.worker,
+          end,
+          ...groupFields(group),
+        };
         yield* Effect.annotateCurrentSpan(fields);
         const now = yield* DateTime.now;
         const outcome = yield* Ref.modify(state, (current) =>
@@ -271,12 +299,13 @@ export class ProviderCapacity extends Context.Service<
           return "Free" as const;
         }
         const brain = yield* request.brain;
-        const group = Capacity.capacityGroupOf(brain, worker);
+        const holderOf = yield* holders.current;
+        const group = Capacity.capacityGroupOf(brain, worker, holderOf);
         const now = yield* DateTime.now;
         const claimed = yield* Ref.modify(state, (current) =>
           Capacity.claim(current, { runId, loop, group, turn: request.turn, now }),
         );
-        const fields = { runId, ...groupFields(group) };
+        const fields = { runId, worker, ...groupFields(group) };
         const current = yield* Ref.get(state);
         const others = claimed.left.flatMap((other) => Capacity.waitersOf(current, other));
         if (claimed.left.length > 0)
@@ -406,9 +435,10 @@ export class ProviderCapacity extends Context.Service<
         readonly attempts: ReadonlyArray<Attempt>;
       }) {
         yield* Effect.annotateCurrentSpan({ runId: run.runId });
+        const holderOf = yield* holders.current;
         // The streak is in one group, so a Run that waits for another group skips all of it.
-        for (const attempt of capacityRefusalStreak(run.attempts))
-          if ((yield* refused(attempt, run.loop)) === "Elsewhere") break;
+        for (const attempt of capacityRefusalStreak(run.attempts, holderOf))
+          if ((yield* refused(attempt, run.loop, holderOf)) === "Elsewhere") break;
         return yield* waitTurn(run.runId);
       });
 

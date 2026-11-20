@@ -35,7 +35,7 @@ import {
   waitForStarted,
   withLocalEngine,
 } from "./support.ts";
-import { runView } from "../../src/operator/projection.ts";
+import { declaredWorkers, runView } from "../../src/operator/projection.ts";
 import { testBotAccount } from "../support/github-app.ts";
 
 /** The identity of `testBotAccount` in git's `<name> <email>` form. */
@@ -99,7 +99,7 @@ describe("local worker salvage", () => {
             const fs = yield* FileSystem.FileSystem;
             const contents = yield* fs.readFileString(`${attempt.salvage.value.path}/progress.txt`);
             assert.strictEqual(contents, "keep this work\n");
-            const view = runView(snapshot, new Set(), new Map());
+            const view = runView(snapshot, new Set(), declaredWorkers([]));
             assert.isTrue(view.canResolveFailure);
             const outcome = view.attempts[0]?.outcome;
             assert(outcome?._tag === "Failed" && outcome.failure._tag === "GitHubPushFailure");

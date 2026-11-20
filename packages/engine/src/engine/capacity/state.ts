@@ -9,13 +9,13 @@ import type { AttemptFailure } from "@usine/core/attempt/failure";
 import { jsonKey } from "@usine/core/json-key";
 import type { LoopName } from "@usine/core/loop";
 import { RunId } from "@usine/core/run";
-import { WorkerName } from "@usine/core/worker";
-import { Array as EffectArray, type Brand, DateTime, Option, Order, Schema } from "effect";
+import { CredentialHolder, type CredentialHolderOf, type WorkerName } from "@usine/core/worker";
+import { Array as EffectArray, type Brand, DateTime, Match, Option, Order, Schema } from "effect";
 
 /**
- * The harness and model of an Attempt's child sessions on one Worker, which a provider capacity
- * refusal applies to. The Worker holds the harness credential, and a model can have its own usage
- * limit.
+ * The harness and model of an Attempt's child sessions, and the holder of the credential that the
+ * harness used, which a provider capacity refusal applies to. Workers behind one Gateway that holds
+ * the credential share a group, and a model can have its own usage limit.
  */
 export class CapacityGroup extends Schema.Class<
   CapacityGroup,
@@ -25,19 +25,33 @@ export class CapacityGroup extends Schema.Class<
   harness: Harness,
   /** The model of the Attempt's child sessions. */
   model: ModelId,
-  /** The Worker whose credential the harness used. */
-  worker: WorkerName,
+  /** The Worker or Gateway that holds the credential the harness used. */
+  holder: CredentialHolder,
 }) {}
 
-/** Returns the capacity group of `brain` on `worker`. */
+/** Returns the capacity group of `brain` on `worker`, whose credential holder `holderOf` returns. */
 export const capacityGroupOf = (
   brain: Pick<BrainSpec, "harness" | "model">,
   worker: WorkerName,
-): CapacityGroup => CapacityGroup.make({ harness: brain.harness, model: brain.model, worker });
+  holderOf: CredentialHolderOf,
+): CapacityGroup =>
+  CapacityGroup.make({
+    harness: brain.harness,
+    model: brain.model,
+    holder: holderOf(worker, brain.harness),
+  });
 
 /** Identifies `group` in the capacity state and in the operator's attention entries. */
-export const capacityGroupKey = (group: CapacityGroup): string =>
-  jsonKey([group.worker, group.harness, group.model]);
+export const capacityGroupKey = ({ holder, harness, model }: CapacityGroup): string =>
+  jsonKey([
+    holder._tag,
+    Match.valueTags(holder, {
+      Worker: ({ worker }) => worker,
+      Gateway: ({ destination }) => destination,
+    }),
+    harness,
+    model,
+  ]);
 
 /** A capacity group whose provider refuses requests, and the Runs that wait for it. */
 export class CapacityWait extends Schema.Class<
@@ -71,13 +85,20 @@ export interface CapacityRefusal {
   readonly resetsAt: Option.Option<DateTime.Utc>;
 }
 
-/** Returns the capacity refusal that ended `attempt`, or `None` without one or an end time. */
-export const refusalOf = (attempt: Attempt, loop: LoopName): Option.Option<CapacityRefusal> =>
+/**
+ * Returns the capacity refusal that ended `attempt`, or `None` without one or an end time.
+ * `holderOf` returns the holder of the credential that the Attempt's harness used.
+ */
+export const refusalOf = (
+  attempt: Attempt,
+  loop: LoopName,
+  holderOf: CredentialHolderOf,
+): Option.Option<CapacityRefusal> =>
   Option.flatMap(capacityRefusal(attempt), (failure) =>
     Option.map(attempt.endedAt, (endedAt) => ({
       runId: attempt.runId,
       loop,
-      group: capacityGroupOf(attempt.brain, attempt.worker),
+      group: capacityGroupOf(attempt.brain, attempt.worker, holderOf),
       attemptId: attempt.id,
       startedAt: attempt.startedAt,
       endedAt,

@@ -16,8 +16,15 @@ import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
 import { Run, RunId } from "@usine/core/run";
 import * as RunState from "@usine/core/run/state";
 import { Step, StepName } from "@usine/core/step";
-import { ContainerImage, type WorkerKind, WorkerName } from "@usine/core/worker";
-import { Submission } from "@usine/engine/engine";
+import {
+  ContainerImage,
+  GatewayCredentialHolder,
+  SshDestination,
+  type WorkerKind,
+  WorkerCredentialHolder,
+  WorkerName,
+} from "@usine/core/worker";
+import { CredentialHolders, Submission } from "@usine/engine/engine";
 import { StepExecution, StepExecutor } from "@usine/engine/step-executor";
 import {
   Executor,
@@ -1497,24 +1504,26 @@ describe("Worker scheduler on reload", () => {
 
 /**
  * Returns an SSH Worker behind the Gateway `usine-gateway`, with its admin token in the variable
- * `tokenEnv`.
+ * `tokenEnv`, that holds the credentials of `llmProviders`.
  */
 const gatewaySshWorker = (
   name: string,
   max: number,
   tokenEnv: string,
+  llmProviders: ReadonlyArray<string> = [],
 ) => `${sshWorker(name, max)}    gateway:
       domain: gw.test
       destination: usine-gateway
       admin_token_env: ${tokenEnv}
+      llm_providers: [${llmProviders.join(", ")}]
 `;
 
 /**
- * Starts the SSH scheduler over a `recordingExecutor` of kind `ssh` that records preflights, Worker
+ * Builds the SSH scheduler over a `recordingExecutor` of kind `ssh` that records preflights, Worker
  * additions, and removals in `events`, and each added address in `added`. `environment` is the
  * orchestrator's environment.
  */
-const startSshScheduler = (
+const sshSchedulerContext = (
   events: Array<string>,
   options: {
     readonly added?: Array<SshWorkerAddress>;
@@ -1538,7 +1547,7 @@ const startSshScheduler = (
           events.push(`remove ${worker}`);
         }),
     });
-    const context = yield* Layer.build(
+    return yield* Layer.build(
       sshStepExecutorLayer(
         config,
         agents.map(({ agent }) => agent.brain),
@@ -1554,8 +1563,11 @@ const startSshScheduler = (
         ),
       ),
     );
-    return Context.get(context, StepExecutor);
   });
+
+/** Starts the SSH scheduler of `sshSchedulerContext`. */
+const startSshScheduler = (...args: Parameters<typeof sshSchedulerContext>) =>
+  Effect.map(sshSchedulerContext(...args), (context) => Context.get(context, StepExecutor));
 
 const build1 = WorkerName.make("build-1");
 const build2 = WorkerName.make("build-2");
@@ -1627,6 +1639,48 @@ describe("SSH Workers on reload", () => {
         assert.strictEqual(updated.machine.provisioner.serverType, "cpx32");
       }).pipe(Effect.scoped),
     ),
+  );
+
+  it.live(
+    "gives the engine the Gateway as the credential holder of the providers it lists, as of the latest accepted reload",
+    () =>
+      withWorkers(
+        `${gatewaySshWorker("build-1", 1, TOKEN_ENV, ["anthropic-messages"])}${gatewaySshWorker("build-2", 1, TOKEN_ENV, ["anthropic-messages"])}`,
+        (root) =>
+          Effect.gen(function* () {
+            const instances = yield* CurrentInstance;
+            const context = yield* sshSchedulerContext([], {
+              environment: { [TOKEN_ENV]: "admin-token" },
+            });
+            const holders = Context.get(context, CredentialHolders);
+            const gateway = GatewayCredentialHolder.make({
+              destination: SshDestination.make("usine-gateway"),
+            });
+            const own = (worker: WorkerName) => WorkerCredentialHolder.make({ worker });
+            const claude = Harness.make("claude");
+            const codex = Harness.make("codex");
+            const started = yield* holders.current;
+            assert.deepStrictEqual(started(build1, claude), gateway);
+            assert.deepStrictEqual(started(build2, claude), gateway);
+            // The Gateway doesn't list Codex's provider, so Codex uses each Worker's own login.
+            assert.deepStrictEqual(started(build1, codex), own(build1));
+
+            yield* writeInstanceFiles(root, [
+              [
+                "usine.yaml",
+                usineYaml(
+                  `${gatewaySshWorker("build-1", 1, TOKEN_ENV, ["anthropic-messages", "openai-responses"])}${gatewaySshWorker("build-2", 1, TOKEN_ENV, ["anthropic-messages"])}`,
+                ),
+              ],
+            ]);
+            const report = yield* instances.reload;
+            assert.deepStrictEqual(report.workers.changed, [build1]);
+            const reloaded = yield* holders.current;
+            assert.deepStrictEqual(reloaded(build1, codex), gateway);
+            assert.deepStrictEqual(reloaded(build2, codex), own(build2));
+            assert.deepStrictEqual(reloaded(build2, claude), gateway);
+          }).pipe(Effect.scoped),
+      ),
   );
 
   it.live(

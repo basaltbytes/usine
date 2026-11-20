@@ -30,7 +30,15 @@ import {
 import { AttemptFailed } from "../src/attempt/outcome.ts";
 import { SalvageRetained } from "../src/attempt/salvage.ts";
 import { Running } from "../src/run/state.ts";
-import { ContainerId, ContainerMemoryMib, WorkerName } from "../src/worker.ts";
+import {
+  ContainerId,
+  ContainerMemoryMib,
+  type CredentialHolderOf,
+  GatewayCredentialHolder,
+  SshDestination,
+  WorkerCredentialHolder,
+  WorkerName,
+} from "../src/worker.ts";
 import { RepositoryName } from "../src/repository.ts";
 
 const infra = InfraFailure.make({
@@ -122,12 +130,14 @@ describe("provider retry deadline", () => {
     worker: WorkerName.make(worker),
     brain,
   });
+  const ownLogins: CredentialHolderOf = (worker) => WorkerCredentialHolder.make({ worker });
   const retryAt = (refusals: number, resetsAt: Option.Option<DateTime.Utc>) =>
     pendingProviderRetry(
       Running.make(),
       Array.from({ length: refusals }, (_, index) =>
         refused(index + 1, index === refusals - 1 ? resetsAt : Option.none()),
       ),
+      ownLogins,
     ).pipe(Option.map(({ retryAt }) => DateTime.formatIso(retryAt)));
 
   it.each([
@@ -158,10 +168,11 @@ describe("provider retry deadline", () => {
     "keeps the wait for an earlier refusal's reset when a later refusal %s",
     (_, later) => {
       const reset = DateTime.makeUnsafe("2026-11-11T08:00:00Z");
-      const retry = pendingProviderRetry(Running.make(), [
-        refused(1, Option.some(reset)),
-        refused(2, later),
-      ]);
+      const retry = pendingProviderRetry(
+        Running.make(),
+        [refused(1, Option.some(reset)), refused(2, later)],
+        ownLogins,
+      );
       expect(Option.map(retry, ({ retryAt }) => DateTime.formatIso(retryAt))).toStrictEqual(
         Option.some("2026-11-11T08:00:00.000Z"),
       );
@@ -170,16 +181,37 @@ describe("provider retry deadline", () => {
 
   it("counts only the refusals in the capacity group of the latest one", () => {
     const sonnet = BrainSpec.make({ ...opus, model: ModelId.make("sonnet") });
-    const retry = pendingProviderRetry(Running.make(), [
-      refused(1, Option.none()),
-      refused(2, Option.none(), "remote"),
-      refused(3, Option.none(), "local", sonnet),
-      refused(4, Option.none()),
-      refused(5, Option.none()),
-    ]);
+    const retry = pendingProviderRetry(
+      Running.make(),
+      [
+        refused(1, Option.none()),
+        refused(2, Option.none(), "remote"),
+        refused(3, Option.none(), "local", sonnet),
+        refused(4, Option.none()),
+        refused(5, Option.none()),
+      ],
+      ownLogins,
+    );
     expect(Option.map(retry, ({ retryAt }) => DateTime.formatIso(retryAt))).toStrictEqual(
       Option.some("2026-11-11T03:30:00.000Z"),
     );
+  });
+
+  it("counts the refusals on Workers behind one Gateway that holds the credential in one group", () => {
+    const gateway = GatewayCredentialHolder.make({ destination: SshDestination.make("gateway") });
+    const behindGateway: CredentialHolderOf = () => gateway;
+    const alternating = [
+      refused(1, Option.none()),
+      refused(2, Option.none(), "remote"),
+      refused(3, Option.none()),
+      refused(4, Option.none(), "remote"),
+    ];
+    const retry = (holderOf: CredentialHolderOf) =>
+      pendingProviderRetry(Running.make(), alternating, holderOf).pipe(
+        Option.map(({ retryAt }) => DateTime.formatIso(retryAt)),
+      );
+    expect(retry(behindGateway)).toStrictEqual(Option.some("2026-11-11T04:00:00.000Z"));
+    expect(retry(ownLogins)).toStrictEqual(Option.some("2026-11-11T03:15:00.000Z"));
   });
 
   it("returns the refusals since the last Attempt that the provider didn't refuse, in the group of the latest one, newest first", () => {
@@ -194,24 +226,30 @@ describe("provider retry deadline", () => {
       refused(5, Option.none()),
       refused(6, Option.none()),
     ];
-    expect(capacityRefusalStreak(attempts).map(({ number }) => number)).toStrictEqual([6, 5, 3]);
-    expect(capacityRefusalStreak(attempts.slice(0, 4)).map(({ number }) => number)).toStrictEqual([
-      4,
+    expect(capacityRefusalStreak(attempts, ownLogins).map(({ number }) => number)).toStrictEqual([
+      6, 5, 3,
     ]);
-    expect(capacityRefusalStreak(attempts.slice(0, 2))).toStrictEqual([]);
-    expect(capacityRefusalStreak([])).toStrictEqual([]);
+    expect(
+      capacityRefusalStreak(attempts.slice(0, 4), ownLogins).map(({ number }) => number),
+    ).toStrictEqual([4]);
+    expect(capacityRefusalStreak(attempts.slice(0, 2), ownLogins)).toStrictEqual([]);
+    expect(capacityRefusalStreak([], ownLogins)).toStrictEqual([]);
   });
 
   it("counts only the refusals since the last Attempt that the provider didn't refuse", () => {
-    const retry = pendingProviderRetry(Running.make(), [
-      refused(1, Option.none()),
-      {
-        ...refused(2, Option.none()),
-        outcome: Option.some(AttemptFailed.make({ failure: infra })),
-      },
-      refused(3, Option.none()),
-      refused(4, Option.none()),
-    ]);
+    const retry = pendingProviderRetry(
+      Running.make(),
+      [
+        refused(1, Option.none()),
+        {
+          ...refused(2, Option.none()),
+          outcome: Option.some(AttemptFailed.make({ failure: infra })),
+        },
+        refused(3, Option.none()),
+        refused(4, Option.none()),
+      ],
+      ownLogins,
+    );
     expect(Option.map(retry, ({ retryAt }) => DateTime.formatIso(retryAt))).toStrictEqual(
       Option.some("2026-11-11T03:15:00.000Z"),
     );

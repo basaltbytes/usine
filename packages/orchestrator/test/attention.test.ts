@@ -12,7 +12,7 @@ import { assert, it } from "@effect/vitest";
 import { GitHubLabelName } from "@usine/core/label";
 import { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
-import { WorkerName } from "@usine/core/worker";
+import { WorkerCredentialHolder, WorkerName } from "@usine/core/worker";
 import { CapacityGroup, CapacityWait } from "@usine/engine/engine";
 import { LabelPreflightFinding } from "../src/label-reconciler.ts";
 import { capacityNeeds } from "../src/operator/capacity.ts";
@@ -142,7 +142,7 @@ it("shows one entry per capacity group and keeps it dismissed while the group re
   const group = CapacityGroup.make({
     harness: Harness.make("claude"),
     model: ModelId.make("claude-sonnet-4-6"),
-    worker: WorkerName.make("local"),
+    holder: WorkerCredentialHolder.make({ worker: WorkerName.make("local") }),
   });
   const wait = (nextTryAt: string, runIds: ReadonlyArray<string>) =>
     CapacityWait.make({

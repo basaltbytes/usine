@@ -3,7 +3,12 @@ import { Harness, ModelId } from "@usine/core/agent/brain";
 import { AttemptId } from "@usine/core/attempt";
 import { LoopName } from "@usine/core/loop";
 import { RunId } from "@usine/core/run";
-import { WorkerName } from "@usine/core/worker";
+import {
+  GatewayCredentialHolder,
+  SshDestination,
+  WorkerCredentialHolder,
+  WorkerName,
+} from "@usine/core/worker";
 import { DateTime, Duration, Option } from "effect";
 import {
   answered,
@@ -23,9 +28,12 @@ const loop = LoopName.make("review");
 const claude = CapacityGroup.make({
   harness: Harness.make("claude"),
   model: ModelId.make("opus"),
-  worker: WorkerName.make("local"),
+  holder: WorkerCredentialHolder.make({ worker: WorkerName.make("local") }),
 });
-const elsewhere = CapacityGroup.make({ ...claude, worker: WorkerName.make("remote") });
+const elsewhere = CapacityGroup.make({
+  ...claude,
+  holder: WorkerCredentialHolder.make({ worker: WorkerName.make("remote") }),
+});
 const sonnet = CapacityGroup.make({ ...claude, model: ModelId.make("sonnet") });
 const at = (minutes: number) => DateTime.makeUnsafe(Duration.toMillis(Duration.minutes(minutes)));
 const run = (name: string) => RunId.make(name);
@@ -109,6 +117,20 @@ describe("capacity state", () => {
     assert.deepStrictEqual(claims, ["Free", "Free", "Wait"]);
   });
 
+  it("keeps a Worker and a Gateway with the same name in separate groups", () => {
+    const worker = CapacityGroup.make({
+      ...claude,
+      holder: WorkerCredentialHolder.make({ worker: WorkerName.make("usine-gateway") }),
+    });
+    const gateway = CapacityGroup.make({
+      ...claude,
+      holder: GatewayCredentialHolder.make({ destination: SshDestination.make("usine-gateway") }),
+    });
+    const marked = refusedAll(refusal(run("a"), 0, 0, worker));
+    assert.strictEqual(claimAt(marked, run("b"), 1, gateway)[0].claim, "Free");
+    assert.strictEqual(claimAt(marked, run("c"), 1, worker)[0].claim, "Wait");
+  });
+
   it("elects one waiting Run to test the group at its next try", () => {
     const marked = refusedAll(refusal(run("a"), 0, 0), refusal(run("b"), 0, 0));
     const [first, elected] = turn(marked, run("a"), at(5));
@@ -130,7 +152,7 @@ describe("capacity state", () => {
     assert.strictEqual(claimed.claim, "Wait");
     const [wait, ...others] = waitsOf(after);
     assert.deepStrictEqual(others, []);
-    assert.strictEqual(wait?.group.worker, elsewhere.worker);
+    assert.deepStrictEqual(wait?.group.holder, elsewhere.holder);
     assert.deepStrictEqual(wait?.runIds, [run("a"), run("b")]);
   });
 

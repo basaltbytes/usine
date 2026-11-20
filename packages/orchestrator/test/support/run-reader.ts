@@ -1,6 +1,6 @@
 import { BoardRunHistory, ItemRunHistory, type RunSummary } from "@usine/engine/run-reader";
 import { Array as EffectArray, DateTime } from "effect";
-import { runSummaryView } from "../../src/operator/projection.ts";
+import { declaredWorkers, runSummaryView } from "../../src/operator/projection.ts";
 import { runUsageSource, taskUsage } from "../../src/operator/usage.ts";
 
 /** Supplies aggregate history for operator tests that inject saved runs. */
@@ -10,7 +10,7 @@ export const boardHistory = (runs: ReadonlyArray<RunSummary>): BoardRunHistory =
     items: Object.values(EffectArray.groupBy(runs, ({ itemKey }) => itemKey)).flatMap((history) => {
       const first = history[0];
       if (first === undefined) return [];
-      const views = history.map((run) => runSummaryView(run, new Set(), new Map()));
+      const views = history.map((run) => runSummaryView(run, new Set(), declaredWorkers([])));
       const { durationMillis, runningSince, unmeasured } = taskUsage(views, new Map());
       return [
         ItemRunHistory.make({

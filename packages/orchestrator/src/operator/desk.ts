@@ -51,7 +51,7 @@ import {
 import { AttemptSummaryView } from "./attempt.ts";
 import { BoardItemLink } from "./board.ts";
 import { checkView, PreflightCheckView, WorkerSlotsView } from "./configuration/view.ts";
-import { readEngineWaits, runSummaryView, workerAccesses } from "./projection.ts";
+import { declaredWorkers, readEngineWaits, runSummaryView } from "./projection.ts";
 import { RunSummaryView, UnconfirmedStopView } from "./run.ts";
 
 /** The number of newest transcript rows the desk reads per running Attempt. */
@@ -647,7 +647,7 @@ const makeDesk = Effect.gen(function* () {
     );
     const queued = new Map(queue.map((reservation) => [reservation.runId, reservation]));
     const paused = new Set(states.filter((state) => state.paused).map((state) => state.loop));
-    const access = workerAccesses(instance.config.workers);
+    const runWorkers = declaredWorkers(instance.config.workers);
     const repositories = yield* Effect.forEach(
       instance.config.repos,
       (repository) =>
@@ -678,7 +678,7 @@ const makeDesk = Effect.gen(function* () {
     const runs = new Map(
       [...summaries, ...history].map((summary) => [
         summary.run.id,
-        runSummaryView(summary, paused, access, waits, engineWaits),
+        runSummaryView(summary, paused, runWorkers, waits, engineWaits),
       ]),
     );
     const newestFirst = [...runs.values()].sort(
@@ -776,7 +776,7 @@ const makeDesk = Effect.gen(function* () {
     const lastOutcomes = closed
       .filter((summary) => visible(summary.repository) && !replacedBeforeStart(summary))
       .map((summary) => {
-        const run = runSummaryView(summary, paused, access, waits, engineWaits);
+        const run = runSummaryView(summary, paused, runWorkers, waits, engineWaits);
         return ClosedRunView.make({
           run,
           item: links.get(run.itemKey) ?? null,

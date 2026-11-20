@@ -246,4 +246,16 @@ export class HarnessCatalog extends Schema.Class<
   get(id: Harness): Option.Option<HarnessDescriptor> {
     return Option.fromNullishOr(this.descriptors.find((descriptor) => descriptor.id === id));
   }
+
+  /**
+   * Returns whether a Gateway that injects the credentials of `llmProviders` holds the credential
+   * that harness `id` uses on the Workers behind it. A harness without a provider credential, such
+   * as Pi, or an unknown harness, never uses the Gateway's.
+   */
+  gatewayHolds(id: Harness, llmProviders: ReadonlyArray<GatewayLlmProtocol>): boolean {
+    return Option.exists(
+      Option.flatMap(this.get(id), (descriptor) => descriptor.worker.credential),
+      ({ protocol }) => llmProviders.includes(protocol),
+    );
+  }
 }

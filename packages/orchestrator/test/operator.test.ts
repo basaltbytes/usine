@@ -51,7 +51,7 @@ import { RunId, Run } from "@usine/core/run";
 import { ApprovalSource, RunApproval } from "@usine/core/run/approval";
 import { StepName, Step } from "@usine/core/step";
 import { StepResult } from "@usine/core/step/result";
-import { SshDestination, WorkerName } from "@usine/core/worker";
+import { SshDestination, WorkerCredentialHolder, WorkerName } from "@usine/core/worker";
 import { AgentFile } from "@usine/config/agent";
 import { GitHubLabelName } from "@usine/core/label";
 import { IssueTrigger } from "@usine/config/trigger";
@@ -160,7 +160,7 @@ import {
   ScheduleTickFailure,
   ScheduleTriggers,
 } from "../src/schedule-triggers.ts";
-import { failureView, runDuration } from "../src/operator/projection.ts";
+import { declaredWorkers, failureView, runDuration, runView } from "../src/operator/projection.ts";
 import { type ProvisioningPause, WorkerStatus } from "../src/worker-status.ts";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { noCycleBudgets } from "./support/polling.ts";
@@ -3285,7 +3285,7 @@ it.effect(
               group: CapacityGroup.make({
                 harness: brain.harness,
                 model: brain.model,
-                worker: WorkerName.make("local"),
+                holder: WorkerCredentialHolder.make({ worker: WorkerName.make("local") }),
               }),
               message: "You've hit your limit",
               since: refusedAt,
@@ -3344,6 +3344,65 @@ it.effect(
     }),
 );
 
+it.effect(
+  "counts a Run's refusals on every Worker behind the Gateway that holds the credential in its next try",
+  () =>
+    Effect.gen(function* () {
+      const behindGateway = (name: string) =>
+        ({
+          name,
+          kind: "ssh",
+          destination: `usine@${name}`,
+          root: "/srv/usine",
+          gateway: {
+            domain: "gw.test",
+            destination: "usine-gateway",
+            admin_token_env: "GATEWAY_TOKEN",
+            llm_providers: ["openai-responses"],
+          },
+        }) as const;
+      const { workers } = yield* Schema.decodeEffect(UsineConfig)({
+        version: 1,
+        repos: [],
+        workers: [behindGateway("east"), behindGateway("west")],
+      });
+      const refusedAt = yield* DateTime.now;
+      const [original] = snapshot.attempts;
+      assert(original !== undefined);
+      // Four refusals in a row that alternate between the two Workers, and the engine lists no
+      // wait for the Run.
+      const current = RunSnapshot.make({
+        ...snapshot,
+        run: Run.make({ ...snapshot.run, state: RunState.Running.make() }),
+        attempts: [1, 2, 3, 4].map((number) =>
+          Attempt.make({
+            ...original,
+            id: AttemptId.make(`refused-${number}`),
+            number: AttemptNumber.make(number),
+            worker: WorkerName.make(number % 2 === 1 ? "east" : "west"),
+            outcome: Option.some(
+              AttemptFailed.make({
+                failure: ProviderCapacityFailure.make({ message: "You've hit your limit" }),
+              }),
+            ),
+            endedAt: Option.some(refusedAt),
+          }),
+        ),
+      });
+      const retryAt = (workers: Parameters<typeof runView>[2]) =>
+        Option.map(
+          Option.fromNullishOr(runView(current, new Set(), workers).providerRetry),
+          ({ retryAt }) => DateTime.toEpochMillis(retryAt),
+        );
+      const after = (minutes: number) =>
+        Option.some(DateTime.toEpochMillis(DateTime.add(refusedAt, { minutes })));
+      // The Gateway's group counts all four refusals.
+      assert.deepStrictEqual(retryAt(declaredWorkers(workers)), after(60));
+      // Undeclared Workers hold their own credentials, so the group counts the two on `west`.
+      assert.deepStrictEqual(retryAt(declaredWorkers([])), after(15));
+    }),
+);
+
 it.effect("shows the group's next try on a Run that waits for it without an Attempt", () =>
   Effect.gen(function* () {
     const fixtureInstance = yield* instance;
@@ -3363,7 +3422,7 @@ it.effect("shows the group's next try on a Run that waits for it without an Atte
       group: CapacityGroup.make({
         harness: brain.harness,
         model: brain.model,
-        worker: WorkerName.make("local"),
+        holder: WorkerCredentialHolder.make({ worker: WorkerName.make("local") }),
       }),
       message: "You've hit your limit",
       since: refusedAt,
