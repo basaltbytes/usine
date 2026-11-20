@@ -37,6 +37,7 @@ import { tmpdir } from "node:os";
 // Synchronous Node path callbacks retain the host platform’s path semantics.
 // @effect-diagnostics-next-line nodeBuiltinImport:off
 import { join, dirname, basename } from "node:path";
+import { brotliCompressSync, brotliDecompressSync } from "node:zlib";
 import {
   NodeHttpPlatform,
   NodeHttpServer,
@@ -139,6 +140,7 @@ import { BackendUnavailableError, FactoryBackend, needsSetupBackendLayer } from 
 import { boundedDesk, projectSummary, summaryOverview, taskSummary } from "../src/changes/reads.ts";
 import { Port, SERVER_HOST } from "../src/cli.ts";
 import { apiRoutes, serverLayer, staticRoutes } from "../src/http.ts";
+import { responseCompression } from "../src/compression.ts";
 import { listenForStartup } from "../src/listener.ts";
 
 const runId = RunId.make("run-1");
@@ -455,9 +457,10 @@ const makeBackend = Effect.gen(function* () {
   );
 });
 const makeApp = (backend: Effect.Success<typeof makeBackend>) =>
-  HttpRouter.toWebHandler(apiRoutes.pipe(HttpRouter.provideRequest(backend)), {
-    disableLogger: true,
-  });
+  HttpRouter.toWebHandler(
+    Layer.merge(apiRoutes, responseCompression).pipe(HttpRouter.provideRequest(backend)),
+    { disableLogger: true },
+  );
 
 let backend: Effect.Success<typeof makeBackend>;
 let app: ReturnType<typeof makeApp>;
@@ -1629,6 +1632,12 @@ describe("operator HTTP API", () => {
           Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
             fileSystem.writeFileString(join(assets, "app.css"), ":root { color-scheme: dark; }"),
           ),
+          Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+            fileSystem.writeFile(
+              join(assets, "app.css.br"),
+              brotliCompressSync(":root { color-scheme: dark; }"),
+            ),
+          ),
         ],
         { concurrency: "unbounded" },
       );
@@ -1678,6 +1687,32 @@ describe("operator HTTP API", () => {
         assert.strictEqual(asset.status, 200);
         const actual24 = yield* Effect.promise(() => asset.text());
         assert.strictEqual(actual24, ":root { color-scheme: dark; }");
+
+        const encodedAsset = yield* Effect.promise(() =>
+          web.handler(
+            new Request("http://localhost/assets/app.css", {
+              headers: { "accept-encoding": "gzip, br" },
+            }),
+          ),
+        );
+        assert.strictEqual(encodedAsset.headers.get("content-encoding"), "br");
+        assert.strictEqual(encodedAsset.headers.get("content-type"), "text/css");
+        assert.strictEqual(encodedAsset.headers.get("vary"), "Accept-Encoding");
+        const encodedBytes = yield* Effect.promise(() => encodedAsset.arrayBuffer());
+        assert.strictEqual(
+          brotliDecompressSync(new Uint8Array(encodedBytes)).toString(),
+          ":root { color-scheme: dark; }",
+        );
+        const gzipOnly = yield* Effect.promise(() =>
+          web.handler(
+            new Request("http://localhost/assets/app.css", {
+              headers: { "accept-encoding": "gzip" },
+            }),
+          ),
+        );
+        assert.strictEqual(gzipOnly.headers.get("content-encoding"), null);
+        const actualGzipOnly = yield* Effect.promise(() => gzipOnly.text());
+        assert.strictEqual(actualGzipOnly, ":root { color-scheme: dark; }");
 
         const missing = yield* Effect.promise(() =>
           web.handler(new Request("http://localhost/assets/missing.js")),
@@ -1809,17 +1844,35 @@ it.live("checks the declared permission for every operator route and each role",
   }),
 );
 
-it.live("returns a private validator and an empty 304 for unchanged authorized reads", () =>
+it.live("compresses authorized reads and returns an empty 304 for unchanged ones", () =>
   Effect.gen(function* () {
     const request = (headers: Record<string, string> = {}) =>
-      app.handler(new Request("http://localhost/api/overview", { headers }));
-    const first = yield* Effect.promise(() => request());
+      app.handler(
+        new Request("http://localhost/api/overview", {
+          headers: { "x-usine-view": "full", ...headers },
+        }),
+      );
+    const plain = yield* Effect.promise(() => request());
+    const first = yield* Effect.promise(() => request({ "accept-encoding": "gzip, br" }));
     assert.strictEqual(first.status, 200);
+    assert.strictEqual(first.headers.get("content-encoding"), "br");
+    assert.include(first.headers.get("vary") ?? "", "Accept-Encoding");
     const etag = first.headers.get("etag");
     assert(etag !== null);
+    assert.strictEqual(etag, plain.headers.get("etag"));
     assert.strictEqual(first.headers.get("cache-control"), "private, no-cache");
-    const second = yield* Effect.promise(() => request({ "if-none-match": `W/${etag}` }));
+    const compressed = yield* Effect.promise(() =>
+      first.arrayBuffer().then((buffer) => new Uint8Array(buffer)),
+    );
+    const text = yield* Effect.promise(() => plain.text());
+    assert.isBelow(compressed.length, text.length);
+    assert.strictEqual(new TextDecoder().decode(brotliDecompressSync(compressed)), text);
+    const second = yield* Effect.promise(() =>
+      request({ "accept-encoding": "gzip, br", "if-none-match": etag }),
+    );
     assert.strictEqual(second.status, 304);
+    assert.strictEqual(second.headers.get("content-encoding"), null);
+    assert.strictEqual(second.headers.get("etag"), etag);
     const actual26 = yield* Effect.promise(() => second.text());
     assert.strictEqual(actual26, "");
     const shell = yield* Effect.promise(() =>
@@ -1932,23 +1985,23 @@ it.live("streams small changes and replays missed revisions without payloads", (
       const bus = Context.get(context, ChangeBus);
       {
         const streamApp = HttpRouter.toWebHandler(
-          apiRoutes.pipe(
-            Layer.provide(Layer.succeed(ChangeBus, bus)),
-            HttpRouter.provideRequest(backend),
-          ),
+          Layer.merge(
+            apiRoutes.pipe(Layer.provide(Layer.succeed(ChangeBus, bus))),
+            responseCompression,
+          ).pipe(HttpRouter.provideRequest(backend)),
           {
             disableLogger: true,
           },
         );
-        const open = (last?: string) =>
-          streamApp.handler(
-            new Request("http://localhost/api/changes", {
-              headers: last === undefined ? {} : { "last-event-id": last },
-            }),
-          );
+        const open = (last?: string) => {
+          const headers = new Headers({ "accept-encoding": "br, gzip" });
+          if (last !== undefined) headers.set("last-event-id", last);
+          return streamApp.handler(new Request("http://localhost/api/changes", { headers }));
+        };
         try {
           const response = yield* Effect.promise(() => open());
           assert.strictEqual(response.headers.get("content-type"), "text/event-stream");
+          assert.strictEqual(response.headers.get("content-encoding"), null);
           const reader = response.body?.getReader();
           assert(reader !== undefined);
           const first = new TextDecoder().decode(

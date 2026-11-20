@@ -14,8 +14,7 @@ import { taskNumber, taskRow } from "~/lib/tasks/model";
 import { statusLine } from "~/lib/tasks/status";
 import { cn } from "~/lib/utils";
 
-// A chip is at most one line of the text around it tall, so a line with one keeps its height.
-const CHIP = "max-h-lh max-w-full align-text-bottom";
+const CHIP = "max-w-full align-text-bottom";
 // A title in a sentence stops at 160px, about 24 characters, so a sentence with two chips takes at
 // most one more line than its plain text in a 520px column.
 const SENTENCE_TITLE = "max-w-40";
@@ -50,6 +49,7 @@ export const TaskChip = ({ project, task, item, place }: TaskChipProps) => {
   const chip = (
     <Badge
       variant="outline"
+      size="tall"
       data-not-typeset
       className={CHIP}
       render={
@@ -112,6 +112,7 @@ type RunChipProps = {
 export const RunChip = ({ project, run }: RunChipProps) => (
   <Badge
     variant="outline"
+    size="tall"
     data-not-typeset
     className={CHIP}
     render={

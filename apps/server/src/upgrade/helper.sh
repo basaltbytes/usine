@@ -206,26 +206,46 @@ restore_data() {
   printf 'upgrade restore previous=%s status=complete snapshot=%s\n' "$previous" "$snapshot"
 }
 
-install_version() {
-  local version=$1 attempt output exit_code
+npm_install() {
+  local step=$1 version=$2 destination=$3 attempt output exit_code
+  shift 3
   for ((attempt=1; attempt<=3; attempt++)); do
-    printf 'upgrade install version=%s attempt=%s\n' "$version" "$attempt"
-    if timeout 5m npm install --global --prefix "$prefix" "@usine/server@$version" > "$folder/install.log" 2>&1; then
-      cat "$folder/install.log"
+    printf 'upgrade %s version=%s attempt=%s\n' "$step" "$version" "$attempt"
+    if timeout 5m npm install --global --prefix "$destination" "@usine/server@$version" "$@" > "$folder/$step.log" 2>&1; then
+      cat "$folder/$step.log"
       return 0
     else
       exit_code=$?
     fi
-    output=$(< "$folder/install.log")
+    output=$(< "$folder/$step.log")
     printf '%s\n' "$output"
     if [ "$exit_code" -eq 124 ] || [ "$attempt" -eq 3 ] || \
       [[ ! "$output" =~ npm[[:space:]]+(ERR!|error)[[:space:]]+code[[:space:]]+(ETARGET|E404)($|[[:space:]]) ]]; then
-      printf 'upgrade install failed version=%s attempt=%s exit_code=%s\n' "$version" "$attempt" "$exit_code"
+      printf 'upgrade %s failed version=%s attempt=%s exit_code=%s\n' "$step" "$version" "$attempt" "$exit_code"
       return 1
     fi
-    printf 'upgrade install retry version=%s attempt=%s delay_seconds=60\n' "$version" "$attempt"
+    printf 'upgrade %s retry version=%s attempt=%s delay_seconds=60\n' "$step" "$version" "$attempt"
     sleep 60
   done
+}
+
+# Fills the npm cache with the version's dependency tree by installing it into a throwaway prefix.
+download_version() {
+  local download="$folder/download" status=0
+  rm -rf -- "$download" || return 1
+  mkdir -- "$download" || return 1
+  npm_install download "$1" "$download" --ignore-scripts --no-audit || status=1
+  if ! rm -rf -- "$download"; then
+    printf 'upgrade download cleanup folder=%s status=failed\n' "$download" >&2
+  fi
+  if [ "$status" -eq 0 ]; then printf 'upgrade download version=%s status=complete\n' "$1"; fi
+  return "$status"
+}
+
+install_version() {
+  local version=$1
+  shift
+  npm_install install "$version" "$prefix" "$@"
 }
 
 installed_version() {
@@ -257,6 +277,10 @@ if ! prepare_backup; then
   record failed "$backup_reason"
   exit 1
 fi
+if ! download_version "$target"; then
+  record failed 'Could not download the target version; the server and packages were not changed. Check the upgrade service output.'
+  exit 1
+fi
 if ! backup_data; then
   record failed 'Could not back up the databases; the server and packages were not changed. Check the upgrade service output.'
   exit 1
@@ -267,7 +291,7 @@ if ! stop_server; then
 fi
 reason='The package could not be installed.'
 failure_stage=install
-if install_version "$target"; then
+if install_version "$target" --prefer-offline --no-audit; then
   failure_stage=health-check
   if start_server; then
     if healthy "$target" ready; then

@@ -3,6 +3,7 @@ import tailwindcss from "@tailwindcss/vite";
 import react, { reactCompilerPreset } from "@vitejs/plugin-react";
 import babel from "@rolldown/plugin-babel";
 import { compilerOptions } from "./react-compiler.ts";
+import { precompress } from "./precompress.ts";
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
 
@@ -21,6 +22,7 @@ export default defineConfig({
     react(),
     babel({ presets: [reactCompilerPreset(compilerOptions)] }),
     tailwindcss(),
+    precompress(),
   ],
   resolve: {
     alias: {

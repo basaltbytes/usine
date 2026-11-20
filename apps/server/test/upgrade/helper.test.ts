@@ -69,7 +69,6 @@ const run = (
     | "bad-stop"
     | "transient-target"
     | "transient-404"
-    | "missing-target"
     | "missing-404"
     | "migrated-api"
     | "migrated-external"
@@ -178,15 +177,13 @@ printf 'Avail\\n%s\\n' "$available"`,
       "npm",
       `echo "$*" >> "$folder/commands"
 manifest="$4/lib/node_modules/@usine/server/package.json"
-if [ "$5" = @usine/server@2.0.0 ]; then
+if [[ "$4" = */download ]]; then
   count=0
-  if [ -f "$folder/installs" ]; then count=$(cat "$folder/installs"); fi
+  if [ -f "$folder/downloads" ]; then count=$(cat "$folder/downloads"); fi
   count=$((count + 1))
-  echo "$count" > "$folder/installs"
+  echo "$count" > "$folder/downloads"
   case "$scenario" in
-    bad-install) rm "$manifest"; echo 'npm error code EACCES' >&2; exit 1;;
-    unchanged-install|unchanged-unhealthy) echo 'npm error code EACCES' >&2; exit 1;;
-    transient-target|transient-404|missing-target|missing-404)
+    transient-target|transient-404|missing-404)
       if [ "$count" -lt 3 ] || [[ "$scenario" = missing-* ]]; then
         case "$scenario" in
           *target) echo 'npm error code ETARGET' >&2;;
@@ -194,6 +191,13 @@ if [ "$5" = @usine/server@2.0.0 ]; then
         esac
         exit 1
       fi;;
+  esac
+  exit 0
+fi
+if [ "$5" = @usine/server@2.0.0 ]; then
+  case "$scenario" in
+    bad-install) rm "$manifest"; echo 'npm error code EACCES' >&2; exit 1;;
+    unchanged-install|unchanged-unhealthy) echo 'npm error code EACCES' >&2; exit 1;;
   esac
 fi
 if [ "$5" = @usine/server@1.0.0 ]; then
@@ -620,7 +624,7 @@ describe.skipIf(!hasUpgradeTools)("upgrade helper (requires GNU tools and flock)
     expect(result.record.reason).toContain("back up");
     expect(result.running).toBe("@usine/server@1.0.0");
     expect(result.commands).not.toContain("stop");
-    expect(result.commands).not.toContain("install");
+    expect(result.commands).not.toContain(`--prefix ${result.prefix} `);
   });
 
   it.each(["missing-backup"] as const)(
@@ -674,7 +678,9 @@ describe.skipIf(!hasUpgradeTools)("upgrade helper (requires GNU tools and flock)
       expect(result.record.failureStage).toBe(
         scenario === "bad-install" ? "install" : "health-check",
       );
-      expect(result.commands.match(/@usine\/server@2\.0\.0/gu)).toHaveLength(1);
+      expect(
+        result.commands.split(`--prefix ${result.prefix} @usine/server@2.0.0`).length - 1,
+      ).toBe(1);
       expect(result.commands).not.toContain("sleep 60");
       expect(result.commands).toContain("@usine/server@1.0.0");
       expect(result.running).toBe("@usine/server@1.0.0");
@@ -749,7 +755,7 @@ describe.skipIf(!hasUpgradeTools)("upgrade helper (requires GNU tools and flock)
   it("does not replace packages when systemd cannot stop the server", slowCli, () => {
     const result = run("bad-stop");
     expect(result.failed).toBe(true);
-    expect(result.commands).not.toContain("install");
+    expect(result.commands).not.toContain(`--prefix ${result.prefix} `);
   });
 
   it.each(["exit-term", "exit-kill"] as const)(
@@ -770,34 +776,46 @@ describe.skipIf(!hasUpgradeTools)("upgrade helper (requires GNU tools and flock)
     const result = run("good", "stuck");
     expect(result.failed).toBe(true);
     expect(result.record.status).toBe("failed");
-    expect(result.commands).not.toContain("install");
+    expect(result.commands).not.toContain(`--prefix ${result.prefix} `);
   });
 
   it.each(["transient-target", "transient-404"] as const)(
-    "installs after delayed registry propagation for %s without rollback",
+    "retries the download for %s while the server runs, then installs from the cache",
     slowCli,
     (scenario) => {
       const result = run(scenario);
       expect(result.failed).toBe(false);
       expect(result.record.status).toBe("good");
-      expect(result.commands.match(/@usine\/server@2\.0\.0/gu)).toHaveLength(3);
-      expect(result.commands.match(/sleep 60/gu)).toHaveLength(2);
+      const stop = result.commands.indexOf("stop --no-block");
+      const beforeStop = result.commands.slice(0, stop);
+      const stopped = result.commands.slice(stop, result.commands.indexOf("start usine.service"));
+      expect(beforeStop.match(/\/download @usine\/server@2\.0\.0/gu)).toHaveLength(3);
+      expect(beforeStop.match(/sleep 60/gu)).toHaveLength(2);
+      expect(stopped.match(/@usine\/server@2\.0\.0.*/gu)).toEqual([
+        "@usine/server@2.0.0 --prefer-offline --no-audit",
+      ]);
+      expect(stopped).not.toContain("sleep 60");
+      expect(result.output.match(/^upgrade download retry /gmu)).toHaveLength(2);
       expect(result.commands).not.toContain("@usine/server@1.0.0");
     },
   );
 
-  it.each(["missing-target"] as const)(
-    "restarts the unchanged previous version after exhausting registry retries for %s",
+  it(
+    "records a failed upgrade without stopping the server when the download never succeeds",
     slowCli,
-    (scenario) => {
-      const result = run(scenario);
+    () => {
+      const result = run("missing-404");
       expect(result.failed).toBe(true);
       assert(result.record.status === "failed");
-      expect(result.record.reason).toBe("The package could not be installed.");
+      expect(result.record.reason).toBe(
+        "Could not download the target version; the server and packages were not changed. Check the upgrade service output.",
+      );
       expect(result.running).toBe("@usine/server@1.0.0");
-      expect(result.commands.match(/@usine\/server@2\.0\.0/gu)).toHaveLength(3);
-      expect(result.commands.match(/sleep 60/gu)).toHaveLength(2);
-      expect(result.commands).not.toContain("@usine/server@1.0.0");
+      expect(result.commands.match(/\/download @usine\/server@2\.0\.0/gu)).toHaveLength(3);
+      expect(result.output.match(/^upgrade download retry /gmu)).toHaveLength(2);
+      expect(result.commands).not.toContain("stop");
+      expect(result.commands).not.toContain(`--prefix ${result.prefix} `);
+      expect(result.retained).toEqual([]);
     },
   );
 
@@ -816,7 +834,7 @@ describe.skipIf(!hasUpgradeTools)("upgrade helper (requires GNU tools and flock)
       if (scenario === "bad-stop") {
         expect(result.failed).toBe(true);
         expect(result.record.status).toBe("failed");
-        expect(result.commands).not.toContain("install --global");
+        expect(result.commands).not.toContain(`--prefix ${result.prefix} `);
         return;
       }
       expect(result.failed, result.output).toBe(false);

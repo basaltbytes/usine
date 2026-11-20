@@ -6,7 +6,8 @@ import {
   UpgradeRecord,
 } from "@usine/core/upgrade";
 import { UpgradeRequest } from "@usine/orchestrator/operator/http";
-import { Deferred, Effect, Logger, Option, Ref, Result, Schema } from "effect";
+import { Deferred, Effect, Logger, Option, Queue, Ref, Result, Schema } from "effect";
+import { TestClock } from "effect/testing";
 import { expect, it } from "@effect/vitest";
 import { makeUpgrades, UpgradeError, type UpgradePlatform } from "../../src/upgrade/control.ts";
 
@@ -306,35 +307,50 @@ it.live("refuses a missing helper before closing admission", () =>
   ),
 );
 
-it.live("reports helper failure instead of waiting for a restart that will not happen", () =>
+it.effect("resumes admission when the helper fails while the server runs", () =>
   Effect.scoped(
     Effect.gen(function* () {
       const f = yield* fixture;
+      const launches = yield* Queue.unbounded<ReleaseVersion>();
+      const candidate = yield* Ref.make(target);
+      const resumed = yield* Ref.make(false);
       const upgrades = yield* makeUpgrades({
         running: previous,
-        settings: Effect.succeed({ upgradeChannel: "latest", upgradeMode: "propose" }),
-        platform: Result.succeed(f.platform),
+        settings: Effect.succeed({ upgradeChannel: "next", upgradeMode: "automatic" }),
+        platform: Result.succeed({
+          ...f.platform,
+          lookup: () => Ref.get(candidate),
+          launch: (version) => Queue.offer(launches, version).pipe(Effect.asVoid),
+        }),
         drain: () => Effect.void,
-        resume: Effect.void,
+        resume: Ref.set(resumed, true),
       });
-      yield* upgrades.request(
-        UpgradeRequest.make({ timing: "idle", version: Option.some(target) }),
-      );
-      yield* Deferred.await(f.launched);
-      yield* Ref.set(
-        f.result,
-        Option.some(
-          UpgradeRecord.make({
-            previous,
-            target,
-            status: "failed",
-            reason: "Could not stop the service.",
-          }),
-        ),
-      );
+      yield* upgrades.check();
+      const launched = yield* Queue.take(launches);
+      expect(launched).toBe(target);
+      const failed = UpgradeRecord.make({
+        previous,
+        target,
+        status: "failed",
+        reason:
+          "Could not download the target version; the server and packages were not changed. Check the upgrade service output.",
+      });
+      yield* Ref.set(f.result, Option.some(failed));
+      yield* TestClock.adjust("5 seconds");
+
+      const resumedState = yield* Ref.get(resumed);
+      expect(resumedState).toBe(true);
       const status = yield* upgrades.status;
-      expect(status.phase).toBe("failed");
-      expect(status.message).toContain("Restart the service");
+      expect(status.phase).toBe("idle");
+      expect(status.message).toBeNull();
+      expect(status.outcome).toEqual(failed);
+      yield* upgrades.check();
+      expect((yield* upgrades.status).phase).toBe("idle");
+      const next = ReleaseVersion.make("1.0.1-next.43.gabcdef1");
+      yield* Ref.set(candidate, next);
+      yield* upgrades.check();
+      const launchedNext = yield* Queue.take(launches);
+      expect(launchedNext).toBe(next);
     }),
   ),
 );
