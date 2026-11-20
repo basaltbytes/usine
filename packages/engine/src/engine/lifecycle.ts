@@ -6,7 +6,7 @@ import {
   AttemptId,
   AttemptNumber,
   MAX_AUTO_ATTEMPTS,
-  pendingProviderRetry,
+  awaitsProviderRetry,
   shouldAutoRetry,
 } from "@usine/core/attempt";
 import {
@@ -342,7 +342,7 @@ export const beginAttempt = (
     ? StartedAfterRestart.make()
     : Option.getOrElse(requested, (): AttemptStart => {
         if (current.attempts.length === 0) return StartedByEvent.make();
-        return Option.isSome(pendingProviderRetry(state, current.attempts))
+        return awaitsProviderRetry(state, current.attempts)
           ? StartedByProviderRetry.make()
           : StartedByInfraRetry.make();
       });
@@ -410,7 +410,7 @@ export const retryRun = (
   const state = current.run.state;
   if (state._tag === "Failed") return { _tag: "Resume", state: RunState.retry(state) };
   if (state._tag === "Running" && Option.isNone(openAttempt(current))) {
-    return Option.isSome(wait) || Option.isSome(pendingProviderRetry(state, current.attempts))
+    return Option.isSome(wait) || awaitsProviderRetry(state, current.attempts)
       ? { _tag: "RetryNow" }
       : { _tag: "ResumePending" };
   }

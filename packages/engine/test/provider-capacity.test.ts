@@ -13,7 +13,7 @@ import {
 } from "@usine/core/agent/session";
 import type { RunId } from "@usine/core/run";
 import { StepCompletion } from "@usine/core/step/result";
-import { WorkerName } from "@usine/core/worker";
+import { GatewayCredentialHolder, SshDestination, WorkerName } from "@usine/core/worker";
 import {
   Array as EffectArray,
   Context,
@@ -28,7 +28,7 @@ import {
   Scope,
 } from "effect";
 import { TestClock } from "effect/testing";
-import { RetryRequest, RunEngine, Submission } from "../src/engine/engine.ts";
+import { CredentialHolders, RetryRequest, RunEngine, Submission } from "../src/engine/engine.ts";
 import { type StepExecution, StepExecutor } from "../src/step-executor.ts";
 import { engineLayer, stepResult, submission, testAgent, withInstance } from "./support.ts";
 
@@ -363,6 +363,69 @@ describe("provider capacity without a reset time", () => {
             const [done] = yield* settle(engine, [runId], (state) => state === "Succeeded");
             assert.strictEqual(done?.run.state._tag, "Succeeded");
           }).pipe(Effect.provide(engineLayer(directory, provider.executor)));
+        }),
+      ),
+    { timeout: 120_000 },
+  );
+
+  it.effect(
+    "shares one group between the Workers behind a Gateway that holds the provider's credential",
+    () =>
+      withInstance((directory) =>
+        Effect.gen(function* () {
+          // The Run of item-1 gets every slot on `local`, and the Run of item-2 on `remote`.
+          const provider = yield* scriptedProvider(
+            minutes(30),
+            immediately,
+            Option.none(),
+            ["local", "remote"],
+            (item) => (item === "item-1" ? "local" : "remote"),
+          );
+          const gateway = GatewayCredentialHolder.make({
+            destination: SshDestination.make("usine@gateway"),
+          });
+          const holders = Layer.succeed(CredentialHolders)({
+            current: Effect.succeed(() => gateway),
+          });
+          yield* Effect.gen(function* () {
+            const engine = yield* RunEngine;
+            const first = yield* claimed(engine, submission({ number: 1, item: "item-1" }));
+            yield* settle(engine, [first]);
+            // The refusal on `local` makes the Run on `remote` wait without an Attempt.
+            const second = yield* claimed(engine, submission({ number: 2, item: "item-2" }));
+            const runs = [first, second];
+            yield* settle(engine, runs);
+            const waiting = yield* engine.inspect(second);
+            assert.lengthOf(waiting.attempts, 0);
+            const [wait, ...others] = yield* engine.capacityWaits;
+            assert.deepStrictEqual(others, []);
+            assert.deepStrictEqual(wait?.group.holder, gateway);
+            assert.sameMembers([...(wait?.runIds ?? [])], runs);
+
+            let elapsed = 0;
+            for (const checkpoint of [4, 5, 19, 20, 49, 50]) {
+              yield* TestClock.adjust(Duration.minutes(checkpoint - elapsed));
+              elapsed = checkpoint;
+              yield* settle(engine, runs);
+            }
+            // One Attempt tests the group at each step, on either Worker; the one at 50 minutes
+            // succeeds and releases the Run on the other Worker.
+            const starts = yield* Ref.get(provider.starts);
+            assert.deepStrictEqual(
+              starts.map(({ at }) => at / minutes(1)),
+              [0, 5, 20, 50, 50],
+            );
+            assert.sameMembers(
+              starts.filter(({ at }) => at === minutes(50)).map(({ worker }) => worker),
+              ["local", "remote"],
+            );
+            const done = yield* settle(engine, runs, (state) => state === "Succeeded");
+            assert.lengthOf(done, 2);
+            const released = yield* engine.capacityWaits;
+            assert.deepStrictEqual(released, []);
+          }).pipe(
+            Effect.provide(engineLayer(directory, provider.executor).pipe(Layer.provide(holders))),
+          );
         }),
       ),
     { timeout: 120_000 },

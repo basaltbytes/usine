@@ -3,7 +3,7 @@ import { Harness, ModelId } from "@usine/core/agent/brain";
 import { AttemptId } from "@usine/core/attempt";
 import { LoopName } from "@usine/core/loop";
 import { RunId } from "@usine/core/run";
-import { WorkerName } from "@usine/core/worker";
+import { WorkerCredentialHolder, WorkerName } from "@usine/core/worker";
 import { DateTime, Duration, Option } from "effect";
 import {
   answered,
@@ -23,9 +23,12 @@ const loop = LoopName.make("review");
 const claude = CapacityGroup.make({
   harness: Harness.make("claude"),
   model: ModelId.make("opus"),
-  worker: WorkerName.make("local"),
+  holder: WorkerCredentialHolder.make({ worker: WorkerName.make("local") }),
 });
-const elsewhere = CapacityGroup.make({ ...claude, worker: WorkerName.make("remote") });
+const elsewhere = CapacityGroup.make({
+  ...claude,
+  holder: WorkerCredentialHolder.make({ worker: WorkerName.make("remote") }),
+});
 const sonnet = CapacityGroup.make({ ...claude, model: ModelId.make("sonnet") });
 const at = (minutes: number) => DateTime.makeUnsafe(Duration.toMillis(Duration.minutes(minutes)));
 const run = (name: string) => RunId.make(name);
@@ -130,7 +133,7 @@ describe("capacity state", () => {
     assert.strictEqual(claimed.claim, "Wait");
     const [wait, ...others] = waitsOf(after);
     assert.deepStrictEqual(others, []);
-    assert.strictEqual(wait?.group.worker, elsewhere.worker);
+    assert.deepStrictEqual(wait?.group.holder, elsewhere.holder);
     assert.deepStrictEqual(wait?.runIds, [run("a"), run("b")]);
   });
 

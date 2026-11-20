@@ -4,7 +4,7 @@ import { BrainSpec, Harness, ModelId } from "@usine/core/agent/brain";
 import { AttemptNumber, pendingProviderRetry } from "@usine/core/attempt";
 import { AttemptFailed } from "@usine/core/attempt/outcome";
 import { Running } from "@usine/core/run/state";
-import { WorkerName } from "@usine/core/worker";
+import { WorkerCredentialHolder, WorkerName } from "@usine/core/worker";
 import { DateTime, Effect, Option, Schema } from "effect";
 import { type AgentCapacityError, toAttemptFailure } from "../../src/runtime.ts";
 import { type FixtureOptions, openFixture, openPiFixture } from "./fixture.ts";
@@ -93,19 +93,23 @@ const loggedUsageLimit = (
 
 /** Returns when the run starts its next attempt after `failure` ends attempt 1 at `ENDED_AT`. */
 const retryAt = (failure: AgentCapacityError) =>
-  pendingProviderRetry(Running.make(), [
-    {
-      number: AttemptNumber.make(1),
-      outcome: Option.some(AttemptFailed.make({ failure: toAttemptFailure(failure) })),
-      endedAt: Option.some(ENDED_AT),
-      worker: WorkerName.make("local"),
-      brain: BrainSpec.make({
-        harness: Harness.make("claude"),
-        model: ModelId.make("opus"),
-        effort: "high",
-      }),
-    },
-  ]).pipe(Option.map(({ retryAt }) => DateTime.formatIso(retryAt)));
+  pendingProviderRetry(
+    Running.make(),
+    [
+      {
+        number: AttemptNumber.make(1),
+        outcome: Option.some(AttemptFailed.make({ failure: toAttemptFailure(failure) })),
+        endedAt: Option.some(ENDED_AT),
+        worker: WorkerName.make("local"),
+        brain: BrainSpec.make({
+          harness: Harness.make("claude"),
+          model: ModelId.make("opus"),
+          effort: "high",
+        }),
+      },
+    ],
+    (worker) => WorkerCredentialHolder.make({ worker }),
+  ).pipe(Option.map(({ retryAt }) => DateTime.formatIso(retryAt)));
 
 describe("recorded usage limits", () => {
   for (const harness of ["claude", "codex", "pi"] as const) {

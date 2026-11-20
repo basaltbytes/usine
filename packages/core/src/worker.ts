@@ -1,4 +1,5 @@
 import { type Brand, Effect, Schema, SchemaGetter } from "effect";
+import type { Harness } from "./agent/brain.ts";
 
 /** A worker's kebab-case name in the instance configuration. */
 export const WorkerName = Schema.String.check(
@@ -160,6 +161,33 @@ export const GatewayLlmProtocolFromName = Schema.Union([
  */
 export const GatewayCredentialKind = Schema.Literals(["api-key", "subscription"]);
 export type GatewayCredentialKind = typeof GatewayCredentialKind.Type;
+
+/**
+ * A Worker that holds the credential its harness uses: a login on its machine, or the API key that
+ * its provisioner gives each of its machines.
+ */
+export class WorkerCredentialHolder extends Schema.TaggedClass<
+  WorkerCredentialHolder,
+  Brand.Brand<"@usine/core/worker/WorkerCredentialHolder">
+>("CredentialHolder/Worker")("Worker", {
+  worker: WorkerName,
+}) {}
+
+/** A Gateway that holds a provider's credential for every Worker behind it (ADR 0027). */
+export class GatewayCredentialHolder extends Schema.TaggedClass<
+  GatewayCredentialHolder,
+  Brand.Brand<"@usine/core/worker/GatewayCredentialHolder">
+>("CredentialHolder/Gateway")("Gateway", {
+  /** The `ssh` destination of the Gateway's admin API, which identifies the Gateway. */
+  destination: SshDestination,
+}) {}
+
+/** The Worker or Gateway that holds the credential a harness uses on a Worker. */
+export const CredentialHolder = Schema.Union([WorkerCredentialHolder, GatewayCredentialHolder]);
+export type CredentialHolder = typeof CredentialHolder.Type;
+
+/** Returns who holds the credential that `harness` uses on `worker`. */
+export type CredentialHolderOf = (worker: WorkerName, harness: Harness) => CredentialHolder;
 
 /**
  * A container image reference, `[registry/]repository[:tag][@digest]`, such as

@@ -4,6 +4,7 @@ import {
   DateTime,
   Duration,
   Effect,
+  Equal,
   Option,
   Schema,
   SchemaTransformation,
@@ -16,7 +17,13 @@ import type { RunState } from "../run/state.ts";
 import { RunId } from "../run/run.ts";
 import { Comment, StepResult } from "../step/result.ts";
 import { StepName } from "../step/step.ts";
-import { ContainerId, ContainerMemoryMib, WorkerKind, WorkerName } from "../worker.ts";
+import {
+  ContainerId,
+  ContainerMemoryMib,
+  type CredentialHolderOf,
+  WorkerKind,
+  WorkerName,
+} from "../worker.ts";
 import { AttemptFailure, isAutoRetryableFailure, ProviderCapacityFailure } from "./failure.ts";
 import { AttemptOutcome } from "./outcome.ts";
 import { AttemptSalvage } from "./salvage.ts";
@@ -317,22 +324,25 @@ export const capacityRefusal = (
 /**
  * Returns the Attempts of `attempts`, ordered oldest to newest, that a capacity wait follows, newest
  * first: the consecutive capacity refusals since the last Attempt that the provider didn't refuse,
- * in the capacity group of the newest one, its Worker and child harness and model. A refusal in
- * another group neither moves the wait nor lengthens its backoff.
+ * in the capacity group of the newest one. A group is a child harness and model, and the holder of
+ * the credential that the harness used on the Attempt's Worker, which `holderOf` returns. A refusal
+ * in another group neither moves the wait nor lengthens its backoff.
  */
 export const capacityRefusalStreak = <A extends Pick<Attempt, "outcome" | "worker" | "brain">>(
   attempts: ReadonlyArray<A>,
+  holderOf: CredentialHolderOf,
 ): ReadonlyArray<A> => {
   const streak = EffectArray.takeWhile(EffectArray.reverse(attempts), (attempt) =>
     Option.isSome(capacityRefusal(attempt)),
   );
   const [newest] = streak;
   if (newest === undefined) return [];
+  const holder = holderOf(newest.worker, newest.brain.harness);
   return streak.filter(
     ({ worker, brain }) =>
-      worker === newest.worker &&
       brain.harness === newest.brain.harness &&
-      brain.model === newest.brain.model,
+      brain.model === newest.brain.model &&
+      Equal.equals(holderOf(worker, brain.harness), holder),
   );
 };
 
@@ -386,24 +396,44 @@ export class ProviderRetry extends Schema.Class<
   }),
 ) {}
 
+/** Returns the latest of `attempts` and its end if the Run is running and a capacity refusal ended it. */
+const latestRefusal = <A extends Pick<Attempt, "outcome" | "endedAt">>(
+  state: RunState,
+  attempts: ReadonlyArray<A>,
+) => {
+  const last = attempts.at(-1);
+  if (state._tag !== "Running" || last === undefined) return Option.none();
+  return Option.flatMap(capacityRefusal(last), (refusal) =>
+    Option.map(last.endedAt, (endedAt) => ({ last, endedAt, refusal })),
+  );
+};
+
+/**
+ * Returns whether the Run waits to retry after a capacity refusal: it is running, and a capacity
+ * refusal ended its latest Attempt at a recorded time. `attempts` must be ordered oldest to newest.
+ */
+export const awaitsProviderRetry = (
+  state: RunState,
+  attempts: ReadonlyArray<Pick<Attempt, "outcome" | "endedAt">>,
+): boolean => Option.isSome(latestRefusal(state, attempts));
+
 /**
  * Returns a pending capacity retry from persisted state, including after an orchestrator restart.
- * `attempts` must be ordered oldest to newest. Returns `None` unless the run is running and its
- * latest attempt has a recorded end time and a capacity failure. The retry starts no earlier than
- * `capacityBackoff` of the refusals of `capacityRefusalStreak` after the latest one ended, and no
- * earlier than the latest usage-limit reset time that those refusals report.
+ * `attempts` must be ordered oldest to newest. Returns `None` unless `awaitsProviderRetry`. The
+ * retry starts no earlier than `capacityBackoff` of the refusals of `capacityRefusalStreak`, with
+ * the credential holders of `holderOf`, after the latest one ended, and no earlier than the latest
+ * usage-limit reset time that those refusals report.
  */
 export const pendingProviderRetry = (
   state: RunState,
   attempts: ReadonlyArray<Pick<Attempt, "number" | "outcome" | "endedAt" | "worker" | "brain">>,
+  holderOf: CredentialHolderOf,
 ): Option.Option<ProviderRetry> => {
-  if (state._tag !== "Running") return Option.none();
-  const last = attempts.at(-1);
-  if (last === undefined || Option.isNone(last.endedAt)) return Option.none();
-  const refusal = capacityRefusal(last);
-  if (Option.isNone(refusal)) return Option.none();
-  const streak = capacityRefusalStreak(attempts);
-  const backoff = DateTime.addDuration(last.endedAt.value, capacityBackoff(streak.length));
+  const latest = latestRefusal(state, attempts);
+  if (Option.isNone(latest)) return Option.none();
+  const { last, endedAt, refusal } = latest.value;
+  const streak = capacityRefusalStreak(attempts, holderOf);
+  const backoff = DateTime.addDuration(endedAt, capacityBackoff(streak.length));
   const resets = streak.flatMap((attempt) =>
     Option.toArray(Option.flatMap(capacityRefusal(attempt), ({ resetsAt }) => resetsAt)),
   );
@@ -411,7 +441,7 @@ export const pendingProviderRetry = (
     ProviderRetry.make({
       nextAttempt: AttemptNumber.make(last.number + 1),
       retryAt: resets.reduce(DateTime.max, backoff),
-      message: refusal.value.message,
+      message: refusal.message,
     }),
   );
 };
