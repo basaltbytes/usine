@@ -43,7 +43,7 @@ Startup applies runtime database migrations before readiness. The transcript mig
 
 ## Managed upgrade backups
 
-The helper creates private `backup.XXXXXXXX` directories under `.usine/upgrade/` in the instance folder. After a successful upgrade, it keeps the newest three backups, always including the current upgrade backup, and removes older ones. Failed upgrades and rollbacks retain all backups. The helper output reports backup paths and cleanup failures. After a download, backup, or space-check failure, fix the recorded cause and restart the server service to resume attempt admission before retrying the upgrade.
+The helper creates private `backup.XXXXXXXX` directories under `.usine/upgrade/` in the instance folder. After a successful upgrade, it keeps the newest three backups, always including the current upgrade backup, and removes older ones. Failed upgrades and rollbacks retain all backups. The helper output reports backup paths and cleanup failures. After a download, backup, or space-check failure, the server resumes attempt admission within a few seconds and **Settings** shows the recorded failure. Fix the recorded cause before you request the upgrade again. Automatic mode doesn't retry the failed version, but it requests the next newer version.
 
 On macOS, set the variables below in the upgrade LaunchAgent's `EnvironmentVariables` dictionary and reload that job while idle, as described in [macOS hosting](/guides/host-usine-on-macos/).
 

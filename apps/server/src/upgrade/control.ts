@@ -13,6 +13,7 @@ import {
   Option,
   Ref,
   Result,
+  Schedule,
   Schema,
   Semaphore,
 } from "effect";
@@ -100,19 +101,8 @@ export const makeUpgrades = Effect.fn("Server.makeUpgrades")(function* (options:
       channel: settings.upgradeChannel,
       mode: settings.upgradeMode,
     });
-    const current = yield* Ref.get(progress);
+    const state = yield* Ref.get(progress);
     const result = yield* outcome;
-    const state =
-      current.phase === "installing" &&
-      Option.exists(
-        result,
-        (record) => record.target === current.target && record.status === "failed",
-      )
-        ? {
-            phase: "failed" as const,
-            message: "The upgrade helper failed. Restart the service to resume attempt admission.",
-          }
-        : current;
     const availableVersion =
       settings.upgradeMode === "off" ? Option.none() : yield* availableFor(settings.upgradeChannel);
     return UpgradeView.make({
@@ -132,6 +122,54 @@ export const makeUpgrades = Effect.fn("Server.makeUpgrades")(function* (options:
             ? `Waiting for admitted attempts to finish before upgrading to ${state.target}. New attempts are deferred and worker slots stay free. Cancel the pending upgrade to resume them.`
             : null,
       outcome: Option.getOrNull(result),
+    });
+  });
+
+  // This process sees a failed record only when the helper failed before it stopped the server.
+  const awaitOutcome = Effect.fn("Server.awaitUpgradeOutcome")(function* (target: ReleaseVersion) {
+    yield* Effect.annotateCurrentSpan({ previous: options.running, target });
+    const record = yield* outcome.pipe(
+      Effect.delay("5 seconds"),
+      Effect.tapError((error) =>
+        Effect.logWarning("Could not read the upgrade outcome; reading it again", {
+          previous: options.running,
+          target,
+          reason: error.message,
+        }),
+      ),
+      Effect.retry(Schedule.forever),
+      Effect.repeat({
+        while: (current) =>
+          Option.match(current, {
+            onNone: () => true,
+            onSome: ({ status }) => status === "installing",
+          }),
+      }),
+    );
+    if (
+      Option.isSome(record) &&
+      record.value.status === "failed" &&
+      record.value.target === target
+    ) {
+      const { reason } = record.value;
+      yield* lock.withPermit(
+        Effect.gen(function* () {
+          yield* options.resume;
+          yield* Ref.set(progress, { phase: "idle" });
+          yield* changed;
+        }),
+      );
+      yield* Effect.logError("Server upgrade failed while the server ran; attempts resumed", {
+        previous: options.running,
+        target,
+        reason,
+      });
+      return;
+    }
+    yield* Effect.logInfo("Server upgrade outcome recorded", {
+      previous: options.running,
+      target,
+      outcome: record,
     });
   });
 
@@ -197,6 +235,7 @@ export const makeUpgrades = Effect.fn("Server.makeUpgrades")(function* (options:
             yield* platform.launch(target.value);
           }),
         );
+        yield* awaitOutcome(target.value);
       }).pipe(
         Effect.catchTag("UpgradeError", (error) =>
           Effect.gen(function* () {
