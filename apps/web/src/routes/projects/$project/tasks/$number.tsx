@@ -1,4 +1,4 @@
-import { projectTasksQuery } from "~/features/tasks/queries";
+import { projectTasksQuery } from "~/lib/tasks/queries";
 import { createFileRoute, notFound, redirect } from "@tanstack/react-router";
 import { ItemNumber } from "@usine/core/item";
 import { RepositoryName } from "@usine/core/repository";

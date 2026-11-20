@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest";
-import { GitHubUserId, ProjectScope } from "@usine/core/access";
+import { GitHubUserId, InstanceScope, ProjectScope } from "@usine/core/access";
 import {
   Conversation,
   ConversationId,
@@ -20,6 +20,7 @@ import {
   settle,
 } from "@usine/core/permission-request";
 import { ProjectId } from "@usine/core/project";
+import { RepositoryName } from "@usine/core/repository";
 import { DateTime, Effect, Option, Schema } from "effect";
 import { OUTCOMES_LIMIT, turnPrompt } from "../../src/conversation/context.ts";
 
@@ -106,6 +107,53 @@ describe("turnPrompt", () => {
       assert.isBelow(cut?.result.length ?? 0, 100_000);
       assert.include(cut?.cut, "of 100000 characters");
       assert.deepStrictEqual([whole?.result, whole?.cut], ['{"ok":true}', undefined]);
+    }),
+  );
+
+  it.effect("gives the reference forms that usine links, and source lines only with source", () =>
+    Effect.gen(function* () {
+      const prompt = (repositories: ReadonlyArray<RepositoryName>) =>
+        turnPrompt({
+          member: ada,
+          grants: [],
+          at,
+          conversation,
+          repositories,
+          needsYou: [],
+          needsTotal: 0,
+          reply: defaultFormat,
+          input: { _tag: "Message", text: "Where does the store open?" },
+        });
+      const mounted = yield* prompt([RepositoryName.make("basaltbytes/usine")]);
+      assert.include(mounted, "a task as #<number> in the project or <owner>/<name>#<number>");
+      assert.include(mounted, "a run as its ID, and a loop, agent, worker, or label as its name");
+      assert.include(mounted, "Write a source line as <owner>/<name>/<path>:<line>");
+      assert.include(mounted, "/projects/<project>/runs/<run> for a run");
+      const bare = yield* prompt([]);
+      assert.notInclude(bare, "Write a source line");
+    }),
+  );
+
+  it.effect("gives an instance turn only the references that resolve without a project", () =>
+    Effect.gen(function* () {
+      const prompt = yield* turnPrompt({
+        member: ada,
+        grants: [],
+        at,
+        conversation: Conversation.make({ ...conversation, scope: InstanceScope.make() }),
+        repositories: [],
+        needsYou: [],
+        needsTotal: 0,
+        reply: defaultFormat,
+        input: { _tag: "Message", text: "What failed overnight?" },
+      });
+      assert.include(
+        prompt,
+        "a task as <owner>/<name>#<number>, and a loop, agent, or worker as its name in a code span.",
+      );
+      assert.notInclude(prompt, "#<number> in the project");
+      assert.notInclude(prompt, "a run as its ID");
+      assert.notInclude(prompt, "or label");
     }),
   );
 });

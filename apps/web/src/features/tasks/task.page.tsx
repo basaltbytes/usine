@@ -1,6 +1,6 @@
 import { Schema } from "effect";
 import { ProjectId } from "@usine/core/project";
-import { projectTasksQuery } from "~/features/tasks/queries";
+import { projectTasksQuery } from "~/lib/tasks/queries";
 import { RepositoryFilter } from "~/components/repository-filter";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { Navigate, useNavigate } from "@tanstack/react-router";

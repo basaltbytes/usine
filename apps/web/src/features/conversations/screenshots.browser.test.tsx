@@ -5,9 +5,15 @@ import {
   type PermissionGrant,
   PermissionGrant as Grant,
 } from "@usine/core/access";
-import { Conversation, ConversationId, ConversationTitle } from "@usine/core/conversation";
+import {
+  Conversation,
+  ConversationId,
+  ConversationTitle,
+  TurnSource,
+} from "@usine/core/conversation";
 import { OperationName, StandingGrantId } from "@usine/core/permission-request";
-import { FactoryOverview } from "@usine/orchestrator/operator";
+import { CommitSha } from "@usine/core/repository";
+import { DeskView, FactoryOverview, ProjectView } from "@usine/orchestrator/operator";
 import { Schema } from "effect";
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
@@ -26,6 +32,7 @@ import {
   interrupted,
   markdownAnswer,
   queued,
+  referenceAnswer,
   running,
   stepEvents,
   supervisorCalls,
@@ -43,9 +50,11 @@ import {
   retryRequest,
   withFollowUp,
 } from "~/lib/conversations/request-fixture";
-import { overviewQuery } from "~/lib/overview";
+import { deskQuery } from "~/lib/desk/queries";
+import { overviewQuery, projectId } from "~/lib/overview";
 import { sessionQuery } from "~/lib/permissions";
-import { taskOverview } from "~/lib/tasks/fixture";
+import { taskOverview, taskRepository } from "~/lib/tasks/fixture";
+import { projectTasksQuery } from "~/lib/tasks/queries";
 import { routeTree } from "~/route-tree.gen";
 import "~/index.css";
 
@@ -331,40 +340,88 @@ const permissionScenes: ReadonlyArray<Scene> = [
   },
 ];
 
-const captures = [
-  { prefix: "881", scenes, devices: [{ device: "phone", width: 390, height: 844 }] },
-  {
-    prefix: "1297",
-    scenes: permissionScenes,
-    devices: [
-      { device: "desktop", width: 1280, height: 900 },
-      { device: "phone", width: 390, height: 844 },
+/** An answer whose references resolve on `taskOverview`'s board, with the source the turn read. */
+const referencing = () =>
+  conversationOf(
+    [
+      {
+        turn: "t-1",
+        member: ada,
+        text: "Where does #40 stand?",
+        minute: 1,
+        state: answered(1),
+        answer: referenceAnswer,
+        sources: [
+          TurnSource.make({
+            repository: taskRepository,
+            revision: CommitSha.make("0123456789abcdef0123456789abcdef01234567"),
+          }),
+        ],
+      },
     ],
+    "Where does #40 stand?",
+  );
+
+const referenceScenes: ReadonlyArray<Scene> = [
+  {
+    name: "answer-references",
+    path: `/conversations?conversation=${conversationId}`,
+    arrange: (server) => server.conversations.set(conversationId, referencing()),
+    ready: "Document the cycle budget reset",
   },
+];
+
+const board = () => {
+  const [project] = taskOverview().projects;
+  if (project === undefined) throw new Error("The task overview has no project");
+  return project;
+};
+const emptyDesk = DeskView.make({
+  running: [],
+  notMoving: [],
+  lastOutcomes: [],
+  workers: [],
+  polls: [],
+});
+
+const desktop = { device: "desktop", width: 1280, height: 900 } as const;
+const phone = { device: "phone", width: 390, height: 844 } as const;
+const captures = [
+  { prefix: "881", scenes, devices: [phone], themes: ["dark"] },
+  { prefix: "1297", scenes: permissionScenes, devices: [desktop, phone], themes: ["dark"] },
+  { prefix: "1307", scenes: referenceScenes, devices: [desktop, phone], themes: ["dark", "light"] },
 ] as const;
 
 it.each(
-  captures.flatMap(({ prefix, scenes: captured, devices }) =>
-    devices.map((device) => ({ prefix, scenes: captured, ...device })),
+  captures.flatMap(({ prefix, scenes: captured, devices, themes }) =>
+    devices.flatMap((device) =>
+      themes.map((theme) => ({ prefix, scenes: captured, theme, ...device })),
+    ),
   ),
 )(
-  "captures the $prefix screens on $device",
-  async ({ prefix, scenes: captured, device, width, height }) => {
+  "captures the $prefix screens on $device in the $theme theme",
+  async ({ prefix, scenes: captured, theme, device, width, height }) => {
     await page.viewport(width, height);
-    document.documentElement.classList.add("dark");
+    document.documentElement.classList.toggle("dark", theme === "dark");
     await commands.reducedMotion(true);
     try {
       for (const scene of captured) {
         const fake = conversationServer(async (url) =>
           url.pathname === "/api/overview"
             ? encodedResponse(FactoryOverview, taskOverview())
-            : encodedResponse(Schema.Array(Schema.Never), []),
+            : url.pathname === `/api/projects/${projectId(board())}`
+              ? encodedResponse(ProjectView, board())
+              : url.pathname === "/api/desk"
+                ? encodedResponse(DeskView, emptyDesk)
+                : encodedResponse(Schema.Array(Schema.Never), []),
         );
         const supervisor = permissionServer(fake.server, fake.fetch);
         scene.arrange(fake.server, supervisor.server);
         answer = supervisor.fetch;
         const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
         queryClient.setQueryData(overviewQuery().queryKey, taskOverview());
+        queryClient.setQueryData(projectTasksQuery(projectId(board())).queryKey, board());
+        queryClient.setQueryData(deskQuery().queryKey, emptyDesk);
         queryClient.setQueryData(configurationQuery().queryKey, configurationFixture());
         queryClient.setQueryData(sessionQuery().queryKey, {
           permissions: scene.permissions ?? operator,
@@ -391,7 +448,9 @@ it.each(
         await loaded;
         await expect.element(page.getByText(scene.ready).last()).toBeVisible();
         await scene.act?.();
-        await commands.configurationEditorScreenshot(`${prefix}-${scene.name}-${device}`);
+        await commands.configurationEditorScreenshot(
+          `${prefix}-${scene.name}-${device}${theme === "dark" ? "" : `-${theme}`}`,
+        );
         flushSync(() => root.unmount());
         host.remove();
         queryClient.clear();

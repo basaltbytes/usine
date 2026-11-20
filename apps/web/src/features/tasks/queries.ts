@@ -2,24 +2,11 @@ import type { ItemNumber } from "@usine/core/item";
 import type { RepositoryName } from "@usine/core/repository";
 import type { FileChangesQuery } from "@usine/github/file-changes";
 import { changes } from "~/lib/query-changes";
-import { infiniteQueryOptions, keepPreviousData, queryOptions } from "@tanstack/react-query";
+import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
 import type { ProjectId } from "@usine/core/project";
 import { splitRepositoryName } from "@usine/core/repository";
 import type { TaskView } from "@usine/orchestrator/operator";
 import { api } from "~/lib/api";
-
-export const projectTasksQuery = (project: ProjectId) =>
-  queryOptions({
-    queryKey: ["project", project, "tasks"] as const,
-    queryFn: () => api((client) => client.project({ params: { project } }), "full"),
-    staleTime: 30_000,
-    placeholderData: keepPreviousData,
-    meta: {
-      refreshLabel: "Tasks",
-      projectId: project,
-      changes: changes.any(changes.project(project), changes.kind("configuration")),
-    },
-  });
 
 export const taskRunsQuery = (task: TaskView) => {
   const { owner, name: repository } = splitRepositoryName(task.repository);

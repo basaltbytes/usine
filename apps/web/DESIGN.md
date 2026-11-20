@@ -326,7 +326,8 @@ Compact and quiet, mostly 28px tall.
 ### Chips
 - **Label chip:** a 20px pill in the GitHub label's colour: text in the colour (dark ones lifted toward white for contrast), border at 40% alpha, fill at 12%. Used for lane sources, card labels (three, then a muted `+n` chip), and GitHub change lines.
 - **Plain chip:** hairline outline, muted text, for item states as lane sources.
-- Run state is not a chip but the dot and word from Colors.
+- **Reference chip:** a task or run that usine text names: the plain chip's outline at 20px, never taller than one line of the text around it, opening its page in the app. A task chip has its item mark, title, and Tasks list status (the state mark, or a done item's icon, then the words in subtext0); in a narrow column the title and words cut to one line with an ellipsis. A run chip has the run's state mark and loop.
+- Run state is otherwise not a chip but the dot and word from Colors.
 
 ### Filter
 One chip per applied filter, then a **Filter** button (`FunnelSimple` in subtext0) in the chip's 28px hairline box, so the button keeps its place at the right of a title row as chips are added. The button opens a 256px menu that searches the fields and, while typing, their values; Backspace in an empty search returns to the fields, and choosing a value applies it. A chip is a 28px hairline box split by hairlines: the field and its icon in subtext0, `is`, the value in 13px medium, and a remove button; the field and value reopen the menu. On phones and coarse pointers, the controls and menu items are 44px tall and the search text is 16px.

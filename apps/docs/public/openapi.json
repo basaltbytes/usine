@@ -61025,6 +61025,27 @@
             "enum": [
               "supervisor"
             ]
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "repository": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9_.-]+\\/[A-Za-z0-9_.-]+$"
+                },
+                "revision": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{40}(?:[0-9a-f]{24})?$"
+                }
+              },
+              "required": [
+                "repository",
+                "revision"
+              ],
+              "additionalProperties": false
+            }
           }
         },
         "required": [

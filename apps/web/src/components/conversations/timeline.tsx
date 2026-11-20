@@ -1,7 +1,9 @@
 import { DateTime } from "effect";
 import type { MemberMessage, OutcomesMessage, SupervisorMessage } from "@usine/core/conversation";
+import type { ProjectId } from "@usine/core/project";
 import type { ReactNode } from "react";
 import { Markdown } from "~/components/markdown";
+import { ReferenceScopeContext } from "~/components/references/scope";
 import { StatusBadge } from "~/components/status-badge";
 import { TwoStepButton } from "~/components/two-step-button";
 import { Bubble, BubbleContent } from "~/components/ui/bubble";
@@ -119,6 +121,8 @@ const TurnState = ({ entry, cancel, canceling }: TurnStateProps) => {
 
 type TurnMessagesProps = {
   readonly entry: TurnEntry;
+  /** The conversation's project, or `undefined` on the instance; its board resolves references. */
+  readonly project: ProjectId | undefined;
   /** Whether the turn's member message is still being sent. */
   readonly pending: boolean;
   /** Whether the signed-in member posted the turn's message, which aligns it to the end. */
@@ -131,13 +135,23 @@ type TurnMessagesProps = {
 /**
  * Renders one turn as two messages: the member's message, then the supervisor's texts, groups of
  * tool calls, state, and answer. The member's message is the scroll anchor while the answer
- * streams in.
+ * streams in. References in the turn's Markdown resolve in `project`, and source lines link to the
+ * commits that the answer records.
  */
-export const TurnMessages = ({ entry, pending, own, cancel, canceling }: TurnMessagesProps) => {
+export const TurnMessages = ({
+  entry,
+  project,
+  pending,
+  own,
+  cancel,
+  canceling,
+}: TurnMessagesProps) => {
   const { message, outcomes, activity, reply } = entry;
   const align = own ? "end" : "start";
   return (
-    <>
+    <ReferenceScopeContext
+      value={{ project, repository: undefined, sources: reply?.sources ?? [] }}
+    >
       {outcomes !== undefined && (
         <MessageScrollerItem messageId={`${entry.turn.id}:outcomes`} scrollAnchor>
           <Message aria-label={outcomesLabel} role="group">
@@ -194,7 +208,7 @@ export const TurnMessages = ({ entry, pending, own, cancel, canceling }: TurnMes
           </Message>
         </MessageScrollerItem>
       )}
-    </>
+    </ReferenceScopeContext>
   );
 };
 

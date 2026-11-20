@@ -20,6 +20,18 @@ Ask the supervisor about runs, tasks, and the source of a project or the whole i
 
 To stop the running turn, select **Stop**, the square button that replaces the send button while a turn runs and the message box is empty. Typing in the box brings the send button back, and Enter always sends. To cancel a queued turn, select **Cancel turn** on its row, then **Confirm cancel**. The events that a stopped turn produced stay in the conversation.
 
+## Open what an answer names
+
+The turn's texts, its answer, and the messages of the conversation link what they name:
+
+- A task on the project's board, written `#<number>` or `<owner>/<name>#<number>`, shows as a chip with the task's mark, number, title, and status, in the colors of the Tasks list. It opens the task page. The chip follows the board, so a task that closes or moves to another status shows its current state without a reload. A number that no card has opens the issue or pull request on GitHub.
+- A run on the board, written as its ID, shows its state mark and loop, and opens the run page. Another run ID, such as an older closed run's, is a link to its run page.
+- A source line, written `<owner>/<name>/<path>:<line>` in a code span, opens that line on GitHub at the commit that the turn read.
+- A loop, agent, or worker name in a code span opens its configuration page, and a label of the repository shows as its badge.
+- A link to a page of usine, such as `/projects/<project>/tasks`, opens in the same tab. A link to another site opens in a new tab.
+
+A reference inside a code block, a task in a project you can't read, a path outside the source that the turn read, and a link to an unknown page stay text. An instance conversation has no project, so only `<owner>/<name>#<number>`, source lines, and loop, agent, and worker names link there. Run transcripts and agent questions link tasks, runs, labels, and names the same way, with `#<number>` in the run's repository.
+
 ## Answer a permission request
 
 A permission request appears in the turn at the place of the call that made it, with a peach border while it waits. It shows the operation, its target, its project or **Instance**, and its arguments; long arguments are folded under **Arguments**.

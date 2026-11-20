@@ -1,8 +1,11 @@
+import { QueryClient } from "@tanstack/react-query";
+import { createMemoryHistory, createRouter, RouterContextProvider } from "@tanstack/react-router";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, expect, it } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { page } from "vitest/browser";
 import { Markdown } from "~/components/markdown";
+import { routeTree } from "~/route-tree.gen";
 
 let host: HTMLDivElement;
 let root: Root;
@@ -63,4 +66,64 @@ it("links only http, https, and mailto URLs, in a new tab without opener or refe
   }
   expect(host.textContent).toContain("script");
   expect(host.textContent).toContain("relative");
+});
+
+it("opens a path that a route matches in the app, and keeps an unknown or unsafe link as text", async () => {
+  const router = createRouter({
+    routeTree,
+    history: createMemoryHistory({ initialEntries: ["/conversations"] }),
+    context: { queryClient: new QueryClient({ defaultOptions: { queries: { retry: false } } }) },
+  });
+  flushSync(() =>
+    root.render(
+      <RouterContextProvider router={router}>
+        <Markdown>
+          {[
+            "[task](/projects/basaltbytes-usine/tasks/40?repository=basaltbytes/usine#runs)",
+            "[unknown](/nowhere/at/all)",
+            "[deep](/projects/basaltbytes-usine/tasks/40/more)",
+            "[relative](tasks/40)",
+            "[other host](//example.com/projects/x)",
+            "[script](javascript:alert(1))",
+            "[data](data:text/html,hi)",
+            "[web](https://example.com/a)",
+            "[home elsewhere](https://example.com/)",
+            "[tasks elsewhere](https://other.example/projects/basaltbytes-usine/tasks)",
+          ].join(" ")}
+        </Markdown>
+      </RouterContextProvider>,
+    ),
+  );
+  expect([...host.querySelectorAll("a")].map((link) => link.textContent)).toEqual([
+    "task",
+    "web",
+    "home elsewhere",
+    "tasks elsewhere",
+  ]);
+  const task = page.getByRole("link", { name: "task", exact: true });
+  await expect
+    .element(task)
+    .toHaveAttribute(
+      "href",
+      "/projects/basaltbytes-usine/tasks/40?repository=basaltbytes%2Fusine#runs",
+    );
+  expect(task.element().getAttribute("target")).toBeNull();
+  // A URL on another origin stays external, even when its path is a page of the app.
+  for (const [name, href] of [
+    ["home elsewhere", "https://example.com/"],
+    ["tasks elsewhere", "https://other.example/projects/basaltbytes-usine/tasks"],
+  ] as const) {
+    const external = page.getByRole("link", { name, exact: true }).element();
+    expect([external.getAttribute("href"), external.getAttribute("target")]).toEqual([
+      href,
+      "_blank",
+    ]);
+  }
+  const navigate = vi.spyOn(router, "navigate").mockResolvedValue();
+  await task.click();
+  expect(navigate).toHaveBeenCalledWith(
+    expect.objectContaining({
+      href: "/projects/basaltbytes-usine/tasks/40?repository=basaltbytes/usine#runs",
+    }),
+  );
 });

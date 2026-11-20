@@ -1,5 +1,5 @@
 import { projectQuery } from "~/features/projects/queries";
-import { projectTasksQuery } from "~/features/tasks/queries";
+import { projectTasksQuery } from "~/lib/tasks/queries";
 import { AttemptTask } from "@usine/core/attempt";
 import {
   RunSummaryView,

@@ -1,5 +1,5 @@
 import { projectQuery } from "~/features/projects/queries";
-import { projectTasksQuery } from "~/features/tasks/queries";
+import { projectTasksQuery } from "~/lib/tasks/queries";
 import { administratorPermissions } from "@usine/core/access";
 import { PermissionsContext, sessionQuery } from "~/lib/permissions";
 import { AgentSessionId, ParentSession, TextOutput } from "@usine/core/agent/session";
@@ -47,6 +47,7 @@ import { createRoot } from "react-dom/client";
 import { expect, it } from "vitest";
 import { commands, page, userEvent } from "vitest/browser";
 import { tooltipText } from "~/lib/testing/tooltip";
+import { taskOverview, taskRepository } from "~/lib/tasks/fixture";
 import { overviewQuery, attentionQuery, projectId } from "~/lib/overview";
 import { deskQuery } from "~/lib/desk/queries";
 import { runDetailQuery } from "~/lib/runs/queries";
@@ -671,6 +672,110 @@ it("shares a direct-link drawer's transcript with the run page and merges earlie
     await expect
       .element(page.getByText("Transcript message 5", { exact: true }))
       .toBeInTheDocument();
+  } finally {
+    flushSync(() => root.unmount());
+    queryClient.clear();
+    host.remove();
+  }
+});
+
+it("links the tasks that a run's outcome and transcript name, in the drawer and on the run page", async () => {
+  const id = RunId.make("references-run");
+  const named = RunView.make({
+    ...run,
+    id,
+    repository: taskRepository,
+    attempts: run.attempts.map((attempt) =>
+      AttemptView.make({
+        ...attempt,
+        outcome: FailedAttemptView.make({
+          failure: AgentFailureView.make({ message: "Blocked by #12." }),
+        }),
+      }),
+    ),
+  });
+  const parent = ParentSession.make({
+    id: AgentSessionId.make("references-parent"),
+    agent,
+    brain: run.agentBrain,
+  });
+  const overview = taskOverview();
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false, staleTime: Infinity } },
+  });
+  queryClient.setQueryData(sessionQuery().queryKey, { permissions: administratorPermissions });
+  queryClient.setQueryData(overviewQuery().queryKey, overview);
+  queryClient.setQueryData(attentionQuery().queryKey, overview);
+  queryClient.setQueryData(
+    deskQuery().queryKey,
+    DeskView.make({ running: [], notMoving: [], lastOutcomes: [], workers: [], polls: [] }),
+  );
+  for (const project of overview.projects) {
+    queryClient.setQueryData(projectQuery(projectId(project)).queryKey, project);
+    queryClient.setQueryData(projectTasksQuery(projectId(project)).queryKey, project);
+  }
+  queryClient.setQueryData(
+    runDetailQuery(queryClient, id).queryKey,
+    RunDetailView.make({
+      run: named,
+      agentDefinitionChanged: false,
+      eventDedupKey: "event",
+      eventPayload: {},
+      transcript: [
+        TranscriptEventView.make({
+          sequence: TranscriptSequence.make(1),
+          attemptId,
+          receivedAt: "2026-09-17T00:10:00Z",
+          direction: "outbound",
+          payload: SessionEvent.make({
+            event: TextOutput.make({ session: parent, text: "Planned in #40." }),
+          }),
+        }),
+      ],
+      sessionState: [],
+      earlierTranscript: [],
+    }),
+  );
+  const router = createRouter({
+    routeTree,
+    context: { queryClient },
+    history: createMemoryHistory({ initialEntries: [`/projects/basaltbytes-usine?run=${id}`] }),
+  });
+  await router.load();
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  try {
+    flushSync(() =>
+      root.render(
+        <PermissionsContext.Provider value={administratorPermissions}>
+          <QueryClientProvider client={queryClient}>
+            <RouterProvider router={router} />
+          </QueryClientProvider>
+        </PermissionsContext.Provider>,
+      ),
+    );
+    const drawer = page.getByRole("dialog");
+    const blocked = drawer.getByText(/Blocked by/u).getByRole("link");
+    await expect
+      .element(blocked)
+      .toHaveAttribute(
+        "href",
+        "/projects/basaltbytes-usine/tasks/12?repository=basaltbytes%2Fusine",
+      );
+    await expect.element(blocked).toMatchTextContent("Document the cycle budget reset");
+    await drawer.getByRole("link", { name: "Open run page", exact: true }).first().click();
+    await expect
+      .poll(() => router.state.location.pathname)
+      .toBe(`/projects/basaltbytes-usine/runs/${id}`);
+    const planned = page.getByText(/Planned in/u).getByRole("link");
+    await expect
+      .element(planned)
+      .toHaveAttribute(
+        "href",
+        "/projects/basaltbytes-usine/tasks/40?repository=basaltbytes%2Fusine",
+      );
+    await expect.element(planned).toMatchTextContent("Rework the conversation reader");
   } finally {
     flushSync(() => root.unmount());
     queryClient.clear();

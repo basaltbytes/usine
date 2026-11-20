@@ -1,5 +1,5 @@
-import { assert, it } from "vitest";
-import { DateTime, Option } from "effect";
+import { assert, it } from "@effect/vitest";
+import { DateTime, Effect, Option, Schema } from "effect";
 import {
   administratorPermissions,
   GitHubUserId,
@@ -21,6 +21,7 @@ import {
   ConversationId,
   defaultFormat,
   failTurn,
+  Message,
   MemberPost,
   MessageBody,
   MessageSequence,
@@ -102,3 +103,19 @@ it("gives a turn only read on its scope, and nothing without read", () => {
     read(InstanceScope.make()),
   );
 });
+
+it.effect("decodes an answer stored before answers kept their sources, with none", () =>
+  Effect.gen(function* () {
+    const stored = yield* Schema.decodeEffect(Schema.toCodecJson(Message))({
+      conversation: "conversation",
+      sequence: 2,
+      turn: "t1",
+      format: "markdown",
+      body: "Nothing needs you.",
+      createdAt: "2026-11-17T09:02:00.000Z",
+      role: "supervisor",
+    });
+    assert(stored.role === "supervisor");
+    assert.deepStrictEqual(stored.sources, []);
+  }),
+);

@@ -159,6 +159,11 @@ const ThreadBody = ({ id, record, composerRef }: ThreadBodyProps) => {
                   <TurnMessages
                     key={entry.turn.id}
                     entry={entry}
+                    project={
+                      record.conversation.scope._tag === "Project"
+                        ? record.conversation.scope.project
+                        : undefined
+                    }
                     pending={isPending(entry.turn)}
                     own={member !== undefined && entry.turn.member.id === member.id}
                     canceling={canceling(entry.turn.id)}

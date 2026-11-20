@@ -39,6 +39,7 @@ import { readerDocument, type AttemptEnd } from "~/lib/runs/transcript/document/
 import { previewText } from "~/lib/runs/transcript/document/text";
 import { projectTranscript } from "~/lib/runs/transcript/model";
 import { Outcome } from "~/components/runs/transcript/outcome";
+import { RepositoryReferences } from "~/components/references/scope";
 import { runDetailQuery } from "~/lib/runs/queries";
 import { TextTooltip } from "~/components/text-tooltip";
 
@@ -213,7 +214,11 @@ export const RunDrawer = ({ runId, open, close }: RunDrawerProps) => {
               openRun={openRun}
             />
           )}
-          {detail.data !== undefined && <RunSummary detail={detail.data} />}
+          {detail.data !== undefined && (
+            <RepositoryReferences repository={detail.data.run.repository}>
+              <RunSummary detail={detail.data} />
+            </RepositoryReferences>
+          )}
           {run !== undefined && (
             <ButtonLink
               {...projectLinks.run(run.repository, run.id)}

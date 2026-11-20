@@ -30,6 +30,7 @@ import {
   TurnEvent,
   TurnId,
   TurnMember,
+  type TurnSource,
   type TurnState,
 } from "@usine/core/conversation";
 import { OperatorLogin } from "@usine/core/operator";
@@ -76,6 +77,8 @@ type Post = {
   readonly minute: number;
   readonly state: TurnState;
   readonly answer?: string;
+  /** The source that the answer read. */
+  readonly sources?: ReadonlyArray<TurnSource>;
 };
 
 /** Returns a conversation view with one turn per post, answered when the post has an answer. */
@@ -110,6 +113,7 @@ export const conversationOf = (
       queuedAt: at(post.minute),
       state: post.state,
       answer: post.answer,
+      sources: post.sources ?? [],
       minute: post.minute,
     };
   });
@@ -125,6 +129,7 @@ export const conversationOf = (
           body: MessageBody.make(turn.answer),
           createdAt: at(turn.minute + 1),
           role: "supervisor",
+          sources: turn.sources,
         }),
       );
     }
@@ -138,7 +143,7 @@ export const conversationOf = (
       createdAt: at(posts[0]?.minute ?? 0),
     }),
     messages,
-    turns: turns.map(({ answer: _answer, minute: _minute, ...turn }) => turn),
+    turns: turns.map(({ answer: _answer, sources: _sources, minute: _minute, ...turn }) => turn),
     requests: [],
   };
 };
@@ -260,6 +265,27 @@ export const markdownAnswer = [
   "",
   "1. Open the run from **Needs attention**.",
   "2. Approve it, or cancel it if the issue is stale.",
+].join("\n");
+
+/**
+ * An answer that names tasks, runs, a source line, configuration, and labels of `taskOverview`'s
+ * project in a heading, a paragraph, a list, and a table.
+ */
+export const referenceAnswer = [
+  "### Where #40 stands",
+  "",
+  "#40 waits on review: `run-again` is running, and `run-approve` waits for approval. Its pull request carries `ready-for-review`.",
+  "",
+  "- #12 waits in the backlog with no run.",
+  "- The reader keeps its place in `basaltbytes/usine/apps/web/src/components/runs/transcript/reader-line.tsx:48`.",
+  "- `review-pr` runs with the `developer` agent on `eu-1`.",
+  "",
+  "| Task | Run | Label |",
+  "| --- | --- | --- |",
+  "| #40 | `run-again` | `ready-for-review` |",
+  "| #12 | None | `bug` |",
+  "",
+  "Open [the task list](/projects/basaltbytes-usine/tasks) for the rest.",
 ].join("\n");
 
 /** Returns a JSON response with `value` encoded by `schema`. */
