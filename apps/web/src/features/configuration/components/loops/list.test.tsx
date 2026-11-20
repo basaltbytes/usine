@@ -419,6 +419,10 @@ describe("Settings page", () => {
       page,
       "settings.max_background_wait_minutes Not set A child that answers while its background tasks run waits for them without a limit.",
     );
+    assert.include(
+      page,
+      "settings.allow_usage_credits false A child stops at its first request on usage credits, and the attempt waits for the plan limit to reset.",
+    );
     assert.include(page, "operator PhilDL");
     assert.include(page, "webhooks.mode off");
     assert.include(page, "Last hint received None since startup");

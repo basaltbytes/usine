@@ -26,7 +26,7 @@ If the parent task cannot be confirmed stopped, its checkout and worker slot rem
 
 ## A run that waits for its provider
 
-A provider capacity refusal, such as a subscription usage limit, never fails a run. The run shows **Provider at capacity** with the provider's message and the time of its next try. It waits until the reset time when the harness reports one. Otherwise it waits 5, 15, and 30 minutes, then 60 minutes between tries, with no limit on the total wait.
+A provider capacity refusal, such as a subscription usage limit, never fails a run. A Claude Code child that starts billing usage credits after its plan's usage limit ends with a capacity refusal too, unless [`settings.allow_usage_credits`](/reference/configuration/settings/#usage-credits) allows usage credits. The run shows **Provider at capacity** with the provider's message and the time of its next try. It waits until the reset time when the harness reports one. Otherwise it waits 5, 15, and 30 minutes, then 60 minutes between tries, with no limit on the total wait.
 
 The refusal marks the capacity group of the attempt: its harness and model on its worker. Runs that need the same group wait without starting an attempt and without holding a worker slot. At each next try, one attempt tests the group. Each group backs off after its own refusals. A run waits for the group of its latest refusal, or for the group of the worker slot it gets next when that group is at capacity too. When the provider answers that attempt, or the attempt ends without a refusal, the other runs start. A notice that the harness writes itself, such as Claude Code's usage-limit message, isn't an answer. Runs on another harness, model, or worker keep running.
 

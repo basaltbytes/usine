@@ -41,6 +41,17 @@ export const SettingsFields = (fields: FormFieldsProps) => {
           optional: field.path === "operator",
         }))}
       />
+      <Label>
+        <Checkbox
+          checked={fieldValue(fields.value, "settings.allow_usage_credits") === true}
+          onCheckedChange={(checked) =>
+            fields.onChange(
+              withField(fields.value, "settings.allow_usage_credits", checked ? true : undefined),
+            )
+          }
+        />
+        {settingsExtraCopy.usageCredits}
+      </Label>
       {fieldValue(fields.value, "webhooks.mode") === "endpoint" && (
         <Fields
           {...fields}

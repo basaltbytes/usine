@@ -64933,6 +64933,9 @@
               }
             ]
           },
+          "allowUsageCredits": {
+            "type": "boolean"
+          },
           "supervisor": {
             "anyOf": [
               {
@@ -65064,6 +65067,7 @@
           "maxAttemptMinutes",
           "maxAttemptTokens",
           "maxBackgroundWaitMinutes",
+          "allowUsageCredits",
           "supervisor",
           "operator",
           "webhooks",

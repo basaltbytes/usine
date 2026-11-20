@@ -10,7 +10,11 @@ import { capabilitiesQuery } from "~/lib/configuration/capabilities";
 import { capabilitiesFixture } from "~/lib/configuration/fixture";
 import "~/index.css";
 
-it("writes the supervisor's brain under settings.supervisor and removes it when unchecked", async () => {
+/**
+ * Renders the settings form on `{ settings: { poll_interval: 60 } }` and returns each value that it
+ * emits, with the cleanup that unmounts it.
+ */
+const renderSettings = () => {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Infinity } },
   });
@@ -32,14 +36,25 @@ it("writes the supervisor's brain under settings.supervisor and removes it when 
   const host = document.createElement("div");
   document.body.append(host);
   const root = createRoot(host);
+  flushSync(() =>
+    root.render(
+      <QueryClientProvider client={client}>
+        <Form />
+      </QueryClientProvider>,
+    ),
+  );
+  return {
+    changes,
+    unmount: () => {
+      root.unmount();
+      host.remove();
+    },
+  };
+};
+
+it("writes the supervisor's brain under settings.supervisor and removes it when unchecked", async () => {
+  const { changes, unmount } = renderSettings();
   try {
-    flushSync(() =>
-      root.render(
-        <QueryClientProvider client={client}>
-          <Form />
-        </QueryClientProvider>,
-      ),
-    );
     const supervisor = page.getByRole("checkbox", { name: "Run a supervisor", exact: true });
     await supervisor.click();
     await expect.element(supervisor).toBeChecked();
@@ -71,7 +86,24 @@ it("writes the supervisor's brain under settings.supervisor and removes it when 
       .not.toBeInTheDocument();
     expect(changes.at(-1)).toStrictEqual({ settings: { poll_interval: 60 } });
   } finally {
-    root.unmount();
-    host.remove();
+    unmount();
+  }
+});
+
+it("writes settings.allow_usage_credits when checked and removes it when unchecked", async () => {
+  const { changes, unmount } = renderSettings();
+  try {
+    const credits = page.getByRole("checkbox", { name: /^Allow usage credits/ });
+    await expect.element(credits).not.toBeChecked();
+    await credits.click();
+    await expect.element(credits).toBeChecked();
+    expect(changes.at(-1)).toStrictEqual({
+      settings: { poll_interval: 60, allow_usage_credits: true },
+    });
+    await credits.click();
+    await expect.element(credits).not.toBeChecked();
+    expect(changes.at(-1)).toStrictEqual({ settings: { poll_interval: 60 } });
+  } finally {
+    unmount();
   }
 });

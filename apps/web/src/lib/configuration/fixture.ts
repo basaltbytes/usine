@@ -442,6 +442,7 @@ export const configurationJson = {
     maxAttemptMinutes: null,
     maxAttemptTokens: 20_000_000,
     maxBackgroundWaitMinutes: null,
+    allowUsageCredits: false,
     supervisor: null,
     operator: "PhilDL",
     webhooks: "off",
