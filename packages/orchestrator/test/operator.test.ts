@@ -13,7 +13,7 @@ import {
 } from "@usine/core/access";
 import { ProjectId } from "@usine/core/project";
 import { ReleaseVersion } from "@usine/core/upgrade";
-import { CapacityGroup, CapacityWait, UpgradeDrain, UpgradeWait } from "@usine/engine/engine";
+import { CapacityWait, UpgradeDrain, UpgradeWait } from "@usine/engine/engine";
 import { WebhookHealth } from "../src/webhooks.ts";
 import { testAppLayer } from "./support/github-app.ts";
 import { pollingTestLayer } from "./support/polling.ts";
@@ -43,6 +43,7 @@ import {
   AttemptNumber,
   AttemptContext,
   AttemptTask,
+  CapacityGroup,
 } from "@usine/core/attempt";
 import { DedupKey, EventId, Event } from "@usine/core/event";
 import { ItemKey, ItemNumber as CoreItemNumber, ItemNumber } from "@usine/core/item";
@@ -3478,6 +3479,57 @@ it.effect("shows the group's next try on a Run that waits for it without an Atte
       ),
     );
   }),
+);
+
+it.effect(
+  "shows that another Run's Attempt tests the group, and no wait on a closed Run that the engine still lists",
+  () =>
+    Effect.gen(function* () {
+      const refusedAt = yield* DateTime.now;
+      const waiting = RunSnapshot.make({
+        ...snapshot,
+        run: Run.make({ ...snapshot.run, state: RunState.Pending.make() }),
+        attempts: [],
+      });
+      const view = (current: RunSnapshot, probes: ReadonlyArray<RunId>) => {
+        const wait = CapacityWait.make({
+          group: CapacityGroup.make({
+            harness: brain.harness,
+            model: brain.model,
+            holder: WorkerCredentialHolder.make({ worker: WorkerName.make("local") }),
+          }),
+          message: "You've hit your limit",
+          since: refusedAt,
+          refusals: 1,
+          nextTryAt: DateTime.add(refusedAt, { minutes: 5 }),
+          probes,
+          runIds: [current.run.id],
+        });
+        const { providerRetry, canRetry } = runView(
+          current,
+          new Set(),
+          declaredWorkers([]),
+          new Map(),
+          {
+            upgrade: null,
+            capacity: [wait],
+          },
+        );
+        return { tested: providerRetry?.testedByAnotherRun ?? null, canRetry };
+      };
+      assert.deepStrictEqual(view(waiting, [RunId.make("other-run")]), {
+        tested: true,
+        canRetry: true,
+      });
+      // The Run that the engine elected to test the group is listed until its Attempt starts.
+      assert.deepStrictEqual(view(waiting, [waiting.run.id]), { tested: false, canRetry: true });
+      // The engine's list of waiting Runs can lag behind a Run that closed.
+      const succeeded = RunSnapshot.make({
+        ...waiting,
+        run: Run.make({ ...waiting.run, state: RunState.Succeeded.make() }),
+      });
+      assert.deepStrictEqual(view(succeeded, []), { tested: null, canRetry: false });
+    }),
 );
 
 it.effect("filters cached project lists and refuses actions outside a project binding", () =>

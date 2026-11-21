@@ -1,7 +1,7 @@
 import { ProjectView } from "@usine/orchestrator/operator";
 import { ProjectId } from "@usine/core/project";
 import { boardOverview } from "~/lib/projects/fixture";
-import { AttemptId, AttemptNumber } from "@usine/core/attempt";
+import { AttemptId, AttemptNumber, CapacityGroup } from "@usine/core/attempt";
 import { LoopName } from "@usine/core/loop";
 import { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
@@ -24,7 +24,6 @@ import { DateTime, Option } from "effect";
 import { assert, describe, it } from "vitest";
 import { needsYouByProject } from "~/lib/overview";
 import { CiFixRun } from "@usine/engine/run-reader";
-import { CapacityGroup } from "@usine/engine/engine";
 import { Harness, ModelId } from "@usine/core/agent/brain";
 import { fixRunStatus, needCopy } from "~/lib/needs-you/strings";
 
