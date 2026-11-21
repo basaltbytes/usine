@@ -19,6 +19,7 @@ import { Harness, ModelId } from "@usine/core/agent/brain";
 import {
   type BillingPool,
   HarnessSession,
+  HarnessSessionId,
   ProviderAnswered,
   ProviderRecovered,
   ProviderRetries,
@@ -521,12 +522,17 @@ const makeClaudeSessions = Effect.gen(function* () {
       return {};
     };
     const { home, defaultHome } = environmentHome(spec.environment, "CLAUDE_CONFIG_DIR", ".claude");
-    const reference = Option.getOrElse(startReference(start), () =>
-      HarnessSession.make({
-        cwd: spec.cwd,
-        home,
-      }),
-    );
+    // Claude Code takes the conversation ID from its caller, so a new session gets one here.
+    const reference = yield* Option.match(startReference(start), {
+      onSome: Effect.succeed,
+      onNone: () =>
+        crypto.randomUUIDv4().pipe(
+          Effect.orDie,
+          Effect.map((id) =>
+            HarnessSession.make({ id: HarnessSessionId.make(id), cwd: spec.cwd, home }),
+          ),
+        ),
+    });
     const options: ClaudeQueryOptions = {
       ...optionsFor(spec, start, reference.id),
       hooks: {

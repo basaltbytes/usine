@@ -70,7 +70,7 @@ The harvest reads `AttemptWindows` (`own`, `overlapping`) through `AttemptWindow
 
 Outbound `SessionEvent` envelopes keep parent and first-level child session identity.
 
-`Steer` and `OperatorMessage` carry an `OperatorMessageId` UUID, assigned by usine when the action is constructed. Encoding preserves it across retries and restarts. Legacy actions without an ID receive one when decoded. `HarnessSession.make` assigns a UUID when no vendor ID is supplied; Claude uses this ID before its first prompt.
+`Steer` and `OperatorMessage` carry an `OperatorMessageId` UUID, assigned by usine when the action is constructed. Encoding preserves it across retries and restarts. Legacy actions without an ID receive one when decoded. `HarnessSession.make` takes the harness's conversation ID; the Claude adapter draws a UUID for a new conversation, because Claude Code takes its ID from the caller.
 
 An `InterventionApplied` receipt uses the original input sequence and intervention. Its state's `forwardedTo` is the child ID when a parent steer is forwarded, or `None` for direct delivery and older receipts. `queued` stays true until the receiving session reads the message. Later receipts update the same input's delivery status.
 

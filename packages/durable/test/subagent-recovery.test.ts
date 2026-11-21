@@ -545,7 +545,9 @@ for (const receipt of ["unacknowledged", "absent"] as const)
                   });
                 }
                 const journal = yield* ChildSessionJournal.current;
-                yield* journal.started(HarnessSession.make({ cwd: child.cwd }));
+                yield* journal.started(
+                  HarnessSession.make({ id: HarnessSessionId.make("saved-child"), cwd: child.cwd }),
+                );
                 if (acknowledged) yield* journal.prompted;
                 return yield* stub.launch(child);
               }),
@@ -629,7 +631,9 @@ it.live("restores the native user-message items that the saved child observed", 
                 });
               }
               const journal = yield* ChildSessionJournal.current;
-              yield* journal.started(HarnessSession.make({ cwd: child.cwd }));
+              yield* journal.started(
+                HarnessSession.make({ id: HarnessSessionId.make("saved-child"), cwd: child.cwd }),
+              );
               yield* journal.received(["task", "guidance"]);
               return yield* stub.launch(child);
             }),
@@ -699,7 +703,9 @@ it.live("keeps a prompted child's receipt when its resumed launch saves it again
                 yield* journal.started(child.resume.value);
                 return yield* stub.launch(child);
               }
-              yield* journal.started(HarnessSession.make({ cwd: child.cwd }));
+              yield* journal.started(
+                HarnessSession.make({ id: HarnessSessionId.make("saved-child"), cwd: child.cwd }),
+              );
               yield* journal.prompted;
               return yield* stub.launch(child);
             }),

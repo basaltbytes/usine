@@ -332,7 +332,10 @@ describe("Claude child backend", () => {
   });
 
   it.effect("reports a failed native reopen as interrupted", () => {
-    const saved = HarnessSession.make({ cwd: request().cwd });
+    const saved = HarnessSession.make({
+      id: HarnessSessionId.make("saved-claude"),
+      cwd: request().cwd,
+    });
     const sdk = Layer.succeed(ClaudeSdk)({
       open: (_input, options) => {
         assert.strictEqual(options.resume, saved.id);
@@ -1423,7 +1426,12 @@ describe("Claude child backend", () => {
               ChildRequest.make({
                 ...request(undefined, undefined, exitingHost(0)),
                 resume: resumed
-                  ? Option.some(HarnessSession.make({ cwd: request().cwd }))
+                  ? Option.some(
+                      HarnessSession.make({
+                        id: HarnessSessionId.make("saved-claude"),
+                        cwd: request().cwd,
+                      }),
+                    )
                   : Option.none(),
               }),
             );
@@ -1483,7 +1491,12 @@ describe("Claude child backend", () => {
         const running = yield* (yield* ChildBackend).launch(
           ChildRequest.make({
             ...request(undefined, undefined, exitingHost(0)),
-            resume: Option.some(HarnessSession.make({ cwd: request().cwd })),
+            resume: Option.some(
+              HarnessSession.make({
+                id: HarnessSessionId.make("saved-claude"),
+                cwd: request().cwd,
+              }),
+            ),
           }),
         );
         const output = () => outputs.at(-1)!;
@@ -1627,7 +1640,12 @@ describe("Claude child backend", () => {
         const running = yield* (yield* ChildBackend).launch(
           ChildRequest.make({
             ...request(),
-            resume: Option.some(HarnessSession.make({ cwd: request().cwd })),
+            resume: Option.some(
+              HarnessSession.make({
+                id: HarnessSessionId.make("saved-claude"),
+                cwd: request().cwd,
+              }),
+            ),
             unread: [{ id: steer.id, message: steer.message }],
           }),
         );

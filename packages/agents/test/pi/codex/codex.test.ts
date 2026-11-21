@@ -454,7 +454,10 @@ describe("Codex child backend", () => {
 
   it.effect("reports a failed native reopen as interrupted without starting a turn", () => {
     const original = request();
-    const saved = HarnessSession.make({ cwd: original.cwd });
+    const saved = HarnessSession.make({
+      id: HarnessSessionId.make("saved-codex"),
+      cwd: original.cwd,
+    });
     const calls: Array<{ readonly method: string; readonly params: Schema.Json }> = [];
     const server = connectionLayer(
       successfulResponses([{ id: "gpt-5.6-terra", model: "gpt-5.6-terra" }]),

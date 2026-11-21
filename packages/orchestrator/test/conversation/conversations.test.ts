@@ -27,6 +27,7 @@ import { BrainSpec, Harness, ModelId } from "@usine/core/agent/brain";
 import {
   type AgentSessionEvent,
   HarnessSession,
+  HarnessSessionId,
   RoleSession,
   SessionStarted,
   SessionTokensUpdated,
@@ -166,7 +167,12 @@ const scriptedHarness = (scripts: Array<Script>, starts: Array<Start>) => {
         const events: ReadonlyArray<AgentSessionEvent> = [
           SessionStarted.make({
             session,
-            harnessSession: Option.some(HarnessSession.make({ cwd: "/conversation" })),
+            harnessSession: Option.some(
+              HarnessSession.make({
+                id: HarnessSessionId.make("saved-conversation"),
+                cwd: "/conversation",
+              }),
+            ),
           }),
           ...script.events.map((text) => TextOutput.make({ session, text })),
           SessionTokensUpdated.make({ session, totalTokens: TokenCount.make(script.tokens) }),

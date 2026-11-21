@@ -1,5 +1,5 @@
 import { InstanceScope, ProjectScope } from "@usine/core/access";
-import { HarnessSession } from "@usine/core/agent/session";
+import { HarnessSession, HarnessSessionId } from "@usine/core/agent/session";
 import {
   defaultFormat,
   followUpOf,
@@ -233,7 +233,10 @@ export const withFollowUp = (
         state: Succeeded.make({
           startedAt: at(5),
           endedAt: at(6),
-          session: HarnessSession.make({ cwd: "/conversation" }),
+          session: HarnessSession.make({
+            id: HarnessSessionId.make("saved-conversation"),
+            cwd: "/conversation",
+          }),
           usage: Option.none(),
         }),
       },

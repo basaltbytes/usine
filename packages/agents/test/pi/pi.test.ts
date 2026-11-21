@@ -25,6 +25,7 @@ import {
   AgentSessionId,
   ChildSession,
   HarnessSession,
+  HarnessSessionId,
   sessionPool,
 } from "@usine/core/agent/session";
 import * as AttemptChannel from "@usine/core/attempt/channel";
@@ -860,7 +861,12 @@ describe("Pi child backend", () => {
           .launch(
             ChildRequest.make({
               ...childRequest,
-              resume: Option.some(HarnessSession.make({ cwd: childRequest.cwd })),
+              resume: Option.some(
+                HarnessSession.make({
+                  id: HarnessSessionId.make("saved-pi"),
+                  cwd: childRequest.cwd,
+                }),
+              ),
             }),
           )
           .pipe(Effect.flip);
@@ -903,7 +909,9 @@ describe("Pi child backend", () => {
         (yield* ChildBackend).launch(
           ChildRequest.make({
             ...childRequest,
-            resume: Option.some(HarnessSession.make({ cwd: childRequest.cwd })),
+            resume: Option.some(
+              HarnessSession.make({ id: HarnessSessionId.make("saved-pi"), cwd: childRequest.cwd }),
+            ),
             unread: restored.map(({ id, message }) => ({ id, message })),
           }),
         ),

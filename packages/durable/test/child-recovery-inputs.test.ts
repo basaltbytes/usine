@@ -7,6 +7,7 @@ import { ChildBackend, ChildSessionJournal, SessionInterruptedError } from "@usi
 import {
   type AgentSessionId,
   HarnessSession,
+  HarnessSessionId,
   SessionStarted,
   TextOutput,
 } from "@usine/core/agent/session";
@@ -105,7 +106,9 @@ for (const failure of ["native-reopen", "spawn-count"] as const) {
           yield* child.emit(
             SessionStarted.make({
               session: child.request.session,
-              harnessSession: Option.some(HarnessSession.make({ cwd: request.cwd })),
+              harnessSession: Option.some(
+                HarnessSession.make({ id: HarnessSessionId.make("saved-child"), cwd: request.cwd }),
+              ),
             }),
           );
           yield* child.emit(
@@ -295,7 +298,9 @@ it.live("reports a restored forwarded steer read by the resumed child", () =>
         yield* child.emit(
           SessionStarted.make({
             session: child.request.session,
-            harnessSession: Option.some(HarnessSession.make({ cwd: request.cwd })),
+            harnessSession: Option.some(
+              HarnessSession.make({ id: HarnessSessionId.make("saved-child"), cwd: request.cwd }),
+            ),
           }),
         );
         yield* child.emit(
@@ -417,7 +422,9 @@ it.live("restores a child's queued operator input to that child alone after a re
           yield* child.emit(
             SessionStarted.make({
               session: child.request.session,
-              harnessSession: Option.some(HarnessSession.make({ cwd: request.cwd })),
+              harnessSession: Option.some(
+                HarnessSession.make({ id: HarnessSessionId.make("saved-child"), cwd: request.cwd }),
+              ),
             }),
           );
           yield* child.emit(

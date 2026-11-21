@@ -8,7 +8,7 @@ import {
   permits,
   ProjectScope,
 } from "@usine/core/access";
-import { HarnessSession } from "@usine/core/agent/session";
+import { HarnessSession, HarnessSessionId } from "@usine/core/agent/session";
 import {
   Conversation,
   ConversationId,
@@ -388,7 +388,15 @@ describe("supervisor permissions", () => {
         const conversations = yield* ConversationStore;
         yield* conversations.transition(
           turn,
-          succeedTurn(turn, at, HarnessSession.make({ cwd: "/conversation" }), Option.none()),
+          succeedTurn(
+            turn,
+            at,
+            HarnessSession.make({
+              id: HarnessSessionId.make("saved-conversation"),
+              cwd: "/conversation",
+            }),
+            Option.none(),
+          ),
         );
         const answering = yield* Effect.forkChild(
           permissions.answer(conversation.id, request.id, "once", as(ada), (id) =>
@@ -443,7 +451,15 @@ describe("supervisor permissions", () => {
         const conversations = yield* ConversationStore;
         yield* conversations.transition(
           turn,
-          succeedTurn(turn, at, HarnessSession.make({ cwd: "/conversation" }), Option.none()),
+          succeedTurn(
+            turn,
+            at,
+            HarnessSession.make({
+              id: HarnessSessionId.make("saved-conversation"),
+              cwd: "/conversation",
+            }),
+            Option.none(),
+          ),
         );
         return turn;
       }).pipe(Effect.provide(open));

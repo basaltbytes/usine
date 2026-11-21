@@ -44,7 +44,7 @@ import {
   EVENTS_PAGE,
   TurnView,
 } from "@usine/orchestrator/operator/http";
-import { AgentSessionId, HarnessSession } from "@usine/core/agent/session";
+import { AgentSessionId, HarnessSession, HarnessSessionId } from "@usine/core/agent/session";
 import { DateTime, Option, Schema } from "effect";
 
 /** The project of `taskOverview`, whose repository is `basaltbytes/usine`. */
@@ -154,7 +154,10 @@ export const answered = (minute: number) =>
   Succeeded.make({
     startedAt: at(minute),
     endedAt: at(minute + 1),
-    session: HarnessSession.make({ cwd: "/conversation" }),
+    session: HarnessSession.make({
+      id: HarnessSessionId.make("saved-conversation"),
+      cwd: "/conversation",
+    }),
     usage: Option.none(),
   });
 export const interrupted = (minute: number) =>

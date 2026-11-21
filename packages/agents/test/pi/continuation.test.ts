@@ -5,6 +5,7 @@ import {
   AgentSessionId,
   ChildSession,
   HarnessSession,
+  HarnessSessionId,
   type AgentSessionEvent,
 } from "@usine/core/agent/session";
 import { OperatorMessageId } from "@usine/core/attempt/channel";
@@ -39,7 +40,10 @@ const session = ChildSession.make({
     effort: "off",
   }),
 });
-const reference = HarnessSession.make({ cwd: "/checkout" });
+const reference = HarnessSession.make({
+  id: HarnessSessionId.make("saved-child"),
+  cwd: "/checkout",
+});
 const request = ChildRequest.make({
   session,
   cwd: WorkingDirectory.make("/checkout"),
