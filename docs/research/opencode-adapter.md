@@ -1,4 +1,4 @@
-# OpenCode adapter: transport and behaviour on OpenCode 2.3.2
+# OpenCode adapter: transport and behavior on OpenCode 2.3.2
 
 Research for [issue #1381](https://github.com/basaltbytes/usine/issues/1381). It settles the design
 of an OpenCode harness adapter before any adapter code, and replaces the 2.2.5 note on the parked
@@ -205,7 +205,7 @@ On the recommended transport. `Capability` is defined in
 | `durable-coordination` | Lacking: OpenCode doesn't journal usine tool intents and results. After a process dies, the in-flight tool call is failed with `Tool execution interrupted` and no turn continues. | Verified |
 | `resume-session` | Supported: a session is stored as rows in the data database, and a new `serve` on the same data directory reopens it by ID. Nothing runs until a prompt, so the continuation policy's one message starts the continuation. | Verified |
 | `steer` | Supported: `POST /api/session/:id/prompt` with `delivery: "steer"` and a usine `msg_…` ID; `session.inbox.delivered` reports the read with that ID. | Verified |
-| `interrupt` | Supported: `POST /api/session/:id/interrupt` answered in 11 ms and killed the shell command about 20 ms later. Pending inbox items stay pending; `?resume=true` runs pending steers at once. | Verified |
+| `interrupt` | Supported: `POST /api/session/:id/interrupt` answered in 11 ms and killed the shell command about 20 ms later. A steer queued before the interrupt stays pending, and `?resume=true` runs it at once. A steer accepted after the answer starts a new execution as soon as the old one settles (see "Steer after an interrupt"). | Verified |
 | `usine-tools` | Supported through MCP: the API client hosts an MCP server over a WebSocket at `/api/experimental/client-mcp`, and the model sees its tools as `<server>_<tool>`. The bridge relays the socket's messages as lines. | Verified at the API; relay not prototyped |
 | `closed-tools` | Supported: session `permissions` remove tools from the model's list exactly. | Verified |
 | `structured-output` | Lacking: no session or prompt option constrains the answer to a JSON Schema. `/api/experimental/generate/decisions` returns only predicate, choice, and score answers. | Source; no recorded request had `response_format` |
@@ -232,6 +232,21 @@ Message IDs must start with `msg_` and be unique in the data database, not only 
 reposting an ID in the same session returns the first record, and the same ID in another
 session returns `409 ConflictError` (verified). Derive them from usine's operator message IDs
 with a per-attempt prefix.
+
+### Steer after an interrupt
+
+`/interrupt` answers before the execution's cleanup settles
+([`execution.ts:190-193`](https://github.com/anomalyco/opencode/blob/v2.3.2/packages/core/src/session/execution.ts#L190-L193)).
+A steer posted after that answer starts a successor execution when the old one settles, without
+`?resume=true`. In the probe, the steer's `POST` returned 200, `session.execution.interrupted`
+arrived 44 ms after the interrupt's answer, `session.execution.started` 1 ms later, and then
+`session.inbox.delivered` with the steer's ID and `session.execution.succeeded` (verified). A
+steer posted 300 ms before the interrupt started no execution and stayed in
+`GET /api/session/:id/inbox` (verified).
+
+So `session.execution.interrupted` doesn't end the turn while a steer accepted after the interrupt
+is still undelivered: the adapter waits for the successor execution and its result. PR #1001 had
+the same race (section 7).
 
 ### usine tools
 
@@ -529,9 +544,11 @@ handoff to a successor
 
 | Finding | With the bridge |
 | --- | --- |
+| P0: the server password went into the SSH remote command, where process listings show it | Gone: the bridge generates the password on the worker and passes it to `serve` in its environment, so no command line or SSH connection carries it. |
 | P1: the OpenCode wiring exported `XDG_DATA_HOME` to every child of the attempt | Gone for other harnesses: step 15 builds each child's environment from its own harness's wiring only ([`environment.ts:156-157`](../../packages/executor/src/ssh/gateway/environment.ts)). Kept as a requirement for OpenCode itself, whose tool commands inherit `serve`'s environment: isolate its state per attempt without moving `XDG_DATA_HOME` for those commands (section 4). Saved credentials beat the placeholder, so the per-attempt directory is required. |
 | P2: server failures had no diagnostics | Gone: the bridge passes OpenCode's warnings to standard error, where the owner keeps a bounded tail and the exit code, as for every child. With `serve --print-logs --log-level warn`, a malformed provider in the configuration put its warning in that tail (verified). Kept: test an exit before readiness. |
 | P2: the SSH forward lacked `ControlPath=none` and ignored its output | Gone: no forward. |
+| P2: guidance accepted while an interrupt settled was lost, because the old execution's `interrupted` event ended the session | Kept as a requirement: 2.3.2 still answers `/interrupt` before cleanup settles, and a steer accepted after the answer starts a successor execution. `session.execution.interrupted` doesn't end the turn while that steer is undelivered (section 2, "Steer after an interrupt"); the `interrupt-guidance` scenario drives this sequence. |
 | P2: CI tested neither the transport nor `interrupt` | Kept as a requirement: replay fixtures at the `ChildHost` boundary for the shared scenarios, including `interrupt-guidance`, `steer`, and `restart`, plus unit tests of the bridge against a scripted fake server (readiness, crash, garbage, slow start, end of input). |
 | P2: preflight skipped the model check on gateway routes | Kept: preflight checks the model on every route through `GET /api/model`, which needs no provider request. |
 | P3: an unexpected event shape failed the whole session | Kept: log and skip unknown event types and shapes; the pin limits drift. |
@@ -554,7 +571,8 @@ issue precedes it.
   title-generation calls), usine-derived `msg_` IDs, session permissions per role, steering and
   interrupt, reads acknowledged by `session.inbox.delivered`, the result after background work
   ends, tokens and cost per step, retries and plan limits mapped to `AgentCapacityError`, and
-  resume from the data database.
+  resume from the data database. `session.execution.interrupted` doesn't end the turn while a
+  steer accepted after the interrupt is still undelivered (section 2, "Steer after an interrupt").
 - A descriptor with the capability profile in section 2, the isolation and credential
   environment in sections 3 and 4, and an install entry that installs only the matching platform
   binary.
