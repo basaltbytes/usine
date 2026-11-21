@@ -33,7 +33,7 @@ The reference covers the operator HTTP API, including sign-in, members, and toke
 
 ## Configuration capabilities
 
-`GET /api/configuration/capabilities` returns `harnesses` (registered IDs), `efforts` (reasoning levels), and `harnessDetails`. Each detail has an `id`, a display `label`, and a nullable `handoff`. A handoff contains the terminal `command`, a nullable `homeVariable` for a saved session directory, and `gateway`, which states whether the command can resume a gateway-authenticated session. Clients use this metadata for harness labels and resume details.
+`GET /api/configuration/capabilities` returns `harnesses` (registered IDs), `efforts` (reasoning levels), and `harnessDetails`. Each detail has an `id`, a display `label`, and a nullable `handoff`. A handoff contains the terminal `command`, a nullable `homeVariable` for a saved session directory, and `gateway`, which states whether the command can resume a gateway-authenticated session. `pools` lists the billing pools that the harnesses declare, in catalog order. Each pool has an `id`, a display `label`, `billing` (`plan` for a subscription with usage limits, or `metered` for usage billed per token), and `windows`, which states how its plan windows are reported: `none`, `together` (each report has every window), or `separately` (each report has one window, and the others keep their last reading). Clients use this metadata for harness and pool labels and resume details.
 
 ## Configuration reads
 
@@ -56,6 +56,8 @@ A task read, `GET /api/projects/:owner/:repository/tasks/:item`, returns the tas
 A transcript's `Started` payload has a `parentModel` with the selected Pi parent model, or `null` for an attempt without a parent session.
 
 Session records in transcripts and usage responses include an optional `pool` resolved at launch and an optional `endpoint` provider name for API-key models. Usage reads the recorded pool; older records without it use the historical harness and model rule. Endpoint names exclude URLs and credentials.
+
+Usage and statistics responses list pools in catalog order, each with its `pool` ID and `label`; a pool warning in Needs you also has the pool's `label`. A cost in a plan pool is an estimate. A pool that the catalog doesn't declare, such as one of a removed harness, comes after the declared pools, with its ID as its label, and its cost isn't an estimate.
 
 ## Item text
 

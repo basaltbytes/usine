@@ -245,7 +245,7 @@ One schema-checked value that a harness returns for one prompt, with no saved co
 _Avoid_: structured call, one-shot
 
 **Pool**:
-The billing source for an attempt's usage: API keys, the Claude plan, or the ChatGPT plan.
+The billing source for an attempt's usage, such as API keys or a subscription plan. A harness descriptor declares each pool that its sessions bill.
 _Avoid_: budget, account, quota
 
 **Capacity group**:
