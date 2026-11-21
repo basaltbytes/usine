@@ -210,46 +210,48 @@ export const loginCheck = (message: Schema.Json, spentTokens: boolean): LoginChe
 };
 
 /**
- * Returns the transcript events in `message`; `tools` names the open tool calls by ID, and
- * `toolName` maps the name that Claude Code reports to the name that events carry.
+ * Returns the transcript events in `message`, and the open tool calls by ID after it. `tools` names
+ * the open tool calls by ID before it, and `toolName` maps the name that Claude Code reports to the
+ * name that events carry.
  */
 export const sessionEventsFrom = (
   message: Schema.Json,
   session: AgentSession,
-  tools: Map<string, string>,
+  tools: ReadonlyMap<string, string>,
   toolName: (reported: string) => string = (reported) => reported,
-): ReadonlyArray<AgentSessionEvent> => {
-  if (!Schema.is(ClaudeContentMessage)(message)) return [];
+) => {
   const events: Array<AgentSessionEvent> = [];
-  for (const block of message.message.content) {
-    // Emits only text blocks of completed assistant messages; streaming deltas are not recorded.
-    if (message.type === "assistant" && Schema.is(ClaudeTextBlock)(block)) {
-      events.push(TextOutput.make({ session, text: block.text }));
-    } else if (Schema.is(ClaudeToolUseBlock)(block)) {
-      const tool = toolName(block.name);
-      tools.set(block.id, tool);
-      events.push(
-        ToolStarted.make({
-          session,
-          callId: block.id,
-          tool,
-          input: block.input,
-        }),
-      );
-    } else if (Schema.is(ClaudeToolResultBlock)(block)) {
-      events.push(
-        ToolFinished.make({
-          session,
-          callId: block.tool_use_id,
-          tool: tools.get(block.tool_use_id) ?? "unknown",
-          output: block.content,
-          isError: block.is_error === true,
-        }),
-      );
-      tools.delete(block.tool_use_id);
+  const open = new Map(tools);
+  if (Schema.is(ClaudeContentMessage)(message))
+    for (const block of message.message.content) {
+      // Emits only text blocks of completed assistant messages; streaming deltas are not recorded.
+      if (message.type === "assistant" && Schema.is(ClaudeTextBlock)(block)) {
+        events.push(TextOutput.make({ session, text: block.text }));
+      } else if (Schema.is(ClaudeToolUseBlock)(block)) {
+        const tool = toolName(block.name);
+        open.set(block.id, tool);
+        events.push(
+          ToolStarted.make({
+            session,
+            callId: block.id,
+            tool,
+            input: block.input,
+          }),
+        );
+      } else if (Schema.is(ClaudeToolResultBlock)(block)) {
+        events.push(
+          ToolFinished.make({
+            session,
+            callId: block.tool_use_id,
+            tool: open.get(block.tool_use_id) ?? "unknown",
+            output: block.content,
+            isError: block.is_error === true,
+          }),
+        );
+        open.delete(block.tool_use_id);
+      }
     }
-  }
-  return events;
+  return { events, tools: open };
 };
 
 /** The HTTP status of a rate-limited request, including a request over the usage limit. */

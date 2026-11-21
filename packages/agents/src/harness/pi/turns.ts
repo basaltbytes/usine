@@ -1,7 +1,7 @@
 import type { ContinuationPolicy } from "../continuation.ts";
 import type { InlineExtension } from "@earendil-works/pi-coding-agent";
 import type { AgentSession } from "@usine/core/agent/session";
-import { Effect, Fiber, Option, Schema } from "effect";
+import { Effect, Fiber, Option, Ref, Schema } from "effect";
 import {
   AgentCapacityError,
   type AgentSessionError,
@@ -18,15 +18,14 @@ import { lastPiMessageText, piUserMessageText, type SessionChannel } from "../se
 export const piPauseGate = Effect.gen(function* () {
   const context = yield* Effect.context<never>();
   const scope = yield* Effect.scope;
-  let boundary = Effect.void;
+  /** The boundary that tool calls and provider requests wait at; none until the session sets it. */
+  const boundary = yield* Ref.make<Effect.Effect<void>>(Effect.void);
   const wait = () =>
     Effect.runPromiseWith(context)(
-      Effect.suspend(() => boundary).pipe(Effect.forkIn(scope), Effect.flatMap(Fiber.join)),
+      Effect.flatten(Ref.get(boundary)).pipe(Effect.forkIn(scope), Effect.flatMap(Fiber.join)),
     );
   return {
-    set: (next: Effect.Effect<void>) => {
-      boundary = next;
-    },
+    set: (next: Effect.Effect<void>) => Ref.set(boundary, next),
     extension: {
       name: "usine-session-intervention",
       factory: (pi) => {
@@ -70,11 +69,10 @@ export const piTurns = Effect.fn("PiTurns.start")(function* (options: {
 }) {
   const scope = yield* Effect.scope;
   const context = yield* Effect.context<never>();
-  let launched = Option.isSome(options.prompt);
+  /** Whether the session has sent Pi a prompt; later input steers its conversation. */
+  const launched = yield* Ref.make(Option.isSome(options.prompt));
   const startTurn = (message: string): Effect.Effect<void> =>
-    Effect.sync(() => {
-      launched = true;
-    }).pipe(
+    Ref.set(launched, true).pipe(
       Effect.andThen(
         Effect.tryPromise({
           try: () => options.sdk.prompt(message),
@@ -127,9 +125,11 @@ export const piTurns = Effect.fn("PiTurns.start")(function* (options: {
     policy: options.policy,
     decode: piReceipts,
     send: (message, activity) =>
-      activity === "idle" || !launched
-        ? startTurn(message).pipe(Effect.as("read" as const))
-        : queueSteer(message),
+      Effect.flatMap(Ref.get(launched), (started) =>
+        activity === "idle" || !started
+          ? startTurn(message).pipe(Effect.as("read" as const))
+          : queueSteer(message),
+      ),
     pause: Effect.void,
     beforeFinish: Effect.void,
   });
@@ -168,12 +168,14 @@ export const piTurns = Effect.fn("PiTurns.start")(function* (options: {
     );
   });
   yield* Effect.addFinalizer(() => Effect.sync(unsubscribe));
-  options.gate.set(conversation.awaitUnpaused);
+  yield* options.gate.set(conversation.awaitUnpaused);
   const { restored } = options.policy;
   if (!restored.paused && Option.isNone(restored.idle) && Option.isSome(options.prompt))
     yield* startTurn(options.prompt.value);
   const send = (message: string) =>
-    launched ? queueSteer(message) : startTurn(message).pipe(Effect.as("read" as const));
+    Effect.flatMap(Ref.get(launched), (started) =>
+      started ? queueSteer(message) : startTurn(message).pipe(Effect.as("read" as const)),
+    );
   const steer = (message: string) => send(message).pipe(Effect.asVoid);
   return {
     recover: (tools: ReadonlyArray<InterruptedTool>) => conversation.recover(tools, send),

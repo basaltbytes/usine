@@ -209,6 +209,35 @@ interface ClaudeLaunch {
   readonly scope: Scope.Closeable;
 }
 
+/** What a Claude child session tracks about its Claude Code process and turns. */
+interface ClaudeState {
+  /** The launch whose process the session uses; a process resume replaces it. */
+  readonly current: ClaudeLaunch;
+  /** Whether the saved conversation holds the task, so recovery sends the continuation instead. */
+  readonly taskSaved: boolean;
+  /**
+   * Whether Claude runs no turn, from a result until the next assistant message. A message sent
+   * then starts the next turn instead of joining a running one.
+   */
+  readonly betweenTurns: boolean;
+  /** The tool names of the calls that started and haven't finished, by call ID. */
+  readonly tools: ReadonlyMap<string, string>;
+  /** The IDs of the background tasks that Claude runs, without ambient watchers. */
+  readonly backgroundTasks: ReadonlyArray<string>;
+  /** Whether Claude reports its session state, so that its idle state ends a turn. */
+  readonly reportsSessionState: boolean;
+  /** The answer of the last turn, until Claude reports that the session is idle. */
+  readonly completedTurn: Option.Option<string>;
+  /** The API retries reported in the current turn. */
+  readonly retries: number;
+  /** Whether the last API retry is unresolved. */
+  readonly retrying: boolean;
+  /** Whether the model answered since the current Claude process started. */
+  readonly answered: boolean;
+  /** Whether a report showed a request on usage credits that the spec allows. */
+  readonly onUsageCredits: boolean;
+}
+
 const makeClaudeSessions = Effect.gen(function* () {
   const sdk = yield* ClaudeSdk;
   const logins = yield* HostLoginLock;
@@ -509,15 +538,12 @@ const makeClaudeSessions = Effect.gen(function* () {
     const { server, toolName } = yield* serveTools(hostTools);
     const context = yield* Effect.context<never>();
     const scope = yield* Effect.scope;
-    const boundaryReady = yield* Deferred.make<void>();
-    let boundary = Effect.void;
+    /** The pause boundary that the hooks wait at, which the conversation supplies. */
+    const boundary = yield* Deferred.make<Effect.Effect<void>>();
     const pauseAtBoundary: HookCallback = async (_input, _id, options) => {
       await Effect.runPromiseWith(context)(
         Effect.acquireUseRelease(
-          Effect.forkIn(
-            Deferred.await(boundaryReady).pipe(Effect.andThen(Effect.suspend(() => boundary))),
-            scope,
-          ),
+          Effect.forkIn(Effect.flatten(Deferred.await(boundary)), scope),
           Fiber.join,
           Fiber.interrupt,
         ),
@@ -556,7 +582,7 @@ const makeClaudeSessions = Effect.gen(function* () {
       : yield* Effect.forEach(Option.toArray(startPrompt(start)), (text) =>
           Effect.map(clientId, (uuid) => userMessage(text, uuid)),
         );
-    let current = yield* launchWithRetries(
+    const launched = yield* launchWithRetries(
       spec,
       options,
       {
@@ -568,7 +594,7 @@ const makeClaudeSessions = Effect.gen(function* () {
       scope,
     );
 
-    const pool = yield* billingPool(spec, current.query);
+    const pool = yield* billingPool(spec, launched.query);
     const session = resolvedSession(spec.session, {
       brain: spec.session.brain,
       pool: Option.some(pool),
@@ -579,24 +605,30 @@ const makeClaudeSessions = Effect.gen(function* () {
       label: "Claude child session",
       sessionId: session.id,
     });
+    // A retained process that never acknowledged its task waits for input without a turn.
+    const unprompted = launched.retained && !policy.restored.prompted;
+    const state = yield* Ref.make<ClaudeState>({
+      current: launched,
+      taskSaved: start._tag === "StartResume" && !unprompted,
+      betweenTurns: launched.retained ? unprompted || startsIdle : prompts.length === 0,
+      tools: new Map(),
+      backgroundTasks: [],
+      reportsSessionState: false,
+      completedTurn: Option.none(),
+      retries: 0,
+      retrying: false,
+      answered: false,
+      onUsageCredits: false,
+    });
     channel.onTerminal(() => {
-      current.input.end();
+      Ref.getUnsafe(state).current.input.end();
     });
     yield* channel.emit(SessionStarted.make({ session, harnessSession: Option.some(reference) }));
-    // A retained process that never acknowledged its task waits for input without a turn.
-    const unprompted = current.retained && !policy.restored.prompted;
     if (unprompted)
       yield* Effect.logWarning("The retained Claude process never received its task", {
         sessionId: session.id,
         harnessSessionId: reference.id,
       });
-    /** Whether the saved conversation holds the task, so recovery sends the continuation instead. */
-    const taskSaved = yield* Ref.make(start._tag === "StartResume" && !unprompted);
-    /**
-     * Whether Claude runs no turn, from a result until the next assistant message. A message sent
-     * then starts the next turn instead of joining a running one.
-     */
-    let betweenTurns = current.retained ? unprompted || startsIdle : prompts.length === 0;
     /**
      * Sends `message` to Claude. During a turn, Claude queues it until a tool call returns or the
      * turn ends; between turns, it starts the next turn.
@@ -607,6 +639,7 @@ const makeClaudeSessions = Effect.gen(function* () {
     ) {
       yield* Effect.annotateCurrentSpan({ sessionId: session.id });
       const uuid = id ?? (yield* clientId);
+      const { current, betweenTurns } = yield* Ref.get(state);
       yield* Effect.try({
         try: () => current.input.offer(userMessage(message, uuid)),
         catch: (cause) => operationError("steer", spec, "Can't send a message to Claude", cause),
@@ -617,29 +650,21 @@ const makeClaudeSessions = Effect.gen(function* () {
       session,
       channel,
       policy,
-      submitted: current.retained && !unprompted ? policy.restored.unread.map(({ id }) => id) : [],
+      submitted: launched.retained && !unprompted ? policy.restored.unread.map(({ id }) => id) : [],
       decode: claudeReceipts,
       send: (message, _activity, id) => send(message, id),
       pause: Effect.void,
       beforeFinish: Effect.void,
     });
-    boundary = conversation.awaitUnpaused;
-    yield* Deferred.succeed(boundaryReady, undefined);
-    const tools = new Map<string, string>();
+    yield* Deferred.succeed(boundary, conversation.awaitUnpaused);
     const usage = claudeSessionMeter(
       Option.getOrUndefined(policy.restored.usage),
-      current.retained,
+      launched.retained,
     );
-    let backgroundTasks: ReadonlyArray<string> = [];
     // Holds the timer that ends a wait for background work after the child answered.
     const backgroundWait = yield* FiberHandle.make<void>();
-    let reportsSessionState = false;
-    let completedTurn = Option.none<string>();
-    // API retries reported in the current turn, and whether the last retry is unresolved.
-    let retries = 0;
-    let retrying = false;
-    // Whether the model answered since the current Claude process started.
-    let answered = false;
+    /** The IDs of the background tasks that Claude runs. */
+    const backgroundTaskIds = Effect.map(Ref.get(state), ({ backgroundTasks }) => backgroundTasks);
 
     /**
      * The configured wait for background work after an answer, or `None` for no limit. The limit
@@ -662,17 +687,13 @@ const makeClaudeSessions = Effect.gen(function* () {
       });
       yield* Effect.logInfo("Claude child is waiting for background work", {
         sessionId: session.id,
-        backgroundTaskIds: backgroundTasks,
+        backgroundTaskIds: yield* backgroundTaskIds,
         limit: limitText,
       });
       if (Option.isNone(backgroundWaitLimit)) return;
       const outlasted = (log: typeof Effect.logInfo, message: string) =>
-        Effect.suspend(() =>
-          log(message, {
-            sessionId: session.id,
-            backgroundTaskIds: backgroundTasks,
-            limit: limitText,
-          }),
+        Effect.flatMap(backgroundTaskIds, (ids) =>
+          log(message, { sessionId: session.id, backgroundTaskIds: ids, limit: limitText }),
         );
       yield* FiberHandle.run(
         backgroundWait,
@@ -714,7 +735,7 @@ const makeClaudeSessions = Effect.gen(function* () {
         sessionId: session.id,
         reason,
         limitPassed: dropped,
-        backgroundTaskIds: backgroundTasks,
+        backgroundTaskIds: yield* backgroundTaskIds,
       });
     });
 
@@ -722,8 +743,10 @@ const makeClaudeSessions = Effect.gen(function* () {
       retry: typeof ClaudeApiRetry.Type,
     ) {
       yield* Effect.annotateCurrentSpan({ sessionId: session.id });
-      retries += 1;
-      retrying = true;
+      const retries = yield* Ref.modify(state, (current) => [
+        current.retries + 1,
+        { ...current, retries: current.retries + 1, retrying: true },
+      ]);
       const message = apiRetryMessage(retry);
       yield* Effect.logWarning("Claude child cannot reach its provider and will retry", {
         sessionId: session.id,
@@ -742,7 +765,10 @@ const makeClaudeSessions = Effect.gen(function* () {
     });
     const reportRecovery = Effect.fn("ClaudeRuntime.reportRecovery")(function* () {
       yield* Effect.annotateCurrentSpan({ sessionId: session.id });
-      retrying = false;
+      const { retries } = yield* Ref.getAndUpdate(state, (current) => ({
+        ...current,
+        retrying: false,
+      }));
       yield* Effect.logInfo("Claude child reached its provider again", {
         sessionId: session.id,
         retries,
@@ -756,7 +782,7 @@ const makeClaudeSessions = Effect.gen(function* () {
     });
     const reportAnswer = Effect.fn("ClaudeRuntime.reportAnswer")(function* () {
       yield* Effect.annotateCurrentSpan({ sessionId: session.id });
-      answered = true;
+      yield* Ref.update(state, (current) => ({ ...current, answered: true }));
       yield* Effect.logInfo(
         "Claude child got its provider's first answer since the process started",
         {
@@ -767,8 +793,6 @@ const makeClaudeSessions = Effect.gen(function* () {
     });
 
     const provider = claudeProviderFailures(session);
-    // Whether a report showed a request on usage credits that the spec allows.
-    let onUsageCredits = false;
     /**
      * Fails the session with `refusal` when a request ran on usage credits that the spec doesn't
      * allow. Closing the failed child ends its Claude Code process. With credits allowed, logs the
@@ -780,8 +804,11 @@ const makeClaudeSessions = Effect.gen(function* () {
       yield* Effect.annotateCurrentSpan({ sessionId: session.id });
       const resetsAt = Option.getOrUndefined(Option.map(refusal.resetsAt, DateTime.formatIso));
       if (spec.allowUsageCredits) {
-        if (onUsageCredits) return;
-        onUsageCredits = true;
+        const first = yield* Ref.modify(state, (current) => [
+          !current.onUsageCredits,
+          { ...current, onUsageCredits: true },
+        ]);
+        if (!first) return;
         yield* Effect.logInfo("Claude child runs on usage credits, which its spec allows", {
           sessionId: session.id,
           planResetsAt: resetsAt,
@@ -822,6 +849,7 @@ const makeClaudeSessions = Effect.gen(function* () {
     /** Applies one message from Claude to the session. */
     const handle = (message: Schema.Json) =>
       Effect.gen(function* () {
+        const { betweenTurns } = yield* Ref.get(state);
         yield* conversation.observe({ message, betweenTurns });
         const reported = yield* provider.read(message);
         if (Option.isSome(reported.rateLimits)) yield* channel.emit(reported.rateLimits.value);
@@ -834,10 +862,11 @@ const makeClaudeSessions = Effect.gen(function* () {
           });
         if (Option.isSome(reported.retry)) return yield* reportRetry(reported.retry.value);
         if (isAssistantMessage(message)) {
-          betweenTurns = false;
+          yield* Ref.update(state, (current) => ({ ...current, betweenTurns: false }));
           yield* resumeTurn("turn started");
         }
         if (isModelAnswer(message)) {
+          const { retrying, answered } = yield* Ref.get(state);
           if (retrying) yield* reportRecovery();
           if (!answered) yield* reportAnswer();
         }
@@ -850,22 +879,25 @@ const makeClaudeSessions = Effect.gen(function* () {
           if (update.subtype === "background_tasks_changed") {
             // Each update replaces the whole task snapshot. Ambient watchers are excluded
             // because they are not work for the parent.
-            backgroundTasks = update.tasks
+            const backgroundTasks = update.tasks
               .filter((task) => task.ambient !== true)
               .map((task) => task.task_id);
+            yield* Ref.update(state, (current) => ({ ...current, backgroundTasks }));
             yield* Effect.logInfo("Claude background work changed", {
               sessionId: session.id,
               backgroundTaskIds: backgroundTasks,
             });
           } else {
-            reportsSessionState = true;
+            const candidate = yield* Ref.modify(state, (current) => [
+              current.completedTurn,
+              { ...current, reportsSessionState: true, completedTurn: Option.none() },
+            ]);
             if (update.state !== "idle") yield* resumeTurn("turn started");
-            const candidate = completedTurn;
-            completedTurn = Option.none();
             // The SDK reports idle after the result flush and the background-notification loop.
             // An empty task snapshot alone does not finish the session, and a waiting turn's
             // answer is not reused before the notification has run.
             if (update.state === "idle" && Option.isSome(candidate)) {
+              const { backgroundTasks } = yield* Ref.get(state);
               if (backgroundTasks.length === 0) yield* conversation.finish(candidate.value);
               else yield* awaitBackgroundWork(candidate.value);
             }
@@ -877,15 +909,20 @@ const makeClaudeSessions = Effect.gen(function* () {
           if (Option.isSome(used.value.restored)) yield* logRestored(used.value.restored.value);
           yield* channel.emit(SessionTokensUpdated.make({ session, ...used.value.usage }));
         }
-        for (const event of sessionEventsFrom(message, session, tools, toolName)) {
-          yield* channel.emit(event);
-        }
+        const events = yield* Ref.modify(state, (current) => {
+          const read = sessionEventsFrom(message, session, current.tools, toolName);
+          return [read.events, { ...current, tools: read.tools }];
+        });
+        for (const event of events) yield* channel.emit(event);
         if (!Schema.is(ClaudeResultMessage)(message)) return;
         yield* resumeTurn("turn started");
-        betweenTurns = true;
-        completedTurn = Option.none();
-        retries = 0;
-        retrying = false;
+        yield* Ref.update(state, (current) => ({
+          ...current,
+          betweenTurns: true,
+          completedTurn: Option.none(),
+          retries: 0,
+          retrying: false,
+        }));
         if (message.subtype !== "success" || message.result === undefined) {
           yield* channel.fail(provider.failedResult(message));
           return;
@@ -920,8 +957,12 @@ const makeClaudeSessions = Effect.gen(function* () {
           return;
         }
         const answer = message.result.trim() || "Claude child session completed";
+        const { reportsSessionState, backgroundTasks } = yield* Ref.get(state);
         if (reportsSessionState) {
-          completedTurn = Option.some(answer);
+          yield* Ref.update(state, (current) => ({
+            ...current,
+            completedTurn: Option.some(answer),
+          }));
         } else if (backgroundTasks.length > 0) {
           yield* awaitBackgroundWork(answer);
         } else {
@@ -935,20 +976,17 @@ const makeClaudeSessions = Effect.gen(function* () {
      * or `None` if the output closed.
      */
     const drain = (launch: ClaudeLaunch) =>
-      Effect.gen(function* () {
-        let broken = Option.none<SessionOperationError>();
-        yield* Stream.concat(
-          Stream.fromIterable(launch.read),
-          Stream.fromQueue(launch.output),
-        ).pipe(
-          Stream.map((message): Result.Result<Schema.Json, SessionOperationError> =>
-            Result.succeed(message),
-          ),
-          Stream.catch((error): Stream.Stream<Result.Result<Schema.Json, SessionOperationError>> =>
-            Stream.make(Result.fail(error)),
-          ),
-          Stream.runForEach(
-            Result.match({
+      Stream.concat(Stream.fromIterable(launch.read), Stream.fromQueue(launch.output)).pipe(
+        Stream.map((message): Result.Result<Schema.Json, SessionOperationError> =>
+          Result.succeed(message),
+        ),
+        Stream.catch((error): Stream.Stream<Result.Result<Schema.Json, SessionOperationError>> =>
+          Stream.make(Result.fail(error)),
+        ),
+        Stream.runFoldEffect(
+          () => Option.none<SessionOperationError>(),
+          (broken, next) =>
+            Result.match(next, {
               onSuccess: (message) =>
                 launch.covered.pipe(
                   Effect.flatMap((covered) =>
@@ -956,16 +994,12 @@ const makeClaudeSessions = Effect.gen(function* () {
                   ),
                   Effect.andThen(handle(message)),
                   Effect.andThen(launch.acknowledge(message)),
+                  Effect.as(broken),
                 ),
-              onFailure: (error) =>
-                Effect.sync(() => {
-                  broken = Option.some(error);
-                }),
+              onFailure: (error) => Effect.succeedSome(error),
             }),
-          ),
-        );
-        return broken;
-      });
+        ),
+      );
 
     const resume = Effect.fn("ClaudeRuntime.resume")(function* (error: SessionOperationError) {
       yield* Effect.annotateCurrentSpan({ sessionId: session.id, worker: spec.worker });
@@ -976,21 +1010,28 @@ const makeClaudeSessions = Effect.gen(function* () {
         harnessSessionId: reference.id,
         exitCode: error.cause.exitCode,
       });
-      const prompted = yield* current.prompted;
-      yield* Scope.close(current.scope, Exit.void);
+      const { current: lost } = yield* Ref.get(state);
+      const prompted = yield* lost.prompted;
+      yield* Scope.close(lost.scope, Exit.void);
       if ((yield* lifecycle.isStopping) || (yield* channel.isTerminal)) return;
-      const empty = !(yield* Ref.updateAndGet(taskSaved, (saved) => saved || prompted));
+      const empty = !(yield* Ref.modify(state, (current) => {
+        const taskSaved = current.taskSaved || prompted;
+        return [taskSaved, { ...current, taskSaved }];
+      }));
       yield* channel.emit(SessionTokensUpdated.make({ session, ...usage.restart() }));
       yield* resumeTurn("process resumed");
-      backgroundTasks = [];
-      completedTurn = Option.none();
-      reportsSessionState = false;
       provider.clear();
-      retries = 0;
-      retrying = false;
-      answered = false;
+      yield* Ref.update(state, (current) => ({
+        ...current,
+        backgroundTasks: [],
+        completedTurn: Option.none(),
+        reportsSessionState: false,
+        retries: 0,
+        retrying: false,
+        answered: false,
+      }));
       const { sessionId: _assignedId, resume: _resumedId, ...resumeOptions } = options;
-      current = yield* policy.reopen(
+      const relaunched = yield* policy.reopen(
         launchWithRetries(
           spec,
           { ...resumeOptions, ...(empty ? { sessionId: reference.id } : { resume: reference.id }) },
@@ -999,13 +1040,17 @@ const makeClaudeSessions = Effect.gen(function* () {
         ),
       );
       // The new process runs no turn until recovery sends one.
-      betweenTurns = true;
+      const { tools } = yield* Ref.getAndUpdate(state, (current) => ({
+        ...current,
+        current: relaunched,
+        betweenTurns: true,
+        tools: new Map(),
+      }));
       yield* conversation.recover(
         [...tools].map(([callId, tool]) => ({ callId, tool })),
         send,
         empty,
       );
-      tools.clear();
       yield* Effect.logInfo("Resumed the Claude child's session", {
         sessionId: session.id,
         harnessSessionId: reference.id,
@@ -1014,6 +1059,7 @@ const makeClaudeSessions = Effect.gen(function* () {
 
     const consume = Effect.gen(function* () {
       for (;;) {
+        const { current } = yield* Ref.get(state);
         const broken = yield* drain(current);
         if ((yield* lifecycle.isStopping) || (yield* channel.isTerminal)) return;
         const error = Option.getOrElse(broken, () =>
@@ -1037,13 +1083,13 @@ const makeClaudeSessions = Effect.gen(function* () {
     const interrupt = Effect.logInfo("Interrupting Claude child session", {
       sessionId: session.id,
     }).pipe(
-      Effect.andThen(
+      Effect.andThen(Ref.get(state)),
+      Effect.flatMap(({ current }) =>
         Effect.tryPromise({
           try: () => current.query.interrupt(),
           catch: (cause) => operationError("interrupt", spec, "Can't interrupt Claude", cause),
-        }),
+        }).pipe(Effect.andThen(Effect.sync(() => current.input.end()))),
       ),
-      Effect.tap(() => Effect.sync(() => current.input.end())),
       Effect.asVoid,
     );
     const running = {
@@ -1056,7 +1102,7 @@ const makeClaudeSessions = Effect.gen(function* () {
     } satisfies RunningSession;
     return {
       running,
-      active: current.retained && !unprompted,
+      active: launched.retained && !unprompted,
       recover: (tools: ReadonlyArray<InterruptedTool>) =>
         conversation.recover(tools, send, unprompted),
     };

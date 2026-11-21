@@ -1,4 +1,4 @@
-import { Clock, Effect, Option, Result, Scope, Exit } from "effect";
+import { Clock, Effect, Option, Ref, Result, Scope, Exit } from "effect";
 import {
   type AgentSession,
   type AgentSessionEvent,
@@ -150,7 +150,8 @@ export const continuationPolicy = Effect.fn("HarnessContinuation.make")(function
 ) {
   const journal = yield* ChildSessionJournal;
   const session = spec.session;
-  let history = restored.continuations;
+  /** The times of the continuation turns within the window, in epoch milliseconds. */
+  const history = yield* Ref.make(restored.continuations);
   return {
     restored,
     journal,
@@ -183,7 +184,8 @@ export const continuationPolicy = Effect.fn("HarnessContinuation.make")(function
           }),
         );
       const now = yield* Clock.currentTimeMillis;
-      const plan = yield* Effect.fromResult(continuationPlan(session, state, history, now)).pipe(
+      const before = yield* Ref.get(history);
+      const plan = yield* Effect.fromResult(continuationPlan(session, state, before, now)).pipe(
         Effect.tapError((error) =>
           Effect.logWarning("Child continuation refused", {
             sessionId: error.sessionId,
@@ -200,11 +202,11 @@ export const continuationPolicy = Effect.fn("HarnessContinuation.make")(function
         return;
       }
       yield* journal.continued(plan.history);
-      history = plan.history;
+      yield* Ref.set(history, plan.history);
       yield* Effect.logInfo("Continuing interrupted child work", {
         sessionId: session.id,
         sendsTask: state.empty === true,
-        continuations: history.length,
+        continuations: plan.history.length,
         tools: tools.length,
         unread: unread.length,
       });
