@@ -1,6 +1,6 @@
 {
   "name": "create-usine",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Create a runtime folder with a pinned usine server and start setup.",
   "license": "AGPL-3.0-only",
   "repository": {
