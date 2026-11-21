@@ -1,5 +1,5 @@
 import { jsonKey } from "@usine/core/json-key";
-import type { BillingPool } from "@usine/core/agent/session";
+import type { PoolDescriptor } from "@usine/core/agent/pool";
 import { TokenCount, UsdAmount } from "@usine/core/agent/session";
 import type { AttemptSummary } from "@usine/engine/run-reader";
 import type { RunId } from "@usine/core/run";
@@ -8,7 +8,7 @@ import type { WorkerName } from "@usine/core/worker";
 import type { RunSummary } from "@usine/engine/run-reader";
 import { Array as EffectArray, DateTime, Option } from "effect";
 import { type WorkerCapacity, workerSlotMillis } from "./workers.ts";
-import type { RunUsageView, SessionUsageView } from "../usage.ts";
+import { poolGroups, type RunUsageView, type SessionUsageView } from "../usage.ts";
 import {
   AgentStatisticsView,
   AttemptCountView,
@@ -41,8 +41,6 @@ import {
   windowStart,
 } from "./window.ts";
 
-const POOLS: ReadonlyArray<BillingPool> = ["apiKeys", "claudePlan", "chatgptPlan"];
-
 /** The stored facts that `runStatisticsView` reduces. */
 export interface RunStatisticsFacts {
   readonly window: StatisticsWindow;
@@ -52,6 +50,8 @@ export interface RunStatisticsFacts {
   /** The usage of each closed Run in `runs`. */
   readonly usage: ReadonlyMap<RunId, RunUsageView>;
   readonly workers: ReadonlyArray<WorkerCapacity>;
+  /** The pools that the harness catalog declares, in catalog order. */
+  readonly pools: ReadonlyArray<PoolDescriptor>;
 }
 
 /** Returns when a closed Run closed; the fallback only covers the nullable stored field. */
@@ -124,10 +124,13 @@ const runMillis = (summary: RunSummary): number =>
   Math.max(0, closedAt(summary) - epoch(summary.run.openedAt));
 
 /**
- * Sums the tokens and prices of `units`, each the sessions of one Run or Attempt. A unit is priced
- * if it has a session and each of its sessions has a price.
+ * Sums the tokens and prices of `units`, each the sessions of one Run or Attempt, and the tokens
+ * per pool of `pools`. A unit is priced if it has a session and each of its sessions has a price.
  */
-const usageSummary = (units: ReadonlyArray<ReadonlyArray<SessionUsageView>>): UsageSummaryView => {
+const usageSummary = (
+  pools: ReadonlyArray<PoolDescriptor>,
+  units: ReadonlyArray<ReadonlyArray<SessionUsageView>>,
+): UsageSummaryView => {
   const sessions = units.flat();
   const tokens = sum(sessions.map((session) => session.tokens));
   const priced = units.filter((unit) => unit.length > 0 && unit.every(({ cost }) => cost !== null));
@@ -138,17 +141,13 @@ const usageSummary = (units: ReadonlyArray<ReadonlyArray<SessionUsageView>>): Us
     measured: units.length,
     tokens: TokenCount.make(tokens),
     meanTokens: units.length === 0 ? null : TokenCount.make(Math.round(tokens / units.length)),
-    pools: POOLS.flatMap((pool) => {
-      const members = sessions.filter((session) => session.pool === pool);
-      return members.length === 0
-        ? []
-        : [
-            PoolTokensView.make({
-              pool,
-              tokens: TokenCount.make(sum(members.map((session) => session.tokens))),
-            }),
-          ];
-    }),
+    pools: poolGroups(pools, sessions).map(({ pool, label, members }) =>
+      PoolTokensView.make({
+        pool,
+        label,
+        tokens: TokenCount.make(sum(members.map((session) => session.tokens))),
+      }),
+    ),
     cost:
       priced.length === 0
         ? null
@@ -178,10 +177,15 @@ const groupRuns = <K extends string>(
         right.length - left.length || leftName.localeCompare(rightName),
     );
 
-const runGroup = (runs: ReadonlyArray<RunSummary>, usage: ReadonlyMap<RunId, RunUsageView>) => ({
+const runGroup = (
+  pools: ReadonlyArray<PoolDescriptor>,
+  runs: ReadonlyArray<RunSummary>,
+  usage: ReadonlyMap<RunId, RunUsageView>,
+) => ({
   outcomes: outcomeCounts(runs.map(runOutcome)),
   time: durationSummary(runs.map(runMillis)),
   usage: usageSummary(
+    pools,
     runs
       .filter(({ attempts }) => attempts.length > 0)
       .map((summary) => runSessions(summary, usage)),
@@ -189,6 +193,7 @@ const runGroup = (runs: ReadonlyArray<RunSummary>, usage: ReadonlyMap<RunId, Run
 });
 
 const brainGroups = (
+  pools: ReadonlyArray<PoolDescriptor>,
   runs: ReadonlyArray<RunSummary>,
   usage: ReadonlyMap<RunId, RunUsageView>,
 ): ReadonlyArray<BrainStatisticsView> => {
@@ -211,7 +216,10 @@ const brainGroups = (
         time: durationSummary(
           members.flatMap(({ attempt }) => Option.toArray(attemptMillis(attempt))),
         ),
-        usage: usageSummary(members.map(({ sessions }) => sessions)),
+        usage: usageSummary(
+          pools,
+          members.map(({ sessions }) => sessions),
+        ),
       }),
     )
     .sort(
@@ -334,6 +342,7 @@ export const runStatisticsView = ({
   runs: stored,
   usage,
   workers,
+  pools,
 }: RunStatisticsFacts): RunStatisticsView => {
   const to = epoch(now);
   const runs = stored.filter((summary) => !replacedBeforeStart(summary));
@@ -425,12 +434,12 @@ export const runStatisticsView = ({
       }),
     ),
     loops: groupRuns(closed, ({ run }) => run.loop).map(([loop, members]) =>
-      LoopStatisticsView.make({ loop, ...runGroup(members, usage) }),
+      LoopStatisticsView.make({ loop, ...runGroup(pools, members, usage) }),
     ),
     agents: groupRuns(closed, ({ agent }) => agent.name).map(([agent, members]) =>
-      AgentStatisticsView.make({ agent, ...runGroup(members, usage) }),
+      AgentStatisticsView.make({ agent, ...runGroup(pools, members, usage) }),
     ),
-    brains: brainGroups(closed, usage),
+    brains: brainGroups(pools, closed, usage),
     queueWait: [...waits.entries()]
       .sort(([left], [right]) => left.localeCompare(right))
       .flatMap(([worker, durations]) => {

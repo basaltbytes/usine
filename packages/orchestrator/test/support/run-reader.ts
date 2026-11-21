@@ -11,7 +11,7 @@ export const boardHistory = (runs: ReadonlyArray<RunSummary>): BoardRunHistory =
       const first = history[0];
       if (first === undefined) return [];
       const views = history.map((run) => runSummaryView(run, new Set(), declaredWorkers([])));
-      const { durationMillis, runningSince, unmeasured } = taskUsage(views, new Map());
+      const { durationMillis, runningSince, unmeasured } = taskUsage([], views, new Map());
       return [
         ItemRunHistory.make({
           itemKey: first.itemKey,

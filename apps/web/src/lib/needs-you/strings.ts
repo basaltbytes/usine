@@ -8,7 +8,7 @@ import type {
   UnresponsiveWorkerNeed,
 } from "@usine/orchestrator/operator";
 import { DateTime, Match, Option } from "effect";
-import { poolLabel, timestampLabel } from "~/lib/strings";
+import { timestampLabel } from "~/lib/strings";
 import { failureMessage, failureReason } from "~/lib/runs/strings";
 import { workerPausedDetail } from "~/lib/workers/strings";
 
@@ -50,8 +50,8 @@ export const needCopy = (need: NeedView): NeedCopy =>
       repository: null,
       runId: null,
     }),
-    PoolLimitNeed: ({ pool, login, window, usedPercent, resetsAt }) => ({
-      title: `${poolLabel(pool)}: rate window at ${usedPercent}%`,
+    PoolLimitNeed: ({ label, login, window, usedPercent, resetsAt }) => ({
+      title: `${label}: rate window at ${usedPercent}%`,
       detail: `${Option.getOrElse(login, () => "Login unavailable")} · ${window} window · resets ${DateTime.formatIso(resetsAt)}`,
       repository: null,
       runId: null,

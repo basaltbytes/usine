@@ -1,7 +1,8 @@
 import { UpgradeWait } from "@usine/engine/engine";
 import { CiFixRun } from "@usine/engine/run-reader";
 import { ConfigFileError } from "@usine/config/file";
-import { BillingPool, PoolLogin } from "@usine/core/agent/session";
+import { BillingPool } from "@usine/core/agent/pool";
+import { PoolLogin } from "@usine/core/agent/session";
 import { AttemptId, AttemptNumber, CapacityGroup } from "@usine/core/attempt";
 import { LoopName } from "@usine/core/loop";
 import { CycleBudgetAsk } from "@usine/core/cycle-budget";
@@ -300,6 +301,8 @@ export class PoolLimitNeed extends Schema.TaggedClass<
   id: Schema.String,
   /** The billing source for this usage. */
   pool: BillingPool,
+  /** The pool's catalog label, or its ID for a pool that the catalog doesn't declare. */
+  label: Schema.NonEmptyString,
   /** The provider account login, or `None` if unavailable; encoded as null. */
   login: Schema.OptionFromNullOr(PoolLogin),
   /** The provider usage window approaching or at its limit. */

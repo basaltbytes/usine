@@ -40,6 +40,7 @@ import {
 } from "@usine/engine/transcript";
 import { GitHubLabelName } from "@usine/core/label";
 import { Agent } from "@usine/core/agent";
+import { BillingPools, type PoolDescriptor } from "@usine/core/agent/pool";
 import { AttemptContext, AttemptId } from "@usine/core/attempt";
 import { Intervention } from "@usine/core/attempt/channel";
 import type { LoadedInstance } from "@usine/config/instance";
@@ -253,13 +254,14 @@ interface CachedOverview {
 
 /**
  * Returns `overview` with the usage of every card that contains a `changed` Run recomputed from
- * `usage`.
+ * `usage`, per pool of `pools`.
  */
 const withRunUsage = (
   overview: ReadyOverview,
   changed: ReadonlySet<RunId>,
   usage: ReadonlyMap<RunId, RunUsageView>,
   history: ReadonlyArray<ItemRunHistory>,
+  pools: ReadonlyArray<PoolDescriptor>,
 ): ReadyOverview => {
   const byItem = new Map(history.map((item) => [item.itemKey, item]));
   return ReadyOverview.make({
@@ -275,7 +277,7 @@ const withRunUsage = (
               return items.some(({ usageSources }) =>
                 usageSources.some(({ run }) => changed.has(run.id)),
               )
-                ? BoardTaskView.make({ ...task, usage: taskHistoryUsage(items, usage) })
+                ? BoardTaskView.make({ ...task, usage: taskHistoryUsage(pools, items, usage) })
                 : task;
             });
             return lane._tag === "WritableBoardLane"
@@ -706,13 +708,14 @@ const makeOperatorObservation = Effect.gen(function* () {
     );
     if (changed.size === 0) return cached;
     const runs = new Map([...cached.usage.runs, ...read]);
+    const pools = yield* BillingPools;
     yield* Effect.logDebug("Refreshed the usage of Runs at work on the cached overview", {
       runsAtWork: read.length,
       changed: changed.size,
     });
     return {
       ...cached,
-      overview: withRunUsage(cached.overview, changed, runs, cached.usage.history),
+      overview: withRunUsage(cached.overview, changed, runs, cached.usage.history, pools),
       usage: { ...cached.usage, runs },
     };
   });

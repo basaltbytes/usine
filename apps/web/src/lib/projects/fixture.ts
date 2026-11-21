@@ -1,3 +1,5 @@
+import { catalog } from "@usine/agents/harness";
+import { BillingPool } from "@usine/core/agent/pool";
 import {
   isSettledItemState,
   LabelLaneSource,
@@ -138,20 +140,26 @@ const run = (
 
 /** Returns one billing pool's tokens, priced dollars, and whether some usage has no price. */
 const pool = (
-  name: TaskPoolUsageView["pool"],
+  name: string,
   tokens: number,
   usd: number | null = null,
   unpriced = false,
-): TaskPoolUsageView =>
-  TaskPoolUsageView.make({
-    pool: name,
+): TaskPoolUsageView => {
+  const declared = catalog.pools.find(({ id }) => id === name);
+  return TaskPoolUsageView.make({
+    pool: BillingPool.make(name),
+    label: declared?.label ?? name,
     tokens: TokenCount.make(tokens),
     cost:
       usd === null
         ? null
-        : UsageCostView.make({ usd: UsdAmount.make(usd), estimate: name !== "apiKeys" }),
+        : UsageCostView.make({
+            usd: UsdAmount.make(usd),
+            estimate: declared?.billing === "plan",
+          }),
     unpriced,
   });
+};
 
 /** Returns a Task's usage as the server computes it: its Runs' Attempt time and billing pools. */
 export const taskUsageOf = (

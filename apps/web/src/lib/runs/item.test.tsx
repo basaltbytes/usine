@@ -1,3 +1,4 @@
+import { BillingPool } from "@usine/core/agent/pool";
 import { HandedOff } from "@usine/core/run/state";
 import { administratorPermissions } from "@usine/core/access";
 import { PermissionsContext } from "~/lib/permissions";
@@ -374,17 +375,20 @@ describe("Run work facts", () => {
     tokens: TokenCount.make(27300),
     pools: [
       PoolUsageView.make({
-        pool: "apiKeys",
+        pool: BillingPool.make("apiKeys"),
+        label: "API keys",
         tokens: TokenCount.make(1500),
         cost: cost(0.75, false),
       }),
       PoolUsageView.make({
-        pool: "claudePlan",
+        pool: BillingPool.make("claudePlan"),
+        label: "Claude plan",
         tokens: TokenCount.make(20000),
         cost: cost(1.25, true),
       }),
       PoolUsageView.make({
-        pool: "chatgptPlan",
+        pool: BillingPool.make("chatgptPlan"),
+        label: "ChatGPT plan",
         tokens: TokenCount.make(5800),
         cost: cost(0.4, true),
       }),
@@ -393,21 +397,21 @@ describe("Run work facts", () => {
       SessionUsageView.make({
         attemptId,
         session: parentSession,
-        pool: "apiKeys",
+        pool: BillingPool.make("apiKeys"),
         tokens: TokenCount.make(1500),
         cost: cost(0.75, false),
       }),
       SessionUsageView.make({
         attemptId,
         session: childSession("claude", "developer", Harness.make("claude"), "claude-opus-4-7"),
-        pool: "claudePlan",
+        pool: BillingPool.make("claudePlan"),
         tokens: TokenCount.make(20000),
         cost: cost(1.25, true),
       }),
       SessionUsageView.make({
         attemptId: second,
         session: childSession("codex", "reviewer", Harness.make("codex"), "gpt-5.6-sol"),
-        pool: "chatgptPlan",
+        pool: BillingPool.make("chatgptPlan"),
         tokens: TokenCount.make(5800),
         cost: cost(0.4, true),
       }),

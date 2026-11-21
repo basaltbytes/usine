@@ -1,3 +1,4 @@
+import { catalog } from "@usine/agents/harness";
 import { jsonKey } from "@usine/core/json-key";
 import { boardRunSummary } from "../src/operator/operator.ts";
 import { ProjectView } from "../src/operator/overview.ts";
@@ -9,13 +10,8 @@ import { LabelLaneSource, LaneName } from "@usine/config/board";
 import { UsineConfig } from "@usine/config/factory";
 import { AgentName } from "@usine/core/agent";
 import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
-import {
-  AgentSessionId,
-  type BillingPool,
-  ParentSession,
-  TokenCount,
-  UsdAmount,
-} from "@usine/core/agent/session";
+import { BillingPool } from "@usine/core/agent/pool";
+import { AgentSessionId, ParentSession, TokenCount, UsdAmount } from "@usine/core/agent/session";
 import { AttemptId } from "@usine/core/attempt";
 import { ItemKey, ItemNumber as CoreItemNumber, ItemNumber } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
@@ -483,7 +479,7 @@ describe("Board projection", () => {
       needsYou: false,
       conflicting: false,
       loops: [],
-      usage: taskUsage([], new Map()),
+      usage: taskUsage(catalog.pools, [], new Map()),
     });
     const source = WritableBoardLaneView.make({
       id: BoardLaneId.make("authored:Ready"),
@@ -555,7 +551,7 @@ describe("Task usage", () => {
   /** Returns one session of `attempt` using `tokens` from `pool`, priced at `usd` or unpriced. */
   const session = (
     attempt: string,
-    pool: BillingPool,
+    pool: keyof typeof harnesses,
     tokens: number,
     usd: number | null,
   ): SessionUsageView =>
@@ -570,7 +566,7 @@ describe("Task usage", () => {
           effort: "high",
         }),
       }),
-      pool,
+      pool: BillingPool.make(pool),
       tokens: TokenCount.make(tokens),
       cost:
         usd === null
@@ -589,6 +585,7 @@ describe("Task usage", () => {
         const costs = members.flatMap(({ cost }) => (cost === null ? [] : [cost]));
         return PoolUsageView.make({
           pool,
+          label: pool,
           tokens: TokenCount.make(members.reduce((sum, { tokens }) => sum + tokens, 0)),
           cost:
             costs.length < members.length
@@ -603,8 +600,8 @@ describe("Task usage", () => {
     });
   const pools = ({ pools: lines }: ReturnType<typeof taskUsage>) =>
     lines.map(
-      ({ pool, tokens, cost, unpriced }): readonly [string, number, number | null, boolean] => [
-        pool,
+      ({ label, tokens, cost, unpriced }): readonly [string, number, number | null, boolean] => [
+        label,
         tokens,
         cost?.usd ?? null,
         unpriced,
@@ -615,6 +612,7 @@ describe("Task usage", () => {
 
   it("adds up an API key and Claude plan Run and a ChatGPT plan Run: time, tokens, pools, and dollars", () => {
     const usage = taskUsage(
+      catalog.pools,
       [
         {
           id: priced,
@@ -654,9 +652,9 @@ describe("Task usage", () => {
     assert.strictEqual(usage.unmeasured, 1);
     assert.strictEqual(usage.tokens, 27_300);
     assert.deepStrictEqual(pools(usage), [
-      ["apiKeys", 1_500, 0.75, false],
-      ["claudePlan", 20_000, 1.25, false],
-      ["chatgptPlan", 5_800, 0.4, false],
+      ["API keys", 1_500, 0.75, false],
+      ["Claude plan", 20_000, 1.25, false],
+      ["ChatGPT plan", 5_800, 0.4, false],
     ]);
     assert.deepStrictEqual({ ...usage.cost }, { usd: 2.4, estimate: true });
   });

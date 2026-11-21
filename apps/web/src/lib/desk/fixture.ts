@@ -1,3 +1,4 @@
+import { BillingPool } from "@usine/core/agent/pool";
 import { AgentName } from "@usine/core/agent";
 import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { ProviderRetries, TokenCount, UsdAmount } from "@usine/core/agent/session";
@@ -690,8 +691,16 @@ const usage = (measured: number, claudePlan: number, chatgptPlan: number, priced
     tokens: TokenCount.make(claudePlan + chatgptPlan),
     meanTokens: TokenCount.make(Math.round((claudePlan + chatgptPlan) / measured)),
     pools: [
-      PoolTokensView.make({ pool: "claudePlan", tokens: TokenCount.make(claudePlan) }),
-      PoolTokensView.make({ pool: "chatgptPlan", tokens: TokenCount.make(chatgptPlan) }),
+      PoolTokensView.make({
+        pool: BillingPool.make("claudePlan"),
+        label: "Claude plan",
+        tokens: TokenCount.make(claudePlan),
+      }),
+      PoolTokensView.make({
+        pool: BillingPool.make("chatgptPlan"),
+        label: "ChatGPT plan",
+        tokens: TokenCount.make(chatgptPlan),
+      }),
     ],
     cost:
       priced === 0

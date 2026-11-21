@@ -1,3 +1,4 @@
+import { BillingPool } from "@usine/core/agent/pool";
 import type { ReactNode } from "react";
 import { capabilitiesQuery } from "~/lib/configuration/capabilities";
 import { capabilitiesFixture } from "~/lib/configuration/fixture";
@@ -187,7 +188,7 @@ const rateLimits = (sequence: number, usedPercent: number) =>
           agent: AgentName.make("developer"),
           brain,
         }),
-        pool: "chatgptPlan",
+        pool: BillingPool.make("chatgptPlan"),
         rateLimits: RateLimitsSnapshot.make({
           limitId: Option.none(),
           limitName: Option.none(),

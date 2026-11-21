@@ -1,6 +1,7 @@
 import { jsonKey } from "@usine/core/json-key";
 import { InstanceScope } from "@usine/core/access";
 import type { ChangeAudience } from "@usine/core/changes";
+import { BillingPools, type PoolDescriptor } from "@usine/core/agent/pool";
 import type { PoolRateLimitsUpdated } from "@usine/core/agent/session";
 import {
   AttentionKey,
@@ -144,9 +145,14 @@ export const partitionNeeds = (
   return { needsYou, dismissedNeeds };
 };
 
+/**
+ * Returns a need for each window of `snapshots` at 80 percent or more that resets after `now`,
+ * labelled from `pools`.
+ */
 export const poolLimitNeeds = (
   snapshots: ReadonlyArray<PoolRateLimitsUpdated>,
   now: DateTime.Utc,
+  pools: ReadonlyArray<PoolDescriptor>,
 ): ReadonlyArray<PoolLimitNeed> =>
   snapshots.flatMap(({ pool, login, rateLimits }) =>
     (["primary", "secondary"] as const).flatMap((window) => {
@@ -158,6 +164,7 @@ export const poolLimitNeeds = (
         PoolLimitNeed.make({
           id: `pool-limit:${pool}:${window}`,
           pool,
+          label: pools.find(({ id }) => id === pool)?.label ?? pool,
           login,
           window,
           usedPercent,
@@ -175,7 +182,8 @@ export const poolAttentionFor = (
     const snapshots = yield* reader.latestPoolRateLimits;
     yield* Effect.annotateCurrentSpan({ pools: snapshots.map(({ pool }) => pool) });
     const observedAt = yield* DateTime.now;
-    const needs = poolLimitNeeds(snapshots, observedAt);
+    const pools = yield* BillingPools;
+    const needs = poolLimitNeeds(snapshots, observedAt, pools);
     yield* Effect.logDebug("Refreshed pool attention", {
       snapshots: snapshots.map(({ pool, rateLimits: { primary, secondary } }) => ({
         pool,

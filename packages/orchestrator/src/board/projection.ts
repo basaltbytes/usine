@@ -1,4 +1,5 @@
 import type { ItemRunHistory } from "@usine/engine/run-reader";
+import { BillingPools } from "@usine/core/agent/pool";
 import { canonicalLabelName, GitHubLabelName } from "@usine/core/label";
 import {
   isSettledItemState,
@@ -184,6 +185,7 @@ export const projectBoard = Effect.fn("Board.project")(
         });
       }
       const lanes = effectiveLanes(repository, repositoryLabels);
+      const pools = yield* BillingPools;
       const cards = taskCards(
         repository.name,
         items,
@@ -191,6 +193,7 @@ export const projectBoard = Effect.fn("Board.project")(
         cycleBlockedItems,
         itemLoops,
         runUsage,
+        pools,
         attentionRuns,
         itemHistory,
       );
