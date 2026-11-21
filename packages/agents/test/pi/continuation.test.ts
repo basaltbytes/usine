@@ -166,7 +166,7 @@ describe("shared continuation policy", () => {
                   closed++;
                 }),
               );
-              yield* (yield* ChildSessionJournal.current).started(reference);
+              yield* policy.journal.started(reference);
               const channel = yield* sessionChannel({
                 sessionId: session.id,
                 label: "Continuation test",
@@ -178,11 +178,7 @@ describe("shared continuation policy", () => {
               const conversation = yield* sessionConversation({
                 session,
                 channel,
-                held: policy.restored.held,
-                paused: policy.restored.paused,
-                idle: policy.restored.idle,
-                idleAnsweredOperator: policy.restored.idleAnsweredOperator,
-                unread: policy.restored.unread,
+                policy,
                 send: (message, _activity, id) =>
                   steer(message, id).pipe(Effect.as("queued" as const)),
                 pause: Effect.void,
@@ -201,7 +197,6 @@ describe("shared continuation policy", () => {
                 active: false,
                 recover: (tools) =>
                   conversation.recover(
-                    policy,
                     tools,
                     (message, id) => steer(message, id).pipe(Effect.as("queued" as const)),
                     state === "empty",

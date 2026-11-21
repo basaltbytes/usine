@@ -79,7 +79,6 @@ import {
   ChildBackend,
   type InterruptedTool,
   ChildSessionLifecycle,
-  ChildSessionJournal,
   type RunningSession,
 } from "../../runtime.ts";
 import { isRemoteHost } from "../../child-host/child-host.ts";
@@ -263,7 +262,7 @@ const makeCodexSessions = Effect.gen(function* () {
       // Codex saves its sessions under CODEX_HOME, which `codex resume` needs to find them.
       home,
     });
-    const journal = yield* ChildSessionJournal.current;
+    const journal = policy.journal;
     yield* journal.started(harnessSession);
     yield* channel.emit(
       SessionStarted.make({ session, harnessSession: Option.some(harnessSession) }),
@@ -487,11 +486,7 @@ const makeCodexSessions = Effect.gen(function* () {
     const conversation = yield* sessionConversation({
       session,
       channel,
-      held: policy.restored.held,
-      paused: policy.restored.paused,
-      idle: policy.restored.idle,
-      idleAnsweredOperator: policy.restored.idleAnsweredOperator,
-      unread: policy.restored.unread,
+      policy,
       submitted: submitted.flatMap(({ id }) => (id === undefined ? [] : [id])),
       send: (message, _activity, id) => steer(message, id),
       pause: Effect.suspend(() => (toolsInFlight.size === 0 ? interruptTurn() : Effect.void)),
@@ -642,7 +637,7 @@ const makeCodexSessions = Effect.gen(function* () {
       turnActive = false;
       interrupting = false;
       yield* readRestored(restored.lastTurn);
-      yield* conversation.recover(policy, interruptedTools, recoverInput, restored.empty);
+      yield* conversation.recover(interruptedTools, recoverInput, restored.empty);
     });
     if (turnActive) {
       yield* Effect.logInfo("Reattached the active Codex turn", {
@@ -905,7 +900,7 @@ const makeCodexSessions = Effect.gen(function* () {
       running,
       active: turnActive,
       recover: (tools: ReadonlyArray<InterruptedTool>) =>
-        conversation.recover(policy, tools, recoverInput, thread.empty),
+        conversation.recover(tools, recoverInput, thread.empty),
     };
   });
   const stop = Effect.fn("CodexRuntime.stop")((spec: SessionSpec) =>

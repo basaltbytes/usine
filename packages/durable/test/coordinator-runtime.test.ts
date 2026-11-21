@@ -104,7 +104,7 @@ const hangingLaunches = (reached: Deferred.Deferred<void>, stage: "before-save" 
           launch: (request) =>
             Effect.gen(function* () {
               if (stage === "after-save") {
-                const journal = yield* ChildSessionJournal.current;
+                const journal = yield* ChildSessionJournal;
                 yield* journal.started(
                   HarnessSession.make({
                     id: HarnessSessionId.make("not-created-yet"),

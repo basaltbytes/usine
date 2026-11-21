@@ -40,15 +40,19 @@ import { Effect } from "effect";
 import { continuationPolicy } from "@usine/agents/continuation";
 import { type SessionSpec, StartPrompt } from "@usine/agents/harness/contract";
 import { Harnesses } from "@usine/agents/harness/node";
-import { RestartState } from "@usine/agents/runtime";
+import { ChildSessionJournal, RestartState } from "@usine/agents/runtime";
 
 const openSession = (spec: SessionSpec, prompt: string) =>
   Effect.gen(function* () {
     const runtime = yield* (yield* Harnesses).runtime(spec.session.brain.harness);
-    const policy = yield* continuationPolicy(spec, prompt, RestartState.make({}));
+    const policy = yield* continuationPolicy(spec, prompt, RestartState.make({})).pipe(
+      Effect.provideService(ChildSessionJournal, ChildSessionJournal.noop),
+    );
     return yield* runtime.open(spec, StartPrompt.make({ text: prompt }), policy);
   });
 ```
+
+The continuation policy saves the session's checkpoints, such as its saved conversation and the messages it read, in the `ChildSessionJournal` of the context that makes it, and adapters save through the policy. `ChildBackend.launch` requires the service, so a durable delegation that leaves out its journal doesn't compile. A session that no delegation journals, such as the supervisor's, takes `ChildSessionJournal.noop`; tests provide `ChildSessionJournal.layerNoop`.
 
 `complete(spec, prompt, output)` sends one prompt and returns a `Completion`: the value that the `output` schema decodes, and its usage as a `SessionTokensUpdated` whose session records the brain that ran and the billing pool. The output's JSON form must be an object, and every field needs a value, because strict provider modes require every property. Admission requires the role in the spec to return a structured value and keep no conversation, so it needs `structured-output` and `ephemeral`. A completion saves no conversation, returns no session reference, and offers the model no usine tools, so admission refuses a role that runs a usine tool set. Each adapter sends the output's JSON Schema, with closed objects and the root definition of an identified schema or `Schema.Class` inlined, and reports what its harness answered and the tokens it spent. `structuredCompletion` then decodes the value with the schema, rejecting properties that the schema doesn't model, and classifies and logs every failure in one place:
 
@@ -98,7 +102,9 @@ const noteHandlers = notes.toLayer({ read_note: ({ name }) => Effect.succeed(`No
 const openWithNotes = (spec: SessionSpec, prompt: string) =>
   Effect.gen(function* () {
     const runtime = yield* (yield* Harnesses).runtime(spec.session.brain.harness);
-    const policy = yield* continuationPolicy(spec, prompt, RestartState.make({}));
+    const policy = yield* continuationPolicy(spec, prompt, RestartState.make({})).pipe(
+      Effect.provideService(ChildSessionJournal, ChildSessionJournal.noop),
+    );
     return yield* runtime.open(spec, StartPrompt.make({ text: prompt }), policy, notes);
   }).pipe(Effect.provide(noteHandlers));
 ```

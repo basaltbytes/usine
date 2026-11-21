@@ -6,6 +6,7 @@ import { CodexAppServer, codexChildLayer } from "@usine/agents/codex";
 import {
   ChildRequest,
   ChildBackend,
+  ChildSessionJournal,
   WorkingDirectory,
   toAttemptFailure,
 } from "@usine/agents/runtime";
@@ -135,11 +136,15 @@ it.effect.each(["success", "restart", "cancel", "repeated", "ordinary"] as const
             };
           }),
       });
-      const backend = codexChildLayer.pipe(Layer.provide(server));
+      const backend = codexChildLayer.pipe(
+        Layer.provide(server),
+        Layer.provideMerge(ChildSessionJournal.layerNoop),
+      );
       const executor = Layer.effect(
         StepExecutor,
         Effect.gen(function* () {
           const codex = yield* ChildBackend;
+          const journal = yield* ChildSessionJournal;
           return {
             workers: Effect.succeed([worker]),
             isLive: () => Effect.succeed(false),
@@ -167,22 +172,24 @@ it.effect.each(["success", "restart", "cancel", "repeated", "ordinary"] as const
                 Effect.gen(function* () {
                   if (execution.attempt.number > 1)
                     assert.deepStrictEqual(execution.resume, Option.some(salvage));
-                  const child = yield* codex.launch(
-                    ChildRequest.make({
-                      session: ChildSession.make({
-                        id: AgentSessionId.make(`child-${execution.attempt.number}`),
-                        parentId: AgentSessionId.make("parent"),
-                        agent: agent.name,
-                        brain,
+                  const child = yield* codex
+                    .launch(
+                      ChildRequest.make({
+                        session: ChildSession.make({
+                          id: AgentSessionId.make(`child-${execution.attempt.number}`),
+                          parentId: AgentSessionId.make("parent"),
+                          agent: agent.name,
+                          brain,
+                        }),
+                        cwd: WorkingDirectory.make(directory),
+                        prompt: execution.task,
+                        environment: {},
+                        host: LocalProcess.make(),
+                        worker,
+                        machine: Option.none(),
                       }),
-                      cwd: WorkingDirectory.make(directory),
-                      prompt: execution.task,
-                      environment: {},
-                      host: LocalProcess.make(),
-                      worker,
-                      machine: Option.none(),
-                    }),
-                  );
+                    )
+                    .pipe(Effect.provideService(ChildSessionJournal, journal));
                   const result = yield* child.result;
                   return StepCompletion.fromResult(
                     StepResult.make({ message: result.message, facts: [] }),

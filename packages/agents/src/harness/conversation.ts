@@ -6,10 +6,8 @@ import {
 } from "@usine/core/attempt/channel";
 import { Deferred, Effect, Option, Semaphore } from "effect";
 import {
-  ChildSessionJournal,
   type AgentSessionError,
   type OnDelivery,
-  type QueuedOperatorMessage,
   type InterruptedTool,
   SessionOperationError,
 } from "../runtime.ts";
@@ -34,14 +32,10 @@ export type ReadPoint = "now" | "turn" | "restored" | number;
 interface ConversationOptions {
   readonly session: AgentSession;
   readonly channel: SessionChannel;
-  readonly held: boolean;
-  readonly paused: boolean;
-  readonly unread?: ReadonlyArray<QueuedOperatorMessage>;
+  /** The supervision, idle report, and unread messages restored, and the journal to save to. */
+  readonly policy: ContinuationPolicy;
   /** Restored messages already submitted to a retained native process. */
   readonly submitted?: ReadonlyArray<OperatorMessageId>;
-  readonly idle: Option.Option<string>;
-  /** Whether the restored idle report replies to operator input (ADR 0018). */
-  readonly idleAnsweredOperator: boolean;
   /**
    * Queues a message during a turn, or starts another turn in an idle session. If it returns
    * `queued`, the harness reports the read later through `read`.
@@ -75,10 +69,11 @@ interface QueuedMessage {
 export const sessionConversation = Effect.fn("SessionConversation.make")(function* (
   options: ConversationOptions,
 ) {
-  const { session, channel } = options;
+  const { session, channel, policy } = options;
+  const { restored, journal } = policy;
   const mutex = yield* Semaphore.make(1);
-  let held = options.held;
-  let paused = options.paused;
+  let held = restored.held;
+  let paused = restored.paused;
   let idle = Option.none<string>();
   // Whether `idle` is an answer whose wait limit passed.
   let idleLimitPassed = false;
@@ -94,19 +89,16 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
   let operatorInput = Option.none<number>();
   let closing = false;
   let resume = yield* Deferred.make<void>();
-  const journal = yield* ChildSessionJournal.current;
   const restoredAt = yield* channel.toolCalls;
   const restoredAfter = yield* channel.toolResults;
-  const queued: Array<QueuedMessage> = (options.unread ?? []).map((message) => ({
+  const queued: Array<QueuedMessage> = restored.unread.map((message) => ({
     ...message,
     onDelivery: (state) => journal.delivered(message.id, state),
     queuedAfter: restoredAfter,
   }));
 
   const unsent = new Set(
-    (options.unread ?? [])
-      .map(({ id }) => id)
-      .filter((id) => !(options.submitted ?? []).includes(id)),
+    restored.unread.map(({ id }) => id).filter((id) => !(options.submitted ?? []).includes(id)),
   );
   const sent = (id: OperatorMessageId) =>
     Effect.sync(() => {
@@ -300,13 +292,13 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
     return InterventionState.make({ held, paused, queued: taken === "queued" });
   }, mutex.withPermits(1));
 
-  if (Option.isSome(options.idle) && options.idleAnsweredOperator) {
+  if (Option.isSome(restored.idle) && restored.idleAnsweredOperator) {
     operatorInput = Option.some(restoredAt);
     yield* Effect.logInfo("The restored idle report replies to the operator", {
       sessionId: session.id,
     });
   }
-  if (Option.isSome(options.idle)) yield* finish(options.idle.value);
+  if (Option.isSome(restored.idle)) yield* finish(restored.idle.value);
   else if (paused) yield* finish("Session paused before restart");
 
   return {
@@ -339,7 +331,6 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
     ),
     intervene,
     recover: Effect.fn("SessionConversation.recover")(function* (
-      policy: ContinuationPolicy,
       tools: ReadonlyArray<InterruptedTool>,
       send: (
         message: string,

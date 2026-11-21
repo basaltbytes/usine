@@ -54,7 +54,6 @@ import {
   ChildBackend,
   ChildSessionLifecycle,
   type InterruptedTool,
-  ChildSessionJournal,
   type RunningSession,
   SessionOperationError,
   UnknownModelError,
@@ -177,6 +176,16 @@ const LOGIN_RETRY_DELAYS: ReadonlyArray<Duration.Duration> = [
  */
 const LOGIN_WINDOW = Duration.seconds(60);
 
+/** What one Claude Code launch serves and sends. */
+interface LaunchInput {
+  readonly tools: Option.Option<ClaudeToolServer>;
+  /** The user messages to send; with none, the launch waits for input. */
+  readonly messages: ReadonlyArray<ClaudeUserMessage>;
+  /** Records that the process owner acknowledged the first user message. */
+  readonly prompted: Effect.Effect<void, SessionOperationError>;
+  readonly transport?: "replace" | "resume" | undefined;
+}
+
 /** One Claude Code launch for a child. */
 interface ClaudeLaunch {
   readonly input: AsyncInput;
@@ -271,26 +280,23 @@ const makeClaudeSessions = Effect.gen(function* () {
   });
 
   /**
-   * Launches Claude Code once for `spec` and sends `messages`, keeping its Claude login lock
-   * until the first messages decide the login state. With no messages, the launch waits for input
-   * and skips the login check. Resources are added to the current scope.
+   * Launches Claude Code once for `spec` and sends the launch's messages, keeping its Claude login
+   * lock until the first messages decide the login state. With no messages, the launch waits for
+   * input and skips the login check. Resources are added to the current scope.
    */
   const launchOnce = Effect.fn("ClaudeRuntime.launchOnce")(function* (
     spec: SessionSpec,
     options: ClaudeQueryOptions,
-    tools: Option.Option<ClaudeToolServer>,
-    messages: ReadonlyArray<ClaudeUserMessage>,
-    transport?: "replace" | "resume",
+    { tools, messages, prompted: savePrompt, transport }: LaunchInput,
   ) {
     yield* Effect.annotateCurrentSpan({ sessionId: spec.session.id, worker: spec.worker });
     const release = yield* holdLogin(spec);
-    const journal = yield* ChildSessionJournal.current;
     return yield* Effect.gen(function* () {
       const input = new AsyncInput();
       const prompted = yield* Ref.make(false);
       const recordPrompt = yield* Effect.cached(
         Ref.set(prompted, true).pipe(
-          Effect.andThen(journal.prompted),
+          Effect.andThen(savePrompt),
           Effect.tap(() =>
             Effect.logDebug("The Claude process owner acknowledged the first user message", {
               sessionId: spec.session.id,
@@ -393,17 +399,15 @@ const makeClaudeSessions = Effect.gen(function* () {
   const launchWithRetries = Effect.fn("ClaudeRuntime.launchWithRetries")(function* (
     spec: SessionSpec,
     options: ClaudeQueryOptions,
-    tools: Option.Option<ClaudeToolServer>,
-    messages: ReadonlyArray<ClaudeUserMessage>,
+    launch: LaunchInput,
     scope: Scope.Scope,
-    transport?: "replace" | "resume",
   ) {
     yield* Effect.annotateCurrentSpan({ sessionId: spec.session.id, worker: spec.worker });
     let launchOptions = options;
     for (let retry = 0; ; retry += 1) {
       const launchScope = yield* Scope.fork(scope);
       const opened: ClaudeLaunch = {
-        ...(yield* launchOnce(spec, launchOptions, tools, messages, transport).pipe(
+        ...(yield* launchOnce(spec, launchOptions, launch).pipe(
           Scope.provide(launchScope),
           Effect.onError((cause) => Scope.close(launchScope, Exit.failCause(cause))),
         )),
@@ -414,7 +418,7 @@ const makeClaudeSessions = Effect.gen(function* () {
           yield* Effect.logInfo("Claude child started without showing whether its login worked", {
             sessionId: spec.session.id,
             worker: spec.worker,
-            messages: messages.length,
+            messages: launch.messages.length,
           });
         return opened;
       }
@@ -541,9 +545,8 @@ const makeClaudeSessions = Effect.gen(function* () {
       },
     };
     const lifecycle = yield* ChildSessionLifecycle.current;
-    const journal = yield* ChildSessionJournal.current;
     yield* checkContinuationHome(spec, start, home, defaultHome);
-    yield* journal.started(reference);
+    yield* policy.journal.started(reference);
     // Login-lock retries finish before the session starts.
     const startsIdle = policy.restored.paused || Option.isSome(policy.restored.idle);
     // Claude names a message with a client UUID on each result that consumed it.
@@ -556,10 +559,13 @@ const makeClaudeSessions = Effect.gen(function* () {
     let current = yield* launchWithRetries(
       spec,
       options,
-      server,
-      prompts,
+      {
+        tools: server,
+        messages: prompts,
+        prompted: policy.journal.prompted,
+        transport: start._tag === "StartResume" ? "resume" : undefined,
+      },
       scope,
-      start._tag === "StartResume" ? "resume" : undefined,
     );
 
     const pool = yield* billingPool(spec, current.query);
@@ -624,11 +630,7 @@ const makeClaudeSessions = Effect.gen(function* () {
     const conversation = yield* sessionConversation({
       session,
       channel,
-      held: policy.restored.held,
-      paused: policy.restored.paused,
-      idle: policy.restored.idle,
-      idleAnsweredOperator: policy.restored.idleAnsweredOperator,
-      unread: policy.restored.unread,
+      policy,
       submitted,
       send: (message, _activity, id) => queueMessage(message, id),
       pause: Effect.void,
@@ -1063,10 +1065,8 @@ const makeClaudeSessions = Effect.gen(function* () {
         launchWithRetries(
           spec,
           { ...resumeOptions, ...(empty ? { sessionId: reference.id } : { resume: reference.id }) },
-          server,
-          [],
+          { tools: server, messages: [], prompted: policy.journal.prompted, transport: "replace" },
           scope,
-          "replace",
         ),
       );
       submitted.length = 0;
@@ -1074,7 +1074,6 @@ const makeClaudeSessions = Effect.gen(function* () {
       // The new process runs no turn until recovery sends one.
       betweenTurns = true;
       yield* conversation.recover(
-        policy,
         [...tools].map(([callId, tool]) => ({ callId, tool })),
         queueMessage,
         empty,
@@ -1132,7 +1131,7 @@ const makeClaudeSessions = Effect.gen(function* () {
       running,
       active: current.retained && !unprompted,
       recover: (tools: ReadonlyArray<InterruptedTool>) =>
-        conversation.recover(policy, tools, queueMessage, unprompted),
+        conversation.recover(tools, queueMessage, unprompted),
     };
   });
   const stop = Effect.fn("ClaudeRuntime.stop")(function* (spec: SessionSpec) {
@@ -1148,7 +1147,12 @@ const makeClaudeSessions = Effect.gen(function* () {
     complete: structuredCompletion(
       claudeCompletion(
         (spec, options, messages, scope) =>
-          launchWithRetries(spec, options, Option.none(), messages, scope),
+          launchWithRetries(
+            spec,
+            options,
+            { tools: Option.none(), messages, prompted: Effect.void },
+            scope,
+          ),
         billingPool,
       ),
     ),

@@ -62,7 +62,7 @@ const readOnReopen = Layer.effectContext(
       launch: (child) =>
         Effect.gen(function* () {
           const running = yield* backend.launch(child);
-          const journal = yield* ChildSessionJournal.current;
+          const journal = yield* ChildSessionJournal;
           const state = AttemptChannel.InterventionState.make({ held: false, paused: false });
           for (const { id } of child.unread) yield* journal.delivered(id, Option.some(state));
           return running;

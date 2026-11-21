@@ -26,7 +26,7 @@ import {
   type PiStartOptions,
 } from "../../src/harness/pi/sdk.ts";
 import { RolePlacements, RoleSpec } from "../../src/harness/role.ts";
-import { RestartState, WorkingDirectory } from "../../src/runtime.ts";
+import { RestartState, WorkingDirectory, ChildSessionJournal } from "../../src/runtime.ts";
 import { collectLogs } from "../logs.ts";
 
 // A usine tool that takes the name of Pi's own `read` tool, which Pi can't carry.
@@ -120,7 +120,9 @@ const runPi = <Tools extends Record<string, Tool.Any>, R>(
   });
   return Effect.gen(function* () {
     const runtime = yield* piRuntime;
-    const policy = yield* continuationPolicy(opened, "Read the note", RestartState.make({}));
+    const policy = yield* continuationPolicy(opened, "Read the note", RestartState.make({})).pipe(
+      Effect.provideService(ChildSessionJournal, ChildSessionJournal.noop),
+    );
     const native = yield* runtime.open(
       opened,
       StartPrompt.make({ text: "Read the note" }),

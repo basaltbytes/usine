@@ -58,6 +58,9 @@ import {
 } from "../../src/harness/pi/sdk.ts";
 import { resolvePiPool } from "../../src/harness/pi/authentication.ts";
 
+/** The Pi backend, whose children save nothing. */
+const piChild = piChildLayer.pipe(Layer.provideMerge(ChildSessionJournal.layerNoop));
+
 /** Fails a Pi completion that the test doesn't expect. */
 const noCompletion = () => Promise.reject(new Error("The test runs no completion"));
 
@@ -214,7 +217,7 @@ describe("Pi child backend", () => {
         [],
       );
     }).pipe(
-      Effect.provide(piChildLayer.pipe(Layer.provide(sdk))),
+      Effect.provide(piChild.pipe(Layer.provide(sdk))),
       Effect.provideService(ChildSessionLifecycle, { isStopping: Effect.sync(() => stopping) }),
       Effect.provide(Logger.layer([logger])),
       Effect.timeout("5 seconds"),
@@ -284,7 +287,7 @@ describe("Pi child backend", () => {
         yield* running.intervene(AttemptChannel.Release.make(), noDelivery);
         assert.strictEqual((yield* Fiber.join(result)).message, "Pi session completed");
         assert.strictEqual(opens, 1);
-      }).pipe(Effect.provide(piChildLayer.pipe(Layer.provideMerge(sdk))));
+      }).pipe(Effect.provide(piChild.pipe(Layer.provideMerge(sdk))));
     }).pipe(Effect.scoped),
   );
 
@@ -350,7 +353,7 @@ describe("Pi child backend", () => {
         }
         endTurn?.();
         return yield* running.result;
-      }).pipe(Effect.scoped, Effect.provide(piChildLayer.pipe(Layer.provideMerge(sdk))));
+      }).pipe(Effect.scoped, Effect.provide(piChild.pipe(Layer.provideMerge(sdk))));
       assert.isFalse(result.answeredOperator);
     }).pipe(Effect.scoped),
   );
@@ -387,7 +390,7 @@ describe("Pi child backend", () => {
         );
         yield* running.intervene(AttemptChannel.Release.make(), noDelivery);
         return yield* running.result;
-      }).pipe(Effect.scoped, Effect.provide(piChildLayer.pipe(Layer.provideMerge(sdk))));
+      }).pipe(Effect.scoped, Effect.provide(piChild.pipe(Layer.provideMerge(sdk))));
       assert.strictEqual(result.message, "The tests need a database.");
       assert.isTrue(result.answeredOperator);
     }).pipe(Effect.scoped),
@@ -444,7 +447,7 @@ describe("Pi child backend", () => {
           yield* Effect.yieldNow;
         }
         for (let spin = 0; spin < 100; spin += 1) yield* Effect.yieldNow;
-      }).pipe(Effect.scoped, Effect.provide(piChildLayer.pipe(Layer.provideMerge(sdk))));
+      }).pipe(Effect.scoped, Effect.provide(piChild.pipe(Layer.provideMerge(sdk))));
       assert.lengthOf(reads, 2);
       assert.match(reads[0] ?? "", /^read /u);
       assert.match(reads[1] ?? "", /^unread /u);
@@ -558,7 +561,7 @@ describe("Pi child backend", () => {
             "SessionFinished",
           ],
         );
-      }).pipe(Effect.provide(piChildLayer.pipe(Layer.provideMerge(sdk)))),
+      }).pipe(Effect.provide(piChild.pipe(Layer.provideMerge(sdk)))),
     );
   });
 
@@ -664,7 +667,7 @@ describe("Pi child backend", () => {
         assert.lengthOf(retries, 3, "one warning per provider retry");
       }).pipe(
         Effect.provide(
-          piChildLayer.pipe(Layer.provideMerge(sdk), Layer.provideMerge(Logger.layer([logger]))),
+          piChild.pipe(Layer.provideMerge(sdk), Layer.provideMerge(Logger.layer([logger]))),
         ),
       ),
     );
@@ -698,7 +701,7 @@ describe("Pi child backend", () => {
         assert.include(error.message, "pi cannot run as coding-agent at ssh: lacks ssh");
         assert.strictEqual(toAttemptFailure(error)._tag, "AgentFailure");
         assert.strictEqual(started, false);
-      }).pipe(Effect.provide(piChildLayer.pipe(Layer.provideMerge(sdk)))),
+      }).pipe(Effect.provide(piChild.pipe(Layer.provideMerge(sdk)))),
     );
   });
 
@@ -714,7 +717,7 @@ describe("Pi child backend", () => {
         const matchesError = Schema.is(UnknownModelError)(error);
         assert(matchesError);
         assert.strictEqual(error.harness, "pi");
-      }).pipe(Effect.provide(piChildLayer.pipe(Layer.provideMerge(sdk)))),
+      }).pipe(Effect.provide(piChild.pipe(Layer.provideMerge(sdk)))),
     );
   });
 
@@ -745,7 +748,7 @@ describe("Pi child backend", () => {
           assert(matchesError);
           assert.strictEqual(error.pool, pool);
           assert.strictEqual(error.model, started.model);
-        }).pipe(Effect.provide(piChildLayer.pipe(Layer.provideMerge(sdk)))),
+        }).pipe(Effect.provide(piChild.pipe(Layer.provideMerge(sdk)))),
       );
     });
   }
@@ -843,7 +846,7 @@ describe("Pi child backend", () => {
         yield* Effect.promise(() => delayed.disposed);
         yield* Fiber.join(interruptFiber);
         assert.strictEqual(delayed.disposeCount(), 1);
-      }).pipe(Effect.provide(piChildLayer.pipe(Layer.provideMerge(sdk)))),
+      }).pipe(Effect.provide(piChild.pipe(Layer.provideMerge(sdk)))),
     );
   });
 
@@ -872,7 +875,7 @@ describe("Pi child backend", () => {
           .pipe(Effect.flip);
         assert.strictEqual(error._tag, "SessionInterruptedError");
       }),
-    ).pipe(Effect.provide(piChildLayer.pipe(Layer.provide(sdk))));
+    ).pipe(Effect.provide(piChild.pipe(Layer.provide(sdk))));
   });
 
   it.effect("reports each restored message that a Pi recovery steer handles as read", () => {
@@ -926,7 +929,6 @@ describe("Pi child backend", () => {
         restored.map(({ id }) => `read ${id}`),
       );
     }).pipe(
-      Effect.provide(piChildLayer.pipe(Layer.provide(sdk))),
       Effect.provideService(ChildSessionJournal, {
         started: () => Effect.void,
         prompted: Effect.void,
@@ -937,6 +939,7 @@ describe("Pi child backend", () => {
             deliveries.push(`${Option.isSome(state) ? "read" : "unread"} ${id}`);
           }),
       }),
+      Effect.provide(piChild.pipe(Layer.provide(sdk))),
     );
   });
 
@@ -1026,7 +1029,7 @@ describe("Pi child backend", () => {
             faux.state.callCount,
             scenario.responses + (scenario.outcome === "success" ? 1 : 0),
           );
-        }).pipe(Effect.provide(piChildLayer.pipe(Layer.provideMerge(sdk))));
+        }).pipe(Effect.provide(piChild.pipe(Layer.provideMerge(sdk))));
       }).pipe(Effect.scoped),
     );
   }

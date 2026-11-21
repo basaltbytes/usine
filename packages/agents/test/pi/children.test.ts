@@ -31,8 +31,14 @@ import {
   RestartState,
   SessionResult,
   WorkingDirectory,
+  ChildSessionJournal,
 } from "../../src/runtime.ts";
 import { childDispatcherLayer } from "../../src/harness/children.ts";
+
+/** The dispatching backend, whose children save nothing. */
+const childDispatcher = childDispatcherLayer.pipe(
+  Layer.provideMerge(ChildSessionJournal.layerNoop),
+);
 
 const request = (harness: Harness) =>
   ChildRequest.make({
@@ -132,7 +138,7 @@ describe("harness runtime registration", () => {
       }),
     ).pipe(
       Effect.provide(
-        childDispatcherLayer.pipe(
+        childDispatcher.pipe(
           Layer.provide(
             Harnesses.layerFrom(catalog, [
               runtime,
@@ -217,7 +223,9 @@ describe("harness runtime registration", () => {
         const harnesses = yield* Harnesses;
         const open = Effect.fn(function* (selected: SessionSpec, resume: boolean) {
           const runtime = yield* harnesses.runtime(selected.session.brain.harness);
-          const policy = yield* continuationPolicy(selected, prompt, RestartState.make({}));
+          const policy = yield* continuationPolicy(selected, prompt, RestartState.make({})).pipe(
+            Effect.provideService(ChildSessionJournal, ChildSessionJournal.noop),
+          );
           return yield* runtime.open(
             selected,
             resume
@@ -296,7 +304,7 @@ describe("harness runtime registration", () => {
           assert(Option.isSome(error.sessionId));
         }).pipe(
           Effect.provide(
-            childDispatcherLayer.pipe(Layer.provideMerge(Harnesses.layerFrom(extended, runtimes))),
+            childDispatcher.pipe(Layer.provideMerge(Harnesses.layerFrom(extended, runtimes))),
           ),
         ),
       ),
@@ -346,7 +354,7 @@ describe("harness runtime registration", () => {
         }
       }).pipe(
         Effect.provide(
-          childDispatcherLayer.pipe(
+          childDispatcher.pipe(
             Layer.provideMerge(
               Harnesses.layerFrom(activeCatalog, [
                 { id: extra, ...backend(extra), preflight: checkedPreflight(() => Effect.void) },

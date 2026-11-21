@@ -117,10 +117,17 @@ const workerCommands = (exitCode: number, stdout = "") => {
   return { commands, layer };
 };
 
-/** The Claude backend, with a login lock that the test can also acquire, and `commands` on Workers. */
-const claudeChildWith = (commands: Layer.Layer<ChildProcessSpawner.ChildProcessSpawner>) =>
+/**
+ * The Claude backend, with a login lock that the test can also acquire, `commands` on Workers, and
+ * `journal` for its children's checkpoints.
+ */
+const claudeChildWith = (
+  commands: Layer.Layer<ChildProcessSpawner.ChildProcessSpawner>,
+  journal: Layer.Layer<ChildSessionJournal> = ChildSessionJournal.layerNoop,
+) =>
   claudeChildLayer.pipe(
     Layer.provideMerge(loginLock),
+    Layer.provideMerge(journal),
     Layer.provide(commands),
     Layer.provide(NodeCrypto.layer),
   );
@@ -728,7 +735,6 @@ describe("Claude child backend", () => {
           const duplicate = yield* Queue.clear(receipts);
           assert.deepStrictEqual(duplicate, []);
         }).pipe(
-          Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk))),
           Effect.provideService(ChildSessionJournal, {
             started: (reference) =>
               Effect.sync(() => {
@@ -739,6 +745,7 @@ describe("Claude child backend", () => {
             received: () => Effect.void,
             delivered: () => Effect.void,
           }),
+          Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk))),
         );
       }).pipe(Effect.scoped),
   );
@@ -2769,18 +2776,14 @@ describe("Claude child backend", () => {
         });
         const layer = claudeChildWith(
           Layer.succeed(ChildProcessSpawner.ChildProcessSpawner)(owner),
-        ).pipe(
-          Layer.provideMerge(sdk),
-          Layer.provideMerge(
-            Layer.succeed(ChildSessionJournal)({
-              started: () => Effect.void,
-              prompted: Deferred.succeed(prompted, undefined).pipe(Effect.andThen(commit)),
-              continued: () => Effect.void,
-              received: () => Effect.void,
-              delivered: () => Effect.void,
-            }),
-          ),
-        );
+          Layer.succeed(ChildSessionJournal)({
+            started: () => Effect.void,
+            prompted: Deferred.succeed(prompted, undefined).pipe(Effect.andThen(commit)),
+            continued: () => Effect.void,
+            received: () => Effect.void,
+            delivered: () => Effect.void,
+          }),
+        ).pipe(Layer.provideMerge(sdk));
         return { outputs, layer, prompted, inputs, launches };
       });
 

@@ -16,7 +16,12 @@ import {
   Steer,
 } from "@usine/core/attempt/channel";
 import { Deferred, Effect, Exit, Fiber, Logger, Option, Queue, Scope, Schema } from "effect";
-import { AgentBlockedError, type OnDelivery, RestartState } from "../../src/runtime.ts";
+import {
+  AgentBlockedError,
+  ChildSessionJournal,
+  type OnDelivery,
+  RestartState,
+} from "../../src/runtime.ts";
 import { sessionChannel } from "../../src/harness/session.ts";
 import { sessionConversation } from "../../src/harness/conversation.ts";
 import type { ContinuationPolicy } from "../../src/harness/continuation.ts";
@@ -37,6 +42,14 @@ const child = (id: string) =>
     agent: parent.agent,
     brain: parent.brain,
   });
+/** A continuation policy over `restored` that saves nothing; recovery sends a continuation. */
+const policyOf = (restored: RestartState): ContinuationPolicy => ({
+  restored,
+  journal: ChildSessionJournal.noop,
+  reopen: (native) => native,
+  recover: (_state, _tools, _unread, _emit, send) => send("Continue the task."),
+});
+
 const conversation = (
   session: ChildSession,
   restored: {
@@ -51,10 +64,13 @@ const conversation = (
     const controls = yield* sessionConversation({
       session,
       channel,
-      held: restored.held ?? false,
-      paused: false,
-      idle: restored.idle ?? Option.none(),
-      idleAnsweredOperator: restored.idleAnsweredOperator ?? false,
+      policy: policyOf(
+        RestartState.make({
+          held: restored.held ?? false,
+          idle: restored.idle ?? Option.none(),
+          idleAnsweredOperator: restored.idleAnsweredOperator ?? false,
+        }),
+      ),
       // A message to a running turn waits for the harness's next boundary.
       send: (message, activity) =>
         Effect.sync(() => {
@@ -173,10 +189,7 @@ describe("session supervision", () => {
       const controls = yield* sessionConversation({
         session,
         channel,
-        held: false,
-        paused: false,
-        idle: Option.none(),
-        idleAnsweredOperator: false,
+        policy: policyOf(RestartState.make({})),
         send: () =>
           Deferred.succeed(sending, undefined).pipe(
             Effect.andThen(Deferred.await(delivered)),
@@ -221,10 +234,7 @@ describe("session supervision", () => {
       const controls = yield* sessionConversation({
         session,
         channel,
-        held: true,
-        paused: false,
-        idle: Option.some("CI passed"),
-        idleAnsweredOperator: false,
+        policy: policyOf(RestartState.make({ held: true, idle: Option.some("CI passed") })),
         send: () => Effect.succeed("read"),
         pause: Effect.void,
         beforeFinish: Deferred.succeed(finishing, undefined).pipe(
@@ -561,12 +571,7 @@ describe("answers to the operator", () => {
       const session = yield* conversation(child("continued"));
       yield* session.intervene(Steer.make({ message: "What changed?" }), noDelivery);
       yield* session.read((yield* session.unread).map(({ id }) => id));
-      const policy: ContinuationPolicy = {
-        restored: RestartState.make({}),
-        reopen: (native) => native,
-        recover: (_state, _tools, _unread, _emit, send) => send("Continue the task."),
-      };
-      yield* session.recover(policy, [], () => Effect.succeed("queued" as const));
+      yield* session.recover([], () => Effect.succeed("queued" as const));
       yield* session.finish("Done.");
       assert.isFalse((yield* Fiber.join(session.result)).answeredOperator);
     }),

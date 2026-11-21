@@ -41,11 +41,6 @@ export const piPauseGate = Effect.gen(function* () {
 /** Runs successive Pi turns in one SDK session; the conversation decides when the session completes. */
 export const piTurns = Effect.fn("PiTurns.start")(function* (options: {
   readonly session: AgentSession;
-  readonly held: boolean;
-  readonly paused: boolean;
-  readonly idle: Option.Option<string>;
-  readonly idleAnsweredOperator: boolean;
-  readonly unread: ReadonlyArray<QueuedOperatorMessage>;
   readonly sdk: PiSession;
   readonly channel: SessionChannel;
   readonly prompt: Option.Option<string>;
@@ -120,11 +115,7 @@ export const piTurns = Effect.fn("PiTurns.start")(function* (options: {
   const conversation = yield* sessionConversation({
     session: options.session,
     channel: options.channel,
-    held: options.held,
-    paused: options.paused,
-    idle: options.idle,
-    idleAnsweredOperator: options.idleAnsweredOperator,
-    unread: options.unread,
+    policy: options.policy,
     send: (message, activity, id) =>
       activity === "idle" || !launched
         ? startTurn(message).pipe(Effect.as("read" as const))
@@ -152,14 +143,14 @@ export const piTurns = Effect.fn("PiTurns.start")(function* (options: {
   });
   yield* Effect.addFinalizer(() => Effect.sync(unsubscribe));
   options.gate.set(conversation.awaitUnpaused);
-  if (!options.paused && Option.isNone(options.idle) && Option.isSome(options.prompt))
+  const { restored } = options.policy;
+  if (!restored.paused && Option.isNone(restored.idle) && Option.isSome(options.prompt))
     yield* startTurn(options.prompt.value);
   const send = (message: string, id?: OperatorMessageId) =>
     launched ? queueSteer(message, id) : startTurn(message).pipe(Effect.as("read" as const));
   const steer = (message: string, id?: OperatorMessageId) => send(message, id).pipe(Effect.asVoid);
   return {
-    recover: (tools: ReadonlyArray<InterruptedTool>) =>
-      conversation.recover(options.policy, tools, send),
+    recover: (tools: ReadonlyArray<InterruptedTool>) => conversation.recover(tools, send),
     intervene: conversation.intervene,
     steer,
     interrupt: Effect.tryPromise({

@@ -124,6 +124,8 @@ export const continuationPlan = (
  */
 export interface ContinuationPolicy {
   readonly restored: RestartState;
+  /** Where the session saves the checkpoints that a restart restores. */
+  readonly journal: ChildSessionJournal["Service"];
   readonly reopen: <A, R>(
     native: Effect.Effect<A, AgentSessionError, R>,
   ) => Effect.Effect<A, AgentSessionError, R>;
@@ -137,19 +139,21 @@ export interface ContinuationPolicy {
 }
 
 /**
- * Makes the continuation policy of `spec`. `task` is the first input that recovery sends when the
- * native history confirms that no input was saved.
+ * Makes the continuation policy of `spec`, which saves its checkpoints in the context's
+ * `ChildSessionJournal`. `task` is the first input that recovery sends when the native history
+ * confirms that no input was saved.
  */
 export const continuationPolicy = Effect.fn("HarnessContinuation.make")(function* (
   spec: SessionSpec,
   task: string,
   restored: RestartState,
 ) {
-  const journal = yield* ChildSessionJournal.current;
+  const journal = yield* ChildSessionJournal;
   const session = spec.session;
   let history = restored.continuations;
   return {
     restored,
+    journal,
     reopen: <A, R>(native: Effect.Effect<A, AgentSessionError, R>) =>
       native.pipe(
         Effect.catchTag("SessionOperationError", (error) =>
@@ -223,7 +227,11 @@ export interface ChildSessions extends ChildBackendService {
   readonly resume: (
     request: ChildRequest,
     reference: HarnessSession,
-  ) => Effect.Effect<Option.Option<NativeSession>, AgentSessionError, Scope.Scope>;
+  ) => Effect.Effect<
+    Option.Option<NativeSession>,
+    AgentSessionError,
+    Scope.Scope | ChildSessionJournal
+  >;
 }
 
 /**
