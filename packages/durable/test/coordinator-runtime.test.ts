@@ -5,6 +5,8 @@ import {
   HarnessSessionId,
   SessionStarted,
   TextOutput,
+  ToolFinished,
+  ToolStarted,
 } from "@usine/core/agent/session";
 import type { AttemptId } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
@@ -415,6 +417,78 @@ describe("event-driven coordinator runtime", () => {
       const [started] = outbound;
       assert.isTrue(
         started?.payload._tag === "Started" && Option.isNone(started.payload.parentModel),
+      );
+    }).pipe(Effect.scoped),
+  );
+
+  it.live("commits each tool event of a child with its in-flight change, in one write", () =>
+    Effect.gen(function* () {
+      const database = yield* temporaryDatabase;
+      const request = coordinated("coordinator/tool-commits");
+      const attemptId = request.spec.attemptId;
+      const writes: Array<string> = [];
+      /** Records which journal write carried each session event and progress change. */
+      const counting = Layer.effect(
+        AttemptJournal,
+        Effect.gen(function* () {
+          const inner = yield* AttemptJournal;
+          const events = (envelopes: ReadonlyArray<AttemptChannel.OutboundEnvelope>) =>
+            envelopes.flatMap(({ payload }) =>
+              payload._tag === "SessionEvent" ? [payload.event._tag] : [],
+            );
+          return AttemptJournal.of({
+            ...inner,
+            reserve: (id, envelopes) =>
+              Effect.sync(() => {
+                for (const event of events(envelopes)) writes.push(`reserve ${event}`);
+              }).pipe(Effect.andThen(inner.reserve(id, envelopes))),
+            saveProgress: (id, number, change) =>
+              Effect.sync(() => {
+                writes.push(`saveProgress ${change._tag}`);
+              }).pipe(Effect.andThen(inner.saveProgress(id, number, change))),
+            reserveWithProgress: (id, envelopes, number, change) =>
+              Effect.sync(() => {
+                writes.push(`reserveWithProgress ${events(envelopes).join(",")} ${change._tag}`);
+              }).pipe(Effect.andThen(inner.reserveWithProgress(id, envelopes, number, change))),
+          });
+        }),
+      ).pipe(Layer.provide(sqliteJournal(database)));
+      const process = yield* orchestrator(counting.pipe(coordinator));
+      const execution = yield* process.execute(request, recordingSink().sink);
+      const child = yield* process.nextChild;
+      const session = child.request.session;
+      yield* child.emit(
+        ToolStarted.make({ session, callId: "call-1", tool: "bash", input: "pnpm test" }),
+      );
+      yield* until(() => writes.some((write) => write.includes("ToolStarted")));
+      const inFlight = yield* stored(database, attemptId).pipe(
+        Effect.map(
+          Option.flatMap(({ delegations }) =>
+            Option.flatMap(Option.fromUndefinedOr(delegations[0]), ({ progress }) => progress),
+          ),
+        ),
+        Effect.map(Option.map(({ inFlight }) => inFlight)),
+      );
+      yield* child.emit(
+        ToolFinished.make({
+          session,
+          callId: "call-1",
+          tool: "bash",
+          output: "passed",
+          isError: false,
+        }),
+      );
+      yield* child.reply("Tests pass.");
+      yield* Fiber.join(execution);
+      yield* process.stop;
+
+      assert.deepStrictEqual(inFlight, Option.some([{ callId: "call-1", tool: "bash" }]));
+      assert.deepStrictEqual(
+        writes.filter((write) => write.includes("Tool")),
+        [
+          "reserveWithProgress ToolStarted ToolStarted",
+          "reserveWithProgress ToolFinished ToolFinished",
+        ],
       );
     }).pipe(Effect.scoped),
   );

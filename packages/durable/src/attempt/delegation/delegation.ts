@@ -528,12 +528,9 @@ export const delegate = Effect.fn("Delegation.delegate")(function* (
     let cumulativeUsage = childRequest.usage;
     const forward = (event: AgentSessionEvent) =>
       Effect.gen(function* () {
+        // A tool event commits with the change to the child's in-flight calls.
         if (event._tag === "ToolStarted" || event._tag === "ToolFinished")
-          yield* checkpoint(
-            event._tag === "ToolStarted"
-              ? journal.toolStarted(event.callId, event.tool)
-              : journal.toolFinished(event.callId),
-          );
+          return yield* journal.toolEvent(event);
         if (
           event._tag === "SessionIdle" ||
           event._tag === "SessionResumed" ||
