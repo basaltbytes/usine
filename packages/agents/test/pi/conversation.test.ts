@@ -4,6 +4,7 @@ import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import {
   AgentSessionId,
   ChildSession,
+  type OperatorMessageId,
   ParentSession,
   ToolFinished,
   ToolStarted,
@@ -24,6 +25,7 @@ import {
 } from "../../src/runtime.ts";
 import { sessionChannel } from "../../src/harness/session.ts";
 import { sessionConversation } from "../../src/harness/conversation.ts";
+import { type ReadPoint, Receipt } from "../../src/harness/receipts.ts";
 import type { ContinuationPolicy } from "../../src/harness/continuation.ts";
 
 const parent = ParentSession.make({
@@ -50,6 +52,16 @@ const policyOf = (restored: RestartState): ContinuationPolicy => ({
   recover: (_state, _tools, _unread, _emit, send) => send("Continue the task."),
 });
 
+/**
+ * The signal of the test harness: the operator messages that the session read, and where. Its
+ * decoder is all that the test adapter supplies for reads.
+ */
+interface TestRead {
+  readonly ids: ReadonlyArray<OperatorMessageId>;
+  readonly at: ReadPoint;
+}
+const testReceipts = ({ ids, at }: TestRead) => [Receipt.ById({ ids, at, opensTurn: false })];
+
 const conversation = (
   session: ChildSession,
   restored: {
@@ -71,6 +83,7 @@ const conversation = (
           idleAnsweredOperator: restored.idleAnsweredOperator ?? false,
         }),
       ),
+      decode: testReceipts,
       // A message to a running turn waits for the harness's next boundary.
       send: (message, activity) =>
         Effect.sync(() => {
@@ -103,8 +116,12 @@ const conversation = (
       Effect.sync(() =>
         channel.emitUnsafe(ToolStarted.make({ session, callId, tool: "bash", input: null })),
       );
+    /** Signals that the session read `ids` at `at`. */
+    const read = (ids: ReadonlyArray<OperatorMessageId>, at: ReadPoint = "now") =>
+      controls.observe({ ids, at });
     return {
       ...controls,
+      read,
       result,
       turns,
       emitted,
@@ -190,6 +207,7 @@ describe("session supervision", () => {
         session,
         channel,
         policy: policyOf(RestartState.make({})),
+        decode: testReceipts,
         send: () =>
           Deferred.succeed(sending, undefined).pipe(
             Effect.andThen(Deferred.await(delivered)),
@@ -218,7 +236,10 @@ describe("session supervision", () => {
       assert.isFalse(finishedOverdue);
       assert.isFalse(terminal);
       assert.isFalse(idle);
-      assert.deepStrictEqual(events, []);
+      assert.deepStrictEqual(
+        events.map((event) => event._tag),
+        ["OperatorMessageRead"],
+      );
 
       yield* controls.intervene(Release.make(), noDelivery);
       assert.strictEqual((yield* Deferred.await(channel.result)).message, "Waiting for CI");
@@ -235,6 +256,7 @@ describe("session supervision", () => {
         session,
         channel,
         policy: policyOf(RestartState.make({ held: true, idle: Option.some("CI passed") })),
+        decode: testReceipts,
         send: () => Effect.succeed("read"),
         pause: Effect.void,
         beforeFinish: Deferred.succeed(finishing, undefined).pipe(

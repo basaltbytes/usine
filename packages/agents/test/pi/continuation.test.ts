@@ -179,6 +179,7 @@ describe("shared continuation policy", () => {
                 session,
                 channel,
                 policy,
+                decode: () => [],
                 send: (message, _activity, id) =>
                   steer(message, id).pipe(Effect.as("queued" as const)),
                 pause: Effect.void,

@@ -1901,7 +1901,7 @@ describe("Codex child backend", () => {
           assert.deepStrictEqual(
             logs.records.flatMap(({ message }) =>
               Array.isArray(message) &&
-              message[0] === "Skipping an observed Codex user-message item"
+              message[0] === "Skipping a native input record that the session already counted"
                 ? [message[1]]
                 : [],
             ),

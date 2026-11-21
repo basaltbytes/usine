@@ -9,6 +9,7 @@ import {
 } from "@usine/core/agent/session";
 import { Option, Schema } from "effect";
 import { AgentCapacityError, AgentResultError, harnessFailure } from "../../runtime.ts";
+import { Receipt } from "../receipts.ts";
 
 const ClaudeTextBlock = Schema.Struct({
   type: Schema.Literal("text"),
@@ -38,7 +39,7 @@ const decodeAssistantError = Schema.decodeUnknownOption(
   }),
 );
 
-export const decodeMessageAcknowledgement = Schema.decodeUnknownOption(
+const decodeMessageAcknowledgement = Schema.decodeUnknownOption(
   Schema.Struct({ user_message_uuids: Schema.Array(OperatorMessageId) }),
 );
 
@@ -93,6 +94,45 @@ export const ClaudeApiRetry = Schema.Struct({
 });
 export const decodeApiRetry = Schema.decodeUnknownOption(ClaudeApiRetry);
 export const isAssistantMessage = Schema.is(Schema.Struct({ type: Schema.Literal("assistant") }));
+
+/** A Claude Code message, and whether Claude ran no turn when it arrived. */
+export interface ClaudeSignal {
+  readonly message: Schema.Json;
+  /** Whether no turn ran before the message: after a result, until the next assistant message. */
+  readonly betweenTurns: boolean;
+}
+
+/**
+ * Decodes what a Claude Code message says about the operator messages that the session read.
+ * Claude names the messages that a frame consumed in `user_message_uuids`: the first assistant
+ * frame of a turn names the messages that started it, and a result names every message that the
+ * turn folded in. A successful result without names counts the messages still queued in
+ * `queued_turn_count`, each of which starts a turn of its own.
+ */
+export const claudeReceipts = ({ message, betweenTurns }: ClaudeSignal): ReadonlyArray<Receipt> => {
+  const named = Option.map(
+    decodeMessageAcknowledgement(message),
+    ({ user_message_uuids }) => user_message_uuids,
+  );
+  if (!Schema.is(ClaudeResultMessage)(message))
+    return Option.match(named, {
+      onNone: () => [],
+      onSome: (ids) => [
+        Receipt.ById({ ids, at: "now", opensTurn: betweenTurns && isAssistantMessage(message) }),
+      ],
+    });
+  const queued =
+    message.subtype === "success" && message.result !== undefined
+      ? message.queued_turn_count
+      : undefined;
+  return [
+    ...Option.match(named, {
+      onSome: (ids) => [Receipt.ById({ ids, at: "turn", opensTurn: false })],
+      onNone: () => (queued === undefined ? [] : [Receipt.ByCount({ unread: queued })]),
+    }),
+    ...(queued !== undefined && queued > 0 ? [Receipt.TurnsQueued({ turns: queued })] : []),
+  ];
+};
 
 /** The model that Claude Code names on an assistant message that it wrote itself. */
 const SYNTHETIC_MODEL = "<synthetic>";

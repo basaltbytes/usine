@@ -59,7 +59,6 @@ import {
   UserMessageItem,
 } from "../../protocol/codex/codex.ts";
 import {
-  userMessageText,
   AgentMessageKindItem,
   decodeItem,
   decodeResponse,
@@ -73,6 +72,7 @@ import {
   ModelKindItem,
   rateLimitsSnapshot,
   UserMessageKindItem,
+  codexReceipts,
 } from "./codec.ts";
 import {
   type AgentSessionError,
@@ -84,7 +84,7 @@ import {
 import { isRemoteHost } from "../../child-host/child-host.ts";
 import { ChildProcessLost } from "../../child-host/process.ts";
 import { sessionChannel } from "../session.ts";
-import { type MessageTaken, sessionConversation } from "../conversation.ts";
+import { type MessageTaken, type RestoredItems, sessionConversation } from "../conversation.ts";
 import { codexThreadTokens, codexTokenBreakdown } from "../usage.ts";
 import {
   CodexAppServer,
@@ -310,36 +310,37 @@ const makeCodexSessions = Effect.gen(function* () {
         .map((item): [string, string] => [item.id, tools.toolName(item)]),
     );
     const pendingMessages: Array<{ message: string; id: OperatorMessageId | undefined }> = [];
-    const submitted: Array<{
-      message: string;
-      id: OperatorMessageId | undefined;
-      turnId: string | undefined;
-    }> = turnActive ? policy.restored.unread.map((message) => ({ ...message, turnId })) : [];
+    /** The inputs sent to the current turn, which the next turn carries if this one doesn't read them. */
+    const submitted: Array<{ message: string; id: OperatorMessageId | undefined }> = turnActive
+      ? [...policy.restored.unread]
+      : [];
     const forgetInput = (input: (typeof submitted)[number]) =>
       Effect.sync(() => {
         const index = submitted.indexOf(input);
         if (index >= 0) submitted.splice(index, 1);
       });
-    // The user-message items observed before a restart already acknowledged their input.
-    const observedItems = new Set<string>(Option.getOrElse(policy.restored.receipts, () => []));
-    /** The observed user-message items of the last turn, which `journal.received` saves. */
-    let receipts = {
-      turnId: Option.map(thread.lastTurn, (turn) => turn.id),
-      items: [...observedItems],
-    };
+    /** Decodes the `userMessage` items of a turn that `thread/resume` returned. */
+    const userMessages = (turn: RestoredTurn) =>
+      Effect.forEach(turn.items.filter(Schema.is(UserMessageKindItem)), (item) =>
+        decodeItem(UserMessageItem, "user message", session.id, item),
+      ).pipe(Effect.map(Arr.getSomes));
+    // The user-message items counted before a restart already acknowledged their input.
+    const counted = Option.getOrElse(policy.restored.receipts, () => []);
     let receiptsKnown = start._tag !== "StartResume" || Option.isSome(policy.restored.receipts);
+    let items: RestoredItems = {
+      counted,
+      turn: Option.map(thread.lastTurn, (turn) => turn.id),
+      saved: counted,
+    };
     if (!receiptsKnown && Option.isSome(thread.activeTurn)) {
       const turn = thread.activeTurn.value;
-      const messages = yield* Effect.forEach(
-        turn.items.filter(Schema.is(UserMessageKindItem)),
-        (item) => decodeItem(UserMessageItem, "user message", session.id, item),
-      ).pipe(Effect.map(Arr.getSomes));
+      const messages = yield* userMessages(turn);
       // Include these in the next save, but let their replayed notifications acknowledge inputs.
-      receipts = { turnId: Option.some(turn.id), items: messages.map(({ id }) => id) };
+      items = { counted, turn: Option.some(turn.id), saved: messages.map(({ id }) => id) };
       yield* Effect.logInfo("Preserving the active Codex turn's existing receipt IDs", {
         sessionId: session.id,
         turnId: turn.id,
-        items: receipts.items.length,
+        items: items.saved.length,
       });
     }
     const savedMessages = yield* Effect.forEach(
@@ -374,7 +375,7 @@ const makeCodexSessions = Effect.gen(function* () {
         ...turnParams,
         input: [{ type: "text", text: message, text_elements: [] }],
       }).pipe(Effect.orDie);
-      const input: (typeof submitted)[number] = { message, id, turnId: undefined };
+      const input: (typeof submitted)[number] = { message, id };
       submitted.push(input);
       const response = yield* connection
         .request("stream", "turn/start", encodedTurnStartParams)
@@ -387,7 +388,6 @@ const makeCodexSessions = Effect.gen(function* () {
         response,
       );
       turnId = started.turn.id;
-      input.turnId = turnId;
       turnActive = true;
       yield* recordPrompt;
       lastText = undefined;
@@ -486,7 +486,7 @@ const makeCodexSessions = Effect.gen(function* () {
           expectedTurnId: turnId,
           input: [{ type: "text", text: message, text_elements: [] }],
         }).pipe(Effect.orDie);
-        const input = { message, id, turnId };
+        const input = { message, id };
         submitted.push(input);
         yield* connection
           .request("steer", "turn/steer", encodedTurnSteerParams)
@@ -503,46 +503,13 @@ const makeCodexSessions = Effect.gen(function* () {
       channel,
       policy,
       submitted: submitted.flatMap(({ id }) => (id === undefined ? [] : [id])),
+      items,
+      decode: codexReceipts,
       send: (message, _activity, id) => steer(message, id),
       pause: Effect.suspend(() => (toolsInFlight.size === 0 ? interruptTurn() : Effect.void)),
       beforeFinish: Effect.suspend(() => connection.close),
     });
 
-    /** Acknowledges the input of `inputs` that a user message item of `turn` records, once per item. */
-    const receive = Effect.fn("CodexRuntime.receive")(function* (
-      item: Schema.Json & { readonly type: string },
-      turn: string,
-      inputs: Array<(typeof submitted)[number]>,
-      at: "now" | "restored",
-    ) {
-      const message = yield* decodeItem(UserMessageItem, "user message", session.id, item);
-      if (Option.isNone(message)) return;
-      if (observedItems.has(message.value.id))
-        return yield* Effect.logInfo("Skipping an observed Codex user-message item", {
-          sessionId: session.id,
-          turnId: turn,
-          itemId: message.value.id,
-        });
-      observedItems.add(message.value.id);
-      receipts = {
-        turnId: Option.some(turn),
-        items: [
-          ...new Set([
-            ...(Option.contains(receipts.turnId, turn) ? receipts.items : []),
-            message.value.id,
-          ]),
-        ],
-      };
-      // Saved before the read, so a restart never matches this item to another unread message.
-      yield* journal.received(receipts.items);
-      const text = userMessageText(message.value);
-      const index = inputs.findIndex(
-        (input) => (input.turnId === undefined || input.turnId === turn) && input.message === text,
-      );
-      if (index < 0) return;
-      const [input] = inputs.splice(index, 1);
-      if (input?.id !== undefined) yield* conversation.read([input.id], at);
-    });
     /**
      * Acknowledges the unread messages that the restored thread's last turn records, so recovery
      * doesn't send them again.
@@ -552,44 +519,28 @@ const makeCodexSessions = Effect.gen(function* () {
     ) {
       if (Option.isNone(lastTurn)) return;
       const turn = lastTurn.value;
-      if (!receiptsKnown) {
-        const messages = yield* Effect.forEach(
-          turn.items.filter(Schema.is(UserMessageKindItem)),
-          (item) => decodeItem(UserMessageItem, "user message", session.id, item),
-        ).pipe(Effect.map(Arr.getSomes));
-        receipts = { turnId: Option.some(turn.id), items: messages.map(({ id }) => id) };
-        yield* journal.received(receipts.items);
-        for (const id of receipts.items) observedItems.add(id);
-        receiptsKnown = true;
+      const recorded = yield* userMessages(turn);
+      const known = receiptsKnown;
+      const unread = (yield* conversation.unread).length;
+      const observed = yield* conversation.observe({
+        _tag: "Restored",
+        turn: turn.id,
+        items: recorded,
+        known,
+      });
+      receiptsKnown = true;
+      if (!known)
         return yield* Effect.logInfo(
           "Skipping restored Codex matching without saved receipt history",
-          {
-            sessionId: session.id,
-            turnId: turn.id,
-            observed: receipts.items.length,
-            unread: (yield* conversation.unread).length,
-          },
+          { sessionId: session.id, turnId: turn.id, observed: recorded.length, unread },
         );
-      }
-      const unread = (yield* conversation.unread).map((message) => ({
-        ...message,
-        turnId: turn.id,
-      }));
-      const count = unread.length;
-      let skipped = 0;
-      for (const item of turn.items) {
-        if (!Schema.is(UserMessageKindItem)(item)) continue;
-        if (Schema.is(UserMessageItem)(item) && observedItems.has(item.id)) skipped++;
-        yield* receive(item, turn.id, unread, "restored");
-      }
-      const read = count - unread.length;
-      if (count > 0)
+      if (unread > 0)
         yield* Effect.logInfo("Checked restored Codex user-message receipts", {
           sessionId: session.id,
           turnId: turn.id,
-          skipped,
-          read,
-          unread: unread.length,
+          skipped: observed.repeated,
+          read: observed.read,
+          unread: unread - observed.read,
         });
     });
 
@@ -703,8 +654,15 @@ const makeCodexSessions = Effect.gen(function* () {
             if (Option.isNone(notification)) return;
             const item = notification.value.item;
             if (notification.value.threadId !== thread.id) return;
-            if (Schema.is(UserMessageKindItem)(item))
-              return yield* receive(item, notification.value.turnId, submitted, "now");
+            if (Schema.is(UserMessageKindItem)(item)) {
+              const message = yield* decodeItem(UserMessageItem, "user message", session.id, item);
+              if (Option.isNone(message)) return;
+              return yield* conversation.observe({
+                _tag: "Recorded",
+                item: message.value,
+                turn: notification.value.turnId,
+              });
+            }
             if (notification.value.turnId !== turnId) {
               return yield* Effect.logDebug("Skipping a Codex item from another turn", {
                 sessionId: session.id,
@@ -837,7 +795,10 @@ const makeCodexSessions = Effect.gen(function* () {
             yield* tools.cancelAll;
             toolsInFlight.clear();
             const hasNewGuidance = pendingMessages.length > 0;
-            const unread = submitted.splice(0).filter((input) => input.id !== undefined);
+            const notRead = new Set((yield* conversation.unread).map(({ id }) => id));
+            const unread = submitted
+              .splice(0)
+              .filter((input) => input.id !== undefined && notRead.has(input.id));
             pendingMessages.unshift(...unread);
             if (unread.length > 0)
               yield* Effect.logInfo("Codex turn ended with unconsumed input", {

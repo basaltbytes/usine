@@ -245,6 +245,26 @@ export class SessionResumed extends Schema.TaggedClass<
   session: AgentSession,
 }) {}
 
+/** A stable identity for one operator message, including repeated text. */
+export const OperatorMessageId = Schema.String.check(Schema.isUUID()).pipe(
+  Schema.brand("OperatorMessageId"),
+);
+export type OperatorMessageId = typeof OperatorMessageId.Type;
+
+/**
+ * The session read an operator message: the message started or joined a turn, or the harness
+ * acknowledged it. The event sits where the session reported the read.
+ */
+export class OperatorMessageRead extends Schema.TaggedClass<
+  OperatorMessageRead,
+  Brand.Brand<"@usine/core/agent/session/OperatorMessageRead">
+>("Agent/OperatorMessageRead")("OperatorMessageRead", {
+  /** The session that read the message. */
+  session: AgentSession,
+  /** The operator message that the session read. */
+  messageId: OperatorMessageId,
+}) {}
+
 /** An estimated amount in US dollars from a rate table, not a bill (ADR 0013). */
 export const UsdAmount = Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0)).pipe(
   Schema.brand("UsdAmount"),
@@ -443,6 +463,7 @@ export const AgentSessionEvent = Schema.Union([
   SessionFinished,
   SessionIdle,
   SessionResumed,
+  OperatorMessageRead,
   SessionTokensUpdated,
   ProviderRetrying,
   ProviderRecovered,
