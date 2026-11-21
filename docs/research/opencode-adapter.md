@@ -548,7 +548,7 @@ handoff to a successor
 | P1: the OpenCode wiring exported `XDG_DATA_HOME` to every child of the attempt | Gone for other harnesses: step 15 builds each child's environment from its own harness's wiring only ([`environment.ts:156-157`](../../packages/executor/src/ssh/gateway/environment.ts)). Kept as a requirement for OpenCode itself, whose tool commands inherit `serve`'s environment: isolate its state per attempt without moving `XDG_DATA_HOME` for those commands (section 4). Saved credentials beat the placeholder, so the per-attempt directory is required. |
 | P2: server failures had no diagnostics | Gone: the bridge passes OpenCode's warnings to standard error, where the owner keeps a bounded tail and the exit code, as for every child. With `serve --print-logs --log-level warn`, a malformed provider in the configuration put its warning in that tail (verified). Kept: test an exit before readiness. |
 | P2: the SSH forward lacked `ControlPath=none` and ignored its output | Gone: no forward. |
-| P2: guidance accepted while an interrupt settled was lost, because the old execution's `interrupted` event ended the session | Kept as a requirement: 2.3.2 still answers `/interrupt` before cleanup settles, and a steer accepted after the answer starts a successor execution. `session.execution.interrupted` doesn't end the turn while that steer is undelivered (section 2, "Steer after an interrupt"); the `interrupt-guidance` scenario drives this sequence. |
+| P2: guidance accepted while an interrupt settled was lost, because the old execution's `interrupted` event ended the session | Kept as a requirement: 2.3.2 still answers `/interrupt` before cleanup settles, and a steer accepted after the answer starts a successor execution. `session.execution.interrupted` doesn't end the turn while that steer is undelivered (section 2, "Steer after an interrupt"). The `interrupt-guidance` scenario sends the guidance after the session goes idle, so it covers a steer after the old execution settles, not this race; the adapter adds a runtime test of the race (follow-up issues). |
 | P2: CI tested neither the transport nor `interrupt` | Kept as a requirement: replay fixtures at the `ChildHost` boundary for the shared scenarios, including `interrupt-guidance`, `steer`, and `restart`, plus unit tests of the bridge against a scripted fake server (readiness, crash, garbage, slow start, end of input). |
 | P2: preflight skipped the model check on gateway routes | Kept: preflight checks the model on every route through `GET /api/model`, which needs no provider request. |
 | P3: an unexpected event shape failed the whole session | Kept: log and skip unknown event types and shapes; the pin limits drift. |
@@ -573,6 +573,10 @@ issue precedes it.
   ends, tokens and cost per step, retries and plan limits mapped to `AgentCapacityError`, and
   resume from the data database. `session.execution.interrupted` doesn't end the turn while a
   steer accepted after the interrupt is still undelivered (section 2, "Steer after an interrupt").
+  A runtime unit test feeds bridge events in the probe's order and asserts that the session
+  doesn't finish at the old event: the interrupt's answer, the steer accepted, the old
+  `session.execution.interrupted`, `session.execution.started`, `session.inbox.delivered` with
+  the steer's ID, then `session.execution.succeeded`.
 - A descriptor with the capability profile in section 2, the isolation and credential
   environment in sections 3 and 4, and an install entry that installs only the matching platform
   binary.
