@@ -264,6 +264,20 @@ const makeCodexSessions = Effect.gen(function* () {
     });
     const journal = policy.journal;
     yield* journal.started(harnessSession);
+    /** Records once that Codex started a turn, whose input its thread saves. */
+    const recordPrompt = yield* Effect.cached(
+      journal.prompted.pipe(
+        Effect.tap(() =>
+          Effect.logDebug("Codex started the child's first turn", { sessionId: session.id }),
+        ),
+        Effect.catch((error) =>
+          Effect.logWarning("Could not record the Codex prompt receipt", {
+            sessionId: session.id,
+            message: error.message,
+          }),
+        ),
+      ),
+    );
     yield* channel.emit(
       SessionStarted.make({ session, harnessSession: Option.some(harnessSession) }),
     );
@@ -375,6 +389,7 @@ const makeCodexSessions = Effect.gen(function* () {
       turnId = started.turn.id;
       input.turnId = turnId;
       turnActive = true;
+      yield* recordPrompt;
       lastText = undefined;
       finalText = undefined;
       retries = 0;

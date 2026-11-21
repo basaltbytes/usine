@@ -123,9 +123,28 @@ export const piTurns = Effect.fn("PiTurns.start")(function* (options: {
     pause: Effect.void,
     beforeFinish: Effect.void,
   });
+  /** Records once that Pi saved a user message, which its conversation file then holds. */
+  const recordPrompt = yield* Effect.cached(
+    options.policy.journal.prompted.pipe(
+      Effect.tap(() =>
+        Effect.logDebug("Pi saved the child's first user message", {
+          sessionId: options.session.id,
+        }),
+      ),
+      Effect.catch((error) =>
+        Effect.logWarning("Could not record the Pi prompt receipt", {
+          sessionId: options.session.id,
+          message: error.message,
+        }),
+      ),
+    ),
+  );
   // Pi removes a steering message from its queue when the message starts in the conversation.
   const observed = new WeakSet<object>();
   const unsubscribe = options.sdk.subscribe((event) => {
+    // Pi appends a message to its conversation file after its listeners see `message_end`.
+    if (event.type === "message_end" && Option.isSome(piUserMessageText(event.message)))
+      Effect.runForkWith(context)(recordPrompt);
     if (event.type !== "message_start") return;
     if (observed.has(event.message)) return;
     observed.add(event.message);

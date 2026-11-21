@@ -97,9 +97,9 @@ const CommittedUsage = Schema.Struct({
 
 const restartFields = {
   /**
-   * Whether the native process acknowledged the task prompt before the restart. Only Claude records
-   * it; Codex reads the thread's turns, and Pi saves a conversation only after its first user
-   * message.
+   * Whether the native process acknowledged the task prompt before the restart. Every adapter
+   * records it, but only Claude Code reads it: Codex reads the thread's turns, and Pi saves a
+   * conversation only after its first user message.
    */
   prompted: Schema.Boolean.pipe(Schema.withConstructorDefault(Effect.succeed(true))),
   /** Continuation timestamps in milliseconds, retained across orchestrator restarts. */

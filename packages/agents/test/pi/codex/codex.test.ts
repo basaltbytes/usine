@@ -2861,6 +2861,48 @@ describe("Codex child backend", () => {
     );
   });
 
+  it.effect("records the prompt receipt once Codex starts the first turn", () => {
+    const checkpoints: Array<string> = [];
+    const server = connectionLayer(
+      successfulResponses([{ id: "gpt-5.6-terra", model: "gpt-5.6-terra" }]),
+      [
+        {
+          method: "item/completed",
+          params: {
+            threadId: "thread-1",
+            turnId: "turn-1",
+            item: { type: "agentMessage", id: "m-1", text: "Done.", phase: "final_answer" },
+          },
+        },
+        {
+          method: "turn/completed",
+          params: { turn: { id: "turn-1", status: "completed", error: null } },
+        },
+      ],
+    );
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const running = yield* (yield* ChildBackend).launch(request());
+        assert.strictEqual((yield* running.result).message, "Done.");
+        assert.deepStrictEqual(checkpoints, ["started thread-1", "prompted"]);
+      }).pipe(
+        Effect.provideService(ChildSessionJournal, {
+          started: (reference) =>
+            Effect.sync(() => {
+              checkpoints.push(`started ${reference.id}`);
+            }),
+          prompted: Effect.sync(() => {
+            checkpoints.push("prompted");
+          }),
+          continued: () => Effect.void,
+          received: () => Effect.void,
+          delivered: () => Effect.void,
+        }),
+        Effect.provide(codexChildLayer.pipe(Layer.provideMerge(server))),
+      ),
+    );
+  });
+
   it.effect("reports the thread's tokens with their split per billing rate", () => {
     const notifications: ReadonlyArray<CodexNotification> = [
       {

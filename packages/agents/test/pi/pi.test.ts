@@ -396,6 +396,64 @@ describe("Pi child backend", () => {
     }).pipe(Effect.scoped),
   );
 
+  it.effect("records the prompt receipt once Pi saves a user message", () =>
+    Effect.gen(function* () {
+      const listeners: Array<(event: PiSessionEvent) => void> = [];
+      const publish = (event: PiSessionEvent) => {
+        for (const listener of listeners) listener(event);
+      };
+      const task: PiMessage = { role: "user", content: childRequest.prompt, timestamp: 0 };
+      const sdk = Layer.succeed(PiSdk)({
+        complete: noCompletion,
+        start: () =>
+          Promise.resolve({
+            _tag: "Started",
+            harnessSession: Option.none(),
+            model: childRequest.session.brain.model,
+            pool: "apiKeys",
+            tools: childTools,
+            session: {
+              messages: [],
+              dispose: () => {},
+              abort: () => Promise.resolve(),
+              subscribe: (listener) => {
+                listeners.push(listener);
+                return () => {};
+              },
+              steer: () => Promise.resolve("queued" as const),
+              prompt: () => {
+                publish({ type: "message_start", message: task });
+                publish({ type: "message_end", message: task });
+                publish({ type: "message_end", message: fauxAssistantMessage("Pi child done.") });
+                publish({ type: "message_end", message: task });
+                return Promise.resolve();
+              },
+            },
+          }),
+      });
+      let prompted = 0;
+      const result = yield* Effect.gen(function* () {
+        const running = yield* (yield* ChildBackend).launch(childRequest);
+        return yield* running.result;
+      }).pipe(
+        Effect.scoped,
+        Effect.provideService(ChildSessionJournal, {
+          started: () => Effect.void,
+          prompted: Effect.sync(() => {
+            prompted += 1;
+          }),
+          continued: () => Effect.void,
+          received: () => Effect.void,
+          delivered: () => Effect.void,
+        }),
+        Effect.provide(piChildLayer.pipe(Layer.provideMerge(sdk))),
+      );
+      for (let spin = 0; spin < 100; spin += 1) yield* Effect.yieldNow;
+      assert.strictEqual(result.message, "Pi child done.");
+      assert.strictEqual(prompted, 1);
+    }),
+  );
+
   it.effect("reports one read for a Pi message start that arrives twice", () =>
     Effect.gen(function* () {
       const listeners: Array<(event: PiSessionEvent) => void> = [];
