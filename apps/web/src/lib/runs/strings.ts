@@ -89,8 +89,11 @@ export const runStateLine = (
   if (run.state === "Queued" && machine?.state === "creating")
     return `Queued, creating a ${providerLabel[machine.provider]} machine`;
   if (run.providerRetry !== null) {
-    const { message, nextAttempt, retryAt } = run.providerRetry;
-    return `Provider at capacity: ${message} Next try: attempt ${nextAttempt} at ${timestampLabel(DateTime.formatIso(retryAt))}.`;
+    const { message, nextAttempt, retryAt, testedByAnotherRun } = run.providerRetry;
+    const when = testedByAnotherRun
+      ? "after another run's attempt tests the provider"
+      : `at ${timestampLabel(DateTime.formatIso(retryAt))}`;
+    return `Provider at capacity: ${message} Next try: attempt ${nextAttempt} ${when}.`;
   }
   const attempts = run.attempts.length;
   const after =

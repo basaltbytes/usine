@@ -62923,6 +62923,9 @@
                   "message": {
                     "type": "string",
                     "minLength": 1
+                  },
+                  "testedByAnotherRun": {
+                    "type": "boolean"
                   }
                 },
                 "required": [
@@ -62936,7 +62939,8 @@
                       "enum": [
                         "nextAttempt",
                         "retryAt",
-                        "message"
+                        "message",
+                        "testedByAnotherRun"
                       ]
                     },
                     {
@@ -70774,6 +70778,9 @@
                   "message": {
                     "type": "string",
                     "minLength": 1
+                  },
+                  "testedByAnotherRun": {
+                    "type": "boolean"
                   }
                 },
                 "required": [
@@ -70787,7 +70794,8 @@
                       "enum": [
                         "nextAttempt",
                         "retryAt",
-                        "message"
+                        "message",
+                        "testedByAnotherRun"
                       ]
                     },
                     {
@@ -72560,7 +72568,7 @@
             "type": "string"
           },
           "group": {
-            "$ref": "#/components/schemas/_usine_engine_CapacityGroupEncoded"
+            "$ref": "#/components/schemas/CapacityGroupEncoded"
           },
           "message": {
             "type": "string",
@@ -72589,7 +72597,7 @@
         ],
         "additionalProperties": false
       },
-      "_usine_engine_CapacityGroupEncoded": {
+      "CapacityGroupEncoded": {
         "type": "object",
         "properties": {
           "harness": {

@@ -1,8 +1,8 @@
-import { CapacityGroup, UpgradeWait } from "@usine/engine/engine";
+import { UpgradeWait } from "@usine/engine/engine";
 import { CiFixRun } from "@usine/engine/run-reader";
 import { ConfigFileError } from "@usine/config/file";
 import { BillingPool, PoolLogin } from "@usine/core/agent/session";
-import { AttemptId, AttemptNumber } from "@usine/core/attempt";
+import { AttemptId, AttemptNumber, CapacityGroup } from "@usine/core/attempt";
 import { LoopName } from "@usine/core/loop";
 import { CycleBudgetAsk } from "@usine/core/cycle-budget";
 import { EventId } from "@usine/core/event";

@@ -259,8 +259,9 @@ export const readEngineWaits = (
 /**
  * Returns the Run's wait for provider capacity: the next try and latest refusal of the capacity
  * group that the engine lists the Run as waiting for, or else its pending capacity retry, with the
- * credential holders of `holderOf`. The group's next try is when the engine starts the Run's next
- * Attempt, with or without a refused Attempt of its own.
+ * credential holders of `holderOf`. The engine starts the Run's next Attempt no earlier than the
+ * group's next try. While another Run's Attempt tests the group, it starts only after that
+ * Attempt's provider answers or the Attempt ends, so the next try can be past.
  */
 const providerRetryOf = (
   snapshot: RunSummary,
@@ -275,6 +276,7 @@ const providerRetryOf = (
       nextAttempt: AttemptNumber.make((snapshot.attempts.at(-1)?.number ?? 0) + 1),
       retryAt: group.nextTryAt,
       message: group.message,
+      testedByAnotherRun: group.probes.some((runId) => runId !== snapshot.run.id),
     }),
   );
 };

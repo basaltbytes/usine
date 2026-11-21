@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest";
 import { Harness, ModelId } from "@usine/core/agent/brain";
-import { AttemptId } from "@usine/core/attempt";
+import { AttemptId, CapacityGroup } from "@usine/core/attempt";
 import { LoopName } from "@usine/core/loop";
 import { RunId } from "@usine/core/run";
 import {
@@ -14,7 +14,6 @@ import {
   answered,
   type CapacityRefusal,
   type CapacityState,
-  CapacityGroup,
   claim,
   emptyCapacity,
   force,

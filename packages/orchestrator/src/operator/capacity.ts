@@ -1,5 +1,6 @@
 import type { AttentionAcknowledgements } from "@usine/engine/attention";
-import { capacityGroupKey, type CapacityWait } from "@usine/engine/engine";
+import { capacityGroupKey } from "@usine/core/attempt";
+import type { CapacityWait } from "@usine/engine/engine";
 import { DateTime, Effect } from "effect";
 import { partitionNeeds } from "./attention.ts";
 import { ProviderCapacityNeed } from "./need.ts";

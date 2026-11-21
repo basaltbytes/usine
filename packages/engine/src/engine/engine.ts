@@ -558,9 +558,4 @@ export {
 } from "./error.ts";
 
 export { UpgradeDrain, UpgradeWait } from "./upgrade.ts";
-export {
-  CapacityGroup,
-  capacityGroupKey,
-  CapacityWait,
-  CredentialHolders,
-} from "./capacity/capacity.ts";
+export { CapacityWait, CredentialHolders } from "./capacity/capacity.ts";

@@ -18,6 +18,7 @@ import { DateTime, Effect, Option, Result } from "effect";
 import { TestClock } from "effect/testing";
 
 import { Submission } from "../../src/engine/submission.ts";
+import { plainRetry } from "../../src/engine/retry.ts";
 import { RunReader } from "../../src/run-reader/run-reader.ts";
 import { RunStore } from "../../src/store/store.ts";
 import { TranscriptAllQuery } from "../../src/transcript.ts";
@@ -307,14 +308,14 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
           const claim = yield* store.recordAndClaim(later, openRun);
           assert.deepStrictEqual(claim.openedRun, Option.some(openRun));
 
-          const blocked = yield* Effect.flip(store.retry(failedRun));
+          const blocked = yield* Effect.flip(store.retry(failedRun, plainRetry, Option.none()));
           assert(blocked._tag === "RunRetryBlockedError");
           assert.strictEqual(blocked.openRunId, openRun);
           assert.include(blocked.message, openRun);
           assert.strictEqual((yield* store.snapshot(failedRun)).run.state._tag, "Failed");
 
           yield* store.cancel(openRun);
-          const retryResult = yield* store.retry(failedRun);
+          const retryResult = yield* store.retry(failedRun, plainRetry, Option.none());
           assert.strictEqual(retryResult, "Reopened");
           assert.strictEqual((yield* store.snapshot(failedRun)).run.state._tag, "Running");
         }),
@@ -353,7 +354,7 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
               assert(Option.isSome(attempt.outcome) && attempt.outcome.value._tag === "Failed");
               assert.strictEqual(attempt.outcome.value.failure._tag, "InfraFailure");
             }
-            yield* store.retry(runId);
+            yield* store.retry(runId, plainRetry, Option.none());
             const canceled = yield* store.cancel(runId);
             assert(canceled._tag === "Canceled" && Option.isNone(canceled.openAttempt));
             assert.strictEqual(
@@ -402,7 +403,7 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
               first.execution.attempt,
               Result.fail(AgentFailure.make({ message: "Checks failed" })),
             );
-            yield* store.retry(readRun);
+            yield* store.retry(readRun, plainRetry, Option.none());
             const retried = yield* store.beginAttempt(
               readRun,
               WorkerName.make("local"),
@@ -569,7 +570,7 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
             );
             yield* begin(claimedRun);
             yield* TestClock.adjust("2 seconds");
-            yield* store.retry(fix);
+            yield* store.retry(fix, plainRetry, Option.none());
             const retried = yield* begin(fix);
             const currentClaimedRun = yield* claim("triage", "triage", "pull-71");
             const triage = yield* begin(currentClaimedRun);
@@ -699,7 +700,7 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
               assert.isTrue(Option.isSome(first.endedAt));
               assert.deepStrictEqual(after.snapshot.closedAt, first.endedAt);
               assert.deepStrictEqual(history[0]?.closedAt, first.endedAt);
-              yield* store.retry(runId);
+              yield* store.retry(runId, plainRetry, Option.none());
               assert.isTrue(Option.isNone((yield* store.snapshot(runId)).closedAt));
               const started = yield* store.beginAttempt(
                 runId,
@@ -793,9 +794,9 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
           assert(Option.isNone(snapshot.step.result));
 
           // A repeated retry is accepted until the reopened Run starts its next Attempt.
-          const retryResult = yield* store.retry(runId);
+          const retryResult = yield* store.retry(runId, plainRetry, Option.none());
           assert.strictEqual(retryResult, "Reopened");
-          const currentRetryResult = yield* store.retry(runId);
+          const currentRetryResult = yield* store.retry(runId, plainRetry, Option.none());
           assert.strictEqual(currentRetryResult, "Unchanged");
           const restarted = yield* store.beginAttempt(
             runId,
@@ -806,7 +807,7 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
           assert(restarted._tag === "AttemptStarted");
           assert.strictEqual(restarted.execution.attempt.number, 4);
           assert.strictEqual(
-            (yield* Effect.flip(store.retry(runId)))._tag,
+            (yield* Effect.flip(store.retry(runId, plainRetry, Option.none())))._tag,
             "RunOperationRejectedError",
           );
           assert.strictEqual(

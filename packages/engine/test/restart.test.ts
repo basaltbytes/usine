@@ -46,6 +46,7 @@ import {
   UnconfirmedStops,
 } from "../src/engine/engine.ts";
 import { runIdFor, type Submission } from "../src/engine/submission.ts";
+import { plainRetry } from "../src/engine/retry.ts";
 import { RunReader } from "../src/run-reader/run-reader.ts";
 import { StepExecutor, type WorkerLease } from "../src/step-executor.ts";
 import {
@@ -1772,7 +1773,7 @@ describe("engine restart", () => {
               started.execution.attempt,
               Result.fail(AgentFailure.make({ message: "needs the operator" })),
             );
-            yield* store.retry(runId);
+            yield* store.retry(runId, plainRetry, Option.none());
           }),
         );
         yield* Effect.gen(function* () {
