@@ -24,7 +24,7 @@ import {
   SessionStarted,
 } from "@usine/core/agent/session";
 import * as AttemptChannel from "@usine/core/attempt/channel";
-import { DateTime, Effect, Exit, Fiber, Match, Option, Result, Schema, Stream } from "effect";
+import { DateTime, Effect, Exit, Fiber, Match, Option, Ref, Result, Schema, Stream } from "effect";
 import type { JournalError } from "../journal-error.ts";
 import { childSessionId, parentSessionId } from "../sessions.ts";
 import {
@@ -222,37 +222,35 @@ export const delegate = Effect.fn("Delegation.delegate")(function* (
         }),
       )
     : Result.succeed([]);
-  const unsettled = new Map(
-    Result.isSuccess(restoredInputs)
-      ? restoredInputs.success.map((input) => [input.inputSequence, input] as const)
-      : [],
+  /** The restored inputs that the child hasn't reported read, which every exit settles. */
+  const unsettled = yield* Ref.make<ReadonlyArray<QueuedChildInput>>(
+    Result.isSuccess(restoredInputs) ? restoredInputs.success : [],
   );
-  // Every exit settles the restored inputs that the child did not report.
   yield* Effect.addFinalizer(() =>
     Effect.gen(function* () {
-      for (const inputSequence of unsettled.keys()) hub.childInputs.delete(inputSequence);
-      if (unsettled.size === 0) return;
+      const inputs = yield* Ref.getAndSet(unsettled, []);
+      for (const { inputSequence } of inputs) hub.childInputs.delete(inputSequence);
+      if (inputs.length === 0) return;
       if (!(yield* hub.attachment.isAttached)) {
         yield* Effect.logInfo("Leaving restored operator inputs for the next relay", {
           attemptId: spec.attemptId,
           sessionId,
-          inputs: unsettled.size,
+          inputs: inputs.length,
         });
         return;
       }
       yield* Effect.logInfo("The child call ended before it read its restored operator inputs", {
         attemptId: spec.attemptId,
         sessionId,
-        inputs: unsettled.size,
+        inputs: inputs.length,
       });
-      for (const input of unsettled.values())
+      for (const input of inputs)
         yield* hub.delivery({
           _tag: "Delivery",
           inputSequence: input.inputSequence,
           intervention: input.intervention,
           delivered: Option.none(),
         });
-      unsettled.clear();
     }),
   );
   if (Result.isFailure(restoredInputs))
@@ -445,30 +443,38 @@ export const delegate = Effect.fn("Delegation.delegate")(function* (
       yield* journal.saveReceipts(items).pipe(Effect.mapError(journalError));
     }),
     delivered: (id, delivered) =>
-      Effect.suspend(() => {
-        const input = [...unsettled.values()].find(
+      Ref.modify(unsettled, (inputs) => {
+        const input = inputs.find(
           ({ intervention }) =>
             (intervention.action._tag === "Steer" ||
               intervention.action._tag === "OperatorMessage") &&
             intervention.action.id === id,
         );
-        if (input === undefined) return Effect.void;
-        unsettled.delete(input.inputSequence);
-        return hub.delivery({
-          _tag: "Delivery",
-          inputSequence: input.inputSequence,
-          intervention: input.intervention,
-          delivered: Option.map(delivered, (state) =>
-            AttemptChannel.InterventionState.make({
-              ...state,
-              forwardedTo:
-                input.intervention.target._tag === "Parent"
-                  ? Option.some(sessionId)
-                  : Option.none(),
-            }),
-          ),
-        });
-      }),
+        return input === undefined
+          ? [Option.none<QueuedChildInput>(), inputs]
+          : [Option.some(input), inputs.filter((queued) => queued !== input)];
+      }).pipe(
+        Effect.flatMap(
+          Option.match({
+            onNone: () => Effect.void,
+            onSome: (input) =>
+              hub.delivery({
+                _tag: "Delivery",
+                inputSequence: input.inputSequence,
+                intervention: input.intervention,
+                delivered: Option.map(delivered, (state) =>
+                  AttemptChannel.InterventionState.make({
+                    ...state,
+                    forwardedTo:
+                      input.intervention.target._tag === "Parent"
+                        ? Option.some(sessionId)
+                        : Option.none(),
+                  }),
+                ),
+              }),
+          }),
+        ),
+      ),
   });
   const runChild = Effect.gen(function* () {
     // Annotate logs with the Attempt because a delegation runs outside the Attempt's fiber. An
