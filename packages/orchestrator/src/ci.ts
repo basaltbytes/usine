@@ -235,28 +235,37 @@ const afterGreen = (head: CommitSha) =>
 const expressionFailure = (wait: RunSnapshot, error: ExpressionError) =>
   `the on_green item expression ${error.source} of loop ${wait.run.loop} failed: ${error.message}`;
 
+/** The label changes to apply when CI passes, and whether the Run's loop sets `ci.on_green`. */
+interface CompletionLabels {
+  readonly mutations: ReadonlyArray<CiLabelMutation>;
+  /** Whether the loop sets `ci.on_green`, so that an empty `mutations` is the loop's choice. */
+  readonly loopSetsOnGreen: boolean;
+}
+
 /**
  * Returns the label changes to apply after green CI, or the operator-facing reason why an open
  * pull request would be left without labels: an `on_green` item expression failed, or neither the
- * handoff nor the loop names a label. A merged pull request needs no label to move on.
+ * handoff nor the loop names a label and the loop doesn't set `ci.on_green`. A merged pull request
+ * needs no label to move on.
  */
 const greenLabels = (
   wait: RunSnapshot,
   { head, pullRequest }: CiHandoff,
   merged: boolean,
-  labels: Result.Result<ReadonlyArray<CiLabelMutation>, ExpressionError>,
+  labels: Result.Result<CompletionLabels, ExpressionError>,
 ): Result.Result<ReadonlyArray<CiLabelMutation>, string> => {
-  const unlabeled = (reason: string) =>
+  const unlabeled = (reason: string, advice: string) =>
     Result.fail(
-      `CI passed on head ${head}, but ${reason}, so pull request #${pullRequest} has no completion labels. Apply them by hand, then mark the failure resolved: ${pullRequestUrl(wait.repository, pullRequest)}`,
+      `CI passed on head ${head}, but ${reason}. Pull request #${pullRequest} has no completion labels. Apply them by hand, then mark the failure resolved.${advice} Pull request: ${pullRequestUrl(wait.repository, pullRequest)}`,
     );
   return Result.match(labels, {
-    onFailure: (error) => unlabeled(expressionFailure(wait, error)),
-    onSuccess: (mutations) =>
-      Arr.isReadonlyArrayNonEmpty(mutations) || merged
+    onFailure: (error) => unlabeled(expressionFailure(wait, error), ""),
+    onSuccess: ({ mutations, loopSetsOnGreen }) =>
+      Arr.isReadonlyArrayNonEmpty(mutations) || loopSetsOnGreen || merged
         ? Result.succeed(mutations)
         : unlabeled(
-            `the attempt recorded no labels to apply, and loop ${wait.run.loop} declares none in ci.on_green`,
+            `the attempt recorded no labels to apply, and loop ${wait.run.loop} doesn't set ci.on_green`,
+            " For later runs, declare the labels in the loop's ci.on_green, or set on_green: [] if the loop applies none.",
           ),
   });
 };
@@ -373,7 +382,7 @@ export class CiMonitor extends Context.Service<
               Effect.logInfo(
                 "The run's loop isn't configured anymore; only the handoff's label changes apply",
                 { runId, loop: name },
-              ).pipe(Effect.as<ReadonlyArray<CiLabelMutation>>([])),
+              ).pipe(Effect.as(Option.none<ReadonlyArray<CiLabelMutation>>())),
             onSome: (loop) =>
               evaluateOnGreen(expressions, loop, {
                 repo: repositoryContext({ name: wait.repository }),
@@ -382,7 +391,13 @@ export class CiMonitor extends Context.Service<
               }),
           },
         );
-        return distinctLabelMutations([...handoff.onGreen, ...declared]);
+        return {
+          mutations: distinctLabelMutations([
+            ...handoff.onGreen,
+            ...Option.getOrElse(declared, () => []),
+          ]),
+          loopSetsOnGreen: Option.isSome(declared),
+        } satisfies CompletionLabels;
       });
 
       const applyLabels = (repository: RepositoryName, mutations: ReadonlyArray<CiLabelMutation>) =>
@@ -812,6 +827,7 @@ export class CiMonitor extends Context.Service<
           item: observation.projection.payload,
         });
         const inherited = yield* completionLabels(instance, wait, handoff).pipe(
+          Effect.map(({ mutations }) => mutations),
           Effect.catch((error) =>
             Effect.logWarning(
               "The fix inherits only the handoff's label changes because an on_green item expression failed",
@@ -947,7 +963,7 @@ export class CiMonitor extends Context.Service<
           return yield* notPassed(
             `CI on head ${head} reads green, but these workflow runs on it didn't finish in full: ${workflowRunDetails([...incomplete, ...running])}.`,
           );
-        const labels = yield* completionLabels(instance, failed, handoff).pipe(
+        const { mutations } = yield* completionLabels(instance, failed, handoff).pipe(
           Effect.mapError((error) =>
             CiLabelExpressionError.make({
               runId,
@@ -962,11 +978,11 @@ export class CiMonitor extends Context.Service<
             }),
           ),
         );
-        yield* applyLabels(failed.repository, labels);
+        yield* applyLabels(failed.repository, mutations);
         yield* engine.resolveFailure(runId, attemptId, operator);
         yield* Effect.logInfo(
           "CI on the recorded head passed after its wait ended; completion labels applied and the failure resolved",
-          { runId, attemptId, head, pullRequest, applied: labels.length },
+          { runId, attemptId, head, pullRequest, applied: mutations.length },
         );
       });
 

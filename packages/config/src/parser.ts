@@ -390,7 +390,10 @@ export const parseLoopDraft = (file: InstancePath, source: string) =>
   });
 
 const onGreenItems = (ci: Option.Option<LoopCiPolicy>): ReadonlyArray<Source> =>
-  Option.match(ci, { onNone: () => [], onSome: ({ onGreen }) => onGreen.map(({ item }) => item) });
+  Option.match(
+    Option.flatMap(ci, ({ onGreen }) => onGreen),
+    { onNone: () => [], onSome: (mutations) => mutations.map(({ item }) => item) },
+  );
 
 const checkExpressions = (
   engine: ExpressionEngine["Service"],

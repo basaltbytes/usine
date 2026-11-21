@@ -66,10 +66,12 @@ export class LoopCiPolicy extends Schema.Class<
   Brand.Brand<"@usine/config/loop/LoopCiPolicy">
 >("@usine/config/LoopCiPolicy")({
   ...CiPolicy.fields,
-  /** Applied with the label changes of the agent's CI handoff, read from the current loop. */
-  onGreen: Schema.Array(LoopCiLabelMutation).pipe(
-    Schema.withDecodingDefaultKey(Effect.succeed([])),
-    Schema.withConstructorDefault(Effect.succeed([])),
+  /**
+   * Applied with the label changes of the agent's CI handoff, read from the current loop. `None`
+   * when the key is absent; an empty list means the loop applies no labels when CI passes.
+   */
+  onGreen: Schema.OptionFromOptionalKey(Schema.Array(LoopCiLabelMutation)).pipe(
+    Schema.withConstructorDefault(Effect.succeedNone),
   ),
 }) {}
 
@@ -153,8 +155,9 @@ export const loopCiPolicy = (loop: LoopFile): Option.Option<CiPolicy> =>
 
 /**
  * Evaluates the `ci.on_green` item expressions of `loop` against `context`, which holds `item`,
- * `repo`, and `pullRequest`. Fails with the first expression error, or with
- * `ExpressionEvaluationError` for a result that isn't an item number.
+ * `repo`, and `pullRequest`. Returns `None` if the loop doesn't set `ci.on_green`. Fails with the
+ * first expression error, or with `ExpressionEvaluationError` for a result that isn't an item
+ * number.
  */
 export const evaluateOnGreen = Effect.fn("Loop.evaluateOnGreen")(function* (
   expressions: ExpressionEngine["Service"],
@@ -162,9 +165,8 @@ export const evaluateOnGreen = Effect.fn("Loop.evaluateOnGreen")(function* (
   context: Schema.JsonObject,
 ) {
   yield* Effect.annotateCurrentSpan({ loop: loop.name });
-  const mutations = Option.match(loop.ci, { onNone: () => [], onSome: ({ onGreen }) => onGreen });
   const environment = onGreenEnvironmentFor(loop.trigger.on);
-  return yield* Effect.forEach(mutations, ({ item, add, remove }) =>
+  const evaluate = ({ item, add, remove }: LoopCiLabelMutation) =>
     expressions.evaluateInteger(item, environment, context).pipe(
       Effect.flatMap((value) =>
         Schema.decodeEffect(ItemNumber)(Number(value)).pipe(
@@ -177,7 +179,13 @@ export const evaluateOnGreen = Effect.fn("Loop.evaluateOnGreen")(function* (
         ),
       ),
       Effect.map((number) => CiLabelMutation.make({ item: number, add, remove })),
-    ),
+    );
+  return yield* Option.match(
+    Option.flatMap(loop.ci, ({ onGreen }) => onGreen),
+    {
+      onNone: () => Effect.succeedNone,
+      onSome: (mutations) => Effect.forEach(mutations, evaluate).pipe(Effect.asSome),
+    },
   );
 });
 

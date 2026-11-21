@@ -1243,17 +1243,24 @@ workers:
     }).pipe(Effect.provide(parserLayer)),
   );
 
-  it.effect("checks ci.on_green item expressions with the pull request against the stream", () =>
+  it.effect("checks ci.on_green item expressions and tells an omitted on_green from []", () =>
     Effect.gen(function* () {
       const parser = yield* ConfigParser;
       const file = InstancePath.make("loops/develop.md");
+      const policy = (onGreen: string) =>
+        `---\ntrigger: { on: issue, if: 'true' }\nagent: developer\nci:\n  fix_loop: fix\n  timeout_seconds: 60\n${onGreen}---\nDevelop.`;
       const source = (item: string) =>
-        `---\ntrigger: { on: issue, if: 'true' }\nagent: developer\nci:\n  fix_loop: fix\n  timeout_seconds: 60\n  on_green:\n    - { item: pullRequest.number, add: [ready-for-review] }\n    - { item: '${item}', remove: [agent-in-progress] }\n---\nDevelop.`;
+        policy(
+          `  on_green:\n    - { item: pullRequest.number, add: [ready-for-review] }\n    - { item: '${item}', remove: [agent-in-progress] }\n`,
+        );
+      const onGreen = (loop: LoopFile) => Option.flatMap(loop.ci, ({ onGreen }) => onGreen);
 
       const loop = yield* parser.parseLoopFile(file, source("item.number"));
-      expect(Option.map(loop.ci, ({ onGreen }) => onGreen.map(({ item }) => item))).toStrictEqual(
-        Option.some(["pullRequest.number", "item.number"]),
-      );
+      expect(
+        Option.map(onGreen(loop), (mutations) => mutations.map(({ item }) => item)),
+      ).toStrictEqual(Option.some(["pullRequest.number", "item.number"]));
+      const none = yield* parser.parseLoopFile(file, policy("  on_green: []\n"));
+      expect(onGreen(none)).toStrictEqual(Option.some([]));
 
       const failure = yield* parser.parseLoopFile(file, source("item.title")).pipe(Effect.flip);
       expect(failure.stage).toBe("expression");
@@ -1265,7 +1272,7 @@ workers:
         _tag: "Some",
         value: { fixLoop: "fix", timeoutSeconds: 60 },
       });
-      expect(Option.map(stored, ({ onGreen }) => onGreen)).toStrictEqual(Option.some([]));
+      expect(Option.flatMap(stored, ({ onGreen }) => onGreen)).toStrictEqual(Option.none());
     }).pipe(Effect.provide(parserLayer)),
   );
 

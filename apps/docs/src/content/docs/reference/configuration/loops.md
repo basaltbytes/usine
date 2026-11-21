@@ -129,7 +129,7 @@ The parent receives the event payload, rendered task, persona, and salvage infor
 | --- | --- | --- | --- |
 | `fix_loop` | qualified loop identity | required | Active pull request loop that selects this repository and handles failed checks or merge conflicts that prevent checks from starting. |
 | `timeout_seconds` | integer, 1–86400 | required | Maximum CI wait after the agent session ends. |
-| `on_green` | list of label changes | `[]` | Labels that usine changes when CI passes, whether or not the agent ended with a CI handoff. |
+| `on_green` | list of label changes | omitted | Labels that usine changes when CI passes, whether or not the agent ended with a CI handoff. `[]` means the loop changes no labels. |
 
 For example, use fix loop `widgets/act-on-findings` and timeout `1800`. The fix loop and timeout are saved with the event, so later configuration edits do not remove them from an existing run. [Connect review and fix loops](/guides/review-fix-loops/) describes the agent handoff and completion labels.
 
@@ -156,6 +156,6 @@ ci:
       remove: [agent-in-progress]
 ```
 
-usine checks each expression when you save the loop. It evaluates them when CI passes, against the event's saved `item` payload, using the loop's current `on_green`. If the agent's CI handoff also has `on_green` changes, usine applies the handoff's changes first and then the loop's, and applies a change that repeats an earlier one only once. A CI fix inherits both. If an expression fails when CI passes, usine applies no labels and the run appears in **Needs attention**. If an expression fails when a fix run starts, usine logs a warning and the fix inherits only the handoff's changes.
+usine checks each expression when you save the loop. It evaluates them when CI passes, against the event's saved `item` payload, using the loop's current `on_green`. If the agent's CI handoff also has `on_green` changes, usine applies the handoff's changes first and then the loop's, and applies a change that repeats an earlier one only once. A CI fix inherits both. If an expression fails when CI passes, usine applies no labels and the run appears in **Needs attention**. If an expression fails when a fix run starts, usine logs a warning and the fix inherits only the handoff's changes. When `on_green` lists labels, the CI handoff instructions that usine adds to the task tell the agent that the handoff's `on_green` can be empty.
 
-When CI passes on an open pull request and neither the handoff nor the loop names a label change, the attempt and run fail with `AgentFailure` in **Needs attention**. The message names the pull request, which has no completion labels, so no loop picks it up. Apply the labels by hand, then mark the failure resolved.
+When CI passes on an open pull request, neither the handoff nor the loop names a label change, and the loop doesn't set `on_green`, the attempt and run fail with `AgentFailure` in **Needs attention**. The message names the pull request, which has no completion labels, so no loop picks it up. Apply the labels by hand, then mark the failure resolved. For later runs, declare the labels in `on_green`, or set `on_green: []` if the loop changes no labels when CI passes. With `on_green: []`, the run succeeds and usine applies only the handoff's label changes, if any.

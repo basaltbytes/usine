@@ -543,16 +543,18 @@ const greenAfterProseReport = Effect.fn("test.greenAfterProseReport")(function* 
 it.live("green CI after a report without a handoff applies the loop's on_green labels", () =>
   Effect.scoped(
     Effect.gen(function* () {
-      const { settled, applied, view } = yield* greenAfterProseReport([
-        LoopCiLabelMutation.make({
-          item: Source.make("pullRequest.number"),
-          add: ["ready-for-review"],
-        }),
-        LoopCiLabelMutation.make({
-          item: Source.make("item.number"),
-          remove: ["agent-in-progress"],
-        }),
-      ]);
+      const { settled, applied, view } = yield* greenAfterProseReport(
+        Option.some([
+          LoopCiLabelMutation.make({
+            item: Source.make("pullRequest.number"),
+            add: ["ready-for-review"],
+          }),
+          LoopCiLabelMutation.make({
+            item: Source.make("item.number"),
+            remove: ["agent-in-progress"],
+          }),
+        ]),
+      );
 
       assert.strictEqual(settled.run.state._tag, "Succeeded");
       assert.deepStrictEqual(applied, [
@@ -564,19 +566,33 @@ it.live("green CI after a report without a handoff applies the loop's on_green l
   ).pipe(Effect.provide(NodeServices.layer)),
 );
 
-it.live("green CI after a report without a handoff or on_green labels needs attention", () =>
+it.live("green CI after a report without a handoff passes when the loop sets on_green: []", () =>
   Effect.scoped(
     Effect.gen(function* () {
-      const { settled, applied, view } = yield* greenAfterProseReport([]);
+      const { settled, applied, view } = yield* greenAfterProseReport(Option.some([]));
 
-      assert.strictEqual(settled.run.state._tag, "Failed");
+      assert.strictEqual(settled.run.state._tag, "Succeeded");
       assert.deepStrictEqual(applied, []);
-      assert.isTrue(runNeedsAttention(view, false));
-      const outcome = Option.getOrNull(settled.attempts.at(-1)?.outcome ?? Option.none());
-      assert(outcome?._tag === "Failed" && outcome.failure._tag === "AgentFailure");
-      assert.include(outcome.failure.message, `https://github.com/${repository}/pull/815`);
+      assert.isFalse(runNeedsAttention(view, false));
     }),
   ).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.live(
+  "green CI after a report without a handoff from a loop without on_green needs attention",
+  () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { settled, applied, view } = yield* greenAfterProseReport(Option.none());
+
+        assert.strictEqual(settled.run.state._tag, "Failed");
+        assert.deepStrictEqual(applied, []);
+        assert.isTrue(runNeedsAttention(view, false));
+        const outcome = Option.getOrNull(settled.attempts.at(-1)?.outcome ?? Option.none());
+        assert(outcome?._tag === "Failed" && outcome.failure._tag === "AgentFailure");
+        assert.include(outcome.failure.message, `https://github.com/${repository}/pull/815`);
+      }),
+    ).pipe(Effect.provide(NodeServices.layer)),
 );
 
 it.live("reports CI observation failures after a repository is removed from configuration", () =>
@@ -2214,9 +2230,9 @@ it.live(
                 LoopCiPolicy.make({
                   fixLoop: loop.name,
                   timeoutSeconds: 3600,
-                  onGreen: [
+                  onGreen: Option.some([
                     LoopCiLabelMutation.make({ item: Source.make("item.number"), add: ["tested"] }),
-                  ],
+                  ]),
                 }),
               ),
             }),
@@ -3163,7 +3179,10 @@ it.live("a replayed CI fix recorded with an earlier wording ends with one curren
             ),
           ),
         );
-        const current = withCiInstructions("", Option.some(policy)).ciInstructions;
+        const current = withCiInstructions(
+          "",
+          Option.some(LoopCiPolicy.make(policy)),
+        ).ciInstructions;
         assert(Option.isSome(current));
         assert.strictEqual(row.ci_instructions, current.value);
         assert(row.task.endsWith(current.value));
