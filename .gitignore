@@ -24,3 +24,9 @@ coverage/
 
 # Embedded Node worker programs are rebuilt from TypeScript.
 packages/agents/src/child-host/programs.ts
+
+# Third-party course skills stay local; they are not ours to redistribute.
+/.claude/skills/emil-*/
+/.codex/skills/emil-*/
+/.opencode/skills/emil-*/
+/.pi/skills/emil-*/
