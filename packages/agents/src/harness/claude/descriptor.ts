@@ -1,4 +1,5 @@
 import { Harness } from "@usine/core/agent/brain";
+import { BillingPool, PoolDescriptor } from "@usine/core/agent/pool";
 import { Option } from "effect";
 import { CapabilityProfile, Lacking } from "../capability.ts";
 import {
@@ -8,6 +9,15 @@ import {
   ResumeCommand,
   WorkerRequirements,
 } from "../harness.ts";
+import { apiKeys, HarnessPool } from "../pool.ts";
+
+/** The Claude subscription. Claude Code reports its five-hour and weekly windows one at a time. */
+export const claudePlan = PoolDescriptor.make({
+  id: BillingPool.make("claudePlan"),
+  label: "Claude plan",
+  billing: "plan",
+  windows: "separately",
+});
 
 export const claude = HarnessDescriptor.make({
   id: Harness.make("claude"),
@@ -119,6 +129,10 @@ export const claude = HarnessDescriptor.make({
   placementReason: "The harness requires a process host",
   credentialReason:
     "The harness requires its own login or a provider credential on the gateway or attempt",
+  pools: [
+    HarnessPool.make({ pool: apiKeys, routes: ["gateway-api-key"] }),
+    HarnessPool.make({ pool: claudePlan, routes: ["gateway-subscription"] }),
+  ],
   prices: Option.none(),
   handoff: ResumeCommand.make({ command: "claude --resume", homeVariable: null, gateway: true }),
 });

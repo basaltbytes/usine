@@ -1,12 +1,15 @@
+import { apiKeys } from "../../src/harness/pool.ts";
+import { claudePlan } from "../../src/harness/claude/descriptor.ts";
+import { chatgptPlan } from "../../src/harness/codex/descriptor.ts";
 import { CodexAppServer } from "../../src/harness/codex/app-server.ts";
 import { codexRuntime } from "../../src/harness/codex/codex.ts";
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import { BrainSpec, Harness, ModelId } from "@usine/core/agent/brain";
+import type { BillingPool } from "@usine/core/agent/pool";
 import {
   AgentSessionId,
   type AgentSessionEvent,
-  type BillingPool,
   HarnessSession,
   HarnessSessionId,
   RoleSession,
@@ -195,9 +198,9 @@ const lacking = (capabilities: ReadonlyArray<Capability>, reason: string) =>
  * `gateway-subscription`, Pi on `gateway`.
  */
 const recordedPools = {
-  claude: "claudePlan",
-  pi: "apiKeys",
-  codex: "chatgptPlan",
+  claude: claudePlan.id,
+  pi: apiKeys.id,
+  codex: chatgptPlan.id,
 } satisfies Record<SupervisorProvider, BillingPool>;
 
 const unresumable = lacking(["resume-session"], "This test's harness reopens no saved session");

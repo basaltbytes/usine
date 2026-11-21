@@ -1,11 +1,7 @@
 import { CredentialRoute } from "@usine/agents/harness";
 import { BrainSpec } from "@usine/core/agent/brain";
-import {
-  BillingPool,
-  type SessionTokensUpdated,
-  TokenCount,
-  UsdAmount,
-} from "@usine/core/agent/session";
+import { BillingPool } from "@usine/core/agent/pool";
+import { type SessionTokensUpdated, TokenCount, UsdAmount } from "@usine/core/agent/session";
 import type { AttemptId } from "@usine/core/attempt";
 import type * as AttemptChannel from "@usine/core/attempt/channel";
 import { type Brand, Context, Effect, Layer, Option, Schema } from "effect";

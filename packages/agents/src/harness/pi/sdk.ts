@@ -22,6 +22,7 @@ import {
   type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import { Effort, ModelId } from "@usine/core/agent/brain";
+import type { BillingPool } from "@usine/core/agent/pool";
 import { HarnessSession, HarnessSessionId } from "@usine/core/agent/session";
 import { Context, Effect, Exit, Layer, Option } from "effect";
 import type { CompletionSchema } from "../completion.ts";
@@ -29,7 +30,6 @@ import type { NativeTools } from "../role.ts";
 import { hostReadTools, type PiHostCommand } from "./host-files.ts";
 import {
   type PiAuthentication,
-  type PiPool,
   piAuthentication,
   resolvePiPool,
   splitPiModel,
@@ -126,7 +126,7 @@ export type PiStartResult =
       /** The active model after Pi applies its settings, in `provider/model` form. */
       readonly model: ModelId;
       /** The billing pool resolved from the active model's credential. */
-      readonly pool: PiPool;
+      readonly pool: BillingPool;
       /** The live in-memory session owned by the caller. */
       readonly session: PiSession;
       /** The saved conversation metadata, or `None` for an in-memory probe. */
@@ -161,7 +161,7 @@ export type PiCompleteResult =
       /** The model in `provider/model` form. */
       readonly model: ModelId;
       /** The billing pool resolved from the model's credential. */
-      readonly pool: PiPool;
+      readonly pool: BillingPool;
       /** The model's response, whose `PI_OUTPUT_TOOL` call carries the value. */
       readonly message: AssistantMessage;
     };
@@ -271,7 +271,7 @@ const checkModel = async (
   thinkingLevel: Effort,
   signal: AbortSignal,
 ): Promise<
-  PiRejection | { readonly _tag: "Checked"; readonly model: ModelId; readonly pool: PiPool }
+  PiRejection | { readonly _tag: "Checked"; readonly model: ModelId; readonly pool: BillingPool }
 > => {
   const model = ModelId.make(`${active.provider}/${active.id}`);
   const supported = getSupportedThinkingLevels(active);

@@ -1,3 +1,4 @@
+import { BillingPool } from "@usine/core/agent/pool";
 import { jsonKey } from "@usine/core/json-key";
 import { sqliteTempDirectory } from "../../../../tooling/test/sqlite.mts";
 import { OperatorLogin } from "@usine/core/operator";
@@ -816,7 +817,7 @@ describe("Transcript read model migration", () => {
                 ...(["chatgptPlan", "claudePlan"] as const).map((pool) =>
                   PoolRateLimitsUpdated.make({
                     session: parent,
-                    pool,
+                    pool: BillingPool.make(pool),
                     login: Option.some(PoolLogin.make(`login-${attempt}`)),
                     rateLimits: RateLimitsSnapshot.make({
                       limitId: Option.none(),

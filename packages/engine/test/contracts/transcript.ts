@@ -1,5 +1,6 @@
 import { assert, describe, it } from "@effect/vitest";
 import { BrainSpec, Harness, ModelId } from "@usine/core/agent/brain";
+import { BillingPool, BillingPools, PoolDescriptor } from "@usine/core/agent/pool";
 import {
   AgentSessionId,
   ChildSession,
@@ -29,6 +30,14 @@ import {
 } from "../../src/transcript.ts";
 import { lifecycleSubmission, testAgent } from "../store/fixtures.ts";
 import { type PersistenceAdapter, withPersistence } from "./adapter.ts";
+
+/** A pool that only test code declares, reported one window at a time like the Claude plan. */
+const separatePlan = PoolDescriptor.make({
+  id: BillingPool.make("separatePlan"),
+  label: "Separate plan",
+  billing: "plan",
+  windows: "separately",
+});
 
 export const transcriptContract = (adapter: PersistenceAdapter) => {
   describe(`${adapter.name} Transcripts contract`, () => {
@@ -135,106 +144,108 @@ export const transcriptContract = (adapter: PersistenceAdapter) => {
         }),
       ),
     );
-    it.live("preserves each Claude window across interleaved children and store restarts", () =>
-      Effect.gen(function* () {
-        const fixture = yield* adapter.fixture;
-        const window = (usedPercent: number, minutes: number) =>
-          Option.some(
-            RateLimitWindow.make({
-              usedPercent,
-              windowDurationMinutes: Option.some(minutes),
-              resetsAt: Option.some(DateTime.makeUnsafe("2026-11-11T00:00:00Z")),
-            }),
-          );
-        const first = ChildSession.make({
-          id: AgentSessionId.make("claude-child-a"),
-          parentId: AgentSessionId.make("pool-parent"),
-          agent: testAgent.name,
-          brain: BrainSpec.make({ ...testAgent.brain, harness: Harness.make("claude") }),
-        });
-        const second = ChildSession.make({ ...first, id: AgentSessionId.make("claude-child-b") });
-        const report = (
-          session: ChildSession,
-          primary: RateLimitsSnapshot["primary"],
-          secondary: RateLimitsSnapshot["secondary"],
-        ) =>
-          PoolRateLimitsUpdated.make({
-            session,
-            pool: "claudePlan",
-            rateLimits: RateLimitsSnapshot.make({
-              limitId: Option.none(),
-              limitName: Option.none(),
-              primary,
-              secondary,
-            }),
-          });
-        const reset = Option.some(
-          RateLimitWindow.make({
-            usedPercent: 0,
-            windowDurationMinutes: Option.some(300),
-            resetsAt: Option.none(),
-          }),
-        );
-        const reports = [
-          report(first, window(25, 300), Option.none()),
-          report(second, window(90, 300), Option.none()),
-          report(first, Option.none(), window(40, 10_080)),
-          report(second, reset, Option.none()),
-        ];
-        yield* Effect.gen(function* () {
-          const store = yield* RunStore;
-          const reader = yield* RunReader;
-          const runId = RunId.make("interleaved-pool-run");
-          yield* store.recordAndClaim(lifecycleSubmission, runId);
-          const started = yield* store.beginAttempt(
-            runId,
-            WorkerName.make("local"),
-            "local",
-            Option.none(),
-          );
-          assert(started._tag === "AttemptStarted");
-          const attemptId = started.execution.attempt.id;
-          const expected = [
-            [25, undefined],
-            [90, undefined],
-            [90, 40],
-            [0, 40],
-          ];
-          for (const [index, event] of reports.entries()) {
-            const envelope = AttemptChannel.OutboundEnvelope.make({
-              version: AttemptChannel.PROTOCOL_VERSION,
-              attemptId,
-              sequence: AttemptChannel.Sequence.make(index + 1),
-              sentAt: DateTime.makeUnsafe("2026-11-04T00:00:00Z"),
-              payload: AttemptChannel.SessionEvent.make({ event }),
-            });
-            yield* store.appendTranscript("outbound", envelope);
-            const [latest] = yield* reader.latestPoolRateLimits;
-            assert(latest !== undefined);
-            assert.deepStrictEqual(latest.session, event.session);
-            assert.deepStrictEqual(
-              [latest.rateLimits.primary, latest.rateLimits.secondary].map((limit) =>
-                Option.getOrUndefined(Option.map(limit, ({ usedPercent }) => usedPercent)),
-              ),
-              expected[index],
+    it.live(
+      "preserves each window of a pool that reports them separately across interleaved children and store restarts",
+      () =>
+        Effect.gen(function* () {
+          const fixture = yield* adapter.fixture;
+          const window = (usedPercent: number, minutes: number) =>
+            Option.some(
+              RateLimitWindow.make({
+                usedPercent,
+                windowDurationMinutes: Option.some(minutes),
+                resetsAt: Option.some(DateTime.makeUnsafe("2026-11-11T00:00:00Z")),
+              }),
             );
-          }
-          const entries = yield* store.transcript(TranscriptAllQuery.make({ attemptId }));
-          assert.deepStrictEqual(
-            entries.map(({ envelope }) => envelope.payload),
-            reports.map((event) => AttemptChannel.SessionEvent.make({ event })),
+          const first = ChildSession.make({
+            id: AgentSessionId.make("child-a"),
+            parentId: AgentSessionId.make("pool-parent"),
+            agent: testAgent.name,
+            brain: BrainSpec.make({ ...testAgent.brain, harness: Harness.make("test-harness") }),
+          });
+          const second = ChildSession.make({ ...first, id: AgentSessionId.make("child-b") });
+          const report = (
+            session: ChildSession,
+            primary: RateLimitsSnapshot["primary"],
+            secondary: RateLimitsSnapshot["secondary"],
+          ) =>
+            PoolRateLimitsUpdated.make({
+              session,
+              pool: separatePlan.id,
+              rateLimits: RateLimitsSnapshot.make({
+                limitId: Option.none(),
+                limitName: Option.none(),
+                primary,
+                secondary,
+              }),
+            });
+          const reset = Option.some(
+            RateLimitWindow.make({
+              usedPercent: 0,
+              windowDurationMinutes: Option.some(300),
+              resetsAt: Option.none(),
+            }),
           );
-          const original = entries[0];
-          assert(original !== undefined);
-          assert(original.envelope._tag === "OutboundEnvelope");
-          assert(original.envelope.version === AttemptChannel.PROTOCOL_VERSION);
-          yield* store.appendTranscript("outbound", original.envelope);
-        }).pipe(Effect.provide(fixture.open));
-        yield* Effect.gen(function* () {
-          const [latest] = yield* (yield* RunReader).latestPoolRateLimits;
-          assert.deepStrictEqual(latest, report(second, reset, window(40, 10_080)));
-        }).pipe(Effect.provide(fixture.open));
-      }).pipe(Effect.scoped),
+          const reports = [
+            report(first, window(25, 300), Option.none()),
+            report(second, window(90, 300), Option.none()),
+            report(first, Option.none(), window(40, 10_080)),
+            report(second, reset, Option.none()),
+          ];
+          yield* Effect.gen(function* () {
+            const store = yield* RunStore;
+            const reader = yield* RunReader;
+            const runId = RunId.make("interleaved-pool-run");
+            yield* store.recordAndClaim(lifecycleSubmission, runId);
+            const started = yield* store.beginAttempt(
+              runId,
+              WorkerName.make("local"),
+              "local",
+              Option.none(),
+            );
+            assert(started._tag === "AttemptStarted");
+            const attemptId = started.execution.attempt.id;
+            const expected = [
+              [25, undefined],
+              [90, undefined],
+              [90, 40],
+              [0, 40],
+            ];
+            for (const [index, event] of reports.entries()) {
+              const envelope = AttemptChannel.OutboundEnvelope.make({
+                version: AttemptChannel.PROTOCOL_VERSION,
+                attemptId,
+                sequence: AttemptChannel.Sequence.make(index + 1),
+                sentAt: DateTime.makeUnsafe("2026-11-04T00:00:00Z"),
+                payload: AttemptChannel.SessionEvent.make({ event }),
+              });
+              yield* store.appendTranscript("outbound", envelope);
+              const [latest] = yield* reader.latestPoolRateLimits;
+              assert(latest !== undefined);
+              assert.deepStrictEqual(latest.session, event.session);
+              assert.deepStrictEqual(
+                [latest.rateLimits.primary, latest.rateLimits.secondary].map((limit) =>
+                  Option.getOrUndefined(Option.map(limit, ({ usedPercent }) => usedPercent)),
+                ),
+                expected[index],
+              );
+            }
+            const entries = yield* store.transcript(TranscriptAllQuery.make({ attemptId }));
+            assert.deepStrictEqual(
+              entries.map(({ envelope }) => envelope.payload),
+              reports.map((event) => AttemptChannel.SessionEvent.make({ event })),
+            );
+            const original = entries[0];
+            assert(original !== undefined);
+            assert(original.envelope._tag === "OutboundEnvelope");
+            assert(original.envelope.version === AttemptChannel.PROTOCOL_VERSION);
+            yield* store.appendTranscript("outbound", original.envelope);
+          }).pipe(Effect.provide(fixture.open));
+          yield* Effect.gen(function* () {
+            const [latest] = yield* (yield* RunReader).latestPoolRateLimits;
+            assert.deepStrictEqual(latest, report(second, reset, window(40, 10_080)));
+          }).pipe(Effect.provide(fixture.open));
+        }).pipe(Effect.provideService(BillingPools, [separatePlan]), Effect.scoped),
     );
     it.live(
       "attributes interventions without adding Events and reads held sessions beyond the visible page",

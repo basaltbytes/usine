@@ -1,11 +1,13 @@
 import { assert, describe, it } from "@effect/vitest";
 import { Harness } from "@usine/core/agent/brain";
+import { BillingPool, PoolDescriptor } from "@usine/core/agent/pool";
 import { Option, Schema } from "effect";
 import {
   catalog,
   HarnessCatalog,
   HarnessCredential,
   HarnessDescriptor,
+  HarnessPool,
   WorkerRequirements,
   workerImageInputs,
 } from "../src/harness/catalog.ts";
@@ -30,6 +32,50 @@ describe("harness catalog", () => {
     assert(Option.isNone(decode("unknown")));
     assert(Option.isNone(decode("not a harness ID")));
     assert(Option.isNone(extended.get(Harness.make("unknown"))));
+  });
+
+  it("lists each declared pool once and refuses a pool ID with two definitions", () => {
+    const testPlan = PoolDescriptor.make({
+      id: BillingPool.make("testPlan"),
+      label: "Test plan",
+      billing: "plan",
+      windows: "separately",
+    });
+    const declaring = (id: string, pool: PoolDescriptor) =>
+      HarnessDescriptor.make({
+        ...pi,
+        id: Harness.make(id),
+        pools: [...pi.pools, HarnessPool.make({ pool, routes: ["gateway-subscription"] })],
+      });
+    const extended = HarnessCatalog.make({
+      descriptors: [
+        ...catalog.descriptors,
+        declaring("first-harness", testPlan),
+        declaring("second-harness", testPlan),
+      ],
+    });
+    assert.deepStrictEqual(extended.pools, [...catalog.pools, testPlan]);
+    assert.deepStrictEqual(
+      catalog.pools.map(({ id }) => id),
+      ["apiKeys", "claudePlan", "chatgptPlan"],
+    );
+    const relabelled = PoolDescriptor.make({ ...testPlan, label: "Another plan" });
+    assert(
+      Option.isNone(
+        HarnessCatalog.makeOption({
+          descriptors: [declaring("first-harness", testPlan), declaring("other", relabelled)],
+        }),
+      ),
+    );
+    assert(
+      Option.isNone(
+        HarnessDescriptor.makeOption({
+          ...pi,
+          pools: [...pi.pools, HarnessPool.make({ pool: testPlan, routes: ["gateway-api-key"] })],
+        }),
+      ),
+      "a route determines one pool",
+    );
   });
 
   it("rejects duplicate IDs so registration and lookup cannot disagree", () => {

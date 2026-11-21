@@ -1,3 +1,4 @@
+import { apiKeys } from "../../src/harness/pool.ts";
 import { rejects } from "node:assert/strict";
 // The fake Pi session runs its tools through the SDK's Promise callbacks.
 // @effect-diagnostics asyncFunction:off
@@ -112,7 +113,7 @@ const runPi = <Tools extends Record<string, Tool.Any>, R>(
         _tag: "Started",
         harnessSession: Option.none(),
         model: brain.model,
-        pool: "apiKeys",
+        pool: apiKeys.id,
         session,
         tools: found.hostTools.map(({ name }) => name),
       });

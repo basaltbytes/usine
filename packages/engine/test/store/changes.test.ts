@@ -7,6 +7,7 @@ import { CycleLimit } from "@usine/core/cycle-budget";
 import { Event, EventId, DedupKey } from "@usine/core/event";
 import { InstanceDirectory } from "@usine/core/instance";
 import { ItemKey, ItemNumber } from "@usine/core/item";
+import { BillingPool, BillingPools, PoolDescriptor } from "@usine/core/agent/pool";
 import {
   AgentSessionId,
   ParentSession,
@@ -47,6 +48,14 @@ import { RunDatabase } from "../../src/database/database.ts";
 import { changeTransaction } from "../../src/store/changes.ts";
 import { RunStore } from "../../src/store/store.ts";
 import { lifecycleSubmission } from "./support.ts";
+
+/** A pool that only test code declares, reported one window at a time like the Claude plan. */
+const separatePlan = PoolDescriptor.make({
+  id: BillingPool.make("separatePlan"),
+  label: "Separate plan",
+  billing: "plan",
+  windows: "separately",
+});
 
 it.effect(
   "publishes committed engine, transcript, item, attention and cycle writes once and skips duplicates",
@@ -133,7 +142,7 @@ it.effect(
             agent: attempt.agent,
             brain: attempt.brain,
           }),
-          pool: "claudePlan",
+          pool: separatePlan.id,
           login: Option.none(),
           rateLimits: RateLimitsSnapshot.make({
             limitId: Option.none(),
@@ -295,7 +304,7 @@ it.effect(
         yield* expectUnchanged(
           acknowledgements.undo(AttentionKey.make(acknowledgement), [audience]),
         );
-      }).pipe(Effect.provide(services));
+      }).pipe(Effect.provide(services), Effect.provideService(BillingPools, [separatePlan]));
     }).pipe(
       Effect.provide(NodeServices.layer.pipe(Layer.provideMerge(changeBusLayer))),
       Effect.scoped,
@@ -356,7 +365,7 @@ it.effect("restores only the latest future pool reset deadlines after a store re
                     agent: attempt.agent,
                     brain: attempt.brain,
                   }),
-                  pool,
+                  pool: BillingPool.make(pool),
                   login: Option.none(),
                   rateLimits: RateLimitsSnapshot.make({
                     limitId: Option.none(),

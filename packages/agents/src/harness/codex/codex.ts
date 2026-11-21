@@ -6,7 +6,8 @@ import {
   environmentHome,
 } from "../continuation.ts";
 import { codexPreflight } from "./preflight.ts";
-import { codex } from "./descriptor.ts";
+import { chatgptPlan, codex } from "./descriptor.ts";
+import { apiKeys } from "../pool.ts";
 import { type HarnessRuntime, openWithTools } from "../runtime.ts";
 import { type SessionSpec, type Start } from "../contract.ts";
 import type { ContinuationPolicy } from "../continuation.ts";
@@ -250,7 +251,7 @@ const makeCodexSessions = Effect.gen(function* () {
         effort: spec.session.brain.effort,
       }),
       pool: Option.some(billing.pool),
-      endpoint: billing.pool === "apiKeys" ? thread.endpoint : Option.none(),
+      endpoint: billing.pool === apiKeys.id ? thread.endpoint : Option.none(),
     });
     const channel = yield* sessionChannel({
       label: "Codex child session",
@@ -774,8 +775,10 @@ const makeCodexSessions = Effect.gen(function* () {
               Effect.mapError(() => codexPoolUnavailable(spec.session.brain.model)),
             );
             if (
-              !isAuthMode(account.authMode, billing.pool === "apiKeys" ? "apikey" : "chatgpt") &&
-              !(billing.pool === "chatgptPlan" && isAuthMode(account.authMode, "chatgptAuthTokens"))
+              !isAuthMode(account.authMode, billing.pool === apiKeys.id ? "apikey" : "chatgpt") &&
+              !(
+                billing.pool === chatgptPlan.id && isAuthMode(account.authMode, "chatgptAuthTokens")
+              )
             ) {
               yield* Effect.logError("Codex authentication changed during the session", {
                 sessionId: session.id,

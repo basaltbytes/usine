@@ -1,3 +1,4 @@
+import { apiKeys } from "../src/harness/pool.ts";
 import { assert, describe, it } from "@effect/vitest";
 import { AgentName } from "@usine/core/agent";
 import { BrainSpec, type Harness, ModelId } from "@usine/core/agent/brain";
@@ -393,7 +394,7 @@ describe("the structured completion seam", () => {
       reply: Effect.fail(
         PoolUnavailableError.make({
           ...brain,
-          pool: "apiKeys",
+          pool: apiKeys.id,
           message: "No API key",
         }),
       ),

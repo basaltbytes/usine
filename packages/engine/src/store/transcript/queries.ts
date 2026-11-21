@@ -1,3 +1,4 @@
+import type { BillingPool, PoolDescriptor } from "@usine/core/agent/pool";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 
 import { and, asc, desc, eq, gt, inArray, isNull, lt, sql } from "drizzle-orm";
@@ -29,6 +30,15 @@ const SealWatermarks = Schema.Struct({
   lastOutboundSequence: Schema.NullOr(AttemptChannel.Sequence),
 });
 
+/**
+ * Returns whether `pools` declares `pool` as reporting one window at a time, so a report that omits
+ * a window leaves its last reading in place.
+ */
+export const reportsWindowsSeparately = (
+  pools: ReadonlyArray<PoolDescriptor>,
+  pool: BillingPool,
+): boolean => pools.some(({ id, windows }) => id === pool && windows === "separately");
+
 /** Returns the transcript queries that run on the caller's transaction. */
 export const transcriptQueries = (
   database: RunDatabaseClient,
@@ -36,12 +46,14 @@ export const transcriptQueries = (
 ) => {
   /**
    * Appends an envelope and returns whether it was new. A redelivered envelope with the same
-   * direction and sequence keeps the first stored copy.
+   * direction and sequence keeps the first stored copy. The latest windows of a pool in `pools`
+   * that reports its windows separately keep each window that a report omits.
    */
   const appendTranscript = Effect.fn("RunStoreQueries.appendTranscript")(function* (
     direction: AttemptChannel.Direction,
     envelope: AttemptChannel.Envelope,
     receivedAt: DateTime.Utc,
+    pools: ReadonlyArray<PoolDescriptor>,
   ) {
     yield* Effect.annotateCurrentSpan({ attemptId: envelope.attemptId, direction });
     const storedSeals = yield* database
@@ -116,21 +128,20 @@ export const transcriptQueries = (
           target: poolRateLimits.pool,
           set: {
             ...limits,
-            envelope:
-              event.pool === "claudePlan"
-                ? jsonSet(
-                    sql`excluded.envelope`,
-                    ["primary", "secondary"].map((window) => {
-                      const path = `$.payload.event.rateLimits.${window}`;
-                      return [
-                        path,
-                        jsonValue(
-                          sql`coalesce(${jsonExtract(sql`excluded.envelope`, path)}, ${jsonExtract(poolRateLimits.envelope, path)})`,
-                        ),
-                      ];
-                    }),
-                  )
-                : limits.envelope,
+            envelope: reportsWindowsSeparately(pools, event.pool)
+              ? jsonSet(
+                  sql`excluded.envelope`,
+                  ["primary", "secondary"].map((window) => {
+                    const path = `$.payload.event.rateLimits.${window}`;
+                    return [
+                      path,
+                      jsonValue(
+                        sql`coalesce(${jsonExtract(sql`excluded.envelope`, path)}, ${jsonExtract(poolRateLimits.envelope, path)})`,
+                      ),
+                    ];
+                  }),
+                )
+              : limits.envelope,
           },
           setWhere: gt(sql`excluded.sequence`, poolRateLimits.sequence),
         })

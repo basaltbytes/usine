@@ -1,3 +1,4 @@
+import { BillingPool } from "@usine/core/agent/pool";
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import { AttemptId } from "@usine/core/attempt";
@@ -153,7 +154,7 @@ describe("SQLite transcript sealing", () => {
             SessionTokensUpdated.make({ session: parent, totalTokens: TokenCount.make(42) }),
             PoolRateLimitsUpdated.make({
               session: parent,
-              pool: "chatgptPlan",
+              pool: BillingPool.make("chatgptPlan"),
               rateLimits: RateLimitsSnapshot.make({
                 limitId: Option.none(),
                 limitName: Option.none(),

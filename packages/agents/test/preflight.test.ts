@@ -1,3 +1,4 @@
+import { chatgptPlan } from "../src/harness/codex/descriptor.ts";
 import { Harnesses, harnessesLayer, hostPlacement, ProbeTarget } from "../src/harness/node.ts";
 import type { CredentialRoute, Placement } from "../src/harness/capability.ts";
 import { claudeSdkLive } from "../src/harness/claude/sdk.ts";
@@ -405,7 +406,7 @@ describe("worker harness readiness", () => {
       _tag: "Started",
       harnessSession: Option.none(),
       model: piBrain.model,
-      pool: "chatgptPlan",
+      pool: chatgptPlan.id,
       tools: [],
       session: {
         messages: [],
