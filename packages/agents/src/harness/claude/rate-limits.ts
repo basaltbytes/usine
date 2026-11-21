@@ -32,6 +32,8 @@ const ClaudeRateLimit = Schema.Struct({
         Schema.isBetween({ minimum: -8_640_000_000_000, maximum: 8_640_000_000_000 }),
       ),
     ),
+    isUsingOverage: Schema.optionalKey(Schema.Boolean),
+    overageInUse: Schema.optionalKey(Schema.Boolean),
   }),
 });
 const decodeRateLimit = Schema.decodeUnknownEffect(ClaudeRateLimit);
@@ -115,4 +117,30 @@ export const rejectedUntil = (message: Schema.Json): Option.Option<DateTime.Utc>
     Option.filter(({ rate_limit_info: info }) => info.status === "rejected"),
     Option.flatMap(({ rate_limit_info: info }) => Option.fromUndefinedOr(info.resetsAt)),
     Option.map(DateTime.fromEpochSeconds),
+  );
+
+/** A rate-limit report that says its request ran on usage credits. */
+export interface UsageCreditsReport {
+  /**
+   * The reset time of the plan window that the report names, or `None` for a report without one or
+   * on the `overage` limit, whose reset is the credits' own.
+   */
+  readonly planResetsAt: Option.Option<DateTime.Utc>;
+}
+
+/**
+ * Reads whether a rate-limit report says that its request ran on usage credits: `isUsingOverage`
+ * or `overageInUse`. Returns `None` for a request on plan limits, including a report on the
+ * `overage` limit without either flag, and for a report that doesn't decode.
+ */
+export const usageCredits = (message: Schema.Json): Option.Option<UsageCreditsReport> =>
+  decodeRateLimitOption(message).pipe(
+    Option.map(({ rate_limit_info: info }) => info),
+    Option.filter((info) => info.isUsingOverage === true || info.overageInUse === true),
+    Option.map((info) => ({
+      planResetsAt:
+        info.rateLimitType === "overage"
+          ? Option.none()
+          : Option.map(Option.fromUndefinedOr(info.resetsAt), DateTime.fromEpochSeconds),
+    })),
   );

@@ -438,6 +438,7 @@ describe("exe.dev preparation", () => {
           requiresCi: true,
           outcomeLabels,
           maxBackgroundWaitMinutes: Option.some(9),
+          allowUsageCredits: true,
         }),
       );
       assert.strictEqual(prepared.workspace.spec.attemptId, ATTEMPT_ID);
@@ -447,6 +448,7 @@ describe("exe.dev preparation", () => {
       assert.isTrue(prepared.workspace.spec.requiresCi);
       assert.deepStrictEqual(prepared.workspace.spec.outcomeLabels, outcomeLabels);
       assert.deepStrictEqual(prepared.workspace.spec.maxBackgroundWaitMinutes, Option.some(9));
+      assert.isTrue(prepared.workspace.spec.allowUsageCredits);
       const commandLine = ssh.state.commands.map(({ args }) => args.join(" ")).join("\n");
       assert(!commandLine.includes("/tmp/not-a-worker-child"));
       assert(commandLine.includes("integrations attach"));

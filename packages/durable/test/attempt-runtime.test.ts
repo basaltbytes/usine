@@ -234,6 +234,7 @@ describe("durable AttemptRuntime", () => {
         const child = yield* (yield* StubChildren).next;
         assert.strictEqual(child.request.session.brain.harness, id);
         assert(Option.isNone(child.request.maxBackgroundWaitMinutes));
+        assert.isFalse(child.request.allowUsageCredits);
         yield* child.reply("Extension result");
         assert.strictEqual((yield* Fiber.join(execution)).message, "Extension completed");
       }).pipe(Effect.provide(services));
@@ -256,6 +257,7 @@ describe("durable AttemptRuntime", () => {
             ...initial.spec,
             task,
             maxBackgroundWaitMinutes: Option.some(4),
+            allowUsageCredits: true,
           }),
         });
         const recording = recordingSink();
@@ -275,6 +277,7 @@ describe("durable AttemptRuntime", () => {
         assert.strictEqual(child.request.cwd, "/workspace/usine");
         assert.deepStrictEqual(child.request.host, LocalProcess.make());
         assert.deepStrictEqual(child.request.maxBackgroundWaitMinutes, Option.some(4));
+        assert.isTrue(child.request.allowUsageCredits);
         assert.include(child.request.prompt, `# Delegated task\n\n${task}\n`);
         assert.include(child.request.prompt, `"commit": "${request.spec.baseCommit}"`);
         assert.include(

@@ -331,6 +331,7 @@ export const delegate = Effect.fn("Delegation.delegate")(function* (
     worker: request.worker,
     machine: request.machine,
     maxBackgroundWaitMinutes: spec.maxBackgroundWaitMinutes,
+    allowUsageCredits: spec.allowUsageCredits,
     resume: Option.map(saved, (child) => child.harnessSession),
     usage: Option.flatMap(saved, (child) => child.usage),
     held,

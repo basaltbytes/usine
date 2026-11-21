@@ -48,6 +48,7 @@ import {
 } from "effect";
 import { ChildProcessSpawner } from "effect/process";
 import {
+  type AgentCapacityError,
   HostLoginLock,
   ChildBackend,
   ChildSessionLifecycle,
@@ -797,6 +798,34 @@ const makeClaudeSessions = Effect.gen(function* () {
     });
 
     const provider = claudeProviderFailures(session);
+    // Whether a report showed a request on usage credits that the spec allows.
+    let onUsageCredits = false;
+    /**
+     * Fails the session with `refusal` when a request ran on usage credits that the spec doesn't
+     * allow. Closing the failed child ends its Claude Code process. With credits allowed, logs the
+     * first such request.
+     */
+    const reportUsageCredits = Effect.fn("ClaudeRuntime.reportUsageCredits")(function* (
+      refusal: AgentCapacityError,
+    ) {
+      yield* Effect.annotateCurrentSpan({ sessionId: session.id });
+      const resetsAt = Option.getOrUndefined(Option.map(refusal.resetsAt, DateTime.formatIso));
+      if (spec.allowUsageCredits) {
+        if (onUsageCredits) return;
+        onUsageCredits = true;
+        yield* Effect.logInfo("Claude child runs on usage credits, which its spec allows", {
+          sessionId: session.id,
+          planResetsAt: resetsAt,
+        });
+        return;
+      }
+      if (yield* channel.isTerminal) return;
+      yield* Effect.logWarning(
+        "Claude child ran a request on usage credits, which its spec doesn't allow; stopping it",
+        { sessionId: session.id, resetsAt },
+      );
+      yield* channel.fail(refusal);
+    });
 
     /** Logs how a new process's first result settled the usage that Claude restored. */
     const logRestored = ({ resultTokens, processTokens, restored }: RestoredUsage) =>
@@ -840,7 +869,9 @@ const makeClaudeSessions = Effect.gen(function* () {
         }
         const reported = yield* provider.read(message);
         if (Option.isSome(reported.rateLimits)) yield* channel.emit(reported.rateLimits.value);
-        if (Option.isSome(reported.rejectedUntil))
+        if (Option.isSome(reported.usageCredits))
+          yield* reportUsageCredits(reported.usageCredits.value);
+        else if (Option.isSome(reported.rejectedUntil))
           yield* Effect.logWarning("Claude reports that its usage limit rejects requests", {
             sessionId: session.id,
             resetsAt: DateTime.formatIso(reported.rejectedUntil.value),

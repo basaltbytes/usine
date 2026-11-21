@@ -65,6 +65,13 @@ const groups = (
             ? "A child that answers while its background tasks run waits for them without a limit."
             : "Minutes a child that answered waits for its background tasks to start a turn. Then it returns its answer and its background tasks stop.",
       },
+      {
+        key: "settings.allow_usage_credits",
+        value: mono(String(settings.allowUsageCredits)),
+        effect: settings.allowUsageCredits
+          ? "Claude Code children keep working on usage credits after the plan's usage limit."
+          : "A Claude Code child stops at its first request on usage credits, and the attempt waits for the plan limit to reset.",
+      },
     ],
   ],
   [

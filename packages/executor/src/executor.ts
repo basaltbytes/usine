@@ -293,6 +293,8 @@ export class CheckoutRequest extends Schema.Class<
   maxBackgroundWaitMinutes: Schema.Option(Schema.Int.check(Schema.isGreaterThan(0))).pipe(
     Schema.withConstructorDefault(Effect.succeed(Option.none<number>())),
   ),
+  /** Whether children may keep working on usage credits; copied into the RunSpec. */
+  allowUsageCredits: Schema.Boolean.pipe(Schema.withConstructorDefault(Effect.succeed(false))),
   /** The ref that unfinished work is pushed to if the Attempt doesn't succeed. */
   salvageRef: SalvageRef,
   /** The previous Attempt's pushed salvage, checked out instead of `revision`. */

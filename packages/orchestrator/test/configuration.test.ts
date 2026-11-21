@@ -359,14 +359,14 @@ const warningsIn = (warnings: Array<unknown>) =>
     if (logLevel === "Warn") warnings.push(message);
   });
 
-/** The instance files with both time limits set. */
+/** The instance files with both time limits set and usage credits allowed. */
 const limitFiles = files.map(([path, content]) =>
   path === "usine.yaml"
     ? ([
         path,
         content.replace(
           "  poll_interval: 30\n",
-          "  poll_interval: 30\n  max_attempt_minutes: 600\n  max_background_wait_minutes: 5\n",
+          "  poll_interval: 30\n  max_attempt_minutes: 600\n  max_background_wait_minutes: 5\n  allow_usage_credits: true\n",
         ),
       ] as const)
     : ([path, content] as const),
@@ -653,6 +653,8 @@ describe("Configuration view", () => {
       const view = yield* readConfigurationOf(limitFiles);
       assert.strictEqual(view.settings.maxAttemptMinutes, 600);
       assert.strictEqual(view.settings.maxBackgroundWaitMinutes, 5);
+      assert.isTrue(view.settings.allowUsageCredits);
+      assert.isFalse((yield* readConfiguration).settings.allowUsageCredits);
     }),
   );
 

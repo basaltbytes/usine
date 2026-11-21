@@ -60,6 +60,7 @@ const configuration = ConfigurationView.make({
     maxAttemptMinutes: null,
     maxAttemptTokens: null,
     maxBackgroundWaitMinutes: null,
+    allowUsageCredits: false,
     supervisor: null,
     operator: null,
     webhooks: "off",

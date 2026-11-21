@@ -54,6 +54,11 @@ export class SessionSpec extends Schema.Class<
   maxBackgroundWaitMinutes: Schema.OptionFromOptionalKey(
     Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
   ).pipe(Schema.withConstructorDefault(Effect.succeed(Option.none<number>()))),
+  /**
+   * Whether the session may keep working after its provider reports a request on usage credits.
+   * Without it, a harness that reads that report ends the session with `AgentCapacityError`.
+   */
+  allowUsageCredits: Schema.Boolean.pipe(Schema.withConstructorDefault(Effect.succeed(false))),
 }) {}
 
 /** Starts a new conversation with `text` as its first message. */

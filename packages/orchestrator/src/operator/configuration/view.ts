@@ -462,6 +462,8 @@ export class SettingsView extends Schema.Class<
    * limit.
    */
   maxBackgroundWaitMinutes: Schema.NullOr(Schema.Int),
+  /** Whether children may keep working on usage credits after the plan's usage limit. */
+  allowUsageCredits: Schema.Boolean,
   /**
    * The harness, model, and effort of the supervisor role, or null when the role is not
    * configured. `ownTools` says why the harness keeps all its own tools, which the supervisor's
@@ -791,6 +793,7 @@ const makeOperatorConfiguration = Effect.gen(function* () {
         maxAttemptMinutes: Option.getOrNull(settings.maxAttemptMinutes),
         maxAttemptTokens: Option.getOrNull(settings.maxAttemptTokens),
         maxBackgroundWaitMinutes: Option.getOrNull(settings.maxBackgroundWaitMinutes),
+        allowUsageCredits: settings.allowUsageCredits,
         supervisor: Option.match(settings.supervisor, {
           onNone: () => null,
           onSome: (brain) => ({

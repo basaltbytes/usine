@@ -49,6 +49,7 @@ const spec = AttemptChannel.RunSpec.make({
   parentModel: Option.some(parentModel),
   maxChildren: ChildSessionBudget.make(4),
   maxBackgroundWaitMinutes: Option.some(7),
+  allowUsageCredits: true,
   parentEffort: "high",
   resume: Option.none(),
   preparedAt: Option.some(DateTime.makeUnsafe("2026-08-30T11:59:00Z")),
@@ -243,6 +244,7 @@ describe("attempt channel", () => {
                 "coordinator",
                 "outcomeLabels",
                 "maxBackgroundWaitMinutes",
+                "allowUsageCredits",
               ].includes(key),
           ),
         ),
@@ -258,6 +260,9 @@ describe("attempt channel", () => {
         maxBackgroundWaitMinutes: null,
       });
       assert(Option.isNone(unlimited.maxBackgroundWaitMinutes));
+      // An Attempt stored before the usage-credits setting stops its children on usage credits.
+      assert.isFalse(storedSpec.allowUsageCredits);
+      assert.isTrue(limited.allowUsageCredits);
       // An Attempt stored before the event-driven coordinator reattaches to its parent session.
       assert.strictEqual(storedSpec.coordinator, "session");
       assert.deepStrictEqual(storedSpec.outcomeLabels, []);

@@ -657,6 +657,7 @@ export const provisionWorktree = Effect.fn("Executor.provisionWorktree")(functio
         agent: request.agent,
         maxChildren: request.maxChildren,
         maxBackgroundWaitMinutes: request.maxBackgroundWaitMinutes,
+        allowUsageCredits: request.allowUsageCredits,
         // New Attempts run on the event-driven coordinator, which has no parent session.
         coordinator: "events",
         parentModel: Option.none(),

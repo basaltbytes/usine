@@ -20,6 +20,7 @@ export const Scenario = Schema.Literals([
   "closed-tools",
   "supervisor",
   "usage-limit",
+  "usage-credits",
   "structured-result",
   "ephemeral",
 ]);

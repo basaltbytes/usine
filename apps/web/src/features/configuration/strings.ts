@@ -434,6 +434,8 @@ export const settingsFormFields = [
 ] as const;
 
 export const settingsExtraCopy = {
+  usageCredits:
+    "Allow usage credits: Claude Code children keep working after the plan's usage limit",
   supervisor: "Run a supervisor",
   supervisorHarness: "Supervisor harness",
   supervisorHarnessHint:

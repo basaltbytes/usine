@@ -169,6 +169,8 @@ export const runSupervisorTurn = Effect.fn("Supervisor.turn")(function* <
     machine: Option.none(),
     cwd: seat.cwd,
     environment: seat.environment,
+    // `settings.allow_usage_credits` covers Attempts; the supervisor isn't one.
+    allowUsageCredits: true,
   });
   const runtime = yield* harnesses.runtime(brain.harness);
   const restart = RestartState.make({
