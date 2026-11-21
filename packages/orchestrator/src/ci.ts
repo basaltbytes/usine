@@ -1,5 +1,6 @@
 import { ConfigParser } from "@usine/config/parser";
 import type { LoadedInstance } from "@usine/config/instance";
+import { evaluateOnGreen } from "@usine/config/loop";
 import { matchesLoop } from "@usine/config/project";
 import { repositoryContext } from "@usine/config/payload-slices";
 import { AttemptTask } from "@usine/core/attempt";
@@ -8,10 +9,13 @@ import {
   type CiHandoff,
   CiHandedOff,
   CiIncomplete,
+  type CiLabelMutation,
   CiPassed,
+  CiPassedWithoutLabels,
   CiPullRequestClosed,
   CiSuperseded,
   CiTimedOut,
+  distinctLabelMutations,
 } from "@usine/core/ci";
 import type { AttemptId } from "@usine/core/attempt";
 import type { OperatorActor } from "@usine/core/operator";
@@ -33,7 +37,7 @@ import {
 } from "@usine/engine/engine";
 import { LoopControl } from "@usine/engine/loop-control";
 import { RunReader, type RunSnapshot } from "@usine/engine/run-reader";
-import { ExpressionEngine } from "@usine/expression/expression-engine";
+import { ExpressionEngine, type ExpressionError } from "@usine/expression/expression-engine";
 import {
   type CheckFailureEvidence,
   type FailedCheck,
@@ -48,7 +52,17 @@ import { GitHubItemWriter, ItemLabelMutation } from "@usine/github/item-writer";
 import { ItemProjectionWriter } from "@usine/engine/item-projection";
 import { ChangedPullRequest, GitHubPolling } from "@usine/github/polling";
 import { type GitHubAppError, isRefusal } from "@usine/github/github-app";
-import { type Brand, Context, DateTime, Effect, Layer, Option, Result, Schema } from "effect";
+import {
+  Array as Arr,
+  type Brand,
+  Context,
+  DateTime,
+  Effect,
+  Layer,
+  Option,
+  Result,
+  Schema,
+} from "effect";
 import { resolveTriggerLoops, triggerSubmission } from "./trigger-submission.ts";
 import {
   RepositoryPollFailure,
@@ -209,11 +223,43 @@ const failuresAfterRunRead = (
   );
 };
 
+const pullRequestUrl = (repository: RepositoryName, pullRequest: number) =>
+  `https://github.com/${repository}/pull/${pullRequest}`;
+
 const checksUrl = (repository: RepositoryName, pullRequest: number) =>
-  `https://github.com/${repository}/pull/${pullRequest}/checks`;
+  `${pullRequestUrl(repository, pullRequest)}/checks`;
 
 const afterGreen = (head: CommitSha) =>
   `After CI on head ${head} passes, apply the completion labels from Needs attention.`;
+
+const expressionFailure = (wait: RunSnapshot, error: ExpressionError) =>
+  `the on_green item expression ${error.source} of loop ${wait.run.loop} failed: ${error.message}`;
+
+/**
+ * Returns the label changes to apply after green CI, or the operator-facing reason why an open
+ * pull request would be left without labels: an `on_green` item expression failed, or neither the
+ * handoff nor the loop names a label. A merged pull request needs no label to move on.
+ */
+const greenLabels = (
+  wait: RunSnapshot,
+  { head, pullRequest }: CiHandoff,
+  merged: boolean,
+  labels: Result.Result<ReadonlyArray<CiLabelMutation>, ExpressionError>,
+): Result.Result<ReadonlyArray<CiLabelMutation>, string> => {
+  const unlabeled = (reason: string) =>
+    Result.fail(
+      `CI passed on head ${head}, but ${reason}, so pull request #${pullRequest} has no completion labels. Apply them by hand, then mark the failure resolved: ${pullRequestUrl(wait.repository, pullRequest)}`,
+    );
+  return Result.match(labels, {
+    onFailure: (error) => unlabeled(expressionFailure(wait, error)),
+    onSuccess: (mutations) =>
+      Arr.isReadonlyArrayNonEmpty(mutations) || merged
+        ? Result.succeed(mutations)
+        : unlabeled(
+            `the attempt recorded no labels to apply, and loop ${wait.run.loop} declares none in ci.on_green`,
+          ),
+  });
+};
 
 /**
  * CI on the recorded head of a failed CI wait hasn't passed, or its pull request closed without a
@@ -226,6 +272,16 @@ export class CiNotPassedError extends Schema.TaggedError<
   runId: RunId,
   head: CommitSha,
   /** An operator-facing explanation of what CI on the head still lacks. */
+  message: Schema.NonEmptyString,
+}) {}
+
+/** An `on_green` item expression of the Run's loop failed, so usine applied no completion labels. */
+export class CiLabelExpressionError extends Schema.TaggedError<
+  CiLabelExpressionError,
+  Brand.Brand<"@usine/orchestrator/ci/CiLabelExpressionError">
+>("@usine/orchestrator/CiLabelExpressionError")("CiLabelExpressionError", {
+  runId: RunId,
+  /** An operator-facing explanation that names the expression and its error. */
   message: Schema.NonEmptyString,
 }) {}
 
@@ -252,16 +308,23 @@ export class CiMonitor extends Context.Service<
     >;
     /**
      * Applies the completion labels of a Run whose CI wait ended because CI on its head didn't
-     * finish, then resolves the failure of `attemptId`. CI on the recorded head must read green
-     * with every workflow run on it concluded in full, and the pull request must not be closed
-     * without a merge. If GitHub refuses the workflow-run read, the check rollup decides alone. Fails with `CiNotPassedError` otherwise, or with `RunOperationRejectedError`
-     * if the Run kept no CI handoff or `attemptId` isn't its unresolved latest failure.
+     * finish, then resolves the failure of `attemptId`. The labels are the handoff's and those
+     * that the Run's loop in `instance` declares in `ci.on_green`. CI on the recorded head must
+     * read green with every workflow run on it concluded in full, and the pull request must not be
+     * closed without a merge. If GitHub refuses the workflow-run read, the check rollup decides
+     * alone. Fails with `CiNotPassedError` otherwise, with `CiLabelExpressionError` if an
+     * `on_green` item expression fails, or with `RunOperationRejectedError` if the Run kept no CI
+     * handoff or `attemptId` isn't its unresolved latest failure.
      */
     readonly applyLabelsAfterGreen: (
+      instance: LoadedInstance,
       runId: RunId,
       attemptId: AttemptId,
       operator: Option.Option<OperatorActor>,
-    ) => Effect.Effect<void, CiNotPassedError | RunEngineError | GitHubAppError>;
+    ) => Effect.Effect<
+      void,
+      CiNotPassedError | CiLabelExpressionError | RunEngineError | GitHubAppError
+    >;
   }
 >()("@usine/orchestrator/ci/CiMonitor") {
   static readonly layer = Layer.effect(
@@ -292,6 +355,42 @@ export class CiMonitor extends Context.Service<
                 { ...fields, head, errorTag: error._tag },
               ).pipe(Effect.as(noWorkflowRuns)),
           ),
+        );
+
+      // Returns the handoff's label changes, then those that the Run's current loop declares in
+      // `ci.on_green`, without repeats.
+      const completionLabels = Effect.fn("CiMonitor.completionLabels")(function* (
+        instance: LoadedInstance,
+        wait: RunSnapshot,
+        handoff: CiHandoff,
+      ) {
+        const { id: runId, loop: name } = wait.run;
+        yield* Effect.annotateCurrentSpan({ runId, loop: name });
+        const declared = yield* Option.match(
+          Option.fromUndefinedOr(instance.loops.find((loop) => loop.name === name)),
+          {
+            onNone: () =>
+              Effect.logInfo(
+                "The run's loop isn't configured anymore; only the handoff's label changes apply",
+                { runId, loop: name },
+              ).pipe(Effect.as<ReadonlyArray<CiLabelMutation>>([])),
+            onSome: (loop) =>
+              evaluateOnGreen(expressions, loop, {
+                repo: repositoryContext({ name: wait.repository }),
+                item: wait.event.payload,
+                pullRequest: { number: handoff.pullRequest },
+              }),
+          },
+        );
+        return distinctLabelMutations([...handoff.onGreen, ...declared]);
+      });
+
+      const applyLabels = (repository: RepositoryName, mutations: ReadonlyArray<CiLabelMutation>) =>
+        Effect.forEach(
+          mutations,
+          ({ item, add, remove }) =>
+            writer.updateLabels(repository, item, ItemLabelMutation.make({ add, remove })),
+          { discard: true },
         );
 
       const observationServices = (yield* Effect.context<
@@ -613,14 +712,30 @@ export class CiMonitor extends Context.Service<
           });
         else if (yield* settleUnfinished(unfinished, pendingChecks)) return;
         if (observed.state === "success") {
-          for (const mutation of handoff.onGreen) {
-            yield* writer.updateLabels(
-              wait.repository,
-              mutation.item,
-              ItemLabelMutation.make(mutation),
+          const evaluated = yield* completionLabels(instance, wait, handoff).pipe(Effect.result);
+          const labels = greenLabels(
+            wait,
+            handoff,
+            observed.pullRequestState === "merged",
+            evaluated,
+          );
+          if (Result.isFailure(labels)) {
+            yield* Effect.logWarning(
+              "CI passed with no completion labels to apply; the run needs attention",
+              { runId, head, pullRequest, detail: labels.failure },
+            );
+            return yield* engine.settleCi(
+              runId,
+              head,
+              CiPassedWithoutLabels.make({ message: labels.failure }),
             );
           }
-          yield* Effect.logInfo("CI passed; recorded completion actions applied", { runId, head });
+          yield* applyLabels(wait.repository, labels.success);
+          yield* Effect.logInfo("CI passed; completion actions applied", {
+            runId,
+            head,
+            applied: labels.success.length,
+          });
           return yield* engine.settleCi(runId, head, CiPassed.make());
         }
         const failureReason =
@@ -696,6 +811,14 @@ export class CiMonitor extends Context.Service<
           repo: repositoryContext(repository),
           item: observation.projection.payload,
         });
+        const inherited = yield* completionLabels(instance, wait, handoff).pipe(
+          Effect.catch((error) =>
+            Effect.logWarning(
+              "The fix inherits only the handoff's label changes because an on_green item expression failed",
+              { runId, head, detail: expressionFailure(wait, error) },
+            ).pipe(Effect.as(handoff.onGreen)),
+          ),
+        );
         const submission = yield* triggerSubmission(expressions, {
           ...fix,
           repository,
@@ -713,7 +836,7 @@ export class CiMonitor extends Context.Service<
           Submission.make({
             ...submission,
             ciFailureHead: Option.some(head),
-            ciOnGreen: handoff.onGreen,
+            ciOnGreen: inherited,
           }),
         );
         yield* Effect.logInfo("CI fix routed through the fix loop's cycle budget", {
@@ -721,7 +844,7 @@ export class CiMonitor extends Context.Service<
           head,
           fixLoop: fix.loop.name,
           result: result._tag,
-          inheritedActions: handoff.onGreen.length,
+          inheritedActions: inherited.length,
           reason: failure.reason,
         });
         if (result._tag === "Queued") {
@@ -763,6 +886,7 @@ export class CiMonitor extends Context.Service<
       });
 
       const applyLabelsAfterGreen = Effect.fn("CiMonitor.applyLabelsAfterGreen")(function* (
+        instance: LoadedInstance,
         runId: RunId,
         attemptId: AttemptId,
         operator: Option.Option<OperatorActor>,
@@ -823,17 +947,26 @@ export class CiMonitor extends Context.Service<
           return yield* notPassed(
             `CI on head ${head} reads green, but these workflow runs on it didn't finish in full: ${workflowRunDetails([...incomplete, ...running])}.`,
           );
-        for (const mutation of handoff.onGreen) {
-          yield* writer.updateLabels(
-            failed.repository,
-            mutation.item,
-            ItemLabelMutation.make(mutation),
-          );
-        }
+        const labels = yield* completionLabels(instance, failed, handoff).pipe(
+          Effect.mapError((error) =>
+            CiLabelExpressionError.make({
+              runId,
+              message: `usine applied no completion labels because ${expressionFailure(failed, error)}`,
+            }),
+          ),
+          Effect.tapError(({ message }) =>
+            Effect.logInfo("CI labels not applied; an on_green item expression failed", {
+              runId,
+              head,
+              message,
+            }),
+          ),
+        );
+        yield* applyLabels(failed.repository, labels);
         yield* engine.resolveFailure(runId, attemptId, operator);
         yield* Effect.logInfo(
           "CI on the recorded head passed after its wait ended; completion labels applied and the failure resolved",
-          { runId, attemptId, head, pullRequest, mutations: handoff.onGreen.length },
+          { runId, attemptId, head, pullRequest, applied: labels.length },
         );
       });
 

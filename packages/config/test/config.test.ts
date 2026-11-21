@@ -1243,6 +1243,32 @@ workers:
     }).pipe(Effect.provide(parserLayer)),
   );
 
+  it.effect("checks ci.on_green item expressions with the pull request against the stream", () =>
+    Effect.gen(function* () {
+      const parser = yield* ConfigParser;
+      const file = InstancePath.make("loops/develop.md");
+      const source = (item: string) =>
+        `---\ntrigger: { on: issue, if: 'true' }\nagent: developer\nci:\n  fix_loop: fix\n  timeout_seconds: 60\n  on_green:\n    - { item: pullRequest.number, add: [ready-for-review] }\n    - { item: '${item}', remove: [agent-in-progress] }\n---\nDevelop.`;
+
+      const loop = yield* parser.parseLoopFile(file, source("item.number"));
+      expect(Option.map(loop.ci, ({ onGreen }) => onGreen.map(({ item }) => item))).toStrictEqual(
+        Option.some(["pullRequest.number", "item.number"]),
+      );
+
+      const failure = yield* parser.parseLoopFile(file, source("item.title")).pipe(Effect.flip);
+      expect(failure.stage).toBe("expression");
+      expect(failure.details?.map(({ path }) => path)).toStrictEqual([
+        ["ci", "on_green", 1, "item"],
+      ]);
+
+      const stored = yield* Schema.decodeEffect(Schema.toCodecJson(LoopFile.fields.ci))({
+        _tag: "Some",
+        value: { fixLoop: "fix", timeoutSeconds: 60 },
+      });
+      expect(Option.map(stored, ({ onGreen }) => onGreen)).toStrictEqual(Option.some([]));
+    }).pipe(Effect.provide(parserLayer)),
+  );
+
   it.effect("reads the PR base commit in conditions and prompts, including older payloads", () =>
     Effect.gen(function* () {
       const parser = yield* ConfigParser;

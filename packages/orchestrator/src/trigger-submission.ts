@@ -2,7 +2,7 @@ import type { ExpressionEngine } from "@usine/expression/expression-engine";
 import { approvalFor } from "./approval.ts";
 import type { ConfigFileError } from "@usine/config/file";
 import type { LoadedInstance } from "@usine/config/instance";
-import type { LoopFile } from "@usine/config/loop";
+import { type LoopFile, loopCiPolicy } from "@usine/config/loop";
 import type { ManagedRepo } from "@usine/config/factory";
 import { Agent, AgentName } from "@usine/core/agent";
 import { AttemptTask } from "@usine/core/attempt";
@@ -104,7 +104,7 @@ export const loopSettings = Effect.fn("TriggerRouting.loopSettings")(function* (
   return {
     ...decision,
     permissions: loop.permissions,
-    ciPolicy: loop.ci,
+    ciPolicy: loopCiPolicy(loop),
     outcomeLabels: loop.outcomeLabels,
     cycleLimit: cycleLimitOf(loop),
     agent,
@@ -186,7 +186,7 @@ export const triggerSubmission = Effect.fn("TriggerRouting.submission")(function
     ...settings,
     repository: options.repository.name,
     revision: options.revision,
-    ...withCiInstructions(options.task, options.loop.ci),
+    ...withCiInstructions(options.task, loopCiPolicy(options.loop)),
   });
 });
 

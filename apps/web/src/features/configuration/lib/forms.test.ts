@@ -4,11 +4,13 @@ import { entityKey } from "./entities";
 import { formText, readForm, withField } from "./forms";
 
 const ciPolicy = "ci: { fix_loop: widgets/fix, timeout_seconds: 3600 }\n";
+const ciLabels =
+  "ci: { fix_loop: widgets/fix, timeout_seconds: 3600, on_green: [{ item: pullRequest.number, add: [ready-for-review] }] }\n";
 
 it.each([
   { priority: "10", ci: "" },
   { priority: "-1", ci: ciPolicy },
-  { priority: "'item.tick.cron == \"0 9 * * *\" ? -1 : 0'", ci: ciPolicy },
+  { priority: "'item.tick.cron == \"0 9 * * *\" ? -1 : 0'", ci: ciLabels },
 ])(
   "preserves priority $priority and CI policy '$ci' when switching between form and text",
   ({ priority, ci }) => {

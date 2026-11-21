@@ -93,6 +93,7 @@ const operatorFailure = (error: BackendError) => {
           return `Could not discard the leftovers on worker "${error.worker}": it is in usine.yaml, or an attempt on it is ending.`;
         return `${error.running} ${error.running === 1 ? "attempt is" : "attempts are"} still running on worker "${error.worker}". Discard its leftovers after they end.`;
       case "CiNotPassedError":
+      case "CiLabelExpressionError":
       case "WorkerPreflightRejectedError":
       case "BackendUnavailableError":
       case "RunRetryBlockedError":

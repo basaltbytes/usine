@@ -269,6 +269,29 @@ export const environmentFor = (stream: Stream): Environment => {
   }
 };
 
+const ciPullRequest = objectType("CiPullRequest", [["number", "int"]]);
+
+const withPullRequest = ({ types, variables }: Environment): Environment =>
+  Environment.make({
+    types: [...types, ciPullRequest],
+    variables: [
+      ...variables,
+      Variable.make({ name: "pullRequest", type: reference("CiPullRequest") }),
+    ],
+  });
+
+const onGreenEnvironments = {
+  issue: withPullRequest(issueEnvironment),
+  pr: withPullRequest(pullRequestEnvironment),
+  schedule: withPullRequest(scheduleEnvironment),
+} satisfies Record<Stream, Environment>;
+
+/**
+ * Returns the CEL type environment of `ci.on_green` item expressions for `stream`: the stream's
+ * environment and `pullRequest`, the pull request whose CI passed.
+ */
+export const onGreenEnvironmentFor = (stream: Stream): Environment => onGreenEnvironments[stream];
+
 /** Returns the value of the CEL `repo` variable; its fields must match the `RepoContext` type. */
 export const repositoryContext = (repository: Pick<ManagedRepo, "name">): Schema.JsonObject => {
   const { owner } = splitRepositoryName(repository.name);

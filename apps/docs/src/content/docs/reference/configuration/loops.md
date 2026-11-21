@@ -97,7 +97,7 @@ If usine can't read the label events, it checks the item's current labels instea
 
 The label-event read, including bot-account lookup and all accounts used by the run, has a 15-second timeout. The current-label read has its own 15-second timeout. usine retries a read twice, after one and two seconds, after timeouts, transport failures, server errors, rate limits, and responses that usine can't read, such as a body that fails partway through. A missing item, a definite refusal such as a 401, 403, or 404 response, or a timeline of more than ten pages of 100 events ends the read without a retry. If the current labels can't be read either, the attempt and run fail with `AgentFailure` in **Needs attention**. A read that times out three times takes about 48 seconds, so when both reads time out, the attempt keeps its worker slot for about 96 seconds before it fails. Verification retries only the reads; it doesn't rerun the agent.
 
-The empty default disables verification. The requirement is saved with the event, so retry and restart retain it; **Run again** uses the current loop setting. Outcome labels apply when the agent ends. For labels applied after CI passes, use the handoff's `on_green` actions instead. Don't list an `on_green` label in `outcome_labels`: usine checks the outcome labels when the agent ends, before the CI wait starts, so the label isn't there yet and the run fails.
+The empty default disables verification. The requirement is saved with the event, so retry and restart retain it; **Run again** uses the current loop setting. Outcome labels apply when the agent ends. For labels applied after CI passes, use the [CI policy's `on_green`](#completion-labels) or the handoff's `on_green` actions instead. Don't list an `on_green` label in `outcome_labels`: usine checks the outcome labels when the agent ends, before the CI wait starts, so the label isn't there yet and the run fails.
 
 A schedule loop can't set `outcome_labels` because its runs have no item to label; the loop fails to load with a schema error. Labels that differ only in letter case are rejected. A label that `usine.yaml` doesn't declare under `labels` still loads, but usine logs `Loop outcome label is not a declared GitHub label` at startup and each time it applies a configuration revision, and the loop's page in **Configuration > Loops** shows a warning next to its outcome labels.
 
@@ -129,5 +129,33 @@ The parent receives the event payload, rendered task, persona, and salvage infor
 | --- | --- | --- | --- |
 | `fix_loop` | qualified loop identity | required | Active pull request loop that selects this repository and handles failed checks or merge conflicts that prevent checks from starting. |
 | `timeout_seconds` | integer, 1–86400 | required | Maximum CI wait after the agent session ends. |
+| `on_green` | list of label changes | `[]` | Labels that usine changes when CI passes, whether or not the agent ended with a CI handoff. |
 
-For example, use fix loop `widgets/act-on-findings` and timeout `1800`. The policy is saved with the event, so later configuration edits do not remove it from an existing run. [Connect review and fix loops](/guides/review-fix-loops/) describes the agent handoff and completion labels.
+For example, use fix loop `widgets/act-on-findings` and timeout `1800`. The fix loop and timeout are saved with the event, so later configuration edits do not remove them from an existing run. [Connect review and fix loops](/guides/review-fix-loops/) describes the agent handoff and completion labels.
+
+### Completion labels
+
+Each `on_green` entry names an item and the labels to add or remove on it:
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `item` | integer CEL expression | required | Number of the issue or pull request to change. |
+| `add` | list of label names | `[]` | Labels to add. |
+| `remove` | list of label names | `[]` | Labels to remove after the additions. |
+
+The `item` expression reads the trigger's `item` and `repo` variables and `pullRequest.number`, the pull request whose CI passed. For example, an issue loop that ends with a pull request moves the pull request to review and clears the issue's progress label:
+
+```yaml
+ci:
+  fix_loop: widgets/act-on-findings
+  timeout_seconds: 1800
+  on_green:
+    - item: pullRequest.number
+      add: [ready-for-review]
+    - item: item.number
+      remove: [agent-in-progress]
+```
+
+usine checks each expression when you save the loop. It evaluates them when CI passes, against the event's saved `item` payload, using the loop's current `on_green`. If the agent's CI handoff also has `on_green` changes, usine applies the handoff's changes first and then the loop's, and applies a change that repeats an earlier one only once. A CI fix inherits both. If an expression fails when CI passes, usine applies no labels and the run appears in **Needs attention**. If an expression fails when a fix run starts, usine logs a warning and the fix inherits only the handoff's changes.
+
+When CI passes on an open pull request and neither the handoff nor the loop names a label change, the attempt and run fail with `AgentFailure` in **Needs attention**. The message names the pull request, which has no completion labels, so no loop picks it up. Apply the labels by hand, then mark the failure resolved.

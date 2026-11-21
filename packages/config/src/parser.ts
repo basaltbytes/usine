@@ -1,5 +1,4 @@
 import { catalog } from "@usine/agents/harness";
-import { CiPolicy } from "@usine/core/ci";
 import { boardRepositories } from "./project/operations.ts";
 import { StepName } from "@usine/core/step";
 import { ApprovalRequirement, LoopName } from "@usine/core/loop";
@@ -34,13 +33,20 @@ import {
   UndeclaredOutcomeLabelWarning,
 } from "./instance/diagnostics.ts";
 import { scheduleWithoutOutcomeLabels } from "./checks.ts";
-import { LoopFile, loopPath, LoopApproval, LoopPriority, PromptTemplate } from "./loop.ts";
+import {
+  LoopCiPolicy,
+  LoopFile,
+  loopPath,
+  LoopApproval,
+  LoopPriority,
+  PromptTemplate,
+} from "./loop.ts";
 import { AgentPersona, AgentName, DecisionBrain } from "@usine/core/agent";
 import { IssueTrigger, PullRequestTrigger, ScheduleTrigger, Stream } from "./trigger.ts";
 import { UsineConfig } from "./factory.ts";
 import { ValidSelector } from "./selector.ts";
 import { Effort, ModelId } from "@usine/core/agent/brain";
-import { environmentFor } from "./payload-slices.ts";
+import { environmentFor, onGreenEnvironmentFor } from "./payload-slices.ts";
 import { parseYamlDocument } from "./yaml/document.ts";
 import { writeYaml } from "./yaml/writer.ts";
 import { loopReferenceFailure, type ReferenceIndex } from "./instance/references.ts";
@@ -85,7 +91,13 @@ class LoopFrontmatter extends Schema.Class<
     permissions: LoopFile.fields.permissions,
     outcomeLabels: LoopFile.fields.outcomeLabels,
     ci: Schema.OptionFromOptionalKey(
-      CiPolicy.pipe(Schema.encodeKeys({ fixLoop: "fix_loop", timeoutSeconds: "timeout_seconds" })),
+      LoopCiPolicy.pipe(
+        Schema.encodeKeys({
+          fixLoop: "fix_loop",
+          timeoutSeconds: "timeout_seconds",
+          onGreen: "on_green",
+        }),
+      ),
     ),
     priority: Schema.OptionFromOptionalKey(LoopPriority),
   }).check(scheduleWithoutOutcomeLabels("outcome_labels")),
@@ -176,7 +188,7 @@ const parseYaml = (
 const expressionError = (
   file: InstancePath,
   error: ExpressionError,
-  path: ReadonlyArray<string>,
+  path: ReadonlyArray<string | number>,
 ): ConfigFileError => {
   const detail: typeof ConfigProblem.Type = {
     path,
@@ -377,6 +389,9 @@ export const parseLoopDraft = (file: InstancePath, source: string) =>
     return LoopFile.make({ name, ...frontmatter, body });
   });
 
+const onGreenItems = (ci: Option.Option<LoopCiPolicy>): ReadonlyArray<Source> =>
+  Option.match(ci, { onNone: () => [], onSome: ({ onGreen }) => onGreen.map(({ item }) => item) });
+
 const checkExpressions = (
   engine: ExpressionEngine["Service"],
   file: InstancePath,
@@ -385,6 +400,7 @@ const checkExpressions = (
   body: Option.Option<PromptTemplate>,
   priority: Option.Option<LoopPriority>,
   approval: Option.Option<LoopApproval>,
+  onGreen: ReadonlyArray<Source>,
 ) =>
   Effect.gen(function* () {
     const failures: Array<ConfigFileError> = [];
@@ -413,6 +429,13 @@ const checkExpressions = (
       const checked = yield* engine.checkScalar(source, environment).pipe(Effect.result);
       if (Result.isFailure(checked))
         failures.push(expressionError(file, checked.failure, ["body"]));
+    }
+    for (const [index, item] of onGreen.entries()) {
+      const checked = yield* engine
+        .checkInteger(item, onGreenEnvironmentFor(stream.value))
+        .pipe(Effect.result);
+      if (Result.isFailure(checked))
+        failures.push(expressionError(file, checked.failure, ["ci", "on_green", index, "item"]));
     }
     return failures;
   });
@@ -503,6 +526,11 @@ const makeCheckLoopDraft = (engine: ExpressionEngine["Service"]) =>
       }),
     )(value);
     const approval = Schema.decodeUnknownOption(Schema.Struct({ approval: LoopApproval }))(value);
+    const ci = Schema.decodeUnknownOption(
+      Schema.Struct({
+        ci: authored ? LoopFrontmatter.fields.ci : Schema.toCodecJson(LoopFile.fields.ci),
+      }),
+    )(value);
 
     problems.push(
       ...(yield* checkExpressions(
@@ -513,6 +541,7 @@ const makeCheckLoopDraft = (engine: ExpressionEngine["Service"]) =>
         Option.map(body, ({ body }) => body),
         Option.flatMap(priority, ({ priority }) => priority),
         Option.map(approval, ({ approval }) => approval),
+        onGreenItems(Option.flatMap(ci, ({ ci }) => ci)),
       )),
     );
     const agent = Schema.decodeUnknownOption(Schema.Struct({ agent: AgentName }))(value);
@@ -554,6 +583,7 @@ const makeParseLoopFile = (engine: ExpressionEngine["Service"]) =>
           Option.some(loop.body),
           loop.priority,
           Option.some(loop.approval),
+          onGreenItems(loop.ci),
         );
         if (Arr.isArrayNonEmpty(failures)) return yield* expressionFailures(file, failures);
         return loop;

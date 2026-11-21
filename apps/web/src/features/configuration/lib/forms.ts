@@ -49,7 +49,14 @@ const encodeCiDraft = Schema.encodeSync(
   Schema.Struct({
     fixLoop: Schema.optionalKey(Schema.Json),
     timeoutSeconds: Schema.optionalKey(Schema.Json),
-  }).pipe(Schema.encodeKeys({ fixLoop: "fix_loop", timeoutSeconds: "timeout_seconds" })),
+    onGreen: Schema.optionalKey(Schema.Json),
+  }).pipe(
+    Schema.encodeKeys({
+      fixLoop: "fix_loop",
+      timeoutSeconds: "timeout_seconds",
+      onGreen: "on_green",
+    }),
+  ),
 );
 
 export const formText = (key: ConfigurationEntityKey, value: Schema.JsonObject): string => {
