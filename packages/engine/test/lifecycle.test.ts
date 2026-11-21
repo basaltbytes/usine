@@ -87,6 +87,8 @@ describe("operator retry", () => {
       "ResumePending",
     );
     assert.strictEqual(decide(RunState.Pending.make(), [], Option.some(wait)), "RetryNow");
+    // An approved Run is Queued and waits for its group in that state.
+    assert.strictEqual(decide(RunState.Queued.make(), [], Option.some(wait)), "RetryNow");
     assert.strictEqual(decide(RunState.Pending.make(), [], Option.none()), "RetryRejected");
     assert.strictEqual(decide(RunState.Queued.make(), [], Option.none()), "RetryRejected");
     // The engine's list of waiting Runs can lag behind the Run's state.
