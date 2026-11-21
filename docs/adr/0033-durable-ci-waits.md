@@ -1,10 +1,10 @@
 # Durable CI waits
 
-A CI wait is run state, not agent work. An attempt that pushed to a pull request ends its session, and the run stays open in `AwaitingCi` with the pull request, the pushed head, the fix loop, the deadline, and the label actions to apply when CI passes. The worker slot is released, no model runs while checks are pending, and a restart keeps the wait. A wait starts from the agent's CI handoff, or from a pushed pull request under the loop's `ci` policy, which the trigger event captures so that a later edit can't drop it. Polling and repository hints read the checks.
+A CI wait is run state, not agent work. An attempt that pushed to a pull request ends its session, and the run stays open in `AwaitingCi` with the pull request, the pushed head, the fix loop, the deadline, and the label actions to apply when CI passes. The worker slot is released, no model runs while checks are pending, and a restart keeps the wait. A wait starts from the agent's CI handoff, or from a pushed pull request under the loop's `ci` policy, which the trigger event captures so that a later edit can't drop it. The label actions are the handoff's and those that the loop declares in `ci.on_green`. The loop's actions are CEL expressions over the trigger item and the waiting pull request, read from the current loop when CI settles, so they don't depend on the agent's final answer. Polling and repository hints read the checks.
 
 CI on the recorded head decides the outcome:
 
-- Green checks apply the label actions, and the run succeeds.
+- Green checks apply the label actions, and the run succeeds. Green checks with no label action to apply fail the run for the operator, because no loop picks up a pull request that nothing labeled, unless the loop sets `on_green: []` to say it changes no labels.
 - Failed checks, or a merge conflict that keeps checks from starting, submit one event to the fix loop through the ordinary cycle budget and approval. Once the fix is admitted, the source run closes as `HandedOff`, a neutral outcome, and the fix inherits the label actions.
 - A newer head or a closed pull request cancels the wait.
 - Checks still pending at the deadline, or CI that ran only in part, fail the run for the operator without an automatic retry. A gate job that failed only because jobs it needs stayed queued counts as CI that ran only in part. The failed run keeps its handoff, so once CI on the same head passes, the operator applies its label actions in one step.

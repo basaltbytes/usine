@@ -1,6 +1,7 @@
-import { type Brand, Match, Option, Result, Schema } from "effect";
+import { Array as Arr, type Brand, Match, Option, Order, Result, Schema } from "effect";
 import { AgentFailure, InfraFailure } from "./attempt/failure.ts";
 import { ItemNumber } from "./item.ts";
+import { jsonKey } from "./json-key.ts";
 import { LoopName } from "./loop.ts";
 import { RunId } from "./run/id.ts";
 import { CommitSha, RepositoryName } from "./repository.ts";
@@ -19,6 +20,21 @@ export class CiLabelMutation extends Schema.Class<
   add: Labels,
   remove: Labels,
 }) {}
+
+const mutationKey = ({ item, add, remove }: CiLabelMutation) =>
+  jsonKey([item, Arr.sort(add, Order.String), Arr.sort(remove, Order.String)]);
+
+/**
+ * Returns the mutations that change at least one label, in order, without a mutation that makes
+ * the same changes on the same item as an earlier one.
+ */
+export const distinctLabelMutations = (
+  mutations: ReadonlyArray<CiLabelMutation>,
+): ReadonlyArray<CiLabelMutation> =>
+  Arr.dedupeWith(
+    mutations.filter(({ add, remove }) => add.length + remove.length > 0),
+    (first, second) => mutationKey(first) === mutationKey(second),
+  );
 
 /** The CI requirement configured on a loop and saved when its event matches. */
 export class CiPolicy extends Schema.Class<CiPolicy, Brand.Brand<"@usine/core/ci/CiPolicy">>(
@@ -75,6 +91,18 @@ export class CiPassed extends Schema.TaggedClass<
   Brand.Brand<"@usine/core/ci/CiPassed">
 >()("CiPassed", {}) {}
 
+/**
+ * CI passed for the recorded head, but usine had no label change to apply, so no loop picks up
+ * the pull request. The operator applies the labels.
+ */
+export class CiPassedWithoutLabels extends Schema.TaggedClass<
+  CiPassedWithoutLabels,
+  Brand.Brand<"@usine/core/ci/CiPassedWithoutLabels">
+>()("CiPassedWithoutLabels", {
+  /** An operator-facing explanation of why usine applied no labels. */
+  message: Schema.NonEmptyString,
+}) {}
+
 /** CI failed without an admitted fix. */
 export class CiFailed extends Schema.TaggedClass<
   CiFailed,
@@ -130,6 +158,7 @@ export class CiPullRequestClosed extends Schema.TaggedClass<
 /** A terminal observation of the recorded head's CI. */
 export const CiResolution = Schema.Union([
   CiPassed,
+  CiPassedWithoutLabels,
   CiFailed,
   CiTimedOut,
   CiIncomplete,

@@ -11,7 +11,7 @@ import { capacityAttentionFor } from "./capacity.ts";
 import { WorkerPreflightView, workerPreflightView } from "./preflight.ts";
 export { WorkerPreflightView } from "./preflight.ts";
 import { WebhookHealth } from "../webhooks.ts";
-import { CiMonitor, type CiNotPassedError } from "../ci.ts";
+import { CiMonitor, type CiLabelExpressionError, type CiNotPassedError } from "../ci.ts";
 import { webhookAttentionFor } from "./webhooks.ts";
 import type { ConfigurationStoreError } from "@usine/config/configuration";
 import { groupProjectViews } from "./projects.ts";
@@ -43,6 +43,7 @@ import { Agent } from "@usine/core/agent";
 import { AttemptContext, AttemptId } from "@usine/core/attempt";
 import { Intervention } from "@usine/core/attempt/channel";
 import type { LoadedInstance } from "@usine/config/instance";
+import { loopCiPolicy } from "@usine/config/loop";
 import { Event, DedupKey, EventId } from "@usine/core/event";
 import { CycleBudgetAskId } from "@usine/core/cycle-budget";
 import { BoardMoveRecord, BoardMoves } from "@usine/engine/board-moves";
@@ -207,6 +208,7 @@ export type BoardMoveError =
 export type OperatorError =
   | AccessDenied
   | CiNotPassedError
+  | CiLabelExpressionError
   | WorkerPreflightRejectedError
   | LoopNotFoundError
   | RosterAgentNotFoundError
@@ -1443,7 +1445,7 @@ const makeOperator = Effect.gen(function* () {
     yield* requireRunOperation(instance, runId);
     yield* Effect.annotateCurrentSpan({ runId, attemptId });
     const actor = yield* requestActor(instance.config.operator);
-    yield* ci.applyLabelsAfterGreen(runId, attemptId, actor);
+    yield* ci.applyLabelsAfterGreen(instance, runId, attemptId, actor);
   });
 
   const retry = Effect.fn("Operator.retry")(function* (instance: LoadedInstance, runId: RunId) {
@@ -1529,7 +1531,7 @@ const makeOperator = Effect.gen(function* () {
         )),
         cycleLimit: cycleLimitOf(loop),
         permissions: loop.permissions,
-        ciPolicy: loop.ci,
+        ciPolicy: loopCiPolicy(loop),
         outcomeLabels: loop.outcomeLabels,
         context: AttemptContext.make({ task: edit.task, agent }),
         requestedBy: yield* requestActor(instance.config.operator),
@@ -1843,7 +1845,8 @@ export class Operator extends Context.Service<
      * Applies the completion labels of a Run whose CI wait ended because CI on its head didn't
      * finish, once CI on that head has passed, and resolves the displayed failed Attempt. Fails with
      * `CiNotPassedError` while CI on the head hasn't passed in full or after its pull request closed
-     * without a merge.
+     * without a merge, and with `CiLabelExpressionError` if an `on_green` item expression of the
+     * Run's loop fails.
      */
     readonly applyCiLabels: (
       instance: LoadedInstance,
@@ -1931,7 +1934,7 @@ export class Operator extends Context.Service<
   );
 }
 
-export { CiNotPassedError } from "../ci.ts";
+export { CiLabelExpressionError, CiNotPassedError } from "../ci.ts";
 export {
   ProjectStatus,
   ProjectView,

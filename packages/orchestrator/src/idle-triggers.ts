@@ -11,7 +11,7 @@ import { ScheduleCycle, ScheduleTriggers } from "./schedule-triggers.ts";
 export const idleTriggersLayer = Layer.mergeAll(
   Layer.succeed(CiMonitor)({
     reconcile: () => Effect.succeed({ outcomes: [], failures: [], nextPollAt: Option.none() }),
-    applyLabelsAfterGreen: (runId) => Effect.fail(RunNotFoundError.make({ runId })),
+    applyLabelsAfterGreen: (_instance, runId) => Effect.fail(RunNotFoundError.make({ runId })),
   }),
   Layer.succeed(PollingTriggers)({
     lastHint: Effect.succeedNone,

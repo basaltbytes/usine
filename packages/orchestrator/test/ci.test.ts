@@ -13,9 +13,15 @@ import { NodeServices } from "@effect/platform-node";
 import { AgentFile } from "@usine/config/agent";
 import { UsineConfig } from "@usine/config/factory";
 import { LoadedInstance } from "@usine/config/instance";
-import { LoopFile, PromptTemplate } from "@usine/config/loop";
+import {
+  LoopCiLabelMutation,
+  LoopCiPolicy,
+  LoopFile,
+  loopCiPolicy,
+  PromptTemplate,
+} from "@usine/config/loop";
 import { ConfigParser } from "@usine/config/parser";
-import { PullRequestTrigger } from "@usine/config/trigger";
+import { IssueTrigger, PullRequestTrigger } from "@usine/config/trigger";
 import { AgentName, AgentPersona } from "@usine/core/agent";
 import { Harness, ModelId } from "@usine/core/agent/brain";
 import { AttemptTask } from "@usine/core/attempt";
@@ -63,6 +69,7 @@ import {
   ContentHash,
   GitHubPolling,
   GitHubItemNotFoundError,
+  IssuePayload,
   PullRequestPayload,
   PullRequestSnapshot,
   RepositoryChanges,
@@ -166,6 +173,7 @@ const scenario = Effect.fn("test.ciScenario")(function* (
   fixCompletion: Effect.Effect<StepResult> = Effect.succeed(
     StepResult.make({ message: "Fixed", facts: [] }),
   ),
+  report: "handoff" | "prose" = "handoff",
 ) {
   const fixtureInstance = yield* instance;
   const fixturePayload = yield* payload;
@@ -191,7 +199,10 @@ const scenario = Effect.fn("test.ciScenario")(function* (
     ReadonlyArray<{ readonly item: number; readonly mutation: ItemLabelMutation }>
   >([]);
   const result = StepResult.make({
-    message: `[usine:awaiting-ci]\n${jsonKey({ pull_request: 815, head, fix_loop: "fix", timeout_seconds: timeoutSeconds, on_green: [{ item: 811, add: ["implemented"], remove: ["agent-in-progress"] }] })}`,
+    message:
+      report === "handoff"
+        ? `[usine:awaiting-ci]\n${jsonKey({ pull_request: 815, head, fix_loop: "fix", timeout_seconds: timeoutSeconds, on_green: [{ item: 811, add: ["implemented"], remove: ["agent-in-progress"] }] })}`
+        : "Implemented #811 and opened pull request #815.",
     facts: [
       PullRequest.make({
         number: 815,
@@ -423,23 +434,23 @@ const scenario = Effect.fn("test.ciScenario")(function* (
   };
 });
 
-const openWait = Effect.fn("test.openCiWait")(function* (timeoutSeconds: number, sameLoop = false) {
-  const fixturePayload = yield* payload;
+// Opens a Run of `triggered` for the Item numbered `item` and waits until it waits for CI.
+const openWaitOf = Effect.fn("test.openCiWaitOf")(function* (
+  triggered: LoopFile,
+  item: number,
+  itemPayload: Schema.Json,
+) {
   const fixtureInstance = yield* instance;
   const engine = yield* RunEngine;
   const expressions = yield* ExpressionEngine;
 
   const submission = yield* triggerSubmission(expressions, {
-    loop: LoopFile.make({
-      ...loop,
-      name: sameLoop === true ? loop.name : LoopName.make("development"),
-      ci: Option.some(CiPolicy.make({ fixLoop: loop.name, timeoutSeconds })),
-    }),
+    loop: triggered,
     agent: agent.agent,
     dedupKey: DedupKey.make("ci-development"),
     cycleGeneration: CycleGeneration.make(0),
-    itemKey: gitHubItemKey(repository, 815),
-    payload: fixturePayload,
+    itemKey: gitHubItemKey(repository, item),
+    payload: itemPayload,
     receivedAt: yield* DateTime.now,
     repository: fixtureInstance.config.repos[0] ?? assert.fail("missing repo"),
     revision: RepositoryRevision.make(head),
@@ -456,6 +467,133 @@ const openWait = Effect.fn("test.openCiWait")(function* (timeoutSeconds: number,
   );
   return accepted.runId;
 });
+
+const openWait = Effect.fn("test.openCiWait")(function* (timeoutSeconds: number, sameLoop = false) {
+  const fixturePayload = yield* payload;
+  return yield* openWaitOf(
+    LoopFile.make({
+      ...loop,
+      name: sameLoop === true ? loop.name : LoopName.make("development"),
+      ci: Option.some(LoopCiPolicy.make({ fixLoop: loop.name, timeoutSeconds })),
+    }),
+    815,
+    fixturePayload,
+  );
+});
+
+const issuePayload = Schema.decodeEffect(IssuePayload)({
+  number: 811,
+  title: "Add a feature",
+  body: "",
+  url: `https://github.com/${repository}/issues/811`,
+  state: "OPEN",
+  stateReason: null,
+  createdAt: "2026-11-01T00:00:00Z",
+  updatedAt: "2026-11-01T00:00:00Z",
+  closedAt: null,
+  author: null,
+  issueType: null,
+  milestone: null,
+  labels: { totalCount: 1, nodes: [{ name: "agent-in-progress" }] },
+  labelEvents: {},
+  assignees: { totalCount: 0, nodes: [] },
+  comments: { totalCount: 0, nodes: [] },
+  closedByPullRequestsReferences: { totalCount: 0, nodes: [] },
+});
+
+// A development loop on issues that ends with a pull request whose CI must pass.
+const issueLoop = (onGreen: LoopCiPolicy["onGreen"]) =>
+  LoopFile.make({
+    ...loop,
+    name: LoopName.make("development"),
+    trigger: IssueTrigger.make({ on: "issue", if: Source.make("false") }),
+    ci: Option.some(LoopCiPolicy.make({ fixLoop: loop.name, timeoutSeconds: 3600, onGreen })),
+  });
+
+// Runs an Attempt of a development loop that declares `onGreen` and reports without a CI handoff,
+// then observes green CI on its pull request.
+const greenAfterProseReport = Effect.fn("test.greenAfterProseReport")(function* (
+  onGreen: LoopCiPolicy["onGreen"],
+) {
+  const fixtureInstance = yield* instance;
+  const development = issueLoop(onGreen);
+  const configured = LoadedInstance.make({ ...fixtureInstance, loops: [loop, development] });
+  const setup = yield* scenario(3600, configured, undefined, "prose");
+  return yield* Effect.gen(function* () {
+    const engine = yield* RunEngine;
+    const issue = yield* issuePayload;
+    const runId = yield* openWaitOf(development, 811, issue);
+    yield* Ref.set(
+      setup.observed,
+      CheckSnapshot.make({ pullRequestState: "open", head, state: "success" }),
+    );
+
+    yield* (yield* CiMonitor).reconcile(configured, Option.none());
+
+    const settled = yield* engine.inspect(runId);
+    const applied = (yield* Ref.get(setup.mutations)).map(({ item, mutation }) => ({
+      item,
+      add: mutation.add,
+      remove: mutation.remove,
+    }));
+    return { settled, applied, view: runView(settled, new Set(), declaredWorkers([])) };
+  }).pipe(Effect.provide(setup.runtime));
+});
+
+it.live("green CI after a report without a handoff applies the loop's on_green labels", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const { settled, applied, view } = yield* greenAfterProseReport(
+        Option.some([
+          LoopCiLabelMutation.make({
+            item: Source.make("pullRequest.number"),
+            add: ["ready-for-review"],
+          }),
+          LoopCiLabelMutation.make({
+            item: Source.make("item.number"),
+            remove: ["agent-in-progress"],
+          }),
+        ]),
+      );
+
+      assert.strictEqual(settled.run.state._tag, "Succeeded");
+      assert.deepStrictEqual(applied, [
+        { item: 815, add: ["ready-for-review"], remove: [] },
+        { item: 811, add: [], remove: ["agent-in-progress"] },
+      ]);
+      assert.isFalse(runNeedsAttention(view, false));
+    }),
+  ).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.live("green CI after a report without a handoff passes when the loop sets on_green: []", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const { settled, applied, view } = yield* greenAfterProseReport(Option.some([]));
+
+      assert.strictEqual(settled.run.state._tag, "Succeeded");
+      assert.deepStrictEqual(applied, []);
+      assert.isFalse(runNeedsAttention(view, false));
+    }),
+  ).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.live(
+  "green CI after a report without a handoff from a loop without on_green needs attention",
+  () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { settled, applied, view } = yield* greenAfterProseReport(Option.none());
+
+        assert.strictEqual(settled.run.state._tag, "Failed");
+        assert.deepStrictEqual(applied, []);
+        assert.isTrue(runNeedsAttention(view, false));
+        const outcome = Option.getOrNull(settled.attempts.at(-1)?.outcome ?? Option.none());
+        assert(outcome?._tag === "Failed" && outcome.failure._tag === "AgentFailure");
+        assert.include(outcome.failure.message, `https://github.com/${repository}/pull/815`);
+      }),
+    ).pipe(Effect.provide(NodeServices.layer)),
+);
 
 it.live("reports CI observation failures after a repository is removed from configuration", () =>
   Effect.scoped(
@@ -1667,7 +1805,7 @@ it.live("a later green run on the same head applies the recorded labels and reso
 
         // The rerun is still queued, so the labels wait.
         const pending = yield* Effect.flip(
-          monitor.applyLabelsAfterGreen(runId, attemptId, Option.none()),
+          monitor.applyLabelsAfterGreen(fixtureInstance, runId, attemptId, Option.none()),
         );
         assert(pending._tag === "CiNotPassedError");
         assert.include(pending.message, `CI on head ${head} is still pending.`);
@@ -1677,7 +1815,7 @@ it.live("a later green run on the same head applies the recorded labels and reso
           CheckSnapshot.make({ pullRequestState: "open", head, state: "success" }),
         );
         const unfinished = yield* Effect.flip(
-          monitor.applyLabelsAfterGreen(runId, attemptId, Option.none()),
+          monitor.applyLabelsAfterGreen(fixtureInstance, runId, attemptId, Option.none()),
         );
         assert(unfinished._tag === "CiNotPassedError");
         assert.include(unfinished.message, "CI (run 43097310882, queued)");
@@ -1689,7 +1827,7 @@ it.live("a later green run on the same head applies the recorded labels and reso
           Effect.succeed(HeadWorkflowRunState.make({ failed: [partialRun], running: [] })),
         );
         const partial = yield* Effect.flip(
-          monitor.applyLabelsAfterGreen(runId, attemptId, Option.none()),
+          monitor.applyLabelsAfterGreen(fixtureInstance, runId, attemptId, Option.none()),
         );
         assert(partial._tag === "CiNotPassedError");
         assert.include(partial.message, `CI (run 42672750451, failure): ${partialRun.url}`);
@@ -1699,7 +1837,7 @@ it.live("a later green run on the same head applies the recorded labels and reso
           setup.workflowRuns,
           Effect.succeed(HeadWorkflowRunState.make({ failed: [], running: [] })),
         );
-        yield* monitor.applyLabelsAfterGreen(runId, attemptId, Option.none());
+        yield* monitor.applyLabelsAfterGreen(fixtureInstance, runId, attemptId, Option.none());
 
         const resolved = yield* engine.inspect(runId);
         assert.isTrue(Option.contains(resolved.resolvedFailureAttemptId, attemptId));
@@ -1715,7 +1853,7 @@ it.live("a later green run on the same head applies the recorded labels and reso
           [{ item: 811, add: ["implemented"], remove: ["agent-in-progress"] }],
         );
         const again = yield* Effect.flip(
-          monitor.applyLabelsAfterGreen(runId, attemptId, Option.none()),
+          monitor.applyLabelsAfterGreen(fixtureInstance, runId, attemptId, Option.none()),
         );
         assert.strictEqual(again._tag, "RunOperationRejectedError");
         assert.strictEqual((yield* Ref.get(setup.mutations)).length, 1);
@@ -1753,7 +1891,7 @@ it.live("unreadable workflow runs leave Apply CI labels to the check rollup", ()
         const { attemptId } = failedAttempt(timedOut);
 
         const pending = yield* Effect.flip(
-          monitor.applyLabelsAfterGreen(runId, attemptId, Option.none()),
+          monitor.applyLabelsAfterGreen(fixtureInstance, runId, attemptId, Option.none()),
         );
         assert(pending._tag === "CiNotPassedError");
         assert.include(pending.message, `CI on head ${head} is still pending.`);
@@ -1762,7 +1900,7 @@ it.live("unreadable workflow runs leave Apply CI labels to the check rollup", ()
           setup.observed,
           CheckSnapshot.make({ pullRequestState: "open", head, state: "success" }),
         );
-        yield* monitor.applyLabelsAfterGreen(runId, attemptId, Option.none());
+        yield* monitor.applyLabelsAfterGreen(fixtureInstance, runId, attemptId, Option.none());
 
         const resolved = yield* engine.inspect(runId);
         assert.isTrue(Option.contains(resolved.resolvedFailureAttemptId, attemptId));
@@ -1802,7 +1940,7 @@ it.live("a new head after an unfinished CI wait leaves its labels unapplied", ()
         );
 
         const moved = yield* Effect.flip(
-          monitor.applyLabelsAfterGreen(runId, attemptId, Option.none()),
+          monitor.applyLabelsAfterGreen(fixtureInstance, runId, attemptId, Option.none()),
         );
 
         assert(moved._tag === "CiNotPassedError");
@@ -1840,7 +1978,7 @@ it.live("green CI on a closed pull request after an unfinished CI wait applies n
         );
 
         const applied = yield* Effect.result(
-          monitor.applyLabelsAfterGreen(runId, attemptId, Option.none()),
+          monitor.applyLabelsAfterGreen(fixtureInstance, runId, attemptId, Option.none()),
         );
 
         assert(applied._tag === "Failure");
@@ -1908,13 +2046,18 @@ it.live("an earlier failed attempt doesn't apply the labels of a later unfinishe
         );
 
         const stale = yield* Effect.flip(
-          monitor.applyLabelsAfterGreen(runId, earlier.attemptId, Option.none()),
+          monitor.applyLabelsAfterGreen(fixtureInstance, runId, earlier.attemptId, Option.none()),
         );
 
         assert.strictEqual(stale._tag, "RunOperationRejectedError");
         assert.strictEqual((yield* Ref.get(setup.mutations)).length, 0);
 
-        yield* monitor.applyLabelsAfterGreen(runId, later.attemptId, Option.none());
+        yield* monitor.applyLabelsAfterGreen(
+          fixtureInstance,
+          runId,
+          later.attemptId,
+          Option.none(),
+        );
 
         assert.deepStrictEqual(
           (yield* Ref.get(setup.mutations)).map(({ item, mutation }) => ({
@@ -2067,89 +2210,111 @@ it.live("red CI observed after the deadline starts one budgeted fix with failure
   ).pipe(Effect.provide(NodeServices.layer)),
 );
 
-it.live("issue and PR completion actions survive an initial failure and successive CI fixes", () =>
-  Effect.scoped(
-    Effect.gen(function* () {
-      const fixtureInstance = yield* instance;
-      const fixturePayload = yield* payload;
-      const heads = [CommitSha.make("b".repeat(40)), CommitSha.make("c".repeat(40))];
-      const completedFixes = yield* Ref.make(0);
-
-      const setup = yield* scenario(
-        3600,
-        fixtureInstance,
-        Ref.updateAndGet(completedFixes, (count) => count + 1).pipe(
-          Effect.map((count) => {
-            const fixedHead = heads[count - 1] ?? assert.fail("unexpected fix attempt");
-            return StepResult.make({
-              message: `[usine:awaiting-ci]\n${jsonKey({ pull_request: 815, head: fixedHead, fix_loop: "fix", timeout_seconds: 3600, on_green: [{ item: 815, add: [count === 1 ? "fix-validated" : "ready-for-review"], remove: ["agent-review-findings"] }] })}`,
-              facts: [
-                PullRequest.make({
-                  number: 815,
-                  url: new URL(fixturePayload.url),
-                  head: Option.some(fixedHead),
+it.live(
+  "handoff and loop completion actions survive an initial failure and successive CI fixes",
+  () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixtureInstance = yield* instance;
+        const fixturePayload = yield* payload;
+        const heads = [CommitSha.make("b".repeat(40)), CommitSha.make("c".repeat(40))];
+        const completedFixes = yield* Ref.make(0);
+        const configured = LoadedInstance.make({
+          ...fixtureInstance,
+          loops: [
+            loop,
+            LoopFile.make({
+              ...loop,
+              name: LoopName.make("development"),
+              ci: Option.some(
+                LoopCiPolicy.make({
+                  fixLoop: loop.name,
+                  timeoutSeconds: 3600,
+                  onGreen: Option.some([
+                    LoopCiLabelMutation.make({ item: Source.make("item.number"), add: ["tested"] }),
+                  ]),
                 }),
-              ],
-            });
-          }),
-        ),
-      );
-      yield* Effect.gen(function* () {
-        const engine = yield* RunEngine;
-        const monitor = yield* CiMonitor;
-        let sourceId = yield* openWait(setup.timeoutSeconds);
-        let failedHead = head;
-        for (const fixedHead of heads) {
+              ),
+            }),
+          ],
+        });
+
+        const setup = yield* scenario(
+          3600,
+          configured,
+          Ref.updateAndGet(completedFixes, (count) => count + 1).pipe(
+            Effect.map((count) => {
+              const fixedHead = heads[count - 1] ?? assert.fail("unexpected fix attempt");
+              return StepResult.make({
+                message: `[usine:awaiting-ci]\n${jsonKey({ pull_request: 815, head: fixedHead, fix_loop: "fix", timeout_seconds: 3600, on_green: [{ item: 815, add: [count === 1 ? "fix-validated" : "ready-for-review"], remove: ["agent-review-findings"] }] })}`,
+                facts: [
+                  PullRequest.make({
+                    number: 815,
+                    url: new URL(fixturePayload.url),
+                    head: Option.some(fixedHead),
+                  }),
+                ],
+              });
+            }),
+          ),
+        );
+        yield* Effect.gen(function* () {
+          const engine = yield* RunEngine;
+          const monitor = yield* CiMonitor;
+          let sourceId = yield* openWait(setup.timeoutSeconds);
+          let failedHead = head;
+          for (const fixedHead of heads) {
+            yield* Ref.set(
+              setup.observed,
+              CheckSnapshot.make({ pullRequestState: "open", head: failedHead, state: "failure" }),
+            );
+
+            yield* monitor.reconcile(configured, Option.none());
+            const source = yield* engine.inspect(sourceId);
+            assert(source.run.state._tag === "HandedOff");
+            sourceId = source.run.state.fixRunId;
+            const fix = yield* engine.inspect(sourceId).pipe(
+              Effect.repeat({
+                until: ({ run }) => run.state._tag === "AwaitingCi",
+                schedule: Schedule.spaced("10 millis"),
+              }),
+              Effect.timeout("5 seconds"),
+            );
+            assert(fix.run.state._tag === "AwaitingCi");
+            assert.strictEqual(fix.run.state.handoff.head, fixedHead);
+
+            assert.strictEqual((yield* Ref.get(setup.mutations)).length, 0);
+            failedHead = fixedHead;
+          }
           yield* Ref.set(
             setup.observed,
-            CheckSnapshot.make({ pullRequestState: "open", head: failedHead, state: "failure" }),
+            CheckSnapshot.make({ pullRequestState: "open", head: failedHead, state: "success" }),
           );
 
-          yield* monitor.reconcile(fixtureInstance, Option.none());
-          const source = yield* engine.inspect(sourceId);
-          assert(source.run.state._tag === "HandedOff");
-          sourceId = source.run.state.fixRunId;
-          const fix = yield* engine.inspect(sourceId).pipe(
-            Effect.repeat({
-              until: ({ run }) => run.state._tag === "AwaitingCi",
-              schedule: Schedule.spaced("10 millis"),
-            }),
-            Effect.timeout("5 seconds"),
+          yield* monitor.reconcile(configured, Option.none());
+
+          yield* monitor.reconcile(configured, Option.none());
+
+          assert.strictEqual((yield* engine.inspect(sourceId)).run.state._tag, "Succeeded");
+
+          assert.deepStrictEqual(
+            (yield* Ref.get(setup.mutations)).map(({ item, mutation }) => ({
+              item,
+              add: mutation.add,
+              remove: mutation.remove,
+            })),
+            [
+              { item: 811, add: ["implemented"], remove: ["agent-in-progress"] },
+              { item: 815, add: ["tested"], remove: [] },
+              { item: 815, add: ["fix-validated"], remove: ["agent-review-findings"] },
+              { item: 815, add: ["ready-for-review"], remove: ["agent-review-findings"] },
+            ],
           );
-          assert(fix.run.state._tag === "AwaitingCi");
-          assert.strictEqual(fix.run.state.handoff.head, fixedHead);
 
-          assert.strictEqual((yield* Ref.get(setup.mutations)).length, 0);
-          failedHead = fixedHead;
-        }
-        yield* Ref.set(
-          setup.observed,
-          CheckSnapshot.make({ pullRequestState: "open", head: failedHead, state: "success" }),
-        );
-
-        yield* monitor.reconcile(fixtureInstance, Option.none());
-
-        yield* monitor.reconcile(fixtureInstance, Option.none());
-
-        assert.strictEqual((yield* engine.inspect(sourceId)).run.state._tag, "Succeeded");
-
-        assert.deepStrictEqual(
-          (yield* Ref.get(setup.mutations)).map(({ item, mutation }) => ({
-            item,
-            add: mutation.add,
-            remove: mutation.remove,
-          })),
-          [
-            { item: 811, add: ["implemented"], remove: ["agent-in-progress"] },
-            { item: 815, add: ["fix-validated"], remove: ["agent-review-findings"] },
-            { item: 815, add: ["ready-for-review"], remove: ["agent-review-findings"] },
-          ],
-        );
-
-        assert.strictEqual((yield* Ref.get(setup.tasks)).length, 3);
-      }).pipe(Effect.provide(setup.runtime));
-    }),
-  ).pipe(Effect.provide(NodeServices.layer)),
+          assert.strictEqual((yield* Ref.get(setup.tasks)).length, 3);
+        }).pipe(Effect.provide(setup.runtime));
+      }),
+    ).pipe(Effect.provide(NodeServices.layer)),
 );
 
 it.live("a pending check timeout records infrastructure failure with job diagnostics", () =>
@@ -2834,8 +2999,11 @@ it.live.each(["removed", "changed"] as const)(
     Effect.scoped(
       Effect.gen(function* () {
         const fixtureInstance = yield* instance;
-        const oldPolicy = CiPolicy.make({ fixLoop: LoopName.make("old-fix"), timeoutSeconds: 60 });
-        const newPolicy = CiPolicy.make({
+        const oldPolicy = LoopCiPolicy.make({
+          fixLoop: LoopName.make("old-fix"),
+          timeoutSeconds: 60,
+        });
+        const newPolicy = LoopCiPolicy.make({
           fixLoop: LoopName.make("new-fix"),
           timeoutSeconds: 7200,
         });
@@ -2907,7 +3075,7 @@ it.live.each(["removed", "changed"] as const)(
           );
           assert.deepStrictEqual(fix.agent, editedAgent.agent);
           assert.strictEqual(fix.permissions, "read");
-          assert.deepStrictEqual(fix.ciPolicy, editedLoop.ci);
+          assert.deepStrictEqual(fix.ciPolicy, loopCiPolicy(editedLoop));
           yield* engine.approve(
             fixId.value,
             Event.make({
@@ -2930,7 +3098,7 @@ it.live.each(["removed", "changed"] as const)(
           assert.deepStrictEqual(saved.cycleLimit, Option.some(CycleLimit.make(4)));
           assert.deepStrictEqual(saved.agent, editedAgent.agent);
           assert.strictEqual(saved.permissions, "read");
-          assert.deepStrictEqual(saved.ciPolicy, editedLoop.ci);
+          assert.deepStrictEqual(saved.ciPolicy, loopCiPolicy(editedLoop));
           assert.strictEqual(saved.task, fix.task);
           assert.include(fix.task, "Fix the failing checks.");
           assert.include(fix.task, "TypeError: failing CI log");
@@ -2972,7 +3140,7 @@ it.live("a replayed CI fix recorded with an earlier wording ends with one curren
             ...loop,
             maxCycles: CycleLimit.make(1),
             approval: "required",
-            ci: Option.some(policy),
+            ci: Option.some(LoopCiPolicy.make(policy)),
           }),
         ],
       });
@@ -3011,7 +3179,10 @@ it.live("a replayed CI fix recorded with an earlier wording ends with one curren
             ),
           ),
         );
-        const current = withCiInstructions("", Option.some(policy)).ciInstructions;
+        const current = withCiInstructions(
+          "",
+          Option.some(LoopCiPolicy.make(policy)),
+        ).ciInstructions;
         assert(Option.isSome(current));
         assert.strictEqual(row.ci_instructions, current.value);
         assert(row.task.endsWith(current.value));

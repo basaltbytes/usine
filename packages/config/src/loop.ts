@@ -1,6 +1,7 @@
-import { CiPolicy } from "@usine/core/ci";
+import { CiLabelMutation, CiPolicy } from "@usine/core/ci";
 import { AgentName } from "@usine/core/agent";
 import { CycleLimit, DEFAULT_CYCLE_LIMIT } from "@usine/core/cycle-budget";
+import { ItemNumber } from "@usine/core/item";
 import { LoopName, ApprovalRequirement, LoopPermissions, OutcomeLabels } from "@usine/core/loop";
 import { StepName } from "@usine/core/step";
 import { type Brand, Effect, Option, Predicate, Schema } from "effect";
@@ -9,7 +10,7 @@ import {
   ExpressionEvaluationError,
   Source,
 } from "@usine/expression/expression-engine";
-import { environmentFor } from "./payload-slices.ts";
+import { environmentFor, onGreenEnvironmentFor } from "./payload-slices.ts";
 import { InstancePath, ConfigFileError } from "./file.ts";
 import { nonBlankString, scheduleWithoutOutcomeLabels, uniqueLabelNames } from "./checks.ts";
 import { ValidSelector } from "./selector.ts";
@@ -41,6 +42,39 @@ export type LoopPriority = typeof LoopPriority.Type;
 export const LoopApproval = Schema.Union([ApprovalRequirement, Source]);
 export type LoopApproval = typeof LoopApproval.Type;
 
+const OptionalLabels = CiLabelMutation.fields.add.pipe(
+  Schema.withDecodingDefaultKey(Effect.succeed([])),
+  Schema.withConstructorDefault(Effect.succeed([])),
+);
+
+/**
+ * Labels to change after CI passes on the item that the CEL `int` expression `item` names. The
+ * expression reads `item`, `repo`, and `pullRequest`, the pull request whose CI passed.
+ */
+export class LoopCiLabelMutation extends Schema.Class<
+  LoopCiLabelMutation,
+  Brand.Brand<"@usine/config/loop/LoopCiLabelMutation">
+>("@usine/config/LoopCiLabelMutation")({
+  item: Source,
+  add: OptionalLabels,
+  remove: OptionalLabels,
+}) {}
+
+/** The loop's CI requirement and the label changes to apply when CI passes. */
+export class LoopCiPolicy extends Schema.Class<
+  LoopCiPolicy,
+  Brand.Brand<"@usine/config/loop/LoopCiPolicy">
+>("@usine/config/LoopCiPolicy")({
+  ...CiPolicy.fields,
+  /**
+   * Applied with the label changes of the agent's CI handoff, read from the current loop. `None`
+   * when the key is absent; an empty list means the loop applies no labels when CI passes.
+   */
+  onGreen: Schema.OptionFromOptionalKey(Schema.Array(LoopCiLabelMutation)).pipe(
+    Schema.withConstructorDefault(Effect.succeedNone),
+  ),
+}) {}
+
 /**
  * A parsed loop definition from `projects/<project>/loops/<loop>.md` or the legacy
  * `loops/<name>.md` format.
@@ -68,7 +102,7 @@ export class LoopFile extends Schema.Class<LoopFile, Brand.Brand<"@usine/config/
       Schema.withConstructorDefault(Effect.succeed(DEFAULT_CYCLE_LIMIT)),
     ),
     /** The CI requirement for successful pushes, or `None` for loops that finish in the session. */
-    ci: Schema.Option(CiPolicy).pipe(
+    ci: Schema.Option(LoopCiPolicy).pipe(
       Schema.withDecodingDefaultTypeKey(Effect.succeedNone),
       Schema.withConstructorDefault(Effect.succeedNone),
     ),
@@ -114,6 +148,46 @@ export const loopPath = (name: LoopName): InstancePath => {
     loop === undefined ? `loops/${name}.md` : `projects/${project}/loops/${loop}.md`,
   );
 };
+
+/** Returns the CI requirement that a trigger event of `loop` records, or `None` without one. */
+export const loopCiPolicy = (loop: LoopFile): Option.Option<CiPolicy> =>
+  Option.map(loop.ci, ({ fixLoop, timeoutSeconds }) => CiPolicy.make({ fixLoop, timeoutSeconds }));
+
+/**
+ * Evaluates the `ci.on_green` item expressions of `loop` against `context`, which holds `item`,
+ * `repo`, and `pullRequest`. Returns `None` if the loop doesn't set `ci.on_green`. Fails with the
+ * first expression error, or with `ExpressionEvaluationError` for a result that isn't an item
+ * number.
+ */
+export const evaluateOnGreen = Effect.fn("Loop.evaluateOnGreen")(function* (
+  expressions: ExpressionEngine["Service"],
+  loop: LoopFile,
+  context: Schema.JsonObject,
+) {
+  yield* Effect.annotateCurrentSpan({ loop: loop.name });
+  const environment = onGreenEnvironmentFor(loop.trigger.on);
+  const evaluate = ({ item, add, remove }: LoopCiLabelMutation) =>
+    expressions.evaluateInteger(item, environment, context).pipe(
+      Effect.flatMap((value) =>
+        Schema.decodeEffect(ItemNumber)(Number(value)).pipe(
+          Effect.mapError(() =>
+            ExpressionEvaluationError.make({
+              source: item,
+              message: `An on_green item must be an issue or pull request number, not ${value}`,
+            }),
+          ),
+        ),
+      ),
+      Effect.map((number) => CiLabelMutation.make({ item: number, add, remove })),
+    );
+  return yield* Option.match(
+    Option.flatMap(loop.ci, ({ onGreen }) => onGreen),
+    {
+      onNone: () => Effect.succeedNone,
+      onSome: (mutations) => Effect.forEach(mutations, evaluate).pipe(Effect.asSome),
+    },
+  );
+});
 
 /** Evaluates the priority against the supplied item and repository snapshot. */
 export const evaluateLoopPriority = Effect.fn("Loop.evaluatePriority")(function* (

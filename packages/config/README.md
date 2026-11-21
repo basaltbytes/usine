@@ -145,7 +145,9 @@ Role bindings are named `binding` configuration entities with revision history. 
 
 ## CI policy
 
-A loop can set `ci: { fix_loop: widgets/fix, timeout_seconds: 3600 }` to require CI after a successful push. `LoopFile.ci` contains the decoded `CiPolicy`; import and export use snake_case keys. The timeout must be an integer from 1 to 86,400 seconds. See [CI waits](https://docs.usine.dev/guides/review-fix-loops/#ci-waits) for the agent handoff and completion actions.
+A loop can set `ci: { fix_loop: widgets/fix, timeout_seconds: 3600 }` to require CI after a successful push. `LoopFile.ci` contains the decoded `LoopCiPolicy`; import and export use snake_case keys. The timeout must be an integer from 1 to 86,400 seconds. `loopCiPolicy` returns the `CiPolicy` that a trigger event records.
+
+`ci.on_green` lists the label changes to apply when CI passes, each with an integer CEL `item` expression and `add` and `remove` labels; both lists default to empty. `LoopCiPolicy.onGreen` is `None` when the key is absent, including in loops stored before the key existed, and `Some([])` for an explicit empty list, which means the loop changes no labels when CI passes. Parsing checks each `item` against `onGreenEnvironmentFor(stream)`: the stream's environment and `pullRequest.number`, the pull request whose CI passed. `evaluateOnGreen` returns the changes as `CiLabelMutation`s, or `None` without `on_green`, and fails with an `ExpressionEvaluationError` for a result that isn't an item number. See [Loops](https://docs.usine.dev/reference/configuration/loops/#completion-labels) and [CI waits](https://docs.usine.dev/guides/review-fix-loops/#ci-outcomes) for the agent handoff and completion actions.
 
 ## Schema contracts
 

@@ -67,6 +67,7 @@ export const ciQueries = (
         const { handoff } = current.run.state;
         const state = Match.valueTags(resolution, {
           CiPassed: () => RunState.Succeeded.make(),
+          CiPassedWithoutLabels: () => RunState.Failed.make(),
           CiFailed: () => RunState.Failed.make(),
           CiTimedOut: () => RunState.Failed.make({ unfinishedCi: Option.some(handoff) }),
           CiIncomplete: () => RunState.Failed.make({ unfinishedCi: Option.some(handoff) }),
@@ -85,6 +86,8 @@ export const ciQueries = (
         const outcome = Match.valueTags(resolution, {
           CiPassed: () => AttemptSucceeded.make(),
           CiHandedOff: () => AttemptHandedOff.make(),
+          CiPassedWithoutLabels: ({ message }) =>
+            AttemptFailed.make({ failure: AgentFailure.make({ message }) }),
           CiFailed: ({ message }) =>
             AttemptFailed.make({ failure: AgentFailure.make({ message }) }),
           CiTimedOut: ({ _tag, message }) =>

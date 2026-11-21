@@ -2,7 +2,7 @@ import type { ExpressionEngine } from "@usine/expression/expression-engine";
 import { approvalFor } from "./approval.ts";
 import type { ConfigFileError } from "@usine/config/file";
 import type { LoadedInstance } from "@usine/config/instance";
-import type { LoopFile } from "@usine/config/loop";
+import { type LoopCiPolicy, type LoopFile, loopCiPolicy } from "@usine/config/loop";
 import type { ManagedRepo } from "@usine/config/factory";
 import { Agent, AgentName } from "@usine/core/agent";
 import { AttemptTask } from "@usine/core/attempt";
@@ -13,7 +13,16 @@ import { ItemKey } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
 import { RepositoryRevision } from "@usine/core/repository";
 import { Submission, type SubmissionResult } from "@usine/engine/engine";
-import { type Brand, type DateTime, Effect, Match, Option, Result, Schema } from "effect";
+import {
+  Array as Arr,
+  type Brand,
+  type DateTime,
+  Effect,
+  Match,
+  Option,
+  Result,
+  Schema,
+} from "effect";
 
 /**
  * The revision for issue and schedule Attempts, which resolve the remote's default branch at
@@ -104,21 +113,30 @@ export const loopSettings = Effect.fn("TriggerRouting.loopSettings")(function* (
   return {
     ...decision,
     permissions: loop.permissions,
-    ciPolicy: loop.ci,
+    ciPolicy: loopCiPolicy(loop),
     outcomeLabels: loop.outcomeLabels,
     cycleLimit: cycleLimitOf(loop),
     agent,
   };
 });
 
-const ciInstructions = (policy: CiPolicy) =>
+const ciInstructions = (
+  { fixLoop, timeoutSeconds }: Pick<CiPolicy, "fixLoop" | "timeoutSeconds">,
+  loopDeclaresLabels: boolean,
+) =>
   Schema.NonEmptyString.make(
-    `\n\nAfter pushing, end with [usine:awaiting-ci] followed by a JSON object with pull_request, head, fix_loop ("${policy.fixLoop}"), timeout_seconds (${policy.timeoutSeconds}), and on_green (an array of {item, add, remove} label changes to apply after CI passes). Do not apply completion labels or wait for CI in the agent session. Relay this handoff unchanged from a child. usine verifies CI before completing the run.`,
+    `\n\nAfter pushing, end with [usine:awaiting-ci] followed by a JSON object with pull_request, head, fix_loop ("${fixLoop}"), timeout_seconds (${timeoutSeconds}), and on_green (an array of {item, add, remove} label changes to apply after CI passes${loopDeclaresLabels ? "; it can be empty, because the loop declares its completion labels" : ""}). Do not apply completion labels or wait for CI in the agent session. Relay this handoff unchanged from a child. usine verifies CI before completing the run.`,
   );
 
-/** Returns `prompt` followed by the CI handoff instructions of `policy`, and those instructions. */
-export const withCiInstructions = (prompt: string, policy: Option.Option<CiPolicy>) => {
-  const instructions = Option.map(policy, ciInstructions);
+/**
+ * Returns `prompt` followed by the CI handoff instructions of the loop's `ci` settings, and those
+ * instructions. When the loop declares labels in `on_green`, they say that the handoff's
+ * `on_green` can be empty.
+ */
+export const withCiInstructions = (prompt: string, ci: Option.Option<LoopCiPolicy>) => {
+  const instructions = Option.map(ci, (settings) =>
+    ciInstructions(settings, Option.exists(settings.onGreen, Arr.isReadonlyArrayNonEmpty)),
+  );
   return {
     task: AttemptTask.make(`${prompt}${Option.getOrElse(instructions, () => "")}`),
     ciInstructions: instructions,
@@ -149,7 +167,7 @@ export const recordedPrompt = (
     onSome: (instructions) => Option.some<RecordedSuffix>({ instructions, removed: "recorded" }),
     onNone: () =>
       Option.map(submission.ciPolicy, (policy): RecordedSuffix => ({
-        instructions: ciInstructions(policy),
+        instructions: ciInstructions(policy, false),
         removed: "current-wording",
       })),
   });

@@ -97,7 +97,7 @@ export const triggerConditionLayer: Layer.Layer<
       }
       return Option.some<AdmissionSettings>({
         ...settings,
-        ...withCiInstructions(recorded.prompt, settings.ciPolicy),
+        ...withCiInstructions(recorded.prompt, resolved.success.loop.ci),
       });
     });
 

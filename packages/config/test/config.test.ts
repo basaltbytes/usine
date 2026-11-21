@@ -1243,6 +1243,39 @@ workers:
     }).pipe(Effect.provide(parserLayer)),
   );
 
+  it.effect("checks ci.on_green item expressions and tells an omitted on_green from []", () =>
+    Effect.gen(function* () {
+      const parser = yield* ConfigParser;
+      const file = InstancePath.make("loops/develop.md");
+      const policy = (onGreen: string) =>
+        `---\ntrigger: { on: issue, if: 'true' }\nagent: developer\nci:\n  fix_loop: fix\n  timeout_seconds: 60\n${onGreen}---\nDevelop.`;
+      const source = (item: string) =>
+        policy(
+          `  on_green:\n    - { item: pullRequest.number, add: [ready-for-review] }\n    - { item: '${item}', remove: [agent-in-progress] }\n`,
+        );
+      const onGreen = (loop: LoopFile) => Option.flatMap(loop.ci, ({ onGreen }) => onGreen);
+
+      const loop = yield* parser.parseLoopFile(file, source("item.number"));
+      expect(
+        Option.map(onGreen(loop), (mutations) => mutations.map(({ item }) => item)),
+      ).toStrictEqual(Option.some(["pullRequest.number", "item.number"]));
+      const none = yield* parser.parseLoopFile(file, policy("  on_green: []\n"));
+      expect(onGreen(none)).toStrictEqual(Option.some([]));
+
+      const failure = yield* parser.parseLoopFile(file, source("item.title")).pipe(Effect.flip);
+      expect(failure.stage).toBe("expression");
+      expect(failure.details?.map(({ path }) => path)).toStrictEqual([
+        ["ci", "on_green", 1, "item"],
+      ]);
+
+      const stored = yield* Schema.decodeEffect(Schema.toCodecJson(LoopFile.fields.ci))({
+        _tag: "Some",
+        value: { fixLoop: "fix", timeoutSeconds: 60 },
+      });
+      expect(Option.flatMap(stored, ({ onGreen }) => onGreen)).toStrictEqual(Option.none());
+    }).pipe(Effect.provide(parserLayer)),
+  );
+
   it.effect("reads the PR base commit in conditions and prompts, including older payloads", () =>
     Effect.gen(function* () {
       const parser = yield* ConfigParser;

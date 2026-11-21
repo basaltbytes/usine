@@ -165,6 +165,7 @@ const errorStatuses = {
   PullRequestFilesChangedError: 409,
   RunOperationRejectedError: 409,
   CiNotPassedError: 409,
+  CiLabelExpressionError: 422,
   RunRetryBlockedError: 409,
   RunInterventionRejectedError: 409,
   LeftoversDiscardRejectedError: 409,
