@@ -169,10 +169,10 @@ const remoteRequest = () =>
   );
 
 /**
- * A stub app-server whose first process streams `original` until `lose` ends it. The replacement
- * process streams `restored` and resumes `thread-1` with `turns`. `recovered` resolves when the
- * replacement's stream opens, `submitted` lists each `turn/start` and `turn/steer`, and `opens`
- * counts the processes.
+ * A stub app-server whose first process streams `original` until `lose` ends it, or fails its
+ * `turn/start` after `loseTurnStart`. The replacement process streams `restored` and resumes
+ * `thread-1` with `turns`. `recovered` resolves when the replacement's stream opens, `submitted`
+ * lists each `turn/start` and `turn/steer`, and `opens` counts the processes.
  */
 const lostAppServer = (turns: ReadonlyArray<Schema.Json>) =>
   Effect.gen(function* () {
@@ -185,46 +185,65 @@ const lostAppServer = (turns: ReadonlyArray<Schema.Json>) =>
     const submitted: Array<{ method: string; params: Schema.Json }> = [];
     let opens = 0;
     let started = 0;
+    let turnStartLost = false;
+    const exited = (sessionId: Option.Option<AgentSessionId>) =>
+      SessionOperationError.make({
+        operation: "stream",
+        sessionId,
+        message: "App-server exited",
+        cause: ChildProcessLost.make({ exitCode: 1, stderrTail: "App-server exited" }),
+      });
     const server = Layer.succeed(CodexAppServer)({
       stop: () => Effect.void,
       open: () =>
-        Effect.sync(
-          () =>
-            ({
-              notifications:
-                opens++ === 0
-                  ? Stream.fromQueue(original)
-                  : Stream.unwrap(
-                      Deferred.succeed(recovered, undefined).pipe(
-                        Effect.as(Stream.fromQueue(restored)),
-                      ),
-                    ),
-              notify: () => Effect.void,
-              close: Queue.end(restored),
-              request: (_operation, method, params) =>
-                Effect.sync(() => {
-                  if (method === "turn/start" || method === "turn/steer")
-                    submitted.push({ method, params });
-                  if (method === "turn/start") return { turn: { id: `turn-${++started}` } };
-                  if (method === "thread/resume")
-                    return { modelProvider: "openai", thread: { id: "thread-1", turns } };
-                  return responses[method] ?? {};
-                }),
-            }) satisfies CodexConnection,
-        ),
+        Effect.sync(() => {
+          const first = opens++ === 0;
+          return {
+            notifications: first
+              ? Stream.fromQueue(original)
+              : Stream.unwrap(
+                  Deferred.succeed(recovered, undefined).pipe(
+                    Effect.as(Stream.fromQueue(restored)),
+                  ),
+                ),
+            notify: () => Effect.void,
+            close: Queue.end(restored),
+            request: (_operation, method, params) =>
+              Effect.suspend((): Effect.Effect<Schema.Json, SessionOperationError> => {
+                if (method === "turn/start" || method === "turn/steer")
+                  submitted.push({ method, params });
+                if (method === "thread/resume")
+                  return Effect.succeed({
+                    modelProvider: "openai",
+                    thread: { id: "thread-1", turns },
+                  });
+                if (method !== "turn/start") return Effect.succeed(responses[method] ?? {});
+                // The process saves the turn before it exits.
+                const turn = { turn: { id: `turn-${++started}` } };
+                return first && turnStartLost
+                  ? Effect.fail(exited(Option.none()))
+                  : Effect.succeed(turn);
+              }),
+          } satisfies CodexConnection;
+        }),
     });
     /** Ends the first process as a lost remote app-server of session `sessionId`. */
     const lose = (sessionId: AgentSessionId) =>
-      Queue.fail(
-        original,
-        SessionOperationError.make({
-          operation: "stream",
-          sessionId: Option.some(sessionId),
-          message: "App-server exited",
-          cause: ChildProcessLost.make({ exitCode: 1, stderrTail: "App-server exited" }),
-        }),
-      );
-    return { server, original, restored, recovered, submitted, lose, opens: () => opens };
+      Queue.fail(original, exited(Option.some(sessionId)));
+    /** Makes the first process exit while it answers a `turn/start`. */
+    const loseTurnStart = Effect.sync(() => {
+      turnStartLost = true;
+    });
+    return {
+      server,
+      original,
+      restored,
+      recovered,
+      submitted,
+      lose,
+      loseTurnStart,
+      opens: () => opens,
+    };
   });
 
 describe("Codex child backend", () => {
@@ -2691,6 +2710,67 @@ describe("Codex child backend", () => {
             "the steer's own record reads it",
           );
         }).pipe(Effect.provide(codexChild.pipe(Layer.provideMerge(lost.server))));
+      }).pipe(Effect.scoped),
+  );
+
+  it.effect(
+    "sends a restored message that repeats the task when the app-server is lost as the task's turn starts",
+    () =>
+      Effect.gen(function* () {
+        const lost = yield* lostAppServer([
+          { id: "turn-1", status: "interrupted", items: [userMessage("task", request().prompt)] },
+        ]);
+        yield* lost.loseTurnStart;
+        const echo = OperatorMessage.make({ message: request().prompt });
+        const journal: Array<string> = [];
+        const read = yield* Deferred.make<void>();
+        const recorded = (id: string, text: string) =>
+          Queue.offer(lost.restored, {
+            method: "item/started",
+            params: { threadId: "thread-1", turnId: "turn-2", item: userMessage(id, text) },
+          });
+        yield* Effect.gen(function* () {
+          yield* (yield* ChildBackend).launch(
+            ChildRequest.make({
+              ...remoteRequest(),
+              unread: [{ id: echo.id, message: echo.message }],
+            }),
+          );
+          yield* Deferred.await(lost.recovered);
+          assert.deepStrictEqual(journal, ["received task"], "the task's record reads no message");
+          assert.deepStrictEqual(
+            lost.submitted.map(({ method }) => method),
+            ["turn/start", "turn/start", "turn/steer"],
+            "the lost task, the continuation, then the message",
+          );
+          assert.include(jsonKey(lost.submitted[0]?.params), request().prompt);
+          assert.include(jsonKey(lost.submitted[1]?.params), CONTINUATION_MESSAGE);
+          assert.include(jsonKey(lost.submitted[2]?.params), echo.message);
+          yield* recorded("continuation", CONTINUATION_MESSAGE);
+          yield* recorded("echo", echo.message);
+          yield* Deferred.await(read);
+          assert.deepStrictEqual(journal, [
+            "received task",
+            "received continuation",
+            "received continuation echo",
+            `read ${echo.id}`,
+          ]);
+        }).pipe(
+          Effect.provideService(ChildSessionJournal, {
+            started: () => Effect.void,
+            prompted: Effect.void,
+            continued: () => Effect.void,
+            received: (items) =>
+              Effect.sync(() => {
+                journal.push(`received ${items.join(" ")}`);
+              }),
+            delivered: (id, state) =>
+              Effect.sync(() => {
+                journal.push(`${Option.isSome(state) ? "read" : "unread"} ${id}`);
+              }).pipe(Effect.andThen(Deferred.succeed(read, undefined)), Effect.asVoid),
+          }),
+          Effect.provide(codexChild.pipe(Layer.provideMerge(lost.server))),
+        );
       }).pipe(Effect.scoped),
   );
 

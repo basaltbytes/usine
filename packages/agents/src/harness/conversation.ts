@@ -273,19 +273,12 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
 
   /**
    * Sends the session's own input `message`, such as its task, with `send`. The harness's record
-   * of it then reads no operator message with the same text.
+   * of it then reads no operator message with the same text. If `send` fails, `message` stays an
+   * own input until `recover` clears the own inputs.
    */
   const sendOwn = <A, E>(message: string, send: (message: string) => Effect.Effect<A, E>) =>
     updateInbox((inbox) => ({ ...inbox, own: [...inbox.own, message] })).pipe(
       Effect.andThen(send(message)),
-      Effect.onError(() =>
-        updateInbox((inbox) => {
-          const index = inbox.own.lastIndexOf(message);
-          return index < 0
-            ? inbox
-            : { ...inbox, own: inbox.own.filter((_, position) => position !== index) };
-        }),
-      ),
     );
 
   yield* Effect.addFinalizer(() =>
@@ -533,8 +526,8 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
           yield* finish(before.overdue.value, true);
         } else yield* finish("Session interrupted before its turn returned");
       }
-      // A new native process has read none of the queued messages. It records none of the earlier
-      // process's own inputs either: the restored turn's records took the ones that process recorded.
+      // A new native process has read none of the queued messages and records none of the earlier
+      // process's own inputs.
       const recovering = yield* Ref.updateAndGet(state, (current) => ({
         ...current,
         inbox: {
