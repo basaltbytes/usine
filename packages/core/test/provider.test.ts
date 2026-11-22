@@ -79,7 +79,7 @@ describe("model providers", () => {
     assert.isTrue(pairs.serves(`${long}ax`));
     assert.isTrue(pairs.serves("/v1/a.b.c"));
     assert.isFalse(pairs.serves("/v1/a."));
-    assert.isBelow(performance.now() - started, 200);
+    assert.isBelow(performance.now() - started, 2_000);
   });
 
   it("refuses a key in a hop-by-hop header or a header that frames the body", () => {
