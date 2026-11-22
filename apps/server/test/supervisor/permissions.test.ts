@@ -48,6 +48,7 @@ import { authenticatedRoutes } from "../../src/auth/http.ts";
 import { OperationId } from "../../src/auth/model.ts";
 import { FactoryBackend } from "../../src/backend.ts";
 import { apiRoutes } from "../../src/http.ts";
+import { catalogPools } from "../../../../packages/orchestrator/test/support/pools.ts";
 import { routedOperatorCall } from "../../src/mcp/http.ts";
 import { loadOperatorTools, PublishedApi } from "../../src/mcp/tools.ts";
 import { operatorOpenApi } from "../../src/openapi.ts";
@@ -132,7 +133,7 @@ const fixture = (
     ).pipe(Layer.provide(Layer.succeedContext(stores)));
     const authenticated = authenticatedRoutes(services);
     const routes = Layer.mergeAll(
-      apiRoutes.pipe(Layer.provide(authenticated.guard.layer)),
+      apiRoutes.pipe(Layer.provide(catalogPools), Layer.provide(authenticated.guard.layer)),
       authenticated.routes,
     ).pipe(
       HttpRouter.provideRequest(

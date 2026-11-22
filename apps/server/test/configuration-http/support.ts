@@ -30,10 +30,12 @@ import { ConfigurationEditor, OperatorConfiguration } from "@usine/orchestrator/
 import { idleTriggersLayer } from "@usine/orchestrator/idle-triggers";
 import { stepExecutorLayer } from "@usine/orchestrator/scheduler";
 import { WorkerStatus } from "@usine/orchestrator/worker-status";
+import type { BillingPools } from "@usine/core/agent/pool";
 import { Context, Effect, FileSystem, Layer, Option, Ref, Schema } from "effect";
 import { HttpRouter } from "effect/http";
 import { FactoryBackend } from "../../src/backend.ts";
 import { apiRoutes } from "../../src/http.ts";
+import { catalogPools } from "../../../../packages/orchestrator/test/support/pools.ts";
 import { configurationLoopControlLayer } from "../../src/configuration/store.ts";
 
 const parserLayer = ConfigParser.layer.pipe(Layer.provide(MarcbachmannCelLayer));
@@ -44,6 +46,7 @@ export const loopText =
 
 export const harness = (
   catalog: Layer.Layer<GitHubApp | GitHubPolling> | Layer.Layer<never> = Layer.empty,
+  pools: Layer.Layer<BillingPools> = catalogPools,
 ) =>
   Effect.gen(function* () {
     const states = yield* Ref.make(new Map<LoopName, LoopRuntimeState>());
@@ -256,6 +259,7 @@ export const harness = (
     });
     const app = HttpRouter.toWebHandler(
       apiRoutes.pipe(
+        Layer.provide(pools),
         HttpRouter.provideRequest(
           Layer.mergeAll(backend, Layer.succeedContext(editorContext), catalog),
         ),

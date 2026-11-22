@@ -142,6 +142,10 @@ import { Port, SERVER_HOST } from "../src/cli.ts";
 import { apiRoutes, serverLayer, staticRoutes } from "../src/http.ts";
 import { responseCompression } from "../src/compression.ts";
 import { listenForStartup } from "../src/listener.ts";
+import { catalogPools } from "../../../packages/orchestrator/test/support/pools.ts";
+
+/** The operator API routes, with the billing pools that the server provides. */
+const operatorRoutes = apiRoutes.pipe(Layer.provide(catalogPools));
 
 const runId = RunId.make("run-1");
 const loopName = LoopName.make("review-issue");
@@ -459,7 +463,7 @@ const makeBackend = Effect.gen(function* () {
 });
 const makeApp = (backend: Effect.Success<typeof makeBackend>) =>
   HttpRouter.toWebHandler(
-    Layer.merge(apiRoutes, responseCompression).pipe(HttpRouter.provideRequest(backend)),
+    Layer.merge(operatorRoutes, responseCompression).pipe(HttpRouter.provideRequest(backend)),
     { disableLogger: true },
   );
 
@@ -497,7 +501,7 @@ it.live(
       );
       const secured = HttpRouter.toWebHandler(
         Layer.mergeAll(
-          apiRoutes.pipe(Layer.provide(auth.guard.layer)),
+          operatorRoutes.pipe(Layer.provide(auth.guard.layer)),
           auth.routes,
           setup.protected.pipe(Layer.provide(auth.guard.layer)),
           providerRoutes.pipe(Layer.provide(auth.guard.layer)),
@@ -742,7 +746,7 @@ describe("operator HTTP API", () => {
       });
       const auth = yield* authFixture().pipe(Effect.scoped);
       const upgradeApp = HttpRouter.toWebHandler(
-        apiRoutes.pipe(
+        operatorRoutes.pipe(
           Layer.provide(authenticatedRoutes(auth).guard.layer),
           HttpRouter.provideRequest(Layer.merge(backend, upgradeBackend)),
         ),
@@ -1107,7 +1111,7 @@ describe("operator HTTP API", () => {
         runStatistics: (window) => Effect.succeed(runStatisticsOf(window)),
       });
       const rejectingApp = HttpRouter.toWebHandler(
-        apiRoutes.pipe(HttpRouter.provideRequest(rejecting)),
+        operatorRoutes.pipe(HttpRouter.provideRequest(rejecting)),
         { disableLogger: true },
       );
       try {
@@ -1418,7 +1422,7 @@ describe("operator HTTP API", () => {
           statistics: (window) => Effect.succeed(statisticsOf(window)),
           runStatistics: (window) => Effect.succeed(runStatisticsOf(window)),
         });
-        const server = HttpRouter.serve(apiRoutes.pipe(HttpRouter.provideRequest(live))).pipe(
+        const server = HttpRouter.serve(operatorRoutes.pipe(HttpRouter.provideRequest(live))).pipe(
           Layer.provideMerge(NodeHttpServer.layerTest),
         );
         yield* Effect.gen(function* () {
@@ -1643,9 +1647,10 @@ describe("operator HTTP API", () => {
         { concurrency: "unbounded" },
       );
       const web = HttpRouter.toWebHandler(
-        Layer.mergeAll(apiRoutes, staticRoutes(webRoot).pipe(Layer.provide(NodePath.layer))).pipe(
-          HttpRouter.provideRequest(Layer.mergeAll(backend, NodeHttpPlatform.layer)),
-        ),
+        Layer.mergeAll(
+          operatorRoutes,
+          staticRoutes(webRoot).pipe(Layer.provide(NodePath.layer)),
+        ).pipe(HttpRouter.provideRequest(Layer.mergeAll(backend, NodeHttpPlatform.layer))),
         { disableLogger: true },
       );
       try {
@@ -1779,7 +1784,11 @@ describe("operator HTTP API", () => {
             const authentication = yield* authFixture();
 
             const listener = yield* listenForStartup(port, "test");
-            yield* Layer.build(serverLayer(fixtureBackend, webRoot, listener, authentication));
+            yield* Layer.build(
+              serverLayer(fixtureBackend, webRoot, listener, authentication).pipe(
+                Layer.provide(catalogPools),
+              ),
+            );
             yield* listener.started;
             return yield* Effect.all([overview("127.0.0.1"), overview("127.0.0.2")]);
           }).pipe(Effect.scoped);
@@ -1807,7 +1816,7 @@ it.live("checks the declared permission for every operator route and each role",
             : ProjectScope.make({ project: ProjectId.make("alpha") }),
       });
       const secured = HttpRouter.toWebHandler(
-        apiRoutes.pipe(
+        operatorRoutes.pipe(
           HttpRouter.provideRequest(
             Layer.merge(backend, Layer.succeed(RequestPermissions, binding.permissions)),
           ),
@@ -1952,7 +1961,7 @@ it.live("retains all linked card membership when the board read omits settled ca
         overview: Effect.succeed(ReadyOverview.make({ ...overview, projects: [project] })),
       })),
     ).pipe(Layer.provide(backend));
-    const boardApp = HttpRouter.toWebHandler(apiRoutes.pipe(HttpRouter.provideRequest(read)), {
+    const boardApp = HttpRouter.toWebHandler(operatorRoutes.pipe(HttpRouter.provideRequest(read)), {
       disableLogger: true,
     });
     try {
@@ -1987,7 +1996,7 @@ it.live("streams small changes and replays missed revisions without payloads", (
       {
         const streamApp = HttpRouter.toWebHandler(
           Layer.merge(
-            apiRoutes.pipe(Layer.provide(Layer.succeed(ChangeBus, bus))),
+            operatorRoutes.pipe(Layer.provide(Layer.succeed(ChangeBus, bus))),
             responseCompression,
           ).pipe(HttpRouter.provideRequest(backend)),
           {

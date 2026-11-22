@@ -173,7 +173,7 @@ it.live(
           auth,
           Layer.empty,
           Layer.empty,
-        ),
+        ).pipe(Layer.provide(catalogPools)),
       );
       const readiness = yield* client.get("/api/ready");
       assert.strictEqual(readiness.status, 200);
@@ -200,7 +200,14 @@ it.live("restores the startup responses when the installed routes close", () =>
     const client = yield* HttpClient.HttpClient;
     const routes = yield* Scope.make();
     yield* Layer.buildWithScope(
-      serverLayer(Layer.mock(FactoryBackend)({}), "", listener, auth, Layer.empty, Layer.empty),
+      serverLayer(
+        Layer.mock(FactoryBackend)({}),
+        "",
+        listener,
+        auth,
+        Layer.empty,
+        Layer.empty,
+      ).pipe(Layer.provide(catalogPools)),
       routes,
     );
     const unstarted = yield* client.get("/api/overview");

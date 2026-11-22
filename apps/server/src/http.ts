@@ -37,6 +37,7 @@ import {
 import { ceilingAdmits } from "./auth/model.ts";
 import { mcpRoutes } from "./mcp/http.ts";
 import { EFFORTS } from "@usine/core/agent/brain";
+import { BillingPools } from "@usine/core/agent/pool";
 import { GitHubApp } from "@usine/github/github-app";
 import { GitHubPolling } from "@usine/github/polling";
 import { configurationRepositories, configurationLabels } from "./configuration/catalog.ts";
@@ -291,6 +292,7 @@ const handlers = HttpApiBuilder.group(
   "operator",
   Effect.fn(function* (routes) {
     const changes = yield* Changes;
+    const pools = yield* BillingPools;
     return routes
       .handleRaw("changes", () =>
         Effect.gen(function* () {
@@ -604,7 +606,7 @@ const handlers = HttpApiBuilder.group(
           harnesses: catalog.ids,
           harnessDetails: harnessPresentations,
           efforts: EFFORTS,
-          pools: catalog.pools,
+          pools,
         }),
       )
       .handle("configurationRepositories", () => configurationRepositories())

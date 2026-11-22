@@ -30,6 +30,7 @@ import { DateTime, Effect, Layer, Redacted, Schema } from "effect";
 import { HttpClient, HttpClientResponse, HttpRouter } from "effect/http";
 import { FactoryBackend } from "../src/backend.ts";
 import { apiRoutes } from "../src/http.ts";
+import { catalogPools } from "../../../packages/orchestrator/test/support/pools.ts";
 
 const repository = RepositoryName.make("basaltbytes/usine");
 const project = ProjectId.make("workspace");
@@ -120,6 +121,7 @@ const fixture = Effect.fn(function* (
   );
   const app = HttpRouter.toWebHandler(
     apiRoutes.pipe(
+      Layer.provide(catalogPools),
       HttpRouter.provideRequest(
         Layer.mergeAll(
           github,
