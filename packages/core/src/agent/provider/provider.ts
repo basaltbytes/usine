@@ -198,6 +198,13 @@ export class ModelProvider extends Schema.Class<
     return Arr.findFirst(this.credentials, (credential) => kindOf(credential) === kind);
   }
 
+  /** The subscription login that the provider accepts, if any. */
+  get login(): Option.Option<SubscriptionLogin> {
+    return Arr.findFirst(this.credentials, (credential) =>
+      credential._tag === "Subscription" ? Option.some(credential.login) : Option.none(),
+    );
+  }
+
   /** Returns the protocol that serves `path`, a path under the slot without its query. */
   protocolFor(path: string): Option.Option<ProviderProtocol> {
     return Arr.findFirst(this.protocols, (protocol) => protocol.serves(path));
@@ -272,6 +279,11 @@ export class ModelProviderCatalog extends Schema.Class<
   /** Returns the provider whose ID is `id`. */
   get(id: string): Option.Option<ModelProvider> {
     return Arr.findFirst(this.providers, (provider) => provider.id === id);
+  }
+
+  /** Returns the first provider whose subscription signs in with `login`. */
+  signingIn(login: SubscriptionLogin): Option.Option<ModelProvider> {
+    return Arr.findFirst(this.providers, (provider) => Option.contains(provider.login, login));
   }
 
   /** Decodes a slot, or a provider ID as configurations from before slots wrote it, to the slot. */

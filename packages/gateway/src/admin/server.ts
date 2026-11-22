@@ -98,19 +98,21 @@ const attachmentHandlers = HttpApiBuilder.group(GatewayAdminApi, "attachments", 
     ),
 );
 
-const credentials = <A>(
-  use: (store: ProviderCredentials["Service"]) => Effect.Effect<A, ProviderCredentialError>,
-) =>
-  Effect.flatMap(Effect.serviceOption(ProviderCredentials), (store) =>
-    Option.match(store, {
-      onNone: () =>
-        Effect.fail(
-          ProviderCredentialError.make({
-            message: "Upgrade the gateway to enable provider connections.",
-          }),
-        ),
-      onSome: use,
-    }),
+const credentials = <A, E>(
+  use: (store: ProviderCredentials["Service"]) => Effect.Effect<A, E>,
+): Effect.Effect<A, E | ProviderCredentialError> =>
+  Effect.flatMap(
+    Effect.serviceOption(ProviderCredentials),
+    (store): Effect.Effect<A, E | ProviderCredentialError> =>
+      Option.match(store, {
+        onNone: () =>
+          Effect.fail(
+            ProviderCredentialError.make({
+              message: "Upgrade the gateway to enable provider connections.",
+            }),
+          ),
+        onSome: use,
+      }),
   );
 
 /** Handlers that return the current LLM providers, including changes from a reload. */

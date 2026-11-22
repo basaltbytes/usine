@@ -2,13 +2,9 @@ import {
   ProviderCredential,
   ProviderCredentialError,
   ProviderConnections,
+  UnservedProvider,
 } from "../credentials/model.ts";
-import {
-  GatewaySlot,
-  type ModelProviderCatalog,
-  modelProviders,
-  RoutePattern,
-} from "@usine/core/agent/provider";
+import { GatewaySlot, type ModelProviderCatalog, RoutePattern } from "@usine/core/agent/provider";
 import { RepositoryName } from "@usine/core/repository";
 import { GatewayCredentialKind, WorkerName } from "@usine/core/worker";
 import { type Brand, Schema } from "effect";
@@ -212,12 +208,19 @@ export const GatewayAdminApi = HttpApi.make("GatewayAdminApi").add(
       HttpApiEndpoint.put("connect", "/v1/provider-credentials", {
         payload: ProviderCredential,
         success: Schema.Struct({ ok: Schema.Boolean }),
-        error: ProviderCredentialError.annotate({ httpApiStatus: 503 }),
+        error: [
+          ProviderCredentialError.annotate({ httpApiStatus: 503 }),
+          UnservedProvider.annotate({ httpApiStatus: 422 }),
+        ],
       }),
+      /** Disconnects the provider whose slot or ID is `provider`. */
       HttpApiEndpoint.delete("disconnect", "/v1/provider-credentials/:provider", {
-        params: { provider: modelProviders.slotFromName },
+        params: { provider: Schema.String },
         success: Schema.Struct({ ok: Schema.Boolean }),
-        error: ProviderCredentialError.annotate({ httpApiStatus: 503 }),
+        error: [
+          ProviderCredentialError.annotate({ httpApiStatus: 503 }),
+          UnservedProvider.annotate({ httpApiStatus: 422 }),
+        ],
       }),
     )
     .middleware(AdminAuthorization),

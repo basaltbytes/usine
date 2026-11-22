@@ -1,17 +1,15 @@
 export {
+  AcceptedCredentials,
+  LoginSecret,
   ProviderCredential,
   ProviderCredentialError,
   ProviderConnection,
   ProviderConnections,
+  providerEntry,
   ProviderTarget,
-  credentialProvider,
+  StaticKey,
+  UnservedProvider,
 } from "./model.ts";
 export { ProviderCredentials } from "./store.ts";
-export {
-  LoginProvider,
-  loginLlmProvider,
-  ProviderLoginState,
-  ProviderLoginView,
-  ProviderStatus,
-} from "./model.ts";
+export { LoginProvider, ProviderLoginState, ProviderLoginView, ProviderStatus } from "./model.ts";
 export { readAuthFile } from "../chatgpt/auth-file.ts";
