@@ -108,7 +108,18 @@ export class WorkerRequirements extends Schema.Class<
   Brand.Brand<"@usine/agents/harness/WorkerRequirements">
 >("@usine/agents/WorkerRequirements")({
   install: Schema.Array(
-    Schema.Struct({ name: Schema.NonEmptyString, version: Schema.NonEmptyString }),
+    Schema.Struct({
+      name: Schema.NonEmptyString,
+      version: Schema.NonEmptyString,
+      /**
+       * `omit` installs the package without its optional dependencies, for a launcher whose
+       * install script fetches only the binary of the worker's platform.
+       */
+      optionalDependencies: Schema.Literals(["include", "omit"]).pipe(
+        Schema.withConstructorDefault(Effect.succeed("include" as const)),
+        Schema.withDecodingDefaultKey(Effect.succeed("include" as const)),
+      ),
+    }),
   ),
   /** Accepted CLI versions; an empty list accepts any installed version. */
   versions: Schema.Array(Schema.NonEmptyString),

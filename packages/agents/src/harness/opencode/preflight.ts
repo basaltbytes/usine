@@ -1,0 +1,89 @@
+import type { BrainSpec } from "@usine/core/agent/brain";
+import { HarnessUnavailableError } from "@usine/core/agent/capability";
+import { Effect, Option } from "effect";
+import { ChildProcessSpawner } from "effect/process";
+import { isRemoteHost } from "../../child-host/child-host.ts";
+import { probeBinary } from "../../preflight/command.ts";
+import { checkedPreflight, loginUnavailable, type ProbeTarget } from "../runtime.ts";
+import { openCodeApi } from "./api.ts";
+import { serveConfig } from "./config.ts";
+import { OPENCODE_VERSION, opencode } from "./descriptor.ts";
+import { checkModel } from "./model.ts";
+import { OpenCodeServer } from "./server.ts";
+
+/**
+ * Starts `opencode serve` with `$1` as its configuration in a temporary data directory, which it
+ * also runs in and removes when OpenCode exits. The remaining arguments are `serve`'s.
+ */
+const PROBE_SCRIPT = String.raw`
+config=$1
+shift
+dir=$(mktemp -d) || exit 1
+cd "$dir" || exit 1
+XDG_DATA_HOME="$dir" XDG_CONFIG_HOME="$dir/config" OPENCODE_CONFIG_PROJECT_DISABLE=1 \
+  OPENCODE_DISABLE_CLAUDE_CODE=1 OPENCODE_DISABLE_MODELS_FETCH=1 OPENCODE_DISABLE_FREE_MODELS=1 \
+  OPENCODE_CONFIG_CONTENT="$config" opencode "$@"
+status=$?
+rm -rf "$dir"
+exit "$status"
+`.trim();
+
+/** Returns the error for `opencode --version` output that names another release than the pin. */
+const unsupportedOpenCodeVersion = (
+  version: string,
+): Option.Option<HarnessUnavailableError> =>
+  version.trim() === `opencode v${OPENCODE_VERSION}`
+    ? Option.none()
+    : Option.some(
+        HarnessUnavailableError.make({
+          harness: opencode.id,
+          capability: "version",
+          message: `The worker has ${/^opencode v\d+\.\d+\.\d+$/u.test(version.trim()) ? version.trim() : "an unrecognized OpenCode version"}. Install @opencode/cli ${OPENCODE_VERSION}.`,
+        }),
+      );
+
+const check = Effect.fn("OpenCodeRuntime.check")(function* (brain: BrainSpec, target: ProbeTarget) {
+  yield* Effect.annotateCurrentSpan({
+    harness: brain.harness,
+    model: brain.model,
+    worker: target.worker,
+    credential: target.credential,
+  });
+  if (isRemoteHost(target.host)) yield* probeBinary(opencode, target, "node", ["--version"]);
+  const version = yield* probeBinary(opencode, target, "opencode", ["--version"]);
+  const unsupported = unsupportedOpenCodeVersion(version);
+  if (Option.isSome(unsupported)) return yield* unsupported.value;
+  const server = yield* OpenCodeServer;
+  const config = yield* serveConfig({
+    brain,
+    route: target.credential,
+    cwd: "/",
+    baseUrl: Option.none(),
+  });
+  // The probe has no session, so a remote host gets no environment; the script sets OpenCode's.
+  yield* Effect.scoped(
+    Effect.gen(function* () {
+      const connection = yield* server.open({
+        host: target.host,
+        cwd: "/",
+        environment: target.environment,
+        sessionId: Option.none(),
+        command: { command: "sh", args: ["-c", PROBE_SCRIPT, "sh", config] },
+      });
+      yield* checkModel(openCodeApi(connection, Option.none()), brain, Option.none());
+    }),
+  ).pipe(
+    Effect.catchTags({
+      UnknownModelError: (error) => loginUnavailable(brain, error.message),
+      UnsupportedEffortError: (error) => loginUnavailable(brain, error.message),
+    }),
+  );
+});
+
+/** Captures the process services used by OpenCode preflight. */
+export const openCodePreflight = Effect.gen(function* () {
+  const context = yield* Effect.context<ChildProcessSpawner.ChildProcessSpawner | OpenCodeServer>();
+  return checkedPreflight((brain, target) =>
+    check(brain, target).pipe(Effect.provideContext(context)),
+  );
+});
