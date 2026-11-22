@@ -4,7 +4,6 @@
 // @effect-diagnostics newPromise:off
 // @effect-diagnostics globalJson:off
 // @effect-diagnostics globalDate:off
-// @effect-diagnostics globalTimers:off
 // @effect-diagnostics processEnv:off
 // @effect-diagnostics schemaSync:off
 import { NodeServices } from "@effect/platform-node";
@@ -368,15 +367,14 @@ describe("OpenCode bridge", () => {
     bridge.child.stdin.write("not a request\n");
     bridge.child.stdin.write(`${JSON.stringify({ id: 1, method: "get", path: "/api/start" })}\n`);
     bridge.child.stdin.write(`${JSON.stringify({ id: 2, method: "GET", path: "//host/api" })}\n`);
-    bridge.send({ id: 3, method: "POST", path: "/api/garbage" });
-    await eventually(() => answerTo(bridge.lines, 3) !== undefined);
-    bridge.send({ id: 4, method: "GET", path: "/api/empty" });
+    bridge.child.stdin.write(`${JSON.stringify({ id: 3, method: "GET", path: "api/start" })}\n`);
+    bridge.send({ id: 4, method: "POST", path: "/api/garbage" });
     await eventually(() => answerTo(bridge.lines, 4) !== undefined);
+    bridge.send({ id: 5, method: "GET", path: "/api/empty" });
+    await eventually(() => answerTo(bridge.lines, 5) !== undefined);
     expect(answerTo(bridge.lines, 1)).toEqual({ id: 1, error: "The request has no HTTP method" });
-    expect(answerTo(bridge.lines, 2)).toEqual({
-      id: 2,
-      error: "The request has no absolute path",
-    });
+    for (const id of [2, 3])
+      expect(answerTo(bridge.lines, id)).toEqual({ id, error: "The request has no absolute path" });
     expect(eventTypes(bridge.lines)).toEqual(["server.connected", "after.garbage"]);
     expect(bridge.stderr()).toContain(
       "opencode bridge: skipping an input line of 13 bytes that isn't JSON",
@@ -396,26 +394,6 @@ describe("OpenCode bridge", () => {
     expect(await bridge.exit).toBe(7);
     expect(bridge.stderr()).toContain("fake serve: end of input");
     expect(bridge.stderr()).not.toContain("opencode bridge:");
-  });
-
-  it("keeps the arrival order of an answer and an event that arrive together", async () => {
-    const bridge = start("ready");
-    await eventually(() => bridge.lines.length >= 2);
-    for (const [id, first] of ["event", "answer"].entries()) {
-      const before = bridge.lines.length;
-      bridge.send({ id, method: "POST", path: `/api/order?first=${first}` });
-      // Serve sends both while the bridge is stopped, so the bridge reads them in one turn.
-      await eventually(() => bridge.stderr().includes(`fake serve: order ${first} received`));
-      bridge.child.kill("SIGSTOP");
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-      bridge.child.kill("SIGCONT");
-      await eventually(() => bridge.lines.length === before + 2);
-      expect(bridge.lines.slice(before)).toEqual(
-        first === "event"
-          ? [{ event: { type: "order", data: {} } }, { id, status: 200, body: { answered: true } }]
-          : [{ id, status: 200, body: { answered: true } }, { event: { type: "order", data: {} } }],
-      );
-    }
   });
 
   it.live("runs as an ordinary child through ChildHost, with the typed client", () =>

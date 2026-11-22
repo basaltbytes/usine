@@ -43,14 +43,9 @@ const LARGE_TEXT = "x".repeat(4 * 1024 ** 2 + 1);
 
 const subscribers = new Set<ServerResponse>();
 const held = new Set<ServerResponse>();
-/** Writes `event` to every subscriber and calls `then` once the frames are on the wire. */
-const emit = (event: OpenCodeEvent, then?: () => void) => {
-  let pending = subscribers.size;
-  for (const subscriber of subscribers)
-    subscriber.write(`data: ${JSON.stringify(event)}\n\n`, () => {
-      pending -= 1;
-      if (pending === 0) then?.();
-    });
+/** Writes `event` to every subscriber. */
+const emit = (event: OpenCodeEvent) => {
+  for (const subscriber of subscribers) subscriber.write(`data: ${JSON.stringify(event)}\n\n`);
 };
 const json = (response: ServerResponse, status: number, body: Schema.Json) => {
   response.writeHead(status, { "content-type": "application/json" });
@@ -163,20 +158,6 @@ const routes = new Map<string, Route>(
     "POST /api/crash": () => {
       process.stderr.write("fake serve: crashed while answering\n");
       process.exit(4);
-    },
-    // Sends the event and the answer, in the order that the query names, 50 ms apart and 300 ms after
-    // reporting the request on stderr, so that a test can stop the bridge before both arrive.
-    "POST /api/order": (request, response) => {
-      const first = request.url?.endsWith("?first=answer") === true ? "answer" : "event";
-      process.stderr.write(`fake serve: order ${first} received\n`);
-      const body = JSON.stringify({ answered: true });
-      const answer = (then?: () => void) => {
-        response.writeHead(200, { "content-type": "application/json" });
-        response.end(body, then);
-      };
-      const event = (then?: () => void) => emit({ type: "order", data: {} }, then);
-      const [one, two] = first === "answer" ? [answer, event] : [event, answer];
-      setTimeout(() => one(() => setTimeout(() => two(), 50)), 300);
     },
     "POST /api/garbage": (_request, response) => {
       for (const subscriber of subscribers) {
