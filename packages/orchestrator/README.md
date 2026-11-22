@@ -1,6 +1,6 @@
 # @usine/orchestrator
 
-SSH worker views expose gateway slots as `anthropic-messages` and `openai-responses`, matching `gateway.llm_providers`. Cloudflare provider records use `anthropic` and `openai`.
+SSH worker views expose gateway slots, such as `anthropic-messages` and `openai-responses`, matching `gateway.llm_providers`, and a provisioner's `apiKeys`, the variable with each provider's key by provider ID. Cloudflare provider records use `anthropic` and `openai`.
 
 Connects stored loop definitions to GitHub polling, the durable run engine, and the configured workers for [usine](https://github.com/basaltbytes/usine). [Operator surfaces](https://github.com/basaltbytes/usine/blob/main/docs/architecture/operator-surfaces.mdx) and [Run lifecycle](https://github.com/basaltbytes/usine/blob/main/docs/architecture/run-lifecycle.mdx) describe the behavior in depth.
 
