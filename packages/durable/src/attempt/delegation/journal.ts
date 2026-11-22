@@ -137,7 +137,8 @@ export interface DelegationJournal {
   ) => Effect.Effect<void, JournalError>;
   /**
    * Relays the child's tool event and records the call as started, replacing one with the same
-   * `callId`, or as finished. The event-driven coordinator commits both in one transaction.
+   * `callId`, or as finished. The event-driven coordinator commits both in one transaction, and
+   * records neither when its outbox refuses the event.
    */
   readonly toolEvent: (event: ToolStarted | ToolFinished) => Effect.Effect<void>;
   /**
