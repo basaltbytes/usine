@@ -162,9 +162,13 @@ const capturedLogs = () => {
   return { entries, layer: Logger.layer([logger]) };
 };
 
+/** The number of captured log messages that contain `text`. */
+const loggedTimes = (logs: ReturnType<typeof capturedLogs>, text: string) =>
+  logs.entries.filter(({ message }) => Array.isArray(message) && String(message[0]).includes(text))
+    .length;
+
 /** Whether a captured log message contains `text`. */
-const logged = (logs: ReturnType<typeof capturedLogs>, text: string) =>
-  logs.entries.some(({ message }) => Array.isArray(message) && String(message[0]).includes(text));
+const logged = (logs: ReturnType<typeof capturedLogs>, text: string) => loggedTimes(logs, text) > 0;
 
 describe("session outcome logs", () => {
   it.effect("logs a blocked report once at Info while preserving its typed outcome", () => {
@@ -671,6 +675,8 @@ describe("answers to the operator", () => {
 
 describe("background work", () => {
   const nothingRuns = Option.some<ReadonlyArray<BackgroundWork>>([]);
+  const lint = BackgroundWork.make({ id: "lint", kind: "command", description: "Run lint" });
+  const graceStarted = "it returns its answer unless a turn starts within the grace period";
   /** Just short of the grace period after the background work ends. */
   const almostGrace = Duration.subtract(BACKGROUND_TURN_GRACE, Duration.seconds(1));
   /** Returns whether each `SessionFinished` in `events` reports a passed wait limit. */
@@ -729,6 +735,52 @@ describe("background work", () => {
     }).pipe(Effect.provide(logs.layer));
   });
 
+  it.effect("waits for the work that a turn within the grace period starts", () =>
+    Effect.gen(function* () {
+      const session = yield* conversation(child("notification-turn-work"));
+      yield* session.reportBackground(Option.some([ciWatch]));
+      yield* session.finish("Waiting for CI");
+      yield* session.reportBackground(nothingRuns);
+      yield* TestClock.adjust("1 minute");
+      yield* session.turnStarted;
+      yield* session.reportBackground(Option.some([lint]));
+      yield* session.finish("Waiting for lint");
+      yield* TestClock.adjust("10 hours");
+      assert.isUndefined(session.result.pollUnsafe(), "the turn's answer waits for its own work");
+      yield* session.reportBackground(nothingRuns);
+      yield* TestClock.adjust(almostGrace);
+      assert.isUndefined(session.result.pollUnsafe(), "the turn's work has its own grace period");
+      yield* TestClock.adjust("1 second");
+      assert.strictEqual((yield* Fiber.join(session.result)).message, "Waiting for lint");
+    }),
+  );
+
+  it.effect("drops the earlier answer when a turn starts within the grace period", () => {
+    const logs = capturedLogs();
+    return Effect.gen(function* () {
+      const session = yield* conversation(child("notification-turn-answer"));
+      yield* session.reportBackground(Option.some([ciWatch]));
+      yield* session.finish("Waiting for CI");
+      yield* session.reportBackground(nothingRuns);
+      yield* TestClock.adjust("1 minute");
+      yield* session.turnStarted;
+      yield* session.reportBackground(Option.some([lint]));
+      yield* session.reportBackground(nothingRuns);
+      assert.strictEqual(
+        loggedTimes(logs, graceStarted),
+        1,
+        "work that ends before the turn answers starts no grace period",
+      );
+      yield* TestClock.adjust("10 hours");
+      assert.isUndefined(
+        session.result.pollUnsafe(),
+        "the turn that started keeps the session open",
+      );
+      yield* session.finish("CI passed");
+      assert.strictEqual((yield* Fiber.join(session.result)).message, "CI passed");
+    }).pipe(Effect.provide(logs.layer));
+  });
+
   it.effect("keeps waiting when its background work runs again within the grace period", () =>
     Effect.gen(function* () {
       const session = yield* conversation(child("work-again"));
@@ -765,6 +817,13 @@ describe("background work", () => {
         assert.isUndefined(session.result.pollUnsafe());
         const emitted = yield* session.emitted;
         assert.notInclude(emitted, "SessionIdle");
+        // A repeated `initialize` sends the empty snapshot again.
+        yield* session.reportBackground(nothingRuns);
+        assert.strictEqual(
+          loggedTimes(logs, graceStarted),
+          1,
+          "a kept answer starts no grace period",
+        );
         yield* session.intervene(Release.make(), noDelivery);
         if (supervision === "pause") {
           yield* TestClock.adjust("10 hours");
