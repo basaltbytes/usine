@@ -255,8 +255,14 @@ const sessionEntries = (
     if (event._tag === "BackgroundWorkUpdated") {
       const first = !snapshotSeen;
       snapshotSeen = true;
-      // A first snapshot in which nothing runs ends no work that the transcript showed.
-      if (first && Option.exists(event.work, (running) => running.length === 0)) continue;
+      // A first snapshot in which nothing runs ends no work that the transcript showed. While the
+      // session's earlier events aren't loaded, a snapshot that lists work can be among them.
+      if (
+        first &&
+        group.earlierLoaded &&
+        Option.exists(event.work, (running) => running.length === 0)
+      )
+        continue;
     }
     if (
       event._tag === "BackgroundWorkUpdated" ||
@@ -378,11 +384,15 @@ const interventionNotice = (record: InterventionRecord): TranscriptNotice => {
   return { ...entry, queued, delivery: messageDelivery(record) };
 };
 
-/** Returns the conversation rows for `events`, without reading the clock. */
+/**
+ * Returns the conversation rows for `events`, without reading the clock. `earlierUnloaded` holds
+ * the Attempts whose earlier events aren't loaded.
+ */
 export const projectTranscript = (
   events: ReadonlyArray<TranscriptEventView>,
   attempts: ReadonlyArray<AttemptView>,
   sessionState: ReadonlyArray<TranscriptEventView> = [],
+  earlierUnloaded: ReadonlySet<AttemptId> = new Set(),
 ): TranscriptProjection => {
   const terminalAttempts = new Set(
     attempts.filter(({ outcome }) => outcome !== null).map(({ id }) => id),
@@ -392,7 +402,12 @@ export const projectTranscript = (
     if (payload._tag === "Final" || payload._tag === "Failed" || payload._tag === "Interrupted")
       terminalAttempts.add(attemptId);
   }
-  const { groups, unmatched } = indexSessions(events, sessionState, terminalAttempts);
+  const { groups, unmatched } = indexSessions(
+    events,
+    sessionState,
+    terminalAttempts,
+    earlierUnloaded,
+  );
   const entries: Array<TranscriptEntry> = [];
   for (const record of [...events].sort((left, right) => left.sequence - right.sequence)) {
     const payload = record.payload;

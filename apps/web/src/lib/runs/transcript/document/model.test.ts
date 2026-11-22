@@ -10,6 +10,7 @@ import {
   ProviderRetries,
   ProviderRetrying,
   SessionFinished,
+  SessionStarted,
   TextOutput,
   ToolFinished,
   ToolStarted,
@@ -764,6 +765,48 @@ describe("background work", () => {
       "plain: Background work: Watch CI (command)",
       "plain: No background work",
     ]);
+  });
+
+  it("shows a note for an empty snapshot while the session's earlier events aren't loaded", () => {
+    const launch = (sequence: number, prompt: Option.Option<string>) =>
+      record(
+        sequence,
+        AttemptChannel.SessionEvent.make({
+          event: SessionStarted.make({ session: child, prompt }),
+        }),
+      );
+    const firstLaunch = launch(3, Option.some("Complete issue #247 end-to-end."));
+    /** The notes for `events`, a page whose Attempt has earlier events that aren't loaded. */
+    const partialNotes = (events: ReadonlyArray<TranscriptEventView>) => {
+      const attempts = [attempt(null)];
+      const chapter = readerDocument(
+        projectTranscript(events, attempts, [firstLaunch], new Set([attemptId])),
+        attempts,
+        events,
+      ).chapters[0];
+      assert(chapter !== undefined);
+      return notes(chapter.rows);
+    };
+    assert.deepStrictEqual(
+      partialNotes([said(6, "CI passed."), snapshot(7, [])]),
+      ["plain: No background work"],
+      "a snapshot that lists work can be on an earlier page",
+    );
+    assert.deepStrictEqual(
+      partialNotes([launch(5, Option.none()), snapshot(6, []), said(7, "Resumed.")]),
+      ["plain: No background work"],
+      "a relaunch after a restart isn't the session's start",
+    );
+    assert.deepStrictEqual(
+      partialNotes([
+        firstLaunch,
+        snapshot(4, []),
+        said(5, "Waiting for CI."),
+        snapshot(6, [ciWatch]),
+      ]),
+      ["plain: Background work: Watch CI (command)"],
+      "the page holds the child's first launch, so its first snapshot ends no work",
+    );
   });
 
   it("keeps a run of tool calls in one group and places the snapshots during it after the run", () => {
