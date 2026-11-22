@@ -869,6 +869,31 @@ describe("background work", () => {
     }),
   );
 
+  it.effect("stops the grace period of a waiting answer that a later answer replaces", () =>
+    Effect.gen(function* () {
+      const session = yield* conversation(child("grace-replaced"), { held: true });
+      yield* session.reportBackground(Option.some([ciWatch]));
+      yield* session.finish("Waiting for CI");
+      yield* session.reportBackground(nothingRuns);
+      // The idle report replaces the answer that waits, so the grace period of its wait stops.
+      yield* session.finish("CI passed");
+      yield* session.reportBackground(Option.some([ciWatch]));
+      yield* session.finish("Waiting for the rerun");
+      yield* TestClock.adjust(BACKGROUND_TURN_GRACE);
+      yield* session.intervene(Release.make(), noDelivery);
+      yield* TestClock.adjust("10 hours");
+      assert.isUndefined(
+        session.result.pollUnsafe(),
+        "the latest answer waits for the work that still runs",
+      );
+      yield* session.reportBackground(nothingRuns);
+      yield* TestClock.adjust(BACKGROUND_TURN_GRACE);
+      assert.strictEqual((yield* Fiber.join(session.result)).message, "Waiting for the rerun");
+      const events = yield* session.events;
+      assert.deepStrictEqual(limitsPassed(events), [false]);
+    }),
+  );
+
   /**
    * Starts a conversation whose harness takes a steer only after `unlock`. `lock` sends a steer,
    * which holds the conversation's lock until then.
