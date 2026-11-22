@@ -750,6 +750,43 @@ describe("Claude child backend", () => {
       }).pipe(Effect.scoped),
   );
 
+  it.effect("gives each new child its own conversation ID and saves it before the launch", () =>
+    Effect.gen(function* () {
+      const opened: Array<string | undefined> = [];
+      const started: Array<HarnessSession> = [];
+      const sdk = Layer.succeed(ClaudeSdk)({
+        open: (_input, options) => {
+          opened.push(options.sessionId);
+          return scripted([{ type: "result", subtype: "success", result: "Done" }]);
+        },
+      });
+      const journal = Layer.succeed(ChildSessionJournal)({
+        ...ChildSessionJournal.noop,
+        started: (reference) =>
+          Effect.sync(() => {
+            started.push(reference);
+          }),
+      });
+      const launch = Effect.gen(function* () {
+        const running = yield* (yield* ChildBackend).launch(request());
+        return (yield* running.result).message;
+      });
+      const messages = yield* Effect.all([launch, launch]).pipe(
+        Effect.provide(
+          claudeChildWith(workerCommands(0).layer, journal).pipe(Layer.provideMerge(sdk)),
+        ),
+        Effect.scoped,
+      );
+      assert.deepStrictEqual(messages, ["Done", "Done"]);
+      assert.lengthOf(opened, 2);
+      assert.notStrictEqual(opened[0], opened[1]);
+      assert.deepStrictEqual(
+        opened,
+        started.map(({ id }) => id),
+      );
+    }),
+  );
+
   it.live("checkpoints a message only after the session has handled it", () =>
     Effect.gen(function* () {
       const stdout = (messages: ReadonlyArray<Schema.Json>) =>
@@ -1329,6 +1366,59 @@ describe("Claude child backend", () => {
           result: "Done",
           queued_turn_count: 0,
           ...acknowledged([question.id, steer.id]),
+        });
+        yield* until("SessionIdle");
+        yield* running.intervene(Release.make(), noDelivery);
+        return yield* running.result;
+      }).pipe(Effect.scoped, Effect.provide(claudeChild.pipe(Layer.provide(sdk))));
+      assert.strictEqual(result.message, "Done");
+      assert.isTrue(result.answeredOperator);
+    }).pipe(Effect.scoped),
+  );
+
+  // Two messages to an idle child can start one turn whose opening frame names only the first.
+  // Claude folds the second in at the turn's next tool result, after the tool call that it opened.
+  it.effect("counts a message that the opening frame of its turn leaves to be folded in", () =>
+    Effect.gen(function* () {
+      const { inputs, output, sdk } = yield* typedTurnSdk;
+      const result = yield* Effect.gen(function* () {
+        const running = yield* (yield* ChildBackend).launch(
+          ChildRequest.make({ ...request(), held: true }),
+        );
+        const { until } = yield* turnDriver(running, () => output);
+        yield* Queue.take(inputs);
+        yield* Queue.offer(output, {
+          type: "result",
+          subtype: "success",
+          result: "Waiting",
+          queued_turn_count: 0,
+        });
+        yield* until("SessionIdle");
+        const first = OperatorMessage.make({ message: "Check the build" });
+        const second = OperatorMessage.make({ message: "Then check the tests" });
+        for (const message of [first, second]) {
+          yield* running.intervene(message, noDelivery);
+          yield* Queue.take(inputs);
+        }
+        yield* Queue.offer(output, {
+          type: "assistant",
+          message: {
+            content: [{ type: "tool_use", id: "bash-1", name: "Bash", input: { command: "ls" } }],
+          },
+          user_message_uuids: [first.id],
+        });
+        yield* until("ToolStarted");
+        yield* Queue.offer(output, {
+          type: "user",
+          message: { content: [{ type: "tool_result", tool_use_id: "bash-1", content: "ok" }] },
+        });
+        yield* until("ToolFinished");
+        yield* Queue.offer(output, {
+          type: "result",
+          subtype: "success",
+          result: "Done",
+          queued_turn_count: 0,
+          user_message_uuids: [first.id, second.id],
         });
         yield* until("SessionIdle");
         yield* running.intervene(Release.make(), noDelivery);
