@@ -746,6 +746,84 @@ describe("background work", () => {
     ]);
   });
 
+  it("shows no note for a first snapshot in which nothing runs", () => {
+    const chapter = document(
+      [
+        record(1, AttemptChannel.Started.make({ parentModel: Option.some(ModelId.make("gpt-5")) })),
+        ...delegation,
+        snapshot(3, []),
+        said(4, "Starting the gate."),
+        snapshot(5, [ciWatch]),
+        said(6, "Waiting for CI."),
+        snapshot(7, []),
+      ],
+      [attempt(null)],
+    ).chapters[0];
+    assert(chapter !== undefined);
+    assert.deepStrictEqual(notes(chapter.rows), [
+      "plain: Background work: Watch CI (command)",
+      "plain: No background work",
+    ]);
+  });
+
+  it("keeps a run of tool calls in one group and places the snapshots during it after the run", () => {
+    const command = (sequence: number, callId: string, finished: boolean) =>
+      record(
+        sequence,
+        AttemptChannel.SessionEvent.make({
+          event: finished
+            ? ToolFinished.make({
+                session: child,
+                callId,
+                tool: "command",
+                output: "",
+                isError: false,
+              })
+            : ToolStarted.make({
+                session: child,
+                callId,
+                tool: "command",
+                input: { command: "/bin/bash -lc 'pnpm test'" },
+              }),
+        }),
+      );
+    const chapter = document(
+      [
+        record(1, AttemptChannel.Started.make({ parentModel: Option.some(ModelId.make("gpt-5")) })),
+        ...delegation,
+        said(3, "Running the gate."),
+        command(4, "gate", false),
+        snapshot(5, [ciWatch]),
+        command(6, "gate", true),
+        command(7, "review", false),
+        snapshot(8, [
+          ciWatch,
+          BackgroundWork.make({ id: "review", kind: "agent", description: "Review the diff" }),
+        ]),
+        command(9, "review", true),
+        said(10, "Waiting for CI."),
+      ],
+      [attempt(null)],
+    ).chapters[0];
+    assert(chapter !== undefined);
+    assert.deepStrictEqual(
+      chapter.rows.map((row) =>
+        row._tag === "Note"
+          ? `Note: ${row.text}`
+          : row._tag === "Burst"
+            ? `Burst: ${row.tools.map(({ key }) => key).length}`
+            : row._tag,
+      ),
+      [
+        "Delegation",
+        "Message",
+        "Burst: 2",
+        "Note: Background work: Watch CI (command), Review the diff (agent)",
+        "Message",
+      ],
+    );
+  });
+
   it("keeps the snapshots of two children in a note for each child", () => {
     const reviewer = ChildSession.make({
       id: AgentSessionId.make("reviewer"),
