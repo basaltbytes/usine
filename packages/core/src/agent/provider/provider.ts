@@ -236,6 +236,14 @@ export class ModelProvider extends Schema.Class<
     return this.protocols.flatMap(({ routes }) => routes);
   }
 
+  /** The upstream that every protocol of the provider has, if they have the same one. */
+  get sharedUpstream(): Option.Option<UpstreamBase> {
+    const [first, ...rest] = this.protocols;
+    return rest.every(({ upstream }) => upstream === first.upstream)
+      ? Option.some(first.upstream)
+      : Option.none();
+  }
+
   /** The hosts of the provider's upstreams. */
   get hosts(): ReadonlyArray<string> {
     return Arr.dedupe(this.protocols.map(({ upstream }) => new URL(upstream).hostname));

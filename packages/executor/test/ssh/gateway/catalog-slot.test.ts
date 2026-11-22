@@ -2,6 +2,7 @@ import { assert, describe, it } from "@effect/vitest";
 import { RemoteShell } from "@usine/agents/child-host";
 import {
   apiKeys,
+  CapabilityProfile,
   catalog,
   CredentialWiring,
   HarnessCatalog,
@@ -32,7 +33,7 @@ import { jsonKey } from "@usine/core/json-key";
 import type { AttemptRequest } from "@usine/durable/attempt-runtime";
 import { completes, type StubParent } from "@usine/durable/testing";
 import { ApiKey, GatewayProxy, LlmProvider, type LlmProviders } from "@usine/gateway";
-import { Effect, Layer, Option, Redacted, Schema } from "effect";
+import { Array as Arr, Effect, Layer, Option, Redacted, Schema } from "effect";
 import { HttpClient, HttpClientResponse, HttpServerRequest, HttpServerResponse } from "effect/http";
 import { CheckoutRequest, Executor } from "../../../src/executor.ts";
 import {
@@ -84,11 +85,19 @@ const wiring = CredentialWiring.make({
   files: {},
 });
 
-/** A harness that only this test registers, which uses the test plan. */
+/**
+ * A harness that only this test registers, which uses the test plan through the gateway. It offers
+ * Claude's routes but the api-key route, which can't reach the plan's two upstreams.
+ */
 const planClient = HarnessDescriptor.make({
   ...claude,
   id: Harness.make("plan-client"),
   label: "Plan client",
+  capabilities: Arr.map(claude.capabilities, (profile) => {
+    const credentials = profile.credentials.filter((route) => route !== "api-key");
+    assert(Arr.isReadonlyArrayNonEmpty(credentials));
+    return CapabilityProfile.make({ ...profile, credentials });
+  }),
   worker: WorkerRequirements.make({
     ...claude.worker,
     credential: Option.some(
