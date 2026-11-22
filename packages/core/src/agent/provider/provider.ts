@@ -135,6 +135,16 @@ export class SubscriptionCredential extends Schema.TaggedClass<
 export const AcceptedCredential = Schema.Union([ApiKeyCredential, SubscriptionCredential]);
 export type AcceptedCredential = typeof AcceptedCredential.Type;
 
+/** The request headers that pass to every upstream that lists the headers it accepts. */
+const CONTENT_HEADERS: ReadonlyArray<string> = [
+  "accept",
+  "accept-encoding",
+  "content-encoding",
+  "content-length",
+  "content-type",
+  "user-agent",
+];
+
 const kindOf = (credential: AcceptedCredential): GatewayCredentialKind =>
   credential._tag === "ApiKey" ? "api-key" : "subscription";
 
@@ -203,6 +213,17 @@ export class ModelProvider extends Schema.Class<
     return Arr.findFirst(this.credentials, (credential) =>
       credential._tag === "Subscription" ? Option.some(credential.login) : Option.none(),
     );
+  }
+
+  /**
+   * Returns whether the request header `name`, in lowercase, passes to the provider's upstreams:
+   * every header, or the content headers and the ones that `passThrough` lists.
+   */
+  passes(name: string): boolean {
+    return Option.match(this.passThrough, {
+      onNone: () => true,
+      onSome: (listed) => CONTENT_HEADERS.includes(name) || listed.some((header) => header === name),
+    });
   }
 
   /** Returns the protocol that serves `path`, a path under the slot without its query. */

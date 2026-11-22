@@ -1,7 +1,7 @@
 // SDK hooks, transactions, and async iterators require Promise callbacks.
 // @effect-diagnostics asyncFunction:off
 import { Files, SandboxFileError } from "@cloudflare/sandbox";
-import { CloudflareLlmProvider } from "@usine/core/worker";
+import { ModelProvider, modelProviders } from "@usine/core/agent/provider";
 import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
 import {
   type Cause,
@@ -71,6 +71,12 @@ const settingsOf = (env: Env): Option.Option<WorkerSettings> =>
     },
     allowedHosts: allowedHostsOf(variables.ALLOWED_HOSTS ?? ""),
   }));
+
+/** The provider and credential of a provider's outbound handler, as its props carry them. */
+const ProviderProps = Schema.Struct({
+  provider: Schema.toCodecJson(ModelProvider),
+  credential: ProviderCredential,
+});
 
 const logger = Logger.layer([Logger.consoleJson]);
 
@@ -206,16 +212,11 @@ const containerOf = (
             ),
           ),
         Provider: ({ host, provider, credential }) =>
-          Schema.encodeEffect(ProviderCredential)(credential).pipe(
+          Schema.encodeEffect(ProviderProps)({ provider, credential }).pipe(
             Effect.mapError((cause) => containerFailure("intercept")(cause)),
-            Effect.flatMap((encoded) =>
+            Effect.flatMap((props) =>
               tryContainer("intercept", () =>
-                container.interceptOutboundHttp(
-                  host,
-                  exports.ProviderOutbound({
-                    props: { provider, credential: encoded },
-                  }),
-                ),
+                container.interceptOutboundHttp(host, exports.ProviderOutbound({ props })),
               ),
             ),
           ),
@@ -348,6 +349,7 @@ export class AttemptSandbox extends DurableObject<Env> {
           onNone: () => [],
           onSome: ({ allowedHosts }) => allowedHosts,
         }),
+        providers: modelProviders,
       }),
       logger,
     );
@@ -498,10 +500,6 @@ const GitHubProps = Schema.Struct({
   host: Schema.Literals(GITHUB_HOSTS),
   token: Schema.NonEmptyString,
 });
-const ProviderProps = Schema.Struct({
-  provider: CloudflareLlmProvider,
-  credential: ProviderCredential,
-});
 
 /** Adds the Attempt's installation token to the sandbox's requests for GitHub. */
 export class GitHubOutbound extends WorkerEntrypoint<Env, typeof GitHubProps.Encoded> {
@@ -520,8 +518,9 @@ export class GitHubOutbound extends WorkerEntrypoint<Env, typeof GitHubProps.Enc
 }
 
 /**
- * Sends the sandbox's plain HTTP requests for a provider to the provider, with its API key.
- * Refuses a request for a route that the harnesses don't call with status 404.
+ * Sends the sandbox's plain HTTP requests for a provider to the upstream of the protocol that
+ * serves the path, with the provider's API key. Refuses a path outside the provider's routes in
+ * the catalog with status 404.
  */
 export class ProviderOutbound extends WorkerEntrypoint<Env, typeof ProviderProps.Encoded> {
   override async fetch(request: Request): Promise<Response> {
@@ -531,19 +530,16 @@ export class ProviderOutbound extends WorkerEntrypoint<Env, typeof ProviderProps
     const forwarded = providerRequest(request, props.provider, props.credential);
     if (Option.isNone(forwarded)) {
       await run(
-        Effect.logWarning("Refused a sandbox request for a route the harnesses don't call", {
-          handler: props.provider,
+        Effect.logWarning("Refused a sandbox request for a route outside the provider's", {
+          handler: props.provider.id,
           method: request.method,
           host: new URL(request.url).host,
           path: new URL(request.url).pathname,
         }),
       );
-      return plain(
-        404,
-        `usine forwards only the routes Claude Code and Codex call to ${props.provider}.\n`,
-      );
+      return plain(404, `usine forwards only the ${props.provider.label} routes in its catalog.\n`);
     }
-    return run(forwardRequest(props.provider, request, forwarded.value));
+    return run(forwardRequest(props.provider.id, request, forwarded.value));
   }
 }
 

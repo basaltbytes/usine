@@ -1,7 +1,8 @@
 import { ListField } from "./list-field";
 import { useQuery } from "@tanstack/react-query";
 import { Worker } from "@usine/config/factory";
-import { CloudflareInstanceType, CloudflareLlmProvider } from "@usine/core/worker";
+import { modelProviders } from "@usine/core/agent/provider";
+import { CloudflareInstanceType } from "@usine/core/worker";
 import { Checkbox } from "~/components/ui/checkbox";
 import { Label } from "~/components/ui/label";
 import { NativeSelect } from "~/components/ui/native-select";
@@ -18,17 +19,20 @@ import { configurationQuery } from "~/lib/configuration/queries";
 import { Fields, FormField } from "./fields";
 import { ProvisionerFields } from "./provisioner";
 
+/** The catalog's providers that take an API key. */
+const keyedProviders = modelProviders.providers.filter((provider) => provider.accepts("api-key"));
+
 const CloudflareKeys = (fields: FormFieldsProps) => {
   const keys = arrayValue(fields.value.llm_providers).map(objectValue);
   return (
     <div className="grid gap-4 sm:grid-cols-2">
-      {CloudflareLlmProvider.literals.map((provider) => {
+      {keyedProviders.map(({ id: provider, label }) => {
         const index = keys.findIndex((key) => key.provider === provider);
         return (
           <FormField
             key={provider}
             path="api_key_env"
-            label={provider === "anthropic" ? copy.anthropic : copy.openai}
+            label={copy.apiKeyVariable(label)}
             description={formCopy.secret}
             optional
             value={index < 0 ? {} : objectValue(keys[index])}

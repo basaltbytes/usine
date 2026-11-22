@@ -1,3 +1,4 @@
+import { anthropic, openai } from "@usine/core/agent/provider";
 import { harnessesLive } from "@usine/agents/harness/node";
 import { jsonKey } from "@usine/core/json-key";
 import type { AttemptConnections } from "../../src/executor.ts";
@@ -68,11 +69,11 @@ const SANDBOX = `${OWNER}.remote-run_execute_1`;
 const WORKTREE = "/home/usine/workspace/attempts/remote-run_execute_1";
 const SHELL = fileURLToPath(new URL("../../src/cloudflare/shell/shell.ts", import.meta.url));
 const ANTHROPIC: CloudflareProviderKey = {
-  provider: "anthropic",
+  provider: anthropic.id,
   apiKey: Redacted.make("sk-ant-test-key"),
 };
 const OPENAI: CloudflareProviderKey = {
-  provider: "openai",
+  provider: openai.id,
   apiKey: Redacted.make("sk-openai-test-key"),
 };
 

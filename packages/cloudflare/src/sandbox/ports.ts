@@ -1,3 +1,4 @@
+import type { ModelProviderCatalog } from "@usine/core/agent/provider";
 import { AttemptId } from "@usine/core/attempt";
 import { CloudflareImageName, CloudflareInstanceType } from "@usine/core/worker";
 import {
@@ -147,5 +148,7 @@ export class SandboxSettings extends Context.Service<
   {
     /** The hosts the sandboxes reach over HTTPS without a credential, from `ALLOWED_HOSTS`. */
     readonly allowedHosts: ReadonlyArray<string>;
+    /** The providers whose sandbox hosts the outbound handlers serve: the Worker's `modelProviders`. */
+    readonly providers: ModelProviderCatalog;
   }
 >()("@usine/cloudflare/sandbox/ports/SandboxSettings") {}

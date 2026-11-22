@@ -1,11 +1,7 @@
 import { AttemptId } from "@usine/core/attempt";
 import { safeSegment } from "@usine/core/repository";
-import {
-  CloudflareImageName,
-  CloudflareInstanceType,
-  CloudflareLlmProvider,
-  type WorkerName,
-} from "@usine/core/worker";
+import { ModelProviderId } from "@usine/core/agent/provider";
+import { CloudflareImageName, CloudflareInstanceType, type WorkerName } from "@usine/core/worker";
 import { type Brand, Schema } from "effect";
 import { HttpApi, HttpApiEndpoint, HttpApiGroup } from "effect/http-api";
 import { ProcessId, SandboxName, SandboxOwner } from "./names.ts";
@@ -49,12 +45,15 @@ export class ApiKeyCredential extends Schema.TaggedClass<
 export const ProviderCredential = Schema.Union([ApiKeyCredential]);
 export type ProviderCredential = typeof ProviderCredential.Type;
 
-/** A provider and the credential its outbound handler uses to authenticate sandbox requests. */
+/**
+ * A provider and the credential its outbound handler uses to authenticate sandbox requests. The
+ * Worker serves the providers of its catalog and leaves out the grants of others.
+ */
 export class ProviderGrant extends Schema.Class<
   ProviderGrant,
   Brand.Brand<"@usine/cloudflare/api/api/ProviderGrant">
 >("@usine/cloudflare/ProviderGrant")({
-  provider: CloudflareLlmProvider,
+  provider: ModelProviderId,
   credential: ProviderCredential,
 }) {}
 

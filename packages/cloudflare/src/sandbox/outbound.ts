@@ -1,8 +1,8 @@
-import type { CloudflareLlmProvider } from "@usine/core/worker";
+import type { ModelProvider, ModelProviderCatalog } from "@usine/core/agent/provider";
 import { Effect, Match, Option, Redacted } from "effect";
 import { FetchHttpClient, HttpClientError, HttpClientRequest } from "effect/http";
 import type { ProviderCredential, SandboxCredentials } from "../api/api.ts";
-import { GITHUB_HOSTS, type GitHubHost, PROVIDER_HOSTS } from "../api/harness.ts";
+import { GITHUB_HOSTS, type GitHubHost, sandboxHost } from "../api/harness.ts";
 
 export const forwardRequest = Effect.fn("Sandbox.forwardRequest")(function* (
   handler: string,
@@ -43,7 +43,7 @@ interface GitHubInterception {
 interface ProviderInterception {
   readonly _tag: "Provider";
   readonly host: string;
-  readonly provider: CloudflareLlmProvider;
+  readonly provider: ModelProvider;
   readonly credential: ProviderCredential;
 }
 
@@ -68,22 +68,24 @@ export type Interception =
   | DeniedInterception;
 
 /**
- * Returns the hosts a sandbox reaches: GitHub and the providers with the Attempt's credentials,
- * and `allowedHosts` unchanged. The container has no other way out. GitHub and provider hosts
- * without a credential are denied rather than left out, because a running container keeps its
- * last handler for a host; they're never treated as allowlisted.
+ * Returns the hosts a sandbox reaches: GitHub and the providers of `catalog` with the Attempt's
+ * credentials, and `allowedHosts` unchanged. The container has no other way out. GitHub and
+ * provider hosts without a credential are denied rather than left out, because a running
+ * container keeps its last handler for a host; they're never treated as allowlisted.
  */
 export const interceptionsFor = (
+  catalog: ModelProviderCatalog,
   credentials: SandboxCredentials,
   allowedHosts: ReadonlyArray<string>,
 ): ReadonlyArray<Interception> => {
-  const providerHosts = Object.values(PROVIDER_HOSTS).map(({ sandbox }) => sandbox);
-  const reserved = new Set<string>([...GITHUB_HOSTS, ...providerHosts]);
-  const providers = Object.entries(PROVIDER_HOSTS).map(([provider, { sandbox }]): Interception => {
-    const grant = credentials.providers.find((candidate) => candidate.provider === provider);
+  const keyed = catalog.providers.filter((provider) => provider.accepts("api-key"));
+  const reserved = new Set<string>([...GITHUB_HOSTS, ...keyed.map(({ id }) => sandboxHost(id))]);
+  const providers = keyed.map((provider): Interception => {
+    const host = sandboxHost(provider.id);
+    const grant = credentials.providers.find((candidate) => candidate.provider === provider.id);
     return grant === undefined
-      ? { _tag: "Denied", host: sandbox, scheme: "http" }
-      : { _tag: "Provider", host: sandbox, provider: grant.provider, credential: grant.credential };
+      ? { _tag: "Denied", host, scheme: "http" }
+      : { _tag: "Provider", host, provider, credential: grant.credential };
   });
   return [
     ...GITHUB_HOSTS.map((host): Interception =>
@@ -106,7 +108,10 @@ export const allowedHostsOf = (value: string): ReadonlyArray<string> =>
     .map((host) => host.trim().toLowerCase())
     .filter((host) => host !== "");
 
-/** The headers a tool in the sandbox can use to send a credential. All are replaced. */
+/**
+ * The headers a tool in the sandbox can use to send a credential. All are replaced, with the key
+ * headers of a provider's protocols.
+ */
 const CREDENTIAL_HEADERS = ["authorization", "x-api-key", "proxy-authorization"] as const;
 
 /**
@@ -146,59 +151,30 @@ export const gitHubRequest = (
   return new Request(upstreamUrl(request, host), new Request(request, { headers }));
 };
 
-/** A request that Claude Code or Codex sends to its provider: a method, and a pattern of its path. */
-interface HarnessRoute {
-  readonly method: "GET" | "POST";
-  readonly path: RegExp;
-}
-
 /**
- * The routes each provider's handler forwards: the paths that the Gateway's `llm.<domain>` serves
- * (ADR 0027), each with the method that the harnesses use. Each pattern matches whole plain
- * segments, so a percent-encoded separator or a dot segment never matches, and the rest of the
- * provider's API, such as files or organization administration, can't be reached with the key.
- */
-const HARNESS_ROUTES = {
-  anthropic: [
-    { method: "POST", path: /^\/v1\/messages$/u },
-    { method: "POST", path: /^\/v1\/messages\/count_tokens$/u },
-    { method: "GET", path: /^\/v1\/models$/u },
-    { method: "GET", path: /^\/v1\/models\/[A-Za-z0-9][A-Za-z0-9._-]*$/u },
-  ],
-  openai: [
-    { method: "POST", path: /^\/v1\/responses$/u },
-    { method: "POST", path: /^\/v1\/responses\/compact$/u },
-    { method: "GET", path: /^\/v1\/models$/u },
-  ],
-} as const satisfies Record<CloudflareLlmProvider, ReadonlyArray<HarnessRoute>>;
-
-/**
- * Returns `request`, sent over plain HTTP to the provider's sandbox host, for the provider's
- * upstream over HTTPS with the provider credential in place of the sandbox's placeholder.
- * Returns `None` for a request that isn't one of the provider's `HARNESS_ROUTES`.
+ * Returns `request`, sent over plain HTTP to the provider's sandbox host, for the upstream of the
+ * provider's protocol that serves its path, with the key in that protocol's header in place of the
+ * sandbox's credentials. Returns `None` for a path outside the provider's routes, so the rest of
+ * the provider's API, such as files or organization administration, can't be reached with the key.
+ * A route's placeholder matches one plain segment, so a percent-encoded separator or a dot segment
+ * never matches.
  */
 export const providerRequest = (
   request: Request,
-  provider: CloudflareLlmProvider,
+  provider: ModelProvider,
   credential: ProviderCredential,
 ): Option.Option<Request> => {
-  const upstream = upstreamUrl(request, PROVIDER_HOSTS[provider].upstream);
-  const routes: ReadonlyArray<HarnessRoute> = HARNESS_ROUTES[provider];
-  if (!routes.some(({ method, path }) => method === request.method && path.test(upstream.pathname)))
-    return Option.none();
-  const headers = withoutCredentials(request);
-  headers.delete("host");
-  Match.valueTags(credential, {
-    ApiKey: ({ key }) => {
-      switch (provider) {
-        case "anthropic":
-          headers.set("x-api-key", Redacted.value(key));
-          return;
-        case "openai":
-          headers.set("authorization", `Bearer ${Redacted.value(key)}`);
-          return;
-      }
-    },
+  const incoming = new URL(request.url);
+  return Option.map(provider.protocolFor(incoming.pathname), (protocol) => {
+    const headers = withoutCredentials(request);
+    for (const { key } of provider.protocols) headers.delete(key.header);
+    headers.delete("host");
+    for (const name of [...headers.keys()]) if (!provider.passes(name)) headers.delete(name);
+    Match.valueTags(credential, {
+      ApiKey: ({ key }) =>
+        headers.set(protocol.key.header, protocol.key.value(Redacted.value(key))),
+    });
+    const upstream = new URL(`${protocol.upstream}${incoming.pathname}${incoming.search}`);
+    return new Request(upstream, new Request(request, { headers }));
   });
-  return Option.some(new Request(upstream, new Request(request, { headers })));
 };

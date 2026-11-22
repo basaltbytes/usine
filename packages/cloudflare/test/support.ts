@@ -1,5 +1,6 @@
 // SDK hooks, transactions, and async iterators require Promise callbacks.
 // @effect-diagnostics asyncFunction:off
+import { anthropic, modelProviders } from "@usine/core/agent/provider";
 import { AttemptId } from "@usine/core/attempt";
 import { CloudflareImageName } from "@usine/core/worker";
 import { DateTime, Effect, Layer, Option, Redacted } from "effect";
@@ -35,7 +36,7 @@ const credentials = (token = "ghs_first") =>
     github: Option.some(Redacted.make(token)),
     providers: [
       ProviderGrant.make({
-        provider: "anthropic",
+        provider: anthropic.id,
         credential: ApiKeyCredential.make({ key: Redacted.make("sk-ant-key") }),
       }),
     ],
@@ -209,7 +210,7 @@ export const fakeSandbox = (allowedHosts: ReadonlyArray<string> = ["registry.npm
       record: (sandbox) => Effect.sync(() => void state.recorded.push(sandbox)),
       forget: (name) => Effect.sync(() => void state.forgotten.push(name)),
     }),
-    Layer.succeed(SandboxSettings)({ allowedHosts }),
+    Layer.succeed(SandboxSettings)({ allowedHosts, providers: modelProviders }),
   );
   return { state, layer };
 };

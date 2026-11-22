@@ -293,13 +293,6 @@ export const CloudflareImageName = Schema.String.check(
 ).pipe(Schema.brand("CloudflareImageName"));
 export type CloudflareImageName = typeof CloudflareImageName.Type;
 
-/**
- * An LLM provider whose API key the Cloudflare Worker's outbound handlers hold for an Attempt:
- * `anthropic` for Claude Code and `openai` for Codex.
- */
-export const CloudflareLlmProvider = Schema.Literals(["anthropic", "openai"]);
-export type CloudflareLlmProvider = typeof CloudflareLlmProvider.Type;
-
 /** The cloud provider that creates one machine per Attempt for a provisioned SSH Worker. */
 export const MachineProvider = Schema.Literals(["hetzner", "boat", "boxd"]);
 export type MachineProvider = typeof MachineProvider.Type;

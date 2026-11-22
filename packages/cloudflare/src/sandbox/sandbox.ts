@@ -128,8 +128,16 @@ const intercept = Effect.fn("Sandbox.intercept")(function* (
   credentials: SandboxCredentials,
 ) {
   const container = yield* SandboxContainer;
-  const { allowedHosts } = yield* SandboxSettings;
-  const interceptions = interceptionsFor(credentials, allowedHosts);
+  const { allowedHosts, providers } = yield* SandboxSettings;
+  const interceptions = interceptionsFor(providers, credentials, allowedHosts);
+  const unserved = credentials.providers.filter(({ provider }) =>
+    Option.isNone(providers.get(provider)),
+  );
+  if (unserved.length > 0)
+    yield* Effect.logWarning("Left out the keys of providers that the Worker doesn't serve", {
+      sandbox: name,
+      providers: unserved.map(({ provider }) => provider).join(","),
+    });
   yield* Effect.forEach(interceptions, container.intercept, { discard: true });
   yield* Effect.logInfo("Registered the sandbox's outbound handlers", {
     sandbox: name,

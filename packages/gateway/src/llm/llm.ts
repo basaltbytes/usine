@@ -105,31 +105,15 @@ export const llmUpstream = (held: LlmProvider, protocol: ProviderProtocol, rest:
   return `${base}${path}`;
 };
 
-/** The request headers that pass to every upstream that lists the headers it accepts. */
-const CONTENT_HEADERS: ReadonlyArray<string> = [
-  "accept",
-  "accept-encoding",
-  "content-encoding",
-  "content-length",
-  "content-type",
-  "user-agent",
-];
-
 /**
  * Returns the request headers that pass to `provider`'s upstream: every header, or the content
  * headers and the ones that `passThrough` lists.
  */
 export const passingHeaders = (provider: ModelProvider, headers: Headers.Headers) =>
-  Option.match(provider.passThrough, {
-    onNone: () => headers,
-    onSome: (listed) => {
-      const kept = new Set<string>([...CONTENT_HEADERS, ...listed]);
-      return Headers.removeMany(
-        headers,
-        Object.keys(headers).filter((name) => !kept.has(name)),
-      );
-    },
-  });
+  Headers.removeMany(
+    headers,
+    Object.keys(headers).filter((name) => !provider.passes(name)),
+  );
 
 /** Returns the header name of each protocol's key, which can carry a caller token. */
 export const keyHeaders = (catalog: ModelProviderCatalog): ReadonlyArray<string> => [
