@@ -500,6 +500,11 @@ const makeCodexSessions = Effect.gen(function* () {
       ),
       beforeFinish: Effect.flatMap(Ref.get(state), ({ connection }) => connection.close),
       maxBackgroundWaitMinutes: spec.maxBackgroundWaitMinutes,
+      // An own input sent while a turn is interrupting waits in `pending` for the next turn.
+      heldOwnInputs: Effect.map(
+        Ref.get(state),
+        ({ pending }) => pending.filter(({ id }) => id === undefined).length,
+      ),
     });
 
     /**
