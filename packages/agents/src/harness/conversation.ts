@@ -209,11 +209,15 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
         turnId: matched.repeated.value.turn,
         itemId: matched.repeated.value.id,
       });
-    if (matched.own)
-      yield* Effect.logDebug(
+    if (Option.isSome(matched.own))
+      yield* Effect.logInfo(
         "The harness recorded the session's own input; no operator message read",
         {
           sessionId: session.id,
+          ...Option.match(matched.own.value.item, {
+            onNone: () => ({}),
+            onSome: ({ turn, id }) => ({ turnId: turn, itemId: id }),
+          }),
         },
       );
     if (matched.folded > 0)

@@ -203,7 +203,7 @@ describe("receipt matching on Codex's decoder", () => {
     );
     assert.deepStrictEqual(
       steps.map(({ own }) => own),
-      [true, false],
+      [Option.some({ item: Option.some({ id: "task", turn: "turn-1" }) }), Option.none()],
     );
     assert.deepStrictEqual(reads(steps), [[id(1), "now"]]);
     assert.deepStrictEqual(steps[0]?.save, Option.some(["task"]));

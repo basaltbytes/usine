@@ -1800,6 +1800,116 @@ describe("Codex child backend", () => {
     }).pipe(Effect.scoped),
   );
 
+  it.effect("reads an operator message that repeats the continuation at its own record", () =>
+    Effect.gen(function* () {
+      const logs = collectLogs(["Info"]);
+      const notifications = yield* Queue.make<CodexNotification, Cause.Done>();
+      const repeated = OperatorMessage.make({ message: CONTINUATION_MESSAGE });
+      const inputs: Array<{ method: string; params: Schema.Json }> = [];
+      const journal: Array<string> = [];
+      const read = yield* Deferred.make<void>();
+      const saved = HarnessSession.make({
+        id: HarnessSessionId.make("thread-1"),
+        cwd: request().cwd,
+      });
+      const userMessage = (id: string, text: string) => ({
+        type: "userMessage",
+        id,
+        content: [{ type: "text", text, text_elements: [] }],
+      });
+      const responses = new Map(
+        Object.entries({
+          ...successfulResponses([{ id: "gpt-5.6-terra", model: "gpt-5.6-terra" }]),
+          "turn/start": { turn: { id: "turn-2" } },
+          "thread/resume": {
+            modelProvider: "openai",
+            thread: {
+              id: saved.id,
+              turns: [
+                {
+                  id: "turn-1",
+                  status: "completed",
+                  items: [userMessage("task", request().prompt)],
+                },
+              ],
+            },
+          },
+        }),
+      );
+      const server = Layer.succeed(CodexAppServer)({
+        stop: () => Effect.void,
+        open: () =>
+          Effect.succeed({
+            notifications: Stream.fromQueue(notifications),
+            notify: () => Effect.void,
+            close: Queue.end(notifications).pipe(Effect.asVoid),
+            request: (_operation, method, params) =>
+              Effect.sync(() => {
+                if (method === "turn/start" || method === "turn/steer")
+                  inputs.push({ method, params });
+                return responses.get(method) ?? {};
+              }),
+          }),
+      });
+      const recorded = (id: string) =>
+        Queue.offer(notifications, {
+          method: "item/started",
+          params: {
+            threadId: saved.id,
+            turnId: "turn-2",
+            item: { ...userMessage(id, CONTINUATION_MESSAGE), clientId: null },
+          },
+        });
+      yield* Effect.gen(function* () {
+        yield* (yield* ChildBackend).launch(
+          ChildRequest.make({
+            ...request(),
+            resume: Option.some(saved),
+            receipts: Option.some(["task"]),
+            unread: [{ id: repeated.id, message: repeated.message }],
+          }),
+        );
+        assert.deepStrictEqual(
+          inputs.map(({ method }) => method),
+          ["turn/start", "turn/steer"],
+          "the continuation, then the message",
+        );
+        yield* recorded("continuation");
+        yield* recorded("repeated");
+        yield* Deferred.await(read);
+        assert.deepStrictEqual(journal, [
+          "received continuation",
+          "received continuation repeated",
+          `read ${repeated.id}`,
+        ]);
+        assert.deepStrictEqual(
+          logs.records.flatMap(({ message }) =>
+            Array.isArray(message) &&
+            message[0] === "The harness recorded the session's own input; no operator message read"
+              ? [message[1]]
+              : [],
+          ),
+          [{ sessionId: request().session.id, turnId: "turn-2", itemId: "continuation" }],
+        );
+      }).pipe(
+        Effect.provideService(ChildSessionJournal, {
+          started: () => Effect.void,
+          prompted: Effect.void,
+          continued: () => Effect.void,
+          received: (items) =>
+            Effect.sync(() => {
+              journal.push(`received ${items.join(" ")}`);
+            }),
+          delivered: (id, state) =>
+            Effect.sync(() => {
+              journal.push(`${Option.isSome(state) ? "read" : "unread"} ${id}`);
+            }).pipe(Effect.andThen(Deferred.succeed(read, undefined)), Effect.asVoid),
+        }),
+        Effect.provide(codexChild.pipe(Layer.provide(server), Layer.provideMerge(logs.layer))),
+      );
+    }).pipe(Effect.scoped),
+  );
+
   describe("saved receipts", () => {
     const userMessage = (id: string, text: string) => ({
       type: "userMessage",
@@ -2483,6 +2593,127 @@ describe("Codex child backend", () => {
         assert.strictEqual(opens, 2);
       }).pipe(Effect.provide(codexChild.pipe(Layer.provideMerge(server))));
     }).pipe(Effect.scoped),
+  );
+
+  it.effect(
+    "reads a message that repeats the task at its own record after an app-server loss",
+    () =>
+      Effect.gen(function* () {
+        const original = yield* Queue.make<CodexNotification, SessionOperationError | Cause.Done>();
+        const restored = yield* Queue.make<CodexNotification, Cause.Done>();
+        const recovered = yield* Deferred.make<void>();
+        const idle = yield* Queue.make<void>();
+        const echo = OperatorMessage.make({ message: request().prompt });
+        const responses: Readonly<Record<string, Schema.Json>> = successfulResponses([
+          { id: "gpt-5.6-terra", model: "gpt-5.6-terra" },
+        ]);
+        const submitted: Array<{ method: string; params: Schema.Json }> = [];
+        const reads: Array<Option.Option<InterventionState>> = [];
+        const userMessage = (id: string, text: string) => ({
+          type: "userMessage",
+          id,
+          content: [{ type: "text", text, text_elements: [] }],
+        });
+        const recorded = (id: string, text: string) =>
+          Queue.offer(restored, {
+            method: "item/started",
+            params: { threadId: "thread-1", turnId: "turn-2", item: userMessage(id, text) },
+          });
+        let opens = 0;
+        let turns = 0;
+        const server = Layer.succeed(CodexAppServer)({
+          stop: () => Effect.void,
+          open: () =>
+            Effect.sync(
+              () =>
+                ({
+                  notifications:
+                    opens++ === 0
+                      ? Stream.fromQueue(original)
+                      : Stream.unwrap(
+                          Deferred.succeed(recovered, undefined).pipe(
+                            Effect.as(Stream.fromQueue(restored)),
+                          ),
+                        ),
+                  notify: () => Effect.void,
+                  close: Queue.end(restored),
+                  request: (_operation, method, params) =>
+                    Effect.sync(() => {
+                      if (method === "turn/start" || method === "turn/steer")
+                        submitted.push({ method, params });
+                      if (method === "turn/start") return { turn: { id: `turn-${++turns}` } };
+                      if (method === "thread/resume")
+                        return {
+                          modelProvider: "openai",
+                          thread: {
+                            id: "thread-1",
+                            turns: [
+                              {
+                                id: "turn-1",
+                                status: "interrupted",
+                                items: [userMessage("task", request().prompt)],
+                              },
+                            ],
+                          },
+                        };
+                      return responses[method] ?? {};
+                    }),
+                }) satisfies CodexConnection,
+            ),
+        });
+        yield* Effect.gen(function* () {
+          const host = RemoteShell.make({
+            ssh: { command: "ssh", args: [] },
+            sshEnvironment: {},
+            destination: "worker",
+          });
+          const running = yield* (yield* ChildBackend).launch(request(undefined, undefined, host));
+          yield* Effect.forkScoped(
+            running.events.pipe(
+              Stream.runForEach((event) =>
+                event._tag === "SessionIdle" ? Queue.offer(idle, undefined) : Effect.void,
+              ),
+            ),
+          );
+          const before = submitted.length;
+          // The app-server exits after Codex took the task, before it reported the task's item.
+          yield* Queue.fail(
+            original,
+            SessionOperationError.make({
+              operation: "stream",
+              sessionId: Option.some(running.session.id),
+              message: "App-server exited",
+              cause: ChildProcessLost.make({ exitCode: 1, stderrTail: "App-server exited" }),
+            }),
+          );
+          yield* Deferred.await(recovered);
+          yield* running.intervene(echo, (delivered) =>
+            Effect.sync(() => {
+              reads.push(delivered);
+            }),
+          );
+          yield* recorded("continuation", CONTINUATION_MESSAGE);
+          yield* recorded("echo", echo.message);
+          yield* Queue.offer(restored, {
+            method: "turn/completed",
+            params: { turn: { id: "turn-2", status: "completed", error: null } },
+          });
+          yield* Queue.take(idle);
+          assert.deepStrictEqual(
+            reads.map(Option.isSome),
+            [true],
+            "the message's own record reads it",
+          );
+          yield* running.intervene(Release.make(), noDelivery);
+          yield* running.result;
+          assert.deepStrictEqual(
+            submitted.slice(before).map(({ method }) => method),
+            ["turn/start", "turn/steer"],
+            "the continuation, then the message once",
+          );
+          assert.include(jsonKey(submitted[before]?.params), CONTINUATION_MESSAGE);
+        }).pipe(Effect.provide(codexChild.pipe(Layer.provideMerge(server))));
+      }).pipe(Effect.scoped),
   );
 
   it.effect("starts one Codex turn when guidance arrives while a turn starts", () =>

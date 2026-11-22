@@ -93,8 +93,11 @@ export interface Matched<A extends Unread> {
   readonly save: Option.Option<ReadonlyArray<string>>;
   /** The native item that the receipt repeats. */
   readonly repeated: Option.Option<NativeItem>;
-  /** Whether the receipt recorded one of the session's own inputs instead of an operator message. */
-  readonly own: boolean;
+  /**
+   * The session's own input that the receipt recorded instead of an operator message, with the
+   * native item that records it if the receipt names one.
+   */
+  readonly own: Option.Option<{ readonly item: Option.Option<NativeItem> }>;
   /** The messages that now start a turn of their own. */
   readonly turnsQueued: number;
   /** The messages that no longer start a turn of their own, because another message opened it. */
@@ -130,7 +133,7 @@ const acknowledged = <A extends Unread>(
   read,
   save: Option.none(),
   repeated: Option.none(),
-  own: false,
+  own: Option.none(),
   turnsQueued: 0,
   folded: 0,
   ...changes,
@@ -178,7 +181,7 @@ export const match = <A extends Unread>(
         return acknowledged(
           { ...counted, own: counted.own.filter((_, index) => index !== own) },
           [],
-          { save, own: true },
+          { save, own: Option.some({ item }) },
         );
       const message = counted.unread.find(
         (candidate) => (at === "restored" || candidate.sent) && candidate.message === text,
