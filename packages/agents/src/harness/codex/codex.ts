@@ -500,15 +500,20 @@ const makeCodexSessions = Effect.gen(function* () {
       beforeFinish: Effect.flatMap(Ref.get(state), ({ connection }) => connection.close),
     });
 
-    /** Acknowledges the unread messages that the restored thread's last turn records. */
+    /**
+     * Acknowledges the unread messages that the restored thread's last turn records. The items
+     * that it counts are known once the conversation saved them.
+     */
     const readLastTurn = (lastTurn: Option.Option<RestoredTurn>) =>
       Option.match(lastTurn, {
         onNone: () => Effect.void,
         onSome: (turn) =>
-          Ref.modify(state, (current) => [
-            current.receiptsKnown,
-            { ...current, receiptsKnown: true },
-          ]).pipe(Effect.flatMap((known) => readRestored(session.id, turn, known, conversation))),
+          Ref.get(state).pipe(
+            Effect.flatMap(({ receiptsKnown }) =>
+              readRestored(session.id, turn, receiptsKnown, conversation),
+            ),
+            Effect.andThen(Ref.update(state, (current) => ({ ...current, receiptsKnown: true }))),
+          ),
       });
 
     const recoverInput = (message: string, id?: OperatorMessageId) =>
