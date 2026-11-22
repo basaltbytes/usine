@@ -4,6 +4,7 @@
 // @effect-diagnostics globalTimers:off
 // @effect-diagnostics processEnv:off
 import type { Schema } from "effect";
+import { spawn } from "node:child_process";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import type { OpenCodeEvent } from "../../src/harness/opencode/bridge/lines.ts";
@@ -11,16 +12,25 @@ import type { OpenCodeEvent } from "../../src/harness/opencode/bridge/lines.ts";
 type Route = (request: IncomingMessage, response: ServerResponse) => void;
 
 /**
- * The scenario in `FAKE_SERVE_SCENARIO`: `ready` starts at once, `slow` reports its URL and then
- * registers event subscriptions after a delay, and `exit-before-ready` fails before its ready line.
+ * The scenario in `FAKE_SERVE_SCENARIO`:
+ *
+ * - `ready` starts at once.
+ * - `slow` reports its URL and then registers event subscriptions after a delay.
+ * - `exit-before-ready` fails before its ready line.
+ * - `refuse-events` answers the event subscription with 401.
+ * - `refuse-events-at-end` holds the event subscription and answers it with 401 at end of input.
+ * - `helper` starts a detached process that keeps its stdout and stderr open after it exits.
  */
 const scenario = process.env.FAKE_SERVE_SCENARIO ?? "ready";
+/** The exit code at end of input, from `FAKE_SERVE_EXIT_CODE`. */
+const exitCode = Number(process.env.FAKE_SERVE_EXIT_CODE ?? "7");
 const password = process.env.OPENCODE_PASSWORD;
 // Like `serve --stdio`, which keeps the password from the commands it runs.
 delete process.env.OPENCODE_PASSWORD;
 const SLOW_MS = 300;
 
 const subscribers = new Set<ServerResponse>();
+const held = new Set<ServerResponse>();
 /** Writes `event` to every subscriber and calls `then` once the frames are on the wire. */
 const emit = (event: OpenCodeEvent, then?: () => void) => {
   let pending = subscribers.size;
@@ -44,6 +54,11 @@ const readBody = (request: IncomingMessage, then: (body: string) => void) => {
 const routes = new Map<string, Route>(
   Object.entries({
     "GET /api/event": (_request, response) => {
+      if (scenario === "refuse-events") return json(response, 401, { _tag: "UnauthorizedError" });
+      if (scenario === "refuse-events-at-end") {
+        held.add(response);
+        return void process.stderr.write("fake serve: holding the event subscription\n");
+      }
       const subscribe = () => {
         response.writeHead(200, { "content-type": "text/event-stream" });
         subscribers.add(response);
@@ -80,6 +95,16 @@ const routes = new Map<string, Route>(
     "GET /api/text": (_request, response) => {
       response.writeHead(502, { "content-type": "text/plain" });
       response.end("bad gateway");
+    },
+    // Ends every event stream and keeps running.
+    "POST /api/end-events": (_request, response) => {
+      for (const subscriber of subscribers) subscriber.end();
+      json(response, 200, {});
+    },
+    // Promises 10 bytes, sends one, and closes the connection.
+    "GET /api/cut": (_request, response) => {
+      response.writeHead(200, { "content-type": "application/json", "content-length": "10" });
+      response.write("{", () => response.socket?.destroy());
     },
     "POST /api/crash": () => {
       process.stderr.write("fake serve: crashed while answering\n");
@@ -135,9 +160,21 @@ server.listen(0, "127.0.0.1", () => {
   if (scenario === "slow") setTimeout(ready, SLOW_MS);
   else ready();
 });
-// Like `serve --stdio`, end of input ends the lease; exit 7 shows that it arrived.
+if (scenario === "helper") {
+  // Like OpenCode's terminal daemon, the helper keeps serve's output open after serve exits.
+  const helper = spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)"], {
+    detached: true,
+    stdio: ["ignore", "inherit", "inherit"],
+  });
+  helper.unref();
+  process.stderr.write(`fake serve: helper ${helper.pid}\n`);
+}
+// Like `serve --stdio`, end of input ends the lease. The default exit code, 7, shows that it arrived.
 process.stdin.on("end", () => {
   process.stderr.write("fake serve: end of input\n");
-  process.exit(7);
+  if (held.size === 0) process.exit(exitCode);
+  for (const response of held) json(response, 401, { _tag: "UnauthorizedError" });
+  // Gives the bridge time to read the refusal before serve's exit.
+  setTimeout(() => process.exit(exitCode), 300);
 });
 process.stdin.resume();

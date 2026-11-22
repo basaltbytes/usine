@@ -17,12 +17,17 @@ import { LocalProcess } from "../../src/child-host/child-host.ts";
 import { startChildProcess } from "../../src/child-host/node.ts";
 import { OPENCODE_BRIDGE } from "../../src/harness/opencode/bridge/bundle.js";
 import { bridgeClient, bridgeCommand } from "../../src/harness/opencode/bridge/client.ts";
-import { BridgeOutput, type BridgeRequest } from "../../src/harness/opencode/bridge/lines.ts";
+import {
+  BridgeOutput,
+  type BridgeRequest,
+  OpenCodePath,
+} from "../../src/harness/opencode/bridge/lines.ts";
 
 const decodeLine = Schema.decodeUnknownSync(Schema.fromJsonString(BridgeOutput));
 const childEnvironment = { PATH: process.env.PATH ?? "", FAKE_SERVE_SCENARIO: "ready" };
 let fakeServe: string;
 const bridges: Array<ChildProcessWithoutNullStreams> = [];
+const helpers: Array<number> = [];
 
 beforeAll(async () => {
   const result = await build({
@@ -40,16 +45,26 @@ beforeAll(async () => {
 
 afterEach(() => {
   for (const bridge of bridges.splice(0)) bridge.kill("SIGKILL");
+  for (const helper of helpers.splice(0))
+    try {
+      process.kill(helper, "SIGKILL");
+    } catch {
+      // The helper has already exited.
+    }
 });
 
-/** Starts the bundled bridge around the fake `serve` in `scenario` and records its output. */
-const start = (scenario: string) => {
+/**
+ * Starts the bundled bridge around the fake `serve` in `scenario`, with `environment` added to its
+ * own, and records its output.
+ */
+const start = (scenario: string, environment: Record<string, string> = {}) => {
   const child = spawn(
     process.execPath,
     ["-e", OPENCODE_BRIDGE, process.execPath, "-e", fakeServe],
     {
       env: {
         ...process.env,
+        ...environment,
         FAKE_SERVE_SCENARIO: scenario,
         OPENCODE_SERVER_PASSWORD: "inherited",
       },
@@ -72,7 +87,8 @@ const start = (scenario: string) => {
     child.on("close", resolve);
     child.on("error", reject);
   });
-  const send = (request: BridgeRequest) => child.stdin.write(`${JSON.stringify(request)}\n`);
+  const send = (request: typeof BridgeRequest.Encoded) =>
+    child.stdin.write(`${JSON.stringify(request)}\n`);
   return { child, lines, stderr: () => stderr, exit, send };
 };
 
@@ -163,8 +179,58 @@ describe("OpenCode bridge", () => {
     bridge.send({ id: 1, method: "POST", path: "/api/crash" });
     expect(await bridge.exit).toBe(4);
     expect(bridge.stderr()).toContain("fake serve: crashed while answering");
-    const answer = answerTo(bridge.lines, 1);
-    if (answer !== undefined) expect(answer).toHaveProperty("error");
+  });
+
+  it("answers a request whose response is cut short with an error, and keeps running", async () => {
+    const bridge = start("ready");
+    await eventually(() => bridge.lines.length >= 1);
+    bridge.send({ id: 1, method: "GET", path: "/api/cut" });
+    await eventually(() => answerTo(bridge.lines, 1) !== undefined);
+    expect(answerTo(bridge.lines, 1)).toEqual({
+      id: 1,
+      error: expect.stringMatching(/^Can't reach OpenCode: /u),
+    });
+    bridge.send({ id: 2, method: "GET", path: "/api/empty" });
+    await eventually(() => answerTo(bridge.lines, 2) !== undefined);
+    expect(answerTo(bridge.lines, 2)).toEqual({ id: 2, status: 204, body: null });
+  });
+
+  it("reports an event stream that closes while serve runs, and exits with 1", async () => {
+    const bridge = start("ready", { FAKE_SERVE_EXIT_CODE: "0" });
+    await eventually(() => bridge.lines.length >= 1);
+    bridge.send({ id: 1, method: "POST", path: "/api/end-events" });
+    expect(await bridge.exit).toBe(1);
+    expect(answerTo(bridge.lines, 1)).toEqual({ id: 1, status: 200, body: {} });
+    expect(bridge.stderr()).toMatch(
+      /opencode bridge: OpenCode closed the event stream\n[^]*fake serve: end of input\n/u,
+    );
+  });
+
+  it("reports a refused event subscription, ends serve's input, and exits with 1", async () => {
+    const bridge = start("refuse-events", { FAKE_SERVE_EXIT_CODE: "0" });
+    expect(await bridge.exit).toBe(1);
+    expect(bridge.lines).toEqual([]);
+    expect(bridge.stderr()).toMatch(
+      /opencode bridge: OpenCode refused the event subscription with status 401\n[^]*fake serve: end of input\n/u,
+    );
+  });
+
+  it("doesn't report a refused event subscription after its input ends", async () => {
+    const bridge = start("refuse-events-at-end", { FAKE_SERVE_EXIT_CODE: "0" });
+    await eventually(() => bridge.stderr().includes("fake serve: holding the event subscription"));
+    bridge.child.stdin.end();
+    expect(await bridge.exit).toBe(0);
+    expect(bridge.stderr()).toContain("fake serve: end of input");
+    expect(bridge.stderr()).not.toContain("opencode bridge:");
+  });
+
+  it("exits with serve's code when a process that serve started keeps serve's output open", async () => {
+    const bridge = start("helper");
+    await eventually(() => bridge.stderr().includes("fake serve: helper"));
+    helpers.push(Number(/fake serve: helper (\d+)/u.exec(bridge.stderr())?.[1]));
+    await eventually(() => bridge.lines.length >= 1);
+    bridge.child.stdin.end();
+    expect(await bridge.exit).toBe(7);
   });
 
   it("logs and skips a garbage input line and a garbage event, and keeps running", async () => {
@@ -246,7 +312,7 @@ describe("OpenCode bridge", () => {
       const events = yield* Effect.forkScoped(Stream.runCollect(client.events));
       const answer = yield* client.request("launch", {
         method: "POST",
-        path: "/api/echo",
+        path: OpenCodePath.make("/api/echo"),
         body: { title: "usine" },
       });
       expect(answer).toEqual({

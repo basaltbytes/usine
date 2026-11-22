@@ -1,7 +1,8 @@
 import { assert, describe, it } from "@effect/vitest";
 import { type Cause, Effect, Exit, Fiber, Option, Queue, Schema, Stream } from "effect";
+import { TestClock } from "effect/testing";
 import { bridgeClient } from "../../src/harness/opencode/bridge/client.ts";
-import { BridgeRequest } from "../../src/harness/opencode/bridge/lines.ts";
+import { BridgeRequest, OpenCodePath } from "../../src/harness/opencode/bridge/lines.ts";
 import type { SessionOperationError } from "../../src/runtime.ts";
 import { collectLogs } from "../logs.ts";
 
@@ -9,6 +10,8 @@ const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 const decodeRequest = Schema.decodeUnknownEffect(Schema.fromJsonString(BridgeRequest));
 const encodeJson = Schema.encodeEffect(Schema.fromJsonString(Schema.Json));
+const messages = (records: ReturnType<typeof collectLogs>["records"]) =>
+  records.map(({ message }) => (Array.isArray(message) ? message[0] : message));
 
 /**
  * A client over scripted bridge streams: `emit` writes a JSON output line, `emitText` any output
@@ -50,7 +53,7 @@ describe("OpenCode bridge client", () => {
         const request = yield* Effect.forkChild(
           bridge.client.request("launch", {
             method: "POST",
-            path: "/api/session",
+            path: OpenCodePath.make("/api/session"),
             body: { title: "usine" },
           }),
         );
@@ -58,7 +61,7 @@ describe("OpenCode bridge client", () => {
         assert.deepStrictEqual(sent, {
           id: 1,
           method: "POST",
-          path: "/api/session",
+          path: OpenCodePath.make("/api/session"),
           body: { title: "usine" },
         });
         yield* bridge.emitText("not json");
@@ -77,10 +80,10 @@ describe("OpenCode bridge client", () => {
           { type: "first", data: {} },
           { type: "second", data: { sessionID: "ses_1" } },
         ]);
-        assert.deepStrictEqual(
-          logs.records.map(({ message }) => (Array.isArray(message) ? message[0] : message)),
-          ["Skipping an unknown OpenCode bridge line", "Skipping an unknown OpenCode bridge line"],
-        );
+        assert.deepStrictEqual(messages(logs.records), [
+          "Skipping an unknown OpenCode bridge line",
+          "Skipping an unknown OpenCode bridge line",
+        ]);
       }).pipe(Effect.scoped, Effect.provide(logs.layer));
     },
   );
@@ -89,10 +92,14 @@ describe("OpenCode bridge client", () => {
     Effect.gen(function* () {
       const bridge = yield* scripted(Option.some(3));
       const request = yield* Effect.forkChild(
-        bridge.client.request("steer", { method: "GET", path: "/api/session" }),
+        bridge.client.request("steer", { method: "GET", path: OpenCodePath.make("/api/session") }),
       );
       const sent = yield* bridge.sent;
-      assert.deepStrictEqual(sent, { id: "3:1", method: "GET", path: "/api/session" });
+      assert.deepStrictEqual(sent, {
+        id: "3:1",
+        method: "GET",
+        path: OpenCodePath.make("/api/session"),
+      });
       // An answer to the first request of an earlier connection matches nothing.
       yield* bridge.emit({ id: 1, status: 500, body: null });
       yield* bridge.emit({ id: "3:1", status: 404, body: "missing" });
@@ -105,7 +112,10 @@ describe("OpenCode bridge client", () => {
     Effect.gen(function* () {
       const bridge = yield* scripted();
       const request = yield* Effect.forkChild(
-        bridge.client.request("interrupt", { method: "POST", path: "/api/session/s/interrupt" }),
+        bridge.client.request("interrupt", {
+          method: "POST",
+          path: OpenCodePath.make("/api/session/s/interrupt"),
+        }),
       );
       yield* bridge.sent;
       yield* bridge.emit({ id: 1, error: "Can't reach OpenCode: socket hang up" });
@@ -122,7 +132,7 @@ describe("OpenCode bridge client", () => {
     Effect.gen(function* () {
       const bridge = yield* scripted();
       const request = yield* Effect.forkChild(
-        bridge.client.request("launch", { method: "GET", path: "/api/session" }),
+        bridge.client.request("launch", { method: "GET", path: OpenCodePath.make("/api/session") }),
       );
       yield* bridge.sent;
       yield* Queue.end(bridge.output);
@@ -130,27 +140,90 @@ describe("OpenCode bridge client", () => {
       const unready = yield* Effect.flip(bridge.client.ready);
       const events = yield* Effect.flip(Stream.runDrain(bridge.client.events));
       const later = yield* Effect.flip(
-        bridge.client.request("steer", { method: "GET", path: "/api/session" }),
+        bridge.client.request("steer", { method: "GET", path: OpenCodePath.make("/api/session") }),
       );
       for (const error of [rejected, unready, events, later])
         assert.strictEqual(error.message, "The OpenCode bridge's output ended");
     }).pipe(Effect.scoped),
   );
 
-  it.effect("ends its input on close, then ends the events and rejects waiting requests", () =>
+  it.effect("fails a request after 60 seconds without an answer and skips the late answer", () => {
+    const logs = collectLogs(["Info"]);
+    return Effect.gen(function* () {
+      const bridge = yield* scripted();
+      const request = yield* Effect.forkChild(
+        bridge.client.request("steer", {
+          method: "POST",
+          path: OpenCodePath.make("/api/session/s/prompt"),
+        }),
+      );
+      yield* bridge.sent;
+      yield* TestClock.adjust("59 seconds");
+      assert.isUndefined(request.pollUnsafe());
+      yield* TestClock.adjust("1 second");
+      const error = yield* Effect.flip(Fiber.join(request));
+      assert.strictEqual(error.operation, "steer");
+      assert.strictEqual(
+        error.message,
+        "OpenCode didn't answer POST /api/session/s/prompt within 60 seconds",
+      );
+      yield* bridge.emit({ id: 1, status: 200, body: null });
+      // The event follows the late answer, so the client has read the answer once it arrives.
+      yield* bridge.emit({ event: { type: "after.answer", data: {} } });
+      yield* bridge.client.events.pipe(Stream.take(1), Stream.runDrain);
+      assert.deepStrictEqual(
+        logs.records.map(({ message }) => message),
+        [
+          [
+            "Skipping an OpenCode bridge answer with no waiting request",
+            { requestId: 1, sessionId: undefined },
+          ],
+        ],
+      );
+    }).pipe(Effect.scoped, Effect.provide(logs.layer));
+  });
+
+  it.effect("fails a request when the bridge's input is closed", () =>
     Effect.gen(function* () {
+      const bridge = yield* scripted();
+      yield* Queue.end(bridge.input);
+      const error = yield* Effect.flip(
+        bridge.client.request("steer", { method: "GET", path: OpenCodePath.make("/api/session") }),
+      );
+      assert.strictEqual(error.message, "The OpenCode bridge's input is closed");
+    }).pipe(Effect.scoped),
+  );
+
+  it("refuses a path that leaves origin form", () => {
+    for (const path of ["/api/session", "/api/model?location[directory]=%2Fwork"])
+      assert.isTrue(Schema.is(OpenCodePath)(path), path);
+    for (const path of [
+      "",
+      "api/session",
+      "//evil.example/x",
+      "http://evil.example/x",
+      "/a b",
+      "/x\r\nHost: evil.example",
+      "/é",
+    ])
+      assert.isFalse(Schema.is(OpenCodePath)(path), path);
+  });
+
+  it.effect("ends its input on close, then ends the events and rejects waiting requests", () => {
+    const logs = collectLogs(["Info"]);
+    return Effect.gen(function* () {
       const bridge = yield* scripted();
       yield* bridge.emit({ ready: true });
       yield* bridge.emit({ event: { type: "server.connected", data: {} } });
       const request = yield* Effect.forkChild(
-        bridge.client.request("steer", { method: "GET", path: "/api/session" }),
+        bridge.client.request("steer", { method: "GET", path: OpenCodePath.make("/api/session") }),
       );
       yield* bridge.sent;
       yield* bridge.client.close;
       const input = yield* Effect.exit(Queue.take(bridge.input));
       assert.isTrue(Exit.isFailure(input));
       const closing = yield* Effect.flip(
-        bridge.client.request("launch", { method: "GET", path: "/api/session" }),
+        bridge.client.request("launch", { method: "GET", path: OpenCodePath.make("/api/session") }),
       );
       assert.strictEqual(closing.message, "The OpenCode bridge is closing");
       yield* Queue.end(bridge.output);
@@ -159,6 +232,9 @@ describe("OpenCode bridge client", () => {
       assert.strictEqual(rejected.message, "The OpenCode bridge closed before it answered");
       const events = yield* Stream.runCollect(bridge.client.events);
       assert.deepStrictEqual(Array.from(events), [{ type: "server.connected", data: {} }]);
-    }).pipe(Effect.scoped),
-  );
+      assert.deepStrictEqual(messages(logs.records), [
+        "The OpenCode bridge's output ended after close",
+      ]);
+    }).pipe(Effect.scoped, Effect.provide(logs.layer));
+  });
 });

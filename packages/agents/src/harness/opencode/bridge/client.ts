@@ -1,6 +1,8 @@
 import type { AgentSessionId } from "@usine/core/agent/session";
 import { type Cause, Deferred, Effect, Option, Queue, Ref, Schema, Stream } from "effect";
+import { previewLine } from "../../../child-host/lines.ts";
 import type { ProcessCommand } from "../../../child-host/process.ts";
+import { pendingRequests } from "../../../child-host/requests.ts";
 import { type SessionOperation, SessionOperationError } from "../../../runtime.ts";
 import { OPENCODE_BRIDGE } from "./bundle.js";
 import {
@@ -12,13 +14,13 @@ import {
   BridgeRequestFailed,
   type BridgeRequestId,
   type OpenCodeEvent,
+  type OpenCodeMethod,
+  type OpenCodePath,
 } from "./lines.ts";
 
-const REQUEST_TIMEOUT = "60 seconds";
 const decodeOutput = Schema.decodeUnknownEffect(Schema.fromJsonString(BridgeOutput));
 const encodeRequest = Schema.encodeEffect(Schema.fromJsonString(BridgeRequest));
 const encoder = new TextEncoder();
-const preview = (line: string): string => (line.length > 200 ? `${line.slice(0, 200)}…` : line);
 
 /**
  * Returns the command that runs the bridge in `opencode.cwd` around `opencode`, the OpenCode
@@ -31,10 +33,10 @@ export const bridgeCommand = (opencode: ProcessCommand): ProcessCommand => ({
   cwd: opencode.cwd,
 });
 
-/** A request to the OpenCode server: an upper-case HTTP method, a path from `/`, and a JSON body. */
+/** A request to the OpenCode server, with `body` sent as JSON. */
 interface OpenCodeRequest {
-  readonly method: string;
-  readonly path: string;
+  readonly method: OpenCodeMethod;
+  readonly path: OpenCodePath;
   readonly body?: Schema.Json;
 }
 
@@ -81,11 +83,6 @@ interface BridgeClient {
   readonly close: Effect.Effect<void>;
 }
 
-interface PendingRequest {
-  readonly operation: SessionOperation;
-  readonly answer: Deferred.Deferred<BridgeAnswer, SessionOperationError>;
-}
-
 /**
  * Starts reading the output of the bridge in `streams` and returns its client. Lines that aren't
  * bridge output, such as an event without a `type`, are logged and skipped.
@@ -97,25 +94,10 @@ export const bridgeClient = Effect.fn("OpenCodeBridge.client")(function* (stream
     SessionOperationError.make({ operation, sessionId: streams.sessionId, message, cause });
   const ready = yield* Deferred.make<void, SessionOperationError>();
   const events = yield* Queue.make<OpenCodeEvent, SessionOperationError | Cause.Done>();
-  const pending = yield* Ref.make(new Map<BridgeRequestId, PendingRequest>());
-  const nextId = yield* Ref.make(1);
+  const pending = yield* pendingRequests<BridgeAnswer>();
   const closing = yield* Ref.make(false);
   const failed = yield* Ref.make(Option.none<SessionOperationError>());
 
-  const take = (id: BridgeRequestId) =>
-    Ref.modify(pending, (entries) => {
-      const entry = entries.get(id);
-      if (entry === undefined) return [Option.none<PendingRequest>(), entries];
-      const remaining = new Map(entries);
-      remaining.delete(id);
-      return [Option.some(entry), remaining];
-    });
-  const rejectPending = (error: (operation: SessionOperation) => SessionOperationError) =>
-    Effect.gen(function* () {
-      const waiting = yield* Ref.getAndSet(pending, new Map());
-      for (const entry of waiting.values())
-        yield* Deferred.fail(entry.answer, error(entry.operation));
-    });
   const failAll = Effect.fn("OpenCodeBridge.failAll")(function* (error: SessionOperationError) {
     yield* Effect.annotateCurrentSpan({ sessionId });
     yield* Ref.update(
@@ -123,7 +105,7 @@ export const bridgeClient = Effect.fn("OpenCodeBridge.client")(function* (stream
       Option.orElseSome(() => error),
     );
     yield* Deferred.fail(ready, error);
-    yield* rejectPending(() => error);
+    yield* pending.rejectAll(() => error);
     yield* Queue.fail(events, error);
   });
   const ended = Effect.fn("OpenCodeBridge.ended")(function* () {
@@ -132,12 +114,12 @@ export const bridgeClient = Effect.fn("OpenCodeBridge.client")(function* (stream
       return yield* failAll(
         failure("stream", "The OpenCode bridge's output ended", new Error("output ended")),
       );
-    yield* Effect.logDebug("The OpenCode bridge's output ended after close", { sessionId });
+    yield* Effect.logInfo("The OpenCode bridge's output ended after close", { sessionId });
     yield* Deferred.fail(
       ready,
       failure("launch", "The OpenCode bridge closed before it was ready", new Error("closed")),
     );
-    yield* rejectPending((operation) =>
+    yield* pending.rejectAll((operation) =>
       failure(operation, "The OpenCode bridge closed before it answered", new Error("closed")),
     );
     yield* Queue.end(events);
@@ -152,7 +134,7 @@ export const bridgeClient = Effect.fn("OpenCodeBridge.client")(function* (stream
         Effect.catch((cause) =>
           Effect.logWarning("Skipping an unknown OpenCode bridge line", {
             cause,
-            line: preview(line),
+            line: previewLine(line),
             sessionId,
           }).pipe(Effect.as(Option.none<BridgeOutput>())),
         ),
@@ -161,15 +143,12 @@ export const bridgeClient = Effect.fn("OpenCodeBridge.client")(function* (stream
       const output = decoded.value;
       if (Schema.is(BridgeReady)(output)) return yield* Deferred.succeed(ready, undefined);
       if (Schema.is(BridgeEvent)(output)) return yield* Queue.offer(events, output.event);
-      const found = yield* take(output.id);
+      const found = yield* pending.take(output.id);
       if (Option.isNone(found))
-        return yield* Effect.logDebug(
-          "Ignoring an OpenCode bridge answer with no waiting request",
-          {
-            id: output.id,
-            sessionId,
-          },
-        );
+        return yield* Effect.logInfo("Skipping an OpenCode bridge answer with no waiting request", {
+          requestId: output.id,
+          sessionId,
+        });
       if (Schema.is(BridgeRequestFailed)(output))
         return yield* Deferred.fail(
           found.value.answer,
@@ -205,48 +184,36 @@ export const bridgeClient = Effect.fn("OpenCodeBridge.client")(function* (stream
         path: call.path,
         sessionId,
       });
-      const sequence = yield* Ref.getAndUpdate(nextId, (current) => current + 1);
-      const id = Option.match(streams.generation, {
-        onNone: () => sequence,
-        onSome: (generation) => `${generation}:${sequence}`,
+      // The request is registered before the checks in `write`, so a failure after them rejects it.
+      const write = (id: BridgeRequestId) =>
+        Effect.gen(function* () {
+          if (yield* Ref.get(closing))
+            return yield* failure(
+              operation,
+              "The OpenCode bridge is closing",
+              new Error("closing"),
+            );
+          const previous = yield* Ref.get(failed);
+          if (Option.isSome(previous)) return yield* previous.value;
+          const line = yield* encodeRequest({ id, ...call }).pipe(Effect.orDie);
+          if (!(yield* Queue.offer(streams.input, encoder.encode(`${line}\n`))))
+            return yield* failure(
+              operation,
+              "The OpenCode bridge's input is closed",
+              new Error("closed"),
+            );
+        });
+      return yield* pending.send({
+        operation,
+        generation: streams.generation,
+        write,
+        timedOut: (timeout) =>
+          failure(
+            operation,
+            `OpenCode didn't answer ${call.method} ${call.path} within ${timeout}`,
+            new Error("request timed out"),
+          ),
       });
-      const answer = yield* Deferred.make<BridgeAnswer, SessionOperationError>();
-      // Registered before the checks, so that a failure after them rejects this request too.
-      yield* Ref.update(pending, (entries) => new Map(entries).set(id, { operation, answer }));
-      const forget = Effect.asVoid(take(id));
-      if (yield* Ref.get(closing)) {
-        yield* forget;
-        return yield* failure(operation, "The OpenCode bridge is closing", new Error("closing"));
-      }
-      const previous = yield* Ref.get(failed);
-      if (Option.isSome(previous)) {
-        yield* forget;
-        return yield* previous.value;
-      }
-      const line = yield* encodeRequest({ id, ...call }).pipe(Effect.orDie);
-      if (!(yield* Queue.offer(streams.input, encoder.encode(`${line}\n`)))) {
-        yield* forget;
-        return yield* failure(
-          operation,
-          "The OpenCode bridge's input is closed",
-          new Error("closed"),
-        );
-      }
-      return yield* Deferred.await(answer).pipe(
-        Effect.timeoutOrElse({
-          duration: REQUEST_TIMEOUT,
-          orElse: () =>
-            forget.pipe(
-              Effect.andThen(
-                failure(
-                  operation,
-                  `OpenCode didn't answer ${call.method} ${call.path} within ${REQUEST_TIMEOUT}`,
-                  new Error("request timed out"),
-                ),
-              ),
-            ),
-        }),
-      );
     },
   );
 

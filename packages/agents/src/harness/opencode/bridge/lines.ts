@@ -7,15 +7,30 @@ import { Schema } from "effect";
 export const BridgeRequestId = Schema.Union([Schema.Int, Schema.String]);
 export type BridgeRequestId = typeof BridgeRequestId.Type;
 
+/** An HTTP method of OpenCode's server API. */
+export const OpenCodeMethod = Schema.Literals(["GET", "POST", "PUT", "PATCH", "DELETE"]);
+export type OpenCodeMethod = typeof OpenCodeMethod.Type;
+
+/**
+ * A request target on OpenCode's server in origin form: a path that starts with one `/`, and an
+ * optional query, in printable ASCII without spaces.
+ */
+export const OpenCodePath = Schema.String.check(
+  Schema.isPattern(/^\/(?!\/)[!-~]*$/u, {
+    message: "Expected a path that starts with one / and has no spaces or non-ASCII characters",
+  }),
+).pipe(Schema.brand("OpenCodePath"));
+export type OpenCodePath = typeof OpenCodePath.Type;
+
 /**
  * A line on the bridge's standard input: the bridge sends `method` to `path` on the OpenCode
- * server, with `body` as JSON when it is present. `method` is an upper-case HTTP method and `path`
- * starts with one `/`; the bridge answers another request with `BridgeRequestFailed`.
+ * server, with `body` as JSON when it is present. The bridge checks the method and the path again,
+ * and answers a request that it refuses with `BridgeRequestFailed`.
  */
 export const BridgeRequest = Schema.Struct({
   id: BridgeRequestId,
-  method: Schema.String,
-  path: Schema.String,
+  method: OpenCodeMethod,
+  path: OpenCodePath,
   body: Schema.optionalKey(Schema.Json),
 });
 export type BridgeRequest = typeof BridgeRequest.Type;

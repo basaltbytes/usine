@@ -70,7 +70,7 @@ const inputLine = (line: string): InputLine => {
     return { invalid: "has no request ID" };
   if (typeof method !== "string" || !/^[A-Z]+$/u.test(method))
     return { id, invalid: "has no HTTP method" };
-  // A path that doesn't start with one slash could name another host.
+  // Keeps the request target in origin form. The host and port come from serve's ready line.
   if (typeof path !== "string" || !path.startsWith("/") || path.startsWith("//"))
     return { id, invalid: "has no absolute path" };
   return { request: body === undefined ? { id, method, path } : { id, method, path, body } };
@@ -191,14 +191,14 @@ const main = () => {
           const chunks: Array<Buffer> = [];
           response.on("data", (chunk: Buffer) => chunks.push(chunk));
           response.on("error", unreachable);
-          response.on("end", () => {
-            if (!response.complete) return unreachable(new Error("the response ended early"));
+          // A response cut short emits `error`, not `end`.
+          response.on("end", () =>
             answer({
               id: request.id,
               status: response.statusCode ?? 0,
               body: answerBody(Buffer.concat(chunks).toString("utf8")),
-            });
-          });
+            }),
+          );
         },
       );
       outgoing.on("error", unreachable);
