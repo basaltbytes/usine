@@ -72,12 +72,12 @@ export const opencode = HarnessDescriptor.make({
         }),
         Lacking.make({
           capability: "usine-tools",
-          reason: "The OpenCode adapter serves no usine tools yet",
+          reason: "The OpenCode adapter serves no usine tools",
         }),
         Lacking.make({
           capability: "closed-tools",
           reason:
-            "The OpenCode adapter closes OpenCode's own tools only for a session with usine tools, which it doesn't serve yet",
+            "The OpenCode adapter serves no usine tools, which a role without OpenCode's own tools needs",
         }),
         Lacking.make({
           capability: "structured-output",

@@ -170,6 +170,54 @@ describe("OpenCode runtime", () => {
     }).pipe(Effect.scoped),
   );
 
+  it.live("retries a near rate limit and refuses a distant one as a capacity limit", () =>
+    Effect.gen(function* () {
+      const { bridge, running, until } = yield* launched("OLD");
+      const retry = (retryAfterMs: number, attempt: number) =>
+        event("session.retry.scheduled", {
+          assistantMessageID: "msg_step",
+          attempt,
+          at: 1_800_000_000_000 + retryAfterMs,
+          error: {
+            type: "provider.rate-limit",
+            message: "Rate limit reached for requests",
+            status: 429,
+            retryAfterMs,
+          },
+        });
+      yield* bridge.emit(retry(7_000, 1));
+      const retrying = yield* until("ProviderRetrying");
+      assert(retrying._tag === "ProviderRetrying");
+      assert.strictEqual(retrying.message, "Rate limit reached for requests");
+      yield* bridge.emit(retry(600_000, 2));
+      const refusal = yield* running.result.pipe(Effect.flip);
+      assert(refusal._tag === "AgentCapacityError");
+      assert.deepStrictEqual(
+        Option.map(refusal.resetsAt, (resetsAt) => resetsAt.epochMilliseconds),
+        Option.some(1_800_000_600_000),
+      );
+    }).pipe(Effect.scoped),
+  );
+
+  it.live("refuses a quota as a capacity limit without a reset time", () =>
+    Effect.gen(function* () {
+      const { bridge, running } = yield* launched("OLD");
+      yield* bridge.emit(
+        event("session.execution.failed", {
+          error: {
+            type: "provider.quota",
+            message: "You exceeded your current quota.",
+            status: 429,
+          },
+        }),
+      );
+      const refusal = yield* running.result.pipe(Effect.flip);
+      assert(refusal._tag === "AgentCapacityError");
+      assert.include(refusal.message, "provider.quota");
+      assert(Option.isNone(refusal.resetsAt));
+    }).pipe(Effect.scoped),
+  );
+
   it.live("returns the answer of the execution that background work wakes, with its tokens", () =>
     Effect.gen(function* () {
       const { bridge, running, until, seen, ended } = yield* launched("Started the tests.");
