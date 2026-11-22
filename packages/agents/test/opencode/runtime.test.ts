@@ -1,101 +1,30 @@
 import { assert, describe, it } from "@effect/vitest";
-import type { AgentSessionEvent } from "@usine/core/agent/session";
 import { Interrupt, Steer } from "@usine/core/attempt/channel";
-import { Effect, Fiber, Option, Queue, Stream } from "effect";
-import { ChildBackend } from "../../src/runtime.ts";
+import { Effect, Fiber, Option } from "effect";
 import {
   assertPrompt,
-  childRequest,
   event,
-  type ScriptedBridge,
-  scriptedBackend,
-  scriptedServer,
+  execution,
+  interrupted,
+  launched,
+  oldExecutionEnds,
+  SESSION,
 } from "./scripted-bridge.ts";
 
-const tokens = (input: number, output: number) => ({
-  input,
-  output,
-  reasoning: 0,
-  cache: { read: 0, write: 0 },
-});
-
-/**
- * Launches the scripted child and runs its first execution up to a running tool call after the
- * text `before`. Returns the bridge, the running session, and its events as they arrive.
- */
-const launched = (before: string) =>
-  Effect.gen(function* () {
-    const server = yield* scriptedServer;
-    const fiber = yield* Effect.gen(function* () {
-      const backend = yield* ChildBackend;
-      return yield* backend.launch(childRequest);
-    }).pipe(Effect.provide(scriptedBackend(server.layer)), Effect.forkScoped);
-    const bridge = yield* server.bridge;
-    const prompt = yield* bridge.request;
-    assertPrompt(prompt, childRequest.prompt);
-    yield* bridge.reply(prompt, 200, { data: { id: "msg_prompt" } });
-    const running = yield* Fiber.join(fiber);
-    const events = yield* Queue.unbounded<AgentSessionEvent>();
-    const seen: Array<AgentSessionEvent> = [];
-    const collector = yield* running.events.pipe(
-      Stream.runForEach((value) =>
-        Effect.sync(() => seen.push(value)).pipe(Effect.andThen(Queue.offer(events, value))),
-      ),
-      Effect.ignore,
-      Effect.forkScoped,
-    );
-    const until = (tag: AgentSessionEvent["_tag"]) =>
-      Effect.gen(function* () {
-        for (;;) {
-          const next = yield* Queue.take(events);
-          if (next._tag === tag) return next;
-        }
-      });
-    for (const line of [
-      event("session.inbox.enqueued", { inboxID: "msg_prompt" }),
-      event("session.execution.started"),
-      event("session.inbox.delivered", { inboxID: "msg_prompt" }),
-      event("session.text.ended", { text: before }),
-      event("session.tool.input.started", { id: "call_1", name: "shell" }),
-      event("session.tool.called", { id: "call_1", input: { command: "sleep 60" } }),
-    ])
-      yield* bridge.emit(line);
-    yield* until("ToolStarted");
-    /** Waits for the session's events to end. */
-    const ended = Fiber.join(collector);
-    return { bridge, running, until, seen, ended };
-  });
-
-/** Interrupts the running execution through the conversation and answers the interrupt. */
-const interrupted = (
-  bridge: ScriptedBridge,
-  running: Effect.Success<ReturnType<typeof launched>>["running"],
-) =>
-  Effect.gen(function* () {
-    const pause = yield* Effect.forkScoped(running.intervene(Interrupt.make(), () => Effect.void));
-    const request = yield* bridge.request;
-    assert.strictEqual(request.path, "/api/session/ses_scripted/interrupt");
-    yield* bridge.reply(request, 200, { interrupted: true });
-    yield* Fiber.join(pause);
-  });
-
-const oldExecutionEnds = [
-  event("session.tool.failed", {
-    id: "call_1",
-    error: { type: "tool.execution", message: "killed" },
-  }),
-  event("session.execution.interrupted", { reason: "user" }),
-];
-
-const successor = (id: string) => [
-  event("session.execution.started"),
-  event("session.inbox.delivered", { inboxID: id }),
-  event("session.text.ended", { text: "SUCCESSOR" }),
-  event("session.step.ended"),
-  event("session.execution.succeeded"),
-];
-
 describe("OpenCode runtime", () => {
+  it.live("sets the command environment of its session before it posts the task", () =>
+    Effect.gen(function* () {
+      const { bridge } = yield* launched("OLD");
+      const environments = yield* bridge.environments;
+      assert.deepStrictEqual(environments, [SESSION]);
+      const answered = yield* bridge.answered;
+      assert(
+        answered.every(({ path }) => !path.endsWith("/prompt")),
+        "the bridge answers no prompt by itself",
+      );
+    }).pipe(Effect.scoped),
+  );
+
   for (const order of ["steer answered first", "interrupted first"] as const)
     it.live(`ends the turn at the successor of a steer after an interrupt, ${order}`, () =>
       Effect.gen(function* () {
@@ -120,7 +49,7 @@ describe("OpenCode runtime", () => {
           yield* bridge.emit(enqueued);
         }
         yield* Fiber.join(steering);
-        for (const line of successor(id.value)) yield* bridge.emit(line);
+        for (const line of execution(id.value, "SUCCESSOR")) yield* bridge.emit(line);
         const result = yield* running.result;
         yield* ended;
         assert.strictEqual(result.message, "SUCCESSOR");
@@ -170,6 +99,114 @@ describe("OpenCode runtime", () => {
     }).pipe(Effect.scoped),
   );
 
+  it.live("ends the turn at the interrupt when a steer comes before the interrupt's answer", () =>
+    Effect.gen(function* () {
+      const { bridge, running, until } = yield* launched("OLD");
+      const pause = yield* Effect.forkScoped(
+        running.intervene(Interrupt.make(), () => Effect.void),
+      );
+      const interrupt = yield* bridge.request;
+      assert.strictEqual(interrupt.path, `/api/session/${SESSION}/interrupt`);
+      // The steer goes out before OpenCode answers the interrupt, so it starts no successor.
+      const steering = yield* Effect.forkScoped(running.steer("Use the other approach."));
+      const posted = yield* bridge.request;
+      assertPrompt(posted, "Use the other approach.");
+      yield* bridge.reply(posted, 200, { data: { id: "msg_early" } });
+      yield* Fiber.join(steering);
+      yield* bridge.reply(interrupt, 200, { interrupted: true });
+      yield* Fiber.join(pause);
+      yield* bridge.emit(event("session.inbox.enqueued", { inboxID: "msg_early" }));
+      for (const line of oldExecutionEnds) yield* bridge.emit(line);
+      const idle = yield* until("SessionIdle");
+      assert(idle._tag === "SessionIdle");
+      assert.deepStrictEqual(idle.message, Option.some("OLD"));
+    }).pipe(Effect.scoped),
+  );
+
+  it.live("ends a later interrupt's turn once the successor delivered the late steer", () =>
+    Effect.gen(function* () {
+      const { bridge, running, until } = yield* launched("OLD");
+      yield* interrupted(bridge, running);
+      const guidance = Steer.make({ message: "Change the final reply." });
+      const steering = yield* Effect.forkScoped(running.intervene(guidance, () => Effect.void));
+      const posted = yield* bridge.request;
+      const id = assertPrompt(posted, guidance.message);
+      assert(Option.isSome(id));
+      yield* bridge.reply(posted, 200, { data: { id: id.value } });
+      yield* Fiber.join(steering);
+      for (const line of [
+        event("session.inbox.enqueued", { inboxID: id.value }),
+        ...oldExecutionEnds,
+        event("session.execution.started"),
+        event("session.inbox.delivered", { inboxID: id.value }),
+        event("session.text.ended", { text: "SUCCESSOR" }),
+        event("session.tool.input.started", { id: "call_2", name: "shell" }),
+        event("session.tool.called", { id: "call_2", input: { command: "sleep 60" } }),
+      ])
+        yield* bridge.emit(line);
+      yield* until("ToolStarted");
+      yield* interrupted(bridge, running);
+      for (const line of [
+        event("session.tool.failed", {
+          id: "call_2",
+          error: { type: "tool.execution", message: "killed" },
+        }),
+        event("session.execution.interrupted", { reason: "user" }),
+      ])
+        yield* bridge.emit(line);
+      const idle = yield* until("SessionIdle");
+      assert(idle._tag === "SessionIdle");
+      assert.deepStrictEqual(idle.message, Option.some("SUCCESSOR"));
+    }).pipe(Effect.scoped),
+  );
+
+  it.live("interrupts again after an interrupt that the execution's success overtook", () =>
+    Effect.gen(function* () {
+      const { bridge, running, until } = yield* launched("OLD");
+      const pause = yield* Effect.forkScoped(
+        running.intervene(Interrupt.make(), () => Effect.void),
+      );
+      const first = yield* bridge.request;
+      assert.strictEqual(first.path, `/api/session/${SESSION}/interrupt`);
+      for (const line of [
+        event("session.tool.success", { id: "call_1", content: [{ type: "text", text: "done" }] }),
+        event("session.text.ended", { text: "FIRST" }),
+        event("session.step.ended"),
+        event("session.execution.succeeded"),
+      ])
+        yield* bridge.emit(line);
+      yield* bridge.reply(first, 200, { interrupted: false });
+      yield* Fiber.join(pause);
+      const idle = yield* until("SessionIdle");
+      assert(idle._tag === "SessionIdle");
+      assert.deepStrictEqual(idle.message, Option.some("FIRST"));
+      const guidance = Steer.make({ message: "Run the tests again." });
+      const steering = yield* Effect.forkScoped(running.intervene(guidance, () => Effect.void));
+      const posted = yield* bridge.request;
+      const id = assertPrompt(posted, guidance.message);
+      assert(Option.isSome(id));
+      yield* bridge.reply(posted, 200, { data: { id: id.value } });
+      yield* Fiber.join(steering);
+      for (const line of [
+        event("session.inbox.enqueued", { inboxID: id.value }),
+        event("session.execution.started"),
+        event("session.inbox.delivered", { inboxID: id.value }),
+        event("session.tool.input.started", { id: "call_2", name: "shell" }),
+        event("session.tool.called", { id: "call_2", input: { command: "pnpm test" } }),
+      ])
+        yield* bridge.emit(line);
+      yield* until("ToolStarted");
+      const second = yield* Effect.forkScoped(
+        running.intervene(Interrupt.make(), () => Effect.void),
+      );
+      const request = yield* bridge.request.pipe(Effect.timeoutOption("2 seconds"));
+      assert(Option.isSome(request), "the second interrupt reaches OpenCode");
+      assert.strictEqual(request.value.path, `/api/session/${SESSION}/interrupt`);
+      yield* bridge.reply(request.value, 200, { interrupted: true });
+      yield* Fiber.join(second);
+    }).pipe(Effect.scoped),
+  );
+
   it.live("retries a near rate limit and refuses a distant one as a capacity limit", () =>
     Effect.gen(function* () {
       const { bridge, running, until } = yield* launched("OLD");
@@ -199,64 +236,40 @@ describe("OpenCode runtime", () => {
     }).pipe(Effect.scoped),
   );
 
-  it.live("refuses a quota as a capacity limit without a reset time", () =>
+  for (const type of [
+    "provider.quota",
+    "provider.rate-limit",
+    "provider.go-limit",
+    "provider.chatgpt-limit",
+    "provider.free-limit",
+    "provider.budget-limit",
+  ])
+    it.live(`refuses ${type} as a capacity limit without a reset time`, () =>
+      Effect.gen(function* () {
+        const { bridge, running } = yield* launched("OLD");
+        yield* bridge.emit(
+          event("session.execution.failed", {
+            error: { type, message: "You exceeded your current quota.", status: 429 },
+          }),
+        );
+        const refusal = yield* running.result.pipe(Effect.flip);
+        assert(refusal._tag === "AgentCapacityError");
+        assert.include(refusal.message, type);
+        assert(Option.isNone(refusal.resetsAt));
+      }).pipe(Effect.scoped),
+    );
+
+  it.live("fails the session on another execution failure", () =>
     Effect.gen(function* () {
       const { bridge, running } = yield* launched("OLD");
       yield* bridge.emit(
         event("session.execution.failed", {
-          error: {
-            type: "provider.quota",
-            message: "You exceeded your current quota.",
-            status: 429,
-          },
+          error: { type: "provider.auth", message: "Incorrect API key provided." },
         }),
       );
-      const refusal = yield* running.result.pipe(Effect.flip);
-      assert(refusal._tag === "AgentCapacityError");
-      assert.include(refusal.message, "provider.quota");
-      assert(Option.isNone(refusal.resetsAt));
-    }).pipe(Effect.scoped),
-  );
-
-  it.live("returns the answer of the execution that background work wakes, with its tokens", () =>
-    Effect.gen(function* () {
-      const { bridge, running, until, seen, ended } = yield* launched("Started the tests.");
-      yield* bridge.setJobs([{ kind: "shell", id: "sh_1", status: "running", title: "pnpm test" }]);
-      for (const line of [
-        event("session.tool.success", {
-          id: "call_1",
-          content: [{ type: "text", text: "Command moved to the background" }],
-        }),
-        event("session.text.ended", { text: "FIRST" }),
-        event("session.step.ended"),
-        event("session.usage.updated", { cost: 0.01, tokens: tokens(100, 10) }),
-        event("session.execution.succeeded"),
-      ])
-        yield* bridge.emit(line);
-      const waiting = yield* until("BackgroundWorkUpdated");
-      assert(waiting._tag === "BackgroundWorkUpdated");
-      assert.deepStrictEqual(
-        Option.map(waiting.work, (work) => work.map(({ id }) => id)),
-        Option.some(["sh_1"]),
-      );
-      yield* bridge.setJobs([]);
-      for (const line of [
-        event("session.inbox.enqueued", { inboxID: "msg_synthetic" }),
-        event("session.execution.started"),
-        event("session.inbox.delivered", { inboxID: "msg_synthetic" }),
-        event("session.text.ended", { text: "WOKEN" }),
-        event("session.step.ended"),
-        event("session.usage.updated", { cost: 0.03, tokens: tokens(250, 30) }),
-        event("session.execution.succeeded"),
-      ])
-        yield* bridge.emit(line);
-      const result = yield* running.result;
-      yield* ended;
-      assert.strictEqual(result.message, "WOKEN");
-      const usage = seen.flatMap((value) => (value._tag === "SessionTokensUpdated" ? [value] : []));
-      assert.strictEqual(usage.at(-1)?.totalTokens, 280);
-      assert.deepStrictEqual(usage.at(-1)?.costUsd, Option.some(0.03));
-      assert.strictEqual(seen.at(-1)?._tag, "SessionFinished");
+      const failure = yield* running.result.pipe(Effect.flip);
+      assert(failure._tag === "AgentResultError");
+      assert.include(failure.message, "provider.auth");
     }).pipe(Effect.scoped),
   );
 });

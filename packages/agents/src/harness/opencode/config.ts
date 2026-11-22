@@ -132,9 +132,17 @@ export const dataDirectory = (
 };
 
 /**
- * Returns the environment of a session's `opencode serve`: the session's environment, with
+ * The prefix of the variables that the bridge sets on `serve` only, without the prefix. It equals
+ * `SERVE_ONLY_PREFIX` in `bridge/main.ts`.
+ */
+const SERVE_ONLY_PREFIX = "USINE_OPENCODE_SERVE_";
+
+/**
+ * Returns the environment of a session's bridge: the session's environment, and for `serve` only
  * OpenCode's data and configuration in `data`, the checkout's own configuration turned off, no
- * catalog download, no free models, and `config` as its configuration. Tool commands inherit it.
+ * catalog download, no free models, and `config` as its configuration. Tool commands get the
+ * session's environment, which keeps the worker's data and configuration directories, once the
+ * runtime sets each OpenCode session's command environment from the bridge.
  */
 export const serveEnvironment = (
   environment: Readonly<Record<string, string>>,
@@ -142,13 +150,17 @@ export const serveEnvironment = (
   config: string,
 ) => ({
   ...environment,
-  XDG_DATA_HOME: data,
-  XDG_CONFIG_HOME: `${data}/config`,
-  OPENCODE_CONFIG_PROJECT_DISABLE: "1",
-  OPENCODE_DISABLE_CLAUDE_CODE: "1",
-  OPENCODE_DISABLE_MODELS_FETCH: "1",
-  OPENCODE_DISABLE_FREE_MODELS: "1",
-  OPENCODE_CONFIG_CONTENT: config,
+  ...Object.fromEntries(
+    Object.entries({
+      XDG_DATA_HOME: data,
+      XDG_CONFIG_HOME: `${data}/config`,
+      OPENCODE_CONFIG_PROJECT_DISABLE: "1",
+      OPENCODE_DISABLE_CLAUDE_CODE: "1",
+      OPENCODE_DISABLE_MODELS_FETCH: "1",
+      OPENCODE_DISABLE_FREE_MODELS: "1",
+      OPENCODE_CONFIG_CONTENT: config,
+    }).map(([name, value]) => [`${SERVE_ONLY_PREFIX}${name}`, value]),
+  ),
 });
 
 /** The base URL that the session's environment sets for the route, if any. */

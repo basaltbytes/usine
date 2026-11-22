@@ -2,7 +2,7 @@ import type { AgentSessionId } from "@usine/core/agent/session";
 import { Effect, Option, Schema } from "effect";
 import { type SessionOperation, SessionOperationError } from "../../runtime.ts";
 import type { BridgeClient } from "./bridge/client.ts";
-import { type OpenCodeMethod, OpenCodePath } from "./bridge/lines.ts";
+import { type BridgeAnswer, type OpenCodeMethod, OpenCodePath } from "./bridge/lines.ts";
 import { ApiError } from "./codec.ts";
 
 /** OpenCode's API through one bridge, for one session or for none, as in preflight. */
@@ -26,15 +26,32 @@ export interface OpenCodeApi {
     path: string,
     body?: Schema.Json,
   ) => Effect.Effect<A, SessionOperationError>;
+  /**
+   * Sets the command environment of OpenCode session `session` to the worker's environment, which
+   * the bridge has, so tool commands don't get the data and configuration directories of `serve`.
+   */
+  readonly setToolEnvironment: (
+    operation: SessionOperation,
+    session: string,
+  ) => Effect.Effect<void, SessionOperationError>;
 }
 
 /** Returns the API of the bridge that `client` talks to, with errors naming `sessionId`. */
 export const openCodeApi = (
-  client: Pick<BridgeClient, "request">,
+  client: Pick<BridgeClient, "request" | "setToolEnvironment">,
   sessionId: Option.Option<AgentSessionId>,
 ): OpenCodeApi => {
   const failure = (operation: SessionOperation, message: string, cause: unknown) =>
     SessionOperationError.make({ operation, sessionId, message, cause });
+  /** Returns the body of a 2xx `answer` to `target`, or fails naming OpenCode's message. */
+  const accepted = (operation: SessionOperation, target: string, answer: BridgeAnswer) => {
+    if (answer.status >= 200 && answer.status <= 299) return Effect.succeed(answer.body);
+    const reason = Option.match(Schema.decodeUnknownOption(ApiError)(answer.body), {
+      onNone: () => `status ${answer.status}`,
+      onSome: ({ message }) => `status ${answer.status}: ${message}`,
+    });
+    return Effect.fail(failure(operation, `OpenCode refused ${target} (${reason})`, answer));
+  };
   const send: OpenCodeApi["send"] = Effect.fn("OpenCodeApi.send")(
     function* (operation, method, target, body) {
       yield* Effect.annotateCurrentSpan({
@@ -49,16 +66,22 @@ export const openCodeApi = (
         operation,
         body === undefined ? { method, path } : { method, path, body },
       );
-      if (answer.status >= 200 && answer.status <= 299) return answer.body;
-      const reason = Option.match(Schema.decodeUnknownOption(ApiError)(answer.body), {
-        onNone: () => `status ${answer.status}`,
-        onSome: ({ message }) => `status ${answer.status}: ${message}`,
-      });
-      return yield* failure(operation, `OpenCode refused ${method} ${target} (${reason})`, answer);
+      return yield* accepted(operation, `${method} ${target}`, answer);
     },
   );
+  const setToolEnvironment: OpenCodeApi["setToolEnvironment"] = Effect.fn(
+    "OpenCodeApi.setToolEnvironment",
+  )(function* (operation, session) {
+    yield* Effect.annotateCurrentSpan({
+      openCodeSessionId: session,
+      sessionId: Option.getOrUndefined(sessionId),
+    });
+    const answer = yield* client.setToolEnvironment(operation, session);
+    yield* accepted(operation, `the command environment of ${session}`, answer);
+  });
   return {
     send,
+    setToolEnvironment,
     read: (schema, operation, method, path, body) =>
       send(operation, method, path, body).pipe(
         Effect.flatMap((answer) =>

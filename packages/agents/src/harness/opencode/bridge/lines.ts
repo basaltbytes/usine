@@ -39,6 +39,25 @@ export const BridgeRequest = Schema.Struct({
 });
 export type BridgeRequest = typeof BridgeRequest.Type;
 
+/** The ID of an OpenCode session, such as `ses_dfda5480fffekNd7DilJmssCG2`. */
+const OpenCodeSessionId = Schema.String.check(
+  Schema.isPattern(/^ses_[A-Za-z0-9]+$/u, { message: "Expected an OpenCode session ID" }),
+);
+
+/**
+ * A line on the bridge's standard input that sets the command environment of OpenCode session
+ * `environment`: the bridge sends `PUT /api/session/<environment>/environment` with its own
+ * environment, without the variables that it sets on `serve` only, and answers it as a request.
+ */
+const BridgeEnvironmentRequest = Schema.Struct({
+  id: BridgeRequestId,
+  environment: OpenCodeSessionId,
+});
+
+/** A line on the bridge's standard input. */
+export const BridgeInput = Schema.Union([BridgeRequest, BridgeEnvironmentRequest]);
+export type BridgeInput = typeof BridgeInput.Type;
+
 /**
  * The bridge's line once OpenCode is listening and the bridge receives its events. Only answers to
  * requests that the bridge refuses come before it.

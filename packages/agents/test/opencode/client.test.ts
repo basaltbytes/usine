@@ -3,13 +3,13 @@ import { type Cause, Effect, Exit, Fiber, Option, Queue, Schema, Stream } from "
 import { TestClock } from "effect/testing";
 import { MAX_PROTOCOL_LINE_BYTES } from "../../src/child-host/lines.ts";
 import { type BridgeClient, bridgeClient } from "../../src/harness/opencode/bridge/client.ts";
-import { BridgeRequest, OpenCodePath } from "../../src/harness/opencode/bridge/lines.ts";
+import { BridgeInput, OpenCodePath } from "../../src/harness/opencode/bridge/lines.ts";
 import type { SessionOperationError } from "../../src/runtime.ts";
 import { collectLogs } from "../logs.ts";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
-const decodeRequest = Schema.decodeUnknownEffect(Schema.fromJsonString(BridgeRequest));
+const decodeRequest = Schema.decodeUnknownEffect(Schema.fromJsonString(BridgeInput));
 const encodeJson = Schema.encodeEffect(Schema.fromJsonString(Schema.Json));
 const messages = (records: ReturnType<typeof collectLogs>["records"]) =>
   records.map(({ message }) => (Array.isArray(message) ? message[0] : message));
@@ -106,6 +106,22 @@ describe("OpenCode bridge client", () => {
       yield* bridge.emit({ id: "3:1", status: 404, body: "missing" });
       const answer = yield* Fiber.join(request);
       assert.deepStrictEqual(answer, { id: "3:1", status: 404, body: "missing" });
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("asks the bridge to set a session's command environment", () =>
+    Effect.gen(function* () {
+      const bridge = yield* scripted();
+      const setting = yield* Effect.forkChild(bridge.client.setToolEnvironment("launch", "ses_1"));
+      const sent = yield* bridge.sent;
+      assert.deepStrictEqual(sent, { id: 1, environment: "ses_1" });
+      yield* bridge.emit({ id: 1, status: 204, body: null });
+      const answer = yield* Fiber.join(setting);
+      assert.deepStrictEqual(answer, { id: 1, status: 204, body: null });
+      const invalid = yield* bridge.client
+        .setToolEnvironment("launch", "../ses_1")
+        .pipe(Effect.flip);
+      assert.include(invalid.message, "Invalid OpenCode bridge input");
     }).pipe(Effect.scoped),
   );
 

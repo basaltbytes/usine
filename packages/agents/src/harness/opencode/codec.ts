@@ -34,6 +34,7 @@ const sessionEvent = <const Type extends string, const Fields extends Schema.Str
 
 const SessionCreated = sessionEvent("session.created", {
   parentID: Schema.optionalKey(Schema.String),
+  title: Schema.optionalKey(Schema.String),
 });
 const ExecutionStarted = sessionEvent("session.execution.started", {});
 const ExecutionSucceeded = sessionEvent("session.execution.succeeded", {});
@@ -41,7 +42,9 @@ const ExecutionFailed = sessionEvent("session.execution.failed", { error: OpenCo
 const ExecutionInterrupted = sessionEvent("session.execution.interrupted", {
   reason: Schema.String,
 });
+const InboxEnqueued = sessionEvent("session.inbox.enqueued", { inboxID: Schema.String });
 const InboxDelivered = sessionEvent("session.inbox.delivered", { inboxID: Schema.String });
+const InboxCancelled = sessionEvent("session.inbox.cancelled", { inboxID: Schema.String });
 const TextEnded = sessionEvent("session.text.ended", { text: Schema.String });
 const ToolInputStarted = sessionEvent("session.tool.input.started", {
   id: Schema.String,
@@ -64,14 +67,16 @@ const RetryScheduled = sessionEvent("session.retry.scheduled", {
   error: OpenCodeError,
 });
 
-/** An OpenCode event that the runtime acts on. */
-export const SessionEvent = Schema.Union([
+/** An OpenCode event of one session that the runtime acts on. */
+const SessionEvent = Schema.Union([
   SessionCreated,
   ExecutionStarted,
   ExecutionSucceeded,
   ExecutionFailed,
   ExecutionInterrupted,
+  InboxEnqueued,
   InboxDelivered,
+  InboxCancelled,
   TextEnded,
   ToolInputStarted,
   ToolCalled,
@@ -81,10 +86,37 @@ export const SessionEvent = Schema.Union([
   UsageUpdated,
   RetryScheduled,
 ]);
+
 export type SessionEvent = typeof SessionEvent.Type;
 
+/** A shell that OpenCode started, with the session that started it in its metadata. */
+const ShellCreated = Schema.Struct({
+  type: Schema.Literal("shell.created"),
+  data: Schema.Struct({
+    info: Schema.Struct({
+      id: Schema.String,
+      command: Schema.String,
+      metadata: Schema.Struct({ sessionID: Schema.optionalKey(Schema.String) }),
+    }),
+  }),
+});
+const shellEnded = <const Type extends string>(type: Type) =>
+  Schema.Struct({ type: Schema.Literal(type), data: Schema.Struct({ id: Schema.String }) });
+
+/** An OpenCode event of one shell that the runtime acts on. */
+const ShellEvent = Schema.Union([
+  ShellCreated,
+  shellEnded("shell.exited"),
+  shellEnded("shell.deleted"),
+]);
+export type ShellEvent = typeof ShellEvent.Type;
+
+/** An OpenCode event that the runtime acts on. */
+export const HandledEvent = Schema.Union([SessionEvent, ShellEvent]);
+export type HandledEvent = typeof HandledEvent.Type;
+
 const handledTypes: ReadonlySet<string> = new Set(
-  SessionEvent.members.map((member) => member.fields.type.literal),
+  [...SessionEvent.members, ...ShellEvent.members].map((member) => member.fields.type.literal),
 );
 
 /**
@@ -93,7 +125,7 @@ const handledTypes: ReadonlySet<string> = new Set(
  * marks.
  */
 export const decodeEvent = (event: OpenCodeEvent) => {
-  const decoded = Schema.decodeUnknownOption(SessionEvent)(event);
+  const decoded = Schema.decodeUnknownOption(HandledEvent)(event);
   return { event: decoded, malformed: Option.isNone(decoded) && handledTypes.has(event.type) };
 };
 
@@ -137,6 +169,9 @@ export const Jobs = Schema.Struct({
   ),
 });
 export type Job = (typeof Jobs.Type)["data"][number];
+
+/** The body of `POST /api/session/:id/prompt`: the inbox item that holds the input. */
+export const PostedInput = Schema.Struct({ data: Schema.Struct({ id: Schema.String }) });
 
 /** The body of `GET /api/session/:id/inbox`: the input that the session hasn't read. */
 export const Inbox = Schema.Struct({ data: Schema.Array(Schema.Struct({ id: Schema.String })) });
