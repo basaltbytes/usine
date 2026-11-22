@@ -8,7 +8,8 @@ import { SandboxRequest, SupervisorSandbox, SupervisorSource } from "@usine/agen
 import { Harness, ModelId } from "@usine/core/agent/brain";
 import { AgentSessionId } from "@usine/core/agent/session";
 import { CommitSha, RepositoryName } from "@usine/core/repository";
-import { ContainerImage, type GatewayLlmProtocol } from "@usine/core/worker";
+import type { GatewaySlot } from "@usine/core/agent/provider";
+import { ContainerImage } from "@usine/core/worker";
 import {
   Clock,
   Context,
@@ -46,7 +47,6 @@ const runtimes = (installed: Readonly<Record<string, Answer>>) =>
 
 const unusedRoute: GatewayModelRoute = {
   credential: () => Effect.die("the test calls no model"),
-  countTokens: () => Effect.die("the test counts no tokens"),
   request: () => Effect.die("the test calls no model"),
 };
 
@@ -207,7 +207,6 @@ describe("the supervisor sandbox's container runtime", () => {
 describe("a supervisor sandbox on a container runtime", () => {
   const route: GatewayModelRoute = {
     credential: () => Effect.succeedNone,
-    countTokens: () => Effect.die("the test counts no tokens"),
     request: () => Effect.die("the test calls no model"),
   };
 
@@ -505,16 +504,16 @@ describe("the supervisor model relay", () => {
   it.effect("sends model calls through the instance's route without the session's credential", () =>
     Effect.gen(function* () {
       const sent: Array<{
-        readonly protocol: GatewayLlmProtocol;
+        readonly slot: GatewaySlot;
+        readonly path: string;
         readonly body: string;
         readonly headers: Readonly<Record<string, string>>;
       }> = [];
       const route: GatewayModelRoute = {
         credential: () => Effect.succeedNone,
-        countTokens: () => Effect.die("the test counts no tokens"),
-        request: (protocol, body, headers) =>
+        request: (slot, path, body, headers) =>
           Effect.sync(() => {
-            sent.push({ protocol, body, headers });
+            sent.push({ slot, path, body, headers });
             return new Response("{}", {
               status: 201,
               headers: { "content-type": "application/json" },
@@ -537,7 +536,10 @@ describe("the supervisor model relay", () => {
       );
       assert.strictEqual(status, 201);
       assert.lengthOf(sent, 1);
-      assert.strictEqual(sent[0]?.protocol, "anthropic-messages");
+      assert.deepStrictEqual(
+        [sent[0]?.slot, sent[0]?.path],
+        ["anthropic-messages", "/v1/messages"],
+      );
       assert.strictEqual(sent[0]?.body, '{"model":"m"}');
       assert.strictEqual(sent[0]?.headers["anthropic-version"], "2023-06-01");
       assert.deepStrictEqual(Object.keys(sent[0]?.headers ?? {}).sort(), [
@@ -552,7 +554,7 @@ describe("the supervisor model relay", () => {
         }),
         route,
       );
-      assert.strictEqual(sent[1]?.protocol, "openai-responses");
+      assert.deepStrictEqual([sent[1]?.slot, sent[1]?.path], ["openai-responses", "/v1/responses"]);
     }),
   );
 });

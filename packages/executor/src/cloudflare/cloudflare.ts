@@ -148,15 +148,15 @@ const brainGap = (
             cause: new Error(`unsupported harness ${brain.harness}`),
           }),
         ),
-      onSome: ({ descriptor, credential: { provider, label } }) =>
-        address.providers.some((key) => key.provider === provider)
+      onSome: ({ descriptor }) =>
+        descriptor.providers.some(({ id }) => address.providers.some((key) => key.provider === id))
           ? Option.none()
           : Option.some(
               WorkerCapabilityError.make({
                 worker: address.name,
                 capability: "harness-login",
-                message: `${descriptor.label} needs an ${label} API key on cloudflare worker "${address.name}", which holds no harness login. Add ${provider} to the worker's llm_providers with its api_key_env.`,
-                cause: new Error(`no ${provider} key`),
+                message: `${descriptor.label} needs an ${descriptor.providers.map(({ label }) => label).join(" or ")} API key on cloudflare worker "${address.name}", which holds no harness login. Add ${descriptor.providers.map(({ id }) => id).join(" or ")} to the worker's llm_providers with its api_key_env.`,
+                cause: new Error(`no ${descriptor.providers.map(({ id }) => id).join(" or ")} key`),
               }),
             ),
     },
@@ -236,9 +236,13 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
       harness: Harness,
     ): Option.Option<GatewayCredentialKind> =>
       Option.flatMap(
-        Option.flatMap(catalog.get(harness), (descriptor) => descriptor.worker.credential),
-        ({ provider }) =>
-          worker.providers.includes(provider) ? Option.some("api-key" as const) : Option.none(),
+        Option.filter(catalog.get(harness), (descriptor) =>
+          Option.isSome(descriptor.worker.credential),
+        ),
+        ({ providers }) =>
+          providers.some(({ id }) => worker.providers.some((held) => held === id))
+            ? Option.some("api-key" as const)
+            : Option.none(),
       );
 
     const destroySandbox = Effect.fn("CloudflareExecutor.destroySandbox")(function* (

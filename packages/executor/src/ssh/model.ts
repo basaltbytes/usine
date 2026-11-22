@@ -1,4 +1,5 @@
 import type { BoxdApiLayer } from "./provisioner/boxd/client.ts";
+import type { GatewaySlot } from "@usine/core/agent/provider";
 import type { boxdExecLayer } from "./provisioner/boxd/exec.ts";
 import type { AttemptConnections } from "../attempt-connections.ts";
 import type { SshCommand } from "@usine/agents/child-host";
@@ -22,7 +23,6 @@ import type {
   GatewayAdminPort,
   GatewayCredentialKind,
   GatewayDomain,
-  GatewayLlmProtocol,
   HetznerImage,
   HetznerLabels,
   HetznerLocation,
@@ -54,8 +54,8 @@ export interface SshWorkerGateway {
   readonly adminPort: GatewayAdminPort;
   /** The admin API bearer token. */
   readonly adminToken: Redacted.Redacted<string>;
-  /** The LLM providers the Gateway has credentials for. A harness whose provider isn't listed uses its own login through the forward proxy. */
-  readonly llmProviders: ReadonlyArray<GatewayLlmProtocol>;
+  /** The slots of the providers the Gateway has credentials for. A harness whose providers aren't listed uses its own login through the forward proxy. */
+  readonly llmProviders: ReadonlyArray<GatewaySlot>;
 }
 
 /**
@@ -76,13 +76,11 @@ export interface SshWorkerContainer {
   readonly tmpfsSizeMib: Option.Option<ContainerScratchMib>;
 }
 
-/** The LLM provider API keys that each Attempt on a provisioned Worker gets in its environment. */
-export interface ProviderApiKeys {
-  /** Claude Code's `ANTHROPIC_API_KEY`. */
-  readonly anthropic: Option.Option<Redacted.Redacted<string>>;
-  /** Codex's `OPENAI_API_KEY`. */
-  readonly openai: Option.Option<Redacted.Redacted<string>>;
-}
+/**
+ * The provider API keys that each Attempt on a provisioned Worker gets in its environment, by
+ * provider ID, such as `anthropic` for Claude Code's `ANTHROPIC_API_KEY`.
+ */
+export type ProviderApiKeys = Readonly<Record<string, Redacted.Redacted<string>>>;
 
 /** Creates each Attempt's machine as a Hetzner Cloud server from a snapshot. */
 export interface HetznerProvisioner {
@@ -262,9 +260,8 @@ export interface MachineGateway {
   readonly forward: GatewayForward;
   readonly admin: GatewayAdmin;
   /**
-   * The credential kind the Gateway uses for each provider, from the last preflight: Anthropic
-   * for Claude Code, OpenAI for Codex. `None` before the first preflight, for a provider that
-   * `llmProviders` doesn't list.
+   * The credential kind the Gateway uses for each slot that `llmProviders` lists, from the last
+   * preflight. Empty before the first preflight.
    */
   readonly credentials: Ref.Ref<GatewayCredentials>;
   /**
@@ -274,10 +271,8 @@ export interface MachineGateway {
   readonly llmPrefixes: Ref.Ref<GatewayLlmPrefixes>;
 }
 
-/** The credential kind the Gateway holds for each provider; see `MachineGateway.credentials`. */
-export type GatewayCredentials = Readonly<
-  Record<GatewayLlmProtocol, Option.Option<GatewayCredentialKind>>
->;
+/** The credential kind the Gateway holds for each slot; see `MachineGateway.credentials`. */
+export type GatewayCredentials = Readonly<Record<string, GatewayCredentialKind>>;
 
 export interface SshMachine extends RemoteMachine {
   /** The Worker's address from `usine.yaml`; preflight checks its root. */

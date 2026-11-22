@@ -163,11 +163,10 @@ export const gatewayAttachmentsFor = Effect.fn("SshExecutor.gatewayAttachmentsFo
     const llmPrefixes = yield* Ref.get(gateway.llmPrefixes);
     yield* Effect.annotateCurrentSpan({ llmPrefixes });
     const homes = yield* Effect.forEach(
-      catalog.descriptors.filter(({ worker }) =>
-        Option.exists(
-          worker.credential,
-          ({ protocol, home }) => settings.llmProviders.includes(protocol) && Option.isSome(home),
-        ),
+      catalog.descriptors.filter(
+        ({ id, worker }) =>
+          Option.exists(worker.credential, ({ home }) => Option.isSome(home)) &&
+          catalog.gatewayHolds(id, settings.llmProviders),
       ),
       (descriptor) => holdAttemptHome(machine, attemptId, descriptor),
     );

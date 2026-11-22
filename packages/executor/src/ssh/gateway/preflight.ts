@@ -5,16 +5,14 @@ import {
 } from "@usine/agents/harness";
 import type { RemoteHost } from "@usine/agents/child-host";
 import type { BrainSpec, Harness } from "@usine/core/agent/brain";
-import {
-  type GatewayCredentialKind,
-  GatewayLlmProtocol,
-  type WorkerName,
-} from "@usine/core/worker";
+import type { ModelProvider, ModelProviderCatalog } from "@usine/core/agent/provider";
+import type { GatewayCredentialKind, WorkerName } from "@usine/core/worker";
 import { Effect, Option, Redacted, Ref } from "effect";
 import { WorkerCapabilityError } from "../../executor.ts";
 import type { HarnessProbe } from "../../harness-preflight.ts";
 import { type RemoteCommands, sendingShell } from "../../remote/commands.ts";
 import type { GatewayCredentials, MachineGateway, SshMachine } from "../model.ts";
+import { type ReportedProviders, reportedProviders } from "./admin.ts";
 import {
   forwardProxyUrl,
   gatewayEnvironment,
@@ -39,37 +37,22 @@ const REFUSED_WITHOUT_TOKEN = /^x-usine-gateway-refusal:\s*missing-caller-token\
 const gatewayGap = (worker: WorkerName, message: string, cause: unknown) =>
   WorkerCapabilityError.make({ worker, capability: "gateway", message, cause });
 
-/** Each provider's display name and the Gateway variables that set its credential. */
-const PROVIDER_CREDENTIALS = {
-  "anthropic-messages": {
-    label: "Anthropic",
-    variables: "ANTHROPIC_API_KEY or USINE_GATEWAY_ANTHROPIC_SUBSCRIPTION_TOKEN",
-  },
-  "openai-responses": {
-    label: "OpenAI",
-    variables: "OPENAI_API_KEY or USINE_GATEWAY_CHATGPT_AUTH_FILE",
-  },
-} as const satisfies Record<
-  GatewayLlmProtocol,
-  { readonly label: string; readonly variables: string }
->;
+/** Returns `items` as an English list, such as `a, b, and c`. */
+const listed = (items: ReadonlyArray<string>): string =>
+  items.length <= 2
+    ? items.join(" and ")
+    : `${items.slice(0, -1).join(", ")}, and ${items.at(-1) ?? ""}`;
 
-const NO_CREDENTIALS: GatewayCredentials = {
-  "anthropic-messages": Option.none(),
-  "openai-responses": Option.none(),
-};
-
-/** The `llm.<domain>` path prefixes of a Gateway that serves `prefixes`, for messages. */
-const llmPaths = (prefixes: GatewayLlmPrefixes) =>
-  GatewayLlmProtocol.literals
-    .map((protocol) => `/${llmPrefixOf(protocol, prefixes)}`)
-    .join(" and ");
+/** The `llm.<domain>` path prefixes of `providers` on a Gateway that serves `prefixes`, for messages. */
+const llmPaths = (providers: ModelProviderCatalog, prefixes: GatewayLlmPrefixes) =>
+  listed(providers.providers.map((provider) => `/${llmPrefixOf(provider, prefixes)}`));
 
 /**
  * Records the path prefixes the Gateway serves, which Attempts that start later use. Logs a
  * warning when the Gateway turns out to predate protocol prefixes, and once it serves them again.
  */
 const recordLlmPrefixes = Effect.fn("SshExecutor.recordLlmPrefixes")(function* (
+  providers: ModelProviderCatalog,
   worker: WorkerName,
   gateway: MachineGateway,
   prefixes: GatewayLlmPrefixes,
@@ -78,7 +61,7 @@ const recordLlmPrefixes = Effect.fn("SshExecutor.recordLlmPrefixes")(function* (
     worker,
     gateway: gateway.forward.gateway,
     llmPrefixes: prefixes,
-    paths: llmPaths(prefixes),
+    paths: llmPaths(providers, prefixes),
   };
   yield* Effect.annotateCurrentSpan(fields);
   const previous = yield* Ref.getAndSet(gateway.llmPrefixes, prefixes);
@@ -93,11 +76,65 @@ const recordLlmPrefixes = Effect.fn("SshExecutor.recordLlmPrefixes")(function* (
 });
 
 /**
- * Reads the Gateway's credential kind for each provider in the Worker's `llmProviders` and
- * records them for the Worker (ADR 0013), with the path prefixes the Gateway serves. Fails if the
- * Gateway has no credential for a listed provider or predates credential reporting.
+ * Returns why the Gateway can't serve `provider` to the Worker: it doesn't serve the provider's
+ * slot or one of its routes, or holds no credential for it. A Gateway from before the provider
+ * catalog reports no slots, so only its credentials are checked.
+ */
+const providerGap = (
+  worker: WorkerName,
+  gateway: MachineGateway,
+  reported: ReportedProviders,
+  provider: ModelProvider,
+): Option.Option<WorkerCapabilityError> => {
+  const { slot, label } = provider;
+  const name = gateway.forward.gateway;
+  const upgrade = "Upgrade @usine/gateway on it to the release that matches the orchestrator.";
+  const unserved = Option.flatMap(reported.slots, (slots) => {
+    const routes = slots[slot];
+    if (routes === undefined)
+      return Option.some(
+        gatewayGap(
+          worker,
+          `Gateway ${name} doesn't serve the ${label} slot ${slot}, which the llm_providers of SSH worker "${worker}" lists, so it is older than this orchestrator. ${upgrade}`,
+          new Error(`the gateway serves ${Object.keys(slots).join(", ") || "no slot"}`),
+        ),
+      );
+    const missing = provider.routes.filter((route) => !routes.includes(route));
+    return missing.length === 0
+      ? Option.none()
+      : Option.some(
+          gatewayGap(
+            worker,
+            `Gateway ${name} serves the ${label} slot ${slot} without ${listed(missing)}, which this orchestrator's harnesses call. ${upgrade}`,
+            new Error(`the gateway serves ${routes.join(", ")} under ${slot}`),
+          ),
+        );
+  });
+  if (Option.isSome(unserved)) return unserved;
+  if (reported.credentials[slot] !== undefined) return Option.none();
+  const variables = provider.credentials.map(({ variable }) => variable).join(" or ");
+  const older = Option.isNone(reported.slots)
+    ? ` Gateway ${name} doesn't report the slots it serves, so it is older than this orchestrator: if its release predates ${slot}, upgrade @usine/gateway on it first.`
+    : "";
+  return Option.some(
+    gatewayGap(
+      worker,
+      `The gateway of SSH worker "${worker}" has no ${label} credential, but the worker's llm_providers includes ${slot}. Set ${variables} on the gateway, or remove ${slot} from llm_providers.${older}`,
+      new Error(
+        `the gateway reports ${Object.keys(reported.credentials).join(", ") || "no provider"}`,
+      ),
+    ),
+  );
+};
+
+/**
+ * Reads the Gateway's provider report for the slots in the Worker's `llmProviders`, and records
+ * each credential kind for the Worker (ADR 0013), with the path prefixes the Gateway serves. Fails
+ * if the Gateway doesn't serve a listed provider's slot and routes, has no credential for it, or
+ * predates credential reporting. Returns the report, or `None` if `llmProviders` is empty.
  */
 const recordProviderCredentials = Effect.fn("SshExecutor.recordProviderCredentials")(function* (
+  catalog: HarnessCatalog,
   worker: WorkerName,
   gateway: MachineGateway,
 ) {
@@ -108,14 +145,14 @@ const recordProviderCredentials = Effect.fn("SshExecutor.recordProviderCredentia
     llmProviders: listed.join(","),
   });
   if (listed.length === 0) {
-    yield* Ref.set(gateway.credentials, NO_CREDENTIALS);
-    return NO_CREDENTIALS;
+    yield* Ref.set(gateway.credentials, {});
+    return Option.none<ReportedProviders>();
   }
-  const reported = yield* gateway.admin.providers.pipe(
+  const report = yield* gateway.admin.providers.pipe(
     Effect.mapError((error) => gatewayGap(worker, error.message, error)),
   );
-  if (Option.isNone(reported)) {
-    yield* Effect.logWarning("Gateway upgrade required before using LLM protocols", {
+  if (Option.isNone(report)) {
+    yield* Effect.logWarning("Gateway upgrade required before using LLM providers", {
       worker,
       gateway: gateway.forward.gateway,
       llmProviders: listed,
@@ -126,41 +163,32 @@ const recordProviderCredentials = Effect.fn("SshExecutor.recordProviderCredentia
       new Error("the gateway answered 404 for GET /v1/providers"),
     );
   }
-  yield* recordLlmPrefixes(worker, gateway, reported.value.prefixes);
-  const { providers } = reported.value.list;
-  const kindOf = (provider: GatewayLlmProtocol) =>
-    Option.fromNullishOr(providers.find((held) => held.provider === provider)?.credential);
-  const missing = listed.find((provider) => Option.isNone(kindOf(provider)));
-  if (missing !== undefined)
-    return yield* gatewayGap(
-      worker,
-      `The gateway of SSH worker "${worker}" has no ${PROVIDER_CREDENTIALS[missing].label} credential, but the worker's llm_providers includes ${missing}. Set ${PROVIDER_CREDENTIALS[missing].variables} on the gateway, or remove ${missing} from llm_providers.`,
-      new Error(
-        `the gateway reports ${providers.map(({ provider }) => provider).join(", ") || "no provider"}`,
-      ),
+  const providers = catalog.providers;
+  const reported = reportedProviders(providers, report.value);
+  yield* recordLlmPrefixes(providers, worker, gateway, reported.prefixes);
+  for (const slot of listed) {
+    const gap = Option.flatMap(providers.find(slot), (provider) =>
+      providerGap(worker, gateway, reported, provider),
     );
-  const credentials: GatewayCredentials = {
-    "anthropic-messages": listed.includes("anthropic-messages")
-      ? kindOf("anthropic-messages")
-      : Option.none(),
-    "openai-responses": listed.includes("openai-responses")
-      ? kindOf("openai-responses")
-      : Option.none(),
-  };
+    if (Option.isSome(gap)) return yield* gap.value;
+  }
+  const credentials: GatewayCredentials = Object.fromEntries(
+    listed.flatMap((slot) => {
+      const kind = reported.credentials[slot];
+      return kind === undefined ? [] : [[slot, kind] as const];
+    }),
+  );
   yield* Ref.set(gateway.credentials, credentials);
-  return credentials;
+  return Option.some(reported);
 });
 
 /** Returns how a provider's harness authenticates on the Worker, for log lines. */
-const credentialMode = (kind: Option.Option<GatewayCredentialKind>, listed: boolean) =>
-  Option.match(kind, {
-    onNone: () => (listed ? "gateway-unreported" : "worker-login"),
-    onSome: (credential) => `gateway-${credential}`,
-  });
+const credentialMode = (kind: GatewayCredentialKind | undefined, listed: boolean) =>
+  kind === undefined ? (listed ? "gateway-unreported" : "worker-login") : `gateway-${kind}`;
 
 /**
  * Returns the credential kind the Gateway injects for `harness`, as recorded by the last
- * preflight: Anthropic's for Claude Code, OpenAI's for Codex. Pi uses its own login.
+ * preflight: the kind of the harness's provider that the Gateway holds. Pi uses its own login.
  */
 export const gatewayCredentialFor = (
   catalog: HarnessCatalog,
@@ -168,26 +196,32 @@ export const gatewayCredentialFor = (
   harness: Harness,
 ): Effect.Effect<Option.Option<GatewayCredentialKind>> =>
   Effect.map(Ref.get(gateway.credentials), (credentials) =>
-    Option.flatMap(catalog.get(harness), (descriptor) =>
-      Option.flatMap(descriptor.worker.credential, ({ protocol }) => credentials[protocol]),
+    Option.flatMap(catalog.gatewayProvider(harness, gateway.settings.llmProviders), ({ slot }) =>
+      Option.fromUndefinedOr(credentials[slot]),
     ),
   );
 
 /**
  * Returns why the Gateway needs an upgrade to match the orchestrator, for operators, or `None`
- * if it serves what the orchestrator uses: protocol path prefixes, which Attempts otherwise
- * replace with the older ones, and the provider-credentials admin API that Settings uses.
+ * if it serves what the orchestrator uses: slot path prefixes, which Attempts otherwise replace
+ * with the older ones, a report of the slots it serves, which preflight checks each listed
+ * provider against, and the provider-credentials admin API that Settings uses.
  */
 const gatewayUpgradeOf = (
+  providers: ModelProviderCatalog,
   gateway: MachineGateway,
   prefixes: GatewayLlmPrefixes,
+  reported: Option.Option<ReportedProviders>,
   servesProviderCredentials: boolean,
 ): Option.Option<string> => {
   const lags = [
     ...(prefixes === "provider"
       ? [
-          `it serves model requests only at ${llmPaths("provider")}, which attempts call instead of ${llmPaths("protocol")}`,
+          `it serves model requests only at ${llmPaths(providers, "provider")}, which attempts call instead of ${llmPaths(providers, "slot")}`,
         ]
+      : []),
+    ...(Option.exists(reported, ({ slots }) => Option.isNone(slots))
+      ? ["it doesn't report the provider slots it serves, so preflight can't check their routes"]
       : []),
     ...(servesProviderCredentials
       ? []
@@ -203,10 +237,12 @@ const gatewayUpgradeOf = (
 /**
  * Verifies the Gateway's admin API for an SSH Worker without attaching anything: the forward
  * opens and the admin API accepts the admin token. Records the Gateway's credential kind for
- * each provider in the Worker's `llmProviders`, and the path prefixes it serves. Needs no Worker
- * machine. Returns why the Gateway needs an upgrade, or `None` if it matches the orchestrator.
+ * each provider in the Worker's `llmProviders`, after checking that the Gateway serves each one's
+ * slot and routes, and the path prefixes it serves. Needs no Worker machine. Returns why the
+ * Gateway needs an upgrade, or `None` if it matches the orchestrator.
  */
 export const verifyGatewayAdmin = Effect.fn("SshExecutor.verifyGatewayAdmin")(function* (
+  catalog: HarnessCatalog,
   worker: WorkerName,
   gateway: MachineGateway,
 ) {
@@ -225,12 +261,20 @@ export const verifyGatewayAdmin = Effect.fn("SshExecutor.verifyGatewayAdmin")(fu
   const { attachments } = yield* admin.list.pipe(
     Effect.mapError((error) => gatewayGap(worker, error.message, error)),
   );
-  const credentials = yield* recordProviderCredentials(worker, gateway);
+  const reported = yield* recordProviderCredentials(catalog, worker, gateway);
+  const credentials = yield* Ref.get(gateway.credentials);
   const prefixes = yield* Ref.get(gateway.llmPrefixes);
   const servesProviderCredentials = yield* admin.servesProviderCredentials.pipe(
     Effect.mapError((error) => gatewayGap(worker, error.message, error)),
   );
-  const upgrade = gatewayUpgradeOf(gateway, prefixes, servesProviderCredentials);
+  const providers = catalog.providers;
+  const upgrade = gatewayUpgradeOf(
+    providers,
+    gateway,
+    prefixes,
+    reported,
+    servesProviderCredentials,
+  );
   yield* Effect.logInfo("SSH Worker Gateway admin API verified", {
     worker,
     domain: settings.domain,
@@ -241,13 +285,11 @@ export const verifyGatewayAdmin = Effect.fn("SshExecutor.verifyGatewayAdmin")(fu
     servesProviderCredentials,
     upgrade: Option.getOrUndefined(upgrade),
     llmProviders: settings.llmProviders.join(","),
-    "anthropic-messages": credentialMode(
-      credentials["anthropic-messages"],
-      settings.llmProviders.includes("anthropic-messages"),
-    ),
-    "openai-responses": credentialMode(
-      credentials["openai-responses"],
-      settings.llmProviders.includes("openai-responses"),
+    ...Object.fromEntries(
+      providers.slots.map((slot) => [
+        slot,
+        credentialMode(credentials[slot], settings.llmProviders.includes(slot)),
+      ]),
     ),
     attachments: attachments.filter((attachment) => attachment.worker === worker).length,
   });
@@ -350,7 +392,7 @@ export const verifyGateway = (
   machine: SshMachine,
   gateway: MachineGateway,
 ) =>
-  verifyGatewayAdmin(worker, gateway).pipe(
+  verifyGatewayAdmin(catalog, worker, gateway).pipe(
     Effect.tap(() => verifyGatewayFromMachine(catalog, commands, worker, machine, gateway)),
   );
 
@@ -389,7 +431,7 @@ export const gatewayHarnessProbe = (
   gateway: MachineGateway,
   probe: HarnessProbe,
   shell: RemoteHost,
-  apiKeyed: (harness: Harness) => boolean,
+  apiKeyed: (harness: Harness) => Option.Option<ModelProvider>,
   external: HarnessProbe,
 ): HarnessProbe => {
   const worker = machine.address.name;
@@ -403,11 +445,16 @@ export const gatewayHarnessProbe = (
   ) {
     const { id: harness, label } = descriptor;
     const keyed = apiKeyed(harness);
-    const hosts: ReadonlyArray<string> = keyed ? [credential.apiHost] : credential.hosts;
-    const uses = keyed ? "an API key" : "its login";
-    const alternative = keyed
-      ? `, or add ${credential.protocol} to the worker's llm_providers with the key on the gateway`
-      : "";
+    const hosts: ReadonlyArray<string> = Option.match(keyed, {
+      onNone: () => credential.hosts,
+      onSome: (provider) => provider.hosts,
+    });
+    const uses = Option.isSome(keyed) ? "an API key" : "its login";
+    const alternative = Option.match(keyed, {
+      onNone: () => "",
+      onSome: ({ slot }) =>
+        `, or add ${slot} to the worker's llm_providers with the key on the gateway`,
+    });
     yield* Effect.annotateCurrentSpan({ worker, host, domain, harness });
     const result = yield* commands.inspect("preflight", shell, "sh", [
       "-c",
@@ -470,7 +517,7 @@ export const gatewayHarnessProbe = (
       {
         onNone: () => probe(brain, login),
         onSome: ({ descriptor, credential }) =>
-          gateway.settings.llmProviders.includes(credential.protocol)
+          catalog.gatewayHolds(descriptor.id, gateway.settings.llmProviders)
             ? external(brain, login)
             : loginOnMachine(brain, descriptor, credential, login),
       },

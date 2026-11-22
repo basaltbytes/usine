@@ -183,11 +183,8 @@ export const sshMachinesFor = Effect.fnUntraced(function* (
       onNone: () => new Set([address.name]),
       onSome: (held) => new Set([...held.workers, address.name]),
     });
-    const credentials = yield* Ref.make<GatewayCredentials>({
-      "anthropic-messages": Option.none(),
-      "openai-responses": Option.none(),
-    });
-    const llmPrefixes = yield* Ref.make<GatewayLlmPrefixes>("protocol");
+    const credentials = yield* Ref.make<GatewayCredentials>({});
+    const llmPrefixes = yield* Ref.make<GatewayLlmPrefixes>("slot");
     return {
       gateway: {
         settings: {

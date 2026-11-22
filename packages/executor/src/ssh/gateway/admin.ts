@@ -1,10 +1,5 @@
-import {
-  GatewayCredentialKind,
-  GatewayLlmProtocol,
-  GatewayLlmProvider,
-  gatewayLlmProtocolOf,
-  WorkerName,
-} from "@usine/core/worker";
+import type { ModelProviderCatalog } from "@usine/core/agent/provider";
+import { GatewayCredentialKind, WorkerName } from "@usine/core/worker";
 import {
   type AttachRequest,
   type Attached,
@@ -12,8 +7,6 @@ import {
   type AttachmentList,
   type Detached,
   GatewayAdminApi,
-  LlmProviderList,
-  LlmProviderSummary,
   AdminAuthorization,
 } from "@usine/gateway/admin";
 import { type Brand, DateTime, Effect, Option, type Redacted, Result, Schema } from "effect";
@@ -69,9 +62,9 @@ export interface GatewayAdmin {
   readonly list: Effect.Effect<AttachmentList, GatewayAdminError>;
   /**
    * Returns the LLM providers the Gateway has credentials for, with each credential kind, and the
-   * path prefixes it serves. Returns `None` if the Gateway predates this endpoint.
+   * slots it serves. Returns `None` if the Gateway predates this endpoint.
    */
-  readonly providers: Effect.Effect<Option.Option<ReportedProviders>, GatewayAdminError>;
+  readonly providers: Effect.Effect<Option.Option<ProviderReport>, GatewayAdminError>;
   /**
    * Returns whether the Gateway serves the provider-credentials admin API, which Settings uses
    * to connect provider logins. Gateways before it answer 404.
@@ -79,11 +72,53 @@ export interface GatewayAdmin {
   readonly servesProviderCredentials: Effect.Effect<boolean, GatewayAdminError>;
 }
 
-/** The LLM providers a Gateway reports, by protocol, and the path prefixes it serves. */
+/**
+ * A Gateway's provider report as any release decodes it: each provider by the name the Gateway
+ * gives it, and, from the provider catalog on, the routes of every slot it serves.
+ */
+const ProviderReport = Schema.Struct({
+  providers: Schema.Array(
+    Schema.Struct({ provider: Schema.String, credential: GatewayCredentialKind }),
+  ),
+  slots: Schema.optionalKey(
+    Schema.Array(Schema.Struct({ slot: Schema.String, routes: Schema.Array(Schema.String) })),
+  ),
+});
+export type ProviderReport = typeof ProviderReport.Type;
+
+/** The LLM providers a Gateway reports, by slot, the path prefixes it serves, and its slots' routes. */
 export interface ReportedProviders {
-  readonly list: LlmProviderList;
+  /** The credential kind of each slot that the Gateway holds a credential for. */
+  readonly credentials: Readonly<Record<string, GatewayCredentialKind>>;
   readonly prefixes: GatewayLlmPrefixes;
+  /** The routes of each slot that the Gateway serves, or `None` if it predates the provider catalog. */
+  readonly slots: Option.Option<Readonly<Record<string, ReadonlyArray<string>>>>;
 }
+
+/**
+ * Reads `report` with the slots of `providers`: a Gateway from before slots names each provider by
+ * its ID, and serves path prefixes by the same names.
+ */
+export const reportedProviders = (
+  providers: ModelProviderCatalog,
+  report: ProviderReport,
+): ReportedProviders => {
+  const named = report.providers.map(({ provider, credential }) => ({
+    reported: provider,
+    slot: Option.match(providers.find(provider), {
+      onNone: () => provider,
+      onSome: ({ slot }) => slot,
+    }),
+    credential,
+  }));
+  return {
+    credentials: Object.fromEntries(named.map(({ slot, credential }) => [slot, credential])),
+    prefixes: named.some(({ reported, slot }) => reported !== slot) ? "provider" : "slot",
+    slots: Option.map(Option.fromUndefinedOr(report.slots), (slots) =>
+      Object.fromEntries(slots.map(({ slot, routes }) => [slot, routes])),
+    ),
+  };
+};
 
 /** The timeout for one admin request. A publish keeps the Attempt's scope open while it runs. */
 const ADMIN_REQUEST_TIMEOUT = "30 seconds";
@@ -147,23 +182,11 @@ const sinceFields = (failure: { readonly _tag: string }) => {
   return {};
 };
 
-const isLegacyProvider = Schema.is(GatewayLlmProvider);
-
-// Gateways before protocol slots report each provider by its provider name.
+// Gateways name providers by provider ID before slots, and by slot after, and a later Gateway can
+// report a slot that this orchestrator doesn't know.
 const CompatibleProvidersApi = HttpApi.make("CompatibleProvidersApi").add(
   HttpApiGroup.make("llm")
-    .add(
-      HttpApiEndpoint.get("providers", "/v1/providers", {
-        success: Schema.Struct({
-          providers: Schema.Array(
-            Schema.Struct({
-              provider: Schema.Union([GatewayLlmProvider, GatewayLlmProtocol]),
-              credential: GatewayCredentialKind,
-            }),
-          ),
-        }),
-      }),
-    )
+    .add(HttpApiEndpoint.get("providers", "/v1/providers", { success: ProviderReport }))
     .middleware(AdminAuthorization),
 );
 
@@ -262,18 +285,7 @@ export const gatewayAdminFor = Effect.fn("SshExecutor.gatewayAdminFor")(function
     list: bounded("list")((client) => client.attachments.list()),
     providers: bounded("providers")((client) =>
       client.llm.providers().pipe(
-        Effect.map((reported) =>
-          Option.some<ReportedProviders>({
-            list: LlmProviderList.make({
-              providers: reported.providers.map(({ provider, credential }) =>
-                LlmProviderSummary.make({ provider: gatewayLlmProtocolOf(provider), credential }),
-              ),
-            }),
-            prefixes: reported.providers.some(({ provider }) => isLegacyProvider(provider))
-              ? "provider"
-              : "protocol",
-          }),
-        ),
+        Effect.asSome,
         Effect.catchIf(unknownRoute, () => Effect.succeedNone),
       ),
     ),

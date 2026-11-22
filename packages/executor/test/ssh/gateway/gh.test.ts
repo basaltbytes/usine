@@ -88,7 +88,7 @@ it.live(
           catalog,
           domain,
           llmProviders: [],
-          llmPrefixes: "protocol",
+          llmPrefixes: "slot",
           ghConfigDirectory: directory,
           homes: { codex: join(directory, "codex") },
           callerToken: Redacted.make(caller),

@@ -99,10 +99,10 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
     const harnessProbe = (machine: SshMachine, shell: RemoteHost): HarnessProbe => {
       const own = options.harnessReadiness?.(machine) ?? agentsHarnessProbe(harnesses, shell, {});
       const keyed = (harness: Harness) =>
-        Option.isSome(provisionedApiKey(catalog, machine, harness));
+        Option.map(provisionedApiKey(catalog, machine, harness), ({ provider }) => provider);
       const external = agentsHarnessProbe(harnesses, shell, {}, "api-key");
       const probe: HarnessProbe = (brain, login) =>
-        keyed(brain.harness) ? external(brain, login) : own(brain, login);
+        Option.isSome(keyed(brain.harness)) ? external(brain, login) : own(brain, login);
       return Option.match(machine.gateway, {
         onNone: () => probe,
         onSome: (gateway) =>
@@ -150,7 +150,7 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
       verifyMachine,
       prepareContainers: (machine) => containers.isolation(machine).pipe(Effect.asVoid),
       reset: reset.reset,
-      verifyGatewayAdmin,
+      verifyGatewayAdmin: (worker, gateway) => verifyGatewayAdmin(catalog, worker, gateway),
       settings: options,
     });
 

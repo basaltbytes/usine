@@ -1,11 +1,13 @@
 // @effect-diagnostics-next-line nodeBuiltinImport:off
 import { createServer } from "node:http";
+import { catalog } from "@usine/agents/harness";
 import type { ModelId } from "@usine/core/agent/brain";
-import { type GatewayLlmProtocol, SupervisorLimits } from "@usine/core/worker";
+import type { GatewaySlot, ModelProviderCatalog } from "@usine/core/agent/provider";
+import { SupervisorLimits } from "@usine/core/worker";
 import { CALLER_CREDENTIAL_HEADERS } from "@usine/gateway/admin";
-import { Effect, Result, Schema, Stream } from "effect";
+import { Effect, Option, Result, Schema, Stream } from "effect";
 import { HttpServerRequest, HttpServerResponse } from "effect/http";
-import type { GatewayModelError, GatewayModelRoute } from "../ssh/gateway/model-route.ts";
+import type { GatewayModelRoute } from "../ssh/gateway/model-route.ts";
 
 export const MAX_RELAY_CONNECTIONS = 8;
 
@@ -19,26 +21,20 @@ export const modelRelayServer = () => {
   return server;
 };
 
-type Forward = (
-  route: GatewayModelRoute,
-  body: string,
-  headers: Readonly<Record<string, string>>,
-) => Effect.Effect<Response, GatewayModelError>;
+/** Returns the slot and path of a model request for a route of one of `providers`, such as `/anthropic-messages/v1/messages`. */
+const relayedRoute = (
+  providers: ModelProviderCatalog,
+  path: string,
+): Option.Option<{ readonly slot: GatewaySlot; readonly rest: string }> => {
+  const match = /^\/([a-z0-9-]+)(\/.*)$/u.exec(path);
+  if (match === null) return Option.none();
+  const [, prefix = "", rest = ""] = match;
+  return Option.flatMap(
+    Option.filter(providers.find(prefix), ({ slot }) => slot === prefix),
+    (provider) => Option.map(provider.protocolFor(rest), () => ({ slot: provider.slot, rest })),
+  );
+};
 
-const modelRequest =
-  (protocol: GatewayLlmProtocol): Forward =>
-  (route, body, headers) =>
-    route.request(protocol, body, headers);
-
-/** How the relay forwards each model request path that it serves. */
-const relayedPaths: ReadonlyMap<string, Forward> = new Map([
-  ["/anthropic-messages/v1/messages", modelRequest("anthropic-messages")],
-  [
-    "/anthropic-messages/v1/messages/count_tokens",
-    (route, body, headers) => route.countTokens(body, headers),
-  ],
-  ["/openai-responses/v1/responses", modelRequest("openai-responses")],
-]);
 const requestOnlyHeaders: ReadonlySet<string> = new Set([
   ...CALLER_CREDENTIAL_HEADERS,
   "host",
@@ -60,8 +56,9 @@ export const relayModelRequest = Effect.fn("SupervisorModelRelay.request")(
     const maxBodyBytes = limits.modelRequestMib * 1024 ** 2;
     const request = yield* HttpServerRequest.HttpServerRequest;
     const path = new URL(request.url, "http://model-relay").pathname;
-    const forward = request.method === "POST" ? relayedPaths.get(path) : undefined;
-    if (forward === undefined) {
+    const forward =
+      request.method === "POST" ? relayedRoute(catalog.providers, path) : Option.none();
+    if (Option.isNone(forward)) {
       yield* Effect.logWarning("The supervisor model relay refused a path", {
         method: request.method,
         path,
@@ -103,7 +100,7 @@ export const relayModelRequest = Effect.fn("SupervisorModelRelay.request")(
     const headers = Object.fromEntries(
       Object.entries(request.headers).filter(([name]) => !requestOnlyHeaders.has(name)),
     );
-    const response = yield* forward(route, body, headers);
+    const response = yield* route.request(forward.value.slot, forward.value.rest, body, headers);
     const kept = new Headers();
     response.headers.forEach((value, name) => {
       if (!connectionHeaders.has(name)) kept.append(name, value);

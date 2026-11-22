@@ -1,7 +1,7 @@
 import { CONTAINER_LIMITS_SCRIPT } from "../container-limits.ts";
 import { NodeHttpServer } from "@effect/platform-node";
 import { ExecShell, type ExecTransport } from "@usine/agents/child-host";
-import { catalog, type CredentialRoute } from "@usine/agents/harness";
+import { catalog, type CredentialRoute, type HarnessCredential } from "@usine/agents/harness";
 import { WorkingDirectory } from "@usine/agents/runtime";
 import {
   type SandboxRequest,
@@ -11,6 +11,7 @@ import {
   SupervisorUnavailable,
 } from "@usine/agents/supervisor";
 import type { Harness, ModelId } from "@usine/core/agent/brain";
+import type { ModelProvider } from "@usine/core/agent/provider";
 import { conversationKey, type ConversationKey } from "./names.ts";
 import { confinedDirectory } from "./confine.ts";
 import { bindMount, mountField } from "../bind-mount.ts";
@@ -26,6 +27,7 @@ import {
 } from "./storage.ts";
 import { type ContainerImage, SupervisorLimits, WorkerName } from "@usine/core/worker";
 import {
+  Array as Arr,
   type Duration,
   Effect,
   FileSystem,
@@ -284,20 +286,27 @@ export interface ContainerSandboxOptions {
   readonly route: Option.Option<Effect.Effect<GatewayModelRoute, GatewayModelError>>;
 }
 
-/** The credential route of a turn whose harness reaches the model through `route`'s `protocol`. */
-const credentialRoute = (
+/**
+ * Returns the first of `providers` that `route`'s gateway holds a credential for, with the turn's
+ * credential route, or the first provider with the `gateway` route when it holds none.
+ */
+const heldProvider = Effect.fn("SupervisorSandbox.heldProvider")(function* (
   route: GatewayModelRoute,
-  protocol: Parameters<GatewayModelRoute["credential"]>[0],
-) =>
-  route.credential(protocol).pipe(
-    Effect.map(
-      Option.match({
-        onNone: (): CredentialRoute => "gateway",
-        onSome: (kind): CredentialRoute =>
-          kind === "subscription" ? "gateway-subscription" : "gateway-api-key",
-      }),
-    ),
-  );
+  providers: Arr.NonEmptyReadonlyArray<ModelProvider>,
+) {
+  for (const provider of providers) {
+    const kind = yield* route.credential(provider.slot);
+    if (Option.isSome(kind))
+      return {
+        provider,
+        route: kind.value === "subscription" ? "gateway-subscription" : "gateway-api-key",
+      } satisfies { readonly provider: ModelProvider; readonly route: CredentialRoute };
+  }
+  return { provider: providers[0], route: "gateway" } satisfies {
+    readonly provider: ModelProvider;
+    readonly route: CredentialRoute;
+  };
+});
 
 const unavailableBecause = (action: string) => (error: { readonly message: string }) =>
   SupervisorUnavailable.make({ message: `Can't ${action}: ${error.message}` });
@@ -357,22 +366,32 @@ const makeContainerSandbox = Effect.fn("SupervisorSandbox.make")(function* (
       65536,
     ).pipe(Effect.timeout("30 seconds"));
 
-  /** The harness's gateway settings, pointed at the relay, for the conversation's home. */
-  const wiringOf = (harness: Harness, paths: ConversationPaths) =>
-    Option.map(
-      Option.flatMap(catalog.get(harness), ({ worker }) => worker.credential),
-      ({ protocol, gatewayPath, gateway }) => {
-        const rendered = gateway.render(
-          `http://127.0.0.1:${MODEL_RELAY_PORT}/${gatewayPath}`,
-          `${paths.home}/.${harness}`,
-        );
-        return {
-          protocol,
-          files: rendered.files,
-          environment: { ...rendered.environment, [rendered.tokenVariable]: SANDBOX_TOKEN },
-        };
-      },
+  /** The harness's credential wiring and the providers it can use, if it has wiring. */
+  const credentialOf = (harness: Harness) =>
+    Option.flatMap(catalog.get(harness), ({ worker, providers }) =>
+      Option.flatMap(worker.credential, (credential) =>
+        Arr.isReadonlyArrayNonEmpty(providers)
+          ? Option.some({ credential, providers })
+          : Option.none(),
+      ),
     );
+
+  /** The harness's gateway settings for `provider`'s slot, pointed at the relay, for the conversation's home. */
+  const wiringOf = (
+    harness: Harness,
+    credential: HarnessCredential,
+    provider: ModelProvider,
+    paths: ConversationPaths,
+  ) => {
+    const rendered = credential.gateway.render(
+      `http://127.0.0.1:${MODEL_RELAY_PORT}/${provider.slot}${credential.slotPath}`,
+      `${paths.home}/.${harness}`,
+    );
+    return {
+      files: rendered.files,
+      environment: { ...rendered.environment, [rendered.tokenVariable]: SANDBOX_TOKEN },
+    };
+  };
 
   const serveRelay = Effect.fn("SupervisorSandbox.serveRelay")(function* (
     socket: string,
@@ -761,14 +780,24 @@ const makeContainerSandbox = Effect.fn("SupervisorSandbox.make")(function* (
       { discard: true },
     );
     const written = yield* checkWorkspaceSize(fs, paths.workspace, limits);
-    const wiring = wiringOf(request.harness, paths);
     const route = yield* openRoute.pipe(
       Effect.mapError(unavailableBecause("open the instance's model route")),
     );
-    const credential = yield* Option.match(wiring, {
-      onNone: () => Effect.succeed<CredentialRoute>("gateway"),
-      onSome: ({ protocol }) => credentialRoute(route, protocol),
+    const wired = yield* Option.match(credentialOf(request.harness), {
+      onNone: () => Effect.succeedNone,
+      onSome: ({ credential: harnessCredential, providers }) =>
+        Effect.map(heldProvider(route, providers), ({ provider, route: held }) =>
+          Option.some({
+            route: held,
+            wiring: wiringOf(request.harness, harnessCredential, provider, paths),
+          }),
+        ),
     }).pipe(Effect.mapError(unavailableBecause("check the instance's model credential")));
+    const credential: CredentialRoute = Option.match(wired, {
+      onNone: () => "gateway",
+      onSome: ({ route: held }) => held,
+    });
+    const wiring = Option.map(wired, ({ wiring: rendered }) => rendered);
     // A socket path has a short length limit, so the relay's directory is in the system's.
     const relayDirectory = yield* fs
       .makeTempDirectoryScoped({ prefix: "usine-supervisor-" })

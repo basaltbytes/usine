@@ -13,16 +13,14 @@ import {
   ContainerLimits,
   ContainerMemoryMib,
   ContainerPids,
-  type GatewayLlmProtocol,
 } from "@usine/core/worker";
 import type { AttemptRequest } from "@usine/durable/attempt-runtime";
 import { completes, type StubParent, StubStorage } from "@usine/durable/testing";
 import {
-  AnthropicProvider,
+  LlmProvider,
   AnthropicSubscriptionToken,
   ChatGptLogin,
   HostFilePath,
-  OpenAiProvider,
   UpstreamBase,
 } from "@usine/gateway";
 import { TestClock } from "effect/testing";
@@ -89,23 +87,19 @@ const CODEX_HOME = `${ROOT}/workers/eu-one/codex/remote-run_execute_1`;
 
 /** A Gateway with a Claude subscription token and a ChatGPT login. */
 const SUBSCRIPTION_PROVIDERS = {
-  "anthropic-messages": Option.some(
-    AnthropicProvider.make({
-      upstream: UpstreamBase.make("https://api.anthropic.com"),
-      credential: AnthropicSubscriptionToken.make({
-        token: Redacted.make("sk-ant-oat01-for-provisioned-tests"),
-      }),
+  "anthropic-messages": LlmProvider.make({
+    upstream: Option.some(UpstreamBase.make("https://api.anthropic.com")),
+    credential: AnthropicSubscriptionToken.make({
+      token: Redacted.make("sk-ant-oat01-for-provisioned-tests"),
     }),
-  ),
-  "openai-responses": Option.some(
-    OpenAiProvider.make({
-      upstream: UpstreamBase.make("https://chatgpt.com/backend-api/codex"),
-      credential: ChatGptLogin.make({
-        authFile: HostFilePath.make("/var/lib/usine-gateway/chatgpt/auth.json"),
-        tokenUrl: UpstreamBase.make("https://auth.openai.com/oauth/token"),
-      }),
+  }),
+  "openai-responses": LlmProvider.make({
+    upstream: Option.some(UpstreamBase.make("https://chatgpt.com/backend-api/codex")),
+    credential: ChatGptLogin.make({
+      authFile: HostFilePath.make("/var/lib/usine-gateway/chatgpt/auth.json"),
+      tokenUrl: UpstreamBase.make("https://auth.openai.com/oauth/token"),
     }),
-  ),
+  }),
 };
 
 /** Returns the public host key in the user data of the first server created. */
@@ -121,7 +115,7 @@ const createdHostKey = (providers: ReturnType<typeof fakeProviders>): string | u
 
 /** Returns a provisioned Hetzner Worker behind a Gateway with `llmProviders`. */
 const gatewayHetznerAddress = (
-  llmProviders: ReadonlyArray<GatewayLlmProtocol>,
+  llmProviders: ReadonlyArray<string>,
   apiKeys: { readonly openai?: string } = {},
 ): SshWorkerAddress => ({
   ...gatewayAddress({ llmProviders }),
@@ -130,10 +124,7 @@ const gatewayHetznerAddress = (
   machine: {
     _tag: "Provisioned",
     provisioner: hetznerSettings({
-      apiKeys: {
-        anthropic: Option.none(),
-        openai: Option.map(Option.fromUndefinedOr(apiKeys.openai), Redacted.make),
-      },
+      apiKeys: apiKeys.openai === undefined ? {} : { openai: Redacted.make(apiKeys.openai) },
     }),
   },
 });
@@ -925,10 +916,7 @@ describe("Provisioned SSH Worker", () => {
           _tag: "Provisioned",
           provisioner: hetznerSettings({
             network: Option.none(),
-            apiKeys: {
-              anthropic: Option.some(Redacted.make(KEY)),
-              openai: Option.some(Redacted.make(OPENAI_KEY)),
-            },
+            apiKeys: { anthropic: Redacted.make(KEY), openai: Redacted.make(OPENAI_KEY) },
           }),
         },
       };

@@ -78,12 +78,12 @@ export const parentModels = Effect.fn("Orchestrator.parentModels")(function* (
   if (Option.isNone(route)) return undefined;
   const current = route.value;
   return yield* gatewayModelAccess({
-    credential: (protocol) =>
-      Effect.flatMap(current, (opened) => opened.credential(protocol)).pipe(
+    credential: (slot) =>
+      Effect.flatMap(current, (opened) => opened.credential(slot)).pipe(
         Effect.mapError((error) => ParentCredentialError.make({ message: error.message })),
       ),
-    request: (protocol, body, headers, signal) =>
-      Effect.flatMap(current, (opened) => opened.request(protocol, body, headers, signal)).pipe(
+    request: (slot, path, body, headers, signal) =>
+      Effect.flatMap(current, (opened) => opened.request(slot, path, body, headers, signal)).pipe(
         Effect.mapError((error) => ParentCredentialError.make({ message: error.message })),
       ),
   });

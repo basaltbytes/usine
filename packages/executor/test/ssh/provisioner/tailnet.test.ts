@@ -18,11 +18,10 @@ import {
 } from "@usine/core/worker";
 import { completes, StubStorage, stubAttemptRuntime } from "@usine/durable/testing";
 import {
-  AnthropicProvider,
+  LlmProvider,
   AnthropicSubscriptionToken,
   ChatGptLogin,
   HostFilePath,
-  OpenAiProvider,
   UpstreamBase,
 } from "@usine/gateway";
 import { Deferred, Duration, Effect, Fiber, Layer, Logger, Option, Redacted, Schema } from "effect";
@@ -108,21 +107,17 @@ const fakeTailnet = () => {
 };
 
 const providers = {
-  "anthropic-messages": Option.some(
-    AnthropicProvider.make({
-      upstream: UpstreamBase.make("https://api.anthropic.com"),
-      credential: AnthropicSubscriptionToken.make({ token: Redacted.make("sk-ant-oat01-test") }),
+  "anthropic-messages": LlmProvider.make({
+    upstream: Option.some(UpstreamBase.make("https://api.anthropic.com")),
+    credential: AnthropicSubscriptionToken.make({ token: Redacted.make("sk-ant-oat01-test") }),
+  }),
+  "openai-responses": LlmProvider.make({
+    upstream: Option.some(UpstreamBase.make("https://api.openai.com")),
+    credential: ChatGptLogin.make({
+      authFile: HostFilePath.make("/gateway/auth.json"),
+      tokenUrl: UpstreamBase.make("https://auth.openai.com/oauth/token"),
     }),
-  ),
-  "openai-responses": Option.some(
-    OpenAiProvider.make({
-      upstream: UpstreamBase.make("https://api.openai.com"),
-      credential: ChatGptLogin.make({
-        authFile: HostFilePath.make("/gateway/auth.json"),
-        tokenUrl: UpstreamBase.make("https://auth.openai.com/oauth/token"),
-      }),
-    }),
-  ),
+  }),
 };
 
 const boatAddress: SshWorkerAddress = {
@@ -134,7 +129,7 @@ const boatAddress: SshWorkerAddress = {
     provisioner: boatSettings({
       snapshot: Option.some(BoatSnapshotName.make("usine-attempt")),
       tailnet: Option.some(tailnet),
-      apiKeys: { anthropic: Option.none(), openai: Option.none() },
+      apiKeys: {},
     }),
   },
 };
@@ -154,7 +149,7 @@ const boxdAddress: SshWorkerAddress = {
     _tag: "Provisioned",
     provisioner: boxdSettings({
       tailnet: Option.some(tailnet),
-      apiKeys: { anthropic: Option.none(), openai: Option.none() },
+      apiKeys: {},
     }),
   },
 };
@@ -248,7 +243,7 @@ const boxdEgressAddress: SshWorkerAddress = {
     _tag: "Provisioned",
     provisioner: boxdSettings({
       tailnet: Option.some(tailnet),
-      apiKeys: { anthropic: Option.none(), openai: Option.none() },
+      apiKeys: {},
       egress: Option.some(
         ["*.tailscale.com", "registry.npmjs.org"].map((entry) => BoxdEgressEntry.make(entry)),
       ),

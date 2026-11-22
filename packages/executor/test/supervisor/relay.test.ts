@@ -20,7 +20,6 @@ const MAX_RELAY_BODY_BYTES = 2 * 1024 ** 2;
 const model = ModelId.make("allowed");
 const unused: GatewayModelRoute = {
   credential: () => Effect.succeedNone,
-  countTokens: () => Effect.die("the test counts no tokens"),
   request: () => Effect.die("A refused request must not reach the gateway"),
 };
 const request = (body: string) =>
@@ -84,7 +83,6 @@ describe("supervisor relay limits", () => {
       const failed = yield* relayModelRequest(
         {
           credential: () => Effect.succeedNone,
-          countTokens: () => Effect.die("the test counts no tokens"),
           request: () =>
             Effect.fail(
               GatewayModelError.make({ message: "Failed to connect to secret.gateway:3210" }),
@@ -154,8 +152,7 @@ describe("supervisor relay limits", () => {
       });
       const route: GatewayModelRoute = {
         credential: () => Effect.succeedNone,
-        countTokens: () => Effect.die("the test counts no tokens"),
-        request: (_protocol, received) =>
+        request: (_slot, _path, received) =>
           Effect.sync(() => {
             assert.strictEqual(received, body);
             return new Response("ok");
@@ -184,12 +181,13 @@ describe("supervisor relay limits", () => {
       const counted: Array<{ body: string; headers: Readonly<Record<string, string>> }> = [];
       const route: GatewayModelRoute = {
         credential: () => Effect.succeedNone,
-        request: () => Effect.die("A token count must not run the model"),
-        countTokens: (body, headers) =>
-          Effect.sync(() => {
-            counted.push({ body, headers });
-            return Response.json({ input_tokens: 42 });
-          }),
+        request: (slot, path, body, headers) =>
+          slot === "anthropic-messages" && path === "/v1/messages/count_tokens"
+            ? Effect.sync(() => {
+                counted.push({ body, headers });
+                return Response.json({ input_tokens: 42 });
+              })
+            : Effect.die("A token count must not run the model"),
       };
       const count = (body: string) =>
         relayModelRequest(route, model, limits).pipe(

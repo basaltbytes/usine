@@ -49,7 +49,7 @@ export const hetznerAddress: SshWorkerAddress = {
     provisioner: hetznerSettings({
       network: Option.none(),
       timings: ProvisionerTimings.make({ sshWait: ProvisionerSeconds.make(1) }),
-      apiKeys: { anthropic: Option.some(Redacted.make(KEY)), openai: Option.none() },
+      apiKeys: { anthropic: Redacted.make(KEY) },
     }),
   },
 };

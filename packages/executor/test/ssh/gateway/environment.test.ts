@@ -9,7 +9,8 @@ import {
 import { jsonKey } from "@usine/core/json-key";
 import { assert, describe, it } from "@effect/vitest";
 import { Harness } from "@usine/core/agent/brain";
-import { GatewayDomain, type GatewayLlmProtocol } from "@usine/core/worker";
+import { GatewaySlot } from "@usine/core/agent/provider";
+import { GatewayDomain } from "@usine/core/worker";
 import { Option, Redacted } from "effect";
 import {
   gatewayConfigFiles,
@@ -23,16 +24,19 @@ const DIRECTORIES = {
   homes: { codex: "/home/usine/.usine/workers/eu-one/codex" },
 };
 
+/** Returns the slots that `names` name. */
+const slots = (...names: ReadonlyArray<string>) => names.map((name) => GatewaySlot.make(name));
+
 const environmentFor = (
-  llmProviders: ReadonlyArray<GatewayLlmProtocol>,
+  llmProviders: ReadonlyArray<string>,
   harness: Option.Option<Harness> = Option.none(),
-  llmPrefixes: GatewayLlmPrefixes = "protocol",
+  llmPrefixes: GatewayLlmPrefixes = "slot",
 ) => {
   const { exported, sent } = gatewayEnvironment({
     catalog,
     harness,
     domain: GatewayDomain.make("gw.internal"),
-    llmProviders,
+    llmProviders: slots(...llmProviders),
     llmPrefixes,
     ...DIRECTORIES,
     callerToken: Redacted.make(CALLER_TOKEN),
@@ -112,8 +116,8 @@ describe("An Attempt's environment behind a Gateway", () => {
     const options = {
       catalog: source,
       domain: GatewayDomain.make("gw.internal"),
-      llmProviders: ["anthropic-messages", "openai-responses"] as const,
-      llmPrefixes: "protocol" as const,
+      llmProviders: slots("anthropic-messages", "openai-responses"),
+      llmPrefixes: "slot" as const,
       ...DIRECTORIES,
       homes: { ...DIRECTORIES.homes, opencode: "/attempt/opencode" },
       callerToken: Redacted.make(CALLER_TOKEN),
@@ -137,13 +141,13 @@ describe("An Attempt's environment behind a Gateway", () => {
   });
 
   it("writes Codex's model provider, without a token, only when the Gateway holds the OpenAI credential", () => {
-    const files = (llmProviders: ReadonlyArray<GatewayLlmProtocol>) =>
+    const files = (llmProviders: ReadonlyArray<string>) =>
       Object.fromEntries(
         gatewayConfigFiles({
           catalog,
           domain: GatewayDomain.make("gw.internal"),
-          llmProviders,
-          llmPrefixes: "protocol",
+          llmProviders: slots(...llmProviders),
+          llmPrefixes: "slot",
           ...DIRECTORIES,
         }),
       );
@@ -170,7 +174,7 @@ describe("An Attempt's environment behind a Gateway", () => {
       gatewayConfigFiles({
         catalog,
         domain: GatewayDomain.make("gw.internal"),
-        llmProviders: ["openai-responses"],
+        llmProviders: slots("openai-responses"),
         llmPrefixes: "provider",
         ...DIRECTORIES,
       }),

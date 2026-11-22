@@ -1,11 +1,8 @@
 import type { Harness } from "@usine/core/agent/brain";
 import type { HarnessCatalog } from "@usine/agents/harness";
+import type { GatewaySlot, ModelProvider } from "@usine/core/agent/provider";
 import type { RepositoryName } from "@usine/core/repository";
-import {
-  GATEWAY_LEGACY_PROVIDERS,
-  type GatewayDomain,
-  type GatewayLlmProtocol,
-} from "@usine/core/worker";
+import type { GatewayDomain } from "@usine/core/worker";
 import { type CallerToken, GATEWAY_TOKEN_HEADER } from "@usine/gateway/admin";
 import { Option, Redacted, Schema } from "effect";
 
@@ -26,16 +23,16 @@ export const forwardProxyUrl = (domain: GatewayDomain): string =>
   `http://${domain}:${FORWARD_PROXY_PORT}`;
 
 /**
- * The path prefixes a Gateway serves on `llm.<domain>`: protocol IDs such as
- * `/openai-responses`, or the provider names such as `/openai` of a Gateway from before
- * protocol slots, which reports its providers by the same names.
+ * The path prefixes a Gateway serves on `llm.<domain>`: provider slots such as
+ * `/openai-responses`, or the provider IDs such as `/openai` of a Gateway from before slots, which
+ * reports its providers by the same names.
  */
-export const GatewayLlmPrefixes = Schema.Literals(["protocol", "provider"]);
+export const GatewayLlmPrefixes = Schema.Literals(["slot", "provider"]);
 export type GatewayLlmPrefixes = typeof GatewayLlmPrefixes.Type;
 
-/** Returns the `llm.<domain>` path prefix of `protocol` on a Gateway that serves `prefixes`. */
-export const llmPrefixOf = (protocol: GatewayLlmProtocol, prefixes: GatewayLlmPrefixes): string =>
-  prefixes === "protocol" ? protocol : GATEWAY_LEGACY_PROVIDERS[protocol];
+/** Returns the `llm.<domain>` path prefix of `provider` on a Gateway that serves `prefixes`. */
+export const llmPrefixOf = (provider: ModelProvider, prefixes: GatewayLlmPrefixes): string =>
+  prefixes === "slot" ? provider.slot : provider.id;
 
 /** Returns the URL a Worker behind the Gateway clones and fetches `repository` from. */
 export const gatewayRepositoryUrl = (domain: GatewayDomain, repository: RepositoryName): string =>
@@ -55,7 +52,7 @@ export interface GatewayEnvironmentOptions {
   readonly catalog: HarnessCatalog;
   readonly egress?: "proxy" | "direct";
   readonly domain: GatewayDomain;
-  readonly llmProviders: ReadonlyArray<GatewayLlmProtocol>;
+  readonly llmProviders: ReadonlyArray<GatewaySlot>;
   /** The path prefixes the Gateway serves on `llm.<domain>`, from the last preflight. */
   readonly llmPrefixes: GatewayLlmPrefixes;
   /** The machine directory that contains the `ghGatewayConfig` files. */
@@ -67,8 +64,8 @@ export interface GatewayEnvironmentOptions {
 
 /**
  * Returns the configuration files that the executor writes on the machine before an Attempt,
- * keyed by path: gh's files, and Codex's `config.toml` if the Gateway holds the OpenAI
- * credential. None contains a token.
+ * keyed by path: gh's files, and each harness's files, such as Codex's `config.toml`, if the
+ * Gateway holds one of the harness's providers. None contains a token.
  */
 export const gatewayConfigFiles = (
   options: Omit<GatewayEnvironmentOptions, "callerToken">,
@@ -98,7 +95,7 @@ export const gatewayExportedEnvironment = (
   gatewayEnvironment({
     ...settings,
     // Without a harness, the environment has no LLM URL.
-    llmPrefixes: "protocol",
+    llmPrefixes: "slot",
     harness: Option.none(),
     ghConfigDirectory,
     homes: {},
@@ -116,12 +113,12 @@ export const gatewayExportedEnvironment = (
  *   enterprise and GitHub token, so absolute pagination links also authenticate.
  * - Package managers use the forward proxy at `<domain>:3128`; local addresses and the
  *   Gateway's own names bypass it.
- * - Claude Code calls `llm.<domain>/anthropic-messages` with the caller token if the Gateway has the
- *   Anthropic credential.
- * - Codex reads its descriptor configuration from `CODEX_HOME` and calls `llm.<domain>/openai-responses/v1` with
- *   the caller token if the Gateway has the OpenAI credential.
- * - A Gateway from before protocol slots gets `/anthropic` and `/openai/v1` instead.
- * - A harness whose provider the Gateway has no credential for uses its own login through the
+ * - A harness whose provider the Gateway holds calls `llm.<domain>/<slot>` and its slot path
+ *   with the caller token, wired as its descriptor says: Claude Code calls
+ *   `llm.<domain>/anthropic-messages`, and Codex reads `CODEX_HOME` and calls
+ *   `llm.<domain>/openai-responses/v1`.
+ * - A Gateway from before slots gets the provider IDs instead, such as `/anthropic`.
+ * - A harness whose providers the Gateway has no credential for uses its own login through the
  *   forward proxy, whose allowlist must include the login's hosts.
  */
 export const gatewayEnvironment = (
@@ -170,7 +167,7 @@ export const gatewayEnvironment = (
   };
 };
 
-/** The registered wiring recipes whose protocols the gateway serves. */
+/** The registered wiring recipes of the harnesses whose providers the gateway holds. */
 const gatewayWirings = (
   options: Pick<
     GatewayEnvironmentOptions,
@@ -178,14 +175,13 @@ const gatewayWirings = (
   >,
 ) =>
   options.catalog.descriptors.flatMap(({ id, worker }) =>
-    Option.toArray(worker.credential)
-      .filter(({ protocol }) => options.llmProviders.includes(protocol))
-      .map(({ gateway, gatewayPath, protocol }) => ({
+    Option.toArray(worker.credential).flatMap(({ gateway, slotPath }) =>
+      Option.toArray(options.catalog.gatewayProvider(id, options.llmProviders)).map((provider) => ({
         harness: id,
         ...gateway.render(
-          // A credential's `gatewayPath` starts with its protocol.
-          `http://llm.${options.domain}/${llmPrefixOf(protocol, options.llmPrefixes)}${gatewayPath.slice(protocol.length)}`,
+          `http://llm.${options.domain}/${llmPrefixOf(provider, options.llmPrefixes)}${slotPath}`,
           options.homes[id] ?? "",
         ),
       })),
+    ),
   );
