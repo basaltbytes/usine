@@ -2356,6 +2356,9 @@ describe("Claude child backend", () => {
           line.includes("Session cancelled the wait limit for its background work") &&
           line.includes(`"reason":"${reason}"`),
       );
+    /** Whether a turn that started dropped the answer that the session kept for a Release. */
+    const dropped = (lines: ReadonlyArray<string>) =>
+      lines.some((line) => line.includes("The session started a turn; dropping"));
 
     it.effect.each([
       {
@@ -2650,7 +2653,10 @@ describe("Claude child backend", () => {
           const outlasted = logs.lines.findIndex((line) =>
             line.includes("outlasted the wait limit"),
           );
-          assert.include(logs.lines[outlasted], "the operator's Hold or pause keeps it open");
+          assert.include(
+            logs.lines[outlasted],
+            "the operator's Hold or pause keeps its answer until a Release",
+          );
           assert.strictEqual(logs.lineLevels[outlasted], "Info");
           assert.notInclude(events, "SessionIdle", "the limit does not report a held child idle");
           yield* Queue.offerAll(output, [
@@ -2658,7 +2664,7 @@ describe("Claude child backend", () => {
             { type: "system", subtype: "session_state_changed", state: "running" },
             { type: "assistant", message: { content: [{ type: "text", text: "CI finished" }] } },
           ]);
-          while (!cancelled(logs.lines, "turn started")) yield* Effect.yieldNow;
+          while (!dropped(logs.lines)) yield* Effect.yieldNow;
           yield* running.intervene(Release.make(), noDelivery);
           yield* TestClock.adjust("5 minutes");
           assert.isUndefined(result.pollUnsafe(), "a Release does not end the running turn");
@@ -2675,7 +2681,9 @@ describe("Claude child backend", () => {
     );
 
     const supervisedLimit = (lines: ReadonlyArray<string>) =>
-      lines.some((line) => line.includes("the operator's Hold or pause keeps it open"));
+      lines.some((line) =>
+        line.includes("outlasted the wait limit; the operator's Hold or pause keeps its answer"),
+      );
 
     it.effect.each([
       {
@@ -2714,11 +2722,11 @@ describe("Claude child backend", () => {
             assert.isTrue(
               logs.lines.some((line) =>
                 line.includes(
-                  "The operator released a session whose wait limit passed; returning its answer",
+                  "The operator released the session; returning the answer whose wait limit passed",
                 ),
               ),
             );
-            assert.isFalse(cancelled(logs.lines, "turn started"), "no turn started");
+            assert.isFalse(dropped(logs.lines), "no turn started");
             const finished = [...(yield* Fiber.join(events))].filter(
               (event) => event._tag === "SessionFinished",
             );
@@ -2805,7 +2813,9 @@ describe("Claude child backend", () => {
           yield* running.intervene(OperatorMessage.make({ message: "Is CI done?" }), noDelivery);
           assert.isTrue(
             logs.lines.some((line) =>
-              line.includes("The operator's input starts a turn; dropping the overdue answer"),
+              line.includes(
+                "The operator's input starts a turn; dropping the answer whose wait limit passed",
+              ),
             ),
           );
           // The Release lands before Claude's first frame of the message's turn.

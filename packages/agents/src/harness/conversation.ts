@@ -15,12 +15,14 @@ import {
 } from "@usine/core/attempt/channel";
 import {
   Array as Arr,
+  Data,
   Deferred,
   Duration,
   Effect,
   Equal,
   FiberHandle,
   Option,
+  Predicate,
   Ref,
   Semaphore,
 } from "effect";
@@ -86,12 +88,34 @@ interface ConversationOptions<S> {
  */
 export const BACKGROUND_TURN_GRACE = Duration.minutes(5);
 
-/** An answer that the session keeps after its wait for background work ended. */
-interface KeptAnswer {
-  readonly message: string;
-  /** Whether the wait ended at its limit, rather than when the work ended. */
-  readonly limitPassed: boolean;
-}
+/**
+ * The answer of the session's last turn, before the session returns it. `Waiting` waits for the
+ * session's background work. `Kept` is an answer whose wait ended while the operator supervised the
+ * session, kept without an idle report. `Idle` is the idle report under operator supervision. A
+ * Release returns a kept answer or an idle report. `limitPassed` marks an answer whose wait for
+ * background work ended at its limit, rather than when the work ended.
+ */
+type Answer = Data.TaggedEnum<{
+  Waiting: { readonly message: string };
+  Kept: { readonly message: string; readonly limitPassed: boolean };
+  Idle: { readonly message: string; readonly limitPassed: boolean };
+}>;
+const Answer = Data.taggedEnum<Answer>();
+
+/**
+ * The log text for an answer whose wait for background work ended at its limit, if `limitPassed`,
+ * or after the work ended: why the wait ended, and the answer that it kept.
+ */
+const waitEnded = (limitPassed: boolean) =>
+  limitPassed
+    ? {
+        why: "Session's background work outlasted the wait limit",
+        kept: "the answer whose wait limit passed",
+      }
+    : {
+        why: "Session's background work ended and no turn started",
+        kept: "the answer kept after its background work ended",
+      };
 
 /** An operator message that the harness hasn't read, and what to run when it is read or not. */
 interface QueuedMessage extends Unread {
@@ -102,17 +126,8 @@ interface QueuedMessage extends Unread {
 interface ConversationState {
   readonly held: boolean;
   readonly paused: boolean;
-  /** The report that the session keeps while it waits idle under operator supervision. */
-  readonly idle: Option.Option<string>;
-  /** Whether `idle` is an answer whose wait limit passed. */
-  readonly idleLimitPassed: boolean;
-  /** The answer that waits for the session's background work to end or start a turn. */
-  readonly waiting: Option.Option<string>;
-  /**
-   * An answer whose wait for background work ended while the operator supervised the session. A
-   * Release returns it unless a turn starts first.
-   */
-  readonly kept: Option.Option<KeptAnswer>;
+  /** The answer that the session hasn't returned; a later answer replaces it. */
+  readonly answer: Option.Option<Answer>;
   /**
    * The session's tool-call count when it last read an operator message or steer, or `None` after
    * its own input, such as a continuation turn.
@@ -155,10 +170,7 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
   const state = yield* Ref.make<ConversationState>({
     held: restored.held,
     paused: restored.paused,
-    idle: Option.none(),
-    idleLimitPassed: false,
-    waiting: Option.none(),
-    kept: Option.none(),
+    answer: Option.none(),
     operatorInput: Option.none(),
     closing: false,
     background: Option.none(),
@@ -376,8 +388,7 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
     if (held || paused) {
       yield* Ref.update(state, (current) => ({
         ...current,
-        idle: Option.some(message),
-        idleLimitPassed: limitPassed,
+        answer: Option.some(Answer.Idle({ message, limitPassed })),
       }));
       yield* channel.emit(
         SessionIdle.make({ session, message: Option.some(message), answeredOperator }),
@@ -424,48 +435,38 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
    * without reporting the session idle, for a later Release or for the recovery after a process
    * restart. Each timer runs this and clears only the other timer.
    */
-  const endWait = (timer: "limit" | "grace") =>
-    mutex.withPermits(1)(
-      Effect.gen(function* () {
-        const current = yield* Ref.getAndUpdate(state, (latest) => ({
-          ...latest,
-          waiting: Option.none(),
-        }));
-        if (Option.isNone(current.waiting)) return;
-        yield* FiberHandle.clear(timer === "limit" ? backgroundGrace : backgroundWait);
-        const answer = current.waiting.value;
-        const limitPassed =
-          timer === "limit" && !Option.exists(current.background, Arr.isReadonlyArrayEmpty);
-        const fields = {
-          ...(yield* backgroundFields),
-          endedBy: timer,
-          grace: Duration.format(BACKGROUND_TURN_GRACE),
-        };
-        if (!current.held && !current.paused) {
-          yield* limitPassed
-            ? Effect.logWarning(
-                "Session's background work outlasted the wait limit; returning its answer",
-                fields,
-              )
-            : Effect.logInfo(
-                "Session's background work ended and no turn started; returning its answer",
-                fields,
-              );
-          yield* finish(answer, limitPassed);
-          return;
-        }
-        yield* Ref.update(state, (latest) => ({
-          ...latest,
-          kept: Option.some({ message: answer, limitPassed }),
-        }));
-        yield* Effect.logInfo(
-          limitPassed
-            ? "Session's background work outlasted the wait limit; the operator's Hold or pause keeps it open until a Release"
-            : "Session's background work ended and no turn started; the operator's Hold or pause keeps its answer until a Release",
-          fields,
-        );
-      }),
+  const endWait = Effect.fn("SessionConversation.endWait")(function* (timer: "limit" | "grace") {
+    yield* Effect.annotateCurrentSpan({ sessionId: session.id, endedBy: timer });
+    const { answer, held, paused, background } = yield* Ref.get(state);
+    const waiting = Option.filter(answer, Answer.$is("Waiting"));
+    if (Option.isNone(waiting)) return;
+    yield* FiberHandle.clear(timer === "limit" ? backgroundGrace : backgroundWait);
+    const { message } = waiting.value;
+    const limitPassed = timer === "limit" && !Option.exists(background, Arr.isReadonlyArrayEmpty);
+    const { why } = waitEnded(limitPassed);
+    const fields = {
+      ...(yield* backgroundFields),
+      endedBy: timer,
+      grace: Duration.format(BACKGROUND_TURN_GRACE),
+    };
+    if (held || paused) {
+      yield* Ref.update(state, (current) => ({
+        ...current,
+        answer: Option.some(Answer.Kept({ message, limitPassed })),
+      }));
+      yield* Effect.logInfo(
+        `${why}; the operator's Hold or pause keeps its answer until a Release`,
+        fields,
+      );
+      return;
+    }
+    yield* Ref.update(state, (current) => ({ ...current, answer: Option.none() }));
+    yield* (limitPassed ? Effect.logWarning : Effect.logInfo)(
+      `${why}; returning its answer`,
+      fields,
     );
+    yield* finish(message, limitPassed);
+  }, mutex.withPermits(1));
 
   /**
    * Waits for background work after `answer`. With a configured limit, returns `answer` once the
@@ -477,7 +478,10 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
     answer: string,
   ) {
     yield* Effect.annotateCurrentSpan({ sessionId: session.id });
-    yield* Ref.update(state, (current) => ({ ...current, waiting: Option.some(answer) }));
+    yield* Ref.update(state, (current) => ({
+      ...current,
+      answer: Option.some(Answer.Waiting({ message: answer })),
+    }));
     yield* Effect.flatMap(backgroundFields, (fields) =>
       Effect.logInfo("Session is waiting for its background work", fields),
     );
@@ -500,29 +504,39 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
     const grace = yield* FiberHandle.get(backgroundGrace);
     yield* FiberHandle.clear(backgroundWait);
     yield* FiberHandle.clear(backgroundGrace);
-    const current = yield* Ref.getAndUpdate(state, (latest) => ({
-      ...latest,
-      waiting: Option.none(),
-      kept: reason === "turn started" ? Option.none() : latest.kept,
+    const { answer } = yield* Ref.getAndUpdate(state, (current) => ({
+      ...current,
+      answer: Option.filter(
+        current.answer,
+        ({ _tag }) => _tag === "Idle" || (_tag === "Kept" && reason === "process restarted"),
+      ),
     }));
-    // A timer that ends the wait clears `waiting` under the mutex, so a wait here has live timers.
-    const waited = Option.isSome(current.waiting);
-    const dropped = reason === "turn started" ? current.kept : Option.none<KeptAnswer>();
-    const droppedOverdue = Option.exists(dropped, ({ limitPassed }) => limitPassed);
+    if (Option.isNone(answer)) return;
     const fields = { ...(yield* backgroundFields), reason };
-    if ((waited && Option.isSome(backgroundWaitLimit)) || droppedOverdue)
-      yield* Effect.logInfo("Session cancelled the wait limit for its background work", {
-        ...fields,
-        limitPassed: droppedOverdue,
-      });
-    if ((waited && Option.isSome(grace)) || (Option.isSome(dropped) && !droppedOverdue))
-      yield* Effect.logInfo(
-        "Session cancelled the return of its answer after its background work ended",
-        {
-          ...fields,
-          kept: Option.isSome(dropped),
-        },
-      );
+    yield* Answer.$match(answer.value, {
+      // A timer that ends the wait replaces `Waiting` under the mutex, so a wait here has live timers.
+      Waiting: () =>
+        Effect.gen(function* () {
+          if (Option.isSome(backgroundWaitLimit))
+            yield* Effect.logInfo(
+              "Session cancelled the wait limit for its background work",
+              fields,
+            );
+          if (Option.isSome(grace))
+            yield* Effect.logInfo(
+              "Session cancelled the return of its answer after its background work ended",
+              fields,
+            );
+        }),
+      Kept: ({ limitPassed }) =>
+        reason === "turn started"
+          ? Effect.logInfo(
+              `The session started a turn; dropping ${waitEnded(limitPassed).kept}`,
+              fields,
+            )
+          : Effect.void,
+      Idle: () => Effect.void,
+    });
   });
 
   /**
@@ -545,7 +559,7 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
       changed,
     });
     if (changed) yield* channel.emit(BackgroundWorkUpdated.make({ session, work }));
-    if (Option.isNone(previous.waiting)) return;
+    if (!Option.exists(previous.answer, Answer.$is("Waiting"))) return;
     const grace = yield* FiberHandle.get(backgroundGrace);
     if (Option.exists(work, Arr.isReadonlyArrayEmpty)) {
       if (Option.isSome(grace)) return;
@@ -569,19 +583,21 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
   /** Ends a takeover: returns the idle report, or the kept answer, unless the session is paused. */
   const release = Effect.gen(function* () {
     const current = yield* Ref.updateAndGet(state, (latest) => ({ ...latest, held: false }));
-    if (current.paused) return "read" as const;
-    if (Option.isSome(current.idle)) yield* finish(current.idle.value, current.idleLimitPassed);
-    else if (Option.isSome(current.kept)) {
-      const { message, limitPassed } = current.kept.value;
-      yield* Ref.update(state, (latest) => ({ ...latest, kept: Option.none() }));
-      yield* Effect.logInfo(
-        limitPassed
-          ? "The operator released a session whose wait limit passed; returning its answer"
-          : "The operator released a session whose background work ended; returning its answer",
-        { sessionId: session.id },
-      );
-      yield* finish(message, limitPassed);
-    }
+    if (current.paused || Option.isNone(current.answer)) return "read" as const;
+    yield* Answer.$match(current.answer.value, {
+      Waiting: () => Effect.void,
+      Idle: ({ message, limitPassed }) => finish(message, limitPassed),
+      Kept: ({ message, limitPassed }) =>
+        Ref.update(state, (latest) => ({ ...latest, answer: Option.none() })).pipe(
+          Effect.andThen(
+            Effect.logInfo(
+              `The operator released the session; returning ${waitEnded(limitPassed).kept}`,
+              { sessionId: session.id },
+            ),
+          ),
+          Effect.andThen(finish(message, limitPassed)),
+        ),
+    });
     return "read" as const;
   });
 
@@ -607,10 +623,11 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
     onDelivery: OnDelivery,
   ) {
     const before = yield* Ref.get(state);
-    const stopped = Option.isSome(before.idle) || before.paused;
+    const idle = Option.exists(before.answer, Answer.$is("Idle"));
+    const stopped = idle || before.paused;
     const replayed = stopped ? before.inbox.unread.filter(({ sent }) => !sent) : [];
     for (const [index, unsent] of replayed.entries()) {
-      const activity = index === 0 && Option.isSome(before.idle) ? "idle" : "running";
+      const activity = index === 0 && idle ? "idle" : "running";
       const replayTaken = yield* options.send(unsent.message, activity, unsent.id);
       yield* took(unsent.id, replayTaken);
     }
@@ -618,7 +635,7 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
     // can return; a rejected message changes no state.
     const taken = yield* options.send(
       action.message,
-      replayed.length === 0 && Option.isSome(before.idle) ? "idle" : "running",
+      replayed.length === 0 && idle ? "idle" : "running",
       action.id,
     );
     if (taken === "read") yield* readOperatorInput;
@@ -629,17 +646,15 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
         ...current,
         held: action._tag === "OperatorMessage" || current.held,
         paused: false,
-        idle: Option.none(),
-        idleLimitPassed: false,
-        kept: Option.none(),
+        // The turn replaces an idle report or a kept answer; an answer that waits keeps its timers.
+        answer: Option.filter(current.answer, Answer.$is("Waiting")),
         resume: next,
       },
     ]);
-    if (Option.isSome(previous.kept))
+    const dropped = Option.filter(previous.answer, Answer.$is("Kept"));
+    if (Option.isSome(dropped))
       yield* Effect.logInfo(
-        previous.kept.value.limitPassed
-          ? "The operator's input starts a turn; dropping the overdue answer"
-          : "The operator's input starts a turn; dropping the answer kept after the background work ended",
+        `The operator's input starts a turn; dropping ${waitEnded(dropped.value.limitPassed).kept}`,
         { sessionId: session.id },
       );
     yield* Deferred.succeed(previous.resume, undefined);
@@ -772,17 +787,21 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
           sessionId: session.id,
         });
       const before = yield* Ref.get(state);
-      // A child without its task gets it under supervision, so it doesn't stop first.
-      if ((before.held || before.paused) && Option.isNone(before.idle) && !empty) {
-        if (Option.isSome(before.kept)) {
-          const { message, limitPassed } = before.kept.value;
-          yield* Ref.update(state, (current) => ({ ...current, kept: Option.none() }));
-          yield* Effect.logInfo(
-            limitPassed
-              ? "The recovered session reports the answer whose wait limit passed"
-              : "The recovered session reports the answer kept after its background work ended",
-            { sessionId: session.id, held: before.held, paused: before.paused },
-          );
+      const kept = Option.filter(before.answer, Answer.$is("Kept"));
+      // A child without its task gets it under supervision, so it doesn't stop first. The idle
+      // report that `finish` keeps replaces the kept answer.
+      if (
+        (before.held || before.paused) &&
+        !Option.exists(before.answer, Answer.$is("Idle")) &&
+        !empty
+      ) {
+        if (Option.isSome(kept)) {
+          const { message, limitPassed } = kept.value;
+          yield* Effect.logInfo(`The recovered session reports ${waitEnded(limitPassed).kept}`, {
+            sessionId: session.id,
+            held: before.held,
+            paused: before.paused,
+          });
           yield* finish(message, limitPassed);
         } else yield* finish("Session interrupted before its turn returned");
       }
@@ -804,10 +823,11 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
       const ownInput = Effect.gen(function* () {
         const current = yield* Ref.getAndUpdate(state, (latest) => ({
           ...latest,
-          idle: Option.none(),
+          answer: Option.filter(latest.answer, Predicate.not(Answer.$is("Idle"))),
           operatorInput: Option.none(),
         }));
-        if (Option.isSome(current.idle)) yield* channel.emit(SessionResumed.make({ session }));
+        if (Option.exists(current.answer, Answer.$is("Idle")))
+          yield* channel.emit(SessionResumed.make({ session }));
         if (Option.isSome(current.operatorInput))
           yield* Effect.logInfo(
             "The harness sent its own continuation input; the next answer no longer replies to the operator",
@@ -818,7 +838,7 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
         {
           held: recovering.held,
           paused: recovering.paused,
-          idle: Option.isSome(recovering.idle),
+          idle: Option.exists(recovering.answer, Answer.$is("Idle")),
           empty,
         },
         tools,
@@ -850,7 +870,7 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
     ),
     isPaused: Effect.map(Ref.get(state), ({ paused }) => paused),
     /** Whether the session finished a turn and waits under operator supervision. */
-    isIdle: Effect.map(Ref.get(state), ({ idle }) => Option.isSome(idle)),
+    isIdle: Effect.map(Ref.get(state), ({ answer }) => Option.exists(answer, Answer.$is("Idle"))),
     isClosing: Effect.map(Ref.get(state), ({ closing }) => closing),
     /** The queued operator messages that the harness hasn't read, oldest first. */
     unread: Effect.map(Ref.get(state), ({ inbox }) =>

@@ -257,7 +257,8 @@ describe("session supervision", () => {
 
         yield* Deferred.succeed(delivered, undefined);
         assert.isTrue((yield* Fiber.join(takeover)).held);
-        while (!logged(logs, "the operator's Hold or pause keeps it open")) yield* Effect.yieldNow;
+        while (!logged(logs, "the operator's Hold or pause keeps its answer"))
+          yield* Effect.yieldNow;
         const terminal = yield* channel.isTerminal;
         const idle = yield* controls.isIdle;
         const events = yield* Queue.clear(channel.events);
@@ -277,7 +278,7 @@ describe("session supervision", () => {
     },
   );
 
-  it.effect("drops a kept answer when a turn starts only after a Release finishes", () => {
+  it.effect("returns the latest answer at a Release that a starting turn waits for", () => {
     const logs = capturedLogs();
     return Effect.gen(function* () {
       const session = child("overdue-release");
@@ -299,7 +300,7 @@ describe("session supervision", () => {
       yield* controls.reportBackground(Option.some([ciWatch]));
       yield* controls.finish("Waiting for CI");
       yield* TestClock.adjust("1 minute");
-      while (!logged(logs, "the operator's Hold or pause keeps it open")) yield* Effect.yieldNow;
+      while (!logged(logs, "the operator's Hold or pause keeps its answer")) yield* Effect.yieldNow;
       const release = yield* controls.intervene(Release.make(), noDelivery).pipe(Effect.forkChild);
       yield* Deferred.await(finishing);
       const turn = yield* controls.turnStarted.pipe(Effect.forkChild({ startImmediately: true }));
@@ -310,16 +311,19 @@ describe("session supervision", () => {
       yield* Deferred.succeed(cleanedUp, undefined);
       assert.isFalse((yield* Fiber.join(release)).held);
       yield* Fiber.join(turn);
-      assert.strictEqual((yield* Deferred.await(channel.result)).message, "CI passed");
-      assert.isTrue(
-        logs.entries.some(
-          ({ message }) =>
-            Array.isArray(message) &&
-            message[0] === "Session cancelled the wait limit for its background work" &&
-            Predicate.hasProperty(message[1], "limitPassed") &&
-            message[1].limitPassed === true,
-        ),
-        "the turn drops the kept answer",
+      assert.strictEqual(
+        (yield* Deferred.await(channel.result)).message,
+        "Waiting for CI",
+        "the answer of the later turn replaces the restored idle report",
+      );
+      const finished = (yield* Queue.clear(channel.events)).find(
+        (event) => event._tag === "SessionFinished",
+      );
+      assert(finished?._tag === "SessionFinished");
+      assert.isTrue(finished.backgroundWaitLimitPassed);
+      assert.isFalse(
+        logged(logs, "The session started a turn; dropping"),
+        "the Release returned the kept answer before the turn started",
       );
     }).pipe(Effect.provide(logs.layer));
   });
