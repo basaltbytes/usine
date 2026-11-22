@@ -1373,7 +1373,7 @@ describe("Codex child backend", () => {
         const idle = yield* Queue.make<void>();
         const started = yield* Queue.make<void>();
         const receipts = yield* Queue.make<string>();
-        const answered = yield* Deferred.make<void>();
+        const taken = yield* Deferred.make<void>();
         const calls: Array<{ method: string; params: Schema.Json }> = [];
         let turns = 0;
         const old = OperatorMessage.make({ message: "Check the diff" });
@@ -1385,7 +1385,12 @@ describe("Codex child backend", () => {
           stop: () => Effect.void,
           open: () =>
             Effect.succeed({
-              notifications: Stream.fromQueue(notifications),
+              // Completes `taken` once the adapter takes the first turn's completion.
+              notifications: Stream.fromQueue(notifications).pipe(
+                Stream.tap(({ method }) =>
+                  method === "turn/completed" ? Deferred.succeed(taken, undefined) : Effect.void,
+                ),
+              ),
               notify: () => Effect.void,
               close: Queue.end(notifications),
               request: (_operation, method, params) =>
@@ -1402,7 +1407,8 @@ describe("Codex child backend", () => {
                       method: "turn/completed",
                       params: { turn: { id: "turn-1", status: "completed", error: null } },
                     });
-                    yield* Deferred.await(answered);
+                    yield* Deferred.await(taken);
+                    // The handler runs until it waits for the steer's lock.
                     yield* Effect.yieldNow;
                     if (steer === "rejected")
                       return yield* SessionOperationError.make({
@@ -1424,14 +1430,19 @@ describe("Codex child backend", () => {
           yield* Effect.forkScoped(
             running.events.pipe(
               Stream.runForEach((event) =>
-                event._tag === "ProviderAnswered"
-                  ? Deferred.succeed(answered, undefined)
-                  : event._tag === "SessionIdle"
-                    ? Queue.offer(idle, undefined)
-                    : Effect.void,
+                event._tag === "SessionIdle" ? Queue.offer(idle, undefined) : Effect.void,
               ),
             ),
           );
+          // The model answers before the steer, so the turn's end isn't its first answer.
+          yield* Queue.offer(notifications, {
+            method: "item/completed",
+            params: {
+              threadId: "thread-1",
+              turnId: "turn-1",
+              item: { type: "agentMessage", id: "answer-1", text: "Reading the diff." },
+            },
+          });
           const sent = yield* Effect.result(
             running.intervene(old, (state) =>
               Queue.offer(receipts, Option.isSome(state) ? old.id : "unread").pipe(Effect.asVoid),
