@@ -315,6 +315,9 @@ describe("a provider slot that only the test's catalog declares", () => {
         id: ModelProviderId.make("later-plan"),
         slot: GatewaySlot.make("later-plan"),
         label: "Later plan",
+        credentials: [
+          ApiKeyCredential.make({ variable: GatewayVariable.make("LATER_PLAN_API_KEY") }),
+        ],
       });
       const widened = ModelProvider.make({
         ...plan,
