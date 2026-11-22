@@ -1,0 +1,21 @@
+---
+"@usine/core": minor
+"@usine/gateway": minor
+"@usine/agents": minor
+"@usine/config": minor
+"@usine/cloudflare": minor
+"@usine/executor": minor
+"@usine/durable": minor
+"@usine/server": minor
+---
+
+A provider with a static key is added with its catalog entry and the descriptors that use it. The operator connects its key in Settings or with `usine login <provider> --api-key`, and a harness reaches it through the gateway or in a Cloudflare sandbox. The two subscription logins, `claude` and `chatgpt`, stay a closed set, because usine implements each one's sign-in and refresh.
+
+- `@usine/gateway`: the admin API connects and disconnects a static key for any provider of the gateway's catalog that accepts one. `PUT /v1/provider-credentials` takes the kind `<provider ID>-api-key`, which gateways up to 0.3.0 accept for the built-in providers, and returns 422 with `UnservedProvider` for a provider that the catalog doesn't have or that doesn't take the credential; `DELETE /v1/provider-credentials/:provider` takes a slot or a provider ID. `GET /v1/provider-credentials` lists every slot of the catalog with its provider's `id`, `label`, and `accepts`. `provider-credentials.json` keeps the format of gateways up to 0.3.0 for the built-in providers' credentials, so those gateways still read it, and holds other providers' keys under `staticKeys`, which they ignore. `ProviderCredential` decodes to a `StaticKey` or a `LoginSecret`; `credentialProvider` and `loginLlmProvider` are removed, and `providerEntry` and `AcceptedCredentials` are added.
+- `@usine/server`: Provider connections and `usine login` list each provider that a destination serves, with the credentials it takes. Settings shows a provider without a subscription login with only its API key field. `usine login <provider>` takes a provider ID, a slot, or a login name, and lists the destination's providers when the name matches none. The operator API's `PUT /api/providers/key` and `POST /api/providers/disconnect` take a provider by its slot or ID, or by its subscription login as before. Worker routing changes only for providers that the orchestrator's harnesses use. The Cloudflare worker and provisioner forms list the catalog's providers.
+- `@usine/cloudflare`: the Worker serves `<provider ID>.usine.internal` for each provider of its catalog that takes an API key, and sends each request to the upstream of the protocol that serves its path, with the key in that protocol's header. It forwards the provider's routes in the catalog with any method, as the gateway does. `PROVIDER_HOSTS` is replaced by `sandboxHost`, `interceptionsFor` takes the catalog, `providerRequest` takes a `ModelProvider`, `SandboxSettings` has `providers`, and `ProviderGrant.provider` is a `ModelProviderId`.
+- `@usine/core`: `CloudflareLlmProvider` is removed. `ModelProvider` adds `login`, `passes`, and `sharedUpstream`, and `ModelProviderCatalog` adds `signingIn`.
+- `@usine/config`: a Cloudflare worker's `llm_providers` names any catalog provider that takes an API key.
+- `@usine/executor`: `CloudflareProviderKey.provider` is a `ModelProviderId`.
+- `@usine/agents`: a descriptor that offers the `api-key` route outside a sandbox refuses a provider whose protocols have different upstreams, and `HarnessCredential.apiKeyBaseUrl` gives the upstream they share.
+- `@usine/durable`: Pi's gateway route takes each slot from the Pi harness's catalog providers.

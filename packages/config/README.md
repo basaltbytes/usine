@@ -1,6 +1,6 @@
 # @usine/config
 
-SSH `gateway.llm_providers` lists the slots of providers in the harness catalog, such as `anthropic-messages` and `openai-responses`, and refuses a slot that the catalog doesn't declare. Saved configurations and imports that name a provider by its ID, as before slots, decode to its slot; exports write slots. `ProviderApiKeys`, a provisioner's `api_keys`, maps a catalog provider ID, such as `anthropic` or `openai`, to the variable with its key, and refuses an unknown ID. Cloudflare provider records use `anthropic` and `openai`.
+SSH `gateway.llm_providers` lists the slots of providers in the harness catalog, such as `anthropic-messages` and `openai-responses`, and refuses a slot that the catalog doesn't declare. Saved configurations and imports that name a provider by its ID, as before slots, decode to its slot; exports write slots. `ProviderApiKeys`, a provisioner's `api_keys`, maps a catalog provider ID, such as `anthropic` or `openai`, to the variable with its key, and refuses an unknown ID. A Cloudflare worker's `llm_providers` record names a catalog provider ID that takes an API key, such as `anthropic` or `openai`, and refuses another.
 
 Stores versioned configuration and imports and exports the files of a [usine](https://github.com/basaltbytes/usine) instance folder. The [`usine.yaml`](https://docs.usine.dev/reference/configuration/usine-yaml/), [loop file](https://docs.usine.dev/reference/configuration/loop-files/), and [agent file](https://docs.usine.dev/reference/configuration/agent-files/) references describe every key.
 

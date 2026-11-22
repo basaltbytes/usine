@@ -1,6 +1,6 @@
 # @usine/cloudflare
 
-The sandbox environment reads provider credential variables from the selected harness descriptor. `harnessEnvironment(providers, harness)` takes `Option<Harness>`: `Some` adds that harness's provider wiring, and `None` returns the base git, gh, and certificate environment. Other harnesses' wiring does not enter child or tool commands. Outbound handlers replace the placeholder credential with the provider API key; sandbox environment variables contain no provider secrets.
+The sandbox environment reads provider credential variables from the selected harness descriptor. `harnessEnvironment(providers, harness)` takes the IDs of the providers that the sandbox holds keys for and `Option<Harness>`: `Some` adds that harness's wiring for the first of its providers with a key, with the base URL `http://<provider ID>.usine.internal` and the harness's `slotPath`, and `None` returns the base git, gh, and certificate environment. Other harnesses' wiring does not enter child or tool commands. Outbound handlers replace the placeholder credential with the provider API key; sandbox environment variables contain no provider secrets.
 
 The Cloudflare Worker that runs each usine Attempt in its own sandbox, for `cloudflare` Workers in `usine.yaml` ([#551](https://github.com/basaltbytes/usine/issues/551)). You deploy it to your Cloudflare account; usine's executor calls it over HTTPS with a Cloudflare Access service token.
 
@@ -9,13 +9,12 @@ Each sandbox is a Durable Object that owns one container, started from an image 
 | Host in the sandbox | Handler | Upstream |
 | --- | --- | --- |
 | `github.com`, `api.github.com` over HTTPS | Adds the Attempt's installation token | GitHub |
-| `anthropic.usine.internal` over HTTP | Replaces the placeholder key with the Anthropic API key | `https://api.anthropic.com` |
-| `openai.usine.internal` over HTTP | Replaces the placeholder key with the OpenAI API key | `https://api.openai.com` |
+| `<provider ID>.usine.internal` over HTTP, such as `anthropic.usine.internal` | Replaces the placeholder key with the provider's API key | The upstream of the provider's protocol that serves the path, such as `https://api.anthropic.com` |
 | Each host in `ALLOWED_HOSTS` over HTTPS | Forwards the request unchanged | The host |
 
 While a sandbox has no installation token or no key for a provider, such as a sandbox that the executor keeps after its Attempt, the handler for that host refuses every request with status 403. `ALLOWED_HOSTS` can't name a GitHub or provider host.
 
-A provider handler adds the key only to the requests that Claude Code and Codex send: Anthropic's `POST /v1/messages`, `POST /v1/messages/count_tokens`, and `GET /v1/models`, and OpenAI's `POST /v1/responses`, `POST /v1/responses/compact`, and `GET /v1/models`. These are the paths that the Gateway's `llm.<domain>` serves ([ADR 0027](../../docs/adr/0027-gateway-credential-proxy.md)), each with the method that the harnesses use. The handler refuses every other method and path, such as the files or organization administration APIs, with status 404, before it adds the key.
+The Worker serves a handler for each provider in its catalog, `modelProviders` from `@usine/core/agent/provider`, that takes an API key; `SandboxSettings.providers` holds the catalog, and the Worker leaves out the grant of a provider it doesn't serve, with a warning. A handler adds the key only to the provider's routes in the catalog, as the gateway's `llm.<domain>` does ([ADR 0027](../../docs/adr/0027-gateway-credential-proxy.md)): Anthropic's `/v1/messages`, `/v1/messages/count_tokens`, `/v1/models`, and `/v1/models/{model}`, and OpenAI's `/v1/responses`, `/v1/responses/compact`, and `/v1/models`. It sends each path to the upstream of the protocol that serves it, with the key in that protocol's header, and passes the headers that the provider's entry allows. It refuses every other path, such as the files or organization administration APIs, with status 404, before it adds the key. Like the gateway, it forwards every method on a listed route.
 
 HTTPS interception needs the container to trust Cloudflare's container certificate authority. The executor sets `GIT_SSL_CAINFO`, `CURL_CA_BUNDLE`, `SSL_CERT_FILE`, and `NODE_EXTRA_CA_CERTS` to it for every command, as Cloudflare's coding-agent runner does. Claude Code and Codex use plain HTTP to their handlers, with a placeholder key.
 

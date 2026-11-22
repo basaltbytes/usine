@@ -48,19 +48,22 @@ Set `USINE_LAUNCHD_SERVICE=gui/<uid>/<label>` in the instance `.env` and install
 
 ## usine login and usine logout
 
-Connect Claude or ChatGPT while `usine up` runs, from the instance folder:
+Connect a provider while `usine up` runs, from the instance folder:
 
 ```sh
 usine login claude
 usine login chatgpt
 usine login chatgpt --api-key
+usine login <provider> --api-key
 usine logout claude
 usine logout chatgpt --target usine-gateway
 ```
 
+`<provider>` names a provider that the destination lists: by its ID, such as `anthropic`, by its gateway slot, or by its subscription login, `claude` or `chatgpt`. Without `--api-key`, `login` signs in with the provider's subscription; `--api-key` reads a masked key for a provider that takes one. A name that matches none of the destination's providers fails with a list of them and the credentials each one takes.
+
 Both commands read connection status from the running instance and authenticate with its local `.usine/admin-token`. Run them as the user who started the instance. Subscription login polls until authorization completes; logout disconnects the selected provider immediately.
 
-`--target <SSH destination>` selects one gateway when several are configured. With one gateway, usine selects it automatically. With none, it stores credentials where the local Claude Code and Codex harnesses read them, honoring `CLAUDE_CONFIG_DIR` and `CODEX_HOME`.
+`--target <SSH destination>` selects one gateway when several are configured. With one gateway, usine selects it automatically, and lists every provider that the gateway serves. With none, it stores credentials where the local Claude Code and Codex harnesses read them, honoring `CLAUDE_CONFIG_DIR` and `CODEX_HOME`, and lists their two providers.
 
 Local preflight and attempt children use the same credential directories. If one gateway is unavailable, Settings shows its error while other gateways remain usable. `--target` can select a healthy gateway independently.
 
@@ -74,9 +77,9 @@ Local Codex preflight and children use file credential storage, overriding `cli_
 
 Subscription sign-in uses the installed Claude Code `setup-token` command or Codex `login --device-auth` command in a private temporary directory. Claude requires `script` and a code from its authorization page. Codex displays a device code for authorization in another browser. `--api-key` reads a masked key from the terminal. Ctrl+C cancels subscription sign-in. Failed or cancelled authorization preserves the previous login.
 
-Gateway transfers use its authenticated admin API over SSH and require `curl` on the gateway. Managed credentials persist in its state directory with mode `0600`, take precedence over environment credentials, and apply without reloading the service. ChatGPT refreshes use the gateway’s existing token refresh and atomic auth-file replacement. Worker routing changes are configuration revisions. Logout disables the managed provider and removes its routing from workers.
+Gateway transfers use its authenticated admin API over SSH and require `curl` on the gateway. Managed credentials persist in its state directory with mode `0600`, take precedence over environment credentials, and apply without reloading the service. ChatGPT refreshes use the gateway’s existing token refresh and atomic auth-file replacement. Worker routing changes are configuration revisions, for the providers that the orchestrator's harnesses use. Logout disables the managed provider and removes its routing from workers.
 
-Instance admins can use the same controls in setup and **Configuration > Settings > Provider connections**. Expiry and last refresh show the provider’s reported values as local dates and times; opaque Claude setup tokens report neither. Pi children authenticate with a separate Pi login.
+Instance admins can use the same controls in setup and **Configuration > Settings > Provider connections**, which lists the same providers. A provider without a subscription login shows its API key field instead of a sign-in button. Expiry and last refresh show the provider’s reported values as local dates and times; opaque Claude setup tokens report neither. Pi children authenticate with a separate Pi login.
 
 ## usine status
 

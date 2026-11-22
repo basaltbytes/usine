@@ -1,17 +1,16 @@
 # The gateway holds worker credentials and, on its private network, is the only way out
 
-Workers run agent code, so a gateway holds their credentials: the executor attaches each attempt's installation token for the attempt's lifetime (ADR 0011). The reverse proxy adds that token to GitHub requests and a provider's credential to model requests; the forward proxy reaches allowlisted package hosts. On its private network, the gateway is also the workers' SSH bastion, DNS resolver, time server, and only destination.
+Workers run agent code, so a gateway holds their credentials and, on its private network, is their only destination: SSH bastion, DNS resolver, time server, reverse proxy to GitHub and model providers, and forward proxy to allowlisted hosts. A compromised attempt can use only what the executor attached for it (ADR 0011), while attached, through the gateway.
 
-A compromised attempt can use only what is attached, while attached, through the gateway.
-
-- **Caller tokens, not addresses.** Private addresses may be spoofable, so each attempt sends a gateway-signed token naming its attachment, worker, and repository, refused once the attachment ends.
-- **Subscriptions at the gateway.** A refresh invalidates every copy of a harness login, and a long-lived machine's login is readable by its attempts, so the gateway swaps the caller token for the subscription or API key in a provider's slot. Without it, a harness uses its machine's login or an attempt API key.
-- **Providers from a bundled catalog.** Each model provider is one entry in `@usine/core`. The gateway serves its own release's entries and takes no upstream from the orchestrator, which could otherwise send a key to any host. Preflight asks for a gateway upgrade when a slot or route that the orchestrator uses is missing.
-- **Tunnels pinned to names.** A tunnel opens only if the TLS server name matches the CONNECT host. Tunnels keep caller tokens, so the allowlist must omit github.com and gateway-held providers' hosts. For fixed GitHub download paths, the gateway follows redirects to unlisted hosts without credentials.
-- **Plain HTTP to the gateway.** TLS would need a certificate authority on every worker, so traffic crosses the private network in the clear.
+- **Caller tokens, not addresses.** Private addresses may be spoofable, so each attempt sends a gateway-signed token naming its attachment, worker, and repository, valid while attached.
+- **Credentials at the gateway.** A refresh invalidates every copy of a login, and attempts can read a machine's login, so the gateway swaps the caller token for the credential in a provider's slot. Otherwise a harness uses its machine's login or an attempt API key.
+- **Providers from a bundled catalog.** Each model provider is one entry in `@usine/core`. The gateway serves its release's entries and takes no upstream from the orchestrator, which could then send a key to any host; preflight asks to upgrade a gateway that lacks a slot or route.
+- **Keys connected by entry.** The admin API connects a static key for any entry that takes one; the gateway implements each subscription login's sign-in and refresh, so logins stay a closed set. Saved credentials keep older gateways' format where it fits, so downgrades keep the built-in providers.
+- **Tunnels pinned to names.** A tunnel opens only if the TLS server name matches the CONNECT host. Tunnels keep caller tokens, so the allowlist omits GitHub and gateway-held providers' hosts; fixed GitHub download redirects go to unlisted hosts without credentials.
+- **Plain HTTP to the gateway.** TLS would need a certificate authority on every worker, so traffic crosses the private network unencrypted.
 - **The operator's credential.** A gateway serves only its operator's agents: Anthropic's terms, read on 2026-10-26, forbid relaying other people's subscription logins.
 
-Workers off the private network reach the gateway over Tailscale, which keeps credentials off them but doesn't limit their egress (ADR 0029).
+Workers off the private network reach it over Tailscale, which keeps credentials off them but doesn't limit egress (ADR 0029).
 
 ## Considered options
 
