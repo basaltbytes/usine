@@ -1,10 +1,5 @@
 import type { OperatorMessageId } from "@usine/core/attempt/channel";
-import {
-  childContinuation,
-  checkContinuation,
-  checkContinuationHome,
-  environmentHome,
-} from "../continuation.ts";
+import { childContinuation, checkContinuationHome, environmentHome } from "../continuation.ts";
 import { codexPreflight } from "./preflight.ts";
 import { codex } from "./descriptor.ts";
 import { type HarnessRuntime, openWithTools } from "../runtime.ts";
@@ -60,8 +55,6 @@ import {
   isTurnStatus,
   RateLimitsUpdated,
   ThreadStartParams,
-  ThreadResumeParams,
-  ThreadResumeResponse,
   ThreadStartResponse,
   TurnCompleted,
   TurnStartParams,
@@ -76,7 +69,6 @@ import {
   decodeResponse,
   decodeNotification,
   decodeNotifiedToolItem,
-  decodeToolItem,
   providerRetryMessage,
   failedTurn,
   DIAGNOSTIC_METHODS,
@@ -96,7 +88,7 @@ import {
 import { isRemoteHost } from "../../child-host/child-host.ts";
 import { ChildProcessLost } from "../../child-host/process.ts";
 import { sessionChannel } from "../session.ts";
-import { type MessageTaken, type RestoredItems, sessionConversation } from "../conversation.ts";
+import { type MessageTaken, sessionConversation } from "../conversation.ts";
 import { codexThreadTokens, codexTokenBreakdown } from "../usage.ts";
 import {
   CodexAppServer,
@@ -108,6 +100,7 @@ import { structuredCompletion } from "../completion.ts";
 import { codexCompletion } from "./completion.ts";
 import { checkCodexModel } from "./model.ts";
 import { serveCodexTools } from "./tools.ts";
+import { readRestored, restoredState, resumeThread, type RestoredTurn } from "./restored.ts";
 import {
   codexChildAccount,
   codexPoolUnavailable,
@@ -116,8 +109,6 @@ import {
 } from "./account.ts";
 
 export { CodexAppServer, codexAppServerLive, type CodexConnection } from "./app-server.ts";
-
-type RestoredTurn = (typeof ThreadResumeResponse.Type.thread.turns)[number];
 
 /** An input that the session sent to a Codex turn, or holds for the next one. */
 interface TurnInput {
@@ -159,61 +150,6 @@ interface CodexState {
   /** Whether the model answered since the current app-server process started. */
   readonly answered: boolean;
 }
-
-const resumeThread = Effect.fn("CodexRuntime.resumeThread")(function* (
-  connection: CodexConnection,
-  client: CodexClient,
-  spec: SessionSpec,
-  saved: HarnessSession,
-) {
-  const params: ThreadResumeParams = {
-    threadId: saved.id,
-    model: spec.session.brain.model,
-    cwd: spec.cwd,
-    approvalPolicy: "never",
-    sandbox: "danger-full-access",
-    excludeTurns: false,
-  };
-  const encoded = yield* Schema.encodeEffect(Schema.toCodecJson(ThreadResumeParams))(params).pipe(
-    Effect.orDie,
-  );
-  const response = yield* connection.request("launch", "thread/resume", encoded);
-  const restored = yield* decodeResponse(
-    ThreadResumeResponse,
-    "launch",
-    client,
-    "thread resume response",
-    response,
-  );
-  if (restored.thread.id !== saved.id)
-    return yield* operationError(
-      "launch",
-      client,
-      "Codex resumed a different thread",
-      restored.thread.id,
-    );
-  if (Option.isSome(saved.modelProvider))
-    yield* checkContinuation(
-      spec,
-      "model_provider",
-      saved.modelProvider,
-      Option.some(restored.modelProvider),
-    );
-  yield* Effect.logInfo("Resumed the saved Codex thread", {
-    sessionId: spec.session.id,
-    threadId: saved.id,
-  });
-  return {
-    id: saved.id,
-    empty: restored.thread.turns.length === 0,
-    model: spec.session.brain.model,
-    endpoint: Option.some(restored.modelProvider),
-    activeTurn: Option.fromUndefinedOr(
-      restored.thread.turns.find((turn) => isTurnStatus(turn.status, "inProgress")),
-    ),
-    lastTurn: Option.fromUndefinedOr(restored.thread.turns.at(-1)),
-  };
-});
 
 const makeCodexSessions = Effect.gen(function* () {
   const appServer = yield* CodexAppServer;
@@ -351,71 +287,22 @@ const makeCodexSessions = Effect.gen(function* () {
       sandboxPolicy: { type: "dangerFullAccess" },
       effort,
     };
-    const resumedTools = yield* Effect.forEach(
-      Option.match(thread.activeTurn, { onNone: () => [], onSome: (turn) => turn.items }),
-      (item) => decodeToolItem(session.id, item),
-    ).pipe(Effect.map(Arr.getSomes));
-    /** Decodes the `userMessage` items of a turn that `thread/resume` returned. */
-    const userMessages = (turn: RestoredTurn) =>
-      Effect.forEach(turn.items.filter(Schema.is(UserMessageKindItem)), (item) =>
-        decodeItem(UserMessageItem, "user message", session.id, item),
-      ).pipe(Effect.map(Arr.getSomes));
-    // The user-message items counted before a restart already acknowledged their input.
-    const counted = Option.getOrElse(policy.restored.receipts, () => []);
-    const receiptsKnown = start._tag !== "StartResume" || Option.isSome(policy.restored.receipts);
-    // Without saved items, the active turn's items go in the next save, but their replayed
-    // notifications still acknowledge inputs.
-    const preserved = yield* Option.match(receiptsKnown ? Option.none() : thread.activeTurn, {
-      onNone: () => Effect.succeedNone,
-      onSome: (turn) =>
-        Effect.map(userMessages(turn), (messages) =>
-          Option.some({ turn: turn.id, items: messages.map(({ id }) => id) }),
-        ),
-    });
-    if (Option.isSome(preserved))
-      yield* Effect.logInfo("Preserving the active Codex turn's existing receipt IDs", {
-        sessionId: session.id,
-        turnId: preserved.value.turn,
-        items: preserved.value.items.length,
-      });
-    const items: RestoredItems = Option.match(preserved, {
-      onNone: () => ({
-        counted,
-        turn: Option.map(thread.lastTurn, (turn) => turn.id),
-        saved: counted,
-      }),
-      onSome: ({ turn, items: saved }) => ({ counted, turn: Option.some(turn), saved }),
-    });
-    const savedMessages = yield* Effect.forEach(
-      Option.match(thread.activeTurn, { onNone: () => [], onSome: (turn) => turn.items }),
-      (item) =>
-        Schema.is(AgentMessageKindItem)(item)
-          ? decodeItem(AgentMessageItem, "agent message", session.id, item)
-          : Effect.succeedNone,
-    ).pipe(
-      Effect.map((items) => Arr.getSomes(items).filter((item) => item.text.trim().length > 0)),
+    const { items, ...fromThread } = yield* restoredState(
+      session.id,
+      thread,
+      start,
+      policy.restored,
+      tools.toolName,
     );
     const state = yield* Ref.make<CodexState>({
+      ...fromThread,
       connection,
       billing,
       turnId: Option.match(thread.activeTurn, { onNone: () => "", onSome: (turn) => turn.id }),
       turnActive: Option.isSome(thread.activeTurn),
       interrupting: false,
-      toolsInFlight: new Map(
-        resumedTools
-          .filter((item) => isToolStatus(item.status, "inProgress"))
-          .map((item): [string, string] => [item.id, tools.toolName(item)]),
-      ),
       pending: [],
       submitted: Option.isSome(thread.activeTurn) ? policy.restored.unread : [],
-      receiptsKnown,
-      lastText: Option.fromUndefinedOr(savedMessages.at(-1)?.text.trim()),
-      finalText: Option.fromUndefinedOr(
-        savedMessages
-          .filter((item) => isMessagePhase(item.phase, "final_answer"))
-          .at(-1)
-          ?.text.trim(),
-      ),
       retries: 0,
       retrying: false,
       rateLimits: Option.none(),
@@ -606,39 +493,16 @@ const makeCodexSessions = Effect.gen(function* () {
       beforeFinish: Effect.flatMap(Ref.get(state), ({ connection }) => connection.close),
     });
 
-    /**
-     * Acknowledges the unread messages that the restored thread's last turn records, so recovery
-     * doesn't send them again.
-     */
-    const readRestored = Effect.fn("CodexRuntime.readRestored")(function* (
-      lastTurn: Option.Option<RestoredTurn>,
-    ) {
-      if (Option.isNone(lastTurn)) return;
-      const turn = lastTurn.value;
-      const recorded = yield* userMessages(turn);
-      const { receiptsKnown: known } = yield* Ref.get(state);
-      const unread = (yield* conversation.unread).length;
-      const observed = yield* conversation.observe({
-        _tag: "Restored",
-        turn: turn.id,
-        items: recorded,
-        known,
+    /** Acknowledges the unread messages that the restored thread's last turn records. */
+    const readLastTurn = (lastTurn: Option.Option<RestoredTurn>) =>
+      Option.match(lastTurn, {
+        onNone: () => Effect.void,
+        onSome: (turn) =>
+          Ref.modify(state, (current) => [
+            current.receiptsKnown,
+            { ...current, receiptsKnown: true },
+          ]).pipe(Effect.flatMap((known) => readRestored(session.id, turn, known, conversation))),
       });
-      yield* Ref.update(state, (current) => ({ ...current, receiptsKnown: true }));
-      if (!known)
-        return yield* Effect.logInfo(
-          "Skipping restored Codex matching without saved receipt history",
-          { sessionId: session.id, turnId: turn.id, observed: recorded.length, unread },
-        );
-      if (unread > 0)
-        yield* Effect.logInfo("Checked restored Codex user-message receipts", {
-          sessionId: session.id,
-          turnId: turn.id,
-          skipped: observed.repeated,
-          read: observed.read,
-          unread: unread - observed.read,
-        });
-    });
 
     const recoverInput = (message: string, id?: OperatorMessageId) =>
       steer(message, id).pipe(
@@ -707,7 +571,7 @@ const makeCodexSessions = Effect.gen(function* () {
         interrupting: false,
       }));
       const interruptedTools = [...toolsInFlight].map(([callId, tool]) => ({ callId, tool }));
-      yield* readRestored(restored.lastTurn);
+      yield* readLastTurn(restored.lastTurn);
       yield* conversation.recover(interruptedTools, recoverInput, restored.empty);
     });
     const opened = yield* Ref.get(state);
@@ -1010,7 +874,7 @@ const makeCodexSessions = Effect.gen(function* () {
       }
     }).pipe(Effect.catch(fail));
     // Replayed notifications must not save these receipts before restored guidance is matched.
-    if (Option.isNone(thread.activeTurn)) yield* readRestored(thread.lastTurn);
+    if (Option.isNone(thread.activeTurn)) yield* readLastTurn(thread.lastTurn);
     yield* Effect.forkScoped(consume);
 
     const interrupt = interruptTurn();
