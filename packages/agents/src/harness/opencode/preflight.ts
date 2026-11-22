@@ -29,9 +29,7 @@ exit "$status"
 `.trim();
 
 /** Returns the error for `opencode --version` output that names another release than the pin. */
-const unsupportedOpenCodeVersion = (
-  version: string,
-): Option.Option<HarnessUnavailableError> =>
+const unsupportedOpenCodeVersion = (version: string): Option.Option<HarnessUnavailableError> =>
   version.trim() === `opencode v${OPENCODE_VERSION}`
     ? Option.none()
     : Option.some(
