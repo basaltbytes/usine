@@ -122,11 +122,7 @@ export class HarnessSession extends Schema.Class<
   Brand.Brand<"@usine/core/agent/session/HarnessSession">
 >("Agent/HarnessSession")({
   /** The harness's own saved-conversation ID, distinct from the usine session ID. */
-  id: HarnessSessionId.pipe(
-    // Native references exist before an SDK has emitted any messages.
-    // @effect-diagnostics-next-line cryptoRandomUUIDInEffect:off
-    Schema.withConstructorDefault(Effect.sync(() => crypto.randomUUID())),
-  ),
+  id: HarnessSessionId,
   /** The worker checkout directory from which to resume the conversation. */
   cwd: Schema.NonEmptyString,
   /**
@@ -247,6 +243,26 @@ export class SessionResumed extends Schema.TaggedClass<
 >("Agent/SessionResumed")("SessionResumed", {
   /** The session that began another user turn in the same conversation. */
   session: AgentSession,
+}) {}
+
+/** A stable identity for one operator message, including repeated text. */
+export const OperatorMessageId = Schema.String.check(Schema.isUUID()).pipe(
+  Schema.brand("OperatorMessageId"),
+);
+export type OperatorMessageId = typeof OperatorMessageId.Type;
+
+/**
+ * The session read an operator message: the message started or joined a turn, or the harness
+ * acknowledged it. The event sits where the session reported the read.
+ */
+export class OperatorMessageRead extends Schema.TaggedClass<
+  OperatorMessageRead,
+  Brand.Brand<"@usine/core/agent/session/OperatorMessageRead">
+>("Agent/OperatorMessageRead")("OperatorMessageRead", {
+  /** The session that read the message. */
+  session: AgentSession,
+  /** The operator message that the session read. */
+  messageId: OperatorMessageId,
 }) {}
 
 /** An estimated amount in US dollars from a rate table, not a bill (ADR 0013). */
@@ -447,6 +463,7 @@ export const AgentSessionEvent = Schema.Union([
   SessionFinished,
   SessionIdle,
   SessionResumed,
+  OperatorMessageRead,
   SessionTokensUpdated,
   ProviderRetrying,
   ProviderRecovered,

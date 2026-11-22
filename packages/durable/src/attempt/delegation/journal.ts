@@ -6,6 +6,8 @@ import {
   type ChildSessionBudget,
   type ChildSessionCount,
   HarnessSession,
+  type ToolFinished,
+  type ToolStarted,
 } from "@usine/core/agent/session";
 import type * as AttemptChannel from "@usine/core/attempt/channel";
 import { MachineId, WorkerName } from "@usine/core/worker";
@@ -133,9 +135,11 @@ export interface DelegationJournal {
   readonly saveUsage: (
     usage: typeof ChildRequest.fields.usage.Encoded,
   ) => Effect.Effect<void, JournalError>;
-  /** Records a started tool call of the child, replacing one with the same `callId`. */
-  readonly toolStarted: (callId: string, tool: string) => Effect.Effect<void, JournalError>;
-  readonly toolFinished: (callId: string) => Effect.Effect<void, JournalError>;
+  /**
+   * Relays the child's tool event and records the call as started, replacing one with the same
+   * `callId`, or as finished. The event-driven coordinator commits both in one transaction.
+   */
+  readonly toolEvent: (event: ToolStarted | ToolFinished) => Effect.Effect<void>;
   /**
    * Saves the child's report while it waits idle, or `None` when it works or finishes, and whether
    * the report replies to operator input.

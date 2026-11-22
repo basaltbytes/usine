@@ -425,7 +425,7 @@ const make = Effect.gen(function* () {
     const running = yield* delegate(backend, {
       spec: snapshot.request.spec,
       hub: delegationHub(hub),
-      journal: journalDelegation(journal, hub.supervisor, attemptId, record.number),
+      journal: journalDelegation(journal, hub.supervisor, hub.outbox, attemptId, record.number),
       call: coordinatorCall(
         Effect.raceFirst(hub.attachment.canceled, Deferred.await(stopping)),
         hub.interventions.childChanged,

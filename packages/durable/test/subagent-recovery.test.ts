@@ -254,9 +254,11 @@ for (const [recovery, blocker] of recoveries) {
               const shared = (request: ChildRequest) =>
                 childContinuation(admitting, {
                   stop: () => backend.stop(request),
-                  open: (_spec, start) =>
+                  open: (_spec, start, { journal }) =>
                     Effect.gen(function* () {
-                      const running = yield* backend.launch(request);
+                      const running = yield* backend
+                        .launch(request)
+                        .pipe(Effect.provideService(ChildSessionJournal, journal));
                       if (start._tag === "StartResume") yield* running.result;
                       return { running, active: false, recover: () => Effect.void };
                     }),
@@ -544,8 +546,10 @@ for (const receipt of ["unacknowledged", "absent"] as const)
                     message: "Native reopen failed",
                   });
                 }
-                const journal = yield* ChildSessionJournal.current;
-                yield* journal.started(HarnessSession.make({ cwd: child.cwd }));
+                const journal = yield* ChildSessionJournal;
+                yield* journal.started(
+                  HarnessSession.make({ id: HarnessSessionId.make("saved-child"), cwd: child.cwd }),
+                );
                 if (acknowledged) yield* journal.prompted;
                 return yield* stub.launch(child);
               }),
@@ -628,8 +632,10 @@ it.live("restores the native user-message items that the saved child observed", 
                   message: "Native reopen failed",
                 });
               }
-              const journal = yield* ChildSessionJournal.current;
-              yield* journal.started(HarnessSession.make({ cwd: child.cwd }));
+              const journal = yield* ChildSessionJournal;
+              yield* journal.started(
+                HarnessSession.make({ id: HarnessSessionId.make("saved-child"), cwd: child.cwd }),
+              );
               yield* journal.received(["task", "guidance"]);
               return yield* stub.launch(child);
             }),
@@ -688,7 +694,7 @@ it.live("keeps a prompted child's receipt when its resumed launch saves it again
           ...stub,
           launch: (child) =>
             Effect.gen(function* () {
-              const journal = yield* ChildSessionJournal.current;
+              const journal = yield* ChildSessionJournal;
               if (Option.isSome(child.resume)) {
                 restored.push(child.prompted);
                 if (restored.length > 1)
@@ -699,7 +705,9 @@ it.live("keeps a prompted child's receipt when its resumed launch saves it again
                 yield* journal.started(child.resume.value);
                 return yield* stub.launch(child);
               }
-              yield* journal.started(HarnessSession.make({ cwd: child.cwd }));
+              yield* journal.started(
+                HarnessSession.make({ id: HarnessSessionId.make("saved-child"), cwd: child.cwd }),
+              );
               yield* journal.prompted;
               return yield* stub.launch(child);
             }),

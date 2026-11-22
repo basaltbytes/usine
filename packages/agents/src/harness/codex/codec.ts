@@ -24,13 +24,60 @@ import {
   SessionOperationError,
 } from "../../runtime.ts";
 import { type CodexClient, operationError } from "./app-server.ts";
+import { Receipt } from "../receipts.ts";
 
 /** Returns the text of a recorded user message as the executor sent it. */
-export const userMessageText = (item: typeof UserMessageItem.Type): string =>
+const userMessageText = (item: typeof UserMessageItem.Type): string =>
   item.content
     .filter(Schema.is(UserTextInput))
     .map(({ text }) => text)
     .join("");
+
+/** What Codex recorded about the input that its thread read. */
+export type CodexInput =
+  /** A `userMessage` item that a live turn started. */
+  | {
+      readonly _tag: "Recorded";
+      readonly item: typeof UserMessageItem.Type;
+      readonly turn: string;
+    }
+  /**
+   * The `userMessage` items of a restored turn. `known` when the session saved the items that it
+   * counted before the restart.
+   */
+  | {
+      readonly _tag: "Restored";
+      readonly turn: string;
+      readonly items: ReadonlyArray<typeof UserMessageItem.Type>;
+      readonly known: boolean;
+    };
+
+/**
+ * Decodes what Codex recorded about the operator messages that the session read. Codex records
+ * each input that a turn reads as a `userMessage` item with the input's text. A restored turn's
+ * items also acknowledge messages that the restarted session didn't send, but only once the session
+ * saves the items that it counted: before that, each may record an earlier message with the same
+ * text.
+ */
+export const codexReceipts = (input: CodexInput): ReadonlyArray<Receipt> => {
+  if (input._tag === "Recorded")
+    return [
+      Receipt.ByText({
+        text: userMessageText(input.item),
+        at: "now",
+        item: Option.some({ id: input.item.id, turn: input.turn }),
+      }),
+    ];
+  if (!input.known)
+    return [Receipt.Seen({ turn: input.turn, items: input.items.map(({ id }) => id) })];
+  return input.items.map((item) =>
+    Receipt.ByText({
+      text: userMessageText(item),
+      at: "restored",
+      item: Option.some({ id: item.id, turn: input.turn }),
+    }),
+  );
+};
 
 /** Returns the retry message followed by its details in parentheses. */
 export const providerRetryMessage = (error: (typeof ErrorNotification.Type)["error"]): string => {

@@ -9,6 +9,7 @@ import {
 } from "@usine/core/agent/session";
 import { Option, Schema } from "effect";
 import { AgentCapacityError, AgentResultError, harnessFailure } from "../../runtime.ts";
+import { Receipt } from "../receipts.ts";
 
 const ClaudeTextBlock = Schema.Struct({
   type: Schema.Literal("text"),
@@ -38,7 +39,7 @@ const decodeAssistantError = Schema.decodeUnknownOption(
   }),
 );
 
-export const decodeMessageAcknowledgement = Schema.decodeUnknownOption(
+const decodeMessageAcknowledgement = Schema.decodeUnknownOption(
   Schema.Struct({ user_message_uuids: Schema.Array(OperatorMessageId) }),
 );
 
@@ -93,6 +94,45 @@ export const ClaudeApiRetry = Schema.Struct({
 });
 export const decodeApiRetry = Schema.decodeUnknownOption(ClaudeApiRetry);
 export const isAssistantMessage = Schema.is(Schema.Struct({ type: Schema.Literal("assistant") }));
+
+/** A Claude Code message, and whether Claude ran no turn when it arrived. */
+export interface ClaudeSignal {
+  readonly message: Schema.Json;
+  /** Whether no turn ran before the message: after a result, until the next assistant message. */
+  readonly betweenTurns: boolean;
+}
+
+/**
+ * Decodes what a Claude Code message says about the operator messages that the session read.
+ * Claude names the messages that a frame consumed in `user_message_uuids`: the first assistant
+ * frame of a turn names the messages that started it, and a result names every message that the
+ * turn folded in. A successful result without names counts the messages still queued in
+ * `queued_turn_count`, each of which starts a turn of its own.
+ */
+export const claudeReceipts = ({ message, betweenTurns }: ClaudeSignal): ReadonlyArray<Receipt> => {
+  const named = Option.map(
+    decodeMessageAcknowledgement(message),
+    ({ user_message_uuids }) => user_message_uuids,
+  );
+  if (!Schema.is(ClaudeResultMessage)(message))
+    return Option.match(named, {
+      onNone: () => [],
+      onSome: (ids) => [
+        Receipt.ById({ ids, at: "now", opensTurn: betweenTurns && isAssistantMessage(message) }),
+      ],
+    });
+  const queued =
+    message.subtype === "success" && message.result !== undefined
+      ? message.queued_turn_count
+      : undefined;
+  return [
+    ...Option.match(named, {
+      onSome: (ids) => [Receipt.ById({ ids, at: "turn", opensTurn: false })],
+      onNone: () => (queued === undefined ? [] : [Receipt.ByCount({ unread: queued })]),
+    }),
+    ...(queued !== undefined && queued > 0 ? [Receipt.TurnsQueued({ turns: queued })] : []),
+  ];
+};
 
 /** The model that Claude Code names on an assistant message that it wrote itself. */
 const SYNTHETIC_MODEL = "<synthetic>";
@@ -170,46 +210,48 @@ export const loginCheck = (message: Schema.Json, spentTokens: boolean): LoginChe
 };
 
 /**
- * Returns the transcript events in `message`; `tools` names the open tool calls by ID, and
- * `toolName` maps the name that Claude Code reports to the name that events carry.
+ * Returns the transcript events in `message`, and the open tool calls by ID after it. `tools` names
+ * the open tool calls by ID before it, and `toolName` maps the name that Claude Code reports to the
+ * name that events carry.
  */
 export const sessionEventsFrom = (
   message: Schema.Json,
   session: AgentSession,
-  tools: Map<string, string>,
+  tools: ReadonlyMap<string, string>,
   toolName: (reported: string) => string = (reported) => reported,
-): ReadonlyArray<AgentSessionEvent> => {
-  if (!Schema.is(ClaudeContentMessage)(message)) return [];
+) => {
   const events: Array<AgentSessionEvent> = [];
-  for (const block of message.message.content) {
-    // Emits only text blocks of completed assistant messages; streaming deltas are not recorded.
-    if (message.type === "assistant" && Schema.is(ClaudeTextBlock)(block)) {
-      events.push(TextOutput.make({ session, text: block.text }));
-    } else if (Schema.is(ClaudeToolUseBlock)(block)) {
-      const tool = toolName(block.name);
-      tools.set(block.id, tool);
-      events.push(
-        ToolStarted.make({
-          session,
-          callId: block.id,
-          tool,
-          input: block.input,
-        }),
-      );
-    } else if (Schema.is(ClaudeToolResultBlock)(block)) {
-      events.push(
-        ToolFinished.make({
-          session,
-          callId: block.tool_use_id,
-          tool: tools.get(block.tool_use_id) ?? "unknown",
-          output: block.content,
-          isError: block.is_error === true,
-        }),
-      );
-      tools.delete(block.tool_use_id);
+  const open = new Map(tools);
+  if (Schema.is(ClaudeContentMessage)(message))
+    for (const block of message.message.content) {
+      // Emits only text blocks of completed assistant messages; streaming deltas are not recorded.
+      if (message.type === "assistant" && Schema.is(ClaudeTextBlock)(block)) {
+        events.push(TextOutput.make({ session, text: block.text }));
+      } else if (Schema.is(ClaudeToolUseBlock)(block)) {
+        const tool = toolName(block.name);
+        open.set(block.id, tool);
+        events.push(
+          ToolStarted.make({
+            session,
+            callId: block.id,
+            tool,
+            input: block.input,
+          }),
+        );
+      } else if (Schema.is(ClaudeToolResultBlock)(block)) {
+        events.push(
+          ToolFinished.make({
+            session,
+            callId: block.tool_use_id,
+            tool: open.get(block.tool_use_id) ?? "unknown",
+            output: block.content,
+            isError: block.is_error === true,
+          }),
+        );
+        open.delete(block.tool_use_id);
+      }
     }
-  }
-  return events;
+  return { events, tools: open };
 };
 
 /** The HTTP status of a rate-limited request, including a request over the usage limit. */

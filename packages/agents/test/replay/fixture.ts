@@ -16,7 +16,13 @@ import { codexChildLayer } from "../../src/harness/codex/codex.ts";
 import { piChildLayer } from "../../src/harness/pi/pi.ts";
 import { getPackageDir, VERSION as PI_VERSION } from "@earendil-works/pi-coding-agent";
 import { CodexAppServer, codexAppServerLive } from "../../src/harness/codex/app-server.ts";
-import { ChildBackend, ChildRequest, HostLoginLock, WorkingDirectory } from "../../src/runtime.ts";
+import {
+  ChildBackend,
+  ChildRequest,
+  ChildSessionJournal,
+  HostLoginLock,
+  WorkingDirectory,
+} from "../../src/runtime.ts";
 import { ownedClaudeReplay } from "./owned-claude.ts";
 import { claudeTransport } from "./claude.ts";
 import { processTransport } from "./process.ts";
@@ -178,7 +184,11 @@ export const openPiFixture = (
       request,
       /** The recorded provider stream that a Pi runtime starts its sessions on. */
       harness,
-      backend: piChildLayer.pipe(Layer.provide(harness), Layer.provideMerge(NodeServices.layer)),
+      backend: piChildLayer.pipe(
+        Layer.provideMerge(ChildSessionJournal.layerNoop),
+        Layer.provide(harness),
+        Layer.provideMerge(NodeServices.layer),
+      ),
       controls: {
         nativeReceipts: true,
         drop: Effect.void,
@@ -296,7 +306,11 @@ export const openFixture = (
       | ChildProcessSpawner.ChildProcessSpawner
       | Crypto.Crypto
     > = provider === "claude" ? claudeChildLayer : codexChildLayer;
-    const backend = childLayer.pipe(Layer.provide(harness), Layer.provideMerge(NodeServices.layer));
+    const backend = childLayer.pipe(
+      Layer.provideMerge(ChildSessionJournal.layerNoop),
+      Layer.provide(harness),
+      Layer.provideMerge(NodeServices.layer),
+    );
     const request = ChildRequest.make({
       worker: WorkerName.make("replay-worker"),
       machine: Option.none(),
@@ -326,6 +340,7 @@ export const openFixture = (
           environment: { ...environment, PATH: `${cwd}:${environment.PATH}` },
         }),
         backend: codexChildLayer.pipe(
+          Layer.provideMerge(ChildSessionJournal.layerNoop),
           Layer.provide(codexAppServerLive),
           Layer.provide(NodeServices.layer),
         ),

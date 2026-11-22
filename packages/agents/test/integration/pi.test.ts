@@ -4,9 +4,12 @@ import { describe, it } from "@effect/vitest";
 import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { env } from "node:process";
 import { Config, Effect, Schema, Layer } from "effect";
-import { ChildBackend } from "../../src/runtime.ts";
+import { ChildBackend, ChildSessionJournal } from "../../src/runtime.ts";
 import { piChildLayer, piSdkLive } from "../../src/harness/pi/pi.ts";
 import { steeringContract, interruptionContract } from "./contract.ts";
+
+/** The Pi backend, whose children save nothing. */
+const piChild = piChildLayer.pipe(Layer.provideMerge(ChildSessionJournal.layerNoop));
 
 const brain = Effect.gen(function* () {
   const decodedValue2 = yield* Config.String("USINE_PI_INTEGRATION_MODEL");
@@ -29,7 +32,7 @@ describe("Pi child live contract", () => {
         return yield* steeringContract(piChildBackend, fixtureBrain);
       }).pipe(
         Effect.provide(
-          piChildLayer.pipe(Layer.provideMerge(piSdkLive), Layer.provideMerge(NodeServices.layer)),
+          piChild.pipe(Layer.provideMerge(piSdkLive), Layer.provideMerge(NodeServices.layer)),
         ),
       ),
     210_000,
@@ -45,7 +48,7 @@ describe("Pi child live contract", () => {
         return yield* interruptionContract(piChildBackend, fixtureBrain);
       }).pipe(
         Effect.provide(
-          piChildLayer.pipe(Layer.provideMerge(piSdkLive), Layer.provideMerge(NodeServices.layer)),
+          piChild.pipe(Layer.provideMerge(piSdkLive), Layer.provideMerge(NodeServices.layer)),
         ),
       ),
     150_000,

@@ -78,7 +78,7 @@ const childBlocker = ({ kind, ...blocker }: StoredBlocker): ChildBlocker => ({
  * A journal over one `subagent` call. The call's task keys the delegation's `SubagentDoc`. The
  * call counts itself as the Attempt's next delegation and applies the child-session budget, and
  * a new delegation clears the infrastructure failure of a child that no delegation in this
- * process started.
+ * process started. A tool event commits its in-flight change, then goes to `relay`.
  */
 const toolJournal = (
   api: ToolExecutionApi<DelegationDetails>,
@@ -86,6 +86,7 @@ const toolJournal = (
   hub: AttemptHub,
   attemptTaskId: TaskId,
   budget: ChildSessionBudget,
+  relay: DelegationHub["event"],
 ): DelegationJournal => {
   const attemptId = hub.attemptId;
   const run = call(attemptId);
@@ -226,19 +227,26 @@ const toolJournal = (
         const record = await delegation(tx);
         if (record.saved !== null) record.saved.usage = usage;
       }),
-    toolStarted: (callId, tool) =>
+    toolEvent: (event) =>
       commit("save the child's in-flight tool calls", async (tx) => {
         const record = await delegation(tx);
-        record.inFlight = [
-          ...(record.inFlight ?? []).filter((call) => call.callId !== callId),
-          { callId, tool },
-        ];
-      }),
-    toolFinished: (callId) =>
-      commit("save the child's in-flight tool calls", async (tx) => {
-        const record = await delegation(tx);
-        record.inFlight = (record.inFlight ?? []).filter((call) => call.callId !== callId);
-      }),
+        const others = (record.inFlight ?? []).filter((call) => call.callId !== event.callId);
+        record.inFlight =
+          event._tag === "ToolStarted"
+            ? [...others, { callId: event.callId, tool: event.tool }]
+            : others;
+      }).pipe(
+        Effect.tapError((error) =>
+          Effect.logWarning("Child progress checkpoint failed; event forwarding continues", {
+            attemptId,
+            sessionId: event.session.id,
+            operation: error.operation,
+            cause: error.message,
+          }),
+        ),
+        Effect.ignore,
+        Effect.andThen(relay(event)),
+      ),
     saveIdle: (report, answeredOperator) =>
       commit("save the child's idle report", async (tx) => {
         const record = await delegation(tx);
@@ -425,15 +433,17 @@ export const subagentTool = (services: ExtensionServices) => {
     const { spec } = yield* storedRequestOf(owner.input);
     const hub = yield* services.hubs.hub(spec.attemptId, owner.taskId);
     services.hubs.bindParent(hub, api.conversationId);
+    const delegating = delegationHub(services.hubs, hub);
     const outcome = yield* delegate(services.backend, {
       spec,
-      hub: delegationHub(services.hubs, hub),
+      hub: delegating,
       journal: toolJournal(
         api,
         context,
         hub,
         owner.taskId,
         ChildSessionBudget.make(spec.maxChildren),
+        delegating.event,
       ),
       call: toolCall(api, context, spec.attemptId),
       assignment: task,

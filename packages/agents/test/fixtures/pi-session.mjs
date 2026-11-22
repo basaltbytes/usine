@@ -12,7 +12,12 @@ import { LocalProcess } from "../../src/child-host/child-host.ts";
 import { catalog } from "../../src/harness/catalog.ts";
 import { childContinuation } from "../../src/harness/continuation.ts";
 import { piRuntime, piSdkLive } from "../../src/harness/pi/pi.ts";
-import { ChildRequest, WorkingDirectory, SessionOperationError } from "../../src/runtime.ts";
+import {
+  ChildRequest,
+  ChildSessionJournal,
+  WorkingDirectory,
+  SessionOperationError,
+} from "../../src/runtime.ts";
 
 const [cwd, id, mode] = process.argv.slice(2);
 const request = ChildRequest.make({
@@ -75,5 +80,9 @@ await Effect.runPromise(
       )({ saved: started.harnessSession.value, result: result.message });
       process.stdout.write(encoded);
     }),
-  ).pipe(Effect.provide(piSdkLive), Effect.provide(Logger.layer([Logger.make(() => {})]))),
+  ).pipe(
+    Effect.provide(piSdkLive),
+    Effect.provide(ChildSessionJournal.layerNoop),
+    Effect.provide(Logger.layer([Logger.make(() => {})])),
+  ),
 );

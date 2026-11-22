@@ -23,7 +23,6 @@ import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent
 import {
   ChildBackend,
   AgentResultError,
-  ChildSessionJournal,
   PoolUnavailableError,
   type RunningSession,
   SessionOperationError,
@@ -304,9 +303,8 @@ const makePiSessions = Effect.gen(function* () {
               label: "Pi child session",
               sessionId: session.id,
             });
-            const journal = yield* ChildSessionJournal.current;
             if (Option.isSome(started.harnessSession))
-              yield* journal.started(started.harnessSession.value);
+              yield* policy.journal.started(started.harnessSession.value);
             yield* channel.emit(
               SessionStarted.make({ session, harnessSession: started.harnessSession }),
             );
@@ -324,11 +322,6 @@ const makePiSessions = Effect.gen(function* () {
             );
             const controls = yield* piTurns({
               session,
-              held: policy.restored.held,
-              paused: policy.restored.paused,
-              idle: policy.restored.idle,
-              idleAnsweredOperator: policy.restored.idleAnsweredOperator,
-              unread: policy.restored.unread,
               sdk: started.session,
               channel,
               gate,

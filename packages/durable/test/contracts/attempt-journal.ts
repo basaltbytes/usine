@@ -1053,6 +1053,103 @@ export const attemptJournalContract = (adapter: JournalAdapter) =>
         }).pipe(Effect.scoped),
     );
 
+    it.effect("reserves envelopes with a delegation's progress change across a reopen", () =>
+      Effect.gen(function* () {
+        const fixture = yield* adapter.fixture;
+        const request = storedRequest("attempt-progress-envelopes");
+        const attemptId = request.spec.attemptId;
+        const first = ChildSessionCount.make(1);
+        yield* using(
+          fixture,
+          Effect.gen(function* () {
+            const store = yield* journal;
+            yield* store.open(request);
+            yield* store.transition(
+              attemptId,
+              revision(0),
+              step("AttemptStarted", {
+                intents: [delegate(1)],
+                outbound: [envelope(attemptId, 1)],
+              }),
+            );
+            yield* store.startDelegation(attemptId, first);
+            yield* store.reserveWithProgress(
+              attemptId,
+              [envelope(attemptId, 2)],
+              first,
+              ToolStarted.make({ callId: "call-1", tool: "bash" }),
+            );
+            yield* store.reserveWithProgress(
+              attemptId,
+              [envelope(attemptId, 3)],
+              first,
+              ToolFinished.make({ callId: "call-1" }),
+            );
+            yield* store.reserveWithProgress(
+              attemptId,
+              [envelope(attemptId, 4)],
+              first,
+              ToolStarted.make({ callId: "call-2", tool: "read" }),
+            );
+          }),
+        );
+        const reopened = yield* using(
+          fixture,
+          journal.pipe(Effect.flatMap((store) => store.load(attemptId))),
+        );
+
+        assert(Option.isSome(reopened));
+        assert.deepStrictEqual(
+          reopened.value.outbox.map(({ sequence }) => sequence),
+          [1, 2, 3, 4],
+        );
+        assert.strictEqual(reopened.value.nextOutbound, 5);
+        assert.deepStrictEqual(
+          reopened.value.delegations.map(({ progress }) =>
+            Option.map(progress, ({ inFlight }) => inFlight),
+          ),
+          [Option.some([{ callId: "call-2", tool: "read" }])],
+        );
+      }).pipe(Effect.scoped),
+    );
+
+    it.effect(
+      "dies on reserving with progress for a delegation that hasn't started, reserving nothing",
+      () =>
+        Effect.gen(function* () {
+          const fixture = yield* adapter.fixture;
+          const request = storedRequest("attempt-progress-envelopes-unstarted");
+          const attemptId = request.spec.attemptId;
+          const { died, snapshot } = yield* using(
+            fixture,
+            Effect.gen(function* () {
+              const store = yield* journal;
+              yield* store.open(request);
+              yield* store.transition(
+                attemptId,
+                revision(0),
+                step("AttemptStarted", { intents: [delegate(1)] }),
+              );
+              const died = yield* store
+                .reserveWithProgress(
+                  attemptId,
+                  [envelope(attemptId, 1)],
+                  ChildSessionCount.make(1),
+                  ToolStarted.make({ callId: "call-1", tool: "bash" }),
+                )
+                .pipe(dies);
+              return { died, snapshot: yield* store.load(attemptId) };
+            }),
+          );
+
+          assert.isTrue(died);
+          assert.deepStrictEqual(
+            Option.map(snapshot, ({ outbox, nextOutbound }) => ({ outbox, nextOutbound })),
+            Option.some({ outbox: [], nextOutbound: AttemptChannel.Sequence.make(1) }),
+          );
+        }).pipe(Effect.scoped),
+    );
+
     it.effect(
       "dies on progress for a delegation no transition decided or that hasn't started",
       () =>
@@ -1262,6 +1359,52 @@ export const attemptJournalWriteFailureContract = (
         assert.strictEqual(retried.revision, 1);
         assert.strictEqual(retried.delegations.length, 1);
         assert.strictEqual(retried.outbox.length, 1);
+      }).pipe(Effect.scoped),
+    );
+
+    it.effect("leaves a delegation's progress unchanged when its envelopes fail to reserve", () =>
+      Effect.gen(function* () {
+        const fixture = yield* adapter.fixture;
+        const request = storedRequest("attempt-progress-write-failure");
+        const attemptId = request.spec.attemptId;
+        const first = ChildSessionCount.make(1);
+        const started = yield* using(
+          fixture,
+          Effect.gen(function* () {
+            const store = yield* journal;
+            yield* store.open(request);
+            yield* store.transition(
+              attemptId,
+              revision(0),
+              step("AttemptStarted", { intents: [delegate(1)] }),
+            );
+            yield* store.startDelegation(attemptId, first);
+            return yield* store.load(attemptId);
+          }),
+        );
+        const restore = yield* fixture.rejectOutboxInsert;
+        const failed = yield* using(
+          fixture,
+          journal.pipe(
+            Effect.flatMap((store) =>
+              store.reserveWithProgress(
+                attemptId,
+                [envelope(attemptId, 1)],
+                first,
+                ToolStarted.make({ callId: "call-1", tool: "bash" }),
+              ),
+            ),
+            Effect.flip,
+          ),
+        );
+        const unchanged = yield* using(
+          fixture,
+          journal.pipe(Effect.flatMap((store) => store.load(attemptId))),
+        );
+        yield* restore;
+
+        assert.strictEqual(failed._tag, "JournalError");
+        assert.deepStrictEqual(unchanged, started);
       }).pipe(Effect.scoped),
     );
   });

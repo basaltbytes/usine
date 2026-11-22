@@ -1,6 +1,11 @@
 import { assert, describe, it } from "@effect/vitest";
 import type { TaskId } from "@earendil-works/pi-durable";
-import { ChildBackend, type ChildRequest, ContinuationMismatchError } from "@usine/agents/runtime";
+import {
+  ChildBackend,
+  type ChildRequest,
+  ChildSessionJournal,
+  ContinuationMismatchError,
+} from "@usine/agents/runtime";
 import {
   AgentSessionId,
   ChildSessionBudget,
@@ -10,7 +15,7 @@ import {
 } from "@usine/core/agent/session";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { MachineId, WorkerName } from "@usine/core/worker";
-import { Deferred, Effect, Fiber, Option, Schema } from "effect";
+import { Deferred, Effect, Fiber, Option, Queue, Schema } from "effect";
 import { delegate } from "../src/attempt/delegation/delegation.ts";
 import { SavedChild } from "../src/attempt/delegation/journal.ts";
 import { childSessionId, parentSessionId } from "../src/attempt/sessions.ts";
@@ -190,6 +195,83 @@ describe("delegate", () => {
       assert.strictEqual(outcome._tag, "Reported");
       assert.strictEqual(memory.delegation.output, "Partial work\nFinished.\n");
       assert.strictEqual(memory.attempt.children, 1);
+    }).pipe(Effect.provide(stubChildBackendLayer)),
+  );
+
+  it.effect("delivers a restored input that the resumed child read once", () =>
+    Effect.gen(function* () {
+      const attemptId = "delegation/restored-input-read";
+      const request = attemptRequest(attemptId);
+      const sessionId = childSessionId(request.spec.attemptId, 1);
+      const memory = memoryJournal();
+      memory.attempt.children = 1;
+      memory.delegation.count = Option.some(1);
+      const saved = yield* Schema.encodeEffect(SavedChild)(
+        SavedChild.make({
+          session: {
+            id: sessionId,
+            parentId: parentSessionId(request.spec.attemptId),
+            agent: request.spec.agent.name,
+            brain: request.spec.agent.brain,
+          },
+          usage: Option.none(),
+          harnessSession: HarnessSession.make({
+            id: HarnessSessionId.make("native-1"),
+            cwd: request.cwd,
+          }),
+          worker: request.worker,
+          machine: request.machine,
+        }),
+      );
+      memory.delegation.saved = Option.some(saved);
+      const steer = AttemptChannel.Steer.make({ message: "Fix the third finding." });
+      memory.attempt.queued.push({
+        child: sessionId,
+        inputSequence: AttemptChannel.Sequence.make(1),
+        intervention: AttemptChannel.Intervention.make({
+          operator: "PhilDL",
+          target: AttemptChannel.ChildTarget.make({ sessionId }),
+          action: steer,
+        }),
+      });
+      const backend = yield* ChildBackend;
+      const { fiber, hub } = yield* start(attemptId, memory).pipe(
+        Effect.provideService(
+          ChildBackend,
+          ChildBackend.of({
+            ...backend,
+            // The resumed child reads its restored message as soon as it starts.
+            launch: (childRequest) =>
+              Effect.gen(function* () {
+                const running = yield* backend.launch(childRequest);
+                const journal = yield* ChildSessionJournal;
+                const state = AttemptChannel.InterventionState.make({ held: false, paused: false });
+                for (const { id } of childRequest.unread)
+                  yield* journal.delivered(id, Option.some(state));
+                return running;
+              }),
+          }),
+        ),
+      );
+      const child = yield* (yield* StubChildren).next;
+      assert.deepStrictEqual(
+        child.request.unread.map(({ id }) => id),
+        [steer.id],
+      );
+      yield* child.reply("Fixed the third finding.");
+      const outcome = yield* Fiber.join(fiber);
+
+      assert.strictEqual(outcome._tag, "Reported");
+      const deliveries = (yield* Queue.clear(hub.queue)).flatMap((item) =>
+        item._tag === "Delivery" ? [item] : [],
+      );
+      assert.deepStrictEqual(
+        deliveries.map(({ inputSequence, delivered }) => ({
+          inputSequence,
+          read: Option.isSome(delivered),
+        })),
+        [{ inputSequence: 1, read: true }],
+      );
     }).pipe(Effect.provide(stubChildBackendLayer)),
   );
 

@@ -414,6 +414,29 @@ export const sqliteAttemptJournalLayer = Layer.effect(
           ),
         );
       }),
+      reserveWithProgress: Effect.fn("AttemptJournal.reserveWithProgress")(
+        function* (attemptId, envelopes, number, change) {
+          yield* Effect.annotateCurrentSpan({
+            attemptId,
+            envelopes: envelopes.length,
+            delegation: number,
+            change: change._tag,
+          });
+          yield* Effect.gen(function* () {
+            const record = yield* delegationRow(attemptId, number).pipe(
+              Effect.flatMap((current) => progressed(current, change)),
+            );
+            yield* updateProgress(attemptId, record);
+            yield* reserveEnvelopes(attemptId, envelopes);
+          }).pipe(
+            transaction,
+            Effect.catchTag(
+              ["SqlError", "SchemaError"],
+              failure("reserve attempt envelopes with a delegation's progress", attemptId),
+            ),
+          );
+        },
+      ),
       settleDelegation: Effect.fn("AttemptJournal.settleDelegation")(
         function* (attemptId, number, outcome) {
           yield* Effect.annotateCurrentSpan({ attemptId, delegation: number });

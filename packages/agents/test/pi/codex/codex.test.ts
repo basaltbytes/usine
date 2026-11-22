@@ -59,6 +59,9 @@ import { ChildProcessLost } from "../../../src/child-host/process.ts";
 import { codexChildLayer } from "../../../src/harness/codex/codex.ts";
 import { collectLogs } from "../../logs.ts";
 
+/** The Codex backend, whose children save nothing. */
+const codexChild = codexChildLayer.pipe(Layer.provideMerge(ChildSessionJournal.layerNoop));
+
 const noDelivery: OnDelivery = () => Effect.void;
 
 const request = (
@@ -293,9 +296,6 @@ describe("Codex child backend", () => {
             );
           }),
         ).pipe(
-          Effect.provide(
-            codexChildLayer.pipe(Layer.provide(server), Layer.provideMerge(logs.layer)),
-          ),
           Effect.provideService(ChildSessionJournal, {
             started: () => Effect.void,
             prompted: Effect.void,
@@ -307,6 +307,7 @@ describe("Codex child backend", () => {
                 delivered.push(id);
               }),
           }),
+          Effect.provide(codexChild.pipe(Layer.provide(server), Layer.provideMerge(logs.layer))),
         );
       },
     );
@@ -371,7 +372,6 @@ describe("Codex child backend", () => {
       }).pipe(Effect.scoped);
       assert.deepStrictEqual(receipts, [`read ${unread[0]?.id}`, `unread ${unread[1]?.id}`]);
     }).pipe(
-      Effect.provide(codexChildLayer.pipe(Layer.provide(server))),
       Effect.provideService(ChildSessionJournal, {
         started: () => Effect.void,
         prompted: Effect.void,
@@ -382,6 +382,7 @@ describe("Codex child backend", () => {
             receipts.push(`${Option.isSome(state) ? "read" : "unread"} ${id}`);
           }),
       }),
+      Effect.provide(codexChild.pipe(Layer.provide(server))),
     );
   });
 
@@ -448,13 +449,16 @@ describe("Codex child backend", () => {
           assert.strictEqual(clients[0]?.transport, "resume");
           assert.deepStrictEqual(clients[0]?.sessionId, Option.some(original.session.id));
         }),
-      ).pipe(Effect.provide(codexChildLayer.pipe(Layer.provide(server))));
+      ).pipe(Effect.provide(codexChild.pipe(Layer.provide(server))));
     });
   }
 
   it.effect("reports a failed native reopen as interrupted without starting a turn", () => {
     const original = request();
-    const saved = HarnessSession.make({ cwd: original.cwd });
+    const saved = HarnessSession.make({
+      id: HarnessSessionId.make("saved-codex"),
+      cwd: original.cwd,
+    });
     const calls: Array<{ readonly method: string; readonly params: Schema.Json }> = [];
     const server = connectionLayer(
       successfulResponses([{ id: "gpt-5.6-terra", model: "gpt-5.6-terra" }]),
@@ -470,7 +474,7 @@ describe("Codex child backend", () => {
         assert(calls.some(({ method }) => method === "thread/resume"));
         assert(!calls.some(({ method }) => method === "turn/start"));
       }),
-    ).pipe(Effect.provide(codexChildLayer.pipe(Layer.provide(server))));
+    ).pipe(Effect.provide(codexChild.pipe(Layer.provide(server))));
   });
 
   it.effect("stops a retained remote child without resuming its conversation", () => {
@@ -497,7 +501,7 @@ describe("Codex child backend", () => {
       assert.strictEqual(clients.length, 1);
       assert.deepStrictEqual(clients[0]?.sessionId, Option.some(original.session.id));
       assert.deepStrictEqual(calls, []);
-    }).pipe(Effect.provide(codexChildLayer.pipe(Layer.provide(server))));
+    }).pipe(Effect.provide(codexChild.pipe(Layer.provide(server))));
   });
 
   it.effect("reattaches the remote owner when resuming a saved Codex thread", () => {
@@ -575,7 +579,7 @@ describe("Codex child backend", () => {
         assert.include(turns[0], request().prompt);
         assert.notInclude(turns[0], CONTINUATION_MESSAGE);
       }),
-    ).pipe(Effect.provide(codexChildLayer.pipe(Layer.provide(server))));
+    ).pipe(Effect.provide(codexChild.pipe(Layer.provide(server))));
   });
 
   it.effect("restores whether a held idle Codex report answers the operator", () =>
@@ -628,7 +632,7 @@ describe("Codex child backend", () => {
         );
         yield* running.intervene(Release.make(), noDelivery);
         return yield* running.result;
-      }).pipe(Effect.provide(codexChildLayer.pipe(Layer.provide(server))));
+      }).pipe(Effect.provide(codexChild.pipe(Layer.provide(server))));
       assert.strictEqual(result.message, "The tests need a database.");
       assert.isTrue(result.answeredOperator);
     }).pipe(Effect.scoped),
@@ -726,7 +730,7 @@ describe("Codex child backend", () => {
           });
           yield* running.intervene(Release.make(), noDelivery);
           assert.strictEqual((yield* running.result).message, "Corrected.");
-        }).pipe(Effect.provide(codexChildLayer.pipe(Layer.provide(server))));
+        }).pipe(Effect.provide(codexChild.pipe(Layer.provide(server))));
       }).pipe(Effect.scoped),
     );
   }
@@ -832,7 +836,7 @@ describe("Codex child backend", () => {
                 ? ["SessionStarted", "SessionIdle", "SessionResumed", "SessionIdle"]
                 : ["SessionStarted", "SessionIdle"],
             );
-          }).pipe(Effect.provide(codexChildLayer.pipe(Layer.provide(server))));
+          }).pipe(Effect.provide(codexChild.pipe(Layer.provide(server))));
         }).pipe(Effect.scoped),
     );
   }
@@ -971,7 +975,7 @@ describe("Codex child backend", () => {
             assert.strictEqual(opens, 2);
             assert.lengthOf(turns, taskRecorded ? 1 : 2);
             assert(turns.every((input) => input.includes(request().prompt)));
-          }).pipe(Effect.provide(codexChildLayer.pipe(Layer.provideMerge(server))));
+          }).pipe(Effect.provide(codexChild.pipe(Layer.provideMerge(server))));
         }).pipe(Effect.scoped),
     );
 
@@ -1061,7 +1065,7 @@ describe("Codex child backend", () => {
           assert.strictEqual((yield* Fiber.join(result)).message, "Corrected result");
           assert.strictEqual(closes, 1);
           assert.strictEqual(calls.filter(({ method }) => method === "thread/start").length, 1);
-        }).pipe(Effect.provide(codexChildLayer.pipe(Layer.provideMerge(server))));
+        }).pipe(Effect.provide(codexChild.pipe(Layer.provideMerge(server))));
       }).pipe(Effect.scoped),
   );
   it.effect(
@@ -1126,7 +1130,7 @@ describe("Codex child backend", () => {
           assert.strictEqual(closes, 0);
           assert.deepStrictEqual(errors, []);
         }).pipe(
-          Effect.provide(codexChildLayer.pipe(Layer.provide(server))),
+          Effect.provide(codexChild.pipe(Layer.provide(server))),
           Effect.provideService(ChildSessionLifecycle, { isStopping: Deferred.isDone(stopping) }),
           Effect.provide(Logger.layer([logger])),
           Effect.scoped,
@@ -1264,7 +1268,6 @@ describe("Codex child backend", () => {
           yield* running.intervene(Release.make(), noDelivery);
           yield* running.result;
         }).pipe(
-          Effect.provide(codexChildLayer.pipe(Layer.provide(server))),
           Effect.provideService(ChildSessionJournal, {
             started: () => Effect.void,
             prompted: Effect.void,
@@ -1273,10 +1276,124 @@ describe("Codex child backend", () => {
             delivered: (id, state) =>
               Queue.offer(receipts, Option.isSome(state) ? id : "unread").pipe(Effect.asVoid),
           }),
+          Effect.provide(codexChild.pipe(Layer.provide(server))),
         );
       }).pipe(Effect.scoped),
     );
   }
+
+  for (const steer of ["accepted", "rejected"] as const)
+    it.effect(`sends a steer again only if Codex accepted it as the turn ended (${steer})`, () =>
+      Effect.gen(function* () {
+        const notifications = yield* Queue.make<CodexNotification, Cause.Done>();
+        const idle = yield* Queue.make<void>();
+        const started = yield* Queue.make<void>();
+        const receipts = yield* Queue.make<string>();
+        const answered = yield* Deferred.make<void>();
+        const calls: Array<{ method: string; params: Schema.Json }> = [];
+        let turns = 0;
+        const old = OperatorMessage.make({ message: "Check the diff" });
+        const next = OperatorMessage.make({ message: "Check the tests" });
+        const responses: Readonly<Record<string, Schema.Json>> = successfulResponses([
+          { id: "gpt-5.6-terra", model: "gpt-5.6-terra" },
+        ]);
+        const server = Layer.succeed(CodexAppServer)({
+          stop: () => Effect.void,
+          open: () =>
+            Effect.succeed({
+              notifications: Stream.fromQueue(notifications),
+              notify: () => Effect.void,
+              close: Queue.end(notifications),
+              request: (_operation, method, params) =>
+                Effect.gen(function* () {
+                  calls.push({ method, params });
+                  if (method === "turn/start") {
+                    turns += 1;
+                    yield* Queue.offer(started, undefined);
+                    return { turn: { id: `turn-${turns}` } };
+                  }
+                  if (method === "turn/steer" && turns === 1) {
+                    // The turn ends, and its completion is handled, before Codex answers the steer.
+                    yield* Queue.offer(notifications, {
+                      method: "turn/completed",
+                      params: { turn: { id: "turn-1", status: "completed", error: null } },
+                    });
+                    yield* Deferred.await(answered);
+                    yield* Effect.yieldNow;
+                    if (steer === "rejected")
+                      return yield* SessionOperationError.make({
+                        operation: "steer",
+                        sessionId: Option.none(),
+                        message: "no active turn to steer",
+                        cause: new Error("turn/steer"),
+                      });
+                  }
+                  return responses[method] ?? {};
+                }),
+            }),
+        });
+        yield* Effect.gen(function* () {
+          const running = yield* (yield* ChildBackend).launch(
+            ChildRequest.make({ ...request(), held: true }),
+          );
+          yield* Queue.take(started);
+          yield* Effect.forkScoped(
+            running.events.pipe(
+              Stream.runForEach((event) =>
+                event._tag === "ProviderAnswered"
+                  ? Deferred.succeed(answered, undefined)
+                  : event._tag === "SessionIdle"
+                    ? Queue.offer(idle, undefined)
+                    : Effect.void,
+              ),
+            ),
+          );
+          const sent = yield* Effect.result(
+            running.intervene(old, (state) =>
+              Queue.offer(receipts, Option.isSome(state) ? old.id : "unread").pipe(Effect.asVoid),
+            ),
+          );
+          assert.strictEqual(Result.isSuccess(sent), steer === "accepted");
+          yield* Queue.take(idle);
+          yield* running.intervene(next, noDelivery);
+          yield* Queue.take(started);
+          const inputs = calls
+            .filter(({ method }) => method === "turn/start" || method === "turn/steer")
+            .map(({ method, params }) => [method, jsonKey(params)] as const);
+          assert.deepStrictEqual(
+            inputs.map(([method]) => method),
+            steer === "accepted"
+              ? ["turn/start", "turn/steer", "turn/start", "turn/steer"]
+              : ["turn/start", "turn/steer", "turn/start"],
+          );
+          if (steer === "accepted") {
+            assert.include(inputs[2]?.[1], old.message, "the next turn starts with the steer");
+            assert.include(inputs[3]?.[1], next.message);
+            yield* Queue.offer(notifications, {
+              method: "item/started",
+              params: {
+                threadId: "thread-1",
+                turnId: "turn-2",
+                item: {
+                  type: "userMessage",
+                  id: "input-old",
+                  content: [{ type: "text", text: old.message, text_elements: [] }],
+                },
+              },
+            });
+            const receipt = yield* Queue.take(receipts);
+            assert.strictEqual(receipt, old.id);
+          } else assert.include(inputs[2]?.[1], next.message, "the failed steer isn't sent");
+          yield* Queue.offer(notifications, {
+            method: "turn/completed",
+            params: { turn: { id: "turn-2", status: "completed", error: null } },
+          });
+          yield* Queue.take(idle);
+          yield* running.intervene(Release.make(), noDelivery);
+          yield* running.result;
+        }).pipe(Effect.provide(codexChild.pipe(Layer.provide(server))));
+      }).pipe(Effect.scoped),
+    );
 
   it.effect("reads a replayed steer of an active reattached turn without sending it again", () =>
     Effect.gen(function* () {
@@ -1352,7 +1469,6 @@ describe("Codex child backend", () => {
         );
         assert.include(jsonKey(inputs[0]?.params), next.message);
       }).pipe(
-        Effect.provide(codexChildLayer.pipe(Layer.provide(server))),
         Effect.provideService(ChildSessionJournal, {
           started: () => Effect.void,
           prompted: Effect.void,
@@ -1363,6 +1479,7 @@ describe("Codex child backend", () => {
               if (Option.isSome(state)) reads.push(id);
             }),
         }),
+        Effect.provide(codexChild.pipe(Layer.provide(server))),
       );
     }).pipe(Effect.scoped),
   );
@@ -1461,7 +1578,6 @@ describe("Codex child backend", () => {
             assert.include(jsonKey(inputs[0]?.params), CONTINUATION_MESSAGE);
             assert.include(jsonKey(inputs[1]?.params), unread.message);
           }).pipe(
-            Effect.provide(codexChildLayer.pipe(Layer.provide(server))),
             Effect.provideService(ChildSessionJournal, {
               started: () => Effect.void,
               prompted: Effect.void,
@@ -1472,6 +1588,7 @@ describe("Codex child backend", () => {
                   deliveries.push(`${Option.isSome(state) ? "read" : "unread"} ${id}`);
                 }).pipe(Effect.andThen(commit === "delivered" ? Effect.yieldNow : Effect.void)),
             }),
+            Effect.provide(codexChild.pipe(Layer.provide(server))),
           );
         }).pipe(Effect.scoped),
     );
@@ -1570,7 +1687,6 @@ describe("Codex child backend", () => {
         yield* Deferred.await(read);
         assert.deepStrictEqual(journal, ["received guidance-2", `read ${repeated.id}`]);
       }).pipe(
-        Effect.provide(codexChildLayer.pipe(Layer.provide(server), Layer.provideMerge(logs.layer))),
         Effect.provideService(ChildSessionJournal, {
           started: () => Effect.void,
           prompted: Effect.void,
@@ -1584,6 +1700,7 @@ describe("Codex child backend", () => {
               journal.push(`${Option.isSome(state) ? "read" : "unread"} ${id}`);
             }).pipe(Effect.andThen(Deferred.succeed(read, undefined)), Effect.asVoid),
         }),
+        Effect.provide(codexChild.pipe(Layer.provide(server), Layer.provideMerge(logs.layer))),
       );
     }).pipe(Effect.scoped),
   );
@@ -1685,10 +1802,8 @@ describe("Codex child backend", () => {
             assert.include(jsonKey(inputs[1]?.params), repeated.message);
           }).pipe(
             Effect.scoped,
-            Effect.provide(
-              codexChildLayer.pipe(Layer.provide(appServer(notifications, items, inputs))),
-            ),
             recording(received, reads),
+            Effect.provide(codexChild.pipe(Layer.provide(appServer(notifications, items, inputs)))),
           );
         }
         assert.deepStrictEqual(received, [["task", "guidance"]]);
@@ -1746,12 +1861,10 @@ describe("Codex child backend", () => {
               yield* running.intervene(repeated, noDelivery);
             }).pipe(
               Effect.scoped,
-              Effect.provide(
-                codexChildLayer.pipe(
-                  Layer.provide(appServer(notifications, items, [], "inProgress")),
-                ),
-              ),
               recording(received, reads, saves),
+              Effect.provide(
+                codexChild.pipe(Layer.provide(appServer(notifications, items, [], "inProgress"))),
+              ),
             );
             assert.deepStrictEqual(
               reads,
@@ -1782,14 +1895,14 @@ describe("Codex child backend", () => {
               assert.include(jsonKey(inputs[0]?.params), repeated.message);
             }).pipe(
               Effect.scoped,
+              recording([], restoredReads),
               Effect.provide(
-                codexChildLayer.pipe(
+                codexChild.pipe(
                   Layer.provide(
                     appServer(restarted, [...items, userMessage("g2", guidance.message)], inputs),
                   ),
                 ),
               ),
-              recording([], restoredReads),
             );
           }).pipe(Effect.scoped),
       );
@@ -1826,12 +1939,10 @@ describe("Codex child backend", () => {
             yield* Queue.take(saves);
           }).pipe(
             Effect.scoped,
-            Effect.provide(
-              codexChildLayer.pipe(
-                Layer.provide(appServer(notifications, items, [], "inProgress")),
-              ),
-            ),
             recording(received, [], saves),
+            Effect.provide(
+              codexChild.pipe(Layer.provide(appServer(notifications, items, [], "inProgress"))),
+            ),
           );
 
           const restarted = yield* Queue.make<CodexNotification, Cause.Done>();
@@ -1858,14 +1969,14 @@ describe("Codex child backend", () => {
             assert.include(jsonKey(inputs[0]?.params), next.message);
           }).pipe(
             Effect.scoped,
+            recording([], reads),
             Effect.provide(
-              codexChildLayer.pipe(
+              codexChild.pipe(
                 Layer.provide(
                   appServer(restarted, [...items, userMessage("g2", guidance.message)], inputs),
                 ),
               ),
             ),
-            recording([], reads),
           );
         }).pipe(Effect.scoped),
     );
@@ -1903,20 +2014,20 @@ describe("Codex child backend", () => {
           assert.deepStrictEqual(
             logs.records.flatMap(({ message }) =>
               Array.isArray(message) &&
-              message[0] === "Skipping an observed Codex user-message item"
+              message[0] === "Skipping a native input record that the session already counted"
                 ? [message[1]]
                 : [],
             ),
             [{ sessionId: request().session.id, turnId: "turn-1", itemId: "guidance" }],
           );
         }).pipe(
+          recording([], reads),
           Effect.provide(
-            codexChildLayer.pipe(
+            codexChild.pipe(
               Layer.provide(appServer(notifications, [item], [], "inProgress")),
               Layer.provideMerge(logs.layer),
             ),
           ),
-          recording([], reads),
         );
       }).pipe(Effect.scoped),
     );
@@ -2038,8 +2149,8 @@ describe("Codex child backend", () => {
               assert.include(jsonKey(resumed[0]?.params), repeated.message);
             else assert.notInclude(jsonKey(resumed), guidance.message);
           }).pipe(
-            Effect.provide(codexChildLayer.pipe(Layer.provide(server))),
             recording(received, reads),
+            Effect.provide(codexChild.pipe(Layer.provide(server))),
           );
         }).pipe(Effect.scoped),
       );
@@ -2079,10 +2190,8 @@ describe("Codex child backend", () => {
             assert.strictEqual(result.message, "Session interrupted before its turn returned");
             assert.isFalse(result.answeredOperator);
           }).pipe(
-            Effect.provide(
-              codexChildLayer.pipe(Layer.provide(appServer(notifications, items, inputs))),
-            ),
             recording([], reads),
+            Effect.provide(codexChild.pipe(Layer.provide(appServer(notifications, items, inputs)))),
           );
         }).pipe(Effect.scoped),
     );
@@ -2110,8 +2219,8 @@ describe("Codex child backend", () => {
           );
           yield* Queue.takeN(saves, items.length);
         }).pipe(
-          Effect.provide(codexChildLayer.pipe(Layer.provide(appServer(notifications, [], [])))),
           recording(received, reads, saves),
+          Effect.provide(codexChild.pipe(Layer.provide(appServer(notifications, [], [])))),
         );
         assert.deepStrictEqual(received.at(-1), ["task", "g1", "g2"]);
 
@@ -2128,8 +2237,8 @@ describe("Codex child backend", () => {
             }),
           );
         }).pipe(
-          Effect.provide(codexChildLayer.pipe(Layer.provide(appServer(restarted, items, inputs)))),
           recording([], reads),
+          Effect.provide(codexChild.pipe(Layer.provide(appServer(restarted, items, inputs)))),
         );
         assert.deepStrictEqual(reads, []);
         assert.deepStrictEqual(
@@ -2167,10 +2276,10 @@ describe("Codex child backend", () => {
                 }),
               );
             }).pipe(
-              Effect.provide(
-                codexChildLayer.pipe(Layer.provide(appServer(notifications, items, inputs))),
-              ),
               recording(received, reads),
+              Effect.provide(
+                codexChild.pipe(Layer.provide(appServer(notifications, items, inputs))),
+              ),
             );
             assert.deepStrictEqual(inputs, []);
             return { received, reads };
@@ -2277,7 +2386,7 @@ describe("Codex child backend", () => {
         );
         assert.include(jsonKey(submitted[before]?.params), CONTINUATION_MESSAGE);
         assert.strictEqual(opens, 2);
-      }).pipe(Effect.provide(codexChildLayer.pipe(Layer.provideMerge(server))));
+      }).pipe(Effect.provide(codexChild.pipe(Layer.provideMerge(server))));
     }).pipe(Effect.scoped),
   );
 
@@ -2335,7 +2444,7 @@ describe("Codex child backend", () => {
         assert.include(jsonKey(inputs[1]?.params), "Check the diff");
         assert.include(jsonKey(inputs[2]?.params), "Check the tests");
         assert.include(jsonKey(inputs[2]?.params), "turn-2");
-      }).pipe(Effect.provide(codexChildLayer.pipe(Layer.provide(server))));
+      }).pipe(Effect.provide(codexChild.pipe(Layer.provide(server))));
     }).pipe(Effect.scoped),
   );
 
@@ -2503,7 +2612,7 @@ describe("Codex child backend", () => {
           );
           assert(reads.every(Option.isSome));
           assert.strictEqual(opens, 2);
-        }).pipe(Effect.provide(codexChildLayer.pipe(Layer.provideMerge(server))));
+        }).pipe(Effect.provide(codexChild.pipe(Layer.provideMerge(server))));
       }).pipe(Effect.scoped),
     );
   }
@@ -2560,7 +2669,7 @@ describe("Codex child backend", () => {
           assert.strictEqual(transcript.success.at(-1)?._tag, "SessionFinished");
         }).pipe(
           Effect.ensuring(Deferred.succeed(closed, undefined)),
-          Effect.provide(codexChildLayer.pipe(Layer.provideMerge(server))),
+          Effect.provide(codexChild.pipe(Layer.provideMerge(server))),
         ),
       );
     }),
@@ -2693,7 +2802,7 @@ describe("Codex child backend", () => {
         assert.strictEqual(turn.effort, "none");
         assert(calls.some(({ method }) => method === "turn/steer"));
         assert(calls.some(({ method }) => method === "turn/interrupt"));
-      }).pipe(Effect.provide(codexChildLayer.pipe(Layer.provideMerge(server)))),
+      }).pipe(Effect.provide(codexChild.pipe(Layer.provideMerge(server)))),
     );
   });
 
@@ -2804,10 +2913,7 @@ describe("Codex child backend", () => {
           assert.include(reconnects[1], '"retries":2');
         }).pipe(
           Effect.provide(
-            codexChildLayer.pipe(
-              Layer.provideMerge(server),
-              Layer.provideMerge(Logger.layer([logger])),
-            ),
+            codexChild.pipe(Layer.provideMerge(server), Layer.provideMerge(Logger.layer([logger]))),
           ),
         ),
       );
@@ -2864,7 +2970,49 @@ describe("Codex child backend", () => {
         ]);
         assert.strictEqual(result.message, "The fix is done.");
         assert.strictEqual(events.filter((event) => event._tag === "TextOutput").length, 3);
-      }).pipe(Effect.provide(codexChildLayer.pipe(Layer.provideMerge(server)))),
+      }).pipe(Effect.provide(codexChild.pipe(Layer.provideMerge(server)))),
+    );
+  });
+
+  it.effect("records the prompt receipt once Codex starts the first turn", () => {
+    const checkpoints: Array<string> = [];
+    const server = connectionLayer(
+      successfulResponses([{ id: "gpt-5.6-terra", model: "gpt-5.6-terra" }]),
+      [
+        {
+          method: "item/completed",
+          params: {
+            threadId: "thread-1",
+            turnId: "turn-1",
+            item: { type: "agentMessage", id: "m-1", text: "Done.", phase: "final_answer" },
+          },
+        },
+        {
+          method: "turn/completed",
+          params: { turn: { id: "turn-1", status: "completed", error: null } },
+        },
+      ],
+    );
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const running = yield* (yield* ChildBackend).launch(request());
+        assert.strictEqual((yield* running.result).message, "Done.");
+        assert.deepStrictEqual(checkpoints, ["started thread-1", "prompted"]);
+      }).pipe(
+        Effect.provideService(ChildSessionJournal, {
+          started: (reference) =>
+            Effect.sync(() => {
+              checkpoints.push(`started ${reference.id}`);
+            }),
+          prompted: Effect.sync(() => {
+            checkpoints.push("prompted");
+          }),
+          continued: () => Effect.void,
+          received: () => Effect.void,
+          delivered: () => Effect.void,
+        }),
+        Effect.provide(codexChildLayer.pipe(Layer.provideMerge(server))),
+      ),
     );
   });
 
@@ -2924,7 +3072,7 @@ describe("Codex child backend", () => {
             }),
           ),
         );
-      }).pipe(Effect.provide(codexChildLayer.pipe(Layer.provideMerge(server)))),
+      }).pipe(Effect.provide(codexChild.pipe(Layer.provideMerge(server)))),
     );
   });
 
@@ -2975,7 +3123,7 @@ describe("Codex child backend", () => {
         const [events] = yield* Effect.all([Stream.runCollect(running.events), running.result]);
         assert(events.some((event) => event._tag === "SessionTokensUpdated"));
         for (const event of events) assert.strictEqual(sessionPool(event.session), "apiKeys");
-      }).pipe(Effect.provide(codexChildLayer.pipe(Layer.provideMerge(server)))),
+      }).pipe(Effect.provide(codexChild.pipe(Layer.provideMerge(server)))),
     );
   });
 
@@ -3002,7 +3150,7 @@ describe("Codex child backend", () => {
             assert(
               !calls.some(({ method }) => method === "thread/start" || method === "turn/start"),
             );
-          }).pipe(Effect.provide(codexChildLayer.pipe(Layer.provideMerge(server)))),
+          }).pipe(Effect.provide(codexChild.pipe(Layer.provideMerge(server)))),
         );
       },
     );
@@ -3038,7 +3186,7 @@ describe("Codex child backend", () => {
         const matchesStreamError = Schema.is(PoolUnavailableError)(streamError);
         assert(matchesStreamError);
         assert(!events.some((event) => event._tag === "PoolRateLimitsUpdated"));
-      }).pipe(Effect.provide(codexChildLayer.pipe(Layer.provideMerge(server)))),
+      }).pipe(Effect.provide(codexChild.pipe(Layer.provideMerge(server)))),
     );
   });
 
@@ -3107,7 +3255,7 @@ describe("Codex child backend", () => {
             Option.some(codexHome),
             "the session is saved in the Attempt's Codex home",
           );
-        }).pipe(Effect.provide(codexChildLayer.pipe(Layer.provideMerge(server)))),
+        }).pipe(Effect.provide(codexChild.pipe(Layer.provideMerge(server)))),
       );
     },
   );
@@ -3123,7 +3271,7 @@ describe("Codex child backend", () => {
         const matchesError = Schema.is(UnknownModelError)(error);
         assert(matchesError);
         assert.strictEqual(error.harness, "codex");
-      }).pipe(Effect.provide(codexChildLayer.pipe(Layer.provideMerge(server)))),
+      }).pipe(Effect.provide(codexChild.pipe(Layer.provideMerge(server)))),
     );
   });
 
@@ -3149,7 +3297,7 @@ describe("Codex child backend", () => {
         assert(matchesError);
         assert.strictEqual(error.effort, "max");
         assert.strictEqual(error.model, "gpt-5.6-terra");
-      }).pipe(Effect.provide(codexChildLayer.pipe(Layer.provideMerge(server)))),
+      }).pipe(Effect.provide(codexChild.pipe(Layer.provideMerge(server)))),
     );
   });
 
@@ -3177,7 +3325,7 @@ describe("Codex child backend", () => {
         const matchesError = Schema.is(AgentResultError)(error);
         assert(matchesError);
         assert.strictEqual(error.message, "the agent could not finish");
-      }).pipe(Effect.provide(codexChildLayer.pipe(Layer.provideMerge(server)))),
+      }).pipe(Effect.provide(codexChild.pipe(Layer.provideMerge(server)))),
     );
   });
 
@@ -3204,7 +3352,7 @@ describe("Codex child backend", () => {
             events.filter((event) => event._tag === "ProviderAnswered"),
             1,
           );
-        }).pipe(Effect.provide(codexChildLayer.pipe(Layer.provideMerge(server)))),
+        }).pipe(Effect.provide(codexChild.pipe(Layer.provideMerge(server)))),
       );
     },
   );
@@ -3292,7 +3440,7 @@ describe("Codex child backend", () => {
               .map((event) => (event._tag === "TextOutput" ? event.text : event._tag)),
             ["ProviderAnswered", "Working on it.", "ProviderAnswered", "Done."],
           );
-        }).pipe(Effect.provide(codexChildLayer.pipe(Layer.provideMerge(server))));
+        }).pipe(Effect.provide(codexChild.pipe(Layer.provideMerge(server))));
       }).pipe(Effect.scoped),
   );
 });

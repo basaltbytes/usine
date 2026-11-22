@@ -19,7 +19,7 @@ import { piRuntime } from "../../src/harness/pi/pi.ts";
 import { Harnesses } from "../../src/harness/registry.ts";
 import type { HarnessRuntime } from "../../src/harness/runtime.ts";
 import { type NativeTools, RolePlacements, RoleSpec } from "../../src/harness/role.ts";
-import { RestartState } from "../../src/runtime.ts";
+import { RestartState, ChildSessionJournal } from "../../src/runtime.ts";
 import { type FixtureOptions, openFixture, openPiFixture } from "../replay/fixture.ts";
 import type { Transcript } from "../replay/transcript.ts";
 
@@ -245,7 +245,9 @@ export const runToolScenario = (
     const prompt = prompts[scenario];
     const { message, events } = yield* Effect.gen(function* () {
       const runtime = yield* (yield* Harnesses).runtime(Harness.make(provider));
-      const policy = yield* continuationPolicy(spec, prompt, RestartState.make({}));
+      const policy = yield* continuationPolicy(spec, prompt, RestartState.make({})).pipe(
+        Effect.provideService(ChildSessionJournal, ChildSessionJournal.noop),
+      );
       const native = yield* runtime.open(
         spec,
         StartPrompt.make({ text: prompt }),

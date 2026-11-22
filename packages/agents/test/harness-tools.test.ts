@@ -20,7 +20,12 @@ import {
   hostToolNames,
   hostToolSet,
 } from "../src/harness/tools.ts";
-import { AgentResultError, RestartState, WorkingDirectory } from "../src/runtime.ts";
+import {
+  AgentResultError,
+  RestartState,
+  WorkingDirectory,
+  ChildSessionJournal,
+} from "../src/runtime.ts";
 import { collectLogs } from "./logs.ts";
 
 class NoteMissing extends Schema.TaggedError<
@@ -437,7 +442,9 @@ describe("usine tool sets through the registry", () => {
       const open = (selected: SessionSpec, withTools: boolean) =>
         Effect.gen(function* () {
           const runtime = yield* harnesses.runtime(selected.session.brain.harness);
-          const policy = yield* continuationPolicy(selected, "Probe", RestartState.make({}));
+          const policy = yield* continuationPolicy(selected, "Probe", RestartState.make({})).pipe(
+            Effect.provideService(ChildSessionJournal, ChildSessionJournal.noop),
+          );
           const start = StartPrompt.make({ text: "Probe" });
           return yield* withTools
             ? runtime.open(selected, start, policy, tools)

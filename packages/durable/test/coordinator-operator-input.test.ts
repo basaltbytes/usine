@@ -769,7 +769,7 @@ describe("event-driven coordinator operator input across restarts", () => {
             launch: (child) =>
               Effect.gen(function* () {
                 const running = yield* backend.launch(child);
-                const journal = yield* ChildSessionJournal.current;
+                const journal = yield* ChildSessionJournal;
                 const state = AttemptChannel.InterventionState.make({ held: false, paused: false });
                 for (const { id } of child.unread) yield* journal.delivered(id, Option.some(state));
                 return running;
@@ -824,7 +824,7 @@ describe("event-driven coordinator operator input across restarts", () => {
             ...backend,
             launch: (child) =>
               Effect.gen(function* () {
-                const journal = yield* ChildSessionJournal.current;
+                const journal = yield* ChildSessionJournal;
                 if (launches++ === 0) yield* journal.received(["task", "guidance"]);
                 return yield* backend.launch(child);
               }),

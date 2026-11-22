@@ -37,6 +37,7 @@ import {
   ChildRequest,
   ChildSessionLifecycle,
   SessionOperationError,
+  ChildSessionJournal,
 } from "@usine/agents/runtime";
 import {
   Context,
@@ -178,7 +179,7 @@ describe("durable AttemptRuntime", () => {
                   id,
                   complete: () => Effect.die(new Error("The test runs no completion")),
                   // Rebuilds the admitted child's request for the stub backend.
-                  open: (spec, start, { restored }) =>
+                  open: (spec, start, { restored, journal }) =>
                     Effect.gen(function* () {
                       assert(spec.session._tag === "ChildSession" && start._tag === "StartPrompt");
                       const request = ChildRequest.make({
@@ -191,7 +192,9 @@ describe("durable AttemptRuntime", () => {
                         worker: spec.worker,
                         machine: spec.machine,
                       });
-                      const running = yield* stub.launch(request);
+                      const running = yield* stub
+                        .launch(request)
+                        .pipe(Effect.provideService(ChildSessionJournal, journal));
                       return { running, active: false, recover: () => Effect.void };
                     }),
                   stop: () => Effect.void,

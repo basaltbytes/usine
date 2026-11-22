@@ -5,7 +5,12 @@ import { NodeServices } from "@effect/platform-node";
 import { Effect, FileSystem, Layer, Schema } from "effect";
 import { claudeChildLayer } from "../../src/harness/claude/claude.ts";
 import { ClaudeSdk, claudeSdkLive } from "../../src/harness/claude/sdk.ts";
-import { ChildRequest, HostLoginLock, type ChildBackend } from "../../src/runtime.ts";
+import {
+  ChildRequest,
+  ChildSessionJournal,
+  HostLoginLock,
+  type ChildBackend,
+} from "../../src/runtime.ts";
 import { childPidFile } from "../../src/child-host/child-host.ts";
 import type { Transcript } from "./transcript.ts";
 
@@ -170,7 +175,8 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
       };
     },
   });
-  const backend: Layer.Layer<ChildBackend> = claudeChildLayer.pipe(
+  const backend: Layer.Layer<ChildBackend | ChildSessionJournal> = claudeChildLayer.pipe(
+    Layer.provideMerge(ChildSessionJournal.layerNoop),
     Layer.provide(replaySdk),
     Layer.provide(Layer.succeed(HostLoginLock)({ withLock: () => (effect) => effect })),
     Layer.provide(NodeServices.layer),
