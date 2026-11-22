@@ -41,6 +41,7 @@ const unread = (index: number, message: string, options: Partial<Unread> = {}): 
 
 const inbox = (...messages: ReadonlyArray<Unread>): Inbox<Unread> => ({
   unread: messages,
+  own: [],
   counted: [],
   turn: Option.none(),
   saved: [],
@@ -184,6 +185,31 @@ describe("receipt matching on Codex's decoder", () => {
     );
   });
 
+  it("reads no message at the record of the session's own input with the same text", () => {
+    const { steps, inbox: after } = applied(
+      { ...inbox(unread(1, "The task")), own: ["The task"] },
+      [
+        ...codexReceipts({
+          _tag: "Recorded",
+          item: userMessage("task", "The task"),
+          turn: "turn-1",
+        }),
+        ...codexReceipts({
+          _tag: "Recorded",
+          item: userMessage("item-1", "The task"),
+          turn: "turn-1",
+        }),
+      ],
+    );
+    assert.deepStrictEqual(
+      steps.map(({ own }) => own),
+      [true, false],
+    );
+    assert.deepStrictEqual(reads(steps), [[id(1), "now"]]);
+    assert.deepStrictEqual(steps[0]?.save, Option.some(["task"]));
+    assert.deepStrictEqual(after.own, []);
+  });
+
   it("reads restored messages that a restored turn's items record, saving each item", () => {
     const { steps } = applied(
       inbox(unread(1, "Check the diff", { sent: false })),
@@ -199,6 +225,20 @@ describe("receipt matching on Codex's decoder", () => {
       steps.map(({ save }) => save),
       [Option.some(["task"]), Option.some(["task", "item-1"])],
     );
+  });
+
+  it("keeps the session's own inputs for its live records at a restored record", () => {
+    const { steps, inbox: after } = applied(
+      { ...inbox(unread(1, "Continue", { sent: false })), own: ["Continue"] },
+      codexReceipts({
+        _tag: "Restored",
+        turn: "turn-1",
+        items: [userMessage("item-1", "Continue")],
+        known: true,
+      }),
+    );
+    assert.deepStrictEqual(reads(steps), [[id(1), "restored"]]);
+    assert.deepStrictEqual(after.own, ["Continue"]);
   });
 
   it("counts a restored turn's items without reading when the session saved none before", () => {
@@ -232,6 +272,18 @@ describe("receipt matching on Pi's decoder", () => {
       }),
     );
     assert.deepStrictEqual(reads(steps), [[id(2), 4]]);
+  });
+
+  it("reads no message at the start of the session's own input with the same text", () => {
+    const start = piReceipts({
+      message: { role: "user", content: "The task", timestamp: 0 },
+      toolCalls: 0,
+    });
+    const { steps } = applied({ ...inbox(unread(1, "The task")), own: ["The task"] }, [
+      ...start,
+      ...start,
+    ]);
+    assert.deepStrictEqual(reads(steps), [[id(1), 0]]);
   });
 
   it("reads nothing at an assistant message", () => {

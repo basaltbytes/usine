@@ -172,7 +172,7 @@ export const piTurns = Effect.fn("PiTurns.start")(function* (options: {
   yield* options.gate.set(conversation.awaitUnpaused);
   const { restored } = options.policy;
   if (!restored.paused && Option.isNone(restored.idle) && Option.isSome(options.prompt))
-    yield* startTurn(options.prompt.value);
+    yield* conversation.sendOwn(options.prompt.value, startTurn);
   const send = (message: string) =>
     Effect.flatMap(Ref.get(launched), (started) =>
       started ? queueSteer(message) : startTurn(message).pipe(Effect.as("read" as const)),

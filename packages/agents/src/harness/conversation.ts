@@ -128,6 +128,7 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
         sent: submitted.includes(message.id),
         turnStart: Option.none(),
       })),
+      own: [],
       counted: options.items?.counted ?? [],
       turn: options.items?.turn ?? Option.none(),
       saved: options.items?.saved ?? [],
@@ -208,6 +209,13 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
         turnId: matched.repeated.value.turn,
         itemId: matched.repeated.value.id,
       });
+    if (matched.own)
+      yield* Effect.logDebug(
+        "The harness recorded the session's own input; no operator message read",
+        {
+          sessionId: session.id,
+        },
+      );
     if (matched.folded > 0)
       yield* Effect.logInfo(
         "A turn started without some sent operator messages; the session reads them where the turn folds them in",
@@ -258,6 +266,23 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
           toolCalls: calls,
         });
     });
+
+  /**
+   * Sends the session's own input `message`, such as its task, with `send`. The harness's record
+   * of it then reads no operator message with the same text.
+   */
+  const sendOwn = <A, E>(message: string, send: (message: string) => Effect.Effect<A, E>) =>
+    updateInbox((inbox) => ({ ...inbox, own: [...inbox.own, message] })).pipe(
+      Effect.andThen(send(message)),
+      Effect.onError(() =>
+        updateInbox((inbox) => {
+          const index = inbox.own.lastIndexOf(message);
+          return index < 0
+            ? inbox
+            : { ...inbox, own: inbox.own.filter((_, position) => position !== index) };
+        }),
+      ),
+    );
 
   yield* Effect.addFinalizer(() =>
     Effect.gen(function* () {
@@ -478,6 +503,7 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
           ),
     ),
     intervene,
+    sendOwn,
     recover: Effect.fn("SessionConversation.recover")(function* (
       tools: ReadonlyArray<InterruptedTool>,
       send: (
@@ -503,7 +529,8 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
           yield* finish(before.overdue.value, true);
         } else yield* finish("Session interrupted before its turn returned");
       }
-      // A new native process has read none of the queued messages.
+      // A new native process has read none of the queued messages and none of the earlier
+      // process's own inputs.
       const recovering = yield* Ref.updateAndGet(state, (current) => ({
         ...current,
         inbox: {
@@ -513,6 +540,7 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
             sent: false,
             turnStart: Option.none(),
           })),
+          own: [],
         },
       }));
       /** Records the harness's own input: it resumes an idle session and doesn't reply to the operator. */
@@ -540,9 +568,9 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
         recovering.inbox.unread.map(({ id, message }) => ({ id, message })),
         channel.emit,
         (message, id) =>
-          send(message, id).pipe(
-            Effect.flatMap((taken) => (id === undefined ? ownInput : took(id, taken))),
-          ),
+          id === undefined
+            ? sendOwn(message, send).pipe(Effect.andThen(ownInput))
+            : send(message, id).pipe(Effect.flatMap((taken) => took(id, taken))),
       );
     }, mutex.withPermits(1)),
     /**

@@ -593,7 +593,7 @@ const makeCodexSessions = Effect.gen(function* () {
       Option.isNone(policy.restored.idle) &&
       Option.isSome(prompt)
     )
-      yield* startTurn(prompt.value).pipe(Effect.catch(resume));
+      yield* conversation.sendOwn(prompt.value, startTurn).pipe(Effect.catch(resume));
     const consumeNotifications = Stream.unwrap(
       Effect.map(Ref.get(state), ({ connection }) => connection.notifications),
     ).pipe(

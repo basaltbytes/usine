@@ -456,6 +456,61 @@ describe("Pi child backend", () => {
     }),
   );
 
+  it.effect("reads no operator message at the start of the task that the message repeats", () =>
+    Effect.gen(function* () {
+      const listeners: Array<(event: PiSessionEvent) => void> = [];
+      const sdk = Layer.succeed(PiSdk)({
+        complete: noCompletion,
+        start: () =>
+          Promise.resolve({
+            _tag: "Started",
+            harnessSession: Option.none(),
+            model: childRequest.session.brain.model,
+            pool: "apiKeys",
+            tools: childTools,
+            session: {
+              messages: [],
+              dispose: () => {},
+              abort: () => Promise.resolve(),
+              subscribe: (listener) => {
+                listeners.push(listener);
+                return () => {};
+              },
+              steer: () => Promise.resolve("queued" as const),
+              prompt: () => new Promise<void>(() => {}),
+            },
+          }),
+      });
+      const echo = AttemptChannel.Steer.make({ message: childRequest.prompt });
+      const reads: Array<string> = [];
+      /** Starts a user message with the task's text, as Pi does when it reads an input. */
+      const start = () => {
+        const message: PiMessage = { role: "user", content: childRequest.prompt, timestamp: 0 };
+        for (const listener of listeners) listener({ type: "message_start", message });
+      };
+      const readAtTask = yield* Effect.gen(function* () {
+        const running = yield* (yield* ChildBackend).launch(childRequest);
+        yield* running.intervene(echo, (delivered) =>
+          Effect.sync(() => {
+            reads.push(`${Option.isSome(delivered) ? "read" : "unread"} ${echo.id}`);
+          }),
+        );
+        // The task that the session sent first starts after the operator's steer is queued.
+        start();
+        for (let spin = 0; spin < 100; spin += 1) yield* Effect.yieldNow;
+        const readAtTask = [...reads];
+        start();
+        for (let spin = 0; reads.length === 0; spin += 1) {
+          if (spin > 1_000) return assert.fail("the read was never reported");
+          yield* Effect.yieldNow;
+        }
+        return readAtTask;
+      }).pipe(Effect.scoped, Effect.provide(piChild.pipe(Layer.provideMerge(sdk))));
+      assert.deepStrictEqual(readAtTask, []);
+      assert.deepStrictEqual(reads, [`read ${echo.id}`]);
+    }),
+  );
+
   it.effect("reports one read for a Pi message start that arrives twice", () =>
     Effect.gen(function* () {
       const listeners: Array<(event: PiSessionEvent) => void> = [];
