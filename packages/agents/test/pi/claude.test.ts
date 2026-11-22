@@ -11,6 +11,7 @@ import { BrainSpec, Effort, Harness, ModelId } from "@usine/core/agent/brain";
 import {
   type AgentSessionEvent,
   AgentSessionId,
+  BackgroundWork,
   ChildSession,
   HarnessSession,
   HarnessSessionId,
@@ -22,6 +23,7 @@ import {
 } from "@usine/core/agent/session";
 import { AgentName } from "@usine/core/agent";
 import {
+  Array as Arr,
   Cause,
   DateTime,
   Deferred,
@@ -2216,7 +2218,11 @@ describe("Claude child backend", () => {
             {
               type: "system",
               subtype: "background_tasks_changed",
-              tasks: [{ task_id: "gate", task_type: "local_bash", description: "Run gate" }],
+              tasks: [
+                { task_id: "gate", task_type: "local_bash", description: "Run gate" },
+                { task_id: "review", task_type: "local_agent", description: "Review the diff" },
+                { task_id: "spec", task_type: "local_workflow" },
+              ],
             },
             {
               type: "result",
@@ -2225,6 +2231,17 @@ describe("Claude child backend", () => {
               queued_turn_count: 0,
             },
             { type: "system", subtype: "session_state_changed", state: "idle" },
+            // A watcher that starts leaves the background work unchanged, so no event is emitted.
+            {
+              type: "system",
+              subtype: "background_tasks_changed",
+              tasks: [
+                { task_id: "gate", task_type: "local_bash", description: "Run gate" },
+                { task_id: "review", task_type: "local_agent", description: "Review the diff" },
+                { task_id: "spec", task_type: "local_workflow" },
+                { task_id: "watcher", ambient: true },
+              ],
+            },
             // An empty task snapshot is not a final answer; the notification still needs a turn.
             { type: "system", subtype: "background_tasks_changed", tasks: [] },
             { type: "system", subtype: "task_notification", task_id: "gate", status: "completed" },
@@ -2253,7 +2270,34 @@ describe("Claude child backend", () => {
           assert.strictEqual(result.message, "Gate passed; PR published");
           assert.deepStrictEqual(
             events.map((event) => event._tag),
-            ["SessionStarted", "ProviderAnswered", "TextOutput", "SessionFinished"],
+            [
+              "SessionStarted",
+              "BackgroundWorkUpdated",
+              "BackgroundWorkUpdated",
+              "ProviderAnswered",
+              "TextOutput",
+              "SessionFinished",
+            ],
+          );
+          assert.deepStrictEqual(
+            events.flatMap((event) =>
+              event._tag === "BackgroundWorkUpdated"
+                ? [Option.map(event.work, Arr.fromIterable)]
+                : [],
+            ),
+            [
+              Option.some([
+                BackgroundWork.make({ id: "gate", kind: "command", description: "Run gate" }),
+                BackgroundWork.make({
+                  id: "review",
+                  kind: "agent",
+                  description: "Review the diff",
+                }),
+                BackgroundWork.make({ id: "spec", kind: "other", description: "" }),
+              ]),
+              Option.some([]),
+            ],
+            "the child reports each change to its background work once",
           );
         }).pipe(Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk)))),
       );
@@ -2308,7 +2352,7 @@ describe("Claude child backend", () => {
       queued_turn_count: 0,
     });
     const waiting = (lines: ReadonlyArray<string>) =>
-      lines.some((line) => line.includes("Claude child is waiting for background work"));
+      lines.some((line) => line.includes("Session is waiting for its background work"));
     /** A request whose child waits at most two minutes for background work after an answer. */
     const limited = (host?: ChildHost) =>
       ChildRequest.make({
@@ -2318,7 +2362,7 @@ describe("Claude child backend", () => {
 
     /** The number of background task snapshots that the child logged. */
     const snapshots = (lines: ReadonlyArray<string>) =>
-      lines.filter((line) => line.includes("Claude background work changed")).length;
+      lines.filter((line) => line.includes("Session reported its background work")).length;
     /**
      * Frames that Claude Code sends while the child waits, none of which starts a turn: the end of
      * its background task, a rate-limit event, and, with session state, another `idle` report. The
@@ -2339,7 +2383,7 @@ describe("Claude child backend", () => {
     const cancelled = (lines: ReadonlyArray<string>, reason: string) =>
       lines.some(
         (line) =>
-          line.includes("Claude child cancelled the wait limit for its background work") &&
+          line.includes("Session cancelled the wait limit for its background work") &&
           line.includes(`"reason":"${reason}"`),
       );
 
@@ -2382,7 +2426,7 @@ describe("Claude child backend", () => {
             assert.strictEqual((yield* Fiber.join(result)).message, "Fixed the failing test");
             assert.isFalse(
               logs.lines.some((line) =>
-                line.includes("Claude child cancelled the wait limit for its background work"),
+                line.includes("Session cancelled the wait limit for its background work"),
               ),
               "no limit ran, so none is cancelled",
             );
@@ -2445,7 +2489,7 @@ describe("Claude child backend", () => {
           assert.strictEqual(logs.lineLevels[outlasted], "Warn", "the limit logs a warning");
           assert.include(
             logs.lines[outlasted],
-            quiet.length === 0 ? '"backgroundTaskIds":["ci-watch"]' : '"backgroundTaskIds":[]',
+            quiet.length === 0 ? '"backgroundWorkIds":["ci-watch"]' : '"backgroundWorkIds":[]',
           );
           assert.include(logs.lines[outlasted], '"limit":"2m"');
           assert.isFalse(
@@ -2915,7 +2959,7 @@ describe("Claude child backend", () => {
           yield* Queue.offer(outputs[0]!, lost);
           while (!logs.lines.some((line) => line.includes("Resumed the Claude child's session")))
             yield* Effect.yieldNow;
-          assert.isTrue(cancelled(logs.lines, "process resumed"));
+          assert.isTrue(cancelled(logs.lines, "process restarted"));
           yield* TestClock.adjust("5 minutes");
           assert.isUndefined(result.pollUnsafe(), "the continuation turn keeps the child open");
           yield* Queue.offer(outputs.at(-1)!, answered("Continued"));
@@ -2965,6 +3009,15 @@ describe("Claude child backend", () => {
             ),
             [true],
             "the finish of the kept answer reports that the limit returned it",
+          );
+          assert.deepStrictEqual(
+            events.flatMap((event) =>
+              event._tag === "BackgroundWorkUpdated"
+                ? [Option.map(event.work, (work) => work.map(({ id }) => id))]
+                : [],
+            ),
+            [Option.some(["ci-watch"]), Option.none()],
+            "the new process hasn't reported the background work of the lost one",
           );
         }).pipe(Effect.provide(layer.pipe(Layer.provideMerge(logs.layer))), Effect.scoped);
       }),

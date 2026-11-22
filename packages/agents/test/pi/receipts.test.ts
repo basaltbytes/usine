@@ -320,6 +320,7 @@ describe("a harness adapter that supplies only a receipt decoder", () => {
         send: () => Effect.succeed("queued"),
         pause: Effect.void,
         beforeFinish: Effect.void,
+        maxBackgroundWaitMinutes: Option.none(),
       });
       const steer = Steer.make({ message: "Run the tests." });
       const onDelivery = yield* Deferred.make<boolean>();

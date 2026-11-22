@@ -60953,6 +60953,9 @@
                 "$ref": "#/components/schemas/Agent_SessionResumedEncoded"
               },
               {
+                "$ref": "#/components/schemas/Agent_BackgroundWorkUpdatedEncoded"
+              },
+              {
                 "$ref": "#/components/schemas/Agent_OperatorMessageReadEncoded"
               },
               {
@@ -61114,6 +61117,67 @@
           "_tag",
           "session",
           "messageId"
+        ],
+        "additionalProperties": false
+      },
+      "Agent_BackgroundWorkUpdatedEncoded": {
+        "type": "object",
+        "properties": {
+          "_tag": {
+            "type": "string",
+            "enum": [
+              "BackgroundWorkUpdated"
+            ]
+          },
+          "session": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Agent_ParentSessionEncoded"
+              },
+              {
+                "$ref": "#/components/schemas/Agent_ChildSessionEncoded"
+              },
+              {
+                "$ref": "#/components/schemas/Agent_RoleSessionEncoded"
+              }
+            ]
+          },
+          "work": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Agent_BackgroundWorkEncoded"
+            }
+          }
+        },
+        "required": [
+          "_tag",
+          "session"
+        ],
+        "additionalProperties": false
+      },
+      "Agent_BackgroundWorkEncoded": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "command",
+              "agent",
+              "other"
+            ]
+          },
+          "description": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "description"
         ],
         "additionalProperties": false
       },
@@ -71110,6 +71174,9 @@
               },
               {
                 "$ref": "#/components/schemas/Agent_SessionResumedEncoded"
+              },
+              {
+                "$ref": "#/components/schemas/Agent_BackgroundWorkUpdatedEncoded"
               },
               {
                 "$ref": "#/components/schemas/Agent_OperatorMessageReadEncoded"

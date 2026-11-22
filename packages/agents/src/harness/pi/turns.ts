@@ -61,6 +61,8 @@ export const piTurns = Effect.fn("PiTurns.start")(function* (options: {
   readonly prompt: Option.Option<string>;
   readonly policy: ContinuationPolicy;
   readonly lastText: () => string | undefined;
+  /** The wait for background work after an answer, in minutes, or `None` for no limit. */
+  readonly maxBackgroundWaitMinutes: Option.Option<number>;
   readonly error: (
     operation: "stream" | "steer" | "interrupt",
     cause: unknown,
@@ -132,6 +134,7 @@ export const piTurns = Effect.fn("PiTurns.start")(function* (options: {
       ),
     pause: Effect.void,
     beforeFinish: Effect.void,
+    maxBackgroundWaitMinutes: options.maxBackgroundWaitMinutes,
   });
   /** Records once that Pi saved a user message, which its conversation file then holds. */
   const recordPrompt = yield* Effect.cached(

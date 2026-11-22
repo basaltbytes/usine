@@ -329,6 +329,7 @@ const makePiSessions = Effect.gen(function* () {
               prompt,
               policy,
               lastText: subscription.lastText,
+              maxBackgroundWaitMinutes: spec.maxBackgroundWaitMinutes,
               error: (operation, cause) =>
                 childError(operation, spec, `Pi child ${operation} failed`, cause),
             });
