@@ -71,6 +71,7 @@ const start = (scenario: string, environment: Record<string, string> = {}, pream
         ...environment,
         FAKE_SERVE_SCENARIO: scenario,
         OPENCODE_SERVER_PASSWORD: "inherited",
+        OPENCODE_SERVER_USERNAME: "inherited",
       },
       stdio: ["pipe", "pipe", "pipe"],
     },

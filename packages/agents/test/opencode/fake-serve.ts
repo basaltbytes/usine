@@ -28,6 +28,8 @@ const scenario = process.env.FAKE_SERVE_SCENARIO ?? "ready";
 /** The exit code at end of input, from `FAKE_SERVE_EXIT_CODE`. */
 const exitCode = Number(process.env.FAKE_SERVE_EXIT_CODE ?? "7");
 const password = process.env.OPENCODE_PASSWORD;
+// Like OpenCode's server, whose documentation lets this variable replace the user name.
+const userName = process.env.OPENCODE_SERVER_USERNAME ?? "opencode";
 // Like `serve --stdio`, which keeps the password from the commands it runs.
 delete process.env.OPENCODE_PASSWORD;
 const SLOW_MS = 300;
@@ -193,7 +195,7 @@ if (scenario === "exit-before-ready") {
 }
 process.stderr.write(`fake serve: started with ${process.argv.slice(1).join(" ")}\n`);
 const server = createServer((request, response) => {
-  if (request.headers.authorization !== `Basic ${btoa(`opencode:${password}`)}`)
+  if (request.headers.authorization !== `Basic ${btoa(`${userName}:${password}`)}`)
     return json(response, 401, { _tag: "UnauthorizedError" });
   const route = routes.get(`${request.method} ${request.url?.split("?")[0]}`);
   if (route === undefined) {

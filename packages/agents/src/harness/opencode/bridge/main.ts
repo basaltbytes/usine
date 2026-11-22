@@ -231,9 +231,11 @@ const main = () => {
   // The password stays in this process and in serve's environment, which serve clears at start.
   const password = randomBytes(32).toString("base64url");
   const authorization = `Basic ${Buffer.from(`opencode:${password}`).toString("base64")}`;
+  // OpenCode's documentation lets `OPENCODE_SERVER_USERNAME` replace the user name `opencode`.
   const {
     OPENCODE_PASSWORD: _inheritedPassword,
     OPENCODE_SERVER_PASSWORD: _inheritedServerPassword,
+    OPENCODE_SERVER_USERNAME: _inheritedUserName,
     ...environment
   } = process.env;
   const serve = spawn(command, [...args, ...SERVE_ARGUMENTS], {
