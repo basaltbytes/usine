@@ -15,7 +15,8 @@ import {
 
 import { ChatGptLogins } from "../chatgpt/logins.ts";
 import type { EgressAllowlist } from "../egress/egress.ts";
-import type { LlmProvider, LlmProviders } from "../llm/llm.ts";
+import type { ModelProviderCatalog } from "@usine/core/agent/provider";
+import { type LlmProviders, upstreamVariable } from "../llm/llm.ts";
 import { SettingsInForce } from "../settings.ts";
 import {
   egressAllowlistPath,
@@ -57,58 +58,41 @@ const restartValues = ({ domain, adminToken, callerKey, listeners }: RestartSett
   USINE_GATEWAY_ADMIN_PORT: String(listeners.admin.port),
 });
 
-/** Returns each credential variable with its value, or `undefined` if unset. */
-const credentialValues = ({
-  "anthropic-messages": anthropic,
-  "openai-responses": openai,
-}: LlmProviders) => {
-  const anthropicCredential = Option.getOrUndefined(
-    Option.map(anthropic, (provider) => provider.credential),
+/** Returns each credential variable of `catalog` with its value, or `undefined` if unset. */
+const credentialValues = (catalog: ModelProviderCatalog, providers: LlmProviders) =>
+  Object.fromEntries(
+    catalog.providers.flatMap((provider) => {
+      const held = providers[provider.slot]?.credential;
+      const value =
+        held === undefined
+          ? undefined
+          : held._tag === "ApiKey"
+            ? Redacted.value(held.key)
+            : held._tag === "AnthropicSubscriptionToken"
+              ? Redacted.value(held.token)
+              : held.authFile;
+      const set = held?._tag === "ApiKey" ? "ApiKey" : "Subscription";
+      return provider.credentials.map(
+        ({ _tag, variable }) => [variable, _tag === set ? value : undefined] as const,
+      );
+    }),
   );
-  const openAiCredential = Option.getOrUndefined(
-    Option.map(openai, (provider) => provider.credential),
-  );
-  return {
-    ANTHROPIC_API_KEY:
-      anthropicCredential?._tag === "AnthropicApiKey"
-        ? Redacted.value(anthropicCredential.key)
-        : undefined,
-    USINE_GATEWAY_ANTHROPIC_SUBSCRIPTION_TOKEN:
-      anthropicCredential?._tag === "AnthropicSubscriptionToken"
-        ? Redacted.value(anthropicCredential.token)
-        : undefined,
-    OPENAI_API_KEY:
-      openAiCredential?._tag === "OpenAiApiKey" ? Redacted.value(openAiCredential.key) : undefined,
-    USINE_GATEWAY_CHATGPT_AUTH_FILE:
-      openAiCredential?._tag === "ChatGptLogin" ? openAiCredential.authFile : undefined,
-  };
-};
-
-/** The variable that sets each credential's upstream. */
-const UPSTREAM_VARIABLES = {
-  AnthropicApiKey: "USINE_GATEWAY_ANTHROPIC_UPSTREAM",
-  AnthropicSubscriptionToken: "USINE_GATEWAY_ANTHROPIC_UPSTREAM",
-  OpenAiApiKey: "USINE_GATEWAY_OPENAI_UPSTREAM",
-  ChatGptLogin: "USINE_GATEWAY_CHATGPT_UPSTREAM",
-} as const satisfies Record<LlmProvider["credential"]["_tag"], string>;
 
 /** Returns the upstream variables that changed, for providers with the same kind of credential before and after. */
-const changedUpstreams = (before: LlmProviders, after: LlmProviders): ReadonlyArray<string> => {
-  const changed = (was: Option.Option<LlmProvider>, is: Option.Option<LlmProvider>) =>
-    Option.toArray(
-      Option.flatMap(
-        Option.zipWith(was, is, (left, right) => [left, right] as const),
-        ([left, right]) =>
-          left.credential._tag === right.credential._tag && left.upstream !== right.upstream
-            ? Option.some(UPSTREAM_VARIABLES[right.credential._tag])
-            : Option.none(),
-      ),
-    );
-  return [
-    ...changed(before["anthropic-messages"], after["anthropic-messages"]),
-    ...changed(before["openai-responses"], after["openai-responses"]),
-  ];
-};
+const changedUpstreams = (
+  catalog: ModelProviderCatalog,
+  before: LlmProviders,
+  after: LlmProviders,
+): ReadonlyArray<string> =>
+  catalog.providers.flatMap((provider) => {
+    const was = before[provider.slot];
+    const is = after[provider.slot];
+    if (was === undefined || is === undefined) return [];
+    return was.credential._tag === is.credential._tag &&
+      Option.getOrNull(was.upstream) !== Option.getOrNull(is.upstream)
+      ? Option.toArray(upstreamVariable(provider, is))
+      : [];
+  });
 
 /** Returns the names of the variables whose values differ, never the values. */
 const changedVariables = (
@@ -160,33 +144,36 @@ const keptProviders = (error: string) =>
   );
 
 /** The new LLM providers, or `None` if they're invalid. */
-const nextProviders = llmProviders.pipe(
-  Effect.asSome,
-  Effect.catchTags({
-    ConfigError: ({ message }) => keptProviders(message),
-    ConflictingProviderCredentials: ({ message }) => keptProviders(message),
-    ChatGptAuthFileError: ({ message }) => keptProviders(message),
-  }),
-);
+const nextProviders = (catalog: ModelProviderCatalog) =>
+  llmProviders(catalog).pipe(
+    Effect.asSome,
+    Effect.catchTags({
+      ConfigError: ({ message }) => keptProviders(message),
+      ConflictingProviderCredentials: ({ message }) => keptProviders(message),
+      ChatGptAuthFileError: ({ message }) => keptProviders(message),
+    }),
+  );
 
 /**
  * Reads a ChatGPT login's auth file again after a reload, so a login the operator copied
  * replaces the one in memory. An unreadable file keeps the login in memory.
  */
-const reloadChatGptLogin = (logins: ChatGptLogins["Service"], providers: LlmProviders) => {
-  const login = Option.getOrUndefined(
-    Option.map(providers["openai-responses"], ({ credential }) => credential),
-  );
-  if (login?._tag !== "ChatGptLogin") return Effect.void;
-  return logins.reload(login).pipe(
-    Effect.catchTag("ChatGptAuthFileError", ({ message }) =>
-      Effect.logError("Kept the ChatGPT login in memory: its auth file could not be read", {
-        authFile: login.authFile,
-        error: message,
-      }),
+const reloadChatGptLogins = (logins: ChatGptLogins["Service"], providers: LlmProviders) =>
+  Effect.forEach(
+    Object.values(providers).flatMap(({ credential }) =>
+      credential._tag === "ChatGptLogin" ? [credential] : [],
     ),
+    (login) =>
+      logins.reload(login).pipe(
+        Effect.catchTag("ChatGptAuthFileError", ({ message }) =>
+          Effect.logError("Kept the ChatGPT login in memory: its auth file could not be read", {
+            authFile: login.authFile,
+            error: message,
+          }),
+        ),
+      ),
+    { discard: true },
   );
-};
 
 /** Returns the reload for a Gateway started with `started`, reading settings from the environment files over `base`. */
 export const gatewayReloadLayer = (started: StartupSettings, base: ConfigProvider.ConfigProvider) =>
@@ -199,7 +186,7 @@ export const gatewayReloadLayer = (started: StartupSettings, base: ConfigProvide
       const crypto = yield* Crypto.Crypto;
       const credentials = yield* Effect.serviceOption(ProviderCredentials);
       const oneAtATime = yield* Semaphore.make(1);
-      const { domain, adminToken, callerKey } = started.settings;
+      const { domain, adminToken, callerKey, catalog } = started.settings;
       const startedRestartSettings: RestartSettings = {
         domain,
         adminToken,
@@ -212,7 +199,7 @@ export const gatewayReloadLayer = (started: StartupSettings, base: ConfigProvide
           yield* checkRestartSettings(startedRestartSettings);
           const previous = yield* inForce.current;
           const allowlist = yield* nextAllowlist(previous.egress);
-          const providers = yield* nextProviders;
+          const providers = yield* nextProviders(catalog);
           const next = {
             egress: Option.getOrElse(allowlist.egress, () => previous.egress),
             providers: yield* Option.match(credentials, {
@@ -221,7 +208,7 @@ export const gatewayReloadLayer = (started: StartupSettings, base: ConfigProvide
             }),
           };
           yield* inForce.replace(next);
-          if (Option.isSome(providers)) yield* reloadChatGptLogin(logins, next.providers);
+          if (Option.isSome(providers)) yield* reloadChatGptLogins(logins, next.providers);
           yield* Effect.logInfo("Reloaded the gateway settings", {
             environmentFiles: source.files,
             allowlist: Option.isSome(allowlist.egress) ? "reloaded" : "kept",
@@ -230,10 +217,10 @@ export const gatewayReloadLayer = (started: StartupSettings, base: ConfigProvide
             providers: Option.isSome(providers) ? "reloaded" : "kept",
             changed: [
               ...changedVariables(
-                credentialValues(previous.providers),
-                credentialValues(next.providers),
+                credentialValues(catalog, previous.providers),
+                credentialValues(catalog, next.providers),
               ),
-              ...changedUpstreams(previous.providers, next.providers),
+              ...changedUpstreams(catalog, previous.providers, next.providers),
             ],
           });
         }).pipe(Effect.provideService(ConfigProvider.ConfigProvider, source.provider));

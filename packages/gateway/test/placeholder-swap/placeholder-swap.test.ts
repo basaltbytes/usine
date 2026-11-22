@@ -29,21 +29,10 @@ import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/http";
 import { HttpApiClient } from "effect/http-api";
 import { AttachRequest, GatewayAdminApi } from "../../src/admin/api.ts";
 import { AnonymousCredential } from "../../src/attachment/attachment.ts";
-import {
-  AnthropicProvider,
-  AnthropicSubscriptionToken,
-  type LlmProviders,
-} from "../../src/llm/llm.ts";
+import { LlmProvider, AnthropicSubscriptionToken, type LlmProviders } from "../../src/llm/llm.ts";
 import { GatewayAddresses, gatewayLayer } from "../../src/node/node.ts";
-import { UpstreamBase } from "../../src/upstream.ts";
-import {
-  ADMIN_TOKEN_VALUE,
-  NO_PROVIDERS,
-  REPOSITORY,
-  WORKER,
-  secret,
-  settingsLayer,
-} from "../fixtures.ts";
+import { UpstreamBase } from "@usine/core/agent/provider";
+import { ADMIN_TOKEN_VALUE, REPOSITORY, WORKER, secret, settingsLayer } from "../fixtures.ts";
 
 /*
  * Checks whether Claude Code works when the Worker has only a placeholder subscription token
@@ -233,13 +222,10 @@ const swap = (providers: LlmProviders) =>
   );
 
 const subscription = (upstream: string, token: string): LlmProviders => ({
-  ...NO_PROVIDERS,
-  "anthropic-messages": Option.some(
-    AnthropicProvider.make({
-      upstream: UpstreamBase.make(upstream),
-      credential: AnthropicSubscriptionToken.make({ token: secret(token) }),
-    }),
-  ),
+  "anthropic-messages": LlmProvider.make({
+    upstream: Option.some(UpstreamBase.make(upstream)),
+    credential: AnthropicSubscriptionToken.make({ token: secret(token) }),
+  }),
 });
 
 const egressAttempts: Array<string> = [];

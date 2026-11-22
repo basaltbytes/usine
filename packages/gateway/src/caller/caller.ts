@@ -205,26 +205,49 @@ export const tokenFromAuthorization = (value: string): Option.Option<CallerToken
   );
 };
 
+/** The headers that `presentedToken` reads before any protocol's key header. */
+const READ_FIRST: ReadonlySet<string> = new Set([
+  GATEWAY_TOKEN_HEADER,
+  "authorization",
+  "x-api-key",
+]);
+
+/** Returns the trimmed, nonempty value of header `name` as a token. */
+const headerToken = (headers: Headers.Headers, name: string): Option.Option<CallerToken> =>
+  Headers.get(headers, name).pipe(
+    Option.filter((value) => value.trim() !== ""),
+    Option.map((value) => Redacted.make(value.trim())),
+  );
+
 /**
  * Returns the caller token from the request headers, checking the gateway header, then
  * `Authorization` (gh, Codex, git, and Claude Code with `ANTHROPIC_AUTH_TOKEN` or
- * `CLAUDE_CODE_OAUTH_TOKEN`), then `x-api-key` (Claude Code with `ANTHROPIC_API_KEY`).
+ * `CLAUDE_CODE_OAUTH_TOKEN`), then `x-api-key` (Claude Code with `ANTHROPIC_API_KEY`), then each of
+ * `keyHeaders`, where a harness sends a provider protocol's key, such as `x-goog-api-key`.
  */
-export const presentedToken = (headers: Headers.Headers): Option.Option<CallerToken> =>
-  Headers.get(headers, GATEWAY_TOKEN_HEADER).pipe(
-    Option.filter((value) => value.trim() !== ""),
-    Option.map((value) => Redacted.make(value.trim())),
+export const presentedToken = (
+  headers: Headers.Headers,
+  keyHeaders: ReadonlyArray<string> = [],
+): Option.Option<CallerToken> =>
+  headerToken(headers, GATEWAY_TOKEN_HEADER).pipe(
     Option.orElse(() =>
       Headers.get(headers, "authorization").pipe(Option.flatMap(tokenFromAuthorization)),
     ),
+    Option.orElse(() => headerToken(headers, "x-api-key")),
     Option.orElse(() =>
-      Headers.get(headers, "x-api-key").pipe(
-        Option.filter((value) => value.trim() !== ""),
-        Option.map((value) => Redacted.make(value.trim())),
+      Option.firstSomeOf(
+        keyHeaders
+          .filter((name) => !READ_FIRST.has(name))
+          .map((name) => headerToken(headers, name)),
       ),
     ),
   );
 
-/** Returns `headers` without any header that can contain a caller credential. */
-export const withoutCallerCredentials = (headers: Headers.Headers): Headers.Headers =>
-  CALLER_CREDENTIAL_HEADERS.reduce((remaining, name) => Headers.remove(remaining, name), headers);
+/**
+ * Returns `headers` without any header that can contain a caller credential, including each of
+ * `keyHeaders`.
+ */
+export const withoutCallerCredentials = (
+  headers: Headers.Headers,
+  keyHeaders: ReadonlyArray<string> = [],
+): Headers.Headers => Headers.removeMany(headers, [...CALLER_CREDENTIAL_HEADERS, ...keyHeaders]);

@@ -1,5 +1,11 @@
-import { Schema } from "effect";
-import { LlmProviderName } from "../llm/llm.ts";
+import {
+  type GatewaySlot,
+  GatewaySlot as GatewaySlotSchema,
+  type ModelProvider,
+  modelProviders,
+  SubscriptionLogin,
+} from "@usine/core/agent/provider";
+import { Array as Arr, Option, Schema } from "effect";
 
 const Secret = Schema.Redacted(Schema.NonEmptyString);
 export const ProviderCredential = Schema.Union([
@@ -9,10 +15,32 @@ export const ProviderCredential = Schema.Union([
   Schema.Struct({ kind: Schema.Literal("openai-api-key"), secret: Secret }),
 ]);
 export type ProviderCredential = typeof ProviderCredential.Type;
-export const credentialProvider = (credential: ProviderCredential): LlmProviderName =>
-  credential.kind === "claude-subscription" || credential.kind === "anthropic-api-key"
-    ? "anthropic-messages"
-    : "openai-responses";
+
+/** Returns the provider whose subscription credential signs in with `login`. */
+const providerOfLogin = (login: SubscriptionLogin): Option.Option<ModelProvider> =>
+  Arr.findFirst(modelProviders.providers, ({ credentials }) =>
+    credentials.some(
+      (credential) => credential._tag === "Subscription" && credential.login === login,
+    ),
+  );
+
+const SUBSCRIPTION = /^(.+)-subscription$/u;
+const isLogin = Schema.is(SubscriptionLogin);
+
+/**
+ * Returns the slot of the provider that a credential kind names: `<login>-subscription` names the
+ * provider whose subscription signs in with that login, and `<provider ID>-api-key` the provider
+ * with that ID.
+ */
+export const credentialProvider = (credential: ProviderCredential): GatewaySlot => {
+  const login = SUBSCRIPTION.exec(credential.kind)?.[1];
+  const provider =
+    login !== undefined && isLogin(login)
+      ? providerOfLogin(login)
+      : modelProviders.get(credential.kind.slice(0, -"-api-key".length));
+  // SAFETY: each kind of `ProviderCredential` names a provider of `modelProviders`; the gateway's tests check it.
+  return Option.getOrThrow(Option.map(provider, ({ slot }) => slot));
+};
 
 export class ProviderCredentialError extends Schema.TaggedError<
   ProviderCredentialError,
@@ -20,7 +48,7 @@ export class ProviderCredentialError extends Schema.TaggedError<
 >()("ProviderCredentialError", { message: Schema.String }) {}
 
 export const ProviderConnection = Schema.Struct({
-  provider: LlmProviderName,
+  provider: GatewaySlotSchema,
   credential: Schema.NullOr(Schema.Literals(["api-key", "subscription"])),
   expiresAt: Schema.NullOr(Schema.String),
   lastRefresh: Schema.NullOr(Schema.String),
@@ -30,12 +58,16 @@ export const ProviderConnection = Schema.Struct({
 export type ProviderConnection = typeof ProviderConnection.Type;
 export const ProviderConnections = Schema.Struct({ providers: Schema.Array(ProviderConnection) });
 /** A provider whose status could not be read on its destination, such as a missing harness. */
-const ProviderUnavailable = Schema.Struct({ provider: LlmProviderName, error: Schema.String });
+const ProviderUnavailable = Schema.Struct({ provider: GatewaySlotSchema, error: Schema.String });
 
-export const LoginProvider = Schema.Literals(["claude", "chatgpt"]);
-export type LoginProvider = typeof LoginProvider.Type;
-export const loginLlmProvider = (provider: LoginProvider): LlmProviderName =>
-  provider === "claude" ? "anthropic-messages" : "openai-responses";
+/** A subscription login that usine signs in on a target. */
+export const LoginProvider = SubscriptionLogin;
+export type LoginProvider = SubscriptionLogin;
+
+/** Returns the slot of the provider whose subscription signs in with `login`. */
+export const loginLlmProvider = (login: LoginProvider): GatewaySlot =>
+  // SAFETY: each login of `SubscriptionLogin` belongs to a provider of `modelProviders`; the gateway's tests check it.
+  Option.getOrThrow(Option.map(providerOfLogin(login), ({ slot }) => slot));
 export const ProviderLoginState = Schema.Union([
   Schema.Struct({ status: Schema.Literal("starting") }),
   Schema.Struct({

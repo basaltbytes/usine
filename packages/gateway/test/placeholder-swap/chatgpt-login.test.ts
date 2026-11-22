@@ -29,13 +29,12 @@ import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/http";
 import { HttpApiClient } from "effect/http-api";
 import { AttachRequest, GatewayAdminApi } from "../../src/admin/api.ts";
 import { AnonymousCredential } from "../../src/attachment/attachment.ts";
-import { ChatGptLogin, HostFilePath, OpenAiProvider } from "../../src/llm/llm.ts";
+import { ChatGptLogin, HostFilePath, LlmProvider } from "../../src/llm/llm.ts";
 import { GatewayAddresses, gatewayLayer } from "../../src/node/node.ts";
-import { UpstreamBase } from "../../src/upstream.ts";
+import { UpstreamBase } from "@usine/core/agent/provider";
 import {
   ADMIN_TOKEN_VALUE,
   CHATGPT_ACCOUNT,
-  NO_PROVIDERS,
   REPOSITORY,
   WORKER,
   authFileText,
@@ -240,16 +239,13 @@ describe("ChatGPT login at the gateway", () => {
           ),
         );
         const providers = {
-          ...NO_PROVIDERS,
-          "openai-responses": Option.some(
-            OpenAiProvider.make({
-              upstream: UpstreamBase.make(`${standIn.origin}/backend-api/codex`),
-              credential: ChatGptLogin.make({
-                authFile: HostFilePath.make(authFile),
-                tokenUrl: UpstreamBase.make(`${standIn.origin}/oauth/token`),
-              }),
+          "openai-responses": LlmProvider.make({
+            upstream: Option.some(UpstreamBase.make(`${standIn.origin}/backend-api/codex`)),
+            credential: ChatGptLogin.make({
+              authFile: HostFilePath.make(authFile),
+              tokenUrl: UpstreamBase.make(`${standIn.origin}/oauth/token`),
             }),
-          ),
+          }),
         };
 
         const result = yield* Effect.gen(function* () {

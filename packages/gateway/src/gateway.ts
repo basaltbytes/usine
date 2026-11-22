@@ -44,18 +44,14 @@ export { GITHUB_ORIGINS, type GitHubOrigins } from "./github/github.ts";
 export { ChatGptAuthFileError, ChatGptTokens } from "./chatgpt/auth-file.ts";
 export { CHATGPT_TOKEN_URL, ChatGptLoginUnavailable, ChatGptLogins } from "./chatgpt/logins.ts";
 export {
-  AnthropicApiKey,
-  AnthropicCredential,
-  AnthropicProvider,
   AnthropicSubscriptionToken,
+  ApiKey,
   type ChatGptAccess,
   ChatGptLogin,
   HostFilePath,
-  type LlmProvider,
+  LlmCredential,
+  LlmProvider,
   type LlmProviders,
-  OpenAiApiKey,
-  OpenAiCredential,
-  OpenAiProvider,
 } from "./llm/llm.ts";
 export { endToEndHeaders } from "./proxy/forward.ts";
 export { GatewayProxy, REFUSAL_HEADER, RefusalReason } from "./proxy/proxy.ts";
@@ -68,7 +64,7 @@ export {
   type ReloadableSettings,
   SettingsInForce,
 } from "./settings.ts";
-export { UpstreamBase } from "./upstream.ts";
+export { UpstreamBase } from "@usine/core/agent/provider";
 
 /**
  * The Gateway's shared state for one process: the attachment store, the caller token signer,

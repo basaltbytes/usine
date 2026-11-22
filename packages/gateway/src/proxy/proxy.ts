@@ -29,9 +29,10 @@ import { githubDownloadClient } from "../github/download.ts";
 import { type ChatGptLoginUnavailable, ChatGptLogins } from "../chatgpt/logins.ts";
 import {
   type ChatGptLogin,
-  llmRoute,
-  configuredProvider,
+  keyHeaders,
   llmTarget,
+  llmUpstream,
+  passingHeaders,
   withChatGptAccess,
   withStaticCredential,
 } from "../llm/llm.ts";
@@ -155,11 +156,13 @@ export class GatewayProxy extends Context.Service<
       const logins = yield* ChatGptLogins;
       const client = yield* HttpClient.HttpClient;
       const hosts = gatewayHosts(settings.domain);
+      const providerKeyHeaders = keyHeaders(settings.catalog);
+      const slots = settings.catalog.slots.map((slot) => `/${slot}`).join(", ");
 
       const authenticate = Effect.fn("GatewayProxy.authenticate")(function* (
         request: HttpServerRequest.HttpServerRequest,
       ) {
-        const presented = presentedToken(request.headers);
+        const presented = presentedToken(request.headers, providerKeyHeaders);
         if (Option.isNone(presented))
           return yield* refused("missing-caller-token", "The request has no gateway caller token.");
         const claims = yield* callers
@@ -334,48 +337,53 @@ export class GatewayProxy extends Context.Service<
           claims,
           live: { attachment },
         } = yield* authenticate(request);
-        const destination = llmTarget(target.pathname);
+        const destination = llmTarget(settings.catalog, target.pathname);
         if (Option.isNone(destination))
           return yield* refusedCaller(
             claims,
             "unsupported-path",
-            `The gateway serves /anthropic and /openai on ${hosts.llm}, not ${target.pathname}.`,
+            `The gateway serves the provider slots ${slots} on ${hosts.llm}, not ${target.pathname}.`,
           );
-        if (destination.value.legacy)
+        const { provider, rest, legacy } = destination.value;
+        if (legacy)
           yield* Effect.logWarning("Deprecated LLM path prefix; update the attempt configuration", {
             worker: claims.worker,
             repository: claims.repository,
-            provider: destination.value.provider,
+            provider: provider.slot,
           });
         const { providers } = yield* inForce.current;
-        const provider = configuredProvider(providers, destination.value.provider);
-        if (Option.isNone(provider))
+        const held = providers[provider.slot];
+        if (held === undefined)
           return yield* refusedCaller(
             claims,
             "provider-not-configured",
-            `The gateway has no credential for ${destination.value.provider}.`,
+            `The gateway has no credential for ${provider.slot}.`,
           );
-        const path = llmRoute(provider.value, destination.value.rest);
-        if (Option.isNone(path))
+        const protocol = provider.protocolFor(rest);
+        if (Option.isNone(protocol))
           return yield* refusedCaller(
             claims,
             "unsupported-path",
-            `The gateway serves only the configured wire-protocol routes on ${hosts.llm}, such as /anthropic-messages/v1/messages and /openai-responses/v1/responses, not ${target.pathname}.`,
+            `The gateway serves only the routes of ${provider.label} on ${hosts.llm}, such as /${provider.slot}${provider.routes[0] ?? ""}, not ${target.pathname}.`,
           );
-        const incoming = withoutCallerCredentials(endToEndHeaders(request.headers));
-        const { credential } = provider.value;
+        const incoming = passingHeaders(
+          provider,
+          withoutCallerCredentials(endToEndHeaders(request.headers), providerKeyHeaders),
+        );
+        const { credential } = held;
         const outgoing =
           credential._tag === "ChatGptLogin"
             ? yield* chatGptRequest(claims, credential, incoming)
             : {
-                headers: withStaticCredential(credential, incoming),
+                headers: withStaticCredential(credential, protocol.value.key, incoming),
                 answered: () => Effect.void,
               };
-        const upstream = `${provider.value.upstream}${path.value}${target.search}`;
+        const upstream = `${llmUpstream(held, protocol.value, rest)}${target.search}`;
         const response = yield* forwardRequest(client, request, upstream, outgoing.headers);
         yield* outgoing.answered(response.status);
         yield* forwarded("Forwarded an LLM request", request, target, attachment, response, {
-          provider: destination.value.provider,
+          provider: provider.slot,
+          protocol: protocol.value.protocol,
           credential: credential._tag,
         });
         return response;

@@ -1,3 +1,4 @@
+import { GatewaySlot } from "@usine/core/agent/provider";
 import { jsonKey } from "@usine/core/json-key";
 import { NodeServices } from "@effect/platform-node";
 import { assert, it } from "@effect/vitest";
@@ -76,7 +77,7 @@ it.live(
           ["subscription", "subscription"],
         );
         assert.deepEqual(state.providers[0], {
-          provider: "anthropic-messages",
+          provider: GatewaySlot.make("anthropic-messages"),
           credential: "subscription",
           expiresAt: null,
           lastRefresh: null,
@@ -96,7 +97,7 @@ it.live(
         const persisted = yield* fs.stat(`${directory}/provider-credentials.json`);
         assert.equal(persisted.mode & 0o777, 0o600);
         const current = yield* SettingsInForce.pipe(Effect.provideContext(context));
-        assert.isTrue(Option.isSome((yield* current.current).providers["openai-responses"]));
+        assert.isDefined((yield* current.current).providers["openai-responses"]);
         yield* Scope.close(scope, Exit.void);
         const restarted = yield* Layer.build(start());
         const found = yield* Effect.serviceOption(ProviderCredentials).pipe(
@@ -116,15 +117,14 @@ it.live(
           Effect.provideContext(restarted),
           Effect.flatMap((settings) => settings.current),
         );
-        yield* credentials.disconnect("anthropic-messages");
-        yield* credentials.disconnect("openai-responses");
+        yield* credentials.disconnect(GatewaySlot.make("anthropic-messages"));
+        yield* credentials.disconnect(GatewaySlot.make("openai-responses"));
         assert.deepEqual(
           (yield* credentials.status).map(({ credential }) => credential),
           [null, null],
         );
         const next = yield* credentials.apply(beforeDisconnect.providers);
-        assert.isTrue(Option.isNone(next["anthropic-messages"]));
-        assert.isTrue(Option.isNone(next["openai-responses"]));
+        assert.deepStrictEqual(next, {});
       }),
     ).pipe(Effect.provide([NodeServices.layer, FetchHttpClient.layer])),
 );
