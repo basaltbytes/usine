@@ -19,9 +19,11 @@ differences. The adapter should pin 1.6.0.
   running through a detach, the owner replayed the events that Pi wrote while usine was away, and
   Pi stopped cleanly on kill.
 - **One `ChildHost` addition.** Pi writes lines with no upper bound: `agent_end` carries every
-  message of a run and reached 4.75 MiB after 100 tool results of 49 KB. usine's line reader fails
-  the session above 4 MiB. The reader needs a mode that drops an oversized line and keeps reading.
-  The process owner needs nothing.
+  message of a run and reached 4.75 MiB after 100 tool results of 49 KB, and a `read` of a 3.4 MB
+  image gave an 8.53 MiB `tool_execution_end`. usine's line reader fails the session above 4 MiB.
+  The reader needs a mode that drops an oversized line and keeps reading, and the per-attempt
+  `models.json` caps images so that every event the adapter needs stays under the limit. The
+  process owner needs nothing.
 - **Capabilities over RPC.** Supported: `resume-session`, `steer`, `interrupt`, `usine-tools`,
   `closed-tools`, `structured-output`, `ephemeral`, `token-usage`, `cost-usd`, and `model-check`.
   Lacking: `durable-coordination` and `plan-windows`. That is the profile of today's local
@@ -116,20 +118,34 @@ provider accounts, the ChatGPT backend, the Cloudflare sandbox shell, and macOS 
 
 ### The largest line
 
-Measured on 1.4.0; the run with 100 tool results gave the same `agent_end` size on 1.6.0:
+Measured on 1.4.0; the run with 100 tool results gave the same `agent_end` size on 1.6.0, and the
+image rows are the same on both versions:
 
 | Line | Largest seen | What bounds it |
 | --- | --- | --- |
 | `agent_end` after one run with 100 `bash` results of 49 KB | 4.75 MiB | Nothing: it carries every message of the run, the system prompt included |
 | `message_update`, `message_end`, `turn_end`, `agent_end` for a 5 MB answer | 4.88 MiB each | The model's output limit |
 | `get_messages` or `get_entries` after those runs | 14.6 MiB | Nothing: the whole session |
-| `tool_execution_end` for `bash` or `read` | 0.09 to 0.15 MiB | Pi truncates tool output to 50 KB or 2,000 lines |
-| `message_end` for a `read` of an image | Up to 4.5 MiB of base64 by default (`docs/models.md`, `inputLimits`) | Unverified |
+| `tool_execution_end` for `bash` or for a `read` of text | 0.09 to 0.15 MiB | Pi truncates text output to 50 KB or 2,000 lines |
+| `tool_execution_end` for a `read` of a 1,657,003-byte PNG | 4.21 MiB | The image's base64, twice: in `content` and in `structuredContent` |
+| `tool_execution_end` for a `read` of a 3,355,433-byte PNG | 8.53 MiB | The same |
+| `message_start`, `message_end`, `turn_end`, `agent_end` for that `read` | 4.27 MiB each | The image's base64, once |
+| `tool_execution_end` for the same `read` with images capped at 1 MiB | 1.84 MiB | The cap in `models.json`, twice |
+
+Pi doesn't truncate an image. It sends an image as it is while its base64 is under 4.5 MiB and
+its sides are at most 2,000 pixels, and resizes it otherwise
+(`dist/utils/image-resize-core.js:9,54`). A model's `inputLimits.images.resize.maxBytes` in
+`models.json` lowers that limit for new images, and a `modelOverrides` entry sets it for a
+built-in model (`docs/models.md`). A 1.6 MB screenshot is an ordinary file in a web repository.
 
 `MAX_PROTOCOL_LINE_BYTES` is 4 MiB, and `boundedLines` fails the stream on a longer line
 (`packages/agents/src/child-host/lines.ts:3,31`). A long coding run crosses that limit with
-`agent_end` alone. The adapter needs none of `agent_end`'s messages, because each one already
-arrived in its own `message_end`.
+`agent_end` alone, and one image `read` crosses it with `tool_execution_end`. The adapter needs none
+of the messages in `agent_end` or `turn_end`, because each one already arrived in its own
+`message_end`. It needs every `tool_execution_end`: in process, each one becomes a `ToolFinished`
+event (`packages/agents/src/harness/session.ts:277-285`), and `toolResults` and `toolCallsAtResult`
+count those events for receipts. So the per-attempt `models.json` caps images at 1 MiB, which kept
+the image `read`'s `tool_execution_end` at 1.84 MiB (verified).
 
 ### Through `ChildHost` and the process owner
 
@@ -160,6 +176,12 @@ scenarios, which only Claude Code and Codex record today, then apply to Pi too.
   line. Raising the limit doesn't help: `agent_end` has no bound, and `boundedLines` allocates its
   whole buffer up front. A dropped answer fails only its request, by the request's timeout. This is
   follow-up 1.
+- **A dropped line that the adapter needs.** With the image cap, the probe's `tool_execution_end`
+  stayed at 1.84 MiB, but a dropped one must still count. Pi writes `type`, `toolCallId`, and `toolName`
+  before `result` (`pi-agent-core` `dist/agent-loop.js:652-660`; source), so the RPC client decodes
+  them from the reported first bytes and emits `ToolFinished` with a null output and
+  `isError: false`. `isError` follows `result` on the line, and an error result is short text. The
+  client logs and skips every other dropped event. This is follow-up 2.
 - **Nothing else.** The lease, the journal, reattach, and the stop with SIGTERM first work
   unchanged.
 
@@ -380,7 +402,11 @@ With the MCP client, an agent-directory `mcp.json` entry with `"exposure": "dire
   `PI_CODING_AGENT_DIR`, and `PI_SESSION_FILE` (verified on 1.6.0). The extension replaces `bash`
   with `createBashToolDefinition(cwd, { exposeSessionEnvironment: false, spawnHook })`, which
   gives each command exactly the environment usine chose, as `environmentBashTool` does in process
-  (`pi/sdk.ts:175`). Tool commands then saw neither the token nor any `PI_` variable (verified).
+  (`pi/sdk.ts:175`). The tool commands' environment then held neither the token nor any `PI_`
+  variable (verified). It keeps the token out of that environment only: a tool command still read
+  the token from Pi's process with
+  `grep -a -o 'USINE_GATEWAY_TOKEN=[a-z0-9-]*' /proc/$PPID/environ` (verified), because tool
+  commands run as Pi's Unix user. Section 6 covers what limits the token.
 
 ### Flags of `pi --mode rpc`
 
@@ -416,7 +442,7 @@ in a subdirectory, and an `AGENTS.md` and `.agents/skills` in its parent directo
 | Extension, MCP server, skills, `SYSTEM.md`, `APPEND_SYSTEM.md`, `defaultTools` | Skipped | Skipped | Loaded | Skipped |
 | `sessionDir` | Followed | Followed | Followed | Overridden by `--session-dir` |
 | `httpProxy` | Ignored | Ignored | Ignored | Ignored |
-| `AGENTS.md` in the checkout and in its parent | Loaded | Loaded | Loaded | Only the checkout's, by `--append-system-prompt` |
+| `AGENTS.md` in the checkout and in its parent | Loaded | Loaded | Loaded | Only the checkout's, by `--append-system-prompt` after the context-file check |
 | `CLAUDE.md` beside the checkout's `AGENTS.md` | Not loaded | Not loaded | Not loaded | Not loaded |
 | `AGENTS.md` in a subdirectory, after a `read` there | Not added | Not added | Not added | Not added |
 | Built-in `llama.cpp` and `mcp` extensions | Loaded | Loaded | Loaded | Off |
@@ -428,6 +454,26 @@ decision. The parent directory's `AGENTS.md` loaded even when the checkout was a
 (verified on 1.6.0), and on a worker the checkout sits inside the worker's own directories.
 `--append-system-prompt <checkout>/AGENTS.md` adds that file in an `<addendum>` block while `-nc`
 keeps every other context file out (verified on 1.6.0).
+
+The flag needs a file that exists. Pi reads its value as a path only when the path exists, and
+otherwise sends the value as text (`resolvePromptInput`, `dist/core/resource-loader.js:100-113`).
+In a checkout with only `CLAUDE.md`, the system prompt ended with
+`<addendum>\n<checkout>/AGENTS.md\n</addendum>`, and the text of `CLAUDE.md` wasn't sent (verified).
+In process, Pi loads the first regular file it finds in each directory, in the order
+`AGENTS.override.md`, `AGENTS.md`, `AGENTS.MD`, `CLAUDE.md`, and `CLAUDE.MD`
+(`dist/core/resource-loader.js:116-121`). The launch command therefore makes the same check in the
+checkout's root, and passes the flag only when a file is found:
+
+```sh
+context=
+for name in AGENTS.override.md AGENTS.md AGENTS.MD CLAUDE.md CLAUDE.MD; do
+  if [ -f "<checkout>/$name" ]; then context="<checkout>/$name"; break; fi
+done
+```
+
+The checkout's root then gives a session the same file as in process. The file reaches the model in
+an `<addendum>` block, not in the `<project_instructions path="…">` block that a context file gets
+(`dist/core/system-prompt.js:25-28`).
 
 ### Permission prompts in a headless run
 
@@ -464,21 +510,31 @@ without moving the tool commands' `HOME`.
 ### Recipe
 
 Verified against the hostile fixture: nothing from the checkout loaded except its root
-`AGENTS.md`, no outbound connection, and the session where usine put it.
+`AGENTS.md`, no outbound connection, and the session where usine put it. In the fixture, the
+context-file check picks that same `AGENTS.md`.
 
 ```sh
 # Per attempt. The agent directory holds models.json and settings.json, neither with a secret.
 export PI_CODING_AGENT_DIR=<attempt home>/pi
 export PI_OFFLINE=1 PI_SKIP_VERSION_CHECK=1 PI_TELEMETRY=0
-export USINE_GATEWAY_TOKEN=<caller token>   # read by models.json, hidden from tool commands
+export USINE_GATEWAY_TOKEN=<caller token>   # read by models.json; not in tool commands' environment
+context=
+for name in AGENTS.override.md AGENTS.md AGENTS.MD CLAUDE.md CLAUDE.MD; do
+  if [ -f "<checkout>/$name" ]; then context="<checkout>/$name"; break; fi
+done
 pi --mode rpc --no-approve -ne -e <attempt home>/pi/usine.mjs \
-  -ns -np --no-themes --no-mcp -nc --append-system-prompt <checkout>/AGENTS.md \
+  -ns -np --no-themes --no-mcp -nc ${context:+--append-system-prompt "$context"} \
   --session-dir <checkout>/.usine/pi/sessions --session-id <child session> \
   --model <provider>/<model> --thinking <effort>   # plus --tools or --no-tools per role
 ```
 
 `settings.json`: `{"cacheWarming": "off", "transport": "sse"}`; `transport` matters only for the
 ChatGPT route in section 6, which `models.json` follows.
+
+`models.json` gives each model that takes images
+`"inputLimits": {"images": {"resize": {"maxBytes": 1048576}}}`, in its `models` entry or in a
+`modelOverrides` entry for a built-in model, so that an image `read` stays under the line limit
+(section 1).
 
 ## 6. Credentials
 
@@ -492,8 +548,12 @@ ChatGPT route in section 6, which `models.json` follows.
   where someone ran `/login`.
 - **A key and a base URL for one process.** The per-attempt `models.json` names the gateway slot as
   the base URL and `$USINE_GATEWAY_TOKEN` as the key. Nothing secret is written, and the token stays
-  in Pi's environment, where the exact `bash` keeps it from tool commands. Verified on 1.4.0
-  against the fake endpoint:
+  in Pi's environment. The exact `bash` keeps it only out of the tool commands' environment: the
+  agent can still read it from Pi's process (section 4), as it can read the token of Claude Code
+  and Codex, which also hold it in their environment (`tokenVariable` in `claude/descriptor.ts`
+  and `codex/descriptor.ts`). What limits the token is its scope: the gateway refuses a caller
+  token once its attachment ends ([ADR 0027](../adr/0027-gateway-credential-proxy.md)). Verified
+  on 1.4.0 against the fake endpoint:
   - For the `openai-responses` slot, a custom provider with `"api": "openai-responses"` and
     `baseUrl` `…/openai-responses/v1` sent `POST /openai-responses/v1/responses` with
     `Authorization: Bearer <token>`, the gateway's API-key route.
@@ -562,6 +622,10 @@ usine tool call. It gives one adapter and one fixture boundary, the same isolati
 kind, a Pi crash that ends one child process instead of affecting the orchestrator, and a worker CLI
 pin independent of the SDK pin.
 
+Two things change for a session on a local worker. The checkout's parent directories no longer
+give context files, though the checkout's root still gives the same file (section 5). New images
+are capped at 1 MiB of base64 instead of 4.5 MiB (section 1).
+
 | In `packages/agents/src/harness/pi/` | One path (recommended) | Both paths |
 | --- | --- | --- |
 | `authentication.ts` | Kept: `piLoginPools`, `splitPiModel`, and pool resolution, fed by `pi auth check` | Kept |
@@ -607,7 +671,7 @@ separate pin; `packages/durable` keeps 1.4.0 until its Pi parent is removed.
 - The ChatGPT backend's acceptance of Pi's request body, and any header it requires; real provider
   accounts in general.
 - What triggers cache warming, and its `entry_appended` usage on the wire.
-- The size of a `read` of an image on the wire.
+- The launch command's context-file check, which follows Pi's source rather than a run.
 - Strict tool mode for structured completion on the gateway's Responses and Messages slots.
 - The Cloudflare sandbox shell.
 
@@ -616,11 +680,13 @@ separate pin; `packages/durable` keeps 1.4.0 until its Pi parent is removed.
 **1. `ChildHost`: skip an oversized protocol line.** The only contract addition.
 
 - `boundedLines` in `packages/agents/src/child-host/lines.ts` gains an option that discards the
-  rest of a line longer than the limit, reports its size and first 200 characters to the caller,
-  and continues with the next line. The default stays failing, so Codex and the OpenCode bridge
-  don't change.
+  rest of a line longer than the limit, reports its size and first 1 KiB to the caller, and
+  continues with the next line. The caller decides what a dropped line means; 1 KiB holds the
+  fields that Pi writes before a large value, even with a long tool call ID. The default stays
+  failing, so Codex and the OpenCode bridge don't change.
 - Tests: a line across chunk boundaries above the limit, a line that ends exactly at the limit,
-  and a dropped line followed by a valid one.
+  a dropped line followed by a valid one, and the recorded 8.53 MiB `tool_execution_end` of an
+  image `read` followed by the events after it.
 
 **2. Pi adapter 1: the usine extension and the RPC client.** In
 `packages/agents/src/harness/pi/rpc/`, built and shipped like the worker owner program.
@@ -632,7 +698,14 @@ separate pin; `packages/durable` keeps 1.4.0 until its Pi parent is removed.
 - A typed client (Effect Schema) for Pi's command, response, event, and extension UI lines, on
   `pendingRequests` and the line reader of follow-up 1. Unknown events and shapes are logged and
   skipped; a dialog that usine doesn't own is answered `{"cancelled": true}`.
-- The launch command that writes the extension and starts Pi with the recipe in section 5.
+- Dropped lines: a dropped `tool_execution_end` still emits `ToolFinished`, with `callId` and
+  `tool` decoded from the reported first bytes, a null output, and `isError: false` (section 1).
+  Every other dropped line is logged with its size and first bytes and skipped, and a dropped
+  answer fails its request by timeout. Tests cover a dropped `tool_execution_end` and the receipt
+  count after it.
+- The launch command that writes the extension, picks the checkout's context file, and starts Pi
+  with the recipe in section 5. Tests cover a checkout with only `CLAUDE.md` and one with no
+  context file.
 - Unit tests against a scripted fake `pi` (a Node.js script in test code, no Pi in CI), plus one
   test that loads the extension into the pinned CLI with a fake model endpoint.
 
@@ -647,12 +720,13 @@ in-process child path (section 8).
 - **Descriptor:** the profile in section 3 on the `local`, `ssh`, and `container` placements, with
   `sandbox` after its own check of the sandbox shell; the `api-key`, `gateway`, and
   `gateway-api-key` routes, and `host-login` on local workers; the pools it declares (#1379); an
-  install entry for 1.6.0; and credential wiring that writes `models.json` and `settings.json` into
-  the attempt home.
+  install entry for 1.6.0; and credential wiring that writes `models.json`, with the 1 MiB image
+  cap, and `settings.json` into the attempt home.
 - **Preflight:** the model check in section 3 on every route.
 - **Tests:** replay fixtures at the `ChildHost` boundary, recorded against the pinned CLI with a
   controlled model endpoint, for the shared scenarios that the profile declares plus
-  `transport-loss` and `early-exit`, and `capabilityProofs` entries for `model-check`.
+  `transport-loss` and `early-exit`, a `read` of a PNG above the cap on a model that takes images,
+  and `capabilityProofs` entries for `model-check`.
 - **Docs:** the worker column for Pi in
   `apps/docs/src/content/docs/reference/configuration/agents.md`; the Pi sentence in ADR 0006 and
   "Pi on local workers only" in ADR 0005; the Pi child in `docs/architecture/index.mdx`.
