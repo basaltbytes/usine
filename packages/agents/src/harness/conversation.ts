@@ -74,10 +74,23 @@ interface ConversationOptions<S> {
   /** Releases harness resources; runs only when the session is about to return. */
   readonly beforeFinish: Effect.Effect<void, AgentSessionError>;
   /**
-   * The minutes that a session that answered waits for its background work to start a turn, or
-   * `None` for no limit.
+   * The minutes that a session that answered waits for its background work to end or start a
+   * turn, or `None` for no limit.
    */
   readonly maxBackgroundWaitMinutes: Option.Option<number>;
+}
+
+/**
+ * How long a session that answered waits for a turn after its background work ended, before it
+ * returns its answer. A turn that starts later finds the session returned.
+ */
+export const BACKGROUND_TURN_GRACE = Duration.minutes(5);
+
+/** An answer that the session keeps after its wait for background work ended. */
+interface KeptAnswer {
+  readonly message: string;
+  /** Whether the wait ended at its limit, rather than when the work ended. */
+  readonly limitPassed: boolean;
 }
 
 /** An operator message that the harness hasn't read, and what to run when it is read or not. */
@@ -93,11 +106,13 @@ interface ConversationState {
   readonly idle: Option.Option<string>;
   /** Whether `idle` is an answer whose wait limit passed. */
   readonly idleLimitPassed: boolean;
+  /** The answer that waits for the session's background work to end or start a turn. */
+  readonly waiting: Option.Option<string>;
   /**
-   * An answer whose wait limit passed while the operator supervised the session. A Release returns
-   * it unless a turn starts first.
+   * An answer whose wait for background work ended while the operator supervised the session. A
+   * Release returns it unless a turn starts first.
    */
-  readonly overdue: Option.Option<string>;
+  readonly kept: Option.Option<KeptAnswer>;
   /**
    * The session's tool-call count when it last read an operator message or steer, or `None` after
    * its own input, such as a continuation turn.
@@ -122,7 +137,10 @@ interface ConversationState {
  *
  * The adapter reports each snapshot of the session's background work with `reportBackground`, and
  * the conversation records each change with `BackgroundWorkUpdated`. An answer while the snapshot
- * lists work waits for that work to start a turn, up to `maxBackgroundWaitMinutes`.
+ * lists work waits for that work, up to `maxBackgroundWaitMinutes`: a turn that the work starts
+ * replaces the answer, and an answer whose work ended returns once `BACKGROUND_TURN_GRACE` passes
+ * without a turn. The adapter calls `turnStarted` and `processRestarted` from one fiber or
+ * several: each takes the conversation's lock.
  */
 export const sessionConversation = Effect.fn("SessionConversation.make")(function* <S>(
   options: ConversationOptions<S>,
@@ -139,7 +157,8 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
     paused: restored.paused,
     idle: Option.none(),
     idleLimitPassed: false,
-    overdue: Option.none(),
+    waiting: Option.none(),
+    kept: Option.none(),
     operatorInput: Option.none(),
     closing: false,
     background: Option.none(),
@@ -367,8 +386,10 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
     onNone: () => "none",
     onSome: Duration.format,
   });
-  /** Holds the timer that ends a wait for background work after the session answered. */
+  /** Holds the timer that ends a wait for background work at its limit. */
   const backgroundWait = yield* FiberHandle.make<void>();
+  /** Holds the timer that ends a wait for background work that ended without a turn. */
+  const backgroundGrace = yield* FiberHandle.make<void>();
   /** The log fields that name the session's background work and the wait limit. */
   const backgroundFields = Effect.map(Ref.get(state), ({ background }) => ({
     sessionId: session.id,
@@ -379,83 +400,118 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
   }));
 
   /**
-   * Finishes with `message`, an answer whose wait limit passed, if the session is neither held nor
-   * paused. Otherwise keeps `message`, without reporting the session idle, for a later Release or
-   * for the recovery after a process restart.
+   * Ends the wait for background work when `timer` passes: the wait limit, or the grace period
+   * after the work ended. The limit passed only if the latest snapshot still lists work. Finishes
+   * with the waiting answer if the session is neither held nor paused. Otherwise keeps the answer,
+   * without reporting the session idle, for a later Release or for the recovery after a process
+   * restart. Each timer runs this and clears only the other timer.
    */
-  const finishOverdue = (message: string) =>
+  const endWait = (timer: "limit" | "grace") =>
     mutex.withPermits(1)(
       Effect.gen(function* () {
-        const { held, paused } = yield* Ref.get(state);
-        const fields = yield* backgroundFields;
-        if (!held && !paused) {
-          yield* Effect.logWarning(
-            "Session's background work outlasted the wait limit; returning its answer",
-            fields,
-          );
-          yield* finish(message, true);
+        const current = yield* Ref.getAndUpdate(state, (latest) => ({
+          ...latest,
+          waiting: Option.none(),
+        }));
+        if (Option.isNone(current.waiting)) return;
+        yield* FiberHandle.clear(timer === "limit" ? backgroundGrace : backgroundWait);
+        const answer = current.waiting.value;
+        const limitPassed =
+          timer === "limit" && !Option.exists(current.background, Arr.isReadonlyArrayEmpty);
+        const fields = {
+          ...(yield* backgroundFields),
+          endedBy: timer,
+          grace: Duration.format(BACKGROUND_TURN_GRACE),
+        };
+        if (!current.held && !current.paused) {
+          yield* limitPassed
+            ? Effect.logWarning(
+                "Session's background work outlasted the wait limit; returning its answer",
+                fields,
+              )
+            : Effect.logInfo(
+                "Session's background work ended and no turn started; returning its answer",
+                fields,
+              );
+          yield* finish(answer, limitPassed);
           return;
         }
-        yield* Ref.update(state, (current) => ({ ...current, overdue: Option.some(message) }));
+        yield* Ref.update(state, (latest) => ({
+          ...latest,
+          kept: Option.some({ message: answer, limitPassed }),
+        }));
         yield* Effect.logInfo(
-          "Session's background work outlasted the wait limit; the operator's Hold or pause keeps it open until a Release",
+          limitPassed
+            ? "Session's background work outlasted the wait limit; the operator's Hold or pause keeps it open until a Release"
+            : "Session's background work ended and no turn started; the operator's Hold or pause keeps its answer until a Release",
           fields,
         );
       }),
     );
 
-  /** Drops the answer that `finishOverdue` kept, if any, and returns whether one was kept. */
-  const dropOverdue = Effect.flatMap(Ref.get(state), ({ overdue }) =>
-    Option.isNone(overdue)
-      ? Effect.succeed(false)
-      : mutex.withPermits(1)(
-          Ref.modify(state, (current) => [
-            Option.isSome(current.overdue),
-            { ...current, overdue: Option.none() },
-          ]),
-        ),
-  );
-
   /**
    * Waits for background work after `answer`. With a configured limit, returns `answer` once the
-   * limit passes; if the operator holds the session then, a Release returns `answer` instead, and
-   * a paused session stays open until the operator's next message.
+   * limit passes. If the operator holds the session when the wait ends, a Release returns `answer`
+   * instead, and a paused session stays open until the operator's next message. The caller holds
+   * the mutex.
    */
   const awaitBackgroundWork = Effect.fn("SessionConversation.awaitBackgroundWork")(function* (
     answer: string,
   ) {
     yield* Effect.annotateCurrentSpan({ sessionId: session.id });
+    yield* Ref.update(state, (current) => ({ ...current, waiting: Option.some(answer) }));
     yield* Effect.flatMap(backgroundFields, (fields) =>
       Effect.logInfo("Session is waiting for its background work", fields),
     );
     if (Option.isNone(backgroundWaitLimit)) return;
     yield* FiberHandle.run(
       backgroundWait,
-      Effect.sleep(backgroundWaitLimit.value).pipe(Effect.andThen(finishOverdue(answer))),
+      Effect.sleep(backgroundWaitLimit.value).pipe(Effect.andThen(endWait("limit"))),
     );
   });
 
   /**
-   * Cancels the running wait limit and logs `reason` if a wait ran. A started turn also drops the
-   * answer that a passed limit kept for a Release; a process restart keeps it, so that the
-   * recovery reports it.
+   * Ends the wait for background work and logs `reason` if a timer ran. A started turn also drops
+   * the answer that an ended wait kept for a Release; a process restart keeps it, so that the
+   * recovery reports it. The caller holds the mutex.
    */
   const cancelWait = Effect.fn("SessionConversation.cancelWait")(function* (
     reason: "turn started" | "process restarted",
   ) {
-    const wait = yield* FiberHandle.get(backgroundWait);
-    if (Option.isSome(wait)) yield* FiberHandle.clear(backgroundWait);
-    const dropped = reason === "turn started" && (yield* dropOverdue);
-    if (Option.isNone(wait) && !dropped) return;
     yield* Effect.annotateCurrentSpan({ sessionId: session.id });
-    yield* Effect.logInfo("Session cancelled the wait limit for its background work", {
-      ...(yield* backgroundFields),
-      reason,
-      limitPassed: dropped,
-    });
+    const grace = yield* FiberHandle.get(backgroundGrace);
+    yield* FiberHandle.clear(backgroundWait);
+    yield* FiberHandle.clear(backgroundGrace);
+    const current = yield* Ref.getAndUpdate(state, (latest) => ({
+      ...latest,
+      waiting: Option.none(),
+      kept: reason === "turn started" ? Option.none() : latest.kept,
+    }));
+    // A timer that ends the wait clears `waiting` under the mutex, so a wait here has live timers.
+    const waited = Option.isSome(current.waiting);
+    const dropped = reason === "turn started" ? current.kept : Option.none<KeptAnswer>();
+    const droppedOverdue = Option.exists(dropped, ({ limitPassed }) => limitPassed);
+    const fields = { ...(yield* backgroundFields), reason };
+    if ((waited && Option.isSome(backgroundWaitLimit)) || droppedOverdue)
+      yield* Effect.logInfo("Session cancelled the wait limit for its background work", {
+        ...fields,
+        limitPassed: droppedOverdue,
+      });
+    if ((waited && Option.isSome(grace)) || (Option.isSome(dropped) && !droppedOverdue))
+      yield* Effect.logInfo(
+        "Session cancelled the return of its answer after its background work ended",
+        {
+          ...fields,
+          kept: Option.isSome(dropped),
+        },
+      );
   });
 
-  /** Records `work` as the latest snapshot and reports it if it changed. */
+  /**
+   * Records `work` as the latest snapshot and reports it if it changed. During a wait, an empty
+   * snapshot starts the grace period for a turn, and work that runs again cancels it. The caller
+   * holds the mutex.
+   */
   const reportBackground = Effect.fn("SessionConversation.reportBackground")(function* (
     work: Option.Option<ReadonlyArray<BackgroundWork>>,
   ) {
@@ -471,20 +527,42 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
       changed,
     });
     if (changed) yield* channel.emit(BackgroundWorkUpdated.make({ session, work }));
+    if (Option.isNone(previous.waiting)) return;
+    const grace = yield* FiberHandle.get(backgroundGrace);
+    if (Option.exists(work, Arr.isReadonlyArrayEmpty)) {
+      if (Option.isSome(grace)) return;
+      yield* FiberHandle.run(
+        backgroundGrace,
+        Effect.sleep(BACKGROUND_TURN_GRACE).pipe(Effect.andThen(endWait("grace"))),
+      );
+      yield* Effect.logInfo(
+        "Session's background work ended; it returns its answer unless a turn starts within the grace period",
+        { ...(yield* backgroundFields), grace: Duration.format(BACKGROUND_TURN_GRACE) },
+      );
+      return;
+    }
+    if (Option.isNone(grace)) return;
+    yield* FiberHandle.clear(backgroundGrace);
+    yield* Effect.flatMap(backgroundFields, (fields) =>
+      Effect.logInfo("Session's background work runs again; it keeps waiting for the work", fields),
+    );
   });
 
-  /** Ends a takeover: returns the idle report, or the overdue answer, unless the session is paused. */
+  /** Ends a takeover: returns the idle report, or the kept answer, unless the session is paused. */
   const release = Effect.gen(function* () {
     const current = yield* Ref.updateAndGet(state, (latest) => ({ ...latest, held: false }));
     if (current.paused) return "read" as const;
     if (Option.isSome(current.idle)) yield* finish(current.idle.value, current.idleLimitPassed);
-    else if (Option.isSome(current.overdue)) {
-      yield* Ref.update(state, (latest) => ({ ...latest, overdue: Option.none() }));
+    else if (Option.isSome(current.kept)) {
+      const { message, limitPassed } = current.kept.value;
+      yield* Ref.update(state, (latest) => ({ ...latest, kept: Option.none() }));
       yield* Effect.logInfo(
-        "The operator released a session whose wait limit passed; returning its answer",
+        limitPassed
+          ? "The operator released a session whose wait limit passed; returning its answer"
+          : "The operator released a session whose background work ended; returning its answer",
         { sessionId: session.id },
       );
-      yield* finish(current.overdue.value, true);
+      yield* finish(message, limitPassed);
     }
     return "read" as const;
   });
@@ -535,14 +613,17 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
         paused: false,
         idle: Option.none(),
         idleLimitPassed: false,
-        overdue: Option.none(),
+        kept: Option.none(),
         resume: next,
       },
     ]);
-    if (Option.isSome(previous.overdue))
-      yield* Effect.logInfo("The operator's input starts a turn; dropping the overdue answer", {
-        sessionId: session.id,
-      });
+    if (Option.isSome(previous.kept))
+      yield* Effect.logInfo(
+        previous.kept.value.limitPassed
+          ? "The operator's input starts a turn; dropping the overdue answer"
+          : "The operator's input starts a turn; dropping the answer kept after the background work ended",
+        { sessionId: session.id },
+      );
     yield* Deferred.succeed(previous.resume, undefined);
     if (taken !== "read") {
       const queuedAfter = yield* channel.toolResults;
@@ -611,7 +692,8 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
     /**
      * Returns `message`, the answer of the session's last turn, or keeps it as the idle report
      * under operator supervision. While the latest snapshot lists background work, the session
-     * first waits for that work to start a turn, up to the configured limit.
+     * first waits for that work, up to the configured limit: until the work starts a turn, or until
+     * a snapshot lists none and no turn starts within `BACKGROUND_TURN_GRACE`.
      */
     finish: (message: string) =>
       mutex.withPermits(1)(
@@ -625,21 +707,24 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
      * Records a snapshot of the session's background work that replaces the previous one: every
      * piece of work that runs, or `None` if the harness doesn't report it.
      */
-    reportBackground,
+    reportBackground: (work: Option.Option<ReadonlyArray<BackgroundWork>>) =>
+      reportBackground(work).pipe(mutex.withPermits(1)),
     /**
-     * Records that the session started a turn: cancels the wait limit for its background work and
-     * drops the answer that a passed limit kept for a Release.
+     * Records that the session started a turn: ends the wait for its background work and drops the
+     * answer that an ended wait kept for a Release.
      */
-    turnStarted: cancelWait("turn started"),
+    turnStarted: mutex.withPermits(1)(cancelWait("turn started")),
     /**
-     * Records that the harness process restarted: cancels the wait limit for its background work,
-     * keeps the answer that a passed limit kept for the recovery, and records the work as not
-     * reported until the new process reports it.
+     * Records that the harness process restarted: ends the wait for its background work, keeps the
+     * answer that an ended wait kept for the recovery, and records the work as not reported until
+     * the new process reports it.
      */
-    processRestarted: cancelWait("process restarted").pipe(
-      Effect.andThen(Ref.get(state)),
-      Effect.flatMap(({ background }) =>
-        Option.isSome(background) ? reportBackground(Option.none()) : Effect.void,
+    processRestarted: mutex.withPermits(1)(
+      cancelWait("process restarted").pipe(
+        Effect.andThen(Ref.get(state)),
+        Effect.flatMap(({ background }) =>
+          Option.isSome(background) ? reportBackground(Option.none()) : Effect.void,
+        ),
       ),
     ),
     intervene,
@@ -660,13 +745,16 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
       const before = yield* Ref.get(state);
       // A child without its task gets it under supervision, so it doesn't stop first.
       if ((before.held || before.paused) && Option.isNone(before.idle) && !empty) {
-        if (Option.isSome(before.overdue)) {
-          yield* Ref.update(state, (current) => ({ ...current, overdue: Option.none() }));
+        if (Option.isSome(before.kept)) {
+          const { message, limitPassed } = before.kept.value;
+          yield* Ref.update(state, (current) => ({ ...current, kept: Option.none() }));
           yield* Effect.logInfo(
-            "The recovered session reports the answer whose wait limit passed",
+            limitPassed
+              ? "The recovered session reports the answer whose wait limit passed"
+              : "The recovered session reports the answer kept after its background work ended",
             { sessionId: session.id, held: before.held, paused: before.paused },
           );
-          yield* finish(before.overdue.value, true);
+          yield* finish(message, limitPassed);
         } else yield* finish("Session interrupted before its turn returned");
       }
       // A new native process has read none of the queued messages and records none of the earlier

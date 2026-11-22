@@ -806,8 +806,8 @@ const makeClaudeSessions = Effect.gen(function* () {
             ]);
             if (update.state !== "idle") yield* conversation.turnStarted;
             // The SDK reports idle after the result flush and the background-notification loop.
-            // An empty task snapshot alone does not finish the session, and a waiting turn's
-            // answer is not reused before the notification has run.
+            // Only the first idle report after a result finishes with its answer; an empty task
+            // snapshot returns a waiting answer only once the conversation's grace period passes.
             if (update.state === "idle" && Option.isSome(candidate))
               yield* conversation.finish(candidate.value);
           }
