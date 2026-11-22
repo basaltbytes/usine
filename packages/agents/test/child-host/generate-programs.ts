@@ -6,7 +6,10 @@ import { fileURLToPath } from "node:url";
 import type { TestProject } from "vitest/node";
 
 const packageRoot = fileURLToPath(new URL("../..", import.meta.url));
-const workerSources = fileURLToPath(new URL("../../src/child-host/worker/", import.meta.url));
+const programSources = [
+  fileURLToPath(new URL("../../src/child-host/worker/", import.meta.url)),
+  fileURLToPath(new URL("../../src/harness/opencode/bridge/main.ts", import.meta.url)),
+];
 
 const generate = () => {
   execFileSync(process.execPath, ["--experimental-strip-types", "build-worker.mjs"], {
@@ -16,17 +19,17 @@ const generate = () => {
 };
 
 /**
- * Regenerates `src/child-host/programs.ts` before the first run and, in watch mode, whenever a
- * worker source changes. Vitest then reruns the tests that import the rewritten module once.
+ * Regenerates `src/child-host/programs.ts` and `src/harness/opencode/bridge/bundle.ts` before the
+ * first run and, in watch mode, whenever a program source changes. Vitest then reruns the tests that import the rewritten module once.
  */
 export default (project: TestProject) => {
   generate();
   project.vite.watcher.on("all", (_event, file) => {
-    if (!file.startsWith(workerSources)) return;
+    if (!programSources.some((source) => file.startsWith(source))) return;
     try {
       generate();
     } catch (cause) {
-      console.error("Could not regenerate the child-host worker programs", cause);
+      console.error("Could not regenerate the worker programs", cause);
     }
   });
 };

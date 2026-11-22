@@ -16,8 +16,9 @@ import {
 import { type ChildProcess, ChildProcessSpawner } from "effect/process";
 import type { HostInput } from "../../child-host/child-host.ts";
 import { startChildProcess, childProcessCommand } from "../../child-host/node.ts";
-import { boundedLines } from "../../child-host/lines.ts";
+import { boundedLines, previewLine } from "../../child-host/lines.ts";
 import { processError, stopChildProcess } from "../../child-host/process.ts";
+import { pendingRequests } from "../../child-host/requests.ts";
 import { ChildSessionLifecycle, SessionOperationError } from "../../runtime.ts";
 
 import {
@@ -57,14 +58,7 @@ const RpcMessage = Schema.Struct({
 const decodeLine = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Json));
 const encoder = new TextEncoder();
 
-const RPC_TIMEOUT = "60 seconds";
 const EXIT_REPORT_GRACE = "1 second";
-const preview = (line: string): string => (line.length > 200 ? `${line.slice(0, 200)}…` : line);
-
-interface PendingRequest {
-  readonly operation: SessionOperationError["operation"];
-  readonly response: Deferred.Deferred<Schema.Json, SessionOperationError>;
-}
 
 // codexAppServerCommand returns a command synchronously, including its quoted TOML key.
 // @effect-diagnostics-next-line schemaSync:off
@@ -131,8 +125,7 @@ const makeCodexAppServer = Effect.gen(function* () {
         CodexNotification,
         SessionOperationError | Cause.Done
       >();
-      const pending = yield* Ref.make(new Map<number | string, PendingRequest>());
-      const nextId = yield* Ref.make(1);
+      const pending = yield* pendingRequests<Schema.Json>();
       const closing = yield* Ref.make(false);
       const failure = yield* Ref.make(Option.none<SessionOperationError>());
       // Created before the process starts, so its fibers stop after the shutdown in `close`.
@@ -186,8 +179,7 @@ const makeCodexAppServer = Effect.gen(function* () {
           failure,
           Option.orElseSome(() => error),
         );
-        const waiting = yield* Ref.getAndSet(pending, new Map());
-        for (const entry of waiting.values()) yield* Deferred.fail(entry.response, error);
+        yield* pending.rejectAll(() => error);
         yield* Queue.fail(notifications, error);
       });
 
@@ -200,29 +192,23 @@ const makeCodexAppServer = Effect.gen(function* () {
             Effect.catch((cause) =>
               Effect.logWarning("Skipping a non-JSON Codex app-server line", {
                 cause,
-                line: preview(line),
+                line: previewLine(line),
                 sessionId: Option.getOrUndefined(request.sessionId),
               }).pipe(Effect.as(undefined)),
             ),
           );
           if (decoded === undefined) return;
           if (Schema.is(RpcResponse)(decoded)) {
-            const found = yield* Ref.modify(pending, (entries) => {
-              const entry = entries.get(decoded.id);
-              if (entry === undefined) return [Option.none<PendingRequest>(), entries];
-              const updated = new Map(entries);
-              updated.delete(decoded.id);
-              return [Option.some(entry), updated];
-            });
+            const found = yield* pending.take(decoded.id);
             if (Option.isNone(found)) {
-              return yield* Effect.logDebug("Ignoring a Codex response with no waiting request", {
-                id: decoded.id,
+              return yield* Effect.logInfo("Skipping a Codex response with no waiting request", {
+                requestId: decoded.id,
                 sessionId: Option.getOrUndefined(request.sessionId),
               });
             }
             if (Schema.is(RpcErrorResponse)(decoded)) {
               return yield* Deferred.fail(
-                found.value.response,
+                found.value.answer,
                 operationError(
                   found.value.operation,
                   request,
@@ -231,11 +217,11 @@ const makeCodexAppServer = Effect.gen(function* () {
                 ),
               );
             }
-            return yield* Deferred.succeed(found.value.response, decoded.result);
+            return yield* Deferred.succeed(found.value.answer, decoded.result);
           }
           if (!Schema.is(RpcMessage)(decoded)) {
             return yield* Effect.logWarning("Skipping an unknown Codex JSON-RPC shape", {
-              line: preview(line),
+              line: previewLine(line),
               sessionId: Option.getOrUndefined(request.sessionId),
             });
           }
@@ -357,19 +343,14 @@ const makeCodexAppServer = Effect.gen(function* () {
       // in stdio mode. One bounded shutdown is shared by terminal delivery and scope release, and
       // it runs even if the caller is interrupted.
       const rejectPending = (cause: unknown) =>
-        Effect.gen(function* () {
-          const waiting = yield* Ref.getAndSet(pending, new Map());
-          for (const entry of waiting.values())
-            yield* Deferred.fail(
-              entry.response,
-              operationError(
-                entry.operation,
-                request,
-                "Codex app-server closed before it responded to the request",
-                cause,
-              ),
-            );
-        });
+        pending.rejectAll((operation) =>
+          operationError(
+            operation,
+            request,
+            "Codex app-server closed before it responded to the request",
+            cause,
+          ),
+        );
       const close = yield* Effect.cached(
         Effect.gen(function* () {
           yield* Effect.annotateCurrentSpan({
@@ -470,38 +451,18 @@ const makeCodexAppServer = Effect.gen(function* () {
             );
           const failed = yield* Ref.get(failure);
           if (Option.isSome(failed)) return yield* failed.value;
-          const generation = yield* handle.generation;
-          const sequence = yield* Ref.getAndUpdate(nextId, (current) => current + 1);
-          const id = Option.match(generation, {
-            onNone: () => sequence,
-            onSome: (epoch) => `${epoch}:${sequence}`,
+          return yield* pending.send({
+            operation,
+            generation: yield* handle.generation,
+            write: (id) => write({ id, method, params }, operation),
+            timedOut: (timeout) =>
+              operationError(
+                operation,
+                request,
+                `Codex app-server didn't respond to ${method} within ${timeout}`,
+                new Error("request timed out"),
+              ),
           });
-          const response = yield* Deferred.make<Schema.Json, SessionOperationError>();
-          yield* Ref.update(pending, (entries) =>
-            new Map(entries).set(id, { operation, response }),
-          );
-          const forget = Ref.update(pending, (entries) => {
-            const updated = new Map(entries);
-            updated.delete(id);
-            return updated;
-          });
-          yield* write({ id, method, params }, operation).pipe(Effect.tapError(() => forget));
-          return yield* Deferred.await(response).pipe(
-            Effect.timeoutOrElse({
-              duration: RPC_TIMEOUT,
-              orElse: () =>
-                forget.pipe(
-                  Effect.andThen(
-                    operationError(
-                      operation,
-                      request,
-                      `Codex app-server didn't respond to ${method} within ${RPC_TIMEOUT}`,
-                      new Error("request timed out"),
-                    ),
-                  ),
-                ),
-            }),
-          );
         });
       const notify: CodexConnection["notify"] = (operation, method, params) =>
         write({ method, params }, operation);

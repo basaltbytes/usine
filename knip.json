@@ -19,7 +19,8 @@
       "entry": [
         "protocol-conformance/check.ts",
         "src/child-host/worker/owner.ts",
-        "src/child-host/worker/lifeline.ts"
+        "src/child-host/worker/lifeline.ts",
+        "src/harness/opencode/bridge/main.ts"
       ]
     },
     "packages/cloudflare": {

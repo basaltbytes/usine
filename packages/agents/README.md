@@ -152,7 +152,7 @@ Logs record the verified authentication method and pool. On completion or interr
 
 ## Child hosts
 
-The supervisor and lifeline are TypeScript programs in `src/child-host/worker/`. `build-worker.mjs` bundles and minifies them with esbuild into `src/child-host/programs.ts`, using `ownerProgram` from `worker/program.ts` for the supervisor bootstrap. `build` and `check` run it first. The Vitest global setup, `test/child-host/generate-programs.ts`, runs it before the first run and, in watch mode, whenever a file in `src/child-host/worker/` changes. Each such change reruns the affected tests once, so `vitest` never loads a stale bundle. The generated `programs.ts` stays out of git; `programs.d.ts` lets source tools resolve the module before generation. Only `build` writes the standalone bundles to `dist/child-host/worker/`, which the published package includes. Workers need Node.js and their harness binaries.
+The supervisor and lifeline are TypeScript programs in `src/child-host/worker/`. `build-worker.mjs` bundles and minifies them with esbuild into `src/child-host/programs.ts`, using `ownerProgram` from `worker/program.ts` for the supervisor bootstrap. It also bundles the OpenCode bridge, `src/harness/opencode/bridge/main.ts`, into `src/harness/opencode/bridge/bundle.ts`. `build` and `check` run it first. The Vitest global setup, `test/child-host/generate-programs.ts`, runs it before the first run and, in watch mode, whenever a file in `src/child-host/worker/` or the bridge program changes. Each such change reruns the affected tests once, so `vitest` never loads a stale bundle. The generated `programs.ts` and `bundle.ts` stay out of git; `programs.d.ts` and `bundle.d.ts` let source tools resolve the modules before generation. Only `build` writes the standalone bundles to `dist/child-host/worker/` and `dist/harness/opencode/bridge/`, which the published package includes. Workers need Node.js and their harness binaries.
 
 `build`, `check`, the `codex:*` scripts, and the Vitest global setup run Node.js with `--experimental-strip-types`, which needs Node.js 22.6 or later; earlier 22.x releases fail with `bad option`. `engines` stays at `>=22` because the published package and its worker programs don't use the flag.
 
@@ -171,6 +171,24 @@ Executors run `CHILD_KILL_SCRIPT` remotely to stop every child in those pid file
 The worktree is repo-controlled input: Pi ignores the project's `.pi/` settings, extensions, prompt templates, skills, and themes; Claude omits project setting sources; Codex marks the worktree untrusted. AGENTS instructions still apply. The executor isolates the worker.
 
 Codex starts its app server in `/` and applies checkout trust through a top-level `projects` table override. Project-local configuration, hooks, and exec policies stay disabled even when Codex's saved configuration lists the checkout as trusted. Starting outside the home directory also avoids diagnostics about disabled project configuration in the worker's `.codex` directory. Other Codex diagnostics log at Warning.
+
+### OpenCode bridge
+
+The OpenCode bridge is a Node.js program without dependencies that runs `opencode serve --stdio` and relays its HTTP API as JSON lines on its standard streams, so a worker runs it as an ordinary child on every host kind. `bridgeCommand(opencode)` in `src/harness/opencode/bridge/client.ts` returns the child command, `node -e <bundle> <opencode command>`. The bridge adds `serve --stdio --hostname 127.0.0.1 --port 0 --print-logs --log-level warn`, so OpenCode's warnings reach standard error and the process owner's stderr tail.
+
+The bridge generates the server password and passes it to `serve` only in `OPENCODE_PASSWORD`, which `serve` removes from its own environment; no command line carries it. It reads `serve`'s ready line, `{"url": ...}`, subscribes to `GET /api/event`, and writes `{"ready":true}` when OpenCode's first event arrives. It holds request lines that arrive earlier until then. Each line is one JSON value, in arrival order:
+
+| Direction | Line |
+| --- | --- |
+| Input | `{"id","method","path","body"}`: `id` is an integer or a string, `method` an upper-case HTTP method, `path` starts with one `/`, and `body`, when present, is sent as JSON. |
+| Output | `{"ready":true}`, once. |
+| Output | `{"id","status","body"}`: OpenCode's answer. `body` is the response's JSON, `null` when it is empty, or its text when it isn't JSON. |
+| Output | `{"id","error"}`: the bridge refused the request, couldn't send it, or got no full response. |
+| Output | `{"event":{...}}`: one event from OpenCode's event stream. |
+
+The bridge logs and skips an input line that has no request ID, and an event that isn't a JSON object. At end of input, it ends `serve`'s input and exits with `serve`'s exit code. When `serve` exits first, the bridge exits with that code. When OpenCode's event stream closes or refuses the subscription while `serve` runs, the bridge writes the reason to standard error, ends `serve`'s input, and exits with code 1 if `serve` exits with 0.
+
+`lines.ts` defines these lines as schemas. A request's method is an `OpenCodeMethod` (`GET`, `POST`, `PUT`, `PATCH`, or `DELETE`) and its path an `OpenCodePath`: a path in origin form, in printable ASCII without spaces. So the client can't build a request that the bridge refuses. `bridgeClient(streams)` reads a bridge's output and returns its client: `ready`, `events` in arrival order, `request(operation, request)`, which returns the answer with any HTTP status or fails after 60 seconds, and `close`, which ends the bridge's input. Request IDs carry the process owner's relay generation, so an answer to an earlier connection matches nothing. The client shares this request handling with the Codex app-server connection through `src/child-host/requests.ts`. Lines that aren't bridge output, such as an event without a `type`, are logged and skipped.
 
 ## Session events and operator actions
 
