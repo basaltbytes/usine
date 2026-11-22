@@ -66,6 +66,23 @@ describe("model providers", () => {
       assert(Option.isNone(modelProviders.target(path)), path);
   });
 
+  it("splits a path under a slot that is also its provider's ID without the legacy flag", () => {
+    const plan = ModelProvider.make({
+      ...openai,
+      id: ModelProviderId.make("test-plan"),
+      slot: GatewaySlot.make("test-plan"),
+    });
+    const catalog = ModelProviderCatalog.make({ providers: [anthropic, plan] });
+    assert.deepStrictEqual(
+      catalog.target("/test-plan/v1/responses"),
+      Option.some({ provider: plan, rest: "/v1/responses", legacy: false }),
+    );
+    assert.deepStrictEqual(
+      catalog.target("/anthropic/v1/messages"),
+      Option.some({ provider: anthropic, rest: "/v1/messages", legacy: true }),
+    );
+  });
+
   it("refuses a provider name that names two providers", () => {
     const renamed = (id: string, slot: string) =>
       ModelProvider.make({
