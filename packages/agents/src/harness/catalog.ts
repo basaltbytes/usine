@@ -1,19 +1,34 @@
 import { Option } from "effect";
+import type { Placement } from "./capability.ts";
 import { claude } from "./claude/descriptor.ts";
 import { codex } from "./codex/descriptor.ts";
 import { HarnessCatalog, HarnessPresentation } from "./harness.ts";
+import { opencode } from "./opencode/descriptor.ts";
 import { pi } from "./pi/descriptor.ts";
 
 /** The registered harnesses. Importing the catalog loads no vendor SDK or platform adapter. */
-export const catalog = HarnessCatalog.make({ descriptors: [claude, codex, pi] });
+export const catalog = HarnessCatalog.make({ descriptors: [claude, codex, pi, opencode] });
 
-/** Returns worker npm packages and an image tag in catalog order. */
-export const workerImageInputs = (source: HarnessCatalog) => {
-  const installed = source.descriptors.filter(({ worker }) => worker.install.length > 0);
+/**
+ * Returns the npm packages and the image tag, in catalog order, of a worker image for `placement`:
+ * the harnesses that run at that placement and install packages. `npmPackagesWithoutOptional` are
+ * installed with `npm install --omit=optional`.
+ */
+export const workerImageInputs = (source: HarnessCatalog, placement: Placement) => {
+  const installed = source.descriptors.filter(
+    ({ worker, capabilities }) =>
+      worker.install.length > 0 &&
+      capabilities.some(({ placements }) => placements.includes(placement)),
+  );
+  const packages = (optionalDependencies: "include" | "omit") =>
+    installed.flatMap(({ worker }) =>
+      worker.install
+        .filter((entry) => entry.optionalDependencies === optionalDependencies)
+        .map(({ name, version }) => `${name}@${version}`),
+    );
   return {
-    npmPackages: installed.flatMap(({ worker }) =>
-      worker.install.map(({ name, version }) => `${name}@${version}`),
-    ),
+    npmPackages: packages("include"),
+    npmPackagesWithoutOptional: packages("omit"),
     tag: installed
       .map(({ id, worker }) => [id, ...worker.install.map(({ version }) => version)].join("-"))
       .join("-"),

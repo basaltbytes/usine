@@ -104,16 +104,46 @@ describe("brain admission", () => {
   });
 
   it("admits coding agents on supported workers and returns adapter reasons for every remote Pi refusal", () => {
-    for (const id of catalog.ids)
+    for (const id of catalog.ids.filter((harness) => harness !== "opencode"))
       assert(Result.isSuccess(admitBrain(catalog, codingAgent, brain(id), local)));
     for (const placement of ["ssh", "container", "sandbox"] as const) {
       const context = AdmissionContext.make({ placement, credential: "api-key" });
       for (const id of ["claude", "codex"])
         assert(Result.isSuccess(admitBrain(catalog, codingAgent, brain(id), context)));
+      const opencode = admitBrain(catalog, codingAgent, brain("opencode"), context);
+      if (placement === "sandbox") {
+        assert(Result.isFailure(opencode));
+        assert.strictEqual(opencode.failure.missing[0].capability, "sandbox");
+      } else assert(Result.isSuccess(opencode));
       const result = admitBrain(catalog, codingAgent, brain("pi"), context);
       assert(Result.isFailure(result));
       assert.strictEqual(result.failure.missing[0].capability, placement);
       assert.include(result.failure.message, "Pi runs its tools in the orchestrator process");
+    }
+  });
+
+  it("admits OpenCode on an API key, from the attempt or the gateway, and refuses a login", () => {
+    for (const credential of ["api-key", "gateway", "gateway-api-key"] as const)
+      assert(
+        Result.isSuccess(
+          admitBrain(
+            catalog,
+            codingAgent,
+            brain("opencode"),
+            AdmissionContext.make({ placement: "local", credential }),
+          ),
+        ),
+      );
+    for (const credential of ["host-login", "gateway-subscription"] as const) {
+      const refused = admitBrain(
+        catalog,
+        codingAgent,
+        brain("opencode"),
+        AdmissionContext.make({ placement: "ssh", credential }),
+      );
+      assert(Result.isFailure(refused));
+      assert.strictEqual(refused.failure.missing[0].capability, "credential-route");
+      assert.include(refused.failure.message, "OpenCode uses an OpenAI API key");
     }
   });
 
