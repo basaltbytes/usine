@@ -32,8 +32,8 @@ differences. The adapter should pin 1.6.0.
   in-process path.
 - **Tools in band.** A usine extension, loaded with `-e`, registers the session's tools. Each call
   becomes an extension UI `input` dialog on Pi's standard output, and the adapter answers it on
-  standard input. The same extension gives `bash` an exact environment and implements the pause
-  gate.
+  standard input. The same extension gives `bash` an exact environment, implements the pause
+  gate, and stops cache warming between runs that the host's settings don't ask for.
 - **One path.** RPC replaces the in-process path for Pi children on every placement, local workers
   included. The Pi parent in `packages/durable` stays in process.
 - **Follow-ups.** Four issues, scoped at the end of this note: the `ChildHost` line reader, the
@@ -304,10 +304,14 @@ the same capabilities.
   compaction and branch summaries (`docs/rpc-commands.md`; tokens verified). Compaction usage also
   arrives in `compaction_end`.
 - **Cache warming.** Pi can send extra requests that keep a provider's prompt cache warm: during
-  runs by default in 1.4.0, and also for up to 30 minutes between runs by default from 1.5.1. Their
-  usage arrives only as `entry_appended` with an entry of type `usage` and kind `cache_warm`
-  (source). The probe model never triggered one (unverified). The per-attempt settings turn it off
-  (section 5).
+  runs by default in 1.4.0, and also for up to 30 minutes between runs by default from 1.5.1. A
+  refresh repeats the last request with a one-token output cap, for a model that declares a cache
+  lifetime (`promptCache` in `models.json`), when Pi expects it to save at least $0.05
+  (`dist/core/cache-warmer.js:8`). With `"promptCache": {"short": 15}` and a server that reported
+  2,000,000 prompt tokens, Pi refreshed once during a 7-second tool call. Under `"idle"`, it
+  refreshed twice more in the 14 seconds after `agent_settled`, and wrote only an `entry_appended`
+  for each, with an entry of type `usage` and kind `cache_warm` (verified). The per-attempt settings
+  turn warming off (section 5), and section 8 decides it for a `host-login` session.
 
 ### Model check
 
@@ -680,11 +684,12 @@ writes nothing in it. A per-attempt directory can't stand in for it. Pi has no v
 `auth.json` alone, a copy of the file would leave the host with a refresh token that a refresh in
 the copy has replaced, and the host's `models.json` can define the provider that the login serves.
 So the session keeps the host's `auth.json`, where Pi refreshes an OAuth login under its file lock
-as in process, and the host's `models.json` and `settings.json`, `cacheWarming` and `transport`
-included. The `api-key` and gateway routes are new on local workers and use a per-attempt agent
-directory, as on any worker.
+as in process, and the host's `models.json` and `settings.json`, with the values that it sets for
+`cacheWarming` and `transport`. The `api-key` and gateway routes are new on local workers and use a
+per-attempt agent directory, as on any worker.
 
-Two things change for a `host-login` session:
+Three things would change for a `host-login` session. usine accepts the first two and stops the
+third:
 
 - **Context.** The checkout's parent directories no longer give context files. The agent
   directory's `APPEND_SYSTEM.md` and context file, and the checkout's root file, still reach the
@@ -693,6 +698,45 @@ Two things change for a `host-login` session:
   `models.json` decides, as in process. An image `read` whose `tool_execution_end` crosses the line
   limit takes the drop path of section 1: the model still gets the image, and `ToolFinished` has a
   null output.
+- **Cache warming between runs.** A `cacheWarming` that the host's `settings.json` leaves unset
+  takes the CLI's default, and the default changed between the pins: `"streaming"` in 1.4.0, the
+  SDK that runs local children today, and `"idle"` in 1.6.0 (`dist/core/settings-defaults.js:60`).
+  Both pins fall back to the default for an unset or unknown value
+  (`dist/core/settings-manager.js:714-717`). Under `"streaming"`, warming stops at `agent_settled`
+  (`dist/core/cache-warmer.js:149-156`). Under `"idle"`, Pi keeps refreshing the cache after the
+  run, for up to 30 minutes from the last real request (`:6,158`), with an assumed continuation
+  probability of 0.15 (`:14`). A child held idle under operator supervision keeps its session open
+  (`packages/agents/src/harness/conversation.ts:115`, the `held || paused` branch at `:339`), so
+  its Pi process would bill the host's login for refreshes that today's child doesn't send. At $3
+  input, $3.75 cache write, and $0.30 cache read per million tokens, a refresh pays off for Pi from
+  about 230,000 prompt tokens, and at five times those prices from about 46,000, a size that a long
+  coding session reaches.
+
+**Decision: keep today's cache warming.** The usine extension handles `cache_warming_decision`,
+which Pi fires before each refresh with its own decision (`docs/extensions.md` in 1.6.0). While
+`ctx.isIdle()`, the handler returns `{ action: "stop" }` unless the agent directory's
+`settings.json` sets `cacheWarming` to `off`, `streaming`, or `idle`. It reads the key with the
+running CLI's `SettingsManager.create(ctx.cwd, getAgentDir(), { projectTrusted: false })` and
+`getGlobalSettings()`, which read nothing from the checkout and write nothing. So an unset key
+behaves as 1.4.0's `"streaming"`, a host that sets `"idle"` keeps idle warming as in process, and
+refreshes during a run are untouched. The per-attempt `settings.json` sets `"off"`, so on the other
+routes the handler never runs.
+
+Verified on a model with `"promptCache": {"short": 15}` and the prices above, a server that reported
+2,000,000 prompt tokens, a run with one 7-second `bash` call, and standard input kept open for 14
+seconds after `agent_settled`:
+
+| Pi | `cacheWarming` in the agent directory | Handler | Output caps of the requests | Lines after `agent_settled` |
+| --- | --- | --- | --- | --- |
+| 1.4.0 | Unset | No | 1000, 1, 1000 | None |
+| 1.4.0 | `"idle"` | No | 1000, 1, 1000, 1, 1 | Two `entry_appended` with `cache_warm` |
+| 1.6.0 | Unset, or `{}` | No | 1000, 1, 1000, 1, 1 | Two `entry_appended` with `cache_warm` |
+| 1.6.0 | Unset, `{}`, or `"always"` | Yes | 1000, 1, 1000 | None |
+| 1.6.0 | `"idle"` | Yes | 1000, 1, 1000, 1, 1 | Two `entry_appended` with `cache_warm` |
+| 1.6.0 | `"streaming"` | Yes | 1000, 1, 1000 | None |
+| 1.6.0 | `"off"` | Yes | 1000, 1000 | None |
+
+The first `1` in each row is the refresh during the tool call.
 
 ## 9. Versions 1.4.0 and 1.6.0
 
@@ -701,7 +745,8 @@ Every probe in this note gave the same answer on 1.6.0 except:
 - An aborted assistant message has the stop reason `aborted` instead of `error`.
 - End of input or SIGTERM during a tool call saves an `aborted` assistant message; 1.4.0 saves
   nothing after the tool call.
-- `cacheWarming` defaults to `idle` from 1.5.1, which also warms caches between runs.
+- `cacheWarming` defaults to `idle` from 1.5.1, which also warms caches between runs. The usine
+  extension keeps 1.4.0's default where the agent directory doesn't set the key (section 8).
 - The default system prompt is shorter: 1,348 prompt tokens instead of 1,620 in the probe.
 - Usage cost has `totalFromProvider`.
 
@@ -720,7 +765,6 @@ separate pin; `packages/durable` keeps 1.4.0 until its Pi parent is removed.
 - Writing the extension on a remote host with the command that starts Pi.
 - The ChatGPT backend's acceptance of Pi's request body, and any header it requires; real provider
   accounts in general.
-- What triggers cache warming, and its `entry_appended` usage on the wire.
 - An OAuth refresh of a host login by an RPC session in the host's `auth.json`.
 - Strict tool mode for structured completion on the gateway's Responses and Messages slots.
 - The Cloudflare sandbox shell.
@@ -742,9 +786,10 @@ separate pin; `packages/durable` keeps 1.4.0 until its Pi parent is removed.
 `packages/agents/src/harness/pi/rpc/`, built and shipped like the worker owner program.
 
 - The extension: usine tools answered through `input` dialogs with the tool's signal; an
-  exact-environment `bash`; the pause gate with `/usine-pause` and `/usine-resume`; and an output
-  tool with `constrainedSampling` and `terminate: true` for structured completions. It reads the
-  session's tool definitions from an environment variable.
+  exact-environment `bash`; the pause gate with `/usine-pause` and `/usine-resume`; the
+  `cache_warming_decision` handler of section 8; and an output tool with `constrainedSampling` and
+  `terminate: true` for structured completions. It reads the session's tool definitions from an
+  environment variable.
 - A typed client (Effect Schema) for Pi's command, response, event, and extension UI lines, on
   `pendingRequests` and the line reader of follow-up 1. Unknown events and shapes are logged and
   skipped; a dialog that usine doesn't own is answered `{"cancelled": true}`.
@@ -757,7 +802,10 @@ separate pin; `packages/durable` keeps 1.4.0 until its Pi parent is removed.
   the recipe in section 5. Tests cover a checkout with only `CLAUDE.md`, one with no context file,
   and an agent directory that holds `APPEND_SYSTEM.md` and `AGENTS.md`.
 - Unit tests against a scripted fake `pi` (a Node.js script in test code, no Pi in CI), plus one
-  test that loads the extension into the pinned CLI with a fake model endpoint.
+  test that loads the extension into the pinned CLI with a fake model endpoint. That test also
+  holds a session idle after a run, on a model with a `promptCache` lifetime and a prompt large
+  enough to warm: an agent directory whose `settings.json` doesn't set `cacheWarming` gets no
+  request after `agent_settled`, and one that sets `"idle"` still gets refreshes.
 
 **3. Pi adapter 2: RPC runtime, descriptor, and preflight.** Builds on 1 and 2, and replaces the
 in-process child path (section 8).
