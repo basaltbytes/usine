@@ -127,6 +127,10 @@
       "types": "./dist/agent/pool.d.ts",
       "default": "./dist/agent/pool.js"
     },
+    "./agent/provider": {
+      "types": "./dist/agent/provider/catalog.d.ts",
+      "default": "./dist/agent/provider/catalog.js"
+    },
     "./upgrade": {
       "types": "./dist/upgrade.d.ts",
       "default": "./dist/upgrade.js"

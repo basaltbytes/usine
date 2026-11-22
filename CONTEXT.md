@@ -256,6 +256,14 @@ _Avoid_: pool, billing pool, quota
 The gateway or worker that holds the credential a harness uses on a worker: the gateway when its `llm_providers` lists the harness's provider, and the worker otherwise.
 _Avoid_: credential owner, account
 
+**Model provider**:
+A service that answers model requests, such as Anthropic or OpenAI, as one catalog entry: its upstreams and routes for each wire protocol, where a key goes in a request, and the credentials it accepts. A harness descriptor lists the providers its harness can use.
+_Avoid_: LLM provider, vendor, protocol
+
+**Slot**:
+A model provider's place at the gateway, such as `anthropic-messages`: the credential that the gateway holds for the provider, and its path prefix on `llm.<domain>`. A worker's `llm_providers` lists slots.
+_Avoid_: protocol slot, gateway provider
+
 **Runaway guard**:
 Optional per-attempt limits on wall-clock time and tokens, set in `usine.yaml`. Exceeding a limit fails the attempt without an automatic retry.
 _Avoid_: budget, timeout, kill switch
