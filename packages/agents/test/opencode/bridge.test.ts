@@ -214,7 +214,12 @@ describe("OpenCode bridge", () => {
   it("answers a request line longer than 4 MiB with an error, and keeps running", async () => {
     const bridge = start("ready");
     await eventually(() => bridge.lines.length >= 1);
-    bridge.send({ id: 1, method: "POST", path: "/api/echo", body: { text: "x".repeat(LINE_LIMIT) } });
+    bridge.send({
+      id: 1,
+      method: "POST",
+      path: "/api/echo",
+      body: { text: "x".repeat(LINE_LIMIT) },
+    });
     bridge.child.stdin.write(`${"x".repeat(LINE_LIMIT + 1)}\n`);
     bridge.send({ id: 2, method: "GET", path: "/api/empty" });
     await eventually(() => answerTo(bridge.lines, 2) !== undefined);
@@ -302,7 +307,9 @@ describe("OpenCode bridge", () => {
     await eventually(() => bridge.stderr().includes("fake serve: flood stalled"));
     bridge.child.stdout.resume();
     await eventually(() => bridge.stderr().includes("fake serve: flood sent"));
-    await eventually(() => eventTypes(bridge.lines).filter((type) => type === "flood").length === 32);
+    await eventually(
+      () => eventTypes(bridge.lines).filter((type) => type === "flood").length === 32,
+    );
   });
 
   it("reports an event stream that closes while serve runs, and exits with 1", async () => {

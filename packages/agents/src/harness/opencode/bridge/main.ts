@@ -405,7 +405,7 @@ const main = () => {
             response.resume();
           });
         };
-        const tooLong = (bytes: number) =>
+        const skipLong = (bytes: number) =>
           warn(
             `skipping an OpenCode event of ${bytes} bytes that is too long for a line of ${MAX_LINE_BYTES} bytes`,
           );
@@ -421,12 +421,12 @@ const main = () => {
                   `skipping an OpenCode event of ${Buffer.byteLength(data)} bytes that isn't a JSON object`,
                 );
               const line = outputLine({ event: event.value });
-              if (line === undefined) return tooLong(Buffer.byteLength(data));
+              if (line === undefined) return skipLong(Buffer.byteLength(data));
               forward(line);
             },
             (bytes) => {
               arrived();
-              tooLong(bytes);
+              skipLong(bytes);
             },
           ),
         );
