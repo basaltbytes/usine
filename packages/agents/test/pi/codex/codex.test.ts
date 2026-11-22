@@ -2753,6 +2753,61 @@ describe("Codex child backend", () => {
   );
 
   it.effect(
+    "reads a message that repeats the task at its own record when the lost app-server saved no turn",
+    () =>
+      Effect.gen(function* () {
+        const lost = yield* lostAppServer([]);
+        const idle = yield* Queue.make<void>();
+        const echo = OperatorMessage.make({ message: request().prompt });
+        const reads: Array<Option.Option<InterventionState>> = [];
+        const recorded = (id: string, text: string) =>
+          Queue.offer(lost.restored, {
+            method: "item/started",
+            params: { threadId: "thread-1", turnId: "turn-2", item: userMessage(id, text) },
+          });
+        yield* Effect.gen(function* () {
+          const running = yield* (yield* ChildBackend).launch(remoteRequest());
+          yield* Effect.forkScoped(
+            running.events.pipe(
+              Stream.runForEach((event) =>
+                event._tag === "SessionIdle" ? Queue.offer(idle, undefined) : Effect.void,
+              ),
+            ),
+          );
+          yield* running.intervene(echo, (delivered) =>
+            Effect.sync(() => {
+              reads.push(delivered);
+            }),
+          );
+          const before = lost.submitted.length;
+          // The app-server exits before it saves the task's turn, so recovery sends the task again.
+          yield* lost.lose(running.session.id);
+          yield* Deferred.await(lost.recovered);
+          assert.deepStrictEqual(
+            lost.submitted.slice(before).map(({ method }) => method),
+            ["turn/start", "turn/steer"],
+            "the task again, then the message",
+          );
+          assert.include(jsonKey(lost.submitted[before]?.params), request().prompt);
+          yield* recorded("task", request().prompt);
+          yield* recorded("echo", echo.message);
+          yield* Queue.offer(lost.restored, {
+            method: "turn/completed",
+            params: { turn: { id: "turn-2", status: "completed", error: null } },
+          });
+          yield* Queue.take(idle);
+          assert.deepStrictEqual(
+            reads.map(Option.isSome),
+            [true],
+            "the message's own record reads it",
+          );
+          yield* running.intervene(Release.make(), noDelivery);
+          yield* running.result;
+        }).pipe(Effect.provide(codexChild.pipe(Layer.provideMerge(lost.server))));
+      }).pipe(Effect.scoped),
+  );
+
+  it.effect(
     "sends a steer that repeats the task again when the lost app-server recorded only the task",
     () =>
       Effect.gen(function* () {
