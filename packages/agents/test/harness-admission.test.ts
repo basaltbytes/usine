@@ -134,12 +134,17 @@ describe("brain admission", () => {
           ),
         ),
       );
-    for (const credential of ["host-login", "gateway-subscription"] as const) {
+    // A local worker gives its children only the host's login.
+    for (const [placement, credential] of [
+      ["ssh", "host-login"],
+      ["ssh", "gateway-subscription"],
+      ["local", "host-login"],
+    ] as const) {
       const refused = admitBrain(
         catalog,
         codingAgent,
         brain("opencode"),
-        AdmissionContext.make({ placement: "ssh", credential }),
+        AdmissionContext.make({ placement, credential }),
       );
       assert(Result.isFailure(refused));
       assert.strictEqual(refused.failure.missing[0].capability, "credential-route");
