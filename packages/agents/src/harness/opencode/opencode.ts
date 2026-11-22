@@ -760,7 +760,7 @@ const makeOpenCodeSessions = Effect.gen(function* () {
 
     const prompt = startPrompt(start);
     if (Option.isSome(prompt) && !policy.restored.paused && Option.isNone(policy.restored.idle)) {
-      yield* steer(prompt.value);
+      yield* conversation.sendOwn(prompt.value, (message) => steer(message));
       yield* policy.journal.prompted.pipe(
         Effect.catch((error) =>
           Effect.logWarning("Could not record the OpenCode prompt receipt", {
@@ -776,8 +776,7 @@ const makeOpenCodeSessions = Effect.gen(function* () {
       events: Stream.fromQueue(channel.events),
       interrupt: interruptExecution(true),
       result: Deferred.await(channel.result),
-      steer: (message: string, messageId?: OperatorMessageId) =>
-        steer(message, messageId).pipe(Effect.asVoid),
+      steer: (message: string) => steer(message).pipe(Effect.asVoid),
       intervene: conversation.intervene,
     } satisfies RunningSession;
     return {
