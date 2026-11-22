@@ -133,7 +133,10 @@ interface CodexState {
   readonly toolsInFlight: ReadonlyMap<string, string>;
   /** The inputs that wait for an interrupted turn to end. */
   readonly pending: ReadonlyArray<TurnInput>;
-  /** The inputs sent to the running turn, which the next turn carries if this one doesn't read them. */
+  /**
+   * The inputs sent to the running turn whose read the conversation hasn't confirmed. The next turn
+   * carries the operator messages among them.
+   */
   readonly submitted: ReadonlyArray<TurnInput>;
   /** Whether the session saved the user-message items that it counted, so restored ones acknowledge input. */
   readonly receiptsKnown: boolean;
@@ -308,11 +311,15 @@ const makeCodexSessions = Effect.gen(function* () {
       rateLimits: Option.none(),
       answered: false,
     });
-    const forgetInput = (input: TurnInput) =>
+    /** Removes the inputs that `drop` selects from the running turn and from the next one. */
+    const dropInputs = (drop: (input: TurnInput) => boolean) =>
       Ref.update(state, (current) => ({
         ...current,
-        submitted: current.submitted.filter((submitted) => submitted !== input),
+        pending: current.pending.filter((input) => !drop(input)),
+        submitted: current.submitted.filter((input) => !drop(input)),
       }));
+    // A turn that ends while the send is in flight has moved the input to `pending`.
+    const forgetInput = (input: TurnInput) => dropInputs((candidate) => candidate === input);
     const startTurn = Effect.fn("CodexRuntime.startTurn")(function* (
       message: string,
       id?: OperatorMessageId,
@@ -629,11 +636,12 @@ const makeCodexSessions = Effect.gen(function* () {
             if (Schema.is(UserMessageKindItem)(item)) {
               const message = yield* decodeItem(UserMessageItem, "user message", session.id, item);
               if (Option.isNone(message)) return;
-              return yield* conversation.observe({
+              const { read } = yield* conversation.observe({
                 _tag: "Recorded",
                 item: message.value,
                 turn: notification.value.turnId,
               });
+              return yield* dropInputs(({ id }) => id !== undefined && read.includes(id));
             }
             if (notification.value.turnId !== (yield* Ref.get(state)).turnId) {
               return yield* Effect.logDebug("Skipping a Codex item from another turn", {
@@ -788,11 +796,8 @@ const makeCodexSessions = Effect.gen(function* () {
               interrupting: false,
             }));
             yield* tools.cancelAll;
-            const notRead = new Set((yield* conversation.unread).map(({ id }) => id));
             const { hasNewGuidance, unread } = yield* Ref.modify(state, (current) => {
-              const unread = current.submitted.filter(
-                (input) => input.id !== undefined && notRead.has(input.id),
-              );
+              const unread = current.submitted.filter((input) => input.id !== undefined);
               return [
                 { hasNewGuidance: current.pending.length > 0, unread },
                 {

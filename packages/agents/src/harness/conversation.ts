@@ -223,7 +223,10 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
     if (Option.isSome(matched.save)) yield* journal.received(matched.save.value);
     yield* updateInbox(() => matched.inbox);
     yield* deliver(matched.read);
-    return { read: matched.read.length, repeated: Option.isSome(matched.repeated) ? 1 : 0 };
+    return {
+      read: matched.read.map(({ message }) => message.id),
+      repeated: Option.isSome(matched.repeated) ? 1 : 0,
+    };
   });
 
   /**
@@ -544,13 +547,14 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
     }, mutex.withPermits(1)),
     /**
      * Applies what the harness signal `signal` says about the operator messages that the session
-     * read. Returns how many messages it acknowledged and how many native records it repeated.
+     * read. Returns the IDs of the messages that it acknowledged, oldest first, and how many native
+     * records it repeated.
      */
     observe: (signal: S) =>
       mutex.withPermits(1)(
         Effect.forEach(options.decode(signal), receive).pipe(
           Effect.map((results) => ({
-            read: results.reduce((sum, { read }) => sum + read, 0),
+            read: results.flatMap(({ read }) => read),
             repeated: results.reduce((sum, { repeated }) => sum + repeated, 0),
           })),
         ),

@@ -1282,6 +1282,119 @@ describe("Codex child backend", () => {
     );
   }
 
+  for (const steer of ["accepted", "rejected"] as const)
+    it.effect(`sends a steer again only if Codex accepted it as the turn ended (${steer})`, () =>
+      Effect.gen(function* () {
+        const notifications = yield* Queue.make<CodexNotification, Cause.Done>();
+        const idle = yield* Queue.make<void>();
+        const started = yield* Queue.make<void>();
+        const receipts = yield* Queue.make<string>();
+        const answered = yield* Deferred.make<void>();
+        const calls: Array<{ method: string; params: Schema.Json }> = [];
+        let turns = 0;
+        const old = OperatorMessage.make({ message: "Check the diff" });
+        const next = OperatorMessage.make({ message: "Check the tests" });
+        const responses: Readonly<Record<string, Schema.Json>> = successfulResponses([
+          { id: "gpt-5.6-terra", model: "gpt-5.6-terra" },
+        ]);
+        const server = Layer.succeed(CodexAppServer)({
+          stop: () => Effect.void,
+          open: () =>
+            Effect.succeed({
+              notifications: Stream.fromQueue(notifications),
+              notify: () => Effect.void,
+              close: Queue.end(notifications),
+              request: (_operation, method, params) =>
+                Effect.gen(function* () {
+                  calls.push({ method, params });
+                  if (method === "turn/start") {
+                    turns += 1;
+                    yield* Queue.offer(started, undefined);
+                    return { turn: { id: `turn-${turns}` } };
+                  }
+                  if (method === "turn/steer" && turns === 1) {
+                    // The turn ends, and its completion is handled, before Codex answers the steer.
+                    yield* Queue.offer(notifications, {
+                      method: "turn/completed",
+                      params: { turn: { id: "turn-1", status: "completed", error: null } },
+                    });
+                    yield* Deferred.await(answered);
+                    yield* Effect.yieldNow;
+                    if (steer === "rejected")
+                      return yield* SessionOperationError.make({
+                        operation: "steer",
+                        sessionId: Option.none(),
+                        message: "no active turn to steer",
+                        cause: new Error("turn/steer"),
+                      });
+                  }
+                  return responses[method] ?? {};
+                }),
+            }),
+        });
+        yield* Effect.gen(function* () {
+          const running = yield* (yield* ChildBackend).launch(
+            ChildRequest.make({ ...request(), held: true }),
+          );
+          yield* Queue.take(started);
+          yield* Effect.forkScoped(
+            running.events.pipe(
+              Stream.runForEach((event) =>
+                event._tag === "ProviderAnswered"
+                  ? Deferred.succeed(answered, undefined)
+                  : event._tag === "SessionIdle"
+                    ? Queue.offer(idle, undefined)
+                    : Effect.void,
+              ),
+            ),
+          );
+          const sent = yield* Effect.result(
+            running.intervene(old, (state) =>
+              Queue.offer(receipts, Option.isSome(state) ? old.id : "unread").pipe(Effect.asVoid),
+            ),
+          );
+          assert.strictEqual(Result.isSuccess(sent), steer === "accepted");
+          yield* Queue.take(idle);
+          yield* running.intervene(next, noDelivery);
+          yield* Queue.take(started);
+          const inputs = calls
+            .filter(({ method }) => method === "turn/start" || method === "turn/steer")
+            .map(({ method, params }) => [method, jsonKey(params)] as const);
+          assert.deepStrictEqual(
+            inputs.map(([method]) => method),
+            steer === "accepted"
+              ? ["turn/start", "turn/steer", "turn/start", "turn/steer"]
+              : ["turn/start", "turn/steer", "turn/start"],
+          );
+          if (steer === "accepted") {
+            assert.include(inputs[2]?.[1], old.message, "the next turn starts with the steer");
+            assert.include(inputs[3]?.[1], next.message);
+            yield* Queue.offer(notifications, {
+              method: "item/started",
+              params: {
+                threadId: "thread-1",
+                turnId: "turn-2",
+                item: {
+                  type: "userMessage",
+                  id: "input-old",
+                  content: [{ type: "text", text: old.message, text_elements: [] }],
+                },
+              },
+            });
+            const receipt = yield* Queue.take(receipts);
+            assert.strictEqual(receipt, old.id);
+          } else assert.include(inputs[2]?.[1], next.message, "the failed steer isn't sent");
+          yield* Queue.offer(notifications, {
+            method: "turn/completed",
+            params: { turn: { id: "turn-2", status: "completed", error: null } },
+          });
+          yield* Queue.take(idle);
+          yield* running.intervene(Release.make(), noDelivery);
+          yield* running.result;
+        }).pipe(Effect.provide(codexChild.pipe(Layer.provide(server))));
+      }).pipe(Effect.scoped),
+    );
+
   it.effect("reads a replayed steer of an active reattached turn without sending it again", () =>
     Effect.gen(function* () {
       const notifications = yield* Queue.make<CodexNotification, Cause.Done>();

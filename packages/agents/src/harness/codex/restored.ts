@@ -1,4 +1,4 @@
-import type { AgentSessionId, HarnessSession } from "@usine/core/agent/session";
+import type { AgentSessionId, HarnessSession, OperatorMessageId } from "@usine/core/agent/session";
 import { Array as Arr, Effect, Option, Schema } from "effect";
 import {
   AgentMessageItem,
@@ -179,7 +179,10 @@ export const readRestored = Effect.fn("CodexRuntime.readRestored")(function* <E>
     readonly unread: Effect.Effect<ReadonlyArray<unknown>>;
     readonly observe: (
       input: CodexInput,
-    ) => Effect.Effect<{ readonly read: number; readonly repeated: number }, E>;
+    ) => Effect.Effect<
+      { readonly read: ReadonlyArray<OperatorMessageId>; readonly repeated: number },
+      E
+    >;
   },
 ) {
   yield* Effect.annotateCurrentSpan({ sessionId, turnId: turn.id });
@@ -203,7 +206,7 @@ export const readRestored = Effect.fn("CodexRuntime.readRestored")(function* <E>
       sessionId,
       turnId: turn.id,
       skipped: observed.repeated,
-      read: observed.read,
-      unread: unread - observed.read,
+      read: observed.read.length,
+      unread: unread - observed.read.length,
     });
 });
