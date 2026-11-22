@@ -166,10 +166,12 @@ export const providerRequest = (
 ): Option.Option<Request> => {
   const incoming = new URL(request.url);
   return Option.map(provider.protocolFor(incoming.pathname), (protocol) => {
-    const headers = withoutCredentials(request);
-    for (const { key } of provider.protocols) headers.delete(key.header);
-    headers.delete("host");
-    for (const name of [...headers.keys()]) if (!provider.passes(name)) headers.delete(name);
+    const keyHeaders = new Set<string>(provider.protocols.map(({ key }) => key.header));
+    const headers = new Headers(
+      [...withoutCredentials(request)].filter(
+        ([name]) => name !== "host" && !keyHeaders.has(name) && provider.passes(name),
+      ),
+    );
     Match.valueTags(credential, {
       ApiKey: ({ key }) =>
         headers.set(protocol.key.header, protocol.key.value(Redacted.value(key))),

@@ -60,13 +60,18 @@ export interface GatewayModelTransport {
   ) => Effect.Effect<Response, ParentCredentialError>;
 }
 
-/** The wire protocol that each Pi provider speaks to the gateway, and its model request path. */
-const PI_PROTOCOLS: Readonly<Record<string, { readonly protocol: string; readonly path: string }>> =
-  {
-    anthropic: { protocol: "anthropic-messages", path: "/v1/messages" },
-    openai: { protocol: "openai-responses", path: "/v1/responses" },
-    "openai-codex": { protocol: "openai-responses", path: "/v1/responses" },
-  };
+/** Returns the wire protocol that the Pi provider `provider` speaks to the gateway, and its model request path. */
+const piProtocolOf = (provider: string) => {
+  switch (provider) {
+    case "anthropic":
+      return { protocol: "anthropic-messages", path: "/v1/messages" } as const;
+    case "openai":
+    case "openai-codex":
+      return { protocol: "openai-responses", path: "/v1/responses" } as const;
+    default:
+      return undefined;
+  }
+};
 
 /** The providers of the Pi harness in the catalog, whose slots Pi reaches through the gateway. */
 const piProviders = Option.match(catalog.get(Harness.make("pi")), {
@@ -79,7 +84,7 @@ const piProviders = Option.match(catalog.get(Harness.make("pi")), {
  * the slot of the first of Pi's catalog providers that serves its protocol.
  */
 const gatewayRouteOf = (provider: string) => {
-  const spoken = PI_PROTOCOLS[provider];
+  const spoken = piProtocolOf(provider);
   const slot = piProviders.find(({ protocols }) =>
     protocols.some(({ protocol }) => protocol === spoken?.protocol),
   )?.slot;

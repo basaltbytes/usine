@@ -222,7 +222,8 @@ export class ModelProvider extends Schema.Class<
   passes(name: string): boolean {
     return Option.match(this.passThrough, {
       onNone: () => true,
-      onSome: (listed) => CONTENT_HEADERS.includes(name) || listed.some((header) => header === name),
+      onSome: (listed) =>
+        CONTENT_HEADERS.includes(name) || listed.some((header) => header === name),
     });
   }
 

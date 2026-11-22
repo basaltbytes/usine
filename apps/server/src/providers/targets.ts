@@ -484,7 +484,7 @@ const makeProviderTargets = Effect.fn("ProviderTargets.make")(function* (
     const reported = yield* Schema.decodeEffect(Schema.fromJsonString(ProviderConnections))(
       text,
     ).pipe(Effect.mapError(() => failed("Upgrade the gateway to enable provider connections.")));
-    // A gateway up to 0.3.0 reports only the state, of the providers in this orchestrator's catalog.
+    // A gateway up to 0.3.0 reports only the state; this orchestrator's catalog describes its providers.
     const providers = reported.providers.flatMap((connection) =>
       "id" in connection
         ? [connection]

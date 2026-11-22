@@ -54,19 +54,24 @@ const Stored = Schema.Union([
 ]);
 type Stored = typeof Stored.Type;
 
-/** The entries of the built-in providers' static keys, in the format of gateways up to 0.3.0. */
-const STORED_KEYS: Readonly<Record<string, (key: Redacted.Redacted<string>) => Stored>> = {
-  [anthropic.slot]: (key) => ({
-    _tag: "AnthropicProvider",
-    upstream: anthropic.protocols[0].upstream,
-    credential: { _tag: "AnthropicApiKey", key },
-  }),
-  [openai.slot]: (key) => ({
-    _tag: "OpenAiProvider",
-    upstream: openai.protocols[0].upstream,
-    credential: { _tag: "OpenAiApiKey", key },
-  }),
-};
+/**
+ * Returns the entry of a static key for `slot` in the format of gateways up to 0.3.0, which has one
+ * for the built-in providers' slots only.
+ */
+const storedKey = (slot: GatewaySlot, key: Redacted.Redacted<string>): Option.Option<Stored> =>
+  slot === anthropic.slot
+    ? Option.some({
+        _tag: "AnthropicProvider",
+        upstream: anthropic.protocols[0].upstream,
+        credential: { _tag: "AnthropicApiKey", key },
+      })
+    : slot === openai.slot
+      ? Option.some({
+          _tag: "OpenAiProvider",
+          upstream: openai.protocols[0].upstream,
+          credential: { _tag: "OpenAiApiKey", key },
+        })
+      : Option.none();
 
 /**
  * `provider-credentials.json`: by slot, a credential that the format of gateways up to 0.3.0
@@ -194,7 +199,7 @@ export class ProviderCredentials extends Context.Service<
           const temporary = `${file}.${uuid}`;
           const text = yield* Schema.encodeEffect(SnapshotJson)({
             ...next.stored,
-            ...(Object.keys(next.staticKeys).length === 0 ? {} : { staticKeys: next.staticKeys }),
+            staticKeys: next.staticKeys,
           }).pipe(Effect.orDie);
           yield* fs
             .makeDirectory(directory, { recursive: true, mode: 0o700 })
@@ -324,10 +329,9 @@ export class ProviderCredentials extends Context.Service<
                       storing(snapshot, provider.slot, Option.some(held)),
                     )
                   : Effect.succeed(
-                      Option.match(Option.fromUndefinedOr(STORED_KEYS[provider.slot]), {
+                      Option.match(storedKey(provider.slot, credential.secret), {
                         onNone: () => keying(snapshot, provider.slot, credential.secret),
-                        onSome: (stored) =>
-                          storing(snapshot, provider.slot, Option.some(stored(credential.secret))),
+                        onSome: (stored) => storing(snapshot, provider.slot, Option.some(stored)),
                       }),
                     );
                 yield* save(next, provider.slot);
