@@ -205,7 +205,7 @@ On the recommended transport. `Capability` is defined in
 | `durable-coordination` | Lacking: OpenCode doesn't journal usine tool intents and results. After a process dies, the in-flight tool call is failed with `Tool execution interrupted` and no turn continues. | Verified |
 | `resume-session` | Supported: a session is stored as rows in the data database, and a new `serve` on the same data directory reopens it by ID. Nothing runs until a prompt, so the continuation policy's one message starts the continuation. | Verified |
 | `steer` | Supported: `POST /api/session/:id/prompt` with `delivery: "steer"` and a usine `msg_…` ID; `session.inbox.delivered` reports the read with that ID. | Verified |
-| `interrupt` | Supported: `POST /api/session/:id/interrupt` answered in 11 ms and killed the shell command about 20 ms later. A steer queued before the interrupt stays pending, and `?resume=true` runs it at once. A steer accepted after the answer starts a new execution as soon as the old one settles (see "Steer after an interrupt"). | Verified |
+| `interrupt` | Supported: `POST /api/session/:id/interrupt` answered in 11 ms and killed the shell command about 20 ms later. A steer queued before the interrupt stays pending, and `?resume=true` runs it at once. A steer posted after the answer runs in a successor execution, and its own answer can arrive after the old execution's `session.execution.interrupted` (see "Steer after an interrupt"). | Verified |
 | `usine-tools` | Supported through MCP: the API client hosts an MCP server over a WebSocket at `/api/experimental/client-mcp`, and the model sees its tools as `<server>_<tool>`. The bridge relays the socket's messages as lines. | Verified at the API; relay not prototyped |
 | `closed-tools` | Supported: session `permissions` remove tools from the model's list exactly. | Verified |
 | `structured-output` | Lacking: no session or prompt option constrains the answer to a JSON Schema. `/api/experimental/generate/decisions` returns only predicate, choice, and score answers. | Source; no recorded request had `response_format` |
@@ -237,16 +237,31 @@ with a per-attempt prefix.
 
 `/interrupt` answers before the execution's cleanup settles
 ([`execution.ts:190-193`](https://github.com/anomalyco/opencode/blob/v2.3.2/packages/core/src/session/execution.ts#L190-L193)).
-A steer posted after that answer starts a successor execution when the old one settles, without
-`?resume=true`. In the probe, the steer's `POST` returned 200, `session.execution.interrupted`
-arrived 44 ms after the interrupt's answer, `session.execution.started` 1 ms later, and then
-`session.inbox.delivered` with the steer's ID and `session.execution.succeeded` (verified). A
-steer posted 300 ms before the interrupt started no execution and stayed in
-`GET /api/session/:id/inbox` (verified).
+A steer posted after that answer starts a successor execution without `?resume=true`. In 45 runs,
+each with the steer posted 0 to 10 ms after the interrupt's answer and before the old
+execution's `session.execution.interrupted` arrived, the events came in one of two orders
+(verified):
 
-So `session.execution.interrupted` doesn't end the turn while a steer accepted after the interrupt
-is still undelivered: the adapter waits for the successor execution and its result. PR #1001 had
-the same race (section 7).
+| Order | Runs | Sequence after the interrupt's answer |
+| --- | --- | --- |
+| A | 16 | The steer's 200 and its `session.inbox.enqueued`; the old `session.execution.interrupted`, 22 to 40 ms after the interrupt's answer; `session.execution.started` within 2 ms of the old event. |
+| B | 29 | The old `session.execution.interrupted`, 7 to 17 ms after the interrupt's answer; then the steer's 200; then its `session.inbox.enqueued` and `session.execution.started`, 13 to 34 ms after the old event. |
+
+Both orders then reported `session.inbox.delivered` with the steer's ID and
+`session.execution.succeeded`: every run delivered the steer in a successor execution. In order B,
+OpenCode admits the steer only after the old execution has settled, so the bridge, which relays
+answers and events in arrival order, shows the same order. A steer whose 200 returned 0 to 300 ms
+before the interrupt was sent started no execution and stayed in `GET /api/session/:id/inbox`
+(verified).
+
+So the rule keys on when the runtime posted the steer, not on its answer. When the runtime
+handles the old `session.execution.interrupted`, the event doesn't end the turn while a steer
+posted after the interrupt's answer is unanswered or undelivered. If the steer's answer is 200,
+the turn ends at the successor's terminal event, with the successor's result and the steer
+reported as read. If the answer is an error, the turn ends with the interrupted execution's
+result. The runtime judges delivery by the events it has handled, not by what its event reader
+already holds: in order A, `session.execution.started` follows the old event within 2 ms, so the
+reader is usually ahead of the handler. PR #1001 had the same race (section 7).
 
 ### usine tools
 
@@ -548,7 +563,7 @@ handoff to a successor
 | P1: the OpenCode wiring exported `XDG_DATA_HOME` to every child of the attempt | Gone for other harnesses: step 15 builds each child's environment from its own harness's wiring only ([`environment.ts:156-157`](../../packages/executor/src/ssh/gateway/environment.ts)). Kept as a requirement for OpenCode itself, whose tool commands inherit `serve`'s environment: isolate its state per attempt without moving `XDG_DATA_HOME` for those commands (section 4). Saved credentials beat the placeholder, so the per-attempt directory is required. |
 | P2: server failures had no diagnostics | Gone: the bridge passes OpenCode's warnings to standard error, where the owner keeps a bounded tail and the exit code, as for every child. With `serve --print-logs --log-level warn`, a malformed provider in the configuration put its warning in that tail (verified). Kept: test an exit before readiness. |
 | P2: the SSH forward lacked `ControlPath=none` and ignored its output | Gone: no forward. |
-| P2: guidance accepted while an interrupt settled was lost, because the old execution's `interrupted` event ended the session | Kept as a requirement: 2.3.2 still answers `/interrupt` before cleanup settles, and a steer accepted after the answer starts a successor execution. `session.execution.interrupted` doesn't end the turn while that steer is undelivered (section 2, "Steer after an interrupt"). The `interrupt-guidance` scenario sends the guidance after the session goes idle, so it covers a steer after the old execution settles, not this race; the adapter adds a runtime test of the race (follow-up issues). |
+| P2: guidance accepted while an interrupt settled was lost, because the old execution's `interrupted` event ended the session | Kept as a requirement: 2.3.2 still answers `/interrupt` before cleanup settles, and a steer posted after the answer starts a successor execution, even when the steer's own answer arrives after the old `session.execution.interrupted`. The old event doesn't end the turn while that steer is unanswered or undelivered (section 2, "Steer after an interrupt"). The `interrupt-guidance` scenario sends the guidance after the session goes idle, so it covers a steer after the old execution settles, not this race; the adapter adds a runtime test of the race (follow-up issues). |
 | P2: CI tested neither the transport nor `interrupt` | Kept as a requirement: replay fixtures at the `ChildHost` boundary for the shared scenarios, including `interrupt-guidance`, `steer`, and `restart`, plus unit tests of the bridge against a scripted fake server (readiness, crash, garbage, slow start, end of input). |
 | P2: preflight skipped the model check on gateway routes | Kept: preflight checks the model on every route through `GET /api/model`, which needs no provider request. |
 | P3: an unexpected event shape failed the whole session | Kept: log and skip unknown event types and shapes; the pin limits drift. |
@@ -572,11 +587,13 @@ issue precedes it.
   interrupt, reads acknowledged by `session.inbox.delivered`, the result after background work
   ends, tokens and cost per step, retries and plan limits mapped to `AgentCapacityError`, and
   resume from the data database. `session.execution.interrupted` doesn't end the turn while a
-  steer accepted after the interrupt is still undelivered (section 2, "Steer after an interrupt").
-  A runtime unit test feeds bridge events in the probe's order and asserts that the session
-  doesn't finish at the old event: the interrupt's answer, the steer accepted, the old
-  `session.execution.interrupted`, `session.execution.started`, `session.inbox.delivered` with
-  the steer's ID, then `session.execution.succeeded`.
+  steer posted after the interrupt's answer is unanswered or undelivered (section 2, "Steer after
+  an interrupt"). A runtime unit test feeds bridge lines in both orders from section 2, with
+  `session.inbox.enqueued`: order A has the steer's 200 before the old
+  `session.execution.interrupted`, and order B has it after. In each, it asserts that the turn
+  ends at the successor's `session.execution.succeeded` with the successor's text and the steer
+  reported as read. A control with no steer after the interrupt asserts that the turn ends at the
+  old event.
 - A descriptor with the capability profile in section 2, the isolation and credential
   environment in sections 3 and 4, and an install entry that installs only the matching platform
   binary.
