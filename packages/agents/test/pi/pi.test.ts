@@ -468,7 +468,7 @@ describe("Pi child backend", () => {
             _tag: "Started",
             harnessSession: Option.none(),
             model: childRequest.session.brain.model,
-            pool: "apiKeys",
+            pool: apiKeys.id,
             tools: childTools,
             session: {
               messages: [],
