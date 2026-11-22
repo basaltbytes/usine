@@ -178,7 +178,10 @@ const settled = (pending: Pending): Pending =>
     : { ...pending, deliveredEarly: new Set() };
 
 /** Returns the key of an input posted with `id`, if known, and the state that tracks it. */
-export const post = (pending: Pending, id: Option.Option<string>): readonly [number, Pending] => [
+export const trackInput = (
+  pending: Pending,
+  id: Option.Option<string>,
+): readonly [number, Pending] => [
   pending.nextKey,
   {
     ...pending,

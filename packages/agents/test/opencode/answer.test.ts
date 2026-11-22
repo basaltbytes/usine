@@ -124,14 +124,14 @@ describe("OpenCode answer", () => {
     }).pipe(Effect.scoped),
   );
 
-  for (const listed of ["job", "inbox item", "active execution"] as const)
-    it.live(`waits while OpenCode lists a ${listed} that no handled event reported`, () =>
+  for (const listed of ["a job", "an inbox item", "an active execution"] as const)
+    it.live(`waits while OpenCode lists ${listed} that no handled event reported`, () =>
       Effect.gen(function* () {
         const { bridge, running, ended } = yield* launched("Started the tests.");
-        if (listed === "job")
+        if (listed === "a job")
           yield* bridge.setJobs([{ kind: "shell", id: "sh_1", status: "running", title: "test" }]);
-        if (listed === "inbox item") yield* bridge.setInbox([{ id: "msg_notice" }]);
-        if (listed === "active execution") yield* bridge.setActive([SESSION]);
+        if (listed === "an inbox item") yield* bridge.setInbox([{ id: "msg_notice" }]);
+        if (listed === "an active execution") yield* bridge.setActive([SESSION]);
         for (const line of firstExecutionEnds) yield* bridge.emit(line);
         const early = yield* running.result.pipe(Effect.timeoutOption("200 millis"));
         assert(Option.isNone(early), "the first execution's answer isn't the result");

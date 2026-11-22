@@ -90,13 +90,13 @@ import {
   inTree,
   lateInputFailed,
   type Pending,
-  post as postInput,
   removed,
   requestInterrupt,
   restarted,
   runningWork,
   shellEnded,
   shellStarted,
+  trackInput,
   unread,
 } from "./state.ts";
 
@@ -316,7 +316,7 @@ const makeOpenCodeSessions = Effect.gen(function* () {
             new Map(ids).set(openCodeId.value, messageId.value),
           );
         const { key, late } = yield* Ref.modify(state, (latest) => {
-          const [posted, pending] = postInput(latest.pending, openCodeId);
+          const [posted, pending] = trackInput(latest.pending, openCodeId);
           const [isLate, execution] = inputPosted(latest.execution, posted);
           return [
             { key: posted, late: isLate },
