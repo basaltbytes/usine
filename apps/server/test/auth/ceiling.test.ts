@@ -9,6 +9,7 @@ import { authenticatedRoutes } from "../../src/auth/http.ts";
 import { OperationCeilingChange, OperationId, TokenName } from "../../src/auth/model.ts";
 import { FactoryBackend } from "../../src/backend.ts";
 import { apiRoutes } from "../../src/http.ts";
+import { catalogPools } from "../../../../packages/orchestrator/test/support/pools.ts";
 import { ProviderLogins } from "../../src/providers/control.ts";
 import { providerRoutes } from "../../src/providers/http.ts";
 import { setupRoutes } from "../../src/setup/http.ts";
@@ -64,6 +65,7 @@ const fixture = Effect.gen(function* () {
   });
   const routes = Layer.mergeAll(
     apiRoutes.pipe(
+      Layer.provide(catalogPools),
       Layer.provide(Layer.succeed(ChangeBus, bus)),
       Layer.provide(authenticated.guard.layer),
     ),

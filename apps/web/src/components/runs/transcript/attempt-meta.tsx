@@ -78,28 +78,33 @@ export const AttemptMeta = ({ chapter, runTask }: AttemptMetaProps) => {
             }
           />
         )}
-        {chapter.meters.map((meter) => (
-          <Meta
-            key={meter.pool}
-            label={poolLabel(meter.pool)}
-            value={meter.windows
-              .map((window) =>
-                [
-                  `${window.usedPercent}%`,
-                  Option.match(window.windowDurationMinutes, {
-                    onNone: () => "used",
-                    onSome: (minutes) => `of ${windowLabel(minutes)} window`,
-                  }),
-                  Option.match(window.resetsAt, {
-                    onNone: () => "",
-                    onSome: (resets) => `, resets ${dayLabel(DateTime.toDate(resets))}`,
-                  }),
-                ].join(" "),
-              )
-              .join("; ")
-              .replace(/ ,/gu, ",")}
-          />
-        ))}
+        {chapter.meters.map((meter) =>
+          Option.match(poolLabel(meter.pool), {
+            onNone: () => null,
+            onSome: (label) => (
+              <Meta
+                key={meter.pool}
+                label={label}
+                value={meter.windows
+                  .map((window) =>
+                    [
+                      `${window.usedPercent}%`,
+                      Option.match(window.windowDurationMinutes, {
+                        onNone: () => "used",
+                        onSome: (minutes) => `of ${windowLabel(minutes)} window`,
+                      }),
+                      Option.match(window.resetsAt, {
+                        onNone: () => "",
+                        onSome: (resets) => `, resets ${dayLabel(DateTime.toDate(resets))}`,
+                      }),
+                    ].join(" "),
+                  )
+                  .join("; ")
+                  .replace(/ ,/gu, ",")}
+              />
+            ),
+          }),
+        )}
         {attempt?.operatorIntervened === true && <Meta label="Operator intervened" />}
       </p>
       {chapter.sessions.map(({ session, prompt }) =>

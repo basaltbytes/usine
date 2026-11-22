@@ -104,7 +104,7 @@ const makeStatistics = Effect.gen(function* () {
       [],
       new Map(),
       new Map(),
-      [],
+      pools,
     );
     const found = cards.flatMap(({ view }) => {
       const merges = view.items.flatMap(({ itemKey }) => {

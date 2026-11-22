@@ -165,7 +165,7 @@ const makeRunStore = Effect.gen(function* () {
       const key = `${event.pool}:${window}`;
       const limit = event.rateLimits[window];
       if (Option.isNone(limit) && declaredPool(pools, event.pool).windows === "separately") {
-        yield* Effect.logInfo("Window unreported; keeping its pool reset deadline", {
+        yield* Effect.logDebug("Window unreported; keeping its pool reset deadline", {
           pool: event.pool,
           window,
         });

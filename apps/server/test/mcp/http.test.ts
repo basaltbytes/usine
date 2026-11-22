@@ -51,6 +51,7 @@ import type { AuthStore } from "../../src/auth/store.ts";
 import { FactoryBackend } from "../../src/backend.ts";
 import { Port } from "../../src/cli.ts";
 import { apiRoutes, serverLayer } from "../../src/http.ts";
+import { catalogPools } from "../../../../packages/orchestrator/test/support/pools.ts";
 import { operatorOpenApi } from "../../src/openapi.ts";
 import { startupListener } from "../../src/listener.ts";
 import { MCP_PATH, MCP_SESSION_IDLE, mcpRoutes } from "../../src/mcp/http.ts";
@@ -210,7 +211,7 @@ const makeFixture = () =>
     });
     const authenticated = authenticatedRoutes(services);
     const routes = Layer.mergeAll(
-      apiRoutes.pipe(Layer.provide(authenticated.guard.layer)),
+      apiRoutes.pipe(Layer.provide(catalogPools), Layer.provide(authenticated.guard.layer)),
       mcpRoutes([]).pipe(
         Layer.provide(authenticated.guard.layer),
         Layer.provide(NodeHttpServer.layerHttpServices),
@@ -749,7 +750,11 @@ describe("operator MCP endpoint", () => {
           ConfigProvider.fromUnknown({ USINE_GITHUB_WEBHOOK_SECRET: webhookSecret }),
         ),
       );
-      yield* Layer.build(serverLayer(backend, webRoot, listener, services, upgrades, webhooks));
+      yield* Layer.build(
+        serverLayer(backend, webRoot, listener, services, upgrades, webhooks).pipe(
+          Layer.provide(catalogPools),
+        ),
+      );
       yield* listener.started;
       const initialize = (headers: Readonly<Record<string, string>>) =>
         webRequest(`${origin}${MCP_PATH}`, {

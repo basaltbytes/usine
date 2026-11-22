@@ -229,7 +229,7 @@ describe("RunUsageReader", () => {
   );
 
   it.effect(
-    "bills recorded pools independently of harness and model inference, and undeclared pools last under their IDs",
+    "bills recorded pools independently of harness and model inference, and undeclared pools last under their IDs as estimates",
     () => {
       const parent = ParentSession.make({
         ...planParent,
@@ -259,18 +259,22 @@ describe("RunUsageReader", () => {
       ) => pools.map(({ pool, label, cost }) => [pool, label, cost === null ? null : { ...cost }]);
       const expected = [
         ["apiKeys", "API keys", { usd: 0.75, estimate: false }],
-        ["archivedPlan", "archivedPlan", { usd: 2, estimate: false }],
-        ["removedPlan", "removedPlan", { usd: 1, estimate: false }],
+        ["archivedPlan", "archivedPlan", { usd: 2, estimate: true }],
+        ["removedPlan", "removedPlan", { usd: 1, estimate: true }],
       ];
       return Effect.gen(function* () {
         const usage = yield* (yield* RunUsageReader).read(runUsageSource(source));
         assert.deepStrictEqual(
-          usage.sessions.map(({ pool, session }) => [pool, session.endpoint]),
+          usage.sessions.map(({ pool, session, cost }): ReadonlyArray<unknown> => [
+            pool,
+            session.endpoint,
+            cost?.estimate,
+          ]),
           [
-            ["removedPlan", removed.endpoint],
-            ["apiKeys", parent.endpoint],
-            ["archivedPlan", archived.endpoint],
-            ["apiKeys", added.endpoint],
+            ["removedPlan", removed.endpoint, true],
+            ["apiKeys", parent.endpoint, false],
+            ["archivedPlan", archived.endpoint, true],
+            ["apiKeys", added.endpoint, false],
           ],
         );
         assert.deepStrictEqual(lines(usage.pools), expected);
@@ -318,6 +322,7 @@ describe("RunUsageReader", () => {
         AdmissionContext.make({ placement: "local", credential: "gateway-subscription" }),
       );
       assert(Result.isSuccess(admitted));
+      assert.deepStrictEqual(admitted.success.pool, Option.some(testPlan.id));
       // A runtime records the pool that admission determined on the session it opens.
       const session = ChildSession.make({
         ...child("test", testHarness.id, "test-model"),

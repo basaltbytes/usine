@@ -4,6 +4,7 @@ import {
   BillingPools,
   declaredPool,
   type PoolDescriptor,
+  type UndeclaredPool,
 } from "@usine/core/agent/pool";
 import {
   AgentSession,
@@ -26,8 +27,9 @@ import { Array as Arr, type Brand, Context, Effect, Layer, Option, Order, Schema
 import type { AttemptView } from "./attempt.ts";
 
 /**
- * A dollar cost from a harness or from usine's OpenAI price table. `estimate` is true in a plan
- * pool, which doesn't bill per token (ADR 0013).
+ * A dollar cost from a harness or from usine's OpenAI price table. `estimate` is true in a pool that
+ * isn't metered: a plan pool, which doesn't bill per token, or an undeclared pool, whose billing
+ * usine can't tell (ADR 0013).
  */
 export class UsageCostView extends Schema.Class<
   UsageCostView,
@@ -36,8 +38,8 @@ export class UsageCostView extends Schema.Class<
   /** The priced usage in US dollars. */
   usd: UsdAmount,
   /**
-   * Whether the amount estimates usage on a subscription plan rather than per-token billing (ADR
-   * 0013).
+   * Whether the amount estimates usage in a pool that isn't metered rather than per-token billing
+   * (ADR 0013).
    */
   estimate: Schema.Boolean,
 }) {}
@@ -127,14 +129,14 @@ export class TaskUsageView extends Schema.Class<
   pools: Schema.Array(TaskPoolUsageView),
   /**
    * The summed cost of the priced pools, or null if no pool has a price. It's an estimate if it
-   * includes a plan pool, and a lower bound if a pool is `unpriced`.
+   * includes a pool that isn't metered, and a lower bound if a pool is `unpriced`.
    */
   cost: Schema.NullOr(UsageCostView),
 }) {}
 
 /** The members of one billing pool, with the pool as `declaredPool` resolves it. */
 interface PoolGroup<A> {
-  readonly pool: PoolDescriptor;
+  readonly pool: PoolDescriptor | UndeclaredPool;
   readonly members: Arr.NonEmptyReadonlyArray<A>;
 }
 
@@ -163,11 +165,14 @@ export const poolGroups = <A extends { readonly pool: BillingPool }>(
   );
 };
 
-/** Prices usage in `pool`; a price in a plan pool is an estimate (ADR 0013). */
-const priced = (pool: PoolDescriptor, usd: Option.Option<UsdAmount>): UsageCostView | null =>
+/** Prices usage in `pool`; a price in a pool that isn't metered is an estimate (ADR 0013). */
+const priced = (
+  pool: PoolDescriptor | UndeclaredPool,
+  usd: Option.Option<UsdAmount>,
+): UsageCostView | null =>
   Option.match(usd, {
     onNone: () => null,
-    onSome: (value) => UsageCostView.make({ usd: value, estimate: pool.billing === "plan" }),
+    onSome: (value) => UsageCostView.make({ usd: value, estimate: pool.billing !== "metered" }),
   });
 
 /** Returns the harness's price, or for a Codex session, the OpenAI table's price of its breakdown. */
