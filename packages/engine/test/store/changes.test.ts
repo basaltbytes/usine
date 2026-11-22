@@ -58,6 +58,14 @@ const separatePlan = PoolDescriptor.make({
   windows: "separately",
 });
 
+/** A pool that only test code declares, reported with both windows at once like the ChatGPT plan. */
+const togetherPlan = PoolDescriptor.make({
+  id: BillingPool.make("togetherPlan"),
+  label: "Together plan",
+  billing: "plan",
+  windows: "together",
+});
+
 it.effect(
   "publishes committed engine, transcript, item, attention and cycle writes once and skips duplicates",
   () =>
@@ -74,7 +82,7 @@ it.effect(
         CycleBudgets.layer,
       ).pipe(
         Layer.provideMerge(localSqliteLayer(directory)),
-        Layer.provide(Layer.succeed(BillingPools)([separatePlan])),
+        Layer.provide(Layer.succeed(BillingPools)([separatePlan, togetherPlan])),
       );
       yield* Effect.gen(function* () {
         const bus = yield* ChangeBus;
@@ -161,41 +169,37 @@ it.effect(
             ),
           }),
         });
-        yield* expectWrite(
-          store.appendTranscript(
-            "outbound",
-            OutboundEnvelope.make({
-              ...envelope,
-              sequence: Sequence.make(2),
-              payload: SessionEvent.make({ event: report }),
+        // Each pool reports its primary window, then a report that omits it.
+        const reports = [separatePlan.id, togetherPlan.id].flatMap((pool) => [
+          PoolRateLimitsUpdated.make({ ...report, pool }),
+          PoolRateLimitsUpdated.make({
+            ...report,
+            pool,
+            rateLimits: RateLimitsSnapshot.make({
+              ...report.rateLimits,
+              primary: Option.none(),
+              secondary: report.rateLimits.primary,
             }),
-          ),
-          [{ kind: "attempt", id: attempt.id }],
-        );
-        yield* expectWrite(
-          store.appendTranscript(
-            "outbound",
-            OutboundEnvelope.make({
-              ...envelope,
-              sequence: Sequence.make(3),
-              payload: SessionEvent.make({
-                event: PoolRateLimitsUpdated.make({
-                  ...report,
-                  rateLimits: RateLimitsSnapshot.make({
-                    ...report.rateLimits,
-                    primary: Option.none(),
-                    secondary: report.rateLimits.primary,
-                  }),
-                }),
+          }),
+        ]);
+        for (const [index, event] of reports.entries()) {
+          yield* expectWrite(
+            store.appendTranscript(
+              "outbound",
+              OutboundEnvelope.make({
+                ...envelope,
+                sequence: Sequence.make(index + 2),
+                payload: SessionEvent.make({ event }),
               }),
-            }),
-          ),
-          [{ kind: "attempt", id: attempt.id }],
-        );
+            ),
+            [{ kind: "attempt", id: attempt.id }],
+          );
+        }
         const beforeReset = (yield* bus.open).revision;
         yield* TestClock.adjust("1 minute");
 
-        assert.strictEqual((yield* bus.open).revision, beforeReset + 2);
+        // The separate pool keeps its omitted primary window's reset; the together pool cancels it.
+        assert.strictEqual((yield* bus.open).revision, beforeReset + 3);
 
         assert.deepStrictEqual((yield* bus.open).history.at(-1)?.changes, [
           { audience: InstanceScope.make(), target: { kind: "attention", id: "instance" } },

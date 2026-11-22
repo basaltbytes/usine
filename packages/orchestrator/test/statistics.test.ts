@@ -1031,6 +1031,13 @@ describe("OperatorStatistics", () => {
           runsClosed.machineStarts.map(({ count }) => count),
           [3],
         );
+        // The layer labels pools from the `BillingPools` it reads.
+        assert.deepStrictEqual(
+          runsClosed.loops.flatMap(({ usage }) =>
+            usage.pools.map(({ pool, label }) => [pool, label]),
+          ),
+          [["claudePlan", "Claude plan"]],
+        );
 
         // Issue 1 and pull request 2 form the task, up to its review's close; the review reported no tokens.
         assert.deepStrictEqual(

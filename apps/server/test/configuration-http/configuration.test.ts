@@ -563,6 +563,11 @@ it("serves installation repositories, live labels and supported harnesses, and r
             { id: "pi", label: "Pi", handoff: null, ownTools: null },
           ]),
           efforts: expect.arrayContaining(["high"]),
+          pools: [
+            { id: "apiKeys", label: "API keys", billing: "metered", windows: "none" },
+            { id: "claudePlan", label: "Claude plan", billing: "plan", windows: "separately" },
+            { id: "chatgptPlan", label: "ChatGPT plan", billing: "plan", windows: "together" },
+          ],
         },
       });
       const updatedResponse = yield* request("GET", "/labels/acme%2Funavailable");
