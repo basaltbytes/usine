@@ -16,7 +16,10 @@ type Route = (request: IncomingMessage, response: ServerResponse) => void;
  *
  * - `ready` starts at once.
  * - `slow` reports its URL and then registers event subscriptions after a delay.
+ * - `long-line` writes a line longer than the bridge's 4 MiB line limit before its ready line.
+ * - `foreign-url` reports a URL on a host that isn't a loopback address before its own.
  * - `exit-before-ready` fails before its ready line.
+ * - `no-events` accepts the event subscription and sends no event.
  * - `refuse-events` answers the event subscription with 401.
  * - `refuse-events-at-end` holds the event subscription and answers it with 401 at end of input.
  * - `helper` starts a detached process that keeps its stdout and stderr open after it exits.
@@ -25,24 +28,37 @@ const scenario = process.env.FAKE_SERVE_SCENARIO ?? "ready";
 /** The exit code at end of input, from `FAKE_SERVE_EXIT_CODE`. */
 const exitCode = Number(process.env.FAKE_SERVE_EXIT_CODE ?? "7");
 const password = process.env.OPENCODE_PASSWORD;
+// Like OpenCode's server, whose documentation lets this variable replace the user name.
+const userName = process.env.OPENCODE_SERVER_USERNAME ?? "opencode";
 // Like `serve --stdio`, which keeps the password from the commands it runs.
 delete process.env.OPENCODE_PASSWORD;
 const SLOW_MS = 300;
+/**
+ * The number of 1 MiB events that `POST /api/flood` sends: more than the TCP buffers between serve
+ * and the bridge hold.
+ */
+const FLOOD_EVENTS = 32;
+/** The bridge's line limit, 4 MiB. */
+const LINE_LIMIT = 4 * 1024 ** 2;
+/** Text one byte longer than the bridge's line limit. */
+const LARGE_TEXT = "x".repeat(LINE_LIMIT + 1);
+/** The bytes of `GET /api/large`'s body: far more than the bridge reads of a response. */
+const LARGE_RESPONSE_BYTES = 64 * 1024 ** 2;
 
 const subscribers = new Set<ServerResponse>();
 const held = new Set<ServerResponse>();
-/** Writes `event` to every subscriber and calls `then` once the frames are on the wire. */
-const emit = (event: OpenCodeEvent, then?: () => void) => {
-  let pending = subscribers.size;
-  for (const subscriber of subscribers)
-    subscriber.write(`data: ${JSON.stringify(event)}\n\n`, () => {
-      pending -= 1;
-      if (pending === 0) then?.();
-    });
+/** Writes `event` to every subscriber. */
+const emit = (event: OpenCodeEvent) => {
+  for (const subscriber of subscribers) subscriber.write(`data: ${JSON.stringify(event)}\n\n`);
 };
 const json = (response: ServerResponse, status: number, body: Schema.Json) => {
   response.writeHead(status, { "content-type": "application/json" });
   response.end(JSON.stringify(body));
+};
+/** Returns the JSON of `{"type": type, "data": {"text": ...}}` with `bytes` bytes. */
+const padded = (type: string, bytes: number) => {
+  const empty = JSON.stringify({ type, data: { text: "" } });
+  return JSON.stringify({ type, data: { text: "x".repeat(bytes - empty.length) } });
 };
 const readBody = (request: IncomingMessage, then: (body: string) => void) => {
   let text = "";
@@ -55,6 +71,10 @@ const routes = new Map<string, Route>(
   Object.entries({
     "GET /api/event": (_request, response) => {
       if (scenario === "refuse-events") return json(response, 401, { _tag: "UnauthorizedError" });
+      if (scenario === "no-events") {
+        response.writeHead(200, { "content-type": "text/event-stream" });
+        return void response.write(": heartbeat\n\n");
+      }
       if (scenario === "refuse-events-at-end") {
         held.add(response);
         return void process.stderr.write("fake serve: holding the event subscription\n");
@@ -92,6 +112,71 @@ const routes = new Map<string, Route>(
       response.writeHead(204);
       response.end();
     },
+    // Sends LARGE_RESPONSE_BYTES in 1 MiB chunks, waiting for `drain` when a write fills the
+    // connection's buffer. Reports on stderr a connection that closes before the end.
+    "GET /api/large": (_request, response) => {
+      response.writeHead(200, { "content-type": "text/plain" });
+      const chunk = "x".repeat(1024 ** 2);
+      let sent = 0;
+      response.on("close", () => {
+        if (sent < LARGE_RESPONSE_BYTES)
+          process.stderr.write(`fake serve: the large response closed after ${sent} bytes\n`);
+      });
+      const send = () => {
+        while (sent < LARGE_RESPONSE_BYTES) {
+          sent += chunk.length;
+          if (!response.write(chunk)) return void response.once("drain", send);
+        }
+        response.end();
+      };
+      send();
+    },
+    // A JSON body that fits in a line, inside an answer line that doesn't.
+    "GET /api/limit": (_request, response) => {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(padded("limit", LINE_LIMIT - 5));
+    },
+    // Sends event data longer than a line that isn't JSON; JSON data that fits in a line, in a data
+    // line that doesn't; JSON data in a data line that fits, in an event line that doesn't; two data
+    // lines of 3 MiB that each fit in a line, and join to data that doesn't; and a small event.
+    "POST /api/large-event": (_request, response) => {
+      const third = "x".repeat(3 * 1024 ** 2);
+      for (const subscriber of subscribers)
+        for (const data of [
+          LARGE_TEXT,
+          padded("limit", LINE_LIMIT - 5),
+          padded("limit", LINE_LIMIT - 6),
+          `${third}\ndata: ${third}`,
+        ])
+          subscriber.write(`data: ${data}\n\n`);
+      emit({ type: "after.large", data: {} });
+      json(response, 200, {});
+    },
+    // Sends FLOOD_EVENTS events of 1 MiB to the first subscriber, waiting for `drain` when a write
+    // fills its buffer. Reports on stderr each wait that lasts a second, and the end.
+    "POST /api/flood": (_request, response) => {
+      json(response, 200, {});
+      const [subscriber] = subscribers;
+      if (subscriber === undefined) return;
+      const frame = `data: ${JSON.stringify({ type: "flood", data: { text: "x".repeat(1024 ** 2) } })}\n\n`;
+      let sent = 0;
+      const send = () => {
+        while (sent < FLOOD_EVENTS) {
+          sent += 1;
+          if (subscriber.write(frame)) continue;
+          const stalled = setTimeout(
+            () => process.stderr.write(`fake serve: flood stalled after ${sent} events\n`),
+            1000,
+          );
+          return void subscriber.once("drain", () => {
+            clearTimeout(stalled);
+            send();
+          });
+        }
+        process.stderr.write("fake serve: flood sent\n");
+      };
+      send();
+    },
     "GET /api/text": (_request, response) => {
       response.writeHead(502, { "content-type": "text/plain" });
       response.end("bad gateway");
@@ -117,20 +202,6 @@ const routes = new Map<string, Route>(
       process.stderr.write("fake serve: crashed while answering\n");
       process.exit(4);
     },
-    // Sends the event and the answer, in the order that the query names, 50 ms apart and 300 ms after
-    // reporting the request on stderr, so that a test can stop the bridge before both arrive.
-    "POST /api/order": (request, response) => {
-      const first = request.url?.endsWith("?first=answer") === true ? "answer" : "event";
-      process.stderr.write(`fake serve: order ${first} received\n`);
-      const body = JSON.stringify({ answered: true });
-      const answer = (then?: () => void) => {
-        response.writeHead(200, { "content-type": "application/json" });
-        response.end(body, then);
-      };
-      const event = (then?: () => void) => emit({ type: "order", data: {} }, then);
-      const [one, two] = first === "answer" ? [answer, event] : [event, answer];
-      setTimeout(() => one(() => setTimeout(() => two(), 50)), 300);
-    },
     "POST /api/garbage": (_request, response) => {
       for (const subscriber of subscribers) {
         subscriber.write("data: {not json\n\n");
@@ -148,7 +219,7 @@ if (scenario === "exit-before-ready") {
 }
 process.stderr.write(`fake serve: started with ${process.argv.slice(1).join(" ")}\n`);
 const server = createServer((request, response) => {
-  if (request.headers.authorization !== `Basic ${btoa(`opencode:${password}`)}`)
+  if (request.headers.authorization !== `Basic ${btoa(`${userName}:${password}`)}`)
     return json(response, 401, { _tag: "UnauthorizedError" });
   const route = routes.get(`${request.method} ${request.url?.split("?")[0]}`);
   if (route === undefined) {
@@ -162,6 +233,9 @@ server.listen(0, "127.0.0.1", () => {
   const { port } = server.address() as AddressInfo;
   const ready = () => {
     process.stdout.write("a line before the ready line\n");
+    if (scenario === "long-line") process.stdout.write(`${LARGE_TEXT}\n`);
+    if (scenario === "foreign-url")
+      process.stdout.write(`${JSON.stringify({ url: `http://192.0.2.1:${port}` })}\n`);
     process.stdout.write(`${JSON.stringify({ url: `http://127.0.0.1:${port}` })}\n`);
   };
   if (scenario === "slow") setTimeout(ready, SLOW_MS);

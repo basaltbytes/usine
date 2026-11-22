@@ -2,9 +2,13 @@ import { Schema } from "effect";
 
 /**
  * The client's ID for a request, which the bridge copies into the answer: a sequence number, or a
- * string such as `<generation>:<sequence>` that keeps answers to an earlier connection apart.
+ * string of at most 128 characters, such as `<generation>:<sequence>`, that keeps answers to an
+ * earlier connection apart.
  */
-export const BridgeRequestId = Schema.Union([Schema.Int, Schema.String]);
+export const BridgeRequestId = Schema.Union([
+  Schema.Int,
+  Schema.String.check(Schema.isMaxLength(128)),
+]);
 export type BridgeRequestId = typeof BridgeRequestId.Type;
 
 /** An HTTP method of OpenCode's server API. */
@@ -35,7 +39,10 @@ export const BridgeRequest = Schema.Struct({
 });
 export type BridgeRequest = typeof BridgeRequest.Type;
 
-/** The bridge's first line: OpenCode is listening and the bridge receives its events. */
+/**
+ * The bridge's line once OpenCode is listening and the bridge receives its events. Only answers to
+ * requests that the bridge refuses come before it.
+ */
 export const BridgeReady = Schema.Struct({ ready: Schema.Literal(true) });
 export type BridgeReady = typeof BridgeReady.Type;
 
@@ -50,7 +57,10 @@ export const BridgeAnswer = Schema.Struct({
 });
 export type BridgeAnswer = typeof BridgeAnswer.Type;
 
-/** The answer to a request that the bridge refused, couldn't send, or got no full response to. */
+/**
+ * The answer to a request that the bridge refused or couldn't send, or whose response it didn't get
+ * in full or couldn't fit in a line.
+ */
 export const BridgeRequestFailed = Schema.Struct({ id: BridgeRequestId, error: Schema.String });
 export type BridgeRequestFailed = typeof BridgeRequestFailed.Type;
 

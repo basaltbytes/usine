@@ -47,6 +47,20 @@ const SERVE_ARGUMENTS = [
  * event stream closes.
  */
 const GRACE_MS = 1000;
+/**
+ * The most bytes in a line, without its newline, that the bridge reads or writes. It equals
+ * `MAX_PROTOCOL_LINE_BYTES` in `child-host/lines.ts`, the longest line that the client reads.
+ */
+const MAX_LINE_BYTES = 4 * 1024 ** 2;
+/** The most bytes of input lines that the bridge holds until OpenCode is ready. */
+const MAX_HELD_BYTES = MAX_LINE_BYTES;
+/** The characters that the bridge keeps from the start of a line longer than `MAX_LINE_BYTES`. */
+const HEAD_LENGTH = 256;
+/**
+ * The most characters in a string request ID. It keeps each answer that the bridge writes with the
+ * ID shorter than `MAX_LINE_BYTES`, and equals the bound of `BridgeRequestId` in `lines.ts`.
+ */
+const MAX_ID_LENGTH = 128;
 
 const isObject = (value: Json): value is JsonObject =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -61,13 +75,20 @@ const parseJson = (text: string): { readonly value: Json } | undefined => {
   }
 };
 
+/** Returns `value` when it is a request ID: a string of at most `MAX_ID_LENGTH` characters or a safe integer. */
+const requestId = (value: Json | undefined): RequestId | undefined =>
+  (typeof value === "string" && value.length <= MAX_ID_LENGTH) ||
+  (typeof value === "number" && Number.isSafeInteger(value))
+    ? value
+    : undefined;
+
 const inputLine = (line: string): InputLine => {
   const parsed = parseJson(line);
   if (parsed === undefined) return { invalid: "isn't JSON" };
   if (!isObject(parsed.value)) return { invalid: "isn't a JSON object" };
-  const { id, method, path, body } = parsed.value;
-  if (typeof id !== "string" && !(typeof id === "number" && Number.isSafeInteger(id)))
-    return { invalid: "has no request ID" };
+  const { method, path, body } = parsed.value;
+  const id = requestId(parsed.value.id);
+  if (id === undefined) return { invalid: "has no request ID" };
   if (typeof method !== "string" || !/^[A-Z]+$/u.test(method))
     return { id, invalid: "has no HTTP method" };
   // Keeps the request target in origin form. The host and port come from serve's ready line.
@@ -76,37 +97,131 @@ const inputLine = (line: string): InputLine => {
   return { request: body === undefined ? { id, method, path } : { id, method, path, body } };
 };
 
-/** Returns the server address in `serve`'s ready line, `{"url": ...}`, or none for another line. */
+/**
+ * Returns the request ID at the start of `head`, the start of an input line too long to parse. The
+ * client writes a request's ID first: `{"id":...`.
+ */
+const leadingId = (head: string): RequestId | undefined => {
+  const token = /^\{"id":(-?\d+|"(?:[^"\\]|\\.)*")[,}]/u.exec(head)?.[1];
+  return token === undefined ? undefined : requestId(parseJson(token)?.value);
+};
+
+/** Returns whether `host`, an IP address or name from a parsed URL, is a loopback address. */
+const isLoopback = (host: string) => host === "::1" || /^127\.\d+\.\d+\.\d+$/u.test(host);
+
+/**
+ * Returns the server address in `serve`'s ready line, `{"url": ...}`, or none for another line,
+ * including a ready line whose host isn't a loopback address.
+ */
 const readyLine = (line: string): Server | undefined => {
   const parsed = parseJson(line);
   if (parsed === undefined || !isObject(parsed.value)) return undefined;
   const { url } = parsed.value;
   if (typeof url !== "string" || !URL.canParse(url)) return undefined;
   const address = new URL(url);
-  if (address.protocol !== "http:") return undefined;
+  const host = address.hostname.replace(/^\[(.*)\]$/u, "$1");
+  if (address.protocol !== "http:" || !isLoopback(host)) return undefined;
+  return { host, port: address.port === "" ? 80 : Number(address.port) };
+};
+
+/**
+ * Returns a reader of text that calls `line` with each line, without its `\n` or `\r\n`, and
+ * `overflow` with the size in bytes and the first `HEAD_LENGTH` characters of each line longer than
+ * `MAX_LINE_BYTES`. `end` passes on an unfinished last line.
+ */
+const lineReader = (
+  line: (text: string) => void,
+  overflow: (bytes: number, head: string) => void,
+) => {
+  let held = "";
+  let bytes = 0;
+  const add = (piece: string) => {
+    const overflowing = bytes > MAX_LINE_BYTES;
+    bytes += Buffer.byteLength(piece);
+    if (overflowing) return;
+    held += piece;
+    if (bytes > MAX_LINE_BYTES) held = held.slice(0, HEAD_LENGTH);
+  };
+  const complete = () => {
+    if (bytes > MAX_LINE_BYTES) overflow(bytes, held);
+    else line(held.replace(/\r$/u, ""));
+    held = "";
+    bytes = 0;
+  };
   return {
-    host: address.hostname.replace(/^\[(.*)\]$/u, "$1"),
-    port: address.port === "" ? 80 : Number(address.port),
+    push: (text: string) => {
+      const pieces = text.split("\n");
+      const last = pieces.pop() ?? "";
+      for (const piece of pieces) {
+        add(piece);
+        complete();
+      }
+      add(last);
+    },
+    end: () => {
+      if (bytes > 0) complete();
+    },
   };
 };
 
-/** Returns a reader of event-stream text that calls `dispatch` with the data of each event. */
-const eventStream = (dispatch: (data: string) => void) => {
-  let buffer = "";
+/** Returns where the value starts in an event-stream `data` line, or none for another line. */
+const dataStart = (line: string): number | undefined => {
+  if (!line.startsWith("data")) return undefined;
+  if (line.length === 4) return 4;
+  if (line[4] !== ":") return undefined;
+  return line[5] === " " ? 6 : 5;
+};
+
+/**
+ * Returns a reader of event-stream text that calls `dispatch` with the data of each event, and
+ * `oversized` with the size in bytes of each event's data that is longer than `MAX_LINE_BYTES` or
+ * that has a line longer than `MAX_LINE_BYTES`.
+ */
+const eventStream = (dispatch: (data: string) => void, oversized: (bytes: number) => void) => {
   const data: Array<string> = [];
-  return (text: string) => {
-    const lines = (buffer + text).split("\n");
-    buffer = lines.pop() ?? "";
-    for (const line of lines.map((line) => line.replace(/\r$/u, ""))) {
-      if (line === "") {
-        if (data.length > 0) dispatch(data.splice(0).join("\n"));
-        continue;
-      }
-      const colon = line.indexOf(":");
-      if (colon === 0 || (colon === -1 ? line : line.slice(0, colon)) !== "data") continue;
-      data.push(colon === -1 ? "" : line.slice(colon + 1).replace(/^ /u, ""));
-    }
+  let fields = 0;
+  let bytes = 0;
+  let tooLong = false;
+  // Counts a data field of `size` bytes, and the newline that joins it to the previous one.
+  const count = (size: number) => {
+    bytes += (fields > 0 ? 1 : 0) + size;
+    fields += 1;
+    tooLong ||= bytes > MAX_LINE_BYTES;
+    if (tooLong) data.length = 0;
   };
+  const reader = lineReader(
+    (line) => {
+      if (line === "") {
+        if (tooLong) oversized(bytes);
+        else if (fields > 0) dispatch(data.join("\n"));
+        data.length = 0;
+        fields = 0;
+        bytes = 0;
+        tooLong = false;
+        return;
+      }
+      const start = dataStart(line);
+      if (start === undefined) return;
+      const value = line.slice(start);
+      count(Buffer.byteLength(value));
+      if (!tooLong) data.push(value);
+    },
+    // A data line longer than `MAX_LINE_BYTES` has more than `MAX_LINE_BYTES - 6` bytes of data,
+    // which make an event line longer than `MAX_LINE_BYTES`.
+    (lineBytes, head) => {
+      const start = dataStart(head);
+      if (start === undefined) return;
+      tooLong = true;
+      count(lineBytes - start);
+    },
+  );
+  return reader.push;
+};
+
+/** Returns `value` as an output line, or none when it is longer than `MAX_LINE_BYTES`. */
+const outputLine = (value: Json): string | undefined => {
+  const text = JSON.stringify(value);
+  return Buffer.byteLength(text) > MAX_LINE_BYTES ? undefined : `${text}\n`;
 };
 
 /** The answer body: the response's JSON, `null` when it is empty, or its text when it isn't JSON. */
@@ -115,11 +230,21 @@ const answerBody = (text: string): Json => {
   return parseJson(text)?.value ?? text;
 };
 
+/**
+ * Runs the bridge with its arguments: the milliseconds to wait for OpenCode's first event once
+ * `serve` reports its address, then the OpenCode command with any leading arguments.
+ */
 const main = () => {
-  const [command, ...args] = process.argv.slice(1);
+  const [wait, command, ...args] = process.argv.slice(1);
   const warn = (message: string) => {
     process.stderr.write(`opencode bridge: ${message}\n`);
   };
+  const readyWaitMs = Number(wait);
+  if (!Number.isSafeInteger(readyWaitMs) || readyWaitMs <= 0) {
+    warn("missing the milliseconds to wait for OpenCode's first event");
+    process.exitCode = 2;
+    return;
+  }
   if (command === undefined) {
     warn("missing the OpenCode command");
     process.exitCode = 2;
@@ -128,9 +253,11 @@ const main = () => {
   // The password stays in this process and in serve's environment, which serve clears at start.
   const password = randomBytes(32).toString("base64url");
   const authorization = `Basic ${Buffer.from(`opencode:${password}`).toString("base64")}`;
+  // OpenCode's documentation lets `OPENCODE_SERVER_USERNAME` replace the user name `opencode`.
   const {
     OPENCODE_PASSWORD: _inheritedPassword,
     OPENCODE_SERVER_PASSWORD: _inheritedServerPassword,
+    OPENCODE_SERVER_USERNAME: _inheritedUserName,
     ...environment
   } = process.env;
   const serve = spawn(command, [...args, ...SERVE_ARGUMENTS], {
@@ -143,7 +270,9 @@ const main = () => {
   let closing = false;
   let failed = false;
   let finished = false;
+  let readyWait: ReturnType<typeof setTimeout> | undefined;
   const waiting: Array<string> = [];
+  let waitingBytes = 0;
 
   const writeLine = (value: Json) => {
     process.stdout.write(`${JSON.stringify(value)}\n`);
@@ -164,10 +293,14 @@ const main = () => {
 
   const relay = (target: Server, request: Request) => {
     let answered = false;
-    const answer = (line: JsonObject) => {
+    const tooLong: JsonObject = {
+      id: request.id,
+      error: `OpenCode's response is too long for a line of ${MAX_LINE_BYTES} bytes`,
+    };
+    const answer = (value: JsonObject) => {
       if (answered) return;
       answered = true;
-      writeLine(line);
+      process.stdout.write(outputLine(value) ?? `${JSON.stringify(tooLong)}\n`);
     };
     const unreachable = (error: Error) =>
       answer({ id: request.id, error: `Can't reach OpenCode: ${error.message}` });
@@ -189,7 +322,13 @@ const main = () => {
         },
         (response) => {
           const chunks: Array<Buffer> = [];
-          response.on("data", (chunk: Buffer) => chunks.push(chunk));
+          let size = 0;
+          response.on("data", (chunk: Buffer) => {
+            size += chunk.length;
+            if (size <= MAX_LINE_BYTES) return void chunks.push(chunk);
+            answer(tooLong);
+            response.destroy();
+          });
           response.on("error", unreachable);
           // A response cut short emits `error`, not `end`.
           response.on("end", () =>
@@ -211,10 +350,12 @@ const main = () => {
     }
   };
 
-  const handle = (line: string) => {
-    if (line.trim() === "") return;
+  // Relays the request in `line`, or answers it with the reason it is invalid or `refused`.
+  const handle = (line: string, refused?: string) => {
     const parsed = inputLine(line);
     if ("request" in parsed) {
+      if (refused !== undefined)
+        return writeLine({ id: parsed.request.id, error: `The request ${refused}` });
       if (server !== undefined) relay(server, parsed.request);
       return;
     }
@@ -222,8 +363,22 @@ const main = () => {
     warn(`skipping an input line of ${Buffer.byteLength(line)} bytes that ${parsed.invalid}`);
   };
   const accept = (line: string) => {
-    if (ready) handle(line);
-    else waiting.push(line);
+    if (line.trim() === "") return;
+    if (ready) return handle(line);
+    const bytes = Buffer.byteLength(line);
+    if (waitingBytes + bytes > MAX_HELD_BYTES)
+      return handle(
+        line,
+        `would exceed the ${MAX_HELD_BYTES} bytes of requests that the bridge holds until OpenCode is ready`,
+      );
+    waitingBytes += bytes;
+    waiting.push(line);
+  };
+  const refuseLong = (bytes: number, head: string) => {
+    const invalid = `is longer than ${MAX_LINE_BYTES} bytes`;
+    const id = leadingId(head);
+    if (id === undefined) return warn(`skipping an input line of ${bytes} bytes that ${invalid}`);
+    writeLine({ id, error: `The request ${invalid}` });
   };
 
   // The stream reports serve's exit or a lost connection; give serve's exit time to arrive first.
@@ -231,6 +386,13 @@ const main = () => {
     if (!closing) setTimeout(() => fail(reason), GRACE_MS);
   };
   const subscribe = (target: Server) => {
+    readyWait = setTimeout(
+      () =>
+        fail(
+          `OpenCode sent no event within ${readyWaitMs / 1000} seconds of reporting its address`,
+        ),
+      readyWaitMs,
+    );
     const events = httpRequest(
       {
         host: target.host,
@@ -245,23 +407,50 @@ const main = () => {
           response.resume();
           return fail(`OpenCode refused the event subscription with status ${response.statusCode}`);
         }
+        // OpenCode sends its first event once the subscription is registered.
+        const arrived = () => {
+          if (ready) return;
+          ready = true;
+          clearTimeout(readyWait);
+          writeLine({ ready: true });
+          for (const line of waiting.splice(0)) handle(line);
+        };
+        // Holds OpenCode's events while standard output is full, so a slow reader leaves no backlog
+        // in the bridge.
+        let paused = false;
+        const forward = (line: string) => {
+          if (process.stdout.write(line) || paused) return;
+          paused = true;
+          response.pause();
+          process.stdout.once("drain", () => {
+            paused = false;
+            response.resume();
+          });
+        };
+        const skipLong = (bytes: number) =>
+          warn(
+            `skipping an OpenCode event of ${bytes} bytes that is too long for a line of ${MAX_LINE_BYTES} bytes`,
+          );
         response.setEncoding("utf8");
         response.on(
           "data",
-          eventStream((data) => {
-            // OpenCode sends its first event once the subscription is registered.
-            if (!ready) {
-              ready = true;
-              writeLine({ ready: true });
-              for (const line of waiting.splice(0)) handle(line);
-            }
-            const event = parseJson(data);
-            if (event === undefined || !isObject(event.value))
-              return warn(
-                `skipping an OpenCode event of ${Buffer.byteLength(data)} bytes that isn't a JSON object`,
-              );
-            writeLine({ event: event.value });
-          }),
+          eventStream(
+            (data) => {
+              arrived();
+              const event = parseJson(data);
+              if (event === undefined || !isObject(event.value))
+                return warn(
+                  `skipping an OpenCode event of ${Buffer.byteLength(data)} bytes that isn't a JSON object`,
+                );
+              const line = outputLine({ event: event.value });
+              if (line === undefined) return skipLong(Buffer.byteLength(data));
+              forward(line);
+            },
+            (bytes) => {
+              arrived();
+              skipLong(bytes);
+            },
+          ),
         );
         response.on("error", (error) => lost(`OpenCode's event stream failed: ${error.message}`));
         response.on("close", () => lost("OpenCode closed the event stream"));
@@ -275,44 +464,40 @@ const main = () => {
   process.stderr.on("error", () => {});
   serve.stdin.on("error", () => {});
   serve.stderr.pipe(process.stderr);
-  let output = "";
-  serve.stdout.setEncoding("utf8");
-  // Lines before the ready line, and all output after it, are diagnostics.
-  serve.stdout.on("data", (text: string) => {
-    if (server !== undefined) return void process.stderr.write(text);
-    const lines = (output + text).split("\n");
-    output = lines.pop() ?? "";
-    for (const [index, line] of lines.entries()) {
-      server = readyLine(line);
-      if (server !== undefined) {
-        subscribe(server);
-        process.stderr.write([...lines.slice(index + 1), output].join("\n"));
-        output = "";
-        return;
+  // Lines before the ready line, and all lines after it, are diagnostics.
+  const output = lineReader(
+    (line) => {
+      if (server === undefined) {
+        server = readyLine(line);
+        if (server !== undefined) return subscribe(server);
       }
       process.stderr.write(`${line}\n`);
-    }
-  });
+    },
+    (bytes) =>
+      warn(
+        `skipping an OpenCode output line of ${bytes} bytes that is longer than ${MAX_LINE_BYTES} bytes`,
+      ),
+  );
+  serve.stdout.setEncoding("utf8");
+  serve.stdout.on("data", output.push);
+  serve.stdout.on("end", output.end);
   serve.on("error", (error) => {
     warn(`can't run OpenCode: ${error.message}`);
     if (serve.pid === undefined) finish(127);
   });
   serve.on("exit", (code, signal) => {
+    clearTimeout(readyWait);
     const exitCode = code ?? (signal === null ? 1 : 128 + (constants.signals[signal] ?? 0));
     const done = () => finish(failed && exitCode === 0 ? 1 : exitCode);
     serve.on("close", done);
     setTimeout(done, GRACE_MS);
   });
 
-  let input = "";
+  const input = lineReader(accept, refuseLong);
   process.stdin.setEncoding("utf8");
-  process.stdin.on("data", (text: string) => {
-    const lines = (input + text).split("\n");
-    input = lines.pop() ?? "";
-    for (const line of lines) accept(line);
-  });
+  process.stdin.on("data", input.push);
   process.stdin.on("end", () => {
-    if (input !== "") accept(input);
+    input.end();
     closing = true;
     serve.stdin.end();
   });

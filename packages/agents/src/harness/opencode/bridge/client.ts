@@ -1,6 +1,6 @@
 import type { AgentSessionId } from "@usine/core/agent/session";
 import { type Cause, Deferred, Effect, Option, Queue, Ref, Schema, Stream } from "effect";
-import { previewLine } from "../../../child-host/lines.ts";
+import { boundedLines, MAX_PROTOCOL_LINE_BYTES, previewLine } from "../../../child-host/lines.ts";
 import type { ProcessCommand } from "../../../child-host/process.ts";
 import { pendingRequests } from "../../../child-host/requests.ts";
 import { type SessionOperation, SessionOperationError } from "../../../runtime.ts";
@@ -22,14 +22,17 @@ const decodeOutput = Schema.decodeUnknownEffect(Schema.fromJsonString(BridgeOutp
 const encodeRequest = Schema.encodeEffect(Schema.fromJsonString(BridgeRequest));
 const encoder = new TextEncoder();
 
+/** Milliseconds that the bridge waits for OpenCode's first event once `serve` reports its address. */
+const READY_WAIT_MS = 30_000;
+
 /**
  * Returns the command that runs the bridge in `opencode.cwd` around `opencode`, the OpenCode
- * command with any leading arguments. The bridge adds `serve` and its options, and runs with the
- * worker's `node`.
+ * command with any leading arguments. The bridge adds `serve` and its options, runs with the
+ * worker's `node`, and fails when OpenCode sends no event within 30 seconds of its address.
  */
 export const bridgeCommand = (opencode: ProcessCommand): ProcessCommand => ({
   command: "node",
-  args: ["-e", OPENCODE_BRIDGE, opencode.command, ...opencode.args],
+  args: ["-e", OPENCODE_BRIDGE, String(READY_WAIT_MS), opencode.command, ...opencode.args],
   cwd: opencode.cwd,
 });
 
@@ -56,7 +59,7 @@ export interface BridgeStreams {
 }
 
 /** A client of one bridge, scoped to the reading of its output. */
-interface BridgeClient {
+export interface BridgeClient {
   /**
    * Succeeds at the bridge's ready line, and fails if the output ends first. A bridge that a
    * process owner reattaches doesn't repeat the line.
@@ -85,7 +88,8 @@ interface BridgeClient {
 
 /**
  * Starts reading the output of the bridge in `streams` and returns its client. Lines that aren't
- * bridge output, such as an event without a `type`, are logged and skipped.
+ * bridge output, such as an event without a `type`, are logged and skipped. A line longer than
+ * `MAX_PROTOCOL_LINE_BYTES` fails the client as a failed output does.
  */
 export const bridgeClient = Effect.fn("OpenCodeBridge.client")(function* (streams: BridgeStreams) {
   const sessionId = Option.getOrUndefined(streams.sessionId);
@@ -161,9 +165,13 @@ export const bridgeClient = Effect.fn("OpenCodeBridge.client")(function* (stream
       yield* Deferred.succeed(found.value.answer, output);
     });
 
-  yield* streams.output.pipe(
-    Stream.decodeText(),
-    Stream.splitLines,
+  yield* boundedLines(streams.output, () =>
+    failure(
+      "stream",
+      `The OpenCode bridge wrote a line longer than ${MAX_PROTOCOL_LINE_BYTES} bytes`,
+      new Error("line too long"),
+    ),
+  ).pipe(
     Stream.runForEach(route),
     Effect.flatMap(ended),
     Effect.tapError((error) =>
