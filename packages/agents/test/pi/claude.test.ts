@@ -2221,6 +2221,7 @@ describe("Claude child backend", () => {
               tasks: [
                 { task_id: "gate", task_type: "local_bash", description: "Run gate" },
                 { task_id: "review", task_type: "local_agent", description: "Review the diff" },
+                { task_id: "spec", task_type: "local_workflow" },
               ],
             },
             {
@@ -2237,6 +2238,7 @@ describe("Claude child backend", () => {
               tasks: [
                 { task_id: "gate", task_type: "local_bash", description: "Run gate" },
                 { task_id: "review", task_type: "local_agent", description: "Review the diff" },
+                { task_id: "spec", task_type: "local_workflow" },
                 { task_id: "watcher", ambient: true },
               ],
             },
@@ -2291,6 +2293,7 @@ describe("Claude child backend", () => {
                   kind: "agent",
                   description: "Review the diff",
                 }),
+                BackgroundWork.make({ id: "spec", kind: "other", description: "" }),
               ]),
               Option.some([]),
             ],
