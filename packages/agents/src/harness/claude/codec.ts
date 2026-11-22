@@ -3,6 +3,8 @@ import {
   type AgentSessionEvent,
   AgentSessionId,
   type AgentSession,
+  BackgroundWork,
+  type BackgroundWorkKind,
   TextOutput,
   ToolFinished,
   ToolStarted,
@@ -64,10 +66,43 @@ const ClaudeBackgroundTasks = Schema.Struct({
   tasks: Schema.Array(
     Schema.Struct({
       task_id: Schema.NonEmptyString,
+      /** Such as `local_bash` for a shell command or `local_agent` for a subagent. */
+      task_type: Schema.optionalKey(Schema.String),
+      description: Schema.optionalKey(Schema.String),
+      /** Whether the task is a watcher or housekeeping rather than work. */
       ambient: Schema.optionalKey(Schema.Boolean),
     }),
   ),
 });
+
+const backgroundWorkKind = (taskType: string | undefined): BackgroundWorkKind => {
+  switch (taskType) {
+    case "local_bash":
+      return "command";
+    case "local_agent":
+    case "remote_agent":
+      return "agent";
+    default:
+      return "other";
+  }
+};
+
+/**
+ * Returns the background work in a task snapshot, which lists every live task. Ambient watchers
+ * are left out because they aren't work that the session waits for.
+ */
+export const backgroundWork = (
+  update: typeof ClaudeBackgroundTasks.Type,
+): ReadonlyArray<BackgroundWork> =>
+  update.tasks
+    .filter((task) => task.ambient !== true)
+    .map((task) =>
+      BackgroundWork.make({
+        id: task.task_id,
+        kind: backgroundWorkKind(task.task_type),
+        description: task.description ?? "",
+      }),
+    );
 const ClaudeSessionState = Schema.Struct({
   type: Schema.Literal("system"),
   subtype: Schema.Literal("session_state_changed"),

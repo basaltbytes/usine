@@ -498,6 +498,7 @@ const makeCodexSessions = Effect.gen(function* () {
         toolsInFlight.size === 0 ? interruptTurn() : Effect.void,
       ),
       beforeFinish: Effect.flatMap(Ref.get(state), ({ connection }) => connection.close),
+      maxBackgroundWaitMinutes: spec.maxBackgroundWaitMinutes,
     });
 
     /** Acknowledges the unread messages that the restored thread's last turn records. */

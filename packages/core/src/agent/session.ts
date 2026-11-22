@@ -245,6 +245,38 @@ export class SessionResumed extends Schema.TaggedClass<
   session: AgentSession,
 }) {}
 
+/** What a piece of background work runs: a shell command, an agent, or other harness work. */
+export const BackgroundWorkKind = Schema.Literals(["command", "agent", "other"]);
+export type BackgroundWorkKind = typeof BackgroundWorkKind.Type;
+
+/** A piece of work that runs independently of the session's current turn. */
+export class BackgroundWork extends Schema.Class<
+  BackgroundWork,
+  Brand.Brand<"@usine/core/agent/session/BackgroundWork">
+>("Agent/BackgroundWork")({
+  /** The harness's ID for the work, unique within the session. */
+  id: Schema.NonEmptyString,
+  kind: BackgroundWorkKind,
+  /** The harness's description of the work, or an empty string if it gave none. */
+  description: Schema.String,
+}) {}
+
+/**
+ * A snapshot of the session's background work, which replaces the previous one. An empty `work`
+ * means that nothing runs. `None` means that the harness doesn't report it, for example after its
+ * process restarted, so it doesn't mean that nothing runs. A session without this event hasn't
+ * reported its background work.
+ */
+export class BackgroundWorkUpdated extends Schema.TaggedClass<
+  BackgroundWorkUpdated,
+  Brand.Brand<"@usine/core/agent/session/BackgroundWorkUpdated">
+>("Agent/BackgroundWorkUpdated")("BackgroundWorkUpdated", {
+  /** The session that runs the work. */
+  session: AgentSession,
+  /** Every piece of background work that runs, or `None` if the harness doesn't report it. */
+  work: Schema.OptionFromOptionalKey(Schema.Array(BackgroundWork)),
+}) {}
+
 /** A stable identity for one operator message, including repeated text. */
 export const OperatorMessageId = Schema.String.check(Schema.isUUID()).pipe(
   Schema.brand("OperatorMessageId"),
@@ -463,6 +495,7 @@ export const AgentSessionEvent = Schema.Union([
   SessionFinished,
   SessionIdle,
   SessionResumed,
+  BackgroundWorkUpdated,
   OperatorMessageRead,
   SessionTokensUpdated,
   ProviderRetrying,

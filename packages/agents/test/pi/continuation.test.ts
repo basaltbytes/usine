@@ -184,6 +184,7 @@ describe("shared continuation policy", () => {
                   steer(message, id).pipe(Effect.as("queued" as const)),
                 pause: Effect.void,
                 beforeFinish: Effect.void,
+                maxBackgroundWaitMinutes: Option.none(),
               });
               const running = {
                 session,
