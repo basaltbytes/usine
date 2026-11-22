@@ -1,6 +1,14 @@
 import { assert, describe, it } from "@effect/vitest";
 import { Harness } from "@usine/core/agent/brain";
 import { BillingPool, PoolDescriptor } from "@usine/core/agent/pool";
+import {
+  anthropic,
+  ApiKeyCredential,
+  GatewayVariable,
+  ModelProvider,
+  modelProviders,
+  openai,
+} from "@usine/core/agent/provider";
 import { Option, Schema } from "effect";
 import {
   apiKeys,
@@ -143,39 +151,77 @@ describe("harness catalog", () => {
     );
   });
 
-  it("accepts a gateway path that is its protocol or starts with it, and rejects any other", () => {
+  it("accepts an empty slot path or one of plain segments, and rejects any other", () => {
     assert(Option.isSome(codex.worker.credential));
     const credential = codex.worker.credential.value;
-    assert.strictEqual(credential.protocol, "openai-responses");
-    for (const gatewayPath of ["openai-responses/v1", "openai-responses"])
+    for (const slotPath of ["/v1", "", "/api/v1beta"])
       assert(
-        Option.isSome(HarnessCredential.makeOption({ ...credential, gatewayPath })),
-        `accepts ${gatewayPath}`,
+        Option.isSome(HarnessCredential.makeOption({ ...credential, slotPath })),
+        `accepts ${slotPath}`,
       );
-    for (const gatewayPath of [
-      "openai-responsesx/v1",
-      "v1",
-      "anthropic-messages/v1",
-      "openai/v1",
-      "openai-responses-v1",
-      "/openai-responses/v1",
-    ])
+    for (const slotPath of ["v1", "/v1/", "//v1", "/..", "openai-responses/v1"])
       assert(
-        Option.isNone(HarnessCredential.makeOption({ ...credential, gatewayPath })),
-        `rejects ${gatewayPath}`,
+        Option.isNone(HarnessCredential.makeOption({ ...credential, slotPath })),
+        `rejects ${slotPath}`,
       );
   });
 
-  it("gives a harness the Gateway's credential only when the Gateway lists the harness's protocol", () => {
+  it("gives a harness the Gateway's credential of the first provider it lists that the Gateway holds", () => {
     const claude = Harness.make("claude");
     const codexId = Harness.make("codex");
-    assert.isTrue(catalog.gatewayHolds(claude, ["anthropic-messages"]));
-    assert.isTrue(catalog.gatewayHolds(codexId, ["anthropic-messages", "openai-responses"]));
-    assert.isFalse(catalog.gatewayHolds(claude, ["openai-responses"]));
+    const [anthropicSlot, openaiSlot] = [anthropic.slot, openai.slot];
+    assert.isTrue(catalog.gatewayHolds(claude, [anthropicSlot]));
+    assert.isTrue(catalog.gatewayHolds(codexId, [anthropicSlot, openaiSlot]));
+    assert.isFalse(catalog.gatewayHolds(claude, [openaiSlot]));
     assert.isFalse(catalog.gatewayHolds(claude, []));
-    // Pi has no provider credential, and an unknown harness has no descriptor.
-    assert.isFalse(catalog.gatewayHolds(pi.id, ["anthropic-messages", "openai-responses"]));
-    assert.isFalse(catalog.gatewayHolds(Harness.make("unknown"), ["anthropic-messages"]));
+    // Pi has no credential wiring, and an unknown harness has no descriptor.
+    assert.isFalse(catalog.gatewayHolds(pi.id, [anthropicSlot, openaiSlot]));
+    assert.isFalse(catalog.gatewayHolds(Harness.make("unknown"), [anthropicSlot]));
+    const both = HarnessDescriptor.make({
+      ...codex,
+      id: Harness.make("both-providers"),
+      providers: [openai, anthropic],
+    });
+    const extended = HarnessCatalog.make({ descriptors: [...catalog.descriptors, both] });
+    assert.deepStrictEqual(
+      extended.gatewayProvider(both.id, [anthropicSlot, openaiSlot]),
+      Option.some(openai),
+    );
+    assert.deepStrictEqual(
+      extended.gatewayProvider(both.id, [anthropicSlot]),
+      Option.some(anthropic),
+    );
+  });
+
+  it("declares the providers that the gateway serves, once each, and refuses two definitions of one", () => {
+    assert.deepStrictEqual(catalog.providers, modelProviders);
+    const keyOnly = ModelProvider.make({
+      ...openai,
+      credentials: [ApiKeyCredential.make({ variable: GatewayVariable.make("OPENAI_API_KEY") })],
+    });
+    const declaring = (id: string, provider: ModelProvider) =>
+      HarnessDescriptor.make({
+        ...codex,
+        id: Harness.make(id),
+        providers: [provider],
+        pools: [HarnessPool.make({ pool: apiKeys, routes: ["gateway-api-key"] })],
+      });
+    assert(
+      Option.isNone(
+        HarnessCatalog.makeOption({
+          descriptors: [...catalog.descriptors, declaring("key-only", keyOnly)],
+        }),
+      ),
+      "a provider ID has one definition",
+    );
+    assert(
+      Option.isNone(HarnessDescriptor.makeOption({ ...codex, providers: [keyOnly] })),
+      "a subscription pool needs a provider that accepts a subscription",
+    );
+    assert(
+      Option.isNone(HarnessDescriptor.makeOption({ ...codex, providers: [] })),
+      "credential wiring needs a provider",
+    );
   });
 
   it("generates both Dockerfiles, cloud-init, and the published image tag from the descriptors", () => {
