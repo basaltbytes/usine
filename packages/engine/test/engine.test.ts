@@ -76,6 +76,7 @@ import {
   testAgent,
   waitFor,
   withInstance,
+  undeclaredPools,
 } from "./support.ts";
 
 describe("durable run engine", () => {
@@ -1094,6 +1095,7 @@ const flakyEngineLayer = (
     Layer.provide(executor),
     Layer.provide(conditionLayer(stillMatches)),
     Layer.provide(check),
+    Layer.provide(undeclaredPools),
     Layer.provide(NodeServices.layer),
   );
 

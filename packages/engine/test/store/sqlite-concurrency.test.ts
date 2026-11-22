@@ -37,6 +37,7 @@ import { withReadWorker } from "../../src/database/sqlite-reader/reader.ts";
 import { createServer } from "node:http";
 import { RunStore } from "../../src/store/store.ts";
 import { lifecycleSubmission, testAgent, withRunStore } from "./support.ts";
+import { undeclaredPools } from "../support.ts";
 
 it.live(
   "transcript appends and HTTP health finish within 100 ms during a one-second board read",
@@ -148,7 +149,14 @@ it.live(
         const rows =
           yield* sql`SELECT count(*) AS count FROM usine_attempt_transcripts WHERE attempt_id = ${started.execution.attempt.id}`;
         assert.deepStrictEqual(rows, [{ count: 3 }]);
-      }).pipe(Effect.provide(RunStore.layer.pipe(Layer.provideMerge(localSqliteLayer(directory)))));
+      }).pipe(
+        Effect.provide(
+          RunStore.layer.pipe(
+            Layer.provideMerge(localSqliteLayer(directory)),
+            Layer.provide(undeclaredPools),
+          ),
+        ),
+      );
     }).pipe(
       Effect.scoped,
       Effect.provide(Layer.provideMerge(NodeServices.layer, FetchHttpClient.layer)),

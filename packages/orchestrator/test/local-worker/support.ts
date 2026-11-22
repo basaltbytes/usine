@@ -29,6 +29,7 @@ import { stubAttemptRuntime, StubStorage } from "@usine/durable/testing";
 import { fixedConfigLayer } from "../support/current-instance.ts";
 import { testAppLayer } from "../support/github-app.ts";
 import { alwaysHoldsLayer } from "../support/polling.ts";
+import { catalogPools } from "../support/pools.ts";
 
 /**
  * Returns windows where `attemptId` is the only Attempt of its Agent on the Item, open since before
@@ -228,6 +229,7 @@ export const localRuntime = (
   Layer.unwrap(
     Effect.map(configWith(options.settings), (configuration) =>
       localEngineLayer(instance).pipe(
+        Layer.provide(catalogPools),
         Layer.provide(
           stepExecutorLayer(configuration, []).pipe(
             Layer.provide(MarcbachmannCelLayer),

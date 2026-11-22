@@ -2,6 +2,10 @@ import { Effect, Stream } from "effect";
 
 export const MAX_PROTOCOL_LINE_BYTES = 4 * 1024 ** 2;
 
+/** Returns `line` for a log record, cut to its first 200 characters. */
+export const previewLine = (line: string): string =>
+  line.length > 200 ? `${line.slice(0, 200)}…` : line;
+
 /** Bounds complete and unfinished protocol lines before text or JSON decoding. */
 export const boundedLines = <E, R, E2>(
   source: Stream.Stream<Uint8Array, E, R>,

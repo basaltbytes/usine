@@ -1,3 +1,4 @@
+import { catalog } from "@usine/agents/harness";
 import { idleCiMonitor } from "./support/ci.ts";
 import { CompletionCheck } from "@usine/engine/completion-check";
 import { sqliteTempDirectory } from "../../../tooling/test/sqlite.mts";
@@ -46,6 +47,7 @@ import {
   pollingTestLayer,
   unmovedBaseRefHead,
 } from "./support/polling.ts";
+import { catalogPools } from "./support/pools.ts";
 
 const repository = RepositoryName.make("basaltbytes/usine");
 const config = Schema.decodeEffect(UsineConfig)({
@@ -129,6 +131,7 @@ const gatedExecutor = Layer.succeed(StepExecutor)({
 const processLayer = (directory: InstanceDirectory, github: GitHubPolling["Service"]) => {
   const dependencies = Layer.mergeAll(
     localEngineLayer(directory).pipe(
+      Layer.provide(catalogPools),
       Layer.provide(gatedExecutor),
       Layer.provide(alwaysHoldsLayer),
       Layer.provide(CompletionCheck.unverified),
@@ -231,7 +234,7 @@ describe("PollingTriggers open-issue check", () => {
           assert(stored[0] !== undefined && Option.isSome(stored[0].goneAt));
           const managed = fixtureConfig.repos[0];
           assert(managed !== undefined);
-          const board = yield* projectBoard(managed, [], stored, []);
+          const board = yield* projectBoard(managed, [], stored, [], catalog.pools);
           assert.deepStrictEqual(board.lanes[0]?.items, []);
           assert.strictEqual(board.lanes[1]?.items[0]?.state, "issue-closed");
           const currentOpenIssues = yield* items.openIssues(repository);

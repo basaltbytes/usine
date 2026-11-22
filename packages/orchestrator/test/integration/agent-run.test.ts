@@ -51,6 +51,7 @@ import { fixedInstanceLayer } from "../support/current-instance.ts";
 import { layer as durableAttemptRuntimeLayer } from "@usine/durable/live";
 import { harnessesLive } from "@usine/agents/harness/node";
 import { hostLoginLockLayer } from "@usine/executor";
+import { catalogPools } from "../support/pools.ts";
 
 const PositiveIntFromString = Schema.FiniteFromString.pipe(
   Schema.decodeTo(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))),
@@ -221,6 +222,7 @@ const runtimeLayer = (
     },
     database,
   ).pipe(
+    Layer.provide(catalogPools),
     Layer.provide(MarcbachmannCelLayer),
     Layer.provide(credentials),
     Layer.provide(app),

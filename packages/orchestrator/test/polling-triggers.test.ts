@@ -102,6 +102,7 @@ import {
   baseBranches,
   unmovedBaseRefHead,
 } from "./support/polling.ts";
+import { catalogPools } from "./support/pools.ts";
 
 const watchedRepository = RepositoryName.make("basaltbytes/usine");
 const emptyLabelCatalog = RepositoryLabelCatalog.make({
@@ -228,6 +229,7 @@ const runtimeLayer = (
   condition: Layer.Layer<TriggerCondition> = alwaysHoldsLayer,
 ) => {
   const engine = localEngineLayer(directory).pipe(
+    Layer.provide(catalogPools),
     Layer.provide(executor),
     Layer.provide(condition),
     Layer.provide(CompletionCheck.unverified),

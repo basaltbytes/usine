@@ -1,4 +1,5 @@
 import { NodeServices } from "@effect/platform-node";
+import { BillingPools, type PoolDescriptor } from "@usine/core/agent/pool";
 import { InstanceDirectory } from "@usine/core/instance";
 import { Effect, FileSystem, Layer } from "effect";
 import { SqlClient } from "effect/sql";
@@ -57,8 +58,8 @@ export const sqliteAdapter: PersistenceAdapter = {
       prefix: "usine-contract-",
     });
     const directory = InstanceDirectory.make(currentDirectory);
-    return {
-      open: Layer.fresh(
+    const openDeclaring = (pools: ReadonlyArray<PoolDescriptor>) =>
+      Layer.fresh(
         Layer.mergeAll(
           AttentionAcknowledgements.layer,
           BoardMoves.layer,
@@ -72,9 +73,12 @@ export const sqliteAdapter: PersistenceAdapter = {
           RunReader.layer,
           RunStore.layer,
           failures,
-        ).pipe(Layer.provide(localSqliteLayer(directory)), Layer.provide(NodeServices.layer)),
-      ),
-    };
+        ).pipe(
+          Layer.provide([localSqliteLayer(directory), Layer.succeed(BillingPools)(pools)]),
+          Layer.provide(NodeServices.layer),
+        ),
+      );
+    return { open: openDeclaring([]), openDeclaring };
   }).pipe(
     Effect.provide(NodeServices.layer),
     Effect.mapError((cause) =>

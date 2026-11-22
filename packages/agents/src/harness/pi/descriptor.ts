@@ -2,6 +2,8 @@ import { Harness } from "@usine/core/agent/brain";
 import { Option } from "effect";
 import { CapabilityProfile, Lacking } from "../capability.ts";
 import { HarnessDescriptor, WorkerRequirements } from "../harness.ts";
+import { apiKeys, HarnessPool } from "../pool.ts";
+import { piLoginPools } from "./authentication.ts";
 
 export const pi = HarnessDescriptor.make({
   id: Harness.make("pi"),
@@ -67,6 +69,10 @@ export const pi = HarnessDescriptor.make({
   placementReason: "Pi runs its tools in the orchestrator process and supports only local children",
   credentialReason:
     "Pi uses local host credentials for children and host or gateway credentials on the orchestrator",
+  pools: [
+    HarnessPool.make({ pool: apiKeys, routes: ["gateway-api-key"] }),
+    ...Array.from(piLoginPools.values(), (pool) => HarnessPool.make({ pool, routes: [] })),
+  ],
   prices: Option.none(),
   handoff: null,
 });

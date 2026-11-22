@@ -1,3 +1,5 @@
+import { apiKeys } from "../../src/harness/pool.ts";
+import { chatgptPlan } from "../../src/harness/codex/descriptor.ts";
 import { jsonKey } from "@usine/core/json-key";
 // SDK streams and hooks require native Promises, including the test implementations.
 // @effect-diagnostics newPromise:off
@@ -96,7 +98,7 @@ describe("Pi pool resolution", () => {
   it("maps supported authentication to its pool and rejects the rest instead of inventing an API key", () => {
     assert.strictEqual(
       resolvePiPool("openai-codex", { _tag: "OAuth", subscription: true }),
-      "chatgptPlan",
+      chatgptPlan.id,
     );
     assert.strictEqual(resolvePiPool("openai", { _tag: "ApiKey" }), "apiKeys");
     assert.strictEqual(resolvePiPool("openai-codex", undefined), undefined);
@@ -200,7 +202,7 @@ describe("Pi child backend", () => {
           _tag: "Started",
           harnessSession: Option.none(),
           model: childRequest.session.brain.model,
-          pool: "apiKeys",
+          pool: apiKeys.id,
           session,
           tools: childTools,
         }),
@@ -240,7 +242,7 @@ describe("Pi child backend", () => {
             _tag: "Started",
             harnessSession: Option.none(),
             model: childRequest.session.brain.model,
-            pool: "apiKeys",
+            pool: apiKeys.id,
             tools: childTools,
             session: {
               messages: [],
@@ -305,7 +307,7 @@ describe("Pi child backend", () => {
             _tag: "Started",
             harnessSession: Option.none(),
             model: childRequest.session.brain.model,
-            pool: "apiKeys",
+            pool: apiKeys.id,
             tools: childTools,
             session: {
               messages: [],
@@ -367,7 +369,7 @@ describe("Pi child backend", () => {
             _tag: "Started",
             harnessSession: Option.none(),
             model: childRequest.session.brain.model,
-            pool: "apiKeys",
+            pool: apiKeys.id,
             tools: childTools,
             session: {
               messages: [],
@@ -413,7 +415,7 @@ describe("Pi child backend", () => {
             _tag: "Started",
             harnessSession: Option.none(),
             model: childRequest.session.brain.model,
-            pool: "apiKeys",
+            pool: apiKeys.id,
             tools: childTools,
             session: {
               messages: [],
@@ -521,7 +523,7 @@ describe("Pi child backend", () => {
             _tag: "Started",
             harnessSession: Option.none(),
             model: childRequest.session.brain.model,
-            pool: "apiKeys",
+            pool: apiKeys.id,
             tools: childTools,
             session: {
               messages: [],
@@ -570,8 +572,8 @@ describe("Pi child backend", () => {
   );
 
   it.effect.each([
-    { pool: "chatgptPlan", model: "openai-codex/gpt-5.6-sol" },
-    { pool: "apiKeys", model: "ollama/qwen3" },
+    { pool: chatgptPlan.id, model: "openai-codex/gpt-5.6-sol" },
+    { pool: apiKeys.id, model: "ollama/qwen3" },
   ] as const)("normalizes $pool events and controls", ({ pool, model }) => {
     let options: PiStartOptions | undefined;
     const listeners: Array<(event: PiSessionEvent) => void> = [];
@@ -650,7 +652,7 @@ describe("Pi child backend", () => {
         assert.deepStrictEqual(running.session.pool, Option.some(pool));
         assert.deepStrictEqual(
           running.session.endpoint,
-          pool === "apiKeys" ? Option.some(model.split("/")[0]) : Option.none(),
+          pool === apiKeys.id ? Option.some(model.split("/")[0]) : Option.none(),
         );
         const usage = events.find((event) => event._tag === "SessionTokensUpdated");
         assert(usage?._tag === "SessionTokensUpdated");
@@ -734,7 +736,7 @@ describe("Pi child backend", () => {
           _tag: "Started",
           harnessSession: Option.none(),
           model: childRequest.session.brain.model,
-          pool: "apiKeys",
+          pool: apiKeys.id,
           session,
           tools: childTools,
         }),
@@ -839,7 +841,7 @@ describe("Pi child backend", () => {
   for (const [started, pool] of [
     [
       { _tag: "AuthenticationUnavailable", model: ModelId.make("openai-codex/gpt-5.6-sol") },
-      "chatgptPlan",
+      chatgptPlan.id,
     ],
     [
       {
@@ -847,7 +849,7 @@ describe("Pi child backend", () => {
         model: ModelId.make("github-copilot/gpt-5.6-sol"),
         authentication: { _tag: "OAuth", subscription: true },
       },
-      "apiKeys",
+      apiKeys.id,
     ],
   ] as const) {
     it.effect(`rejects ${started.model} with ${started._tag}`, () => {
@@ -956,7 +958,7 @@ describe("Pi child backend", () => {
         delayed.resolve({
           _tag: "Started",
           model: childRequest.session.brain.model,
-          pool: "apiKeys",
+          pool: apiKeys.id,
         });
         yield* Effect.promise(() => delayed.disposed);
         yield* Fiber.join(interruptFiber);
@@ -1007,7 +1009,7 @@ describe("Pi child backend", () => {
           _tag: "Started",
           harnessSession: Option.none(),
           model: childRequest.session.brain.model,
-          pool: "apiKeys",
+          pool: apiKeys.id,
           tools: childTools,
           session: {
             messages: [],
@@ -1123,7 +1125,7 @@ describe("Pi child backend", () => {
               _tag: "Started",
               harnessSession: Option.none(),
               model: ModelId.make(`${faux.provider.id}/${faux.getModel().id}`),
-              pool: "apiKeys",
+              pool: apiKeys.id,
               session,
               tools: [],
             }),

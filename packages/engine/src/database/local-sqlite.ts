@@ -34,6 +34,7 @@ import { BoardMoves } from "../board-moves/board-moves.ts";
 import { CycleBudgets } from "../cycle-budget/cycle-budget.ts";
 import { layerWithDatabase, type RunEngine } from "../engine/engine.ts";
 import { UnconfirmedStops } from "../engine/unconfirmed-stops.ts";
+import type { BillingPools } from "@usine/core/agent/pool";
 import type { InstanceDirectory } from "@usine/core/instance";
 import { EnginePersistenceError, type RunEngineError } from "../engine/error.ts";
 import { RunReader } from "../run-reader/run-reader.ts";
@@ -183,7 +184,7 @@ export const layer = (
   | StepOutputStore
   | UnconfirmedStops,
   RunEngineError,
-  CompletionCheck | StepExecutor | TriggerCondition
+  BillingPools | CompletionCheck | StepExecutor | TriggerCondition
 > =>
   layerWithDatabase(database).pipe(
     Layer.merge(

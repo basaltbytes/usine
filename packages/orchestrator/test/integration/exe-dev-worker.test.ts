@@ -26,6 +26,7 @@ import { fixedConfigLayer } from "../support/current-instance.ts";
 import { testAppLayer } from "../support/github-app.ts";
 import { alwaysHoldsLayer } from "../support/polling.ts";
 import { hostLoginLockLayer } from "@usine/executor";
+import { catalogPools } from "../support/pools.ts";
 
 const VmList = Schema.Struct({
   vms: Schema.Array(
@@ -115,6 +116,7 @@ describe("live exe.dev Worker", () => {
         },
         database,
       ).pipe(
+        Layer.provide(catalogPools),
         Layer.provide(MarcbachmannCelLayer),
         Layer.provide(alwaysHoldsLayer),
         Layer.provide(CompletionCheck.unverified),

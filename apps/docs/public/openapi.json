@@ -31813,12 +31813,19 @@
                           "max"
                         ]
                       }
+                    },
+                    "pools": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Agent_PoolDescriptorEncoded"
+                      }
                     }
                   },
                   "required": [
                     "harnesses",
                     "harnessDetails",
-                    "efforts"
+                    "efforts",
+                    "pools"
                   ],
                   "additionalProperties": false
                 }
@@ -32491,7 +32498,7 @@
             }
           }
         },
-        "description": "Returns supported harnesses and reasoning efforts.",
+        "description": "Returns supported harnesses, reasoning efforts, and the billing pools that the harnesses declare.",
         "summary": "List configuration capabilities",
         "x-usine-permission": "read"
       }
@@ -60544,11 +60551,7 @@
           },
           "pool": {
             "type": "string",
-            "enum": [
-              "apiKeys",
-              "claudePlan",
-              "chatgptPlan"
-            ]
+            "pattern": "^[a-z][a-zA-Z0-9]*$"
           },
           "endpoint": {
             "type": "string",
@@ -60621,11 +60624,7 @@
           },
           "pool": {
             "type": "string",
-            "enum": [
-              "apiKeys",
-              "claudePlan",
-              "chatgptPlan"
-            ]
+            "pattern": "^[a-z][a-zA-Z0-9]*$"
           },
           "endpoint": {
             "type": "string",
@@ -60670,11 +60669,7 @@
           },
           "pool": {
             "type": "string",
-            "enum": [
-              "apiKeys",
-              "claudePlan",
-              "chatgptPlan"
-            ]
+            "pattern": "^[a-z][a-zA-Z0-9]*$"
           },
           "endpoint": {
             "type": "string",
@@ -61243,11 +61238,7 @@
           },
           "pool": {
             "type": "string",
-            "enum": [
-              "apiKeys",
-              "claudePlan",
-              "chatgptPlan"
-            ]
+            "pattern": "^[a-z][a-zA-Z0-9]*$"
           },
           "login": {
             "type": "string",
@@ -62173,11 +62164,11 @@
         "properties": {
           "pool": {
             "type": "string",
-            "enum": [
-              "apiKeys",
-              "claudePlan",
-              "chatgptPlan"
-            ]
+            "pattern": "^[a-z][a-zA-Z0-9]*$"
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1
           },
           "tokens": {
             "type": "integer",
@@ -62187,6 +62178,7 @@
         },
         "required": [
           "pool",
+          "label",
           "tokens"
         ],
         "additionalProperties": false
@@ -67876,6 +67868,41 @@
         ],
         "additionalProperties": false
       },
+      "Agent_PoolDescriptorEncoded": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z][a-zA-Z0-9]*$"
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1
+          },
+          "billing": {
+            "type": "string",
+            "enum": [
+              "plan",
+              "metered"
+            ]
+          },
+          "windows": {
+            "type": "string",
+            "enum": [
+              "none",
+              "together",
+              "separately"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "billing",
+          "windows"
+        ],
+        "additionalProperties": false
+      },
       "_usine_agents_HarnessPresentationEncoded": {
         "type": "object",
         "properties": {
@@ -69134,11 +69161,11 @@
         "properties": {
           "pool": {
             "type": "string",
-            "enum": [
-              "apiKeys",
-              "claudePlan",
-              "chatgptPlan"
-            ]
+            "pattern": "^[a-z][a-zA-Z0-9]*$"
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1
           },
           "tokens": {
             "type": "integer",
@@ -69161,6 +69188,7 @@
         },
         "required": [
           "pool",
+          "label",
           "tokens",
           "cost",
           "unpriced"
@@ -70052,11 +70080,7 @@
           },
           "pool": {
             "type": "string",
-            "enum": [
-              "apiKeys",
-              "claudePlan",
-              "chatgptPlan"
-            ]
+            "pattern": "^[a-z][a-zA-Z0-9]*$"
           },
           "tokens": {
             "type": "integer",
@@ -70088,11 +70112,11 @@
         "properties": {
           "pool": {
             "type": "string",
-            "enum": [
-              "apiKeys",
-              "claudePlan",
-              "chatgptPlan"
-            ]
+            "pattern": "^[a-z][a-zA-Z0-9]*$"
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1
           },
           "tokens": {
             "type": "integer",
@@ -70112,6 +70136,7 @@
         },
         "required": [
           "pool",
+          "label",
           "tokens",
           "cost"
         ],
@@ -72358,11 +72383,11 @@
           },
           "pool": {
             "type": "string",
-            "enum": [
-              "apiKeys",
-              "claudePlan",
-              "chatgptPlan"
-            ]
+            "pattern": "^[a-z][a-zA-Z0-9]*$"
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1
           },
           "login": {
             "anyOf": [
@@ -72394,6 +72419,7 @@
           "_tag",
           "id",
           "pool",
+          "label",
           "login",
           "window",
           "usedPercent",

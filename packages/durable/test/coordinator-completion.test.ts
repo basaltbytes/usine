@@ -1,3 +1,4 @@
+import { BillingPool } from "@usine/core/agent/pool";
 import { assert, describe, it } from "@effect/vitest";
 import { SqliteClient } from "@effect/sql-sqlite-node";
 import {
@@ -250,7 +251,7 @@ describe("structured completion wake-up", () => {
               HandlerSession.make({
                 brain,
                 route: "host-login",
-                pool: "claudePlan",
+                pool: BillingPool.make("claudePlan"),
                 usage: HandlerUsage.make({
                   totalTokens: TokenCount.make(800),
                   costUsd: Option.some(UsdAmount.make(0.002)),

@@ -1,7 +1,12 @@
 import { catalog } from "@usine/agents/harness";
 import {
-  AgentSession,
   BillingPool,
+  BillingPools,
+  declaredPool,
+  type PoolDescriptor,
+} from "@usine/core/agent/pool";
+import {
+  AgentSession,
   sessionPool,
   type SessionTokensUpdated,
   TokenCount,
@@ -17,12 +22,12 @@ import {
   RunUsageSource,
 } from "@usine/engine/run-reader";
 import { type TranscriptEntry, TranscriptUsageQuery } from "@usine/engine/transcript";
-import { type Brand, Context, Effect, Layer, Option, Schema } from "effect";
+import { Array as Arr, type Brand, Context, Effect, Layer, Option, Order, Schema } from "effect";
 import type { AttemptView } from "./attempt.ts";
 
 /**
- * A dollar cost from a harness or from usine's OpenAI price table. `estimate` is true in the Claude
- * and ChatGPT plans, which don't bill per token (ADR 0013).
+ * A dollar cost from a harness or from usine's OpenAI price table. `estimate` is true in a plan
+ * pool, which doesn't bill per token (ADR 0013).
  */
 export class UsageCostView extends Schema.Class<
   UsageCostView,
@@ -61,6 +66,8 @@ export class PoolUsageView extends Schema.Class<
 >("@usine/orchestrator/PoolUsageView")({
   /** The billing source for this usage. */
   pool: BillingPool,
+  /** The pool's catalog label, or its ID for a pool that the catalog doesn't declare. */
+  label: Schema.NonEmptyString,
   /** The total reported tokens, summed once per session. */
   tokens: TokenCount,
   /** Null if any session in the pool has no price. */
@@ -74,7 +81,7 @@ export class RunUsageView extends Schema.Class<
 >("@usine/orchestrator/RunUsageView")({
   /** The total reported tokens, summed once per session. */
   tokens: TokenCount,
-  /** In the order API keys, Claude plan, ChatGPT plan; unused pools are absent. */
+  /** In catalog order, then undeclared pools by ID; unused pools are absent. */
   pools: Schema.Array(PoolUsageView),
   /** In order of Attempt start, then first report. */
   sessions: Schema.Array(SessionUsageView),
@@ -87,6 +94,8 @@ export class TaskPoolUsageView extends Schema.Class<
 >("@usine/orchestrator/TaskPoolUsageView")({
   /** The billing source for this usage. */
   pool: BillingPool,
+  /** The pool's catalog label, or its ID for a pool that the catalog doesn't declare. */
+  label: Schema.NonEmptyString,
   /** The total reported tokens, summed once per session. */
   tokens: TokenCount,
   /** The cost of the priced sessions, or null if no session in the pool has a price yet. */
@@ -112,23 +121,53 @@ export class TaskUsageView extends Schema.Class<
   /** The total reported tokens, summed once per session. */
   tokens: TokenCount,
   /**
-   * Each pool summed over the Runs, in the order API keys, Claude plan, ChatGPT plan; unused
-   * pools are absent.
+   * Each pool summed over the Runs, in catalog order, then undeclared pools by ID; unused pools
+   * are absent.
    */
   pools: Schema.Array(TaskPoolUsageView),
   /**
    * The summed cost of the priced pools, or null if no pool has a price. It's an estimate if it
-   * includes the Claude or ChatGPT plan, and a lower bound if a pool is `unpriced`.
+   * includes a plan pool, and a lower bound if a pool is `unpriced`.
    */
   cost: Schema.NullOr(UsageCostView),
 }) {}
 
-const POOLS: ReadonlyArray<BillingPool> = ["apiKeys", "claudePlan", "chatgptPlan"];
+/** The members of one billing pool, with the pool as `declaredPool` resolves it. */
+interface PoolGroup<A> {
+  readonly pool: PoolDescriptor;
+  readonly members: Arr.NonEmptyReadonlyArray<A>;
+}
 
-const priced = (pool: BillingPool, usd: Option.Option<UsdAmount>): UsageCostView | null =>
+/**
+ * Groups `members` by billing pool: the pools that `pools` declares in its order, then the
+ * undeclared pools, such as those of a removed harness, by ID.
+ */
+export const poolGroups = <A extends { readonly pool: BillingPool }>(
+  pools: ReadonlyArray<PoolDescriptor>,
+  members: ReadonlyArray<A>,
+): ReadonlyArray<PoolGroup<A>> => {
+  const position = (pool: BillingPool) => {
+    const index = pools.findIndex(({ id }) => id === pool);
+    return index === -1 ? pools.length : index;
+  };
+  const order = Order.combine(
+    Order.mapInput(Order.Number, ({ pool }: PoolGroup<A>) => position(pool.id)),
+    Order.mapInput(Order.String, ({ pool }: PoolGroup<A>) => pool.id),
+  );
+  return Arr.sort(
+    Object.values(Arr.groupBy(members, ({ pool }) => pool)).map((group) => ({
+      pool: declaredPool(pools, group[0].pool),
+      members: group,
+    })),
+    order,
+  );
+};
+
+/** Prices usage in `pool`; a price in a plan pool is an estimate (ADR 0013). */
+const priced = (pool: PoolDescriptor, usd: Option.Option<UsdAmount>): UsageCostView | null =>
   Option.match(usd, {
     onNone: () => null,
-    onSome: (value) => UsageCostView.make({ usd: value, estimate: pool !== "apiKeys" }),
+    onSome: (value) => UsageCostView.make({ usd: value, estimate: pool.billing === "plan" }),
   });
 
 /** Returns the harness's price, or for a Codex session, the OpenAI table's price of its breakdown. */
@@ -150,10 +189,13 @@ interface RunUsage {
 }
 
 /**
- * Sums a Run's token reports per pool and for the Run, using each session's highest report because
- * reports are cumulative.
+ * Sums a Run's token reports per pool of `pools` and for the Run, using each session's highest
+ * report because reports are cumulative.
  */
-const runUsage = (reports: ReadonlyArray<TranscriptEntry>): RunUsage => {
+const runUsage = (
+  pools: ReadonlyArray<PoolDescriptor>,
+  reports: ReadonlyArray<TranscriptEntry>,
+): RunUsage => {
   const highest = new Map<string, { attemptId: AttemptId; report: SessionTokensUpdated }>();
   for (const { attemptId, envelope } of reports) {
     const payload = envelope.payload;
@@ -175,7 +217,7 @@ const runUsage = (reports: ReadonlyArray<TranscriptEntry>): RunUsage => {
       session: report.session,
       pool,
       tokens: report.totalTokens,
-      cost: priced(pool, price),
+      cost: priced(declaredPool(pools, pool), price),
     });
   });
   const unknownModels = new Set(
@@ -189,27 +231,24 @@ const runUsage = (reports: ReadonlyArray<TranscriptEntry>): RunUsage => {
         : [],
     ),
   );
-  const pools = POOLS.flatMap((pool) => {
-    const members = sessions.filter((session) => session.pool === pool);
-    if (members.length === 0) return [];
+  const poolUsage = poolGroups(pools, sessions).map(({ pool, members }) => {
     const costs = members.flatMap(({ cost }) => (cost === null ? [] : [cost.usd]));
-    return [
-      PoolUsageView.make({
+    return PoolUsageView.make({
+      pool: pool.id,
+      label: pool.label,
+      tokens: TokenCount.make(members.reduce((sum, { tokens }) => sum + tokens, 0)),
+      cost: priced(
         pool,
-        tokens: TokenCount.make(members.reduce((sum, { tokens }) => sum + tokens, 0)),
-        cost: priced(
-          pool,
-          costs.length === members.length
-            ? Option.some(UsdAmount.make(costs.reduce((sum, usd) => sum + usd, 0)))
-            : Option.none(),
-        ),
-      }),
-    ];
+        costs.length === members.length
+          ? Option.some(UsdAmount.make(costs.reduce((sum, usd) => sum + usd, 0)))
+          : Option.none(),
+      ),
+    });
   });
   return {
     view: RunUsageView.make({
       tokens: TokenCount.make(sessions.reduce((sum, { tokens }) => sum + tokens, 0)),
-      pools,
+      pools: poolUsage,
       sessions,
     }),
     unknownModels,
@@ -217,10 +256,12 @@ const runUsage = (reports: ReadonlyArray<TranscriptEntry>): RunUsage => {
 };
 
 /**
- * Sums the Attempt time, tokens, and cost of a Task's `runs`. Pools sum sessions rather than Run
- * pools, so priced sessions count even when another session is unpriced, which sets `unpriced`.
+ * Sums the Attempt time, tokens, and cost of a Task's `runs` per pool of `pools`. Pools sum sessions
+ * rather than Run pools, so priced sessions count even when another session is unpriced, which
+ * sets `unpriced`.
  */
 export const taskUsage = (
+  pools: ReadonlyArray<PoolDescriptor>,
   runs: ReadonlyArray<{
     readonly id: RunId;
     readonly attempts: ReadonlyArray<Pick<AttemptView, "startedAt" | "endedAt" | "outcome">>;
@@ -238,6 +279,7 @@ export const taskUsage = (
     }
   }
   return taskUsageTotals(
+    pools,
     runs.map(({ id }) => id),
     { durationMillis, unmeasured, runningSince },
     usage,
@@ -245,35 +287,33 @@ export const taskUsage = (
 };
 
 const taskUsageTotals = (
+  pools: ReadonlyArray<PoolDescriptor>,
   runIds: ReadonlyArray<RunId>,
   timing: Pick<TaskUsageView, "durationMillis" | "unmeasured" | "runningSince">,
   usage: ReadonlyMap<RunId, RunUsageView>,
 ): TaskUsageView => {
   const sessions = runIds.flatMap((id) => usage.get(id)?.sessions ?? []);
-  const pools = POOLS.flatMap((pool) => {
-    const members = sessions.filter((session) => session.pool === pool);
-    if (members.length === 0) return [];
+  const poolUsage = poolGroups(pools, sessions).map(({ pool, members }) => {
     const costs = members.flatMap(({ cost }) => (cost === null ? [] : [cost.usd]));
-    return [
-      TaskPoolUsageView.make({
+    return TaskPoolUsageView.make({
+      pool: pool.id,
+      label: pool.label,
+      tokens: TokenCount.make(members.reduce((sum, { tokens }) => sum + tokens, 0)),
+      cost: priced(
         pool,
-        tokens: TokenCount.make(members.reduce((sum, { tokens }) => sum + tokens, 0)),
-        cost: priced(
-          pool,
-          costs.length === 0
-            ? Option.none()
-            : Option.some(UsdAmount.make(costs.reduce((sum, usd) => sum + usd, 0))),
-        ),
-        unpriced: costs.length < members.length,
-      }),
-    ];
+        costs.length === 0
+          ? Option.none()
+          : Option.some(UsdAmount.make(costs.reduce((sum, usd) => sum + usd, 0))),
+      ),
+      unpriced: costs.length < members.length,
+    });
   });
-  const costs = pools.flatMap(({ cost }) => (cost === null ? [] : [cost]));
+  const costs = poolUsage.flatMap(({ cost }) => (cost === null ? [] : [cost]));
   return TaskUsageView.make({
     ...timing,
     durationMillis: Math.round(timing.durationMillis),
     tokens: TokenCount.make(sessions.reduce((sum, { tokens }) => sum + tokens, 0)),
-    pools,
+    pools: poolUsage,
     cost:
       costs.length === 0
         ? null
@@ -284,12 +324,14 @@ const taskUsageTotals = (
   });
 };
 
-/** Combines SQL history totals with session usage for the task's items. */
+/** Combines SQL history totals with session usage per pool of `pools` for the task's items. */
 export const taskHistoryUsage = (
+  pools: ReadonlyArray<PoolDescriptor>,
   items: ReadonlyArray<ItemRunHistory>,
   usage: ReadonlyMap<RunId, RunUsageView>,
 ): TaskUsageView =>
   taskUsageTotals(
+    pools,
     items.flatMap(({ usageSources }) => usageSources.map(({ run }) => run.id)),
     {
       durationMillis: items.reduce((sum, item) => sum + item.durationMillis, 0),
@@ -313,6 +355,7 @@ const makeRunUsageReader = Effect.gen(function* () {
   const runs = yield* RunReader;
   const ended = yield* Effect.sync(() => new Map<AttemptId, ReadonlyArray<TranscriptEntry>>());
   const loggedModels = yield* Effect.sync(() => new Set<string>());
+  const pools = yield* BillingPools;
 
   const attemptReports = Effect.fn("RunUsageReader.attemptReports")(function* (
     attempt: RunUsageSource["attempts"][number],
@@ -327,7 +370,10 @@ const makeRunUsageReader = Effect.gen(function* () {
   const read = Effect.fn("RunUsageReader.read")(function* (snapshot: RunUsageSource) {
     yield* Effect.annotateCurrentSpan({ runId: snapshot.run.id });
     const attempts = yield* Effect.forEach(snapshot.attempts, attemptReports, { concurrency: 4 });
-    const { view: usage, unknownModels } = runUsage(attempts.flatMap(({ reports }) => reports));
+    const { view: usage, unknownModels } = runUsage(
+      pools,
+      attempts.flatMap(({ reports }) => reports),
+    );
     for (const model of unknownModels) {
       if (loggedModels.has(model)) continue;
       loggedModels.add(model);

@@ -1,5 +1,4 @@
 import { BrainSpec } from "@usine/core/agent/brain";
-import type { BillingPool } from "@usine/core/agent/session";
 import type { LoopView, StatisticsWindow } from "@usine/orchestrator/operator";
 
 export const brainLine = (brain: Pick<BrainSpec, "harness" | "model" | "effort">): string =>
@@ -102,9 +101,6 @@ export const tokensLabel = (tokens: number): string =>
 /** Returns dollars to the cent, for example `$1.25`, or `under $0.01` for less than a cent. */
 export const usdLabel = (usd: number): string =>
   usd > 0 && usd < 0.005 ? "under $0.01" : `$${usd.toFixed(2)}`;
-
-export const poolLabel = (pool: BillingPool): string =>
-  ({ apiKeys: "API keys", claudePlan: "Claude plan", chatgptPlan: "ChatGPT plan" })[pool];
 
 /** Returns the length of a rate-limit window, for example `7-day` or `5-hour`. */
 export const windowLabel = (minutes: number): string =>

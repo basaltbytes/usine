@@ -2,6 +2,7 @@ import { Array as Arr, type Brand, DateTime, Effect, Option, Schema } from "effe
 import { GatewayCredentialKind } from "../worker.ts";
 import { AgentName } from "./agent.ts";
 import { BrainSpec } from "./brain.ts";
+import { BillingPool } from "./pool.ts";
 
 /** The usine ID of a parent or child session, distinct from `HarnessSessionId`. */
 export const AgentSessionId = Schema.NonEmptyString.pipe(Schema.brand("AgentSessionId"));
@@ -22,10 +23,6 @@ export type ChildSessionBudget = typeof ChildSessionBudget.Type;
 /** The 1-based number of a child spawn request in an Attempt, counting requests the budget rejected. */
 export const ChildSessionCount = PositiveInt.pipe(Schema.brand("ChildSessionCount"));
 export type ChildSessionCount = typeof ChildSessionCount.Type;
-
-/** The billing source for a session's model requests (ADR 0013). */
-export const BillingPool = Schema.Literals(["apiKeys", "claudePlan", "chatgptPlan"] as const);
-export type BillingPool = typeof BillingPool.Type;
 
 /** The configured provider name of a model endpoint, excluding its URL and credentials. */
 export const EndpointName = Schema.NonEmptyString.pipe(Schema.brand("EndpointName"));
@@ -328,17 +325,22 @@ export class SessionTokensUpdated extends Schema.TaggedClass<
   ).pipe(Schema.withConstructorDefault(Effect.succeedNone)),
 }) {}
 
-/** Returns the recorded pool, using the historical inference only for older sessions. */
+/**
+ * Returns the recorded pool. A session recorded before sessions recorded their pool infers it from
+ * the harnesses and pools of that time, which this function alone names.
+ */
 export const sessionPool = (session: AgentSession): BillingPool =>
   Option.getOrElse(session.pool, () => {
     const credential = session._tag === "ChildSession" ? session.gatewayCredential : Option.none();
     switch (session.brain.harness) {
       case "claude":
-        return Option.contains(credential, "api-key") ? "apiKeys" : "claudePlan";
+        return BillingPool.make(Option.contains(credential, "api-key") ? "apiKeys" : "claudePlan");
       case "codex":
-        return Option.contains(credential, "api-key") ? "apiKeys" : "chatgptPlan";
+        return BillingPool.make(Option.contains(credential, "api-key") ? "apiKeys" : "chatgptPlan");
       case "pi":
-        return session.brain.model.startsWith("openai-codex/") ? "chatgptPlan" : "apiKeys";
+        return BillingPool.make(
+          session.brain.model.startsWith("openai-codex/") ? "chatgptPlan" : "apiKeys",
+        );
       default:
         throw new Error(`No legacy billing pool for harness "${session.brain.harness}"`);
     }

@@ -1,6 +1,6 @@
 import { BrainSpec, Harness, ModelId } from "@usine/core/agent/brain";
-import { BillingPool, RoleName } from "@usine/core/agent/session";
-import type { GatewayLlmProvider } from "@usine/core/worker";
+import { BillingPool } from "@usine/core/agent/pool";
+import { RoleName } from "@usine/core/agent/session";
 import { Array as Arr, type Brand, Effect, Option, Result, Schema } from "effect";
 import { CredentialRoute, Lacking, Placement } from "./capability.ts";
 import type { HarnessCatalog, HarnessDescriptor } from "./harness.ts";
@@ -45,25 +45,18 @@ export class BrainRefused extends Schema.TaggedError<
   message: Schema.NonEmptyString,
 }) {}
 
-const subscriptionPools = {
-  anthropic: "claudePlan",
-  openai: "chatgptPlan",
-} satisfies Record<GatewayLlmProvider, BillingPool>;
-
 /**
- * The billing pool that `credential` determines for `descriptor`. `gateway-api-key` determines
- * `apiKeys`, and `gateway-subscription` determines the plan of the provider that the descriptor's
- * worker credential names. Every other route, and a subscription on a descriptor that names no
- * provider, returns `None`: the harness reports the pool at launch.
+ * The billing pool that `credential` determines for `descriptor`, or `None` for a route that none
+ * of its pools lists: the harness reports the pool at launch.
  */
 export const routePool = (
   descriptor: HarnessDescriptor,
   credential: CredentialRoute,
-): Option.Option<BillingPool> => {
-  if (credential === "gateway-api-key") return Option.some("apiKeys");
-  if (credential !== "gateway-subscription") return Option.none();
-  return Option.map(descriptor.worker.credential, ({ provider }) => subscriptionPools[provider]);
-};
+): Option.Option<BillingPool> =>
+  Option.map(
+    Arr.findFirst(descriptor.pools, ({ routes }) => routes.includes(credential)),
+    ({ pool }) => pool.id,
+  );
 
 /**
  * Checks what `role` requires of `brain` at `context`, without IO or inspecting secret values.

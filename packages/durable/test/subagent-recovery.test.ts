@@ -1,5 +1,6 @@
 // Durable storage transactions use Promise callbacks.
 // @effect-diagnostics asyncFunction:off
+import { BillingPool } from "@usine/core/agent/pool";
 import { assert, it } from "@effect/vitest";
 import { NodeFileSystem } from "@effect/platform-node";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
@@ -149,7 +150,7 @@ for (const [recovery, blocker] of recoveries) {
               SessionStarted.make({
                 session: ChildSession.make({
                   ...child.request.session,
-                  pool: Option.some("claudePlan"),
+                  pool: Option.some(BillingPool.make("claudePlan")),
                 }),
                 harnessSession: Option.some(saved),
               }),

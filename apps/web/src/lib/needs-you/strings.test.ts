@@ -1,3 +1,4 @@
+import { BillingPool } from "@usine/core/agent/pool";
 import { ProjectView } from "@usine/orchestrator/operator";
 import { ProjectId } from "@usine/core/project";
 import { boardOverview } from "~/lib/projects/fixture";
@@ -119,7 +120,8 @@ it("counts a worker alert once for each affected project", () => {
 it("identifies an unrecorded pool login without assigning its warning to a project", () => {
   const need = PoolLimitNeed.make({
     id: "pool-limit:chatgptPlan:secondary",
-    pool: "chatgptPlan",
+    pool: BillingPool.make("chatgptPlan"),
+    label: "ChatGPT plan",
     login: Option.none(),
     window: "secondary",
     usedPercent: 80,

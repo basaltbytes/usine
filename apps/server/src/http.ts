@@ -604,6 +604,7 @@ const handlers = HttpApiBuilder.group(
           harnesses: catalog.ids,
           harnessDetails: harnessPresentations,
           efforts: EFFORTS,
+          pools: catalog.pools,
         }),
       )
       .handle("configurationRepositories", () => configurationRepositories())

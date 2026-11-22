@@ -459,4 +459,5 @@ export const capabilitiesFixture = () => ({
   harnesses: catalog.ids,
   efforts: EFFORTS,
   harnessDetails: harnessPresentations,
+  pools: catalog.pools,
 });

@@ -49,6 +49,7 @@ import {
   TOKEN,
   waitFor,
 } from "./support.ts";
+import { catalogPools } from "../support/pools.ts";
 
 /**
  * Provides the routed `AttemptRuntime` of `durable`, with every Attempt started on the Pi parent,
@@ -100,6 +101,7 @@ const durableRuntime = (
       interruptGrace: "1 second",
       harnessReadiness: harnessReady,
     }).pipe(
+      Layer.provide(catalogPools),
       Layer.provide(harnessesLive),
       Layer.provide(MarcbachmannCelLayer),
       Layer.provide(options.credentials ?? credentialLayer),

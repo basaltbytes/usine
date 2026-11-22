@@ -203,6 +203,7 @@ export const configurationEditorResponses = async (
           harnesses: catalog.ids,
           harnessDetails: harnessPresentations,
           efforts: EFFORTS,
+          pools: catalog.pools,
         }),
       });
       return;

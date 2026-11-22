@@ -6,6 +6,7 @@ import {
   sessionPool,
 } from "@usine/core/agent/session";
 import { DateTime, Effect, Option, Schema } from "effect";
+import { claudePlan } from "./descriptor.ts";
 
 /** Returns whether `message` is Claude Code's report of the account's rate-limit state. */
 export const isRateLimitEvent = Schema.is(
@@ -58,7 +59,7 @@ export const claudeRateLimits = (session: AgentSession) => {
     function* (message: Schema.Json) {
       yield* Effect.annotateCurrentSpan({ sessionId: session.id, pool });
       if (!isRateLimitEvent(message)) return Option.none<AllowanceReport>();
-      if (pool !== "claudePlan") {
+      if (pool !== claudePlan.id) {
         yield* Effect.logDebug("Skipping Claude plan windows for an API-key session", {
           sessionId: session.id,
           pool,

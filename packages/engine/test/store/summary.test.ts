@@ -24,6 +24,7 @@ import { Submission } from "../../src/engine/submission.ts";
 import { RunReader } from "../../src/run-reader/run-reader.ts";
 import { RunStore } from "../../src/store/store.ts";
 import { lifecycleSubmission } from "./support.ts";
+import { undeclaredPools } from "../support.ts";
 
 it.live("board stays coherent when completion commits before reading loop history", () =>
   Effect.gen(function* () {
@@ -111,7 +112,14 @@ it.live("board stays coherent when completion commits before reading loop histor
           run: (_database, effect) => routed.readSnapshot(effect),
         }),
       );
-    }).pipe(Effect.provide(RunStore.layer.pipe(Layer.provideMerge(localSqliteLayer(directory)))));
+    }).pipe(
+      Effect.provide(
+        RunStore.layer.pipe(
+          Layer.provideMerge(localSqliteLayer(directory)),
+          Layer.provide(undeclaredPools),
+        ),
+      ),
+    );
   }).pipe(
     Effect.scoped,
     Effect.provide(NodeServices.layer.pipe(Layer.provideMerge(Reactivity.layer))),
@@ -272,6 +280,13 @@ it.effect(
         }).pipe(
           Effect.provide(RunReader.layer.pipe(Layer.provideMerge(RunDatabase.layer(database)))),
         );
-      }).pipe(Effect.provide(RunStore.layer.pipe(Layer.provideMerge(localSqliteLayer(directory)))));
+      }).pipe(
+        Effect.provide(
+          RunStore.layer.pipe(
+            Layer.provideMerge(localSqliteLayer(directory)),
+            Layer.provide(undeclaredPools),
+          ),
+        ),
+      );
     }).pipe(Effect.provide(NodeServices.layer)),
 );

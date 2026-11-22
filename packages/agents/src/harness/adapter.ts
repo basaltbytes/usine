@@ -1,8 +1,8 @@
 import type { BrainSpec } from "@usine/core/agent/brain";
+import type { BillingPool } from "@usine/core/agent/pool";
 import {
   type AgentSession,
   type AgentSessionId,
-  type BillingPool,
   ChildSession,
   type EndpointName,
   type HarnessSession,

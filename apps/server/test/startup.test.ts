@@ -41,6 +41,7 @@ import {
 } from "../../../packages/executor/test/ssh/support.ts";
 import { startupListener } from "../src/listener.ts";
 import { sqliteTempDirectory } from "../../../tooling/test/sqlite.mts";
+import { catalogPools } from "../../../packages/orchestrator/test/support/pools.ts";
 
 it.live(
   "answers the version while recovering 400 finished attempts without per-attempt remote commands",
@@ -124,6 +125,7 @@ it.live(
         }),
       ).pipe(Layer.provide(executor));
       const runtime = engineLayer(directory).pipe(
+        Layer.provide(catalogPools),
         Layer.provide(scheduler),
         Layer.provide(
           Layer.succeed(TriggerCondition)({

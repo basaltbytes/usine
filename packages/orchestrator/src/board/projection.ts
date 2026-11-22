@@ -1,4 +1,5 @@
 import type { ItemRunHistory } from "@usine/engine/run-reader";
+import type { PoolDescriptor } from "@usine/core/agent/pool";
 import { canonicalLabelName, GitHubLabelName } from "@usine/core/label";
 import {
   isSettledItemState,
@@ -156,6 +157,7 @@ export const projectBoard = Effect.fn("Board.project")(
     repositoryLabels: ReadonlyArray<string>,
     storedItems: ReadonlyArray<ItemProjection>,
     runs: ReadonlyArray<RunSummaryView>,
+    pools: ReadonlyArray<PoolDescriptor>,
     cycleBlockedItems: ReadonlyArray<ItemKey> = [],
     itemLoops: ReadonlyMap<ItemKey, ReadonlyArray<LoopName>> = new Map(),
     runUsage: ReadonlyMap<RunId, RunUsageView> = new Map(),
@@ -191,6 +193,7 @@ export const projectBoard = Effect.fn("Board.project")(
         cycleBlockedItems,
         itemLoops,
         runUsage,
+        pools,
         attentionRuns,
         itemHistory,
       );

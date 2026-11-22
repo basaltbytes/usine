@@ -19,6 +19,7 @@ import {
   TurnStartResponse,
 } from "../../protocol/codex/codex.ts";
 import { parentFields, resolvedSession } from "../adapter.ts";
+import { apiKeys } from "../pool.ts";
 import { CompletionReply, type CompletionRequest } from "../completion.ts";
 import { codexChildAccount, initializeCodex } from "./account.ts";
 import {
@@ -101,7 +102,7 @@ export const codexCompletion = (appServer: CodexAppServer["Service"]) =>
         effort: spec.session.brain.effort,
       }),
       pool: Option.some(billing.pool),
-      endpoint: billing.pool === "apiKeys" ? Option.some(thread.modelProvider) : Option.none(),
+      endpoint: billing.pool === apiKeys.id ? Option.some(thread.modelProvider) : Option.none(),
     });
     const encodedTurnParams = yield* Schema.encodeEffect(Schema.toCodecJson(TurnStartParams))({
       threadId: thread.thread.id,

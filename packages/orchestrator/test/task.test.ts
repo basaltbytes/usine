@@ -52,6 +52,7 @@ import { ScheduleTriggers } from "../src/schedule-triggers.ts";
 import { WorkerStatus } from "../src/worker-status.ts";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { noCycleBudgets } from "./support/polling.ts";
+import { catalogPools } from "./support/pools.ts";
 
 const repository = RepositoryName.make("basaltbytes/usine");
 const brain = BrainSpec.make({
@@ -463,6 +464,7 @@ const observation = (
     latest: Effect.succeedNone,
   });
   return OperatorObservation.layer.pipe(
+    Layer.provide(catalogPools),
     Layer.provide(configurationLayer),
     Layer.provide(
       Layer.mock(AttentionAcknowledgements)({

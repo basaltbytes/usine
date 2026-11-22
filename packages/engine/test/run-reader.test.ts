@@ -35,6 +35,7 @@ import {
   submission as supportSubmission,
   waitFor,
   withInstance,
+  undeclaredPools,
 } from "./support.ts";
 
 describe("Run evidence reader", () => {
@@ -79,6 +80,7 @@ describe("Run evidence reader", () => {
       });
       const writer = layer(directory).pipe(
         Layer.provide(executor),
+        Layer.provide(undeclaredPools),
         Layer.provide(
           Layer.succeed(TriggerCondition)({
             recheck: (submission) =>

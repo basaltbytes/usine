@@ -1,5 +1,6 @@
 import type { TranscriptCodec } from "../store/transcript/codec.ts";
 import { StepOutputStore } from "../step-outputs/store.ts";
+import type { BillingPools } from "@usine/core/agent/pool";
 import type { CiResolution } from "@usine/core/ci";
 import type { CommitSha } from "@usine/core/repository";
 import type { ReleaseVersion } from "@usine/core/upgrade";
@@ -490,7 +491,12 @@ export const layerWithDatabase = <DatabaseError, DatabaseRequirements>(
   | StepOutputStore
   | UnconfirmedStops,
   RunEngineError | DatabaseError,
-  Crypto.Crypto | CompletionCheck | StepExecutor | TriggerCondition | DatabaseRequirements
+  | BillingPools
+  | Crypto.Crypto
+  | CompletionCheck
+  | StepExecutor
+  | TriggerCondition
+  | DatabaseRequirements
 > => {
   const store = RunStore.layer.pipe(Layer.provide(database));
   const itemWriter = ItemProjectionWriter.layer.pipe(Layer.provide(database));

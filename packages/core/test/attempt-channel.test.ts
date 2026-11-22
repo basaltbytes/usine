@@ -2,6 +2,7 @@ import { assert, describe, it } from "@effect/vitest";
 import { Effect, DateTime, Option, Result, Schema } from "effect";
 import { Agent, AgentPersona, AgentName } from "../src/agent/agent.ts";
 import { Harness, BrainSpec, ModelId } from "../src/agent/brain.ts";
+import { BillingPool } from "../src/agent/pool.ts";
 import {
   AgentSessionId,
   AgentSession,
@@ -167,7 +168,7 @@ describe("attempt channel", () => {
           payload: AttemptChannel.SessionEvent.make({
             event: PoolRateLimitsUpdated.make({
               session,
-              pool: "chatgptPlan",
+              pool: BillingPool.make("chatgptPlan"),
               login: Option.some(PoolLogin.make("operator@example.com")),
               rateLimits: RateLimitsSnapshot.make({
                 limitId: Option.some("codex"),
@@ -333,18 +334,18 @@ describe("attempt channel", () => {
         assert.isFalse("endpoint" in encoded);
         const legacy = yield* Schema.decodeEffect(AgentSession)(encoded);
         assert.isTrue(Option.isNone(legacy.pool));
-        assert.strictEqual(sessionPool(legacy), expected);
+        assert.strictEqual<string>(sessionPool(legacy), expected);
       }
       for (const session of [
         ParentSession.make({
           ...parent,
-          pool: Option.some("apiKeys"),
+          pool: Option.some(BillingPool.make("apiKeys")),
           endpoint: Option.some(EndpointName.make("ollama")),
         }),
         ChildSession.make({
           ...child,
           brain: BrainSpec.make({ ...child.brain, harness: Harness.make("new-harness") }),
-          pool: Option.some("apiKeys"),
+          pool: Option.some(BillingPool.make("apiKeys")),
           endpoint: Option.some(EndpointName.make("local")),
         }),
       ]) {
@@ -355,12 +356,12 @@ describe("attempt channel", () => {
         assert.strictEqual(sessionPool(stored), "apiKeys");
       }
       const invalid = yield* Effect.flip(
-        Schema.decodeUnknownEffect(ParentSession)({
+        Schema.decodeEffect(ParentSession)({
           _tag: "ParentSession",
           id: "parent",
           agent: "developer",
           brain: { harness: "pi", model: "ollama/qwen", effort: "high" },
-          pool: "invalid",
+          pool: "not a pool",
         }),
       );
       assert.strictEqual(invalid._tag, "SchemaError");

@@ -1,16 +1,17 @@
 import {
   admitBrain,
   AdmissionContext,
+  apiKeys,
   catalog,
   RolePlacements,
   RoleSpec,
 } from "@usine/agents/harness";
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import type { ModelRef } from "@earendil-works/pi-durable";
+import type { BillingPool } from "@usine/core/agent/pool";
 import {
   piAuthentication,
   type PiAuthentication,
-  type PiPool,
   requiredPiPool,
   resolvePiPool,
   splitPiModel,
@@ -51,7 +52,7 @@ const coordinator = RoleSpec.make({
 interface ResolvedParent {
   readonly ref: ModelRef;
   readonly model: ModelId;
-  readonly pool: PiPool;
+  readonly pool: BillingPool;
   readonly endpoint: Option.Option<EndpointName>;
 }
 
@@ -321,6 +322,6 @@ export const resolveParent = Effect.fn("ParentModel.resolve")(function* (
     model,
     pool,
     endpoint:
-      pool === "apiKeys" ? Option.some(EndpointName.make(selected.provider)) : Option.none(),
+      pool === apiKeys.id ? Option.some(EndpointName.make(selected.provider)) : Option.none(),
   } satisfies ResolvedParent;
 });

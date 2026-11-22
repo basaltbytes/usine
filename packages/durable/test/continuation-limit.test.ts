@@ -1,5 +1,6 @@
 // Durable storage and the Pi SDK use Promise callbacks.
 // @effect-diagnostics asyncFunction:off
+import { BillingPool } from "@usine/core/agent/pool";
 import { assert, it } from "@effect/vitest";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { CONTINUATION_MESSAGE } from "@usine/agents/continuation";
@@ -60,7 +61,7 @@ it.live("refuses a fourth continuation after three durable restarts within ten m
               return {
                 _tag: "Started",
                 model: options.model,
-                pool: "apiKeys",
+                pool: BillingPool.make("apiKeys"),
                 tools: [],
                 harnessSession: Option.some(saved),
                 session: {

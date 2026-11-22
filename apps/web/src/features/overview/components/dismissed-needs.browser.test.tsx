@@ -1,3 +1,4 @@
+import { BillingPool } from "@usine/core/agent/pool";
 import { administratorPermissions } from "@usine/core/access";
 import { PermissionsContext } from "~/lib/permissions";
 import { QueryClient, QueryClientProvider, useSuspenseQuery } from "@tanstack/react-query";
@@ -56,7 +57,8 @@ it.each([
     kind: "pool warning",
     need: PoolLimitNeed.make({
       id: "pool-limit:chatgptPlan:primary",
-      pool: "chatgptPlan",
+      pool: BillingPool.make("chatgptPlan"),
+      label: "ChatGPT plan",
       login: Option.some(PoolLogin.make("operator@example.com")),
       window: "primary",
       usedPercent: 85,
