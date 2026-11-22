@@ -3,6 +3,7 @@ import {
   type AgentSession,
   type AgentSessionEvent,
   type HarnessSession,
+  type OperatorMessageId,
   ToolFinished,
 } from "@usine/core/agent/session";
 import {
@@ -16,7 +17,6 @@ import {
   type InterruptedTool,
   type QueuedOperatorMessage,
   type RestartState,
-  type RunningSession,
 } from "../runtime.ts";
 import {
   type NativeSession,
@@ -134,7 +134,8 @@ export interface ContinuationPolicy {
     tools: ReadonlyArray<InterruptedTool>,
     unread: ReadonlyArray<QueuedOperatorMessage>,
     emit: (event: AgentSessionEvent) => Effect.Effect<void>,
-    send: RunningSession["steer"],
+    /** Sends an input: the operator message `id`, or the session's own input without one. */
+    send: (message: string, id?: OperatorMessageId) => Effect.Effect<void, AgentSessionError>,
   ) => Effect.Effect<void, AgentSessionError>;
 }
 

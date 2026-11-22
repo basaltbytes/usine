@@ -588,11 +588,11 @@ export interface RunningSession {
   readonly events: Stream.Stream<AgentSessionEvent, AgentSessionError>;
   /** Waits for the session's final message, or fails with the error that ended it. */
   readonly result: Effect.Effect<SessionResult, AgentSessionError>;
-  /** Adds operator guidance to the running session without creating a new attempt. */
-  readonly steer: (
-    message: string,
-    id?: AttemptChannel.OperatorMessageId,
-  ) => Effect.Effect<void, AgentSessionError>;
+  /**
+   * Adds guidance to the running session without creating a new attempt. No operator message
+   * stands for it, so nothing reports its read; `intervene` sends operator messages.
+   */
+  readonly steer: (message: string) => Effect.Effect<void, AgentSessionError>;
   /** Requests that the session stop its current work. */
   readonly interrupt: Effect.Effect<void, AgentSessionError>;
   /**

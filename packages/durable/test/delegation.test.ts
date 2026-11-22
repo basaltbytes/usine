@@ -27,8 +27,15 @@ import { attemptRequest } from "./support.ts";
 // SAFETY: the hub uses the task ID only as a lookup key; no durable task backs these tests.
 const ATTEMPT_TASK = 1 as TaskId;
 
-/** Starts one delegation, after an `execute` call supplied the child host, and returns its fiber. */
-const start = (attemptId: string, memory: ReturnType<typeof memoryJournal>) =>
+/**
+ * Starts one delegation, after an `execute` call supplied the child host, and returns its fiber.
+ * `afterDelivery` runs after each delivery that the delegation sends to the hub.
+ */
+const start = (
+  attemptId: string,
+  memory: ReturnType<typeof memoryJournal>,
+  afterDelivery: Effect.Effect<void> = Effect.void,
+) =>
   Effect.gen(function* () {
     const request = attemptRequest(attemptId);
     const hubs = yield* attemptHubs;
@@ -45,7 +52,7 @@ const start = (attemptId: string, memory: ReturnType<typeof memoryJournal>) =>
           routing: hub.routing,
           attachment: delegationAttachment(hub),
           event: (event) => hubs.event(hub, event),
-          delivery: (delivery) => hubs.delivery(hub, delivery),
+          delivery: (delivery) => hubs.delivery(hub, delivery).pipe(Effect.andThen(afterDelivery)),
         },
         journal: memory.journal,
         call: memory.call,
@@ -198,7 +205,7 @@ describe("delegate", () => {
     }).pipe(Effect.provide(stubChildBackendLayer)),
   );
 
-  it.effect("delivers a restored input that the resumed child read once", () =>
+  it.effect("delivers a restored input once when the child reads it as the delegation ends", () =>
     Effect.gen(function* () {
       const attemptId = "delegation/restored-input-read";
       const request = attemptRequest(attemptId);
@@ -235,21 +242,25 @@ describe("delegate", () => {
         }),
       });
       const backend = yield* ChildBackend;
-      const { fiber, hub } = yield* start(attemptId, memory).pipe(
+      const journal = yield* Deferred.make<ChildSessionJournal["Service"]>();
+      const read = AttemptChannel.InterventionState.make({ held: false, paused: false });
+      // The child reports its read of the input while the delegation's finalizer settles it.
+      const { fiber, hub } = yield* start(
+        attemptId,
+        memory,
+        Deferred.await(journal).pipe(
+          Effect.flatMap((saving) => saving.delivered(steer.id, Option.some(read))),
+        ),
+      ).pipe(
         Effect.provideService(
           ChildBackend,
           ChildBackend.of({
             ...backend,
-            // The resumed child reads its restored message as soon as it starts.
             launch: (childRequest) =>
-              Effect.gen(function* () {
-                const running = yield* backend.launch(childRequest);
-                const journal = yield* ChildSessionJournal;
-                const state = AttemptChannel.InterventionState.make({ held: false, paused: false });
-                for (const { id } of childRequest.unread)
-                  yield* journal.delivered(id, Option.some(state));
-                return running;
-              }),
+              ChildSessionJournal.pipe(
+                Effect.tap((saving) => Deferred.succeed(journal, saving)),
+                Effect.andThen(backend.launch(childRequest)),
+              ),
           }),
         ),
       );
@@ -265,12 +276,13 @@ describe("delegate", () => {
       const deliveries = (yield* Queue.clear(hub.queue)).flatMap((item) =>
         item._tag === "Delivery" ? [item] : [],
       );
+      // The finalizer took the input first, so the child's report finds nothing to settle.
       assert.deepStrictEqual(
         deliveries.map(({ inputSequence, delivered }) => ({
           inputSequence,
           read: Option.isSome(delivered),
         })),
-        [{ inputSequence: 1, read: true }],
+        [{ inputSequence: 1, read: false }],
       );
     }).pipe(Effect.provide(stubChildBackendLayer)),
   );

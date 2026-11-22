@@ -32,9 +32,10 @@ export type Receipt = Data.TaggedEnum<{
     readonly opensTurn: boolean;
   };
   /**
-   * The harness recorded an input with `text`, which acknowledges the oldest message with that text
-   * that this process sent, or, at `restored`, the oldest unread one. `item` names the native
-   * record, which acknowledges once.
+   * The harness recorded an input with `text`. The record acknowledges the oldest of the session's
+   * own inputs with that text, or else the oldest operator message with that text that this
+   * process sent. At `restored`, that message can be any unread one, because an earlier process may
+   * have sent it. `item` names the native record, which acknowledges once.
    */
   ByText: {
     readonly text: string;
@@ -69,6 +70,11 @@ export interface Unread {
 export interface Inbox<A extends Unread> {
   /** Oldest first. */
   readonly unread: ReadonlyArray<A>;
+  /**
+   * The texts of the inputs that this process sent on the session's own behalf, such as its task or
+   * a continuation message, that the harness hasn't recorded, oldest first.
+   */
+  readonly own: ReadonlyArray<string>;
   /** The native items that the session already counted, which acknowledge nothing again. */
   readonly counted: ReadonlyArray<string>;
   /** The turn whose items `saved` lists. */
@@ -86,6 +92,11 @@ export interface Matched<A extends Unread> {
   readonly save: Option.Option<ReadonlyArray<string>>;
   /** The native item that the receipt repeats. */
   readonly repeated: Option.Option<NativeItem>;
+  /**
+   * The session's own input that the receipt recorded instead of an operator message, with the
+   * native item that records it if the receipt names one.
+   */
+  readonly own: Option.Option<{ readonly item: Option.Option<NativeItem> }>;
   /** The messages that now start a turn of their own. */
   readonly turnsQueued: number;
   /** The messages that no longer start a turn of their own, because another message opened it. */
@@ -121,6 +132,7 @@ const acknowledged = <A extends Unread>(
   read,
   save: Option.none(),
   repeated: Option.none(),
+  own: Option.none(),
   turnsQueued: 0,
   folded: 0,
   ...changes,
@@ -162,12 +174,18 @@ export const match = <A extends Unread>(
         onNone: () => inbox,
         onSome: (found) => count(inbox, found),
       });
+      const save = Option.map(item, () => counted.saved);
+      const own = counted.own.indexOf(text);
+      if (own >= 0)
+        return acknowledged(
+          { ...counted, own: counted.own.filter((_, index) => index !== own) },
+          [],
+          { save, own: Option.some({ item }) },
+        );
       const message = counted.unread.find(
         (candidate) => (at === "restored" || candidate.sent) && candidate.message === text,
       );
-      return acknowledged(counted, message === undefined ? [] : [{ message, at }], {
-        save: Option.map(item, () => counted.saved),
-      });
+      return acknowledged(counted, message === undefined ? [] : [{ message, at }], { save });
     },
     ByCount: ({ unread }) => {
       const sent = inbox.unread.filter((message) => message.sent);

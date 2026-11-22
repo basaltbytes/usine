@@ -398,11 +398,14 @@ describe("Pi child backend", () => {
     }).pipe(Effect.scoped),
   );
 
-  it.effect("records the prompt receipt once Pi saves a user message", () =>
+  it.effect("records the prompt receipt once, after Pi saves a user message", () =>
     Effect.gen(function* () {
       const listeners: Array<(event: PiSessionEvent) => void> = [];
+      const trace: Array<string> = [];
       const publish = (event: PiSessionEvent) => {
         for (const listener of listeners) listener(event);
+        // As Pi does, appends the message once its listeners return, before it yields.
+        if (event.type === "message_end" && event.message.role === "user") trace.push("saved");
       };
       const task: PiMessage = { role: "user", content: childRequest.prompt, timestamp: 0 };
       const sdk = Layer.succeed(PiSdk)({
@@ -433,7 +436,6 @@ describe("Pi child backend", () => {
             },
           }),
       });
-      let prompted = 0;
       const result = yield* Effect.gen(function* () {
         const running = yield* (yield* ChildBackend).launch(childRequest);
         return yield* running.result;
@@ -442,7 +444,7 @@ describe("Pi child backend", () => {
         Effect.provideService(ChildSessionJournal, {
           started: () => Effect.void,
           prompted: Effect.sync(() => {
-            prompted += 1;
+            trace.push("prompted");
           }),
           continued: () => Effect.void,
           received: () => Effect.void,
@@ -452,7 +454,62 @@ describe("Pi child backend", () => {
       );
       for (let spin = 0; spin < 100; spin += 1) yield* Effect.yieldNow;
       assert.strictEqual(result.message, "Pi child done.");
-      assert.strictEqual(prompted, 1);
+      assert.deepStrictEqual(trace, ["saved", "saved", "prompted"]);
+    }),
+  );
+
+  it.effect("reads no operator message at the start of the task that the message repeats", () =>
+    Effect.gen(function* () {
+      const listeners: Array<(event: PiSessionEvent) => void> = [];
+      const sdk = Layer.succeed(PiSdk)({
+        complete: noCompletion,
+        start: () =>
+          Promise.resolve({
+            _tag: "Started",
+            harnessSession: Option.none(),
+            model: childRequest.session.brain.model,
+            pool: apiKeys.id,
+            tools: childTools,
+            session: {
+              messages: [],
+              dispose: () => {},
+              abort: () => Promise.resolve(),
+              subscribe: (listener) => {
+                listeners.push(listener);
+                return () => {};
+              },
+              steer: () => Promise.resolve("queued" as const),
+              prompt: () => new Promise<void>(() => {}),
+            },
+          }),
+      });
+      const echo = AttemptChannel.Steer.make({ message: childRequest.prompt });
+      const reads: Array<string> = [];
+      /** Starts a user message with the task's text, as Pi does when it reads an input. */
+      const start = () => {
+        const message: PiMessage = { role: "user", content: childRequest.prompt, timestamp: 0 };
+        for (const listener of listeners) listener({ type: "message_start", message });
+      };
+      const readAtTask = yield* Effect.gen(function* () {
+        const running = yield* (yield* ChildBackend).launch(childRequest);
+        yield* running.intervene(echo, (delivered) =>
+          Effect.sync(() => {
+            reads.push(`${Option.isSome(delivered) ? "read" : "unread"} ${echo.id}`);
+          }),
+        );
+        // The task that the session sent first starts after the operator's steer is queued.
+        start();
+        for (let spin = 0; spin < 100; spin += 1) yield* Effect.yieldNow;
+        const readAtTask = [...reads];
+        start();
+        for (let spin = 0; reads.length === 0; spin += 1) {
+          if (spin > 1_000) return assert.fail("the read was never reported");
+          yield* Effect.yieldNow;
+        }
+        return readAtTask;
+      }).pipe(Effect.scoped, Effect.provide(piChild.pipe(Layer.provideMerge(sdk))));
+      assert.deepStrictEqual(readAtTask, []);
+      assert.deepStrictEqual(reads, [`read ${echo.id}`]);
     }),
   );
 

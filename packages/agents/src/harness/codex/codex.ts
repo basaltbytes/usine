@@ -502,15 +502,20 @@ const makeCodexSessions = Effect.gen(function* () {
       maxBackgroundWaitMinutes: spec.maxBackgroundWaitMinutes,
     });
 
-    /** Acknowledges the unread messages that the restored thread's last turn records. */
+    /**
+     * Acknowledges the unread messages that the restored thread's last turn records. The items
+     * that it counts are known once the conversation saved them.
+     */
     const readLastTurn = (lastTurn: Option.Option<RestoredTurn>) =>
       Option.match(lastTurn, {
         onNone: () => Effect.void,
         onSome: (turn) =>
-          Ref.modify(state, (current) => [
-            current.receiptsKnown,
-            { ...current, receiptsKnown: true },
-          ]).pipe(Effect.flatMap((known) => readRestored(session.id, turn, known, conversation))),
+          Ref.get(state).pipe(
+            Effect.flatMap(({ receiptsKnown }) =>
+              readRestored(session.id, turn, receiptsKnown, conversation),
+            ),
+            Effect.andThen(Ref.update(state, (current) => ({ ...current, receiptsKnown: true }))),
+          ),
       });
 
     const recoverInput = (message: string, id?: OperatorMessageId) =>
@@ -595,7 +600,7 @@ const makeCodexSessions = Effect.gen(function* () {
       Option.isNone(policy.restored.idle) &&
       Option.isSome(prompt)
     )
-      yield* startTurn(prompt.value).pipe(Effect.catch(resume));
+      yield* conversation.sendOwn(prompt.value, startTurn).pipe(Effect.catch(resume));
     const consumeNotifications = Stream.unwrap(
       Effect.map(Ref.get(state), ({ connection }) => connection.notifications),
     ).pipe(
@@ -892,7 +897,7 @@ const makeCodexSessions = Effect.gen(function* () {
       events: Stream.fromQueue(channel.events),
       interrupt,
       result: Deferred.await(channel.result),
-      steer: (message: string, id?: OperatorMessageId) => steer(message, id).pipe(Effect.asVoid),
+      steer: (message: string) => steer(message).pipe(Effect.asVoid),
       intervene: conversation.intervene,
     } satisfies RunningSession;
     const { turnActive } = yield* Ref.get(state);

@@ -40,7 +40,9 @@ const asJson = (
  * The journal of delegation `number`, which the transition that decided it numbered within the
  * child-session budget, so `start` never refuses it. The child's supervision and queued operator
  * input come from the attempt journal. A tool event of the child goes through `outbox` with its
- * change to the in-flight calls, in one transaction.
+ * change to the in-flight calls, in one transaction. An event that the outbox refuses, while no
+ * call is attached or after the terminal envelope, changes no in-flight call: the saved calls are
+ * the ones that the transcript shows open, which a resumed child reports interrupted.
  */
 export const journalDelegation = (
   journal: AttemptJournal["Service"],
