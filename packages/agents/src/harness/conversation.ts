@@ -138,6 +138,8 @@ interface ConversationState {
   readonly paused: boolean;
   /** The answer that the session hasn't returned; a later answer replaces it. */
   readonly answer: Option.Option<Answer>;
+  /** Whether the session's last report was `SessionIdle`, which a `SessionResumed` ends. */
+  readonly idleReported: boolean;
   /**
    * The session's tool-call count when it last read an operator message or steer, or `None` after
    * its own input, such as a continuation turn.
@@ -182,6 +184,7 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
     held: restored.held,
     paused: restored.paused,
     answer: Option.none(),
+    idleReported: false,
     operatorInput: Option.none(),
     closing: false,
     background: Option.none(),
@@ -439,6 +442,7 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
       yield* transition((current) => ({
         ...current,
         answer: Option.some(Answer.Idle({ message, limitPassed })),
+        idleReported: true,
       }));
       yield* channel.emit(
         SessionIdle.make({ session, message: Option.some(message), answeredOperator }),
@@ -672,7 +676,9 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
 
   /**
    * Sends an operator message or steer. A stopped session first sends the restored messages that
-   * this process hasn't sent, then starts its turn with `action`.
+   * this process hasn't sent, then starts its turn with `action`. The session resumes if it was
+   * stopped or last reported idle, even if a later answer, such as one that waits for background
+   * work, replaced its idle report.
    */
   const message = Effect.fn("SessionConversation.message")(function* (
     action: Steer | OperatorMessage,
@@ -702,6 +708,7 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
       paused: false,
       // The turn replaces an idle report or a kept answer; an answer that waits keeps its timers.
       answer: Option.filter(current.answer, Answer.$is("Waiting")),
+      idleReported: false,
       resume: next,
     }));
     const dropped = Option.filter(previous.answer, Answer.$is("Kept"));
@@ -729,7 +736,7 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
       }));
       yield* took(action.id, taken);
     }
-    if (stopped) yield* channel.emit(SessionResumed.make({ session }));
+    if (stopped || previous.idleReported) yield* channel.emit(SessionResumed.make({ session }));
     if (taken === "read")
       yield* channel.emit(OperatorMessageRead.make({ session, messageId: action.id }));
     return taken;
@@ -872,15 +879,18 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
           own: [],
         },
       }));
-      /** Records the harness's own input: it resumes an idle session and doesn't reply to the operator. */
+      /**
+       * Records the harness's own input: it resumes a session that last reported idle and doesn't
+       * reply to the operator.
+       */
       const ownInput = Effect.gen(function* () {
         const current = yield* transition((latest) => ({
           ...latest,
           answer: Option.filter(latest.answer, Predicate.not(Answer.$is("Idle"))),
+          idleReported: false,
           operatorInput: Option.none(),
         }));
-        if (Option.exists(current.answer, Answer.$is("Idle")))
-          yield* channel.emit(SessionResumed.make({ session }));
+        if (current.idleReported) yield* channel.emit(SessionResumed.make({ session }));
         if (Option.isSome(current.operatorInput))
           yield* Effect.logInfo(
             "The harness sent its own continuation input; the next answer no longer replies to the operator",

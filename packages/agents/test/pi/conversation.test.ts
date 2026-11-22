@@ -894,6 +894,27 @@ describe("background work", () => {
     }),
   );
 
+  it.effect("resumes a session that last reported idle when its later answer waits for work", () =>
+    Effect.gen(function* () {
+      const session = yield* conversation(child("idle-then-waiting"), {
+        held: true,
+        idle: Option.some("Waiting for review"),
+      });
+      // The harness starts a turn of its own, whose answer waits for its work.
+      yield* session.turnStarted;
+      yield* session.reportBackground(Option.some([ciWatch]));
+      yield* session.finish("Watching CI");
+      const reported = yield* session.emitted;
+      assert.deepStrictEqual(reported, ["SessionIdle", "BackgroundWorkUpdated"]);
+      yield* session.intervene(OperatorMessage.make({ message: "Is CI green?" }), noDelivery);
+      const resumed = yield* session.emitted;
+      assert.deepStrictEqual(resumed, ["SessionResumed"], "the session last reported idle");
+      yield* session.intervene(OperatorMessage.make({ message: "And the lint?" }), noDelivery);
+      const again = yield* session.emitted;
+      assert.deepStrictEqual(again, [], "the session already resumed");
+    }),
+  );
+
   /**
    * Starts a conversation whose harness takes a steer only after `unlock`. `lock` sends a steer,
    * which holds the conversation's lock until then.
