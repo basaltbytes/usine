@@ -680,13 +680,20 @@ describe("connectivity", () => {
 });
 
 describe("background work", () => {
-  const snapshot = (sequence: number, work: ReadonlyArray<BackgroundWork>) =>
+  const reported = (
+    sequence: number,
+    work: Option.Option<ReadonlyArray<BackgroundWork>>,
+    session: AgentSession = child,
+  ) =>
     record(
       sequence,
-      AttemptChannel.SessionEvent.make({
-        event: BackgroundWorkUpdated.make({ session: child, work: Option.some(work) }),
-      }),
+      AttemptChannel.SessionEvent.make({ event: BackgroundWorkUpdated.make({ session, work }) }),
     );
+  const snapshot = (
+    sequence: number,
+    work: ReadonlyArray<BackgroundWork>,
+    session: AgentSession = child,
+  ) => reported(sequence, Option.some(work), session);
   const ciWatch = BackgroundWork.make({ id: "ci-watch", kind: "command", description: "Watch CI" });
   const notes = (rows: ReadonlyArray<ChapterRow>) =>
     rows.flatMap((row) => (row._tag === "Note" ? [`${row.tone}: ${row.text}`] : []));
@@ -719,5 +726,55 @@ describe("background work", () => {
       "plain: No background work",
       "warning: Its background work outlasted the wait limit, so usine returned its last answer",
     ]);
+  });
+
+  it("shows a snapshot that isn't reported apart from one where nothing runs", () => {
+    const chapter = document(
+      [
+        record(1, AttemptChannel.Started.make({ parentModel: Option.some(ModelId.make("gpt-5")) })),
+        ...delegation,
+        snapshot(3, [ciWatch]),
+        said(4, "Waiting for CI."),
+        reported(5, Option.none()),
+      ],
+      [attempt(null)],
+    ).chapters[0];
+    assert(chapter !== undefined);
+    assert.deepStrictEqual(notes(chapter.rows), [
+      "plain: Background work: Watch CI (command)",
+      "plain: Background work not reported",
+    ]);
+  });
+
+  it("keeps the snapshots of two children in a note for each child", () => {
+    const reviewer = ChildSession.make({
+      id: AgentSessionId.make("reviewer"),
+      parentId: parent.id,
+      agent: AgentName.make("reviewer"),
+      brain,
+    });
+    const chapter = document(
+      [
+        record(1, AttemptChannel.Started.make({ parentModel: Option.some(ModelId.make("gpt-5")) })),
+        ...delegation,
+        snapshot(3, [ciWatch]),
+        snapshot(
+          4,
+          [BackgroundWork.make({ id: "suite", kind: "command", description: "Run the suite" })],
+          reviewer,
+        ),
+      ],
+      [attempt(null)],
+    ).chapters[0];
+    assert(chapter !== undefined);
+    assert.deepStrictEqual(
+      chapter.rows.flatMap((row) =>
+        row._tag === "Note" ? [`${row.speaker?.name ?? "-"}: ${row.text}`] : [],
+      ),
+      [
+        "developer: Background work: Watch CI (command)",
+        "reviewer: Background work: Run the suite (command)",
+      ],
+    );
   });
 });
