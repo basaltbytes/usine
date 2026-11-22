@@ -46,6 +46,7 @@ import {
   ScheduleTickFailure,
   ScheduleTriggers,
 } from "../src/schedule-triggers.ts";
+import { catalogPools } from "./support/pools.ts";
 
 const agent = AgentFile.make({
   name: AgentName.make("developer"),
@@ -200,6 +201,7 @@ const runtimeLayer = (directory: InstanceDirectory) => {
     execute: () => Effect.die("an approval-gated test run must not start an Attempt"),
   });
   const engine = localEngineLayer(directory).pipe(
+    Layer.provide(catalogPools),
     Layer.provide(executor),
     Layer.provide(alwaysHoldsLayer),
     Layer.provide(CompletionCheck.unverified),

@@ -1,3 +1,4 @@
+import { catalog } from "@usine/agents/harness";
 import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { assert, describe, it } from "@effect/vitest";
 import { UsineConfig } from "@usine/config/factory";
@@ -169,7 +170,17 @@ const project = (
     const fixtureConfig = yield* config;
     const managed = fixtureConfig.repos[0];
     assert(managed !== undefined);
-    return yield* projectBoard(managed, [], items, runs, [], new Map(), new Map(), new Map(events));
+    return yield* projectBoard(
+      managed,
+      [],
+      items,
+      runs,
+      catalog.pools,
+      [],
+      new Map(),
+      new Map(),
+      new Map(events),
+    );
   });
 
 /** Returns each lane's name and the numbers of its cards. */

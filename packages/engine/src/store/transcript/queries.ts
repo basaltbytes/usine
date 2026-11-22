@@ -1,3 +1,4 @@
+import { declaredPool, type PoolDescriptor } from "@usine/core/agent/pool";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 
 import { and, asc, desc, eq, gt, inArray, isNull, lt, sql } from "drizzle-orm";
@@ -36,12 +37,14 @@ export const transcriptQueries = (
 ) => {
   /**
    * Appends an envelope and returns whether it was new. A redelivered envelope with the same
-   * direction and sequence keeps the first stored copy.
+   * direction and sequence keeps the first stored copy. The latest windows of a pool in `pools`
+   * that reports its windows separately keep each window that a report omits.
    */
   const appendTranscript = Effect.fn("RunStoreQueries.appendTranscript")(function* (
     direction: AttemptChannel.Direction,
     envelope: AttemptChannel.Envelope,
     receivedAt: DateTime.Utc,
+    pools: ReadonlyArray<PoolDescriptor>,
   ) {
     yield* Effect.annotateCurrentSpan({ attemptId: envelope.attemptId, direction });
     const storedSeals = yield* database
@@ -117,7 +120,7 @@ export const transcriptQueries = (
           set: {
             ...limits,
             envelope:
-              event.pool === "claudePlan"
+              declaredPool(pools, event.pool).windows === "separately"
                 ? jsonSet(
                     sql`excluded.envelope`,
                     ["primary", "secondary"].map((window) => {

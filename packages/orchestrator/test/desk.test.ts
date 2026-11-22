@@ -70,6 +70,7 @@ import {
   repositoryLabelProjectionReaderLayer,
 } from "./support/polling.ts";
 import { CycleBudgets } from "@usine/engine/cycle-budget";
+import { catalogPools } from "./support/pools.ts";
 
 const time = (clock: string) => DateTime.makeUnsafe(`2026-10-20T${clock}.000Z`);
 const repository = RepositoryName.make("basaltbytes/usine");
@@ -489,6 +490,7 @@ const deskLayer = (
     ]),
   });
   return OperatorObservation.layer.pipe(
+    Layer.provide(catalogPools),
     Layer.provide(configurationLayer),
     Layer.provide(
       Layer.mock(AttentionAcknowledgements)({

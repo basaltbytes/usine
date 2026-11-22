@@ -1,8 +1,10 @@
 import { Harness } from "@usine/core/agent/brain";
+import type { PoolDescriptor } from "@usine/core/agent/pool";
 import { type TokenBreakdown, UsdAmount } from "@usine/core/agent/session";
 import { GatewayLlmProtocol, GatewayLlmProvider } from "@usine/core/worker";
-import { type Brand, Effect, Option, Record, Schema } from "effect";
+import { Array as Arr, type Brand, Effect, Equal, Option, Record, Schema } from "effect";
 import { CapabilityProfile } from "./capability.ts";
+import { HarnessPool } from "./pool.ts";
 
 /** The terminal command for a saved harness session. */
 export class ResumeCommand extends Schema.Class<
@@ -166,6 +168,17 @@ export class HarnessDescriptor extends Schema.Class<
   ),
   placementReason: Schema.NonEmptyString,
   credentialReason: Schema.NonEmptyString,
+  /** The billing pools of the harness's sessions; a credential route determines at most one. */
+  pools: Schema.NonEmptyArray(HarnessPool).check(
+    Schema.makeFilter(
+      (pools) => {
+        const ids = pools.map(({ pool }) => pool.id);
+        const routes = pools.flatMap(({ routes }) => routes);
+        return new Set(ids).size === ids.length && new Set(routes).size === routes.length;
+      },
+      { message: "Expected distinct pools, each credential route in at most one" },
+    ),
+  ),
   /** None when the harness supplies its own prices. */
   prices: Schema.Option(Schema.Record(Schema.String, TokenRates)),
 }) {
@@ -194,7 +207,13 @@ export class HarnessDescriptor extends Schema.Class<
   }
 }
 
-/** A catalog rejects duplicate IDs and validates registered harnesses at configuration boundaries. */
+const declaredPools = (descriptors: ReadonlyArray<HarnessDescriptor>) =>
+  descriptors.flatMap(({ pools }) => pools.map(({ pool }) => pool));
+
+/**
+ * A catalog rejects duplicate harness IDs and a pool ID that two harnesses define differently, and
+ * validates registered harnesses at configuration boundaries.
+ */
 export class HarnessCatalog extends Schema.Class<
   HarnessCatalog,
   Brand.Brand<"@usine/agents/harness/HarnessCatalog">
@@ -205,10 +224,23 @@ export class HarnessCatalog extends Schema.Class<
         new Set(descriptors.map(({ id }) => id)).size === descriptors.length ||
         "Duplicate harness ID",
     ),
+    Schema.makeFilter(({ descriptors }) => {
+      const pools = declaredPools(descriptors);
+      return (
+        pools.every((pool) =>
+          pools.every((other) => other.id !== pool.id || Equal.equals(other, pool)),
+        ) || "A pool ID that two harnesses declare has one definition"
+      );
+    }),
   ),
 ) {
   get ids(): ReadonlyArray<Harness> {
     return this.descriptors.map(({ id }) => id);
+  }
+
+  /** Every pool that a harness declares, once, in catalog order. */
+  get pools(): ReadonlyArray<PoolDescriptor> {
+    return Arr.dedupeWith(declaredPools(this.descriptors), (left, right) => left.id === right.id);
   }
 
   get harness() {

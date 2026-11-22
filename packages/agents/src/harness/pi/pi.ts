@@ -6,11 +6,13 @@ import {
 import { type SessionSpec, type Start } from "../contract.ts";
 import { parentFields, resolvedSession, startPrompt, startReference } from "../adapter.ts";
 import { HarnessCatalog } from "../harness.ts";
+import { apiKeys } from "../pool.ts";
 import { piPreflight } from "./preflight.ts";
 import { pi } from "./descriptor.ts";
 import { type HarnessRuntime, openWithTools } from "../runtime.ts";
 import { callHostTool, decodeHostToolInput, type HostToolSet, hostToolNames } from "../tools.ts";
 import { Harness, BrainSpec, type ModelId } from "@usine/core/agent/brain";
+import type { BillingPool } from "@usine/core/agent/pool";
 import {
   EndpointName,
   SessionStarted,
@@ -39,7 +41,6 @@ import {
   type PiStartResult,
   usePiStart,
 } from "./sdk.ts";
-import type { PiPool } from "./authentication.ts";
 import { failedPiTurn } from "./refusal.ts";
 import type { PiHostCommand, PiHostOutput } from "./host-files.ts";
 import { execHandle } from "../../child-host/exec.ts";
@@ -114,7 +115,7 @@ const rejected = Effect.fn("Pi.rejected")(function* (spec: SessionSpec, rejectio
 });
 
 /** The billing pool, and for an API key the provider, that a Pi session or completion records. */
-const resolvedPi = (spec: SessionSpec, model: ModelId, pool: PiPool) =>
+const resolvedPi = (spec: SessionSpec, model: ModelId, pool: BillingPool) =>
   resolvedSession(spec.session, {
     brain: BrainSpec.make({
       harness: Harness.make("pi"),
@@ -123,7 +124,7 @@ const resolvedPi = (spec: SessionSpec, model: ModelId, pool: PiPool) =>
     }),
     pool: Option.some(pool),
     endpoint:
-      pool === "apiKeys"
+      pool === apiKeys.id
         ? Option.map(Option.fromUndefinedOr(splitPiModel(model)), ({ provider }) =>
             EndpointName.make(provider),
           )

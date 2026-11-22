@@ -40,6 +40,7 @@ import {
 } from "@usine/engine/transcript";
 import { GitHubLabelName } from "@usine/core/label";
 import { Agent } from "@usine/core/agent";
+import { BillingPools, type PoolDescriptor } from "@usine/core/agent/pool";
 import { AttemptContext, AttemptId } from "@usine/core/attempt";
 import { Intervention } from "@usine/core/attempt/channel";
 import type { LoadedInstance } from "@usine/config/instance";
@@ -253,13 +254,14 @@ interface CachedOverview {
 
 /**
  * Returns `overview` with the usage of every card that contains a `changed` Run recomputed from
- * `usage`.
+ * `usage`, per pool of `pools`.
  */
 const withRunUsage = (
   overview: ReadyOverview,
   changed: ReadonlySet<RunId>,
   usage: ReadonlyMap<RunId, RunUsageView>,
   history: ReadonlyArray<ItemRunHistory>,
+  pools: ReadonlyArray<PoolDescriptor>,
 ): ReadyOverview => {
   const byItem = new Map(history.map((item) => [item.itemKey, item]));
   return ReadyOverview.make({
@@ -275,7 +277,7 @@ const withRunUsage = (
               return items.some(({ usageSources }) =>
                 usageSources.some(({ run }) => changed.has(run.id)),
               )
-                ? BoardTaskView.make({ ...task, usage: taskHistoryUsage(items, usage) })
+                ? BoardTaskView.make({ ...task, usage: taskHistoryUsage(pools, items, usage) })
                 : task;
             });
             return lane._tag === "WritableBoardLane"
@@ -313,7 +315,8 @@ const makeOperatorObservation = Effect.gen(function* () {
   );
   const workerStatus = yield* WorkerStatus;
   const workerAttention = workerAttentionFor(reader, acknowledgements, workerStatus);
-  const poolAttention = poolAttentionFor(reader, acknowledgements);
+  const pools = yield* BillingPools;
+  const poolAttention = poolAttentionFor(reader, acknowledgements, pools);
   const webhookHealth = yield* WebhookHealth;
   const webhookAttention = webhookAttentionFor(webhookHealth, acknowledgements);
 
@@ -412,6 +415,7 @@ const makeOperatorObservation = Effect.gen(function* () {
             catalog.map(({ name }) => name),
             boardItems,
             projectRuns,
+            pools,
             cycleAsks.map(({ itemKey }) => itemKey),
             itemLoops,
             runUsage,
@@ -712,7 +716,7 @@ const makeOperatorObservation = Effect.gen(function* () {
     });
     return {
       ...cached,
-      overview: withRunUsage(cached.overview, changed, runs, cached.usage.history),
+      overview: withRunUsage(cached.overview, changed, runs, cached.usage.history, pools),
       usage: { ...cached.usage, runs },
     };
   });
@@ -1358,6 +1362,7 @@ const makeOperator = Effect.gen(function* () {
   const polling = yield* PollingTriggers;
   const githubChanges = yield* RunGitHubChanges;
   const ci = yield* CiMonitor;
+  const pools = yield* BillingPools;
   const scope = yield* Effect.scope;
 
   const dismissNeed = Effect.fn("Operator.dismissNeed")(function* (
@@ -1637,6 +1642,7 @@ const makeOperator = Effect.gen(function* () {
         storedItems,
         // Placement reads no pause state, so these views leave every Loop unpaused.
         summaries.map((summary) => runSummaryView(summary, new Set(), runWorkers)),
+        pools,
         [],
         new Map(),
         new Map(),

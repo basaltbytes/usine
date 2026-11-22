@@ -89,6 +89,7 @@ import {
   withLocalEngine,
   workerCredential,
 } from "./support.ts";
+import { catalogPools } from "../support/pools.ts";
 
 const GITHUB_GH = fileURLToPath(new URL("../fixtures/github.mjs", import.meta.url));
 const REVIEW_URL = "https://github.com/acme/demo/pull/71#pullrequestreview-81";
@@ -235,6 +236,7 @@ const withGitHubEngine = <A, E, R>(
     const decodedValue2 = yield* config;
     const decodedValue3 = yield* config;
     const engine = localEngineLayer(instance).pipe(
+      Layer.provide(catalogPools),
       Layer.provide(
         stepExecutorLayer(decodedValue2, []).pipe(
           Layer.provide(MarcbachmannCelLayer),
@@ -807,6 +809,7 @@ describe("local worker", () => {
           repositoryUrl: () => remote,
           harnessReadiness: harnessReady,
         }).pipe(
+          Layer.provide(catalogPools),
           Layer.provide(harnessesLive),
           Layer.provide(MarcbachmannCelLayer),
           Layer.provide(credentialLayer),

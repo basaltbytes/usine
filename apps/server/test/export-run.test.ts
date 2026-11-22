@@ -40,6 +40,7 @@ import { TranscriptAllQuery } from "@usine/engine/transcript";
 
 import { assert, describe, expect, it } from "@effect/vitest";
 import { RunEvidenceFromJson } from "../src/export-run.ts";
+import { catalogPools } from "../../../packages/orchestrator/test/support/pools.ts";
 
 const cli = fileURLToPath(new URL("../dist/main.js", import.meta.url));
 const now = DateTime.makeUnsafe("2026-09-06T00:00:00Z");
@@ -155,6 +156,7 @@ const seed = (directory: string) =>
   }).pipe(
     Effect.provide(
       layer(InstanceDirectory.make(directory)).pipe(
+        Layer.provide(catalogPools),
         Layer.provide(executor),
         Layer.provide(
           Layer.succeed(TriggerCondition)({

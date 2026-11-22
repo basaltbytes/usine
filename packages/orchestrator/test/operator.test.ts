@@ -1,3 +1,5 @@
+import { catalog } from "@usine/agents/harness";
+import { BillingPool, BillingPools } from "@usine/core/agent/pool";
 import { idleCiMonitor } from "./support/ci.ts";
 import { jsonKey } from "@usine/core/json-key";
 import { CiHandoff } from "@usine/core/ci";
@@ -768,7 +770,11 @@ const testLayer = (
     Layer.succeed(UnconfirmedStops)({ list: unconfirmedStops }),
     idleCiMonitor,
   );
-  return Operator.layer.pipe(Layer.provide(configurationLayer), Layer.provide(dependencies));
+  return Operator.layer.pipe(
+    Layer.provide(configurationLayer),
+    Layer.provide(dependencies),
+    Layer.provideMerge(Layer.succeed(BillingPools)(catalog.pools)),
+  );
 };
 
 describe("Operator", () => {
@@ -855,7 +861,7 @@ describe("Operator", () => {
                 payload: AttemptChannel.SessionEvent.make({
                   event: PoolRateLimitsUpdated.make({
                     session: parent,
-                    pool: "chatgptPlan",
+                    pool: BillingPool.make("chatgptPlan"),
                     login: Option.some(PoolLogin.make("operator@example.com")),
                     rateLimits: RateLimitsSnapshot.make({
                       limitId: Option.none(),
@@ -886,6 +892,7 @@ describe("Operator", () => {
           const [need] = yield* needs;
           assert(need !== undefined);
           assert.strictEqual(need.pool, "chatgptPlan");
+          assert.strictEqual(need.label, "ChatGPT plan");
           assert.strictEqual(Option.getOrNull(need.login), "operator@example.com");
           assert.strictEqual(need.usedPercent, 80);
           assert.deepStrictEqual(need.resetsAt, resetsAt);

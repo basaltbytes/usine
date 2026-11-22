@@ -54,6 +54,7 @@ import {
   pollingTestLayer,
   unmovedBaseRefHead,
 } from "./support/polling.ts";
+import { catalogPools } from "./support/pools.ts";
 
 const repository = RepositoryName.make("basaltbytes/usine");
 const instance = Effect.gen(function* () {
@@ -622,6 +623,7 @@ it.live(
           ),
       });
       const engineLayer = localEngineLayer(directory).pipe(
+        Layer.provide(catalogPools),
         Layer.provide(executor),
         Layer.provide(alwaysHoldsLayer),
         Layer.provide(CompletionCheck.unverified),

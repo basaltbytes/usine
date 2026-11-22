@@ -5,7 +5,8 @@ import {
   type SubmissionId,
   type TaskId,
 } from "@earendil-works/pi-durable";
-import type { BillingPool, EndpointName } from "@usine/core/agent/session";
+import type { BillingPool } from "@usine/core/agent/pool";
+import type { EndpointName } from "@usine/core/agent/session";
 import type * as AttemptChannel from "@usine/core/attempt/channel";
 import { Schema } from "effect";
 

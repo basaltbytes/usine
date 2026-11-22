@@ -61,6 +61,7 @@ import {
   submission,
   waitFor,
   withInstance,
+  undeclaredPools,
 } from "./support.ts";
 
 const POSTED_COMMENT = "https://github.com/acme/demo/issues/57#issuecomment-1";
@@ -1614,7 +1615,14 @@ describe("engine restart", () => {
               .pipe(Effect.provide(Logger.layer([logger])));
             const tracked = yield* store.salvageCandidates;
             return [returned, tracked] as const;
-          }).pipe(Effect.provide(RunStore.layer.pipe(Layer.provide(localSqliteLayer(directory)))));
+          }).pipe(
+            Effect.provide(
+              RunStore.layer.pipe(
+                Layer.provide(localSqliteLayer(directory)),
+                Layer.provide(undeclaredPools),
+              ),
+            ),
+          );
 
           const recoveredState = yield* Ref.get(recovered);
           assert.sameMembers(

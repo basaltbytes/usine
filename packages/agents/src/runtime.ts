@@ -1,9 +1,9 @@
 import { Effort, Harness, ModelId } from "@usine/core/agent/brain";
+import { BillingPool } from "@usine/core/agent/pool";
 import {
   AgentSession,
   AgentSessionEvent,
   AgentSessionId,
-  BillingPool,
   ChildSession,
   ChildSessionBudget,
   ChildSessionCount,

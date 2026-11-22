@@ -8,7 +8,7 @@ import type {
   UsageCostView,
 } from "@usine/orchestrator/operator";
 import { Popover, PopoverContent, PopoverTrigger } from "~/components/ui/popover";
-import { poolLabel, tokensLabel, usdLabel } from "~/lib/strings";
+import { tokensLabel, usdLabel } from "~/lib/strings";
 
 const count = new Intl.NumberFormat("en");
 
@@ -48,7 +48,7 @@ export const PoolBreakdown = ({ pools }: PoolBreakdownProps) => {
       <h2 className="pb-1 text-sm font-medium text-foreground">Tokens per pool</h2>
       {pools.map((pool) => (
         <div key={pool.pool} className={lowerBound ? lowerBoundRow : row}>
-          <span className="truncate text-foreground">{poolLabel(pool.pool)}</span>
+          <span className="truncate text-foreground">{pool.label}</span>
           <span className="text-right font-mono text-foreground tabular-nums">
             {count.format(pool.tokens)}
           </span>

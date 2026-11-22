@@ -27,6 +27,7 @@ export {
 } from "./configuration/loops/model.ts";
 import { ConfigProblem } from "@usine/config/file";
 import { Harness, Effort } from "@usine/core/agent/brain";
+import { PoolDescriptor } from "@usine/core/agent/pool";
 import { RepositoryLabel } from "@usine/github/polling";
 import {
   ConfigurationRevisionNumber,
@@ -1101,10 +1102,14 @@ export const OperatorApi = operatorApi.add(
           harnesses: Schema.Array(Harness),
           harnessDetails: Schema.Array(HarnessPresentation),
           efforts: Schema.Array(Effort),
+          pools: Schema.Array(PoolDescriptor),
         }),
       })
         .annotate(OpenApi.Summary, "List configuration capabilities")
-        .annotate(OpenApi.Description, "Returns supported harnesses and reasoning efforts."),
+        .annotate(
+          OpenApi.Description,
+          "Returns supported harnesses, reasoning efforts, and the billing pools that the harnesses declare.",
+        ),
       HttpApiEndpoint.get("configurationRepositories", "/api/configuration/repositories", {
         success: Schema.Array(RepositoryName),
       })

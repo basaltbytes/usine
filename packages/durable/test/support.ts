@@ -1,3 +1,4 @@
+import { BillingPool } from "@usine/core/agent/pool";
 import { sqliteTempDirectory } from "../../../tooling/test/sqlite.mts";
 // This Node boundary needs synchronous filesystem operations that FileSystem does not expose.
 // @effect-diagnostics-next-line nodeBuiltinImport:off
@@ -168,6 +169,6 @@ export const handlerSession = HandlerSession.make({
     effort: "low",
   }),
   route: "host-login",
-  pool: "claudePlan",
+  pool: BillingPool.make("claudePlan"),
   usage: HandlerUsage.make({ totalTokens: TokenCount.make(1_200), costUsd: Option.none() }),
 });

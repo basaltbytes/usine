@@ -25,6 +25,7 @@ import { sqliteTempDirectory } from "../../../tooling/test/sqlite.mts";
 import { triggerSubmission } from "../src/trigger-submission.ts";
 import { declaredWorkers, runView } from "../src/operator/projection.ts";
 import { alwaysHoldsLayer } from "./support/polling.ts";
+import { catalogPools } from "./support/pools.ts";
 
 const condition = 'item.labelEvents["ready-for-agent"].actor.type != "User"';
 const label = (actor: Schema.Json) => ({
@@ -133,6 +134,7 @@ for (const scenario of [
         scenario.warning,
       );
       const runtime = layer(directory).pipe(
+        Layer.provide(catalogPools),
         Layer.provide(executor),
         Layer.provide(alwaysHoldsLayer),
         Layer.provide(CompletionCheck.unverified),

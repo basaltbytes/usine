@@ -1,3 +1,4 @@
+import { BillingPool } from "@usine/core/agent/pool";
 import { jsonKey } from "@usine/core/json-key";
 import { CiHandoff } from "@usine/core/ci";
 import { ItemNumber } from "@usine/core/item";
@@ -133,7 +134,7 @@ export const seedReadFixture = Effect.fn("ReadPlans.seedFixture")(function* (pad
     AttemptChannel.SessionEvent.make({
       event: PoolRateLimitsUpdated.make({
         session,
-        pool: "chatgptPlan",
+        pool: BillingPool.make("chatgptPlan"),
         login: Option.none(),
         rateLimits: RateLimitsSnapshot.make({
           limitId: Option.none(),

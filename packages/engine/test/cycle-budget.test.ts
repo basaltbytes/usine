@@ -25,6 +25,7 @@ import { CycleBudgets } from "../src/cycle-budget/cycle-budget.ts";
 import { localSqliteLayer } from "../src/database/local-sqlite.ts";
 import { Submission } from "../src/engine/submission.ts";
 import { RunStore } from "../src/store/store.ts";
+import { undeclaredPools } from "./support.ts";
 
 const agent = Agent.make({
   name: AgentName.make("reviewer"),
@@ -67,7 +68,9 @@ const afterReset = (value: Submission) =>
     }),
   });
 const idFor = (value: Submission) => RunId.make(value.event.id);
-const services = Layer.mergeAll(RunStore.layer, CycleBudgets.layer);
+const services = Layer.mergeAll(RunStore.layer, CycleBudgets.layer).pipe(
+  Layer.provide(undeclaredPools),
+);
 const inDatabase = <A, E>(
   directory: InstanceDirectory,
   work: Effect.Effect<A, E, RunStore | CycleBudgets>,

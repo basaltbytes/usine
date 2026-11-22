@@ -1,7 +1,8 @@
 import type { Schema } from "effect";
 import { jsonExtract, jsonValid } from "./dialect.ts";
 import { AttentionRevision } from "../attention/model.ts";
-import type { AgentSessionId, BillingPool, TokenCount } from "@usine/core/agent/session";
+import type { BillingPool } from "@usine/core/agent/pool";
+import type { AgentSessionId, TokenCount } from "@usine/core/agent/session";
 import { ModelId } from "@usine/core/agent/brain";
 import { AgentName } from "@usine/core/agent";
 import { AttemptNumber, AttemptTask, AttemptId } from "@usine/core/attempt";

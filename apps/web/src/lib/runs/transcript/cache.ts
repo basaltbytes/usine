@@ -1,4 +1,5 @@
-import type { BillingPool, RateLimitWindow } from "@usine/core/agent/session";
+import type { BillingPool } from "@usine/core/agent/pool";
+import type { RateLimitWindow } from "@usine/core/agent/session";
 import {
   RunDetailView,
   type TranscriptEventView,

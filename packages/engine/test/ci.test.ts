@@ -55,6 +55,7 @@ import {
   submission,
   waitFor,
   withInstance,
+  undeclaredPools,
 } from "./support.ts";
 
 const head = CommitSha.make("a".repeat(40));
@@ -439,7 +440,7 @@ it.live(
           ciPolicy: Option.some(policy),
         });
         const storage = Layer.merge(RunStore.layer, CycleBudgets.layer).pipe(
-          Layer.provide(localSqliteLayer(directory)),
+          Layer.provide([localSqliteLayer(directory), undeclaredPools]),
         );
         yield* Effect.scoped(
           Effect.gen(function* () {
@@ -528,7 +529,7 @@ it.live("a reset replays a blocked CI fix that was ignored as superseded", () =>
         ciFailureHead: Option.some(head),
       });
       const storage = Layer.merge(RunStore.layer, CycleBudgets.layer).pipe(
-        Layer.provide(localSqliteLayer(directory)),
+        Layer.provide([localSqliteLayer(directory), undeclaredPools]),
       );
       yield* Effect.scoped(
         Effect.gen(function* () {
@@ -626,7 +627,14 @@ it.live("item revocation cancels unstarted CI fixes with required approval", () 
         assert.deepStrictEqual(revoked.attempts, []);
         const pending = yield* ciFixQueues(store);
         assert.deepStrictEqual(pending, []);
-      }).pipe(Effect.provide(RunStore.layer.pipe(Layer.provide(localSqliteLayer(directory))))),
+      }).pipe(
+        Effect.provide(
+          RunStore.layer.pipe(
+            Layer.provide(localSqliteLayer(directory)),
+            Layer.provide(undeclaredPools),
+          ),
+        ),
+      ),
     ),
   ),
 );
@@ -698,7 +706,14 @@ it.live("a suppressed CI fix stays queued until the operator resolves the blocke
         assert.deepStrictEqual(suppressed, []);
         yield* store.resolveFailure(runId, started.execution.attempt.id, Option.none());
         assert.strictEqual((yield* ciFixQueues(store))[0]?.submission.event.id, queued.event.id);
-      }).pipe(Effect.provide(RunStore.layer.pipe(Layer.provide(localSqliteLayer(directory))))),
+      }).pipe(
+        Effect.provide(
+          RunStore.layer.pipe(
+            Layer.provide(localSqliteLayer(directory)),
+            Layer.provide(undeclaredPools),
+          ),
+        ),
+      ),
     ),
   ),
 );
@@ -762,7 +777,10 @@ it.live.each([
   ({ newest, sameTime, newestMatches }) =>
     withInstance((directory) =>
       Effect.gen(function* () {
-        const storage = RunStore.layer.pipe(Layer.provide(localSqliteLayer(directory)));
+        const storage = RunStore.layer.pipe(
+          Layer.provide(localSqliteLayer(directory)),
+          Layer.provide(undeclaredPools),
+        );
         const ciFix = (number: number) =>
           Submission.make({ ...submission({ number }), ciFailureHead: Option.some(head) });
         const older = newest === "CI fix" ? submission({ number: 2 }) : ciFix(2);

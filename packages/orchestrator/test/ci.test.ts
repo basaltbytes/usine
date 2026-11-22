@@ -98,6 +98,7 @@ import { PollingTriggers } from "../src/polling-triggers.ts";
 import { triggerSubmission, withCiInstructions } from "../src/trigger-submission.ts";
 import { gitHubItemKey } from "../src/polling/repository-sync.ts";
 import { inertLabelReconcilerLayer, unmovedBaseRefHead } from "./support/polling.ts";
+import { catalogPools } from "./support/pools.ts";
 
 const repository = RepositoryName.make("basaltbytes/usine");
 const head = CommitSha.make("a".repeat(40));
@@ -375,6 +376,7 @@ const scenario = Effect.fn("test.ciScenario")(function* (
       }),
   });
   const engine = engineLayer(directory).pipe(
+    Layer.provide(catalogPools),
     Layer.provide(executor),
     Layer.provide(
       Layer.succeed(CompletionCheck)({

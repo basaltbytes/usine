@@ -1,3 +1,4 @@
+import { BillingPool } from "@usine/core/agent/pool";
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import { AttemptId } from "@usine/core/attempt";
@@ -55,7 +56,7 @@ import {
   type TranscriptSequence,
   type TranscriptEntry,
 } from "../../src/transcript.ts";
-import { submission } from "../support.ts";
+import { submission, undeclaredPools } from "../support.ts";
 import { lifecycleSubmission, testAgent } from "./support.ts";
 
 const at = DateTime.makeUnsafe("2026-10-01T00:00:00Z");
@@ -129,7 +130,10 @@ const withSealing = <A, E>(
     const database = transcriptSealerLayer.pipe(Layer.provideMerge(localSqliteLayer(directory)));
     return yield* test(directory).pipe(
       Effect.provide(
-        Layer.merge(RunReader.layer, RunStore.layer).pipe(Layer.provideMerge(database)),
+        Layer.merge(RunReader.layer, RunStore.layer).pipe(
+          Layer.provideMerge(database),
+          Layer.provide(undeclaredPools),
+        ),
       ),
     );
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer));
@@ -153,7 +157,7 @@ describe("SQLite transcript sealing", () => {
             SessionTokensUpdated.make({ session: parent, totalTokens: TokenCount.make(42) }),
             PoolRateLimitsUpdated.make({
               session: parent,
-              pool: "chatgptPlan",
+              pool: BillingPool.make("chatgptPlan"),
               rateLimits: RateLimitsSnapshot.make({
                 limitId: Option.none(),
                 limitName: Option.none(),

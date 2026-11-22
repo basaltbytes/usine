@@ -1,4 +1,5 @@
-import type { AgentSession, AgentSessionId, BillingPool } from "@usine/core/agent/session";
+import type { BillingPool } from "@usine/core/agent/pool";
+import type { AgentSession, AgentSessionId } from "@usine/core/agent/session";
 import { SessionTokensUpdated, TokenCount } from "@usine/core/agent/session";
 import {
   type Cause,

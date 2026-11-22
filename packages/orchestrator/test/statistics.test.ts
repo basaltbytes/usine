@@ -1,3 +1,4 @@
+import { catalog } from "@usine/agents/harness";
 import { AttemptSummary } from "@usine/engine/run-reader";
 import { issue, mergedPullRequest } from "./statistics/fixtures.ts";
 import { MachineStarts } from "@usine/executor";
@@ -6,13 +7,8 @@ import { configurationLayer } from "./support/configuration.ts";
 import { assert, describe, it } from "@effect/vitest";
 import { Agent, AgentName, AgentPersona } from "@usine/core/agent";
 import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
-import {
-  AgentSessionId,
-  type BillingPool,
-  ParentSession,
-  TokenCount,
-  UsdAmount,
-} from "@usine/core/agent/session";
+import { BillingPool, PoolDescriptor } from "@usine/core/agent/pool";
+import { AgentSessionId, ParentSession, TokenCount, UsdAmount } from "@usine/core/agent/session";
 import {
   Attempt,
   AttemptId,
@@ -72,6 +68,7 @@ import {
   SessionUsageView,
   UsageCostView,
 } from "../src/operator/usage.ts";
+import { catalogPools } from "./support/pools.ts";
 
 const at = (instant: string) => DateTime.makeUnsafe(`2026-10-${instant}:00.000Z`);
 const MINUTE = 60_000;
@@ -298,7 +295,7 @@ const waiting = summary({
 
 const session = (
   attempt: string,
-  pool: BillingPool,
+  pool: string,
   tokens: number,
   usd: number | null,
   brain: BrainSpec = opus,
@@ -310,7 +307,7 @@ const session = (
       agent: AgentName.make("developer"),
       brain,
     }),
-    pool,
+    pool: BillingPool.make(pool),
     tokens: TokenCount.make(tokens),
     cost:
       usd === null
@@ -403,7 +400,7 @@ const workers = [
   { name: WorkerName.make("w2"), slots: 1, initialSlots: 1, changes: [] },
   { name: WorkerName.make("idle"), slots: 1, initialSlots: 1, changes: [] },
 ];
-const week = runStatisticsView({ window: "7d", now, runs, usage, workers });
+const week = runStatisticsView({ window: "7d", now, runs, usage, workers, pools: catalog.pools });
 
 const mergedTask = (
   number: number,
@@ -694,6 +691,31 @@ describe("Model statistics", () => {
 });
 
 describe("Run statistics", () => {
+  it("lists a pool that only test code declares under its label", () => {
+    const testPlan = PoolDescriptor.make({
+      id: BillingPool.make("testPlan"),
+      label: "Test plan",
+      billing: "plan",
+      windows: "separately",
+    });
+    const view = runStatisticsView({
+      window: "7d",
+      now,
+      runs: [implemented],
+      usage: new Map([
+        [implemented.run.id, usageOf([session("implemented/1", "testPlan", 100_000, 2)])],
+      ]),
+      workers,
+      pools: [...catalog.pools, testPlan],
+    });
+    assert.deepStrictEqual(
+      view.loops.map(({ usage }) =>
+        usage.pools.map(({ pool, label, tokens }) => [pool, label, tokens]),
+      ),
+      [[["testPlan", "Test plan", 100_000]]],
+    );
+  });
+
   it("excludes handed-off runs and attempts from failure, cancellation, and attention counts", () => {
     const source = summary({
       id: "handed-off",
@@ -723,6 +745,7 @@ describe("Run statistics", () => {
       runs: [source],
       usage: new Map(),
       workers,
+      pools: catalog.pools,
     });
     assert.deepStrictEqual({ ...view.runs }, { succeeded: 0, failed: 0, canceled: 0 });
     assert.strictEqual(view.needsAttention.failures, 0);
@@ -807,7 +830,8 @@ describe("Run statistics", () => {
 
   it("counts resolutions and retries separately, without unanswered failures or double counting", () => {
     const view = (runs: ReadonlyArray<RunSummary>) =>
-      runStatisticsView({ window: "7d", now, runs, usage, workers }).needsAttention;
+      runStatisticsView({ window: "7d", now, runs, usage, workers, pools: catalog.pools })
+        .needsAttention;
     const resolve = (run: RunSummary, number: number, resolvedAt: string) =>
       RunSummary.make({
         ...run,
@@ -998,6 +1022,7 @@ describe("OperatorStatistics", () => {
               Layer.provide(configurationLayer),
               Layer.provide(RunUsageReader.layer),
               Layer.provide(Layer.mergeAll(reader, items, budgets)),
+              Layer.provide(catalogPools),
             ),
           ),
         );
@@ -1005,6 +1030,13 @@ describe("OperatorStatistics", () => {
         assert.deepStrictEqual(
           runsClosed.machineStarts.map(({ count }) => count),
           [3],
+        );
+        // The layer labels pools from the `BillingPools` it reads.
+        assert.deepStrictEqual(
+          runsClosed.loops.flatMap(({ usage }) =>
+            usage.pools.map(({ pool, label }) => [pool, label]),
+          ),
+          [["claudePlan", "Claude plan"]],
         );
 
         // Issue 1 and pull request 2 form the task, up to its review's close; the review reported no tokens.

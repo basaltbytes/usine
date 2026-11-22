@@ -49,6 +49,7 @@ import { gitHubCredentialLayer } from "../../src/credentials.ts";
 import { layer as sshLayer, sshWorkerAddressesOf } from "../../src/ssh.ts";
 import { fixedConfigLayer } from "../support/current-instance.ts";
 import { alwaysHoldsLayer } from "../support/polling.ts";
+import { catalogPools } from "../support/pools.ts";
 
 const INSTANCE_ID = InstanceId.make("0b4e7f3c-5a2d-4c1e-9f6b-8d7a2e1c3b4f");
 
@@ -288,6 +289,7 @@ describe.skipIf(destination === undefined)("live SSH Worker", () => {
           harnessReadiness: () => (brain) =>
             Effect.succeed(HarnessReady.make({ harness: brain.harness })),
         }).pipe(
+          Layer.provide(catalogPools),
           Layer.provide(harnessesLive),
           Layer.provide(MarcbachmannCelLayer),
           Layer.provide(gitHubCredentialLayer.pipe(Layer.provide(app))),
@@ -677,6 +679,7 @@ describe.skipIf(gatewayDestination === undefined)("live SSH Worker behind a Gate
           harnessReadiness: () => (brain) =>
             Effect.succeed(HarnessReady.make({ harness: brain.harness })),
         }).pipe(
+          Layer.provide(catalogPools),
           Layer.provide(harnessesLive),
           Layer.provide(MarcbachmannCelLayer),
           Layer.provide(gitHubCredentialLayer.pipe(Layer.provide(app))),

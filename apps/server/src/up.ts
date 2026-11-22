@@ -4,6 +4,8 @@ import { ProviderLogins } from "./providers/control.ts";
 import { providerLoginRunnerLayer } from "./providers/runner.ts";
 import type { StepOutputStore } from "@usine/engine/step-outputs";
 import { changeBusLayer } from "@usine/core/changes";
+import { catalog } from "@usine/agents/harness";
+import { BillingPools } from "@usine/core/agent/pool";
 import { listenForStartup, type StartupListener } from "./listener.ts";
 import { memberAccessLayer } from "./auth/access.ts";
 import { Setup } from "./setup/control.ts";
@@ -377,7 +379,9 @@ export const up = (command: UpCommand) =>
   Effect.scoped(
     Effect.gen(function* () {
       const services = yield* Layer.build(
-        changeBusLayer.pipe(Layer.provideMerge(NodeServices.layer)),
+        Layer.mergeAll(changeBusLayer, Layer.succeed(BillingPools)(catalog.pools)).pipe(
+          Layer.provideMerge(NodeServices.layer),
+        ),
       );
       return yield* Effect.gen(function* () {
         const { port, origin } = command;

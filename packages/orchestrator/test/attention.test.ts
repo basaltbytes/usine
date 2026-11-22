@@ -1,3 +1,5 @@
+import { catalog } from "@usine/agents/harness";
+import { BillingPool } from "@usine/core/agent/pool";
 import { AgentName } from "@usine/core/agent";
 import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import {
@@ -50,7 +52,7 @@ it("shows a changed preflight finding again and ignores acknowledgements of a di
   assert.deepStrictEqual(partitionNeeds([original], []).needsYou, [original]);
 });
 
-it("warns at 80 percent for either window and skips expired or undated windows", () => {
+it("warns at 80 percent for either window under its pool's label and skips expired or undated windows", () => {
   const now = DateTime.makeUnsafe("2026-10-29T00:00:00Z");
   const future = DateTime.add(now, { hours: 1 });
   const window = (usedPercent: number, resetsAt: Option.Option<DateTime.Utc>) =>
@@ -67,7 +69,7 @@ it("warns at 80 percent for either window and skips expired or undated windows",
         effort: "high",
       }),
     }),
-    pool: "chatgptPlan",
+    pool: BillingPool.make("chatgptPlan"),
     rateLimits: RateLimitsSnapshot.make({
       limitId: Option.none(),
       limitName: Option.none(),
@@ -75,15 +77,27 @@ it("warns at 80 percent for either window and skips expired or undated windows",
       secondary: window(95, Option.some(future)),
     }),
   });
-  const needs = poolLimitNeeds([snapshot], now);
+  const needs = poolLimitNeeds([snapshot], now, catalog.pools);
   assert.deepStrictEqual(
-    needs.map(({ window, usedPercent }) => [window, usedPercent]),
+    needs.map(({ window, usedPercent, label }) => [window, usedPercent, label]),
     [
-      ["primary", 80],
-      ["secondary", 95],
+      ["primary", 80, "ChatGPT plan"],
+      ["secondary", 95, "ChatGPT plan"],
     ],
   );
   assert(needs.every(({ login }) => Option.isNone(login)));
+  const removed = PoolRateLimitsUpdated.make({
+    ...snapshot,
+    pool: BillingPool.make("removedPlan"),
+  });
+  assert.deepStrictEqual(
+    poolLimitNeeds([removed], now, catalog.pools).map(({ pool, label }) => [pool, label]),
+    [
+      ["removedPlan", "removedPlan"],
+      ["removedPlan", "removedPlan"],
+    ],
+    "a pool that the catalog doesn't declare shows under its ID",
+  );
   for (const primary of [
     Option.none(),
     window(79.9, Option.some(future)),
@@ -96,7 +110,7 @@ it("warns at 80 percent for either window and skips expired or undated windows",
       rateLimits: RateLimitsSnapshot.make({ ...snapshot.rateLimits, primary }),
     });
     assert.deepStrictEqual(
-      poolLimitNeeds([changed], now).map(({ window }) => window),
+      poolLimitNeeds([changed], now, catalog.pools).map(({ window }) => window),
       ["secondary"],
     );
   }
@@ -105,7 +119,8 @@ it("warns at 80 percent for either window and skips expired or undated windows",
 it("keeps pool warnings dismissed within each threshold band and separates pools and windows", () => {
   const original = PoolLimitNeed.make({
     id: "pool-limit:chatgptPlan:primary",
-    pool: "chatgptPlan",
+    pool: BillingPool.make("chatgptPlan"),
+    label: "ChatGPT plan",
     login: Option.none(),
     window: "primary",
     usedPercent: 80,
@@ -125,7 +140,7 @@ it("keeps pool warnings dismissed within each threshold band and separates pools
       dismissedNeeds: [updated],
     });
     for (const changed of [
-      PoolLimitNeed.make({ ...need, pool: "claudePlan" }),
+      PoolLimitNeed.make({ ...need, pool: BillingPool.make("claudePlan") }),
       PoolLimitNeed.make({ ...need, window: "secondary" }),
       ...[90, 95, 100]
         .filter((threshold) => threshold > band)

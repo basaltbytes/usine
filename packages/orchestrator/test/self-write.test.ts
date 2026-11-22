@@ -60,6 +60,7 @@ import {
   inertLabelReconcilerLayer,
   unmovedBaseRefHead,
 } from "./support/polling.ts";
+import { catalogPools } from "./support/pools.ts";
 
 const repository = RepositoryName.make("basaltbytes/usine");
 const agent = AgentFile.make({
@@ -213,6 +214,7 @@ describe("Board self-writes", () => {
             execute: () => Effect.die("approval must precede an Attempt"),
           });
           const engine = localEngineLayer(directory).pipe(
+            Layer.provide(catalogPools),
             Layer.provide(executor),
             Layer.provide(alwaysHoldsLayer),
             Layer.provide(CompletionCheck.unverified),
@@ -242,6 +244,7 @@ describe("Board self-writes", () => {
           const layer = Operator.layer.pipe(
             Layer.provide(configurationLayer),
             Layer.provideMerge(pollingLayer),
+            Layer.provide(catalogPools),
           );
           yield* Effect.gen(function* () {
             const polling = yield* PollingTriggers;

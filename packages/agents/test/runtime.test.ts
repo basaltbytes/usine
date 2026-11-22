@@ -1,3 +1,4 @@
+import { apiKeys } from "../src/harness/pool.ts";
 import { assert, describe, it } from "@effect/vitest";
 import { Harness, ModelId } from "@usine/core/agent/brain";
 import { AgentSessionId, ChildSessionBudget, ChildSessionCount } from "@usine/core/agent/session";
@@ -54,7 +55,7 @@ describe("agent runtime contract", () => {
       PoolUnavailableError.make({
         harness: Harness.make("pi"),
         model: ModelId.make("github-copilot/gpt-5.6-sol"),
-        pool: "apiKeys",
+        pool: apiKeys.id,
         message: "Pi model github-copilot/gpt-5.6-sol must use an API key",
       }),
       UnsupportedEffortError.make({

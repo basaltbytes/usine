@@ -1,3 +1,4 @@
+import { BillingPool } from "@usine/core/agent/pool";
 import { AgentName } from "@usine/core/agent";
 import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import {
@@ -77,7 +78,7 @@ const meter = (sequence: number) =>
     sequence,
     PoolRateLimitsUpdated.make({
       session: parent,
-      pool: "chatgptPlan",
+      pool: BillingPool.make("chatgptPlan"),
       rateLimits: RateLimitsSnapshot.make({
         limitId: Option.none(),
         limitName: Option.none(),

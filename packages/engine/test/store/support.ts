@@ -6,6 +6,7 @@ import { SqlClient } from "effect/sql";
 import { sqliteTempDirectory } from "../../../../tooling/test/sqlite.mts";
 import { localSqliteLayer } from "../../src/database/local-sqlite.ts";
 import { RunStore } from "../../src/store/store.ts";
+import { undeclaredPools } from "../support.ts";
 
 export { lifecycleSubmission, testAgent } from "./fixtures.ts";
 
@@ -18,6 +19,11 @@ export const withRunStore = <A, E>(effect: Effect.Effect<A, E, RunStore | SqlCli
     });
     const directory = InstanceDirectory.make(currentDirectory);
     return yield* effect.pipe(
-      Effect.provide(RunStore.layer.pipe(Layer.provideMerge(localSqliteLayer(directory)))),
+      Effect.provide(
+        RunStore.layer.pipe(
+          Layer.provideMerge(localSqliteLayer(directory)),
+          Layer.provide(undeclaredPools),
+        ),
+      ),
     );
   }).pipe(Effect.provide(NodeServices.layer));

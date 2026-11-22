@@ -1,3 +1,4 @@
+import { catalog } from "@usine/agents/harness";
 import { jsonKey } from "@usine/core/json-key";
 import { boardRunSummary } from "../src/operator/operator.ts";
 import { ProjectView } from "../src/operator/overview.ts";
@@ -9,13 +10,8 @@ import { LabelLaneSource, LaneName } from "@usine/config/board";
 import { UsineConfig } from "@usine/config/factory";
 import { AgentName } from "@usine/core/agent";
 import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
-import {
-  AgentSessionId,
-  type BillingPool,
-  ParentSession,
-  TokenCount,
-  UsdAmount,
-} from "@usine/core/agent/session";
+import { BillingPool } from "@usine/core/agent/pool";
+import { AgentSessionId, ParentSession, TokenCount, UsdAmount } from "@usine/core/agent/session";
 import { AttemptId } from "@usine/core/attempt";
 import { ItemKey, ItemNumber as CoreItemNumber, ItemNumber } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
@@ -176,7 +172,7 @@ describe("Board projection", () => {
           goneAt: Option.some(DateTime.makeUnsafe("2026-09-04T08:00:00Z")),
         });
         for (const settled of [closedItem, gone]) {
-          const board = yield* projectBoard(managed, [], [settled], []);
+          const board = yield* projectBoard(managed, [], [settled], [], catalog.pools);
           assert.deepStrictEqual(board.lanes[0]?.items, []);
           const unmapped = board.lanes.find(({ origin }) => origin === "fallback");
           assert.strictEqual(unmapped?.items[0]?.itemKey, itemKey);
@@ -217,10 +213,10 @@ describe("Board projection", () => {
         ...open,
         goneAt: Option.some(DateTime.makeUnsafe("2026-09-04T08:00:00Z")),
       });
-      const before = yield* projectBoard(managed, [], [open], []);
+      const before = yield* projectBoard(managed, [], [open], [], catalog.pools);
       assert.strictEqual(before.lanes[1]?.items[0]?.itemKey, open.itemKey);
       assert.strictEqual(before.lanes[1]?.items[0]?.pullRequest?.state, "pr-open");
-      const board = yield* projectBoard(managed, [], [gone], []);
+      const board = yield* projectBoard(managed, [], [gone], [], catalog.pools);
       assert.deepStrictEqual(board.lanes[0]?.items, []);
       assert.deepStrictEqual(board.lanes[1]?.items, []);
       assert.strictEqual(board.lanes[2]?.items[0]?.itemKey, gone.itemKey);
@@ -246,7 +242,7 @@ describe("Board projection", () => {
         contentHash: ItemContentHash.make("malformed-34"),
         payload: { number: 34 },
       });
-      const board = yield* projectBoard(managed, [], [malformed, item], []);
+      const board = yield* projectBoard(managed, [], [malformed, item], [], catalog.pools);
       assert.strictEqual(board.lanes[0]?.items[0]?.itemKey, itemKey);
       assert.strictEqual(board.failures.length, 1);
       assert.strictEqual(board.failures[0]?.itemKey, malformed.itemKey);
@@ -280,7 +276,13 @@ describe("Board projection", () => {
         itemKey: pr.itemKey,
         openedAt: "2026-09-01T11:00:00.000Z",
       });
-      const board = yield* projectBoard(managed, [], [closedItem, pr], [failed, reviewRun]);
+      const board = yield* projectBoard(
+        managed,
+        [],
+        [closedItem, pr],
+        [failed, reviewRun],
+        catalog.pools,
+      );
       const card = board.lanes.flatMap(({ items }) => items)[0];
       assert.strictEqual(card?.run?.id, reviewRun.id);
       assert.strictEqual(card?.needsYou, false);
@@ -325,6 +327,7 @@ describe("Board projection", () => {
           [],
           [itemWithLabels([]), pr],
           [reviewRun, development],
+          catalog.pools,
           [itemKey],
           new Map([
             [pr.itemKey, [reviewLoop]],
@@ -392,7 +395,13 @@ describe("Board projection", () => {
             },
           },
         });
-        const board = yield* projectBoard(managed, [], [linked, mergedPullRequest], []);
+        const board = yield* projectBoard(
+          managed,
+          [],
+          [linked, mergedPullRequest],
+          [],
+          catalog.pools,
+        );
         assert.strictEqual(board.failures.length, 0);
         assert.strictEqual(board.lanes.flatMap(({ items }) => items).length, count);
       }
@@ -435,11 +444,13 @@ describe("Board projection", () => {
         [item, issue34, mergedPullRequest],
         [mergedPullRequest, issue34, item],
       ]) {
-        const board = yield* projectBoard(managed, [], snapshots, [
-          development,
-          companion,
-          reviewRun,
-        ]);
+        const board = yield* projectBoard(
+          managed,
+          [],
+          snapshots,
+          [development, companion, reviewRun],
+          catalog.pools,
+        );
         const cards = board.lanes.flatMap(({ items }) => items);
         assert.strictEqual(cards.length, 1);
         const card = cards[0];
@@ -483,7 +494,7 @@ describe("Board projection", () => {
       needsYou: false,
       conflicting: false,
       loops: [],
-      usage: taskUsage([], new Map()),
+      usage: taskUsage(catalog.pools, [], new Map()),
     });
     const source = WritableBoardLaneView.make({
       id: BoardLaneId.make("authored:Ready"),
@@ -530,7 +541,13 @@ describe("Board projection", () => {
       assert(managed !== undefined);
       const documentation = GitHubLabelName.make("documentation");
       const labels = [bug, documentation, ready];
-      const board = yield* projectBoard(managed, [...labels, review], [itemWithLabels(labels)], []);
+      const board = yield* projectBoard(
+        managed,
+        [...labels, review],
+        [itemWithLabels(labels)],
+        [],
+        catalog.pools,
+      );
       const target = board.lanes.find(({ name }) => name === reviewLane);
       assert(target !== undefined);
       assert(board.lanes.every((lane) => lane._tag === "ReadOnlyBoardLane"));
@@ -555,7 +572,7 @@ describe("Task usage", () => {
   /** Returns one session of `attempt` using `tokens` from `pool`, priced at `usd` or unpriced. */
   const session = (
     attempt: string,
-    pool: BillingPool,
+    pool: keyof typeof harnesses,
     tokens: number,
     usd: number | null,
   ): SessionUsageView =>
@@ -570,7 +587,7 @@ describe("Task usage", () => {
           effort: "high",
         }),
       }),
-      pool,
+      pool: BillingPool.make(pool),
       tokens: TokenCount.make(tokens),
       cost:
         usd === null
@@ -589,6 +606,7 @@ describe("Task usage", () => {
         const costs = members.flatMap(({ cost }) => (cost === null ? [] : [cost]));
         return PoolUsageView.make({
           pool,
+          label: pool,
           tokens: TokenCount.make(members.reduce((sum, { tokens }) => sum + tokens, 0)),
           cost:
             costs.length < members.length
@@ -603,8 +621,8 @@ describe("Task usage", () => {
     });
   const pools = ({ pools: lines }: ReturnType<typeof taskUsage>) =>
     lines.map(
-      ({ pool, tokens, cost, unpriced }): readonly [string, number, number | null, boolean] => [
-        pool,
+      ({ label, tokens, cost, unpriced }): readonly [string, number, number | null, boolean] => [
+        label,
         tokens,
         cost?.usd ?? null,
         unpriced,
@@ -615,6 +633,7 @@ describe("Task usage", () => {
 
   it("adds up an API key and Claude plan Run and a ChatGPT plan Run: time, tokens, pools, and dollars", () => {
     const usage = taskUsage(
+      catalog.pools,
       [
         {
           id: priced,
@@ -654,9 +673,9 @@ describe("Task usage", () => {
     assert.strictEqual(usage.unmeasured, 1);
     assert.strictEqual(usage.tokens, 27_300);
     assert.deepStrictEqual(pools(usage), [
-      ["apiKeys", 1_500, 0.75, false],
-      ["claudePlan", 20_000, 1.25, false],
-      ["chatgptPlan", 5_800, 0.4, false],
+      ["API keys", 1_500, 0.75, false],
+      ["Claude plan", 20_000, 1.25, false],
+      ["ChatGPT plan", 5_800, 0.4, false],
     ]);
     assert.deepStrictEqual({ ...usage.cost }, { usd: 2.4, estimate: true });
   });
@@ -684,7 +703,7 @@ it.effect("matches a project's label lane by name in both repositories", () =>
         repository: managed.name,
         itemKey: ItemKey.make(decodedValue1),
       });
-      const board = yield* projectBoard(managed, [], [projection], []);
+      const board = yield* projectBoard(managed, [], [projection], [], catalog.pools);
       assert.strictEqual(board.lanes[0]?.name, "Ready");
       assert.strictEqual(board.lanes[0]?.items[0]?.itemKey, projection.itemKey);
       views.push(

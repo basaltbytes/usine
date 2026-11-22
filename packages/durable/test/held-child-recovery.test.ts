@@ -1,5 +1,6 @@
 // Durable storage and the Pi SDK use Promise callbacks.
 // @effect-diagnostics asyncFunction:off
+import { BillingPool } from "@usine/core/agent/pool";
 import { assert, it } from "@effect/vitest";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { PiSdk, piChildLayer, type PiSessionEvent } from "@usine/agents/pi";
@@ -67,7 +68,7 @@ for (const supervision of ["held-unread", "paused", "held-idle", "held-idle-stee
                 return {
                   _tag: "Started",
                   model: options.model,
-                  pool: "apiKeys",
+                  pool: BillingPool.make("apiKeys"),
                   tools: ["read", "bash", "edit", "write"],
                   harnessSession: Option.some(saved),
                   session: {

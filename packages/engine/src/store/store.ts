@@ -1,5 +1,6 @@
 import { TranscriptCodec } from "./transcript/codec.ts";
 import { InstanceScope } from "@usine/core/access";
+import { BillingPools, declaredPool } from "@usine/core/agent/pool";
 import type { PoolRateLimitsUpdated } from "@usine/core/agent/session";
 import { latestPoolRateLimits } from "../run-reader/pool-rate-limits.ts";
 import { ChangeBus } from "@usine/core/changes";
@@ -153,6 +154,7 @@ const makeRunStore = Effect.gen(function* () {
   const transact = changeTransaction(database, bus);
   const crypto = yield* Crypto.Crypto;
   const codec = yield* TranscriptCodec;
+  const pools = yield* BillingPools;
   const queries = queriesFor(database, codec);
 
   const schedulePoolResets = Effect.fn("RunStore.schedulePoolResets")(function* (
@@ -162,8 +164,8 @@ const makeRunStore = Effect.gen(function* () {
     for (const window of ["primary", "secondary"] as const) {
       const key = `${event.pool}:${window}`;
       const limit = event.rateLimits[window];
-      if (event.pool === "claudePlan" && Option.isNone(limit)) {
-        yield* Effect.logDebug("Claude window unreported; keeping its pool reset deadline", {
+      if (Option.isNone(limit) && declaredPool(pools, event.pool).windows === "separately") {
+        yield* Effect.logInfo("Window unreported; keeping its pool reset deadline", {
           pool: event.pool,
           window,
         });
@@ -1161,7 +1163,7 @@ const makeRunStore = Effect.gen(function* () {
     const inserted = yield* transact((transaction, record) =>
       Effect.gen(function* () {
         const tx = queriesFor(transaction, codec, record);
-        if (!(yield* tx.appendTranscript(direction, envelope, receivedAt))) {
+        if (!(yield* tx.appendTranscript(direction, envelope, receivedAt, pools))) {
           yield* Effect.logDebug("Transcript envelope already recorded; keeping the first copy", {
             attemptId: envelope.attemptId,
             direction,

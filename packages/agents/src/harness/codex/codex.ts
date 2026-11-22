@@ -1,7 +1,8 @@
 import type { OperatorMessageId } from "@usine/core/attempt/channel";
 import { childContinuation, checkContinuationHome, environmentHome } from "../continuation.ts";
 import { codexPreflight } from "./preflight.ts";
-import { codex } from "./descriptor.ts";
+import { chatgptPlan, codex } from "./descriptor.ts";
+import { apiKeys } from "../pool.ts";
 import { type HarnessRuntime, openWithTools } from "../runtime.ts";
 import { type SessionSpec, type Start } from "../contract.ts";
 import type { ContinuationPolicy } from "../continuation.ts";
@@ -15,8 +16,8 @@ import {
 } from "../adapter.ts";
 import { HarnessCatalog } from "../harness.ts";
 import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
+import type { BillingPool } from "@usine/core/agent/pool";
 import {
-  type BillingPool,
   type PoolLogin,
   PoolRateLimitsUpdated,
   ProviderAnswered,
@@ -242,7 +243,7 @@ const makeCodexSessions = Effect.gen(function* () {
         effort: spec.session.brain.effort,
       }),
       pool: Option.some(billing.pool),
-      endpoint: billing.pool === "apiKeys" ? thread.endpoint : Option.none(),
+      endpoint: billing.pool === apiKeys.id ? thread.endpoint : Option.none(),
     });
     const channel = yield* sessionChannel({
       label: "Codex child session",
@@ -738,8 +739,10 @@ const makeCodexSessions = Effect.gen(function* () {
             );
             const { billing, connection } = yield* Ref.get(state);
             if (
-              !isAuthMode(account.authMode, billing.pool === "apiKeys" ? "apikey" : "chatgpt") &&
-              !(billing.pool === "chatgptPlan" && isAuthMode(account.authMode, "chatgptAuthTokens"))
+              !isAuthMode(account.authMode, billing.pool === apiKeys.id ? "apikey" : "chatgpt") &&
+              !(
+                billing.pool === chatgptPlan.id && isAuthMode(account.authMode, "chatgptAuthTokens")
+              )
             ) {
               yield* Effect.logError("Codex authentication changed during the session", {
                 sessionId: session.id,

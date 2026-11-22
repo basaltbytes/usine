@@ -351,7 +351,7 @@ describe("brain admission", () => {
       "apiKeys",
       "launch",
     ]);
-    // Pi's descriptor names no subscription provider, so Pi reports a subscription's pool itself.
+    // Pi declares no pool for a gateway subscription, so Pi reports a subscription's pool itself.
     assert.deepStrictEqual(pools("pi", coordinator, "orchestrator"), [
       "launch",
       "launch",

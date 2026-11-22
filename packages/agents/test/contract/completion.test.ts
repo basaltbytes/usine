@@ -1,6 +1,9 @@
+import { apiKeys } from "../../src/harness/pool.ts";
+import { claudePlan } from "../../src/harness/claude/descriptor.ts";
+import { chatgptPlan } from "../../src/harness/codex/descriptor.ts";
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
-import type { BillingPool } from "@usine/core/agent/session";
+import type { BillingPool } from "@usine/core/agent/pool";
 import { DateTime, Effect, Option, Predicate, Result, type Schema, type Scope } from "effect";
 import type { CompletionError, CompletionFailure } from "../../src/harness/contract.ts";
 import { openCompletionFixture, recordedValues } from "../replay/completion.ts";
@@ -11,9 +14,9 @@ const harnesses: ReadonlyArray<Provider> = ["claude", "codex", "pi"];
 
 /** The pool that each fixture's credential route resolves. */
 const pools = {
-  claude: "claudePlan",
-  codex: "chatgptPlan",
-  pi: "apiKeys",
+  claude: claudePlan.id,
+  codex: chatgptPlan.id,
+  pi: apiKeys.id,
 } satisfies Record<Provider, BillingPool>;
 
 /** Rewrites every string that `rewrite` changes in the harness output of `transcript`. */

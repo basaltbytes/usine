@@ -1,5 +1,6 @@
 import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
-import { type BillingPool, PoolLogin } from "@usine/core/agent/session";
+import type { BillingPool } from "@usine/core/agent/pool";
+import { PoolLogin } from "@usine/core/agent/session";
 import { Effect, Option, Schema } from "effect";
 import { PoolUnavailableError } from "../../runtime.ts";
 import {
@@ -7,7 +8,9 @@ import {
   type GetAccountParams,
   type InitializeParams,
 } from "../../protocol/codex/codex.ts";
+import { apiKeys } from "../pool.ts";
 import type { CodexConnection } from "./app-server.ts";
+import { chatgptPlan } from "./descriptor.ts";
 
 /**
  * Sends `initialize` and `initialized` to the app server; must run before account checks or
@@ -44,7 +47,7 @@ export const codexPoolUnavailable = (model: ModelId) =>
   PoolUnavailableError.make({
     harness: Harness.make("codex"),
     model,
-    pool: "chatgptPlan",
+    pool: chatgptPlan.id,
     message:
       "Codex children need a ChatGPT login or API key. Connect ChatGPT in usine or run codex login on the worker.",
   });
@@ -74,7 +77,7 @@ export const verifyCodexAccount = Effect.fn("Codex.verifyAccount")(function* (
     });
     return yield* codexPoolUnavailable(model);
   }
-  const pool: BillingPool = account.account.type === "apiKey" ? "apiKeys" : "chatgptPlan";
+  const pool = (account.account.type === "apiKey" ? apiKeys : chatgptPlan).id;
   yield* Effect.logInfo("Codex billing pool verified", {
     model,
     authentication: account.account.type,

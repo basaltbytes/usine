@@ -1,18 +1,19 @@
-# Usage is metered per billing pool; guards are opt-in and keep the work
+# Usage is metered per billing pool that harnesses declare; guards are opt-in and keep the work
 
-usine records usage and enforces no dollar budget. Each session records its billing pool at launch, from the credential it resolved: `apiKeys`, `claudePlan`, or `chatgptPlan`. A pool is the billed credential, not the harness: a Claude Code session on a gateway API key is in the API keys pool, and Pi on the `openai-codex` ChatGPT login is in the ChatGPT plan pool. Behind a gateway, the pool follows the credential kind that the gateway reports. usine refuses a credential whose billing source it can't represent, such as another provider's OAuth login in Pi, rather than report false usage.
+usine records usage and enforces no dollar budget. Each session records its billing pool at launch, from its resolved credential. A pool is the billed credential, not the harness: Claude Code on a gateway API key bills API keys, and Pi on the `openai-codex` login bills the ChatGPT plan. usine refuses a credential whose billing no pool states, rather than report false usage.
 
-Each pool keeps its native meter. A session's price is the harness's own figure or, for Codex, which reports none, the bundled OpenAI price table. Prices in the two plan pools are marked as estimates. A model missing from the table stays unpriced, and the total shows as a lower bound. Claude Code and Codex report plan usage windows; Pi doesn't. Token counts are output plus uncached input, because the harnesses' cumulative totals reread the whole context every turn.
+Pools are harness catalog data. A descriptor declares each pool that its sessions bill, with the credential routes that determine it: an ID, a label, plan or metered, and how harnesses report its plan windows. A harness or login with its own plan adds its pool in its own folder; usage, statistics, plan windows, and the web read the catalog. Stored IDs keep their meaning, and sessions recorded before pools infer theirs in one function.
 
-Pool health is shown and warned about, never used to schedule attempts.
+Each pool keeps its native meter: the harness's price or, for Codex, the bundled OpenAI price table, marked as an estimate in plan pools. A model missing from the table stays unpriced, making the total a lower bound. Token counts are output plus uncached input, because cumulative totals reread the context every turn. Pool health is warned about, never used for scheduling.
 
-The only hard limits guard against runaways, per attempt: a child-session budget (`max_children`, default 4) and wall-clock and token ceilings (`max_attempt_minutes`, `max_attempt_tokens`), which are off unless set. An armed ceiling warns the agent at 80 percent so it can push first. A tripped guard fails the attempt with a typed error that is never retried automatically, and the checkout is salvaged first (ADR 0006). An unresponsive worker has no limit: it shows in the transcript with its start time, and the operator decides.
+The only hard limits guard against runaways, per attempt: a child-session budget (`max_children`, default 4) and wall-clock and token ceilings (`max_attempt_minutes`, `max_attempt_tokens`), off unless set. An armed ceiling warns the agent at 80 percent so it can push first. A tripped guard salvages the checkout (ADR 0006) and fails the attempt with a typed error, never retried automatically. An unresponsive worker has no limit; the operator decides.
 
 ## Considered options
 
-- **Enforced dollar budgets**: two pools have no dollar meter that usine controls, and plan prices are client-side estimates.
+- **Enforced dollar budgets**: plan pools have no dollar meter that usine controls.
 - **Dollars everywhere at API rates**: one comparable but partly fictional figure.
-- **Holding attempts until a plan window resets**: more scheduler machinery and another "why isn't my run starting".
-- **Default ceilings**: large issues take two or three hours, so a default ceiling fails healthy attempts (#161).
+- **Holding attempts until a plan window resets**: more scheduler machinery and unexplained waits.
+- **Default ceilings**: large issues take hours, so a default ceiling fails healthy attempts (#161).
 - **A pool per harness**: showed Claude Code on a gateway API key as plan usage (#248).
-- **Every OAuth login as a subscription pool**: logins such as GitHub Copilot or xAI fit no billing source that usine can report.
+- **Every OAuth login as a plan pool**: logins such as GitHub Copilot fit no billing source usine can report.
+- **A closed set of pools in core**: each new plan changed core, the engine, the operator views, and the web (#1379).

@@ -1,4 +1,5 @@
 import { RequestPermissions, permits, InstanceScope } from "@usine/core/access";
+import { BillingPools } from "@usine/core/agent/pool";
 import { visibleInstance } from "../access.ts";
 import { WorkerStatus } from "../../worker-status.ts";
 import { ConfigurationStore, type ConfigurationStoreError } from "@usine/config/configuration";
@@ -45,6 +46,7 @@ const makeStatistics = Effect.gen(function* () {
   const itemReader = yield* ItemProjectionReader;
   const usageReader = yield* RunUsageReader;
   const budgets = yield* CycleBudgets;
+  const pools = yield* BillingPools;
 
   const usageOf = (runs: ReadonlyArray<RunSummary>) =>
     Effect.forEach(
@@ -102,6 +104,7 @@ const makeStatistics = Effect.gen(function* () {
       [],
       new Map(),
       new Map(),
+      [],
     );
     const found = cards.flatMap(({ view }) => {
       const merges = view.items.flatMap(({ itemKey }) => {
@@ -199,6 +202,7 @@ const makeStatistics = Effect.gen(function* () {
     const view = runStatisticsView({
       window,
       now,
+      pools,
       runs: [...visibleClosed, ...open],
       usage: yield* usageOf(visibleClosed),
       workers: yield* Effect.forEach(

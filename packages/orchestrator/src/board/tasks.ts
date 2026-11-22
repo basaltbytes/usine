@@ -1,4 +1,5 @@
 import { isSettledItemState } from "@usine/config/board";
+import type { PoolDescriptor } from "@usine/core/agent/pool";
 import type { ItemKey } from "@usine/core/item";
 import type { LoopName } from "@usine/core/loop";
 import { canonicalRepositoryName, type RepositoryName } from "@usine/core/repository";
@@ -46,7 +47,8 @@ const itemLink = (item: ProjectedItem) =>
 
 /**
  * Joins explicit issue and pull request relationships into Task cards, without stored Task
- * identities (ADR 0008). Each card includes its running Run, which sets its Board lane.
+ * identities (ADR 0008). Each card includes its running Run, which sets its Board lane, and its
+ * usage per pool of `pools`.
  */
 export const taskCards = (
   repository: RepositoryName,
@@ -55,6 +57,7 @@ export const taskCards = (
   cycleBlockedItems: ReadonlyArray<ItemKey>,
   itemLoops: ReadonlyMap<ItemKey, ReadonlyArray<LoopName>>,
   runUsage: ReadonlyMap<RunId, RunUsageView>,
+  pools: ReadonlyArray<PoolDescriptor>,
   attentionRuns: ReadonlySet<RunId> = new Set(),
   itemHistory: ReadonlyMap<ItemKey, ItemRunHistory> = new Map(),
 ): ReadonlyArray<TaskCard> => {
@@ -181,7 +184,10 @@ export const taskCards = (
         members.some(({ item }) => blocked.has(item.itemKey)),
       conflicting: current.conflicting,
       loops: [...new Set(ordered.flatMap(({ item }) => itemLoops.get(item.itemKey) ?? []))],
-      usage: totals.length === 0 ? taskUsage(runs, runUsage) : taskHistoryUsage(totals, runUsage),
+      usage:
+        totals.length === 0
+          ? taskUsage(pools, runs, runUsage)
+          : taskHistoryUsage(pools, totals, runUsage),
     });
     cards.push({ view, running: active?.run.state === "Running" ? active.run : undefined });
   }

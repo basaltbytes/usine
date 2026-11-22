@@ -9,15 +9,16 @@ import { type SessionSpec, type Start } from "../contract.ts";
 import { parentFields, resolvedSession, startPrompt, startReference } from "../adapter.ts";
 import { HarnessCatalog } from "../harness.ts";
 import { claudePreflight } from "./preflight.ts";
-import { claude } from "./descriptor.ts";
+import { claude, claudePlan } from "./descriptor.ts";
+import { apiKeys } from "../pool.ts";
 import { type HarnessRuntime, openWithTools } from "../runtime.ts";
 import { callHostTool, type HostToolSet, hostToolNames } from "../tools.ts";
 // SDK hooks, transactions, and async iterators require Promise callbacks.
 // @effect-diagnostics asyncFunction:off
 import { type HookCallback } from "@anthropic-ai/claude-agent-sdk";
 import { Harness, ModelId } from "@usine/core/agent/brain";
+import type { BillingPool } from "@usine/core/agent/pool";
 import {
-  type BillingPool,
   HarnessSession,
   HarnessSessionId,
   ProviderAnswered,
@@ -488,7 +489,7 @@ const makeClaudeSessions = Effect.gen(function* () {
           try: () => query.usesApiKey(),
           catch: (cause) =>
             operationError("launch", spec, "Claude account discovery failed", cause),
-        }).pipe(Effect.map((apiKey): BillingPool => (apiKey ? "apiKeys" : "claudePlan"))),
+        }).pipe(Effect.map((apiKey): BillingPool => (apiKey ? apiKeys : claudePlan).id)),
     });
 
   /** Serves `tools` to a session as the in-process MCP server `TOOL_SERVER`. */

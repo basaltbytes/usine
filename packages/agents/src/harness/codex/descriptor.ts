@@ -1,4 +1,5 @@
 import { Harness } from "@usine/core/agent/brain";
+import { BillingPool, PoolDescriptor } from "@usine/core/agent/pool";
 import { Option } from "effect";
 import { CODEX_PROTOCOL } from "../../protocol/codex/version.ts";
 import { CapabilityProfile, Lacking } from "../capability.ts";
@@ -9,6 +10,15 @@ import {
   ResumeCommand,
   WorkerRequirements,
 } from "../harness.ts";
+import { apiKeys, HarnessPool } from "../pool.ts";
+
+/** The ChatGPT subscription. Codex reports its primary and secondary windows together. */
+export const chatgptPlan = PoolDescriptor.make({
+  id: BillingPool.make("chatgptPlan"),
+  label: "ChatGPT plan",
+  billing: "plan",
+  windows: "together",
+});
 
 /** The pinned app-server protocol baseline used by the conformance check. */
 export const CODEX_CLI_VERSION = CODEX_PROTOCOL.version;
@@ -159,6 +169,10 @@ export const codex = HarnessDescriptor.make({
   placementReason: "The harness requires a process host",
   credentialReason:
     "The harness requires its own login or a provider credential on the gateway or attempt",
+  pools: [
+    HarnessPool.make({ pool: apiKeys, routes: ["gateway-api-key"] }),
+    HarnessPool.make({ pool: chatgptPlan, routes: ["gateway-subscription"] }),
+  ],
   prices: Option.some(prices),
   handoff: ResumeCommand.make({
     command: "codex resume --",
