@@ -229,7 +229,7 @@ describe("RunUsageReader", () => {
   );
 
   it.effect(
-    "bills recorded pools independently of harness and model inference, and undeclared pools last under their IDs",
+    "bills recorded pools independently of harness and model inference, and undeclared pools last under their IDs as estimates",
     () => {
       const parent = ParentSession.make({
         ...planParent,
@@ -259,8 +259,8 @@ describe("RunUsageReader", () => {
       ) => pools.map(({ pool, label, cost }) => [pool, label, cost === null ? null : { ...cost }]);
       const expected = [
         ["apiKeys", "API keys", { usd: 0.75, estimate: false }],
-        ["archivedPlan", "archivedPlan", { usd: 2, estimate: false }],
-        ["removedPlan", "removedPlan", { usd: 1, estimate: false }],
+        ["archivedPlan", "archivedPlan", { usd: 2, estimate: true }],
+        ["removedPlan", "removedPlan", { usd: 1, estimate: true }],
       ];
       return Effect.gen(function* () {
         const usage = yield* (yield* RunUsageReader).read(runUsageSource(source));

@@ -49,12 +49,23 @@ export class BillingPools extends Context.Service<BillingPools, ReadonlyArray<Po
 ) {}
 
 /**
- * Returns the pool of `pools` with ID `id`. For a pool that `pools` doesn't declare, such as one of
- * a removed harness, returns a metered pool without plan windows that is labelled with its ID.
+ * A pool that the harness catalog doesn't declare, such as one of a removed harness, labelled with
+ * its ID. Its billing is `unknown` because usine can't tell how it was billed, and it has no plan
+ * windows.
+ */
+export interface UndeclaredPool {
+  readonly id: BillingPool;
+  readonly label: BillingPool;
+  readonly billing: "unknown";
+  readonly windows: "none";
+}
+
+/**
+ * Returns the pool of `pools` with ID `id`, or an `UndeclaredPool` for a pool that `pools` doesn't
+ * declare.
  */
 export const declaredPool = (
   pools: ReadonlyArray<PoolDescriptor>,
   id: BillingPool,
-): PoolDescriptor =>
-  pools.find((pool) => pool.id === id) ??
-  PoolDescriptor.make({ id, label: id, billing: "metered", windows: "none" });
+): PoolDescriptor | UndeclaredPool =>
+  pools.find((pool) => pool.id === id) ?? { id, label: id, billing: "unknown", windows: "none" };

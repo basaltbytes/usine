@@ -8,7 +8,7 @@ The platform-free entry points are `PollingTriggers` (`/polling-triggers`), `Sch
 
 0.x APIs can change between minor releases. Supply `effect` at the workspace's pinned version.
 
-Operator usage reads use each session's recorded billing pool. Older sessions without a pool use the compatibility rule in `@usine/core/agent/session`. Usage, statistics, and pool warnings read the pools that the harness catalog declares from `BillingPools` (`@usine/core/agent/pool`), which the server provides: views list pools in catalog order with their labels, and price usage in a plan pool as an estimate. A pool that the catalog doesn't declare, such as one of a removed harness, follows the declared pools under its ID and isn't an estimate.
+Operator usage reads use each session's recorded billing pool. Older sessions without a pool use the compatibility rule in `@usine/core/agent/session`. Usage, statistics, and pool warnings read the pools that the harness catalog declares from `BillingPools` (`@usine/core/agent/pool`), which the server provides: views list pools in catalog order with their labels, and price usage in a pool that isn't metered as an estimate. A pool that the catalog doesn't declare, such as one of a removed harness, follows the declared pools under its ID, and its price is an estimate because usine can't tell how it was billed.
 
 Operator usage reads use each harness descriptor’s token price table when the session reports a token breakdown without its own USD cost. The configuration capabilities API includes harness display labels and saved-session resume commands from the same catalog.
 
