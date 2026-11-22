@@ -35,7 +35,10 @@ export const BridgeRequest = Schema.Struct({
 });
 export type BridgeRequest = typeof BridgeRequest.Type;
 
-/** The bridge's first line: OpenCode is listening and the bridge receives its events. */
+/**
+ * The bridge's line once OpenCode is listening and the bridge receives its events. Only answers to
+ * requests that the bridge refuses come before it.
+ */
 export const BridgeReady = Schema.Struct({ ready: Schema.Literal(true) });
 export type BridgeReady = typeof BridgeReady.Type;
 
@@ -50,7 +53,10 @@ export const BridgeAnswer = Schema.Struct({
 });
 export type BridgeAnswer = typeof BridgeAnswer.Type;
 
-/** The answer to a request that the bridge refused, couldn't send, or got no full response to. */
+/**
+ * The answer to a request that the bridge refused or couldn't send, or whose response it didn't get
+ * in full or couldn't fit in a line.
+ */
 export const BridgeRequestFailed = Schema.Struct({ id: BridgeRequestId, error: Schema.String });
 export type BridgeRequestFailed = typeof BridgeRequestFailed.Type;
 
