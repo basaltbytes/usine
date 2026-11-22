@@ -1,0 +1,1793 @@
+{
+  "protocol": "opencode-bridge",
+  "harnessVersion": "2.3.2",
+  "model": "gpt-5.4-mini",
+  "scenario": "interrupt-guidance",
+  "environment": {
+    "HOME": "$HOME",
+    "USINE_OPENCODE_HOME": "$OPENCODE_HOME",
+    "USINE_OPENCODE_BASE_URL": "$MODEL_URL",
+    "OPENAI_API_KEY": "sk-replay",
+    "PATH": "$PATH"
+  },
+  "entries": [
+    {
+      "type": "expect_outbound",
+      "port": "process:1",
+      "payload": {
+        "command": "$NODE",
+        "args": [
+          "-e",
+          "$CHILD_LIFELINE",
+          "$WORKTREE.child-1.pid",
+          "",
+          "node",
+          "-e",
+          "$OPENCODE_BRIDGE",
+          "30000",
+          "opencode"
+        ],
+        "cwd": "$WORKTREE",
+        "env": {
+          "HOME": "$HOME",
+          "USINE_OPENCODE_HOME": "$OPENCODE_HOME",
+          "USINE_OPENCODE_BASE_URL": "$MODEL_URL",
+          "OPENAI_API_KEY": "sk-replay",
+          "PATH": "$PATH",
+          "XDG_DATA_HOME": "$OPENCODE_HOME/replay-parent_child_1",
+          "XDG_CONFIG_HOME": "$OPENCODE_HOME/replay-parent_child_1/config",
+          "OPENCODE_CONFIG_PROJECT_DISABLE": "1",
+          "OPENCODE_DISABLE_CLAUDE_CODE": "1",
+          "OPENCODE_DISABLE_MODELS_FETCH": "1",
+          "OPENCODE_DISABLE_FREE_MODELS": "1",
+          "OPENCODE_CONFIG_CONTENT": "{\"model\":\"openai/gpt-5.4-mini\",\"providers\":{\"openai\":{\"env\":[],\"settings\":{\"apiKey\":\"{env:OPENAI_API_KEY}\",\"transport\":\"http\",\"baseURL\":\"{env:USINE_OPENCODE_BASE_URL}\"}},\"lmstudio\":{\"settings\":{\"baseURL\":\"\"}},\"ollama\":{\"settings\":{\"baseURL\":\"\"}},\"vllm\":{\"settings\":{\"baseURL\":\"\"}}},\"policies\":[{\"action\":\"provider.use\",\"resource\":\"*\",\"effect\":\"deny\"},{\"action\":\"provider.use\",\"resource\":\"openai\",\"effect\":\"allow\"},{\"action\":\"plugin.use\",\"resource\":\"*\",\"effect\":\"deny\"},{\"action\":\"mcp.use\",\"resource\":\"*\",\"effect\":\"deny\"},{\"action\":\"websearch.use\",\"resource\":\"*\",\"effect\":\"deny\"}],\"permissions\":[{\"action\":\"*\",\"resource\":\"*\",\"effect\":\"allow\"},{\"action\":\"read\",\"resource\":\"*.env\",\"effect\":\"allow\"},{\"action\":\"read\",\"resource\":\"*.env.*\",\"effect\":\"allow\"},{\"action\":\"question\",\"resource\":\"*\",\"effect\":\"deny\"},{\"action\":\"webfetch\",\"resource\":\"*\",\"effect\":\"deny\"},{\"action\":\"websearch\",\"resource\":\"*\",\"effect\":\"deny\"}],\"websearch\":false,\"formatter\":false,\"warming\":false,\"agents\":{\"title\":{\"disabled\":true}},\"instructions\":[\"$WORKTREE/AGENTS.md\"]}"
+        }
+      }
+    },
+    { "type": "emit_inbound", "port": "process:1/stdout", "payload": { "ready": true } },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": { "id": "evt_2020afdbf001V0wO0oW4ZazIRs", "type": "server.connected", "data": {} }
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "port": "process:1/stdin",
+      "payload": {
+        "id": 1,
+        "method": "GET",
+        "path": "/api/model?location%5Bdirectory%5D=$ENCODED_WORKTREE"
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_2020afddc001C3JPscL6RRg2b5",
+          "created": 1795330604508,
+          "type": "project.updated",
+          "location": { "directory": "$WORKTREE" },
+          "data": {
+            "id": "c141a7c73a58862b85ef7c8b15ce676aa278baaa",
+            "canonical": "$WORKTREE",
+            "time": { "created": 1795330604504, "updated": 1795330604504, "active": 1795330604506 },
+            "sandboxes": []
+          }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "id": 1,
+        "status": 200,
+        "body": {
+          "location": { "directory": "$WORKTREE" },
+          "data": [
+            {
+              "id": "gpt-5.4-mini",
+              "modelID": "gpt-5.4-mini",
+              "providerID": "openai",
+              "type": "chat",
+              "family": "gpt-mini",
+              "name": "GPT-5.4 mini",
+              "package": "@opencode/ai/providers/openai/responses",
+              "settings": { "apiKey": "sk-replay", "baseURL": "$MODEL_URL" },
+              "capabilities": {
+                "tools": true,
+                "freeform": ["text", "lark", "regex"],
+                "input": ["text", "image"],
+                "output": ["text"],
+                "temperature": true
+              },
+              "variants": [
+                {
+                  "id": "none",
+                  "settings": {
+                    "reasoningEffort": "none",
+                    "reasoningSummary": "auto",
+                    "include": ["reasoning.encrypted_content"]
+                  }
+                },
+                {
+                  "id": "low",
+                  "settings": {
+                    "reasoningEffort": "low",
+                    "reasoningSummary": "auto",
+                    "include": ["reasoning.encrypted_content"]
+                  }
+                },
+                {
+                  "id": "medium",
+                  "settings": {
+                    "reasoningEffort": "medium",
+                    "reasoningSummary": "auto",
+                    "include": ["reasoning.encrypted_content"]
+                  }
+                },
+                {
+                  "id": "high",
+                  "settings": {
+                    "reasoningEffort": "high",
+                    "reasoningSummary": "auto",
+                    "include": ["reasoning.encrypted_content"]
+                  }
+                },
+                {
+                  "id": "xhigh",
+                  "settings": {
+                    "reasoningEffort": "xhigh",
+                    "reasoningSummary": "auto",
+                    "include": ["reasoning.encrypted_content"]
+                  }
+                }
+              ],
+              "time": { "released": 1773705600000 },
+              "cost": [{ "input": 0.75, "output": 4.5, "cache": { "read": 0.075, "write": 0 } }],
+              "status": "active",
+              "enabled": true,
+              "limit": { "context": 400000, "input": 272000, "output": 128000 }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_2020b021e0019zlL3ogUoFe5uA",
+          "created": 1795330605598,
+          "type": "integration.updated",
+          "location": { "directory": "$WORKTREE" },
+          "data": {}
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_2020b02250015sx7dFEA3uHlKW",
+          "created": 1795330605605,
+          "type": "provider.updated",
+          "location": { "directory": "$WORKTREE" },
+          "data": {}
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_2020b023c001VNcGJwzO26PnFp",
+          "created": 1795330605628,
+          "type": "model.updated",
+          "location": { "directory": "$WORKTREE" },
+          "data": {}
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_2020b023f001NQpWVdCULAp0ay",
+          "created": 1795330605631,
+          "type": "agent.updated",
+          "location": { "directory": "$WORKTREE" },
+          "data": {}
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_2020b0240001ufQI1MbO4Zqnr0",
+          "created": 1795330605632,
+          "type": "command.updated",
+          "location": { "directory": "$WORKTREE" },
+          "data": {}
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_2020b0240002lU7V31kAHLXCWH",
+          "created": 1795330605632,
+          "type": "skill.updated",
+          "location": { "directory": "$WORKTREE" },
+          "data": {}
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_2020b027b001FwMwon7rzXxWky",
+          "created": 1795330605691,
+          "type": "artifact.updated",
+          "location": { "directory": "$WORKTREE" },
+          "data": {}
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_2020b02950010ybz8Gx9Atfw3X",
+          "created": 1795330605717,
+          "type": "websearch.updated",
+          "location": { "directory": "$WORKTREE" },
+          "data": {}
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_2020b02960017DECr0h0BwEwvB",
+          "created": 1795330605718,
+          "type": "reference.updated",
+          "location": { "directory": "$WORKTREE" },
+          "data": {}
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_2020b029c001KqDHKtCDbonf6o",
+          "created": 1795330605724,
+          "type": "plugin.updated",
+          "location": { "directory": "$WORKTREE" },
+          "data": {}
+        }
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "port": "process:1/stdin",
+      "payload": {
+        "id": 2,
+        "method": "POST",
+        "path": "/api/session",
+        "body": {
+          "title": "usine replay",
+          "location": { "directory": "$WORKTREE" },
+          "model": { "providerID": "openai", "id": "gpt-5.4-mini", "variant": "low" },
+          "permissions": [
+            { "action": "*", "resource": "*", "effect": "allow" },
+            { "action": "read", "resource": "*.env", "effect": "allow" },
+            { "action": "read", "resource": "*.env.*", "effect": "allow" },
+            { "action": "question", "resource": "*", "effect": "deny" },
+            { "action": "webfetch", "resource": "*", "effect": "deny" },
+            { "action": "websearch", "resource": "*", "effect": "deny" }
+          ]
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "id": 2,
+        "status": 200,
+        "body": {
+          "data": {
+            "id": "ses_dfdf4fd1cffekOY8bCgqUTwPfb",
+            "projectID": "c141a7c73a58862b85ef7c8b15ce676aa278baaa",
+            "model": { "id": "gpt-5.4-mini", "providerID": "openai", "variant": "low" },
+            "cost": 0,
+            "tokens": {
+              "input": 0,
+              "output": 0,
+              "reasoning": 0,
+              "cache": { "read": 0, "write": 0 }
+            },
+            "time": { "created": 1795330605798, "updated": 1795330605798 },
+            "title": "usine replay",
+            "permissions": [
+              { "action": "*", "resource": "*", "effect": "allow" },
+              { "action": "read", "resource": "*.env", "effect": "allow" },
+              { "action": "read", "resource": "*.env.*", "effect": "allow" },
+              { "action": "question", "resource": "*", "effect": "deny" },
+              { "action": "webfetch", "resource": "*", "effect": "deny" },
+              { "action": "websearch", "resource": "*", "effect": "deny" }
+            ],
+            "location": { "directory": "$WORKTREE" }
+          }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_2020b02e6001xbXnqAhZh7c7gf",
+          "created": 1795330605798,
+          "type": "session.created",
+          "location": { "directory": "$WORKTREE" },
+          "data": {
+            "sessionID": "ses_dfdf4fd1cffekOY8bCgqUTwPfb",
+            "slug": "lucky-circuit",
+            "version": "2.3.2",
+            "projectID": "c141a7c73a58862b85ef7c8b15ce676aa278baaa",
+            "location": { "directory": "$WORKTREE" },
+            "subpath": "",
+            "title": "usine replay",
+            "permissions": [
+              { "action": "*", "resource": "*", "effect": "allow" },
+              { "action": "read", "resource": "*.env", "effect": "allow" },
+              { "action": "read", "resource": "*.env.*", "effect": "allow" },
+              { "action": "question", "resource": "*", "effect": "deny" },
+              { "action": "webfetch", "resource": "*", "effect": "deny" },
+              { "action": "websearch", "resource": "*", "effect": "deny" }
+            ],
+            "model": { "id": "gpt-5.4-mini", "providerID": "openai", "variant": "low" }
+          },
+          "durable": { "aggregateID": "ses_dfdf4fd1cffekOY8bCgqUTwPfb", "seq": 0, "version": 1 }
+        }
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "port": "process:1/stdin",
+      "payload": {
+        "id": 3,
+        "method": "POST",
+        "path": "/api/session/ses_dfdf4fd1cffekOY8bCgqUTwPfb/prompt",
+        "body": {
+          "text": "Run exactly `node wait.cjs` with your command tool and wait for it to finish. Then reply with exactly REPLAY_DONE. The test controls the command. Do not use any other tools.",
+          "delivery": "steer"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "id": 3,
+        "status": 200,
+        "body": {
+          "data": {
+            "id": "msg_2020b02f7001x6h0d0oKVNza04",
+            "sessionID": "ses_dfdf4fd1cffekOY8bCgqUTwPfb",
+            "time": { "created": 1795330605817 },
+            "type": "user",
+            "payload": {
+              "text": "Run exactly `node wait.cjs` with your command tool and wait for it to finish. Then reply with exactly REPLAY_DONE. The test controls the command. Do not use any other tools."
+            },
+            "delivery": "steer"
+          }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_2020b02f90010RPJE6wjI9Wnrt",
+          "created": 1795330605817,
+          "type": "session.inbox.enqueued",
+          "location": { "directory": "$WORKTREE" },
+          "data": {
+            "inboxID": "msg_2020b02f7001x6h0d0oKVNza04",
+            "sessionID": "ses_dfdf4fd1cffekOY8bCgqUTwPfb",
+            "item": {
+              "type": "user",
+              "payload": {
+                "text": "Run exactly `node wait.cjs` with your command tool and wait for it to finish. Then reply with exactly REPLAY_DONE. The test controls the command. Do not use any other tools."
+              },
+              "delivery": "steer"
+            }
+          },
+          "durable": { "aggregateID": "ses_dfdf4fd1cffekOY8bCgqUTwPfb", "seq": 1, "version": 1 }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_2020b02fd001xuQDCWol6fqM1l",
+          "created": 1795330605821,
+          "type": "session.execution.started",
+          "data": { "sessionID": "ses_dfdf4fd1cffekOY8bCgqUTwPfb" },
+          "durable": { "aggregateID": "ses_dfdf4fd1cffekOY8bCgqUTwPfb", "seq": 2, "version": 1 }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_2020b031b001Sl9dBq1GPPcsCN",
+          "created": 1795330605851,
+          "metadata": { "instructions": { "initial": true } },
+          "type": "session.instructions.updated",
+          "location": { "directory": "$WORKTREE" },
+          "data": {
+            "sessionID": "ses_dfdf4fd1cffekOY8bCgqUTwPfb",
+            "delta": {
+              "core/codemode": "72ca3fdf406e907043554434594d5d88ba02e2a7fbedfb7d9fe9ab80539c75da",
+              "core/skill-guidance": "0fcf81582b0bdb08251c185c9c8f477ff4fba0fdecbb4a499f3d6e18ae6a8ed7",
+              "core/date": "2aa19af1a815db353db35bcd12c2298a6c79f1aa6ef765da4ea26049dae88040",
+              "core/environment": "b9d688ffc40e5b21334264bd51d790f01854ad37cb66f12c8571cc10e0257246"
+            }
+          },
+          "durable": { "aggregateID": "ses_dfdf4fd1cffekOY8bCgqUTwPfb", "seq": 3, "version": 2 }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_2020b031f001rV57n0kJQkf5Jp",
+          "created": 1795330605855,
+          "type": "session.inbox.delivered",
+          "location": { "directory": "$WORKTREE" },
+          "data": {
+            "sessionID": "ses_dfdf4fd1cffekOY8bCgqUTwPfb",
+            "inboxID": "msg_2020b02f7001x6h0d0oKVNza04"
+          },
+          "durable": { "aggregateID": "ses_dfdf4fd1cffekOY8bCgqUTwPfb", "seq": 4, "version": 1 }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_2020b034b001dWWepQrSqPmfHH",
+          "created": 1795330605899,
+          "type": "session.step.started",
+          "location": { "directory": "$WORKTREE" },
+          "data": {
+            "sessionID": "ses_dfdf4fd1cffekOY8bCgqUTwPfb",
+            "agent": "build",
+            "model": { "id": "gpt-5.4-mini", "providerID": "openai", "variant": "low" },
+            "assistantMessageID": "msg_2020b032e001BnGIFzXAs7fA9o",
+            "started": 1795330605878
+          },
+          "durable": { "aggregateID": "ses_dfdf4fd1cffekOY8bCgqUTwPfb", "seq": 5, "version": 1 }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_2020b034e001e1M4kXrb80LF6x",
+          "created": 1795330605903,
+          "type": "session.step.first-token",
+          "location": { "directory": "$WORKTREE" },
+          "data": {
+            "sessionID": "ses_dfdf4fd1cffekOY8bCgqUTwPfb",
+            "assistantMessageID": "msg_2020b032e001BnGIFzXAs7fA9o"
+          },
+          "durable": { "aggregateID": "ses_dfdf4fd1cffekOY8bCgqUTwPfb", "seq": 6, "version": 1 }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_2020b0352001GMR19JV0tubce6",
+          "created": 1795330605906,
+          "type": "session.tool.input.started",
+          "location": { "directory": "$WORKTREE" },
+          "data": {
+            "sessionID": "ses_dfdf4fd1cffekOY8bCgqUTwPfb",
+            "assistantMessageID": "msg_2020b032e001BnGIFzXAs7fA9o",
+            "id": "call_1",
+            "name": "shell"
+          },
+          "durable": { "aggregateID": "ses_dfdf4fd1cffekOY8bCgqUTwPfb", "seq": 7, "version": 1 }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_2020b0358001RhkLpB15Dfd6jb",
+          "created": 1795330605912,
+          "type": "session.tool.input.ended",
+          "location": { "directory": "$WORKTREE" },
+          "data": {
+            "sessionID": "ses_dfdf4fd1cffekOY8bCgqUTwPfb",
+            "assistantMessageID": "msg_2020b032e001BnGIFzXAs7fA9o",
+            "id": "call_1",
+            "text": "{\"command\":\"node wait.cjs\",\"description\":\"Wait for the test\"}"
+          },
+          "durable": { "aggregateID": "ses_dfdf4fd1cffekOY8bCgqUTwPfb", "seq": 8, "version": 1 }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_2020b035d0019IxzO57buurYhl",
+          "created": 1795330605917,
+          "type": "session.tool.called",
+          "location": { "directory": "$WORKTREE" },
+          "data": {
+            "sessionID": "ses_dfdf4fd1cffekOY8bCgqUTwPfb",
+            "assistantMessageID": "msg_2020b032e001BnGIFzXAs7fA9o",
+            "id": "call_1",
+            "input": { "command": "node wait.cjs", "description": "Wait for the test" },
+            "executed": false,
+            "native": { "itemId": "fc_1" }
+          },
+          "durable": { "aggregateID": "ses_dfdf4fd1cffekOY8bCgqUTwPfb", "seq": 9, "version": 1 }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_2020b036e001waGTAfclsbbp5p",
+          "created": 1795330605934,
+          "type": "session.step.streamed",
+          "location": { "directory": "$WORKTREE" },
+          "data": {
+            "sessionID": "ses_dfdf4fd1cffekOY8bCgqUTwPfb",
+            "assistantMessageID": "msg_2020b032e001BnGIFzXAs7fA9o"
+          },
+          "durable": { "aggregateID": "ses_dfdf4fd1cffekOY8bCgqUTwPfb", "seq": 10, "version": 1 }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_2020b03a0001a5M3mzchuvgIM9",
+          "created": 1795330605984,
+          "type": "shell.created",
+          "location": { "directory": "$WORKTREE" },
+          "data": {
+            "info": {
+              "id": "sh_2020b0372001owZN2ffGoPtekJ",
+              "status": "running",
+              "command": "node wait.cjs",
+              "cwd": "$WORKTREE",
+              "shell": "/usr/bin/bash",
+              "file": "$OPENCODE_HOME/replay-parent_child_1/opencode/shell/c141a7c73a58862b85ef7c8b15ce676aa278baaa/sh_2020b0372001owZN2ffGoPtekJ.out",
+              "metadata": { "sessionID": "ses_dfdf4fd1cffekOY8bCgqUTwPfb" },
+              "time": { "started": 1795330605974 },
+              "pid": 15435
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_2020b03a0002WQ3rcsGY2yATb2",
+          "created": 1795330605984,
+          "type": "session.tool.progress",
+          "location": { "directory": "$WORKTREE" },
+          "data": {
+            "sessionID": "ses_dfdf4fd1cffekOY8bCgqUTwPfb",
+            "assistantMessageID": "msg_2020b032e001BnGIFzXAs7fA9o",
+            "id": "call_1",
+            "metadata": { "shellID": "sh_2020b0372001owZN2ffGoPtekJ" }
+          }
+        }
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "port": "process:1/stdin",
+      "payload": {
+        "id": 4,
+        "method": "POST",
+        "path": "/api/session/ses_dfdf4fd1cffekOY8bCgqUTwPfb/interrupt"
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": { "id": 4, "status": 200, "body": { "interrupted": true } }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_2020b03c6001Tww9MpiaM1rF2L",
+          "created": 1795330606022,
+          "type": "shell.exited",
+          "location": { "directory": "$WORKTREE" },
+          "data": { "id": "sh_2020b0372001owZN2ffGoPtekJ", "status": "killed" }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_2020b03c7001NzMVMlwUqGyH4O",
+          "created": 1795330606023,
+          "type": "session.tool.failed",
+          "location": { "directory": "$WORKTREE" },
+          "data": {
+            "sessionID": "ses_dfdf4fd1cffekOY8bCgqUTwPfb",
+            "assistantMessageID": "msg_2020b032e001BnGIFzXAs7fA9o",
+            "id": "call_1",
+            "error": {
+              "type": "tool.execution",
+              "message": "[no output; output file: $OPENCODE_HOME/replay-parent_child_1/opencode/shell/c141a7c73a58862b85ef7c8b15ce676aa278baaa/sh_2020b0372001owZN2ffGoPtekJ.out]\n\nCommand interrupted by the user (shell ID: sh_2020b0372001owZN2ffGoPtekJ)."
+            },
+            "metadata": {
+              "shellID": "sh_2020b0372001owZN2ffGoPtekJ",
+              "interrupted": true,
+              "truncated": false,
+              "notice": "[no output; output file: $OPENCODE_HOME/replay-parent_child_1/opencode/shell/c141a7c73a58862b85ef7c8b15ce676aa278baaa/sh_2020b0372001owZN2ffGoPtekJ.out]\n\nCommand interrupted by the user (shell ID: sh_2020b0372001owZN2ffGoPtekJ)."
+            },
+            "executed": false
+          },
+          "durable": { "aggregateID": "ses_dfdf4fd1cffekOY8bCgqUTwPfb", "seq": 11, "version": 2 }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_2020b03ca001vpRvkXg8mQ10bv",
+          "created": 1795330606026,
+          "type": "session.step.failed",
+          "location": { "directory": "$WORKTREE" },
+          "data": {
+            "sessionID": "ses_dfdf4fd1cffekOY8bCgqUTwPfb",
+            "assistantMessageID": "msg_2020b032e001BnGIFzXAs7fA9o",
+            "error": { "type": "aborted", "message": "Step interrupted" },
+            "native": { "responseId": "resp_1" },
+            "tokens": {
+              "input": 1000,
+              "output": 20,
+              "reasoning": 0,
+              "cache": { "read": 200, "write": 0 }
+            },
+            "cost": 0.000855
+          },
+          "durable": { "aggregateID": "ses_dfdf4fd1cffekOY8bCgqUTwPfb", "seq": 12, "version": 1 }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_2020b03cd001I5x7ozf56ht3fL",
+          "created": 1795330606029,
+          "type": "session.usage.updated",
+          "data": {
+            "sessionID": "ses_dfdf4fd1cffekOY8bCgqUTwPfb",
+            "cost": 0.000855,
+            "tokens": {
+              "input": 1000,
+              "output": 20,
+              "reasoning": 0,
+              "cache": { "read": 200, "write": 0 }
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_2020b03ce00131oRLoFvfnCGa1",
+          "created": 1795330606030,
+          "type": "session.execution.interrupted",
+          "data": { "sessionID": "ses_dfdf4fd1cffekOY8bCgqUTwPfb", "reason": "user" },
+          "durable": { "aggregateID": "ses_dfdf4fd1cffekOY8bCgqUTwPfb", "seq": 13, "version": 1 }
+        }
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "port": "process:1/stdin",
+      "payload": {
+        "id": 5,
+        "method": "POST",
+        "path": "/api/session/ses_dfdf4fd1cffekOY8bCgqUTwPfb/prompt",
+        "body": {
+          "id": "msg_usine_replay_1",
+          "text": "Change the final reply to exactly REPLAY_GUIDED. Do not use any more tools.",
+          "delivery": "steer"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "id": 5,
+        "status": 200,
+        "body": {
+          "data": {
+            "id": "msg_usine_replay_1",
+            "sessionID": "ses_dfdf4fd1cffekOY8bCgqUTwPfb",
+            "time": { "created": 1795330606045 },
+            "type": "user",
+            "payload": {
+              "text": "Change the final reply to exactly REPLAY_GUIDED. Do not use any more tools."
+            },
+            "delivery": "steer"
+          }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_2020b03dd001pdoMA08juxeaV1",
+          "created": 1795330606045,
+          "type": "session.inbox.enqueued",
+          "location": { "directory": "$WORKTREE" },
+          "data": {
+            "inboxID": "msg_usine_replay_1",
+            "sessionID": "ses_dfdf4fd1cffekOY8bCgqUTwPfb",
+            "item": {
+              "type": "user",
+              "payload": {
+                "text": "Change the final reply to exactly REPLAY_GUIDED. Do not use any more tools."
+              },
+              "delivery": "steer"
+            }
+          },
+          "durable": { "aggregateID": "ses_dfdf4fd1cffekOY8bCgqUTwPfb", "seq": 14, "version": 1 }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_2020b03e3001Z6NNaIyJNC5ql8",
+          "created": 1795330606051,
+          "type": "session.execution.started",
+          "data": { "sessionID": "ses_dfdf4fd1cffekOY8bCgqUTwPfb" },
+          "durable": { "aggregateID": "ses_dfdf4fd1cffekOY8bCgqUTwPfb", "seq": 15, "version": 1 }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_2020b03f0001A93GWyWWYr0p25",
+          "created": 1795330606064,
+          "type": "session.inbox.delivered",
+          "location": { "directory": "$WORKTREE" },
+          "data": {
+            "sessionID": "ses_dfdf4fd1cffekOY8bCgqUTwPfb",
+            "inboxID": "msg_usine_replay_1"
+          },
+          "durable": { "aggregateID": "ses_dfdf4fd1cffekOY8bCgqUTwPfb", "seq": 16, "version": 1 }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_2020b041e001H6YGqy61npoELH",
+          "created": 1795330606110,
+          "type": "session.step.started",
+          "location": { "directory": "$WORKTREE" },
+          "data": {
+            "sessionID": "ses_dfdf4fd1cffekOY8bCgqUTwPfb",
+            "agent": "build",
+            "model": { "id": "gpt-5.4-mini", "providerID": "openai", "variant": "low" },
+            "assistantMessageID": "msg_2020b0403001PegAS3HiVfed4E",
+            "started": 1795330606099
+          },
+          "durable": { "aggregateID": "ses_dfdf4fd1cffekOY8bCgqUTwPfb", "seq": 17, "version": 1 }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_2020b0421001JTzw3zY2FBhtuX",
+          "created": 1795330606113,
+          "type": "session.step.first-token",
+          "location": { "directory": "$WORKTREE" },
+          "data": {
+            "sessionID": "ses_dfdf4fd1cffekOY8bCgqUTwPfb",
+            "assistantMessageID": "msg_2020b0403001PegAS3HiVfed4E"
+          },
+          "durable": { "aggregateID": "ses_dfdf4fd1cffekOY8bCgqUTwPfb", "seq": 18, "version": 1 }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_2020b0424001sQjyQfuJQpN804",
+          "created": 1795330606116,
+          "type": "session.text.started",
+          "location": { "directory": "$WORKTREE" },
+          "data": {
+            "sessionID": "ses_dfdf4fd1cffekOY8bCgqUTwPfb",
+            "assistantMessageID": "msg_2020b0403001PegAS3HiVfed4E",
+            "ordinal": 0
+          },
+          "durable": { "aggregateID": "ses_dfdf4fd1cffekOY8bCgqUTwPfb", "seq": 19, "version": 1 }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_2020b0427001yCqSmEUUdsoxfq",
+          "created": 1795330606119,
+          "type": "session.text.delta",
+          "location": { "directory": "$WORKTREE" },
+          "data": {
+            "sessionID": "ses_dfdf4fd1cffekOY8bCgqUTwPfb",
+            "assistantMessageID": "msg_2020b0403001PegAS3HiVfed4E",
+            "ordinal": 0,
+            "delta": "REPLAY_GUIDED"
+          }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_2020b0428001DrxgGUsgHI5cX2",
+          "created": 1795330606120,
+          "type": "session.text.ended",
+          "location": { "directory": "$WORKTREE" },
+          "data": {
+            "sessionID": "ses_dfdf4fd1cffekOY8bCgqUTwPfb",
+            "assistantMessageID": "msg_2020b0403001PegAS3HiVfed4E",
+            "ordinal": 0,
+            "text": "REPLAY_GUIDED",
+            "native": { "itemId": "msg_2" }
+          },
+          "durable": { "aggregateID": "ses_dfdf4fd1cffekOY8bCgqUTwPfb", "seq": 20, "version": 1 }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_2020b042c001tYIEYm5rd9p8jF",
+          "created": 1795330606124,
+          "type": "session.step.streamed",
+          "location": { "directory": "$WORKTREE" },
+          "data": {
+            "sessionID": "ses_dfdf4fd1cffekOY8bCgqUTwPfb",
+            "assistantMessageID": "msg_2020b0403001PegAS3HiVfed4E"
+          },
+          "durable": { "aggregateID": "ses_dfdf4fd1cffekOY8bCgqUTwPfb", "seq": 21, "version": 1 }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_2020b042f001klXLyHIEz4NGU1",
+          "created": 1795330606127,
+          "type": "session.step.ended",
+          "location": { "directory": "$WORKTREE" },
+          "data": {
+            "sessionID": "ses_dfdf4fd1cffekOY8bCgqUTwPfb",
+            "assistantMessageID": "msg_2020b0403001PegAS3HiVfed4E",
+            "finish": "stop",
+            "native": { "responseId": "resp_2" },
+            "tokens": {
+              "input": 1000,
+              "output": 20,
+              "reasoning": 0,
+              "cache": { "read": 200, "write": 0 }
+            },
+            "cost": 0.000855
+          },
+          "durable": { "aggregateID": "ses_dfdf4fd1cffekOY8bCgqUTwPfb", "seq": 22, "version": 1 }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_2020b0433001mT3YocIpAM11lP",
+          "created": 1795330606131,
+          "type": "session.usage.updated",
+          "data": {
+            "sessionID": "ses_dfdf4fd1cffekOY8bCgqUTwPfb",
+            "cost": 0.00171,
+            "tokens": {
+              "input": 2000,
+              "output": 40,
+              "reasoning": 0,
+              "cache": { "read": 400, "write": 0 }
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_2020b0437001oyyyQwbt6gzyiP",
+          "created": 1795330606135,
+          "type": "session.execution.succeeded",
+          "data": { "sessionID": "ses_dfdf4fd1cffekOY8bCgqUTwPfb" },
+          "durable": { "aggregateID": "ses_dfdf4fd1cffekOY8bCgqUTwPfb", "seq": 23, "version": 1 }
+        }
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "port": "process:1/stdin",
+      "payload": {
+        "id": 6,
+        "method": "GET",
+        "path": "/api/session/ses_dfdf4fd1cffekOY8bCgqUTwPfb/inbox"
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": { "id": 6, "status": 200, "body": { "data": [] } }
+    },
+    {
+      "type": "expect_outbound",
+      "port": "process:1/stdin",
+      "payload": {
+        "id": 7,
+        "method": "GET",
+        "path": "/api/experimental/job?sessionID=ses_dfdf4fd1cffekOY8bCgqUTwPfb&descendants=true&status=running"
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": { "id": 7, "status": 200, "body": { "data": [] } }
+    },
+    { "type": "expect_outbound", "port": "process:1/stdin", "payload": { "eof": true } },
+    {
+      "type": "expect_outbound",
+      "port": "process:2",
+      "payload": {
+        "command": "$NODE",
+        "args": [
+          "-e",
+          "$CHILD_LIFELINE",
+          "$WORKTREE.child-1.pid",
+          "",
+          "node",
+          "-e",
+          "$OPENCODE_BRIDGE",
+          "30000",
+          "opencode"
+        ],
+        "cwd": "$WORKTREE",
+        "env": {
+          "HOME": "$HOME",
+          "USINE_OPENCODE_HOME": "$OPENCODE_HOME",
+          "USINE_OPENCODE_BASE_URL": "$MODEL_URL",
+          "OPENAI_API_KEY": "sk-replay",
+          "PATH": "$PATH",
+          "XDG_DATA_HOME": "$OPENCODE_HOME/replay-parent_child_1",
+          "XDG_CONFIG_HOME": "$OPENCODE_HOME/replay-parent_child_1/config",
+          "OPENCODE_CONFIG_PROJECT_DISABLE": "1",
+          "OPENCODE_DISABLE_CLAUDE_CODE": "1",
+          "OPENCODE_DISABLE_MODELS_FETCH": "1",
+          "OPENCODE_DISABLE_FREE_MODELS": "1",
+          "OPENCODE_CONFIG_CONTENT": "{\"model\":\"openai/gpt-5.4-mini\",\"providers\":{\"openai\":{\"env\":[],\"settings\":{\"apiKey\":\"{env:OPENAI_API_KEY}\",\"transport\":\"http\",\"baseURL\":\"{env:USINE_OPENCODE_BASE_URL}\"}},\"lmstudio\":{\"settings\":{\"baseURL\":\"\"}},\"ollama\":{\"settings\":{\"baseURL\":\"\"}},\"vllm\":{\"settings\":{\"baseURL\":\"\"}}},\"policies\":[{\"action\":\"provider.use\",\"resource\":\"*\",\"effect\":\"deny\"},{\"action\":\"provider.use\",\"resource\":\"openai\",\"effect\":\"allow\"},{\"action\":\"plugin.use\",\"resource\":\"*\",\"effect\":\"deny\"},{\"action\":\"mcp.use\",\"resource\":\"*\",\"effect\":\"deny\"},{\"action\":\"websearch.use\",\"resource\":\"*\",\"effect\":\"deny\"}],\"permissions\":[{\"action\":\"*\",\"resource\":\"*\",\"effect\":\"allow\"},{\"action\":\"read\",\"resource\":\"*.env\",\"effect\":\"allow\"},{\"action\":\"read\",\"resource\":\"*.env.*\",\"effect\":\"allow\"},{\"action\":\"question\",\"resource\":\"*\",\"effect\":\"deny\"},{\"action\":\"webfetch\",\"resource\":\"*\",\"effect\":\"deny\"},{\"action\":\"websearch\",\"resource\":\"*\",\"effect\":\"deny\"}],\"websearch\":false,\"formatter\":false,\"warming\":false,\"agents\":{\"title\":{\"disabled\":true}},\"instructions\":[\"$WORKTREE/AGENTS.md\"]}"
+        }
+      }
+    },
+    { "type": "runtime_exit", "port": "process:1/stdout", "code": 0, "error": null },
+    { "type": "runtime_exit", "port": "process:1/exit", "code": 0, "error": null },
+    { "type": "emit_inbound", "port": "process:2/stdout", "payload": { "ready": true } },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "event": { "id": "evt_2020b06d9001RAzu81MwiZBkNG", "type": "server.connected", "data": {} }
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "port": "process:2/stdin",
+      "payload": {
+        "id": 1,
+        "method": "GET",
+        "path": "/api/model?location%5Bdirectory%5D=$ENCODED_WORKTREE"
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_2020b06ed001QLLU1dE363lOlF",
+          "created": 1795330606829,
+          "type": "project.updated",
+          "location": { "directory": "$WORKTREE" },
+          "data": {
+            "id": "c141a7c73a58862b85ef7c8b15ce676aa278baaa",
+            "canonical": "$WORKTREE",
+            "time": { "created": 1795330604504, "updated": 1795330604504, "active": 1795330606829 },
+            "sandboxes": []
+          }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "id": 1,
+        "status": 200,
+        "body": {
+          "location": { "directory": "$WORKTREE" },
+          "data": [
+            {
+              "id": "gpt-5.4-mini",
+              "modelID": "gpt-5.4-mini",
+              "providerID": "openai",
+              "type": "chat",
+              "family": "gpt-mini",
+              "name": "GPT-5.4 mini",
+              "package": "@opencode/ai/providers/openai/responses",
+              "settings": { "apiKey": "sk-replay", "baseURL": "$MODEL_URL" },
+              "capabilities": {
+                "tools": true,
+                "freeform": ["text", "lark", "regex"],
+                "input": ["text", "image"],
+                "output": ["text"],
+                "temperature": true
+              },
+              "variants": [
+                {
+                  "id": "none",
+                  "settings": {
+                    "reasoningEffort": "none",
+                    "reasoningSummary": "auto",
+                    "include": ["reasoning.encrypted_content"]
+                  }
+                },
+                {
+                  "id": "low",
+                  "settings": {
+                    "reasoningEffort": "low",
+                    "reasoningSummary": "auto",
+                    "include": ["reasoning.encrypted_content"]
+                  }
+                },
+                {
+                  "id": "medium",
+                  "settings": {
+                    "reasoningEffort": "medium",
+                    "reasoningSummary": "auto",
+                    "include": ["reasoning.encrypted_content"]
+                  }
+                },
+                {
+                  "id": "high",
+                  "settings": {
+                    "reasoningEffort": "high",
+                    "reasoningSummary": "auto",
+                    "include": ["reasoning.encrypted_content"]
+                  }
+                },
+                {
+                  "id": "xhigh",
+                  "settings": {
+                    "reasoningEffort": "xhigh",
+                    "reasoningSummary": "auto",
+                    "include": ["reasoning.encrypted_content"]
+                  }
+                }
+              ],
+              "time": { "released": 1773705600000 },
+              "cost": [{ "input": 0.75, "output": 4.5, "cache": { "read": 0.075, "write": 0 } }],
+              "status": "active",
+              "enabled": true,
+              "limit": { "context": 400000, "input": 272000, "output": 128000 }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "port": "process:2/stdin",
+      "payload": {
+        "id": 2,
+        "method": "POST",
+        "path": "/api/session",
+        "body": {
+          "title": "usine replay",
+          "location": { "directory": "$WORKTREE" },
+          "model": { "providerID": "openai", "id": "gpt-5.4-mini", "variant": "low" },
+          "permissions": [
+            { "action": "*", "resource": "*", "effect": "allow" },
+            { "action": "read", "resource": "*.env", "effect": "allow" },
+            { "action": "read", "resource": "*.env.*", "effect": "allow" },
+            { "action": "question", "resource": "*", "effect": "deny" },
+            { "action": "webfetch", "resource": "*", "effect": "deny" },
+            { "action": "websearch", "resource": "*", "effect": "deny" }
+          ]
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_2020b0ba8001mCFnajbhLJDaZT",
+          "created": 1795330608040,
+          "type": "integration.updated",
+          "location": { "directory": "$WORKTREE" },
+          "data": {}
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_2020b0bb80017rxYeoI4LMYmk7",
+          "created": 1795330608056,
+          "type": "provider.updated",
+          "location": { "directory": "$WORKTREE" },
+          "data": {}
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_2020b0bd2001zXVPI8K3wpoQVE",
+          "created": 1795330608082,
+          "type": "model.updated",
+          "location": { "directory": "$WORKTREE" },
+          "data": {}
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_2020b0bd5001DjFrWPFpMqqYfO",
+          "created": 1795330608085,
+          "type": "agent.updated",
+          "location": { "directory": "$WORKTREE" },
+          "data": {}
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_2020b0bd5002fsAEL6aFQW8h7e",
+          "created": 1795330608085,
+          "type": "command.updated",
+          "location": { "directory": "$WORKTREE" },
+          "data": {}
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_2020b0bd7001Da0T5IdZLiThpc",
+          "created": 1795330608087,
+          "type": "skill.updated",
+          "location": { "directory": "$WORKTREE" },
+          "data": {}
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_2020b0c0c00179mye6SqzG73b2",
+          "created": 1795330608140,
+          "type": "artifact.updated",
+          "location": { "directory": "$WORKTREE" },
+          "data": {}
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_2020b0c3b0017EAGmCd0D8pkim",
+          "created": 1795330608187,
+          "type": "websearch.updated",
+          "location": { "directory": "$WORKTREE" },
+          "data": {}
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_2020b0c3c001E3V7s4n2VLp9fn",
+          "created": 1795330608188,
+          "type": "reference.updated",
+          "location": { "directory": "$WORKTREE" },
+          "data": {}
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_2020b0c3c002jlRAhT0orB1kus",
+          "created": 1795330608188,
+          "type": "plugin.updated",
+          "location": { "directory": "$WORKTREE" },
+          "data": {}
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "id": 2,
+        "status": 200,
+        "body": {
+          "data": {
+            "id": "ses_dfdf4f382ffe5BLsBeo1DQaC0f",
+            "projectID": "c141a7c73a58862b85ef7c8b15ce676aa278baaa",
+            "model": { "id": "gpt-5.4-mini", "providerID": "openai", "variant": "low" },
+            "cost": 0,
+            "tokens": {
+              "input": 0,
+              "output": 0,
+              "reasoning": 0,
+              "cache": { "read": 0, "write": 0 }
+            },
+            "time": { "created": 1795330608257, "updated": 1795330608257 },
+            "title": "usine replay",
+            "permissions": [
+              { "action": "*", "resource": "*", "effect": "allow" },
+              { "action": "read", "resource": "*.env", "effect": "allow" },
+              { "action": "read", "resource": "*.env.*", "effect": "allow" },
+              { "action": "question", "resource": "*", "effect": "deny" },
+              { "action": "webfetch", "resource": "*", "effect": "deny" },
+              { "action": "websearch", "resource": "*", "effect": "deny" }
+            ],
+            "location": { "directory": "$WORKTREE" }
+          }
+        }
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "port": "process:2/stdin",
+      "payload": {
+        "id": 3,
+        "method": "POST",
+        "path": "/api/session/ses_dfdf4f382ffe5BLsBeo1DQaC0f/prompt",
+        "body": {
+          "text": "Run exactly `node wait.cjs` with your command tool and wait for it to finish. Then reply with exactly REPLAY_DONE. The test controls the command. Do not use any other tools.",
+          "delivery": "steer"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_2020b0c81001zb4AP6PAnPThzT",
+          "created": 1795330608257,
+          "type": "session.created",
+          "location": { "directory": "$WORKTREE" },
+          "data": {
+            "sessionID": "ses_dfdf4f382ffe5BLsBeo1DQaC0f",
+            "slug": "curious-forest",
+            "version": "2.3.2",
+            "projectID": "c141a7c73a58862b85ef7c8b15ce676aa278baaa",
+            "location": { "directory": "$WORKTREE" },
+            "subpath": "",
+            "title": "usine replay",
+            "permissions": [
+              { "action": "*", "resource": "*", "effect": "allow" },
+              { "action": "read", "resource": "*.env", "effect": "allow" },
+              { "action": "read", "resource": "*.env.*", "effect": "allow" },
+              { "action": "question", "resource": "*", "effect": "deny" },
+              { "action": "webfetch", "resource": "*", "effect": "deny" },
+              { "action": "websearch", "resource": "*", "effect": "deny" }
+            ],
+            "model": { "id": "gpt-5.4-mini", "providerID": "openai", "variant": "low" }
+          },
+          "durable": { "aggregateID": "ses_dfdf4f382ffe5BLsBeo1DQaC0f", "seq": 0, "version": 1 }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "id": 3,
+        "status": 200,
+        "body": {
+          "data": {
+            "id": "msg_2020b0c95001e41NK5Yri0oA6T",
+            "sessionID": "ses_dfdf4f382ffe5BLsBeo1DQaC0f",
+            "time": { "created": 1795330608279 },
+            "type": "user",
+            "payload": {
+              "text": "Run exactly `node wait.cjs` with your command tool and wait for it to finish. Then reply with exactly REPLAY_DONE. The test controls the command. Do not use any other tools."
+            },
+            "delivery": "steer"
+          }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_2020b0c97001sRM6r64I24oMtw",
+          "created": 1795330608279,
+          "type": "session.inbox.enqueued",
+          "location": { "directory": "$WORKTREE" },
+          "data": {
+            "inboxID": "msg_2020b0c95001e41NK5Yri0oA6T",
+            "sessionID": "ses_dfdf4f382ffe5BLsBeo1DQaC0f",
+            "item": {
+              "type": "user",
+              "payload": {
+                "text": "Run exactly `node wait.cjs` with your command tool and wait for it to finish. Then reply with exactly REPLAY_DONE. The test controls the command. Do not use any other tools."
+              },
+              "delivery": "steer"
+            }
+          },
+          "durable": { "aggregateID": "ses_dfdf4f382ffe5BLsBeo1DQaC0f", "seq": 1, "version": 1 }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_2020b0c9e001qr2vDnTWGQCsYn",
+          "created": 1795330608286,
+          "type": "session.execution.started",
+          "data": { "sessionID": "ses_dfdf4f382ffe5BLsBeo1DQaC0f" },
+          "durable": { "aggregateID": "ses_dfdf4f382ffe5BLsBeo1DQaC0f", "seq": 2, "version": 1 }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_2020b0cca001xVO7lbdj8OWvI5",
+          "created": 1795330608331,
+          "metadata": { "instructions": { "initial": true } },
+          "type": "session.instructions.updated",
+          "location": { "directory": "$WORKTREE" },
+          "data": {
+            "sessionID": "ses_dfdf4f382ffe5BLsBeo1DQaC0f",
+            "delta": {
+              "core/codemode": "72ca3fdf406e907043554434594d5d88ba02e2a7fbedfb7d9fe9ab80539c75da",
+              "core/skill-guidance": "0fcf81582b0bdb08251c185c9c8f477ff4fba0fdecbb4a499f3d6e18ae6a8ed7",
+              "core/date": "2aa19af1a815db353db35bcd12c2298a6c79f1aa6ef765da4ea26049dae88040",
+              "core/environment": "b9d688ffc40e5b21334264bd51d790f01854ad37cb66f12c8571cc10e0257246"
+            }
+          },
+          "durable": { "aggregateID": "ses_dfdf4f382ffe5BLsBeo1DQaC0f", "seq": 3, "version": 2 }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_2020b0ccd001GbXST7sioefGcH",
+          "created": 1795330608333,
+          "type": "session.inbox.delivered",
+          "location": { "directory": "$WORKTREE" },
+          "data": {
+            "sessionID": "ses_dfdf4f382ffe5BLsBeo1DQaC0f",
+            "inboxID": "msg_2020b0c95001e41NK5Yri0oA6T"
+          },
+          "durable": { "aggregateID": "ses_dfdf4f382ffe5BLsBeo1DQaC0f", "seq": 4, "version": 1 }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_2020b0cf9001I7eUPp2HERrRS5",
+          "created": 1795330608377,
+          "type": "session.step.started",
+          "location": { "directory": "$WORKTREE" },
+          "data": {
+            "sessionID": "ses_dfdf4f382ffe5BLsBeo1DQaC0f",
+            "agent": "build",
+            "model": { "id": "gpt-5.4-mini", "providerID": "openai", "variant": "low" },
+            "assistantMessageID": "msg_2020b0cdd001XMkYPo42BI7wC5",
+            "started": 1795330608358
+          },
+          "durable": { "aggregateID": "ses_dfdf4f382ffe5BLsBeo1DQaC0f", "seq": 5, "version": 1 }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_2020b0cfc001qp0K1ZZdT5ERjb",
+          "created": 1795330608380,
+          "type": "session.step.first-token",
+          "location": { "directory": "$WORKTREE" },
+          "data": {
+            "sessionID": "ses_dfdf4f382ffe5BLsBeo1DQaC0f",
+            "assistantMessageID": "msg_2020b0cdd001XMkYPo42BI7wC5"
+          },
+          "durable": { "aggregateID": "ses_dfdf4f382ffe5BLsBeo1DQaC0f", "seq": 6, "version": 1 }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_2020b0d00001NcXUOtsFismxBt",
+          "created": 1795330608384,
+          "type": "session.tool.input.started",
+          "location": { "directory": "$WORKTREE" },
+          "data": {
+            "sessionID": "ses_dfdf4f382ffe5BLsBeo1DQaC0f",
+            "assistantMessageID": "msg_2020b0cdd001XMkYPo42BI7wC5",
+            "id": "call_3",
+            "name": "shell"
+          },
+          "durable": { "aggregateID": "ses_dfdf4f382ffe5BLsBeo1DQaC0f", "seq": 7, "version": 1 }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_2020b0d03001irRSIecCQrYnmQ",
+          "created": 1795330608387,
+          "type": "session.tool.input.ended",
+          "location": { "directory": "$WORKTREE" },
+          "data": {
+            "sessionID": "ses_dfdf4f382ffe5BLsBeo1DQaC0f",
+            "assistantMessageID": "msg_2020b0cdd001XMkYPo42BI7wC5",
+            "id": "call_3",
+            "text": "{\"command\":\"node wait.cjs\",\"description\":\"Wait for the test\"}"
+          },
+          "durable": { "aggregateID": "ses_dfdf4f382ffe5BLsBeo1DQaC0f", "seq": 8, "version": 1 }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_2020b0d07001kEOvUuxJeLVLOK",
+          "created": 1795330608391,
+          "type": "session.tool.called",
+          "location": { "directory": "$WORKTREE" },
+          "data": {
+            "sessionID": "ses_dfdf4f382ffe5BLsBeo1DQaC0f",
+            "assistantMessageID": "msg_2020b0cdd001XMkYPo42BI7wC5",
+            "id": "call_3",
+            "input": { "command": "node wait.cjs", "description": "Wait for the test" },
+            "executed": false,
+            "native": { "itemId": "fc_3" }
+          },
+          "durable": { "aggregateID": "ses_dfdf4f382ffe5BLsBeo1DQaC0f", "seq": 9, "version": 1 }
+        }
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "port": "process:2/stdin",
+      "payload": {
+        "id": 4,
+        "method": "POST",
+        "path": "/api/session/ses_dfdf4f382ffe5BLsBeo1DQaC0f/interrupt"
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_2020b0d0f001fKP7SnjOGe2AtQ",
+          "created": 1795330608399,
+          "type": "session.step.streamed",
+          "location": { "directory": "$WORKTREE" },
+          "data": {
+            "sessionID": "ses_dfdf4f382ffe5BLsBeo1DQaC0f",
+            "assistantMessageID": "msg_2020b0cdd001XMkYPo42BI7wC5"
+          },
+          "durable": { "aggregateID": "ses_dfdf4f382ffe5BLsBeo1DQaC0f", "seq": 10, "version": 1 }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": { "id": 4, "status": 200, "body": { "interrupted": true } }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_2020b0d89001oqAfGVe5e7SjHh",
+          "created": 1795330608521,
+          "type": "shell.created",
+          "location": { "directory": "$WORKTREE" },
+          "data": {
+            "info": {
+              "id": "sh_2020b0d1a001Ne07TYZTwtJPJ2",
+              "status": "running",
+              "command": "node wait.cjs",
+              "cwd": "$WORKTREE",
+              "shell": "/usr/bin/bash",
+              "file": "$OPENCODE_HOME/replay-parent_child_1/opencode/shell/c141a7c73a58862b85ef7c8b15ce676aa278baaa/sh_2020b0d1a001Ne07TYZTwtJPJ2.out",
+              "metadata": { "sessionID": "ses_dfdf4f382ffe5BLsBeo1DQaC0f" },
+              "time": { "started": 1795330608518 },
+              "pid": 15492
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_2020b0d8b001TrCUZwCvihfNws",
+          "created": 1795330608523,
+          "type": "session.tool.progress",
+          "location": { "directory": "$WORKTREE" },
+          "data": {
+            "sessionID": "ses_dfdf4f382ffe5BLsBeo1DQaC0f",
+            "assistantMessageID": "msg_2020b0cdd001XMkYPo42BI7wC5",
+            "id": "call_3",
+            "metadata": { "shellID": "sh_2020b0d1a001Ne07TYZTwtJPJ2" }
+          }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_2020b0d9d001EFQ09yM03JkcBA",
+          "created": 1795330608541,
+          "type": "shell.exited",
+          "location": { "directory": "$WORKTREE" },
+          "data": { "id": "sh_2020b0d1a001Ne07TYZTwtJPJ2", "status": "killed" }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_2020b0d9f001Kj2OaF1ABCxugd",
+          "created": 1795330608543,
+          "type": "session.tool.failed",
+          "location": { "directory": "$WORKTREE" },
+          "data": {
+            "sessionID": "ses_dfdf4f382ffe5BLsBeo1DQaC0f",
+            "assistantMessageID": "msg_2020b0cdd001XMkYPo42BI7wC5",
+            "id": "call_3",
+            "error": {
+              "type": "tool.execution",
+              "message": "[no output; output file: $OPENCODE_HOME/replay-parent_child_1/opencode/shell/c141a7c73a58862b85ef7c8b15ce676aa278baaa/sh_2020b0d1a001Ne07TYZTwtJPJ2.out]\n\nCommand interrupted by the user (shell ID: sh_2020b0d1a001Ne07TYZTwtJPJ2)."
+            },
+            "metadata": {
+              "shellID": "sh_2020b0d1a001Ne07TYZTwtJPJ2",
+              "interrupted": true,
+              "truncated": false,
+              "notice": "[no output; output file: $OPENCODE_HOME/replay-parent_child_1/opencode/shell/c141a7c73a58862b85ef7c8b15ce676aa278baaa/sh_2020b0d1a001Ne07TYZTwtJPJ2.out]\n\nCommand interrupted by the user (shell ID: sh_2020b0d1a001Ne07TYZTwtJPJ2)."
+            },
+            "executed": false
+          },
+          "durable": { "aggregateID": "ses_dfdf4f382ffe5BLsBeo1DQaC0f", "seq": 11, "version": 2 }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_2020b0da8001E4LUmma4MOtVJD",
+          "created": 1795330608553,
+          "type": "session.step.failed",
+          "location": { "directory": "$WORKTREE" },
+          "data": {
+            "sessionID": "ses_dfdf4f382ffe5BLsBeo1DQaC0f",
+            "assistantMessageID": "msg_2020b0cdd001XMkYPo42BI7wC5",
+            "error": { "type": "aborted", "message": "Step interrupted" },
+            "native": { "responseId": "resp_3" },
+            "tokens": {
+              "input": 1000,
+              "output": 20,
+              "reasoning": 0,
+              "cache": { "read": 200, "write": 0 }
+            },
+            "cost": 0.000855
+          },
+          "durable": { "aggregateID": "ses_dfdf4f382ffe5BLsBeo1DQaC0f", "seq": 12, "version": 1 }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_2020b0db8001iZvGdRGS85wl0U",
+          "created": 1795330608570,
+          "type": "session.usage.updated",
+          "data": {
+            "sessionID": "ses_dfdf4f382ffe5BLsBeo1DQaC0f",
+            "cost": 0.000855,
+            "tokens": {
+              "input": 1000,
+              "output": 20,
+              "reasoning": 0,
+              "cache": { "read": 200, "write": 0 }
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_2020b0dbc001sm0B0CsykYQ8kc",
+          "created": 1795330608572,
+          "type": "session.execution.interrupted",
+          "data": { "sessionID": "ses_dfdf4f382ffe5BLsBeo1DQaC0f", "reason": "user" },
+          "durable": { "aggregateID": "ses_dfdf4f382ffe5BLsBeo1DQaC0f", "seq": 13, "version": 1 }
+        }
+      }
+    },
+    { "type": "expect_outbound", "port": "process:2/stdin", "payload": { "eof": true } },
+    { "type": "runtime_exit", "port": "process:2/stdout", "code": 0, "error": null },
+    { "type": "runtime_exit", "port": "process:2/exit", "code": 0, "error": null }
+  ]
+}

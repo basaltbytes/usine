@@ -5,7 +5,8 @@ import { Option } from "effect";
 import type { Capability } from "../../src/harness/capability.ts";
 import { catalog } from "../../src/harness/catalog.ts";
 import { completionScenarios } from "../replay/completion.ts";
-import { piScenarios, type Provider, scenarios } from "../replay/fixture.ts";
+import { piScenarios, type RecordedHarness, scenarios } from "../replay/fixture.ts";
+import { openCodeScenarios } from "../replay/opencode.ts";
 import type { Scenario } from "../replay/transcript.ts";
 import { toolProviders, toolScenariosOf } from "./host-tools.ts";
 import { supervisorProviders } from "./supervisor.ts";
@@ -23,7 +24,7 @@ export type Proof =
        * The test files, relative to this package, that check the capability for each harness. A
        * harness without an entry may not declare the capability.
        */
-      readonly files: Partial<Record<Provider, readonly [string, ...Array<string>]>>;
+      readonly files: Partial<Record<RecordedHarness, readonly [string, ...Array<string>]>>;
       /** Why no session scenario shows the capability. */
       readonly reason: string;
     };
@@ -56,19 +57,27 @@ export const capabilityProofs = {
   },
   "model-check": {
     _tag: "Suites",
-    files: { codex: ["test/pi/codex/codex.test.ts"], pi: ["test/pi/pi.test.ts"] },
+    files: {
+      codex: ["test/pi/codex/codex.test.ts"],
+      pi: ["test/pi/pi.test.ts"],
+      opencode: ["test/opencode/model.test.ts"],
+    },
     reason: "An unknown model is a launch failure, which the recorded scenarios don't include",
   },
 } satisfies Record<Capability, Proof>;
 
 /**
  * The scenarios that the replay suites run for `harness`. Claude Code and Codex replay `restart`
- * and `credential-changed` through the durable parent in `@usine/durable`, every harness replays
- * the completion scenarios in `completion.test.ts`, the harnesses that serve usine tool sets replay
- * their tool scenarios in `host-tools.test.ts`, and the harnesses that admit the supervisor role
- * replay the supervisor scenario in `supervisor.test.ts`.
+ * and `credential-changed` through the durable parent in `@usine/durable`, every harness with
+ * structured completions replays the completion scenarios in `completion.test.ts`, the harnesses
+ * that serve usine tool sets replay their tool scenarios in `host-tools.test.ts`, and the
+ * harnesses that admit the supervisor role replay the supervisor scenario in
+ * `supervisor.test.ts`. OpenCode replays its scenarios in `opencode.test.ts`.
  */
-export const replayedScenarios = (harness: Harness): ReadonlyArray<Scenario> => [
+export const replayedScenarios = (harness: Harness): ReadonlyArray<Scenario> =>
+  harness === "opencode" ? openCodeScenarios : providerScenarios(harness);
+
+const providerScenarios = (harness: Harness): ReadonlyArray<Scenario> => [
   ...(harness === "pi"
     ? piScenarios
     : [...scenarios, "restart" as const, "credential-changed" as const]),

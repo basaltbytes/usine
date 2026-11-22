@@ -49,7 +49,12 @@ type Entry = typeof Entry.Type;
 type Incoming = Exclude<Entry, typeof Outbound.Type>;
 
 export const Transcript = Schema.Struct({
-  protocol: Schema.Literals(["claude-sdk", "codex-app-server", "pi-provider-stream"]),
+  protocol: Schema.Literals([
+    "claude-sdk",
+    "codex-app-server",
+    "pi-provider-stream",
+    "opencode-bridge",
+  ]),
   harnessVersion: Schema.NonEmptyString,
   model: Schema.NonEmptyString,
   scenario: Scenario,

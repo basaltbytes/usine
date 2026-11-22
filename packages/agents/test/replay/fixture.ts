@@ -30,6 +30,8 @@ import { piTransport } from "./pi.ts";
 import { type Scenario, type SessionScenario, Tape, Transcript } from "./transcript.ts";
 
 export type Provider = "claude" | "codex" | "pi";
+/** Every harness whose contract scenarios a replay suite records. */
+export type RecordedHarness = Provider | "opencode";
 /** The harnesses that run as a process behind a recorded transport. */
 export const providers: ReadonlyArray<Exclude<Provider, "pi">> = ["claude", "codex"];
 export const scenarios: ReadonlyArray<SessionScenario> = [
@@ -53,7 +55,7 @@ export const piScenarios: ReadonlyArray<SessionScenario> = [
   "hold-release",
   "restart",
 ];
-export const recordingModel = (provider: Provider): string | undefined =>
+export const recordingModel = (provider: RecordedHarness): string | undefined =>
   env[`USINE_${provider.toUpperCase()}_INTEGRATION_MODEL`];
 
 export const recordingPid = (savedPid: string): number => {
@@ -62,7 +64,7 @@ export const recordingPid = (savedPid: string): number => {
   return pid;
 };
 
-export const fixtureFile = (provider: Provider, scenario: Scenario) =>
+export const fixtureFile = (provider: RecordedHarness, scenario: Scenario) =>
   fileURLToPath(new URL(`../fixtures/replay/${scenario}/${provider}.json`, import.meta.url));
 const environmentKeys = [
   "HOME",

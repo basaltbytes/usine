@@ -1,7 +1,7 @@
 {
   "name": "@usine/agents",
   "version": "0.7.0",
-  "description": "The usine agent layer: Claude Code, Codex, and Pi child backends, Attempt prompts, and harness preflight.",
+  "description": "The usine agent layer: Claude Code, Codex, OpenCode, and Pi child backends, Attempt prompts, and harness preflight.",
   "license": "AGPL-3.0-only",
   "repository": {
     "type": "git",
@@ -98,6 +98,7 @@
     "test:integration:claude": "vitest run test/integration/claude.test.ts",
     "test:integration:codex": "vitest run test/integration/codex.test.ts",
     "test:integration:pi": "vitest run test/integration/pi.test.ts",
+    "test:integration:opencode": "vitest run test/integration/opencode.test.ts",
     "codex:generate": "node --experimental-strip-types scripts/codex/generate.mjs",
     "codex:check": "node --experimental-strip-types scripts/codex/generate.mjs --check",
     "codex:check:upstream": "node --experimental-strip-types scripts/codex/generate.mjs --check --upstream",
