@@ -101,6 +101,13 @@ const routes = new Map<string, Route>(
       for (const subscriber of subscribers) subscriber.end();
       json(response, 200, {});
     },
+    // Like a server that shuts down cleanly: ends every event stream, then exits 100 ms later with
+    // the exit code from `FAKE_SERVE_EXIT_CODE`.
+    "POST /api/shutdown": (_request, response) => {
+      for (const subscriber of subscribers) subscriber.end();
+      json(response, 200, {});
+      setTimeout(() => process.exit(exitCode), 100);
+    },
     // Promises 10 bytes, sends one, and closes the connection.
     "GET /api/cut": (_request, response) => {
       response.writeHead(200, { "content-type": "application/json", "content-length": "10" });

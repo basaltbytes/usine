@@ -206,6 +206,15 @@ describe("OpenCode bridge", () => {
     );
   });
 
+  it("exits with serve's code when serve closes the event stream just before it exits", async () => {
+    const bridge = start("ready", { FAKE_SERVE_EXIT_CODE: "0" });
+    await eventually(() => bridge.lines.length >= 1);
+    bridge.send({ id: 1, method: "POST", path: "/api/shutdown" });
+    expect(await bridge.exit).toBe(0);
+    expect(bridge.stderr()).not.toContain("opencode bridge:");
+    expect(bridge.stderr()).not.toContain("fake serve: end of input");
+  });
+
   it("reports a refused event subscription, ends serve's input, and exits with 1", async () => {
     const bridge = start("refuse-events", { FAKE_SERVE_EXIT_CODE: "0" });
     expect(await bridge.exit).toBe(1);
