@@ -227,18 +227,40 @@ describe("receipt matching on Codex's decoder", () => {
     );
   });
 
-  it("keeps the session's own inputs for its live records at a restored record", () => {
+  it("reads no message at a restored record of the session's own input with the same text", () => {
     const { steps, inbox: after } = applied(
-      { ...inbox(unread(1, "Continue", { sent: false })), own: ["Continue"] },
+      { ...inbox(unread(1, "The task")), own: ["The task"] },
       codexReceipts({
         _tag: "Restored",
         turn: "turn-1",
-        items: [userMessage("item-1", "Continue")],
+        items: [userMessage("task", "The task")],
+        known: true,
+      }),
+    );
+    assert.deepStrictEqual(reads(steps), []);
+    assert.deepStrictEqual(
+      steps.map(({ own }) => own),
+      [Option.some({ item: Option.some({ id: "task", turn: "turn-1" }) })],
+    );
+    assert.deepStrictEqual(after.own, []);
+    assert.deepStrictEqual(
+      after.unread.map(({ id }) => id),
+      [id(1)],
+    );
+  });
+
+  it("reads a restored message at the record after the session's own input", () => {
+    const { steps, inbox: after } = applied(
+      { ...inbox(unread(1, "The task")), own: ["The task"] },
+      codexReceipts({
+        _tag: "Restored",
+        turn: "turn-1",
+        items: [userMessage("task", "The task"), userMessage("item-1", "The task")],
         known: true,
       }),
     );
     assert.deepStrictEqual(reads(steps), [[id(1), "restored"]]);
-    assert.deepStrictEqual(after.own, ["Continue"]);
+    assert.deepStrictEqual(after.own, []);
   });
 
   it("counts a restored turn's items without reading when the session saved none before", () => {

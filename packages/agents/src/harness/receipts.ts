@@ -34,9 +34,8 @@ export type Receipt = Data.TaggedEnum<{
   /**
    * The harness recorded an input with `text`. The record acknowledges the oldest of the session's
    * own inputs with that text, or else the oldest operator message with that text that this
-   * process sent. At `restored`, it acknowledges the oldest unread message with that text, because
-   * a record from before this process holds none of its own inputs. `item` names the native record,
-   * which acknowledges once.
+   * process sent. At `restored`, that message can be any unread one, because an earlier process may
+   * have sent it. `item` names the native record, which acknowledges once.
    */
   ByText: {
     readonly text: string;
@@ -176,7 +175,7 @@ export const match = <A extends Unread>(
         onSome: (found) => count(inbox, found),
       });
       const save = Option.map(item, () => counted.saved);
-      const own = at === "restored" ? -1 : counted.own.indexOf(text);
+      const own = counted.own.indexOf(text);
       if (own >= 0)
         return acknowledged(
           { ...counted, own: counted.own.filter((_, index) => index !== own) },

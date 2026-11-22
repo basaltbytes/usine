@@ -533,8 +533,8 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
           yield* finish(before.overdue.value, true);
         } else yield* finish("Session interrupted before its turn returned");
       }
-      // A new native process has read none of the queued messages and none of the earlier
-      // process's own inputs.
+      // A new native process has read none of the queued messages. It records none of the earlier
+      // process's own inputs either: the restored turn's records took the ones that process recorded.
       const recovering = yield* Ref.updateAndGet(state, (current) => ({
         ...current,
         inbox: {
