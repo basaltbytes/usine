@@ -2,6 +2,8 @@ import { AgentName } from "@usine/core/agent";
 import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import {
   AgentSessionId,
+  BackgroundWork,
+  BackgroundWorkUpdated,
   ChildSession,
   ParentSession,
   ProviderRecovered,
@@ -674,5 +676,48 @@ describe("connectivity", () => {
       [attempt(FailedAttemptView.make({ failure }))],
     ).chapters[0];
     assert.deepStrictEqual(ended?.connectivity, []);
+  });
+});
+
+describe("background work", () => {
+  const snapshot = (sequence: number, work: ReadonlyArray<BackgroundWork>) =>
+    record(
+      sequence,
+      AttemptChannel.SessionEvent.make({
+        event: BackgroundWorkUpdated.make({ session: child, work: Option.some(work) }),
+      }),
+    );
+  const ciWatch = BackgroundWork.make({ id: "ci-watch", kind: "command", description: "Watch CI" });
+  const notes = (rows: ReadonlyArray<ChapterRow>) =>
+    rows.flatMap((row) => (row._tag === "Note" ? [`${row.tone}: ${row.text}`] : []));
+
+  it("shows what an answered child waits for, and a finish at the wait limit as a warning", () => {
+    const chapter = document(
+      [
+        record(1, AttemptChannel.Started.make({ parentModel: Option.some(ModelId.make("gpt-5")) })),
+        ...delegation,
+        snapshot(3, [ciWatch]),
+        snapshot(4, [
+          ciWatch,
+          BackgroundWork.make({ id: "review", kind: "agent", description: "Review the diff" }),
+          BackgroundWork.make({ id: "nightly-sync", kind: "other", description: "" }),
+        ]),
+        said(5, "Waiting for CI."),
+        snapshot(6, []),
+        record(
+          7,
+          AttemptChannel.SessionEvent.make({
+            event: SessionFinished.make({ session: child, backgroundWaitLimitPassed: true }),
+          }),
+        ),
+      ],
+      [attempt(null)],
+    ).chapters[0];
+    assert(chapter !== undefined);
+    assert.deepStrictEqual(notes(chapter.rows), [
+      "plain: Background work: Watch CI (command), Review the diff (agent), nightly-sync",
+      "plain: No background work",
+      "warning: Its background work outlasted the wait limit, so usine returned its last answer",
+    ]);
   });
 });

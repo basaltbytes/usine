@@ -1,9 +1,12 @@
 import type {
   AgentSession,
   AgentSessionEvent,
+  BackgroundWork,
+  BackgroundWorkUpdated,
   HarnessSession,
   ProviderRecovered,
   ProviderRetrying,
+  SessionFinished,
 } from "@usine/core/agent/session";
 import type { AttemptId } from "@usine/core/attempt";
 import type { AttemptView, TranscriptEventView } from "@usine/orchestrator/operator";
@@ -36,20 +39,33 @@ interface TranscriptPosition {
   readonly receivedAt: string;
 }
 
-/** The source of a notice: a session event, a provider retry or recovery, an operator input receipt, or an Attempt envelope. */
+/**
+ * The source of a notice: a session event, a provider retry or recovery, a session's background
+ * work, an operator input receipt, or an Attempt envelope.
+ */
 type NoticeOrigin =
   | {
       readonly _tag: "Session";
       readonly session: AgentSession;
       readonly event: Exclude<
         AgentSessionEvent["_tag"],
-        "ToolStarted" | "ToolFinished" | "ProviderRetrying" | "ProviderRecovered"
+        | "ToolStarted"
+        | "ToolFinished"
+        | "ProviderRetrying"
+        | "ProviderRecovered"
+        | "BackgroundWorkUpdated"
       >;
     }
   | {
       readonly _tag: "Provider";
       readonly session: AgentSession;
       readonly event: ProviderRetrying | ProviderRecovered;
+    }
+  | {
+      readonly _tag: "Background";
+      readonly session: AgentSession;
+      /** A snapshot of the session's background work, or the finish that its wait limit caused. */
+      readonly event: BackgroundWorkUpdated | SessionFinished;
     }
   | { readonly _tag: "Operator"; readonly operator: string }
   | { readonly _tag: "Envelope"; readonly payload: TranscriptEventView["payload"] };
@@ -147,6 +163,30 @@ const notice = (
   delivery: null,
 });
 
+const workKinds = {
+  command: " (command)",
+  agent: " (agent)",
+  other: "",
+} satisfies Record<BackgroundWork["kind"], string>;
+
+/**
+ * Returns a snapshot of background work as text, for example `Background work: Watch CI
+ * (command)`. An empty snapshot means that nothing runs; `None` means that it isn't reported.
+ */
+const backgroundWorkText = (work: BackgroundWorkUpdated["work"]): string =>
+  Option.match(work, {
+    onNone: () => "Background work not reported",
+    onSome: (running) =>
+      running.length === 0
+        ? "No background work"
+        : `Background work: ${running
+            .map(
+              ({ id, kind, description }) =>
+                `${description === "" ? id : description}${workKinds[kind]}`,
+            )
+            .join(", ")}`,
+  });
+
 /** Returns a retry count as text, for example `1 retry` or `27 retries`. */
 export const retriesLabel = (retries: number): string =>
   `${retries} ${retries === 1 ? "retry" : "retries"}`;
@@ -206,6 +246,34 @@ const sessionEntries = (
                 tone: "plain",
               },
           { _tag: "Provider", session: group.session, event },
+        ),
+      );
+      continue;
+    }
+    if (
+      event._tag === "BackgroundWorkUpdated" ||
+      (event._tag === "SessionFinished" && event.backgroundWaitLimitPassed)
+    ) {
+      entries.push(
+        notice(
+          at,
+          event._tag === "BackgroundWorkUpdated"
+            ? {
+                kind: "status",
+                label: `${group.session.agent} background work`,
+                detail: backgroundWorkText(event.work),
+                format: "plain",
+                tone: "plain",
+              }
+            : {
+                kind: "status",
+                label: `${group.session.agent} finished`,
+                detail:
+                  "Its background work outlasted the wait limit, so usine returned its last answer",
+                format: "plain",
+                tone: "warning",
+              },
+          { _tag: "Background", session: group.session, event },
         ),
       );
       continue;

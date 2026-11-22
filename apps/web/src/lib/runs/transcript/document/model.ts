@@ -335,6 +335,8 @@ const chapterRows = (
   let burstSpeaker: Speaker | null = null;
   /** The row index of each session's unresolved provider retries, by session ID. */
   const retrying = new Map<string, number>();
+  /** The row index of each session's latest background work snapshot, by session ID. */
+  const snapshots = new Map<string, number>();
   const flush = () => {
     const [first, ...rest] = burst;
     if (first !== undefined && burstSpeaker !== null)
@@ -441,6 +443,28 @@ const chapterRows = (
         text,
         tone: "warning",
         connectivity: { _tag: "ProviderRetrying", sessionId: origin.session.id },
+      });
+      continue;
+    }
+    if (origin._tag === "Background") {
+      const speaker = session ?? { name: origin.session.agent, sessionKey: null };
+      const snapshot = origin.event._tag === "BackgroundWorkUpdated";
+      flush();
+      const latest = snapshots.get(origin.session.id);
+      const folded = latest === undefined ? undefined : rows[latest];
+      // Consecutive snapshots of one session are merged into one line with the latest.
+      if (snapshot && latest === rows.length - 1 && folded?._tag === "Note") {
+        rows[latest] = { ...folded, latestSequence: entry.latestSequence, text: entry.detail };
+        continue;
+      }
+      if (snapshot) snapshots.set(origin.session.id, rows.length);
+      rows.push({
+        _tag: "Note",
+        ...at,
+        speaker,
+        text: entry.detail,
+        tone: entry.tone,
+        connectivity: null,
       });
       continue;
     }
