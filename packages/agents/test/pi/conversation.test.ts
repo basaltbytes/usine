@@ -19,6 +19,7 @@ import {
 } from "@usine/core/attempt/channel";
 import {
   Deferred,
+  Duration,
   Effect,
   Exit,
   Fiber,
@@ -37,7 +38,7 @@ import {
   RestartState,
 } from "../../src/runtime.ts";
 import { sessionChannel } from "../../src/harness/session.ts";
-import { sessionConversation } from "../../src/harness/conversation.ts";
+import { BACKGROUND_TURN_GRACE, sessionConversation } from "../../src/harness/conversation.ts";
 import { type ReadPoint, Receipt } from "../../src/harness/receipts.ts";
 import type { ContinuationPolicy } from "../../src/harness/continuation.ts";
 
@@ -82,6 +83,7 @@ const conversation = (
     readonly idle?: Option.Option<string>;
     readonly idleAnsweredOperator?: boolean;
   } = {},
+  maxBackgroundWaitMinutes: Option.Option<number> = Option.none(),
 ) =>
   Effect.gen(function* () {
     const channel = yield* sessionChannel({ sessionId: session.id, label: "Conversation test" });
@@ -105,7 +107,7 @@ const conversation = (
         }),
       pause: Effect.void,
       beforeFinish: Effect.void,
-      maxBackgroundWaitMinutes: Option.none(),
+      maxBackgroundWaitMinutes,
     });
     const result = yield* Deferred.await(channel.result).pipe(Effect.forkChild);
     /** Returns the tags of the events the session emitted since the last call. */
@@ -160,9 +162,13 @@ const capturedLogs = () => {
   return { entries, layer: Logger.layer([logger]) };
 };
 
+/** The number of captured log messages that contain `text`. */
+const loggedTimes = (logs: ReturnType<typeof capturedLogs>, text: string) =>
+  logs.entries.filter(({ message }) => Array.isArray(message) && String(message[0]).includes(text))
+    .length;
+
 /** Whether a captured log message contains `text`. */
-const logged = (logs: ReturnType<typeof capturedLogs>, text: string) =>
-  logs.entries.some(({ message }) => Array.isArray(message) && String(message[0]).includes(text));
+const logged = (logs: ReturnType<typeof capturedLogs>, text: string) => loggedTimes(logs, text) > 0;
 
 describe("session outcome logs", () => {
   it.effect("logs a blocked report once at Info while preserving its typed outcome", () => {
@@ -255,7 +261,8 @@ describe("session supervision", () => {
 
         yield* Deferred.succeed(delivered, undefined);
         assert.isTrue((yield* Fiber.join(takeover)).held);
-        while (!logged(logs, "the operator's Hold or pause keeps it open")) yield* Effect.yieldNow;
+        while (!logged(logs, "the operator's Hold or pause keeps its answer"))
+          yield* Effect.yieldNow;
         const terminal = yield* channel.isTerminal;
         const idle = yield* controls.isIdle;
         const events = yield* Queue.clear(channel.events);
@@ -275,7 +282,7 @@ describe("session supervision", () => {
     },
   );
 
-  it.effect("drops a kept answer when a turn starts only after a Release finishes", () => {
+  it.effect("returns the latest answer at a Release that a starting turn waits for", () => {
     const logs = capturedLogs();
     return Effect.gen(function* () {
       const session = child("overdue-release");
@@ -297,7 +304,7 @@ describe("session supervision", () => {
       yield* controls.reportBackground(Option.some([ciWatch]));
       yield* controls.finish("Waiting for CI");
       yield* TestClock.adjust("1 minute");
-      while (!logged(logs, "the operator's Hold or pause keeps it open")) yield* Effect.yieldNow;
+      while (!logged(logs, "the operator's Hold or pause keeps its answer")) yield* Effect.yieldNow;
       const release = yield* controls.intervene(Release.make(), noDelivery).pipe(Effect.forkChild);
       yield* Deferred.await(finishing);
       const turn = yield* controls.turnStarted.pipe(Effect.forkChild({ startImmediately: true }));
@@ -308,16 +315,19 @@ describe("session supervision", () => {
       yield* Deferred.succeed(cleanedUp, undefined);
       assert.isFalse((yield* Fiber.join(release)).held);
       yield* Fiber.join(turn);
-      assert.strictEqual((yield* Deferred.await(channel.result)).message, "CI passed");
-      assert.isTrue(
-        logs.entries.some(
-          ({ message }) =>
-            Array.isArray(message) &&
-            message[0] === "Session cancelled the wait limit for its background work" &&
-            Predicate.hasProperty(message[1], "limitPassed") &&
-            message[1].limitPassed === true,
-        ),
-        "the turn drops the kept answer",
+      assert.strictEqual(
+        (yield* Deferred.await(channel.result)).message,
+        "Waiting for CI",
+        "the answer of the later turn replaces the restored idle report",
+      );
+      const finished = (yield* Queue.clear(channel.events)).find(
+        (event) => event._tag === "SessionFinished",
+      );
+      assert(finished?._tag === "SessionFinished");
+      assert.isTrue(finished.backgroundWaitLimitPassed);
+      assert.isFalse(
+        logged(logs, "The session started a turn; dropping"),
+        "the Release returned the kept answer before the turn started",
       );
     }).pipe(Effect.provide(logs.layer));
   });
@@ -659,6 +669,331 @@ describe("answers to the operator", () => {
       const result = yield* Fiber.join(restored.result);
       assert.strictEqual(result.message, "The tests need a database.");
       assert.isTrue(result.answeredOperator);
+    }),
+  );
+});
+
+describe("background work", () => {
+  const nothingRuns = Option.some<ReadonlyArray<BackgroundWork>>([]);
+  const lint = BackgroundWork.make({ id: "lint", kind: "command", description: "Run lint" });
+  const graceStarted = "it returns its answer unless a turn starts within the grace period";
+  /** Just short of the grace period after the background work ends. */
+  const almostGrace = Duration.subtract(BACKGROUND_TURN_GRACE, Duration.seconds(1));
+  /** Returns whether each `SessionFinished` in `events` reports a passed wait limit. */
+  const limitsPassed = (events: ReadonlyArray<{ readonly _tag: string }>) =>
+    events.flatMap((event) =>
+      event._tag === "SessionFinished" && Predicate.hasProperty(event, "backgroundWaitLimitPassed")
+        ? [event.backgroundWaitLimitPassed]
+        : [],
+    );
+
+  it.effect.each([
+    { limit: Option.none<number>(), label: "no limit", returnsAfter: BACKGROUND_TURN_GRACE },
+    {
+      limit: Option.some(2),
+      label: "a two-minute limit",
+      returnsAfter: Duration.min(BACKGROUND_TURN_GRACE, Duration.minutes(2)),
+    },
+  ])(
+    "returns the answer once its background work ends and no turn starts in time ($label)",
+    ({ limit, returnsAfter }) =>
+      Effect.gen(function* () {
+        const session = yield* conversation(child("work-ended"), {}, limit);
+        yield* session.reportBackground(Option.some([ciWatch]));
+        yield* session.finish("Waiting for CI");
+        yield* session.reportBackground(nothingRuns);
+        yield* TestClock.adjust(Duration.subtract(returnsAfter, Duration.seconds(1)));
+        assert.isUndefined(session.result.pollUnsafe(), "the session waits for a turn");
+        yield* TestClock.adjust("1 second");
+        assert.strictEqual((yield* Fiber.join(session.result)).message, "Waiting for CI");
+        const events = yield* session.events;
+        assert.deepStrictEqual(
+          limitsPassed(events),
+          [false],
+          "the work ended before the limit, so no limit passed",
+        );
+      }),
+  );
+
+  it.effect("keeps waiting for a turn that starts within the grace period", () => {
+    const logs = capturedLogs();
+    return Effect.gen(function* () {
+      const session = yield* conversation(child("notification-turn"));
+      yield* session.reportBackground(Option.some([ciWatch]));
+      yield* session.finish("Waiting for CI");
+      yield* session.reportBackground(nothingRuns);
+      yield* TestClock.adjust(almostGrace);
+      yield* session.turnStarted;
+      assert.isTrue(
+        logged(logs, "Session cancelled the return of its answer after its background work ended"),
+        "the turn cancels the return",
+      );
+      yield* TestClock.adjust("10 hours");
+      assert.isUndefined(session.result.pollUnsafe(), "the turn keeps the session open");
+      yield* session.finish("CI passed");
+      assert.strictEqual((yield* Fiber.join(session.result)).message, "CI passed");
+    }).pipe(Effect.provide(logs.layer));
+  });
+
+  it.effect("waits for the work that a turn within the grace period starts", () =>
+    Effect.gen(function* () {
+      const session = yield* conversation(child("notification-turn-work"));
+      yield* session.reportBackground(Option.some([ciWatch]));
+      yield* session.finish("Waiting for CI");
+      yield* session.reportBackground(nothingRuns);
+      yield* TestClock.adjust("1 minute");
+      yield* session.turnStarted;
+      yield* session.reportBackground(Option.some([lint]));
+      yield* session.finish("Waiting for lint");
+      yield* TestClock.adjust("10 hours");
+      assert.isUndefined(session.result.pollUnsafe(), "the turn's answer waits for its own work");
+      yield* session.reportBackground(nothingRuns);
+      yield* TestClock.adjust(almostGrace);
+      assert.isUndefined(session.result.pollUnsafe(), "the turn's work has its own grace period");
+      yield* TestClock.adjust("1 second");
+      assert.strictEqual((yield* Fiber.join(session.result)).message, "Waiting for lint");
+    }),
+  );
+
+  it.effect("drops the earlier answer when a turn starts within the grace period", () => {
+    const logs = capturedLogs();
+    return Effect.gen(function* () {
+      const session = yield* conversation(child("notification-turn-answer"));
+      yield* session.reportBackground(Option.some([ciWatch]));
+      yield* session.finish("Waiting for CI");
+      yield* session.reportBackground(nothingRuns);
+      yield* TestClock.adjust("1 minute");
+      yield* session.turnStarted;
+      yield* session.reportBackground(Option.some([lint]));
+      yield* session.reportBackground(nothingRuns);
+      assert.strictEqual(
+        loggedTimes(logs, graceStarted),
+        1,
+        "work that ends before the turn answers starts no grace period",
+      );
+      yield* TestClock.adjust("10 hours");
+      assert.isUndefined(
+        session.result.pollUnsafe(),
+        "the turn that started keeps the session open",
+      );
+      yield* session.finish("CI passed");
+      assert.strictEqual((yield* Fiber.join(session.result)).message, "CI passed");
+    }).pipe(Effect.provide(logs.layer));
+  });
+
+  it.effect("keeps waiting when its background work runs again within the grace period", () =>
+    Effect.gen(function* () {
+      const session = yield* conversation(child("work-again"));
+      yield* session.reportBackground(Option.some([ciWatch]));
+      yield* session.finish("Waiting for CI");
+      yield* session.reportBackground(nothingRuns);
+      yield* TestClock.adjust(almostGrace);
+      yield* session.reportBackground(Option.some([ciWatch]));
+      yield* TestClock.adjust("10 hours");
+      assert.isUndefined(session.result.pollUnsafe(), "the work that runs again keeps the wait");
+      yield* session.reportBackground(nothingRuns);
+      yield* TestClock.adjust(almostGrace);
+      assert.isUndefined(session.result.pollUnsafe(), "each end of the work has a grace period");
+      yield* TestClock.adjust("1 second");
+      assert.strictEqual((yield* Fiber.join(session.result)).message, "Waiting for CI");
+    }),
+  );
+
+  it.effect.each(["Hold", "pause"] as const)(
+    "keeps the answer, without an idle report, when its background work ends under a %s",
+    (supervision) => {
+      const logs = capturedLogs();
+      return Effect.gen(function* () {
+        const session = yield* conversation(child(`work-ended-${supervision}`), {
+          held: supervision === "Hold",
+        });
+        if (supervision === "pause") yield* session.intervene(Interrupt.make(), noDelivery);
+        yield* session.reportBackground(Option.some([ciWatch]));
+        yield* session.finish("Waiting for CI");
+        yield* session.reportBackground(nothingRuns);
+        yield* TestClock.adjust(BACKGROUND_TURN_GRACE);
+        while (!logged(logs, "the operator's Hold or pause keeps its answer until a Release"))
+          yield* Effect.yieldNow;
+        assert.isUndefined(session.result.pollUnsafe());
+        const emitted = yield* session.emitted;
+        assert.notInclude(emitted, "SessionIdle");
+        // A repeated `initialize` sends the empty snapshot again.
+        yield* session.reportBackground(nothingRuns);
+        assert.strictEqual(
+          loggedTimes(logs, graceStarted),
+          1,
+          "a kept answer starts no grace period",
+        );
+        yield* session.intervene(Release.make(), noDelivery);
+        if (supervision === "pause") {
+          yield* TestClock.adjust("10 hours");
+          assert.isUndefined(session.result.pollUnsafe(), "a Release doesn't end a paused session");
+          return;
+        }
+        assert.strictEqual((yield* Fiber.join(session.result)).message, "Waiting for CI");
+        const events = yield* session.events;
+        assert.deepStrictEqual(limitsPassed(events), [false]);
+      }).pipe(Effect.provide(logs.layer));
+    },
+  );
+
+  it.effect("cancels the grace period when the harness process restarts", () =>
+    Effect.gen(function* () {
+      const session = yield* conversation(child("restarted"));
+      yield* session.reportBackground(Option.some([ciWatch]));
+      yield* session.finish("Waiting for CI");
+      yield* session.reportBackground(nothingRuns);
+      yield* session.processRestarted;
+      yield* TestClock.adjust("10 hours");
+      assert.isUndefined(session.result.pollUnsafe(), "the recovery decides what the session does");
+    }),
+  );
+
+  it.effect("keeps the grace period of the first snapshot that lists no work", () =>
+    Effect.gen(function* () {
+      const session = yield* conversation(child("work-ended-twice"));
+      yield* session.reportBackground(Option.some([ciWatch]));
+      yield* session.finish("Waiting for CI");
+      yield* session.reportBackground(nothingRuns);
+      yield* TestClock.adjust("1 minute");
+      // A repeated `initialize` sends the empty snapshot again.
+      yield* session.reportBackground(nothingRuns);
+      yield* TestClock.adjust(Duration.subtract(almostGrace, Duration.minutes(1)));
+      assert.isUndefined(session.result.pollUnsafe(), "the session waits for a turn");
+      yield* TestClock.adjust("1 second");
+      assert.isDefined(
+        session.result.pollUnsafe(),
+        "the grace period runs from the first snapshot that lists no work",
+      );
+      assert.strictEqual((yield* Fiber.join(session.result)).message, "Waiting for CI");
+    }),
+  );
+
+  /**
+   * Starts a conversation whose harness takes a steer only after `unlock`. `lock` sends a steer,
+   * which holds the conversation's lock until then.
+   */
+  const lockedBySteer = (id: string) =>
+    Effect.gen(function* () {
+      const session = child(id);
+      const channel = yield* sessionChannel({ sessionId: session.id, label: "Conversation test" });
+      const sending = yield* Deferred.make<void>();
+      const sent = yield* Deferred.make<void>();
+      const controls = yield* sessionConversation({
+        session,
+        channel,
+        policy: policyOf(RestartState.make({})),
+        decode: testReceipts,
+        send: () =>
+          Deferred.succeed(sending, undefined).pipe(
+            Effect.andThen(Deferred.await(sent)),
+            Effect.as("read" as const),
+          ),
+        pause: Effect.void,
+        beforeFinish: Effect.void,
+        maxBackgroundWaitMinutes: Option.none(),
+      });
+      const lock = controls
+        .intervene(Steer.make({ message: "Check the logs too." }), noDelivery)
+        .pipe(
+          Effect.forkChild,
+          Effect.tap(() => Deferred.await(sending)),
+        );
+      return { channel, controls, lock, unlock: Deferred.succeed(sent, undefined) };
+    });
+
+  it.effect("applies a snapshot after an answer that waits for the lock before it", () =>
+    Effect.gen(function* () {
+      const { channel, controls, lock, unlock } = yield* lockedBySteer("snapshot-order");
+      const steer = yield* lock;
+      const answer = yield* controls
+        .finish("Done")
+        .pipe(Effect.forkChild({ startImmediately: true }));
+      const snapshot = yield* controls
+        .reportBackground(Option.some([ciWatch]))
+        .pipe(Effect.forkChild({ startImmediately: true }));
+      yield* unlock;
+      yield* Fiber.join(steer);
+      yield* Fiber.join(answer);
+      yield* Fiber.join(snapshot);
+      assert.strictEqual(
+        (yield* Deferred.await(channel.result)).message,
+        "Done",
+        "the answer came before the work, so it doesn't wait for it",
+      );
+    }),
+  );
+
+  it.effect("applies a process restart after an answer that waits for the lock before it", () =>
+    Effect.gen(function* () {
+      const { channel, controls, lock, unlock } = yield* lockedBySteer("restart-order");
+      yield* controls.reportBackground(Option.some([ciWatch]));
+      const steer = yield* lock;
+      const answer = yield* controls
+        .finish("Done")
+        .pipe(Effect.forkChild({ startImmediately: true }));
+      const restart = yield* controls.processRestarted.pipe(
+        Effect.forkChild({ startImmediately: true }),
+      );
+      yield* unlock;
+      yield* Fiber.join(steer);
+      yield* Fiber.join(answer);
+      yield* Fiber.join(restart);
+      yield* TestClock.adjust("10 hours");
+      const returned = yield* Deferred.isDone(channel.result);
+      assert.isFalse(
+        returned,
+        "the answer waits for the listed work, and the restart leaves it to the recovery",
+      );
+    }),
+  );
+});
+
+describe("own inputs", () => {
+  it.effect("drops the own inputs at a turn end that waits for the lock during a save", () =>
+    Effect.gen(function* () {
+      const session = child("turn-end-order");
+      const channel = yield* sessionChannel({ sessionId: session.id, label: "Conversation test" });
+      const saving = yield* Deferred.make<void>();
+      const saved = yield* Deferred.make<void>();
+      const policy = policyOf(RestartState.make({}));
+      const controls = yield* sessionConversation({
+        session,
+        channel,
+        // A save waits until `saved` completes.
+        policy: {
+          ...policy,
+          journal: ChildSessionJournal.of({
+            ...ChildSessionJournal.noop,
+            received: () =>
+              Deferred.succeed(saving, undefined).pipe(Effect.andThen(Deferred.await(saved))),
+          }),
+        },
+        decode: (receipt: Receipt) => [receipt],
+        send: () => Effect.succeed("queued" as const),
+        pause: Effect.void,
+        beforeFinish: Effect.void,
+        maxBackgroundWaitMinutes: Option.none(),
+      });
+      /** Signals that the harness recorded an input with `text` as native item `id`. */
+      const record = (text: string, id: string) =>
+        controls.observe(
+          Receipt.ByText({ text, at: "now", item: Option.some({ id, turn: "turn-1" }) }),
+        );
+      yield* controls.sendOwn("Do the task", () => Effect.void);
+      const other = yield* record("Look around first.", "item-1").pipe(Effect.forkChild);
+      yield* Deferred.await(saving);
+      const turnEnd = yield* controls.turnEnded.pipe(Effect.forkChild({ startImmediately: true }));
+      yield* Deferred.succeed(saved, undefined);
+      yield* Fiber.join(other);
+      yield* Fiber.join(turnEnd);
+      yield* controls.intervene(OperatorMessage.make({ message: "Do the task" }), noDelivery);
+      const { read } = yield* record("Do the task", "item-2");
+      assert.lengthOf(
+        read,
+        1,
+        "the turn end dropped the own input, so the record reads the message",
+      );
     }),
   );
 });

@@ -204,7 +204,8 @@ export class SessionFinished extends Schema.TaggedClass<
   session: AgentSession,
   /**
    * Whether the session returned its answer because its wait for background work passed the
-   * configured limit. Cleanup then salvages the Attempt's checkout even after a success.
+   * configured limit while the work still ran. Cleanup then salvages the Attempt's checkout even
+   * after a success. An answer whose work ended without starting a turn returns without it.
    */
   backgroundWaitLimitPassed: Schema.Boolean.pipe(
     Schema.withDecodingDefaultKey(Effect.succeed(false)),
@@ -260,9 +261,10 @@ export class BackgroundWork extends Schema.Class<
 
 /**
  * A snapshot of the session's background work, which replaces the previous one. An empty `work`
- * means that nothing runs. `None` means that the harness doesn't report it, for example after its
- * process restarted, so it doesn't mean that nothing runs. A session without this event hasn't
- * reported its background work.
+ * means that nothing runs: a session that answered while its work ran returns that answer if no
+ * turn starts within a grace period. `None` means that the harness doesn't report it, for example
+ * after its process restarted, so it doesn't mean that nothing runs. A session without this event
+ * hasn't reported its background work.
  */
 export class BackgroundWorkUpdated extends Schema.TaggedClass<
   BackgroundWorkUpdated,

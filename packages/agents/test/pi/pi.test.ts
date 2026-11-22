@@ -513,6 +513,74 @@ describe("Pi child backend", () => {
     }),
   );
 
+  it.effect("reads a steer that repeats a task that its turn never started", () =>
+    Effect.gen(function* () {
+      const listeners: Array<(event: PiSessionEvent) => void> = [];
+      const turns = yield* Queue.make<() => void>();
+      const idle = yield* Queue.make<void>();
+      const context = yield* Effect.context<never>();
+      const sdk = Layer.succeed(PiSdk)({
+        complete: noCompletion,
+        start: () =>
+          Promise.resolve({
+            _tag: "Started",
+            harnessSession: Option.none(),
+            model: childRequest.session.brain.model,
+            pool: apiKeys.id,
+            tools: childTools,
+            session: {
+              messages: [],
+              dispose: () => {},
+              abort: () => Promise.resolve(),
+              subscribe: (listener) => {
+                listeners.push(listener);
+                return () => {};
+              },
+              steer: () => Promise.resolve("queued" as const),
+              prompt: () =>
+                new Promise<void>((complete) => {
+                  Effect.runForkWith(context)(Queue.offer(turns, complete));
+                }),
+            },
+          }),
+      });
+      const echo = AttemptChannel.Steer.make({ message: childRequest.prompt });
+      const reads: Array<string> = [];
+      yield* Effect.gen(function* () {
+        const running = yield* (yield* ChildBackend).launch(
+          ChildRequest.make({ ...childRequest, held: true }),
+        );
+        yield* Effect.forkScoped(
+          running.events.pipe(
+            Stream.runForEach((event) =>
+              event._tag === "SessionIdle" ? Queue.offer(idle, undefined) : Effect.void,
+            ),
+          ),
+        );
+        // The task's turn ends before Pi starts the task's message.
+        (yield* Queue.take(turns))();
+        yield* Queue.take(idle);
+        yield* running.intervene(
+          AttemptChannel.OperatorMessage.make({ message: "Now fix the edge case" }),
+          noDelivery,
+        );
+        yield* Queue.take(turns);
+        yield* running.intervene(echo, (delivered) =>
+          Effect.sync(() => {
+            reads.push(`${Option.isSome(delivered) ? "read" : "unread"} ${echo.id}`);
+          }),
+        );
+        const message: PiMessage = { role: "user", content: echo.message, timestamp: 0 };
+        for (const listener of listeners) listener({ type: "message_start", message });
+        for (let spin = 0; reads.length === 0; spin += 1) {
+          if (spin > 1_000) return assert.fail("the read was never reported");
+          yield* Effect.yieldNow;
+        }
+      }).pipe(Effect.scoped, Effect.provide(piChild.pipe(Layer.provideMerge(sdk))));
+      assert.deepStrictEqual(reads, [`read ${echo.id}`]);
+    }),
+  );
+
   it.effect("reports one read for a Pi message start that arrives twice", () =>
     Effect.gen(function* () {
       const listeners: Array<(event: PiSessionEvent) => void> = [];

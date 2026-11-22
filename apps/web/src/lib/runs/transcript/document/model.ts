@@ -337,6 +337,8 @@ const chapterRows = (
   const retrying = new Map<string, number>();
   /** The row index of each session's latest background work snapshot, by session ID. */
   const snapshots = new Map<string, number>();
+  /** The latest snapshot note of each session that reported during the open burst, in order. */
+  let afterBurst: Array<{ readonly sessionId: string; readonly row: NoteRow }> = [];
   const flush = () => {
     const [first, ...rest] = burst;
     if (first !== undefined && burstSpeaker !== null)
@@ -348,6 +350,11 @@ const chapterRows = (
       });
     burst = [];
     burstSpeaker = null;
+    for (const { sessionId, row } of afterBurst) {
+      snapshots.set(sessionId, rows.length);
+      rows.push(row);
+    }
+    afterBurst = [];
   };
   for (const { entry, session } of entries) {
     if (entry._tag === "Tool") {
@@ -449,6 +456,30 @@ const chapterRows = (
     if (origin._tag === "Background") {
       const speaker = session ?? { name: origin.session.agent, sessionKey: null };
       const snapshot = origin.event._tag === "BackgroundWorkUpdated";
+      const note: NoteRow = {
+        _tag: "Note",
+        ...at,
+        speaker,
+        text: entry.detail,
+        tone: entry.tone,
+        connectivity: null,
+      };
+      // A snapshot during a run of tool calls follows the run, so the run stays one group.
+      if (snapshot && burst.length > 0) {
+        const sessionId = origin.session.id;
+        const earlier = afterBurst.find((pending) => pending.sessionId === sessionId);
+        afterBurst = [
+          ...afterBurst.filter((pending) => pending !== earlier),
+          {
+            sessionId,
+            row:
+              earlier === undefined
+                ? note
+                : { ...earlier.row, latestSequence: entry.latestSequence, text: entry.detail },
+          },
+        ];
+        continue;
+      }
       flush();
       const latest = snapshots.get(origin.session.id);
       const folded = latest === undefined ? undefined : rows[latest];
@@ -458,14 +489,7 @@ const chapterRows = (
         continue;
       }
       if (snapshot) snapshots.set(origin.session.id, rows.length);
-      rows.push({
-        _tag: "Note",
-        ...at,
-        speaker,
-        text: entry.detail,
-        tone: entry.tone,
-        connectivity: null,
-      });
+      rows.push(note);
       continue;
     }
     if (origin._tag === "Envelope" && origin.payload._tag === "Started") {

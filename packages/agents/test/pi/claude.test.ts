@@ -27,6 +27,7 @@ import {
   Cause,
   DateTime,
   Deferred,
+  Duration,
   Effect,
   Exit,
   Fiber,
@@ -75,6 +76,7 @@ import {
   type ClaudeQuery,
   type ClaudeQueryOptions,
 } from "../../src/harness/claude/claude.ts";
+import { BACKGROUND_TURN_GRACE } from "../../src/harness/conversation.ts";
 
 /** A single login lock for all Workers, since each test launches its children on one Worker. */
 const loginLock = Layer.effect(
@@ -2304,41 +2306,6 @@ describe("Claude child backend", () => {
     },
   );
 
-  it.effect(
-    "does not return a saved waiting answer when background work ends without another result",
-    () => {
-      const sdk = Layer.succeed(ClaudeSdk)({
-        open: () =>
-          scripted([
-            { type: "system", subtype: "session_state_changed", state: "running" },
-            {
-              type: "system",
-              subtype: "background_tasks_changed",
-              tasks: [{ task_id: "gate", task_type: "local_bash", description: "Run gate" }],
-            },
-            {
-              type: "result",
-              subtype: "success",
-              result: "Waiting for gate",
-              queued_turn_count: 0,
-            },
-            { type: "system", subtype: "session_state_changed", state: "idle" },
-            { type: "system", subtype: "background_tasks_changed", tasks: [] },
-            { type: "system", subtype: "session_state_changed", state: "idle" },
-          ]),
-      });
-      return Effect.scoped(
-        Effect.gen(function* () {
-          const session = yield* (yield* ChildBackend).launch(request());
-          const error = yield* Effect.flip(session.result);
-          const matchesError = Schema.is(SessionOperationError)(error);
-          assert(matchesError);
-          assert.strictEqual(error.operation, "stream");
-        }).pipe(Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk)))),
-      );
-    },
-  );
-
   describe("after an answer while background work runs", () => {
     const gate = {
       type: "system",
@@ -2364,17 +2331,20 @@ describe("Claude child backend", () => {
     const snapshots = (lines: ReadonlyArray<string>) =>
       lines.filter((line) => line.includes("Session reported its background work")).length;
     /**
-     * Frames that Claude Code sends while the child waits, none of which starts a turn: the end of
-     * its background task, a rate-limit event, and, with session state, another `idle` report. The
-     * last snapshot shows that the child read every frame.
+     * Frames that Claude Code sends while the child waits, none of which starts a turn or ends the
+     * background work: a snapshot with another task, a rate-limit event, and, with session state,
+     * another `idle` report. The last snapshot shows that the child read every frame.
      */
     const quietFrames = (sessionState: boolean): ReadonlyArray<Schema.Json> => [
-      { type: "system", subtype: "background_tasks_changed", tasks: [] },
+      {
+        ...gate,
+        tasks: [...gate.tasks, { task_id: "lint", task_type: "local_bash", description: "Lint" }],
+      },
       rateLimitEvent,
       ...(sessionState
         ? [{ type: "system", subtype: "session_state_changed", state: "idle" }]
         : []),
-      { type: "system", subtype: "background_tasks_changed", tasks: [] },
+      gate,
     ];
 
     const isTaskSnapshot = (frame: Schema.Json) =>
@@ -2386,6 +2356,9 @@ describe("Claude child backend", () => {
           line.includes("Session cancelled the wait limit for its background work") &&
           line.includes(`"reason":"${reason}"`),
       );
+    /** Whether a turn that started dropped the answer that the session kept for a Release. */
+    const dropped = (lines: ReadonlyArray<string>) =>
+      lines.some((line) => line.includes("The session started a turn; dropping"));
 
     it.effect.each([
       {
@@ -2487,10 +2460,7 @@ describe("Claude child backend", () => {
             line.includes("outlasted the wait limit"),
           );
           assert.strictEqual(logs.lineLevels[outlasted], "Warn", "the limit logs a warning");
-          assert.include(
-            logs.lines[outlasted],
-            quiet.length === 0 ? '"backgroundWorkIds":["ci-watch"]' : '"backgroundWorkIds":[]',
-          );
+          assert.include(logs.lines[outlasted], '"backgroundWorkIds":["ci-watch"]');
           assert.include(logs.lines[outlasted], '"limit":"2m"');
           assert.isFalse(
             cancelled(logs.lines, "turn started"),
@@ -2568,6 +2538,94 @@ describe("Claude child backend", () => {
         }),
     );
 
+    const workEnded = (lines: ReadonlyArray<string>) =>
+      lines.some((line) =>
+        line.includes(
+          "Session's background work ended; it returns its answer unless a turn starts",
+        ),
+      );
+    const answeredWithWork = [
+      { type: "system", subtype: "session_state_changed", state: "running" },
+      gate,
+      answered("Waiting for CI"),
+      { type: "system", subtype: "session_state_changed", state: "idle" },
+    ];
+
+    it.effect("returns the answer when its background work ends and no turn starts in time", () =>
+      Effect.gen(function* () {
+        const { output, sdk } = yield* openOutput(answeredWithWork);
+        const logs = infoLines();
+        yield* Effect.gen(function* () {
+          const session = yield* (yield* ChildBackend).launch(request());
+          const result = yield* Effect.forkChild(session.result);
+          const events = yield* Effect.forkChild(Stream.runCollect(session.events));
+          while (!waiting(logs.lines)) yield* Effect.yieldNow;
+          // The task ends without a notification turn, and the next idle report has no answer.
+          yield* Queue.offerAll(output, [
+            { type: "system", subtype: "background_tasks_changed", tasks: [] },
+            { type: "system", subtype: "session_state_changed", state: "idle" },
+            rateLimitEvent,
+          ]);
+          while (!workEnded(logs.lines)) yield* Effect.yieldNow;
+          yield* TestClock.adjust(Duration.subtract(BACKGROUND_TURN_GRACE, Duration.seconds(1)));
+          assert.isUndefined(result.pollUnsafe(), "the child waits through the grace period");
+          yield* TestClock.adjust("1 second");
+          assert.strictEqual((yield* Fiber.join(result)).message, "Waiting for CI");
+          assert.deepStrictEqual(
+            [...(yield* Fiber.join(events))].flatMap((event) =>
+              event._tag === "SessionFinished" ? [event.backgroundWaitLimitPassed] : [],
+            ),
+            [false],
+            "the work ended, so no limit passed",
+          );
+        }).pipe(
+          Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk), Layer.provideMerge(logs.layer))),
+          Effect.scoped,
+        );
+      }),
+    );
+
+    it.effect("waits for a notification turn that starts within the grace period", () =>
+      Effect.gen(function* () {
+        const { output, sdk } = yield* openOutput(answeredWithWork);
+        const logs = infoLines();
+        yield* Effect.gen(function* () {
+          const session = yield* (yield* ChildBackend).launch(request());
+          const result = yield* Effect.forkChild(session.result);
+          while (!waiting(logs.lines)) yield* Effect.yieldNow;
+          yield* Queue.offer(output, {
+            type: "system",
+            subtype: "background_tasks_changed",
+            tasks: [],
+          });
+          while (!workEnded(logs.lines)) yield* Effect.yieldNow;
+          yield* TestClock.adjust(Duration.subtract(BACKGROUND_TURN_GRACE, Duration.seconds(1)));
+          yield* Queue.offerAll(output, [
+            { type: "system", subtype: "session_state_changed", state: "running" },
+            { type: "assistant", message: { content: [{ type: "text", text: "CI passed" }] } },
+          ]);
+          while (
+            !logs.lines.some((line) =>
+              line.includes(
+                "Session cancelled the return of its answer after its background work ended",
+              ),
+            )
+          )
+            yield* Effect.yieldNow;
+          yield* TestClock.adjust("10 hours");
+          assert.isUndefined(result.pollUnsafe(), "the notification turn keeps the child open");
+          yield* Queue.offerAll(output, [
+            answered("CI passed"),
+            { type: "system", subtype: "session_state_changed", state: "idle" },
+          ]);
+          assert.strictEqual((yield* Fiber.join(result)).message, "CI passed");
+        }).pipe(
+          Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk), Layer.provideMerge(logs.layer))),
+          Effect.scoped,
+        );
+      }),
+    );
+
     it.effect("keeps a held child open past the limit until its notification turn answers", () =>
       Effect.gen(function* () {
         const { output, sdk } = yield* openOutput([
@@ -2595,7 +2653,10 @@ describe("Claude child backend", () => {
           const outlasted = logs.lines.findIndex((line) =>
             line.includes("outlasted the wait limit"),
           );
-          assert.include(logs.lines[outlasted], "the operator's Hold or pause keeps it open");
+          assert.include(
+            logs.lines[outlasted],
+            "the operator's Hold or pause keeps its answer until a Release",
+          );
           assert.strictEqual(logs.lineLevels[outlasted], "Info");
           assert.notInclude(events, "SessionIdle", "the limit does not report a held child idle");
           yield* Queue.offerAll(output, [
@@ -2603,7 +2664,7 @@ describe("Claude child backend", () => {
             { type: "system", subtype: "session_state_changed", state: "running" },
             { type: "assistant", message: { content: [{ type: "text", text: "CI finished" }] } },
           ]);
-          while (!cancelled(logs.lines, "turn started")) yield* Effect.yieldNow;
+          while (!dropped(logs.lines)) yield* Effect.yieldNow;
           yield* running.intervene(Release.make(), noDelivery);
           yield* TestClock.adjust("5 minutes");
           assert.isUndefined(result.pollUnsafe(), "a Release does not end the running turn");
@@ -2620,7 +2681,9 @@ describe("Claude child backend", () => {
     );
 
     const supervisedLimit = (lines: ReadonlyArray<string>) =>
-      lines.some((line) => line.includes("the operator's Hold or pause keeps it open"));
+      lines.some((line) =>
+        line.includes("outlasted the wait limit; the operator's Hold or pause keeps its answer"),
+      );
 
     it.effect.each([
       {
@@ -2659,11 +2722,11 @@ describe("Claude child backend", () => {
             assert.isTrue(
               logs.lines.some((line) =>
                 line.includes(
-                  "The operator released a session whose wait limit passed; returning its answer",
+                  "The operator released the session; returning the answer whose wait limit passed",
                 ),
               ),
             );
-            assert.isFalse(cancelled(logs.lines, "turn started"), "no turn started");
+            assert.isFalse(dropped(logs.lines), "no turn started");
             const finished = [...(yield* Fiber.join(events))].filter(
               (event) => event._tag === "SessionFinished",
             );
@@ -2750,7 +2813,9 @@ describe("Claude child backend", () => {
           yield* running.intervene(OperatorMessage.make({ message: "Is CI done?" }), noDelivery);
           assert.isTrue(
             logs.lines.some((line) =>
-              line.includes("The operator's input starts a turn; dropping the overdue answer"),
+              line.includes(
+                "The operator's input starts a turn; dropping the answer whose wait limit passed",
+              ),
             ),
           );
           // The Release lands before Claude's first frame of the message's turn.

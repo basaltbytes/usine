@@ -197,6 +197,8 @@ const sessionEntries = (
 ): ReadonlyArray<TranscriptEntry> => {
   const entries: Array<TranscriptNotice> = [];
   const tools = new Map<string, TranscriptTool>();
+  /** Whether the session reported a snapshot of its background work before this event. */
+  let snapshotSeen = false;
   for (const record of group.events) {
     const event = record.event;
     const at = { ...record, attemptId: group.attemptId };
@@ -249,6 +251,12 @@ const sessionEntries = (
         ),
       );
       continue;
+    }
+    if (event._tag === "BackgroundWorkUpdated") {
+      const first = !snapshotSeen;
+      snapshotSeen = true;
+      // A first snapshot in which nothing runs ends no work that the transcript showed.
+      if (first && Option.exists(event.work, (running) => running.length === 0)) continue;
     }
     if (
       event._tag === "BackgroundWorkUpdated" ||
