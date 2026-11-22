@@ -16,6 +16,7 @@ type Route = (request: IncomingMessage, response: ServerResponse) => void;
  *
  * - `ready` starts at once.
  * - `slow` reports its URL and then registers event subscriptions after a delay.
+ * - `long-line` writes a line longer than the bridge's 4 MiB line limit before its ready line.
  * - `foreign-url` reports a URL on a host that isn't a loopback address before its own.
  * - `exit-before-ready` fails before its ready line.
  * - `no-events` accepts the event subscription and sends no event.
@@ -30,6 +31,8 @@ const password = process.env.OPENCODE_PASSWORD;
 // Like `serve --stdio`, which keeps the password from the commands it runs.
 delete process.env.OPENCODE_PASSWORD;
 const SLOW_MS = 300;
+/** Text one byte longer than the bridge's 4 MiB line limit. */
+const LARGE_TEXT = "x".repeat(4 * 1024 ** 2 + 1);
 
 const subscribers = new Set<ServerResponse>();
 const held = new Set<ServerResponse>();
@@ -97,6 +100,12 @@ const routes = new Map<string, Route>(
     "GET /api/empty": (_request, response) => {
       response.writeHead(204);
       response.end();
+    },
+    "GET /api/large": (_request, response) => json(response, 200, { text: LARGE_TEXT }),
+    "POST /api/large-event": (_request, response) => {
+      emit({ type: "large", data: { text: LARGE_TEXT } });
+      emit({ type: "after.large", data: {} });
+      json(response, 200, {});
     },
     "GET /api/text": (_request, response) => {
       response.writeHead(502, { "content-type": "text/plain" });
@@ -168,6 +177,7 @@ server.listen(0, "127.0.0.1", () => {
   const { port } = server.address() as AddressInfo;
   const ready = () => {
     process.stdout.write("a line before the ready line\n");
+    if (scenario === "long-line") process.stdout.write(`${LARGE_TEXT}\n`);
     if (scenario === "foreign-url")
       process.stdout.write(`${JSON.stringify({ url: `http://192.0.2.1:${port}` })}\n`);
     process.stdout.write(`${JSON.stringify({ url: `http://127.0.0.1:${port}` })}\n`);

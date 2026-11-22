@@ -96,6 +96,8 @@ const start = (scenario: string, environment: Record<string, string> = {}, pream
   return { child, lines, stderr: () => stderr, exit, send };
 };
 
+/** The bridge's line limit, 4 MiB. */
+const LINE_LIMIT = 4 * 1024 ** 2;
 const eventually = (condition: () => boolean) =>
   expect.poll(condition, { timeout: 9000, interval: 20 }).toBe(true);
 const answerTo = (lines: ReadonlyArray<BridgeOutput>, id: number | string) =>
@@ -207,6 +209,88 @@ describe("OpenCode bridge", () => {
     bridge.send({ id: 2, method: "GET", path: "/api/empty" });
     await eventually(() => answerTo(bridge.lines, 2) !== undefined);
     expect(answerTo(bridge.lines, 2)).toEqual({ id: 2, status: 204, body: null });
+  });
+
+  it("answers a request line longer than 4 MiB with an error, and keeps running", async () => {
+    const bridge = start("ready");
+    await eventually(() => bridge.lines.length >= 1);
+    bridge.send({ id: 1, method: "POST", path: "/api/echo", body: { text: "x".repeat(LINE_LIMIT) } });
+    bridge.child.stdin.write(`${"x".repeat(LINE_LIMIT + 1)}\n`);
+    bridge.send({ id: 2, method: "GET", path: "/api/empty" });
+    await eventually(() => answerTo(bridge.lines, 2) !== undefined);
+    expect(answerTo(bridge.lines, 1)).toEqual({
+      id: 1,
+      error: "The request is longer than 4194304 bytes",
+    });
+    expect(answerTo(bridge.lines, 2)).toEqual({ id: 2, status: 204, body: null });
+    await eventually(() =>
+      bridge
+        .stderr()
+        .includes(
+          "opencode bridge: skipping an input line of 4194305 bytes that is longer than 4194304 bytes",
+        ),
+    );
+  });
+
+  it("refuses a request that would exceed the 4 MiB of requests held until ready", async () => {
+    const bridge = start("no-events");
+    const text = (mib: number) => "x".repeat(mib * 1024 ** 2);
+    bridge.send({ id: 1, method: "POST", path: "/api/echo", body: { text: text(3) } });
+    bridge.send({ id: 2, method: "POST", path: "/api/echo", body: { text: text(2) } });
+    bridge.send({ id: 3, method: "GET", path: "/api/empty" });
+    await eventually(() => answerTo(bridge.lines, 2) !== undefined);
+    expect(bridge.lines).toEqual([
+      {
+        id: 2,
+        error:
+          "The request would exceed the 4194304 bytes of requests that the bridge holds until OpenCode is ready",
+      },
+    ]);
+  });
+
+  it("answers a response too long for a line of 4 MiB with an error, and keeps running", async () => {
+    const bridge = start("ready");
+    await eventually(() => bridge.lines.length >= 1);
+    bridge.send({ id: 1, method: "GET", path: "/api/large" });
+    await eventually(() => answerTo(bridge.lines, 1) !== undefined);
+    expect(answerTo(bridge.lines, 1)).toEqual({
+      id: 1,
+      error: "OpenCode's response is too long for a line of 4194304 bytes",
+    });
+    bridge.send({ id: 2, method: "GET", path: "/api/empty" });
+    await eventually(() => answerTo(bridge.lines, 2) !== undefined);
+    expect(answerTo(bridge.lines, 2)).toEqual({ id: 2, status: 204, body: null });
+  });
+
+  it("logs and skips an event too long for a line of 4 MiB, and keeps running", async () => {
+    const bridge = start("ready");
+    await eventually(() => bridge.lines.length >= 2);
+    bridge.send({ id: 1, method: "POST", path: "/api/large-event" });
+    await eventually(() => eventTypes(bridge.lines).includes("after.large"));
+    expect(eventTypes(bridge.lines)).toEqual(["server.connected", "after.large"]);
+    const size = Buffer.byteLength(
+      JSON.stringify({ type: "large", data: { text: "x".repeat(LINE_LIMIT + 1) } }),
+    );
+    await eventually(() =>
+      bridge
+        .stderr()
+        .includes(
+          `opencode bridge: skipping an OpenCode event of ${size} bytes that is too long for a line of 4194304 bytes`,
+        ),
+    );
+  });
+
+  it("logs and skips a line of serve's output longer than 4 MiB", async () => {
+    const bridge = start("long-line");
+    await eventually(() => bridge.lines.length >= 1);
+    expect(bridge.lines[0]).toEqual({ ready: true });
+    await eventually(() =>
+      bridge
+        .stderr()
+        .includes(
+          "opencode bridge: skipping an OpenCode output line of 4194305 bytes that is longer than 4194304 bytes",
+        ),
+    );
   });
 
   it("reports an event stream that closes while serve runs, and exits with 1", async () => {
