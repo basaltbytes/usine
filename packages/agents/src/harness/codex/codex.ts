@@ -893,7 +893,7 @@ const makeCodexSessions = Effect.gen(function* () {
       events: Stream.fromQueue(channel.events),
       interrupt,
       result: Deferred.await(channel.result),
-      steer: (message: string, id?: OperatorMessageId) => steer(message, id).pipe(Effect.asVoid),
+      steer: (message: string) => steer(message).pipe(Effect.asVoid),
       intervene: conversation.intervene,
     } satisfies RunningSession;
     const { turnActive } = yield* Ref.get(state);

@@ -1075,10 +1075,10 @@ const makeClaudeSessions = Effect.gen(function* () {
     }).pipe(Effect.catch((error) => channel.fail(error)));
     yield* Effect.forkScoped(consume);
 
-    const steer = Effect.fn("ClaudeRuntime.steer")((message: string, id?: OperatorMessageId) =>
+    const steer = Effect.fn("ClaudeRuntime.steer")((message: string) =>
       Effect.logDebug("Steering Claude child session", {
         sessionId: session.id,
-      }).pipe(Effect.andThen(send(message, id)), Effect.asVoid),
+      }).pipe(Effect.andThen(send(message)), Effect.asVoid),
     );
     const interrupt = Effect.logInfo("Interrupting Claude child session", {
       sessionId: session.id,
