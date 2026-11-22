@@ -786,9 +786,33 @@ describe("background work", () => {
     }),
   );
 
-  it.effect("applies a snapshot after an answer that waits for the lock before it", () =>
+  it.effect("keeps the grace period of the first snapshot that lists no work", () =>
     Effect.gen(function* () {
-      const session = child("snapshot-order");
+      const session = yield* conversation(child("work-ended-twice"));
+      yield* session.reportBackground(Option.some([ciWatch]));
+      yield* session.finish("Waiting for CI");
+      yield* session.reportBackground(nothingRuns);
+      yield* TestClock.adjust("1 minute");
+      // A repeated `initialize` sends the empty snapshot again.
+      yield* session.reportBackground(nothingRuns);
+      yield* TestClock.adjust(Duration.subtract(almostGrace, Duration.minutes(1)));
+      assert.isUndefined(session.result.pollUnsafe(), "the session waits for a turn");
+      yield* TestClock.adjust("1 second");
+      assert.isDefined(
+        session.result.pollUnsafe(),
+        "the grace period runs from the first snapshot that lists no work",
+      );
+      assert.strictEqual((yield* Fiber.join(session.result)).message, "Waiting for CI");
+    }),
+  );
+
+  /**
+   * Starts a conversation whose harness takes a steer only after `unlock`. `lock` sends a steer,
+   * which holds the conversation's lock until then.
+   */
+  const lockedBySteer = (id: string) =>
+    Effect.gen(function* () {
+      const session = child(id);
       const channel = yield* sessionChannel({ sessionId: session.id, label: "Conversation test" });
       const sending = yield* Deferred.make<void>();
       const sent = yield* Deferred.make<void>();
@@ -806,18 +830,26 @@ describe("background work", () => {
         beforeFinish: Effect.void,
         maxBackgroundWaitMinutes: Option.none(),
       });
-      // A steer holds the lock while the harness takes it.
-      const steer = yield* controls
+      const lock = controls
         .intervene(Steer.make({ message: "Check the logs too." }), noDelivery)
-        .pipe(Effect.forkChild);
-      yield* Deferred.await(sending);
+        .pipe(
+          Effect.forkChild,
+          Effect.tap(() => Deferred.await(sending)),
+        );
+      return { channel, controls, lock, unlock: Deferred.succeed(sent, undefined) };
+    });
+
+  it.effect("applies a snapshot after an answer that waits for the lock before it", () =>
+    Effect.gen(function* () {
+      const { channel, controls, lock, unlock } = yield* lockedBySteer("snapshot-order");
+      const steer = yield* lock;
       const answer = yield* controls
         .finish("Done")
         .pipe(Effect.forkChild({ startImmediately: true }));
       const snapshot = yield* controls
         .reportBackground(Option.some([ciWatch]))
         .pipe(Effect.forkChild({ startImmediately: true }));
-      yield* Deferred.succeed(sent, undefined);
+      yield* unlock;
       yield* Fiber.join(steer);
       yield* Fiber.join(answer);
       yield* Fiber.join(snapshot);
@@ -825,6 +857,79 @@ describe("background work", () => {
         (yield* Deferred.await(channel.result)).message,
         "Done",
         "the answer came before the work, so it doesn't wait for it",
+      );
+    }),
+  );
+
+  it.effect("applies a process restart after an answer that waits for the lock before it", () =>
+    Effect.gen(function* () {
+      const { channel, controls, lock, unlock } = yield* lockedBySteer("restart-order");
+      yield* controls.reportBackground(Option.some([ciWatch]));
+      const steer = yield* lock;
+      const answer = yield* controls
+        .finish("Done")
+        .pipe(Effect.forkChild({ startImmediately: true }));
+      const restart = yield* controls.processRestarted.pipe(
+        Effect.forkChild({ startImmediately: true }),
+      );
+      yield* unlock;
+      yield* Fiber.join(steer);
+      yield* Fiber.join(answer);
+      yield* Fiber.join(restart);
+      yield* TestClock.adjust("10 hours");
+      const returned = yield* Deferred.isDone(channel.result);
+      assert.isFalse(
+        returned,
+        "the answer waits for the listed work, and the restart leaves it to the recovery",
+      );
+    }),
+  );
+});
+
+describe("own inputs", () => {
+  it.effect("drops the own inputs at a turn end that waits for the lock during a save", () =>
+    Effect.gen(function* () {
+      const session = child("turn-end-order");
+      const channel = yield* sessionChannel({ sessionId: session.id, label: "Conversation test" });
+      const saving = yield* Deferred.make<void>();
+      const saved = yield* Deferred.make<void>();
+      const policy = policyOf(RestartState.make({}));
+      const controls = yield* sessionConversation({
+        session,
+        channel,
+        // A save waits until `saved` completes.
+        policy: {
+          ...policy,
+          journal: ChildSessionJournal.of({
+            ...ChildSessionJournal.noop,
+            received: () =>
+              Deferred.succeed(saving, undefined).pipe(Effect.andThen(Deferred.await(saved))),
+          }),
+        },
+        decode: (receipt: Receipt) => [receipt],
+        send: () => Effect.succeed("queued" as const),
+        pause: Effect.void,
+        beforeFinish: Effect.void,
+        maxBackgroundWaitMinutes: Option.none(),
+      });
+      /** Signals that the harness recorded an input with `text` as native item `id`. */
+      const record = (text: string, id: string) =>
+        controls.observe(
+          Receipt.ByText({ text, at: "now", item: Option.some({ id, turn: "turn-1" }) }),
+        );
+      yield* controls.sendOwn("Do the task", () => Effect.void);
+      const other = yield* record("Look around first.", "item-1").pipe(Effect.forkChild);
+      yield* Deferred.await(saving);
+      const turnEnd = yield* controls.turnEnded.pipe(Effect.forkChild({ startImmediately: true }));
+      yield* Deferred.succeed(saved, undefined);
+      yield* Fiber.join(other);
+      yield* Fiber.join(turnEnd);
+      yield* controls.intervene(OperatorMessage.make({ message: "Do the task" }), noDelivery);
+      const { read } = yield* record("Do the task", "item-2");
+      assert.lengthOf(
+        read,
+        1,
+        "the turn end dropped the own input, so the record reads the message",
       );
     }),
   );
