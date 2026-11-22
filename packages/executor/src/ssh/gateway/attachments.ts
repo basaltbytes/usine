@@ -24,6 +24,7 @@ import {
   GH_GATEWAY_SOCKET_DIRECTORY,
   gatewayConfigFiles,
   gatewayEnvironment,
+  llmPrefixOf,
 } from "./environment.ts";
 
 /**
@@ -162,12 +163,35 @@ export const gatewayAttachmentsFor = Effect.fn("SshExecutor.gatewayAttachmentsFo
     const directories = configDirectories(catalog, machine, attemptId);
     const llmPrefixes = yield* Ref.get(gateway.llmPrefixes);
     yield* Effect.annotateCurrentSpan({ llmPrefixes });
+    const credentials = yield* Ref.get(gateway.credentials);
+    yield* Effect.forEach(Option.toArray(harness), (id) =>
+      Option.match(catalog.gatewayProvider(id, settings.llmProviders), {
+        onNone: () =>
+          Effect.logInfo(
+            "The harness calls no Gateway slot: the Gateway holds none of its providers, or the harness has no Gateway wiring",
+            { ...fields, harness: id },
+          ),
+        onSome: (provider) => {
+          const credential = credentials[provider.slot] ?? "unreported";
+          return Effect.annotateCurrentSpan({ harness: id, slot: provider.slot, credential }).pipe(
+            Effect.andThen(
+              Effect.logInfo("Wired the harness to a Gateway slot", {
+                ...fields,
+                harness: id,
+                slot: provider.slot,
+                prefix: llmPrefixOf(provider, llmPrefixes),
+                credential,
+              }),
+            ),
+          );
+        },
+      }),
+    );
     const homes = yield* Effect.forEach(
-      catalog.descriptors.filter(({ worker }) =>
-        Option.exists(
-          worker.credential,
-          ({ protocol, home }) => settings.llmProviders.includes(protocol) && Option.isSome(home),
-        ),
+      catalog.descriptors.filter(
+        ({ id, worker }) =>
+          Option.exists(worker.credential, ({ home }) => Option.isSome(home)) &&
+          catalog.gatewayHolds(id, settings.llmProviders),
       ),
       (descriptor) => holdAttemptHome(machine, attemptId, descriptor),
     );

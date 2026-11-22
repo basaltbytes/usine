@@ -8,6 +8,7 @@ import {
 import { visibleRepository, visibleLoop } from "../access.ts";
 import { AgentPersona, AgentName } from "@usine/core/agent";
 import { Effort, Harness, ModelId } from "@usine/core/agent/brain";
+import { GatewaySlot } from "@usine/core/agent/provider";
 import { CycleLimit } from "@usine/core/cycle-budget";
 import { LoopName, LoopPermissions, OutcomeLabels } from "@usine/core/loop";
 import { OperatorLogin } from "@usine/core/operator";
@@ -22,7 +23,6 @@ import {
   ContainerPids,
   GatewayAdminPort,
   GatewayDomain,
-  GatewayLlmProtocol,
   SshDestination,
   SshIdentityFile,
   SshPort,
@@ -192,7 +192,7 @@ export class GatewayView extends Schema.Class<
   /** The environment-variable name for the gateway admin token, never its value. */
   adminTokenEnv: Schema.NonEmptyString,
   /** The model providers whose credentials the gateway injects. */
-  llmProviders: Schema.Array(GatewayLlmProtocol),
+  llmProviders: Schema.Array(GatewaySlot),
 }) {}
 
 /** The current slot usage of a Worker. */

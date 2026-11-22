@@ -30,7 +30,6 @@ const sandboxAt = (root: string, imagePullTimeout?: Duration.Duration) =>
     route: Option.some(
       Effect.succeed({
         credential: () => Effect.succeedNone,
-        countTokens: () => Effect.die("the test counts no tokens"),
         request: () => Effect.die("the test calls no model"),
       }),
     ),

@@ -3,9 +3,15 @@ import {
   ProviderCredentialError,
   ProviderConnections,
 } from "../credentials/model.ts";
+import {
+  GatewaySlot,
+  type ModelProviderCatalog,
+  modelProviders,
+  RoutePattern,
+} from "@usine/core/agent/provider";
 import { RepositoryName } from "@usine/core/repository";
 import { GatewayCredentialKind, WorkerName } from "@usine/core/worker";
-import { type Brand, Option, Schema } from "effect";
+import { type Brand, Schema } from "effect";
 import {
   HttpApi,
   HttpApiEndpoint,
@@ -23,12 +29,7 @@ import {
   AttachmentId,
 } from "../attachment/attachment.ts";
 import { CallerToken } from "../caller/caller.ts";
-import {
-  credentialKind,
-  type LlmProvider,
-  LlmProviderName,
-  type LlmProviders,
-} from "../llm/llm.ts";
+import { credentialKind, type LlmProviders } from "../llm/llm.ts";
 
 export { AttachmentId, InstallationCredential } from "../attachment/attachment.ts";
 export { CALLER_CREDENTIAL_HEADERS, CallerToken, GATEWAY_TOKEN_HEADER } from "../caller/caller.ts";
@@ -113,15 +114,25 @@ export class LlmProviderSummary extends Schema.Class<
   LlmProviderSummary,
   Brand.Brand<"@usine/gateway/admin/api/LlmProviderSummary">
 >("@usine/gateway/LlmProviderSummary")({
-  /** The configured LLM provider identified by its gateway path prefix. */
-  provider: LlmProviderName,
+  /** The provider's slot, which is its path prefix on `llm.<domain>`. */
+  provider: GatewaySlot,
   /** Whether requests use an API key or a subscription credential. */
   credential: GatewayCredentialKind,
 }) {}
 
+/** A provider slot that the gateway serves, with or without a credential, and its routes. */
+export class ServedSlot extends Schema.Class<
+  ServedSlot,
+  Brand.Brand<"@usine/gateway/admin/api/ServedSlot">
+>("@usine/gateway/ServedSlot")({
+  slot: GatewaySlot,
+  /** The paths under the slot that the gateway forwards, in the provider's protocol order. */
+  routes: Schema.Array(RoutePattern),
+}) {}
+
 /**
- * The LLM providers the gateway forwards to, with each credential kind. Providers without a
- * credential aren't listed.
+ * The LLM providers the gateway forwards to, with each credential kind, and every slot that its
+ * provider catalog has. Providers without a credential aren't in `providers`.
  */
 export class LlmProviderList extends Schema.Class<
   LlmProviderList,
@@ -129,23 +140,19 @@ export class LlmProviderList extends Schema.Class<
 >("@usine/gateway/LlmProviderList")({
   /** Configured providers and credential kinds, excluding providers with no credential. */
   providers: Schema.Array(LlmProviderSummary),
+  /** Every slot the gateway serves, in catalog order. Gateways from before the provider catalog omit it. */
+  slots: Schema.optionalKey(Schema.Array(ServedSlot)),
 }) {
-  /** Lists configured providers in Anthropic, then OpenAI order, exposing only their credential kinds. */
-  static fromProviders({
-    "anthropic-messages": anthropic,
-    "openai-responses": openai,
-  }: LlmProviders): LlmProviderList {
-    const listed = (provider: LlmProviderName, configured: Option.Option<LlmProvider>) =>
-      Option.toArray(
-        Option.map(configured, (held) =>
-          LlmProviderSummary.make({ provider, credential: credentialKind(held) }),
-        ),
-      );
+  /** Lists configured providers in catalog order, exposing only their credential kinds, and every slot of `catalog`. */
+  static fromProviders(catalog: ModelProviderCatalog, providers: LlmProviders): LlmProviderList {
     return LlmProviderList.make({
-      providers: [
-        ...listed("anthropic-messages", anthropic),
-        ...listed("openai-responses", openai),
-      ],
+      providers: catalog.providers.flatMap(({ slot }) => {
+        const held = providers[slot];
+        return held === undefined
+          ? []
+          : [LlmProviderSummary.make({ provider: slot, credential: credentialKind(held) })];
+      }),
+      slots: catalog.providers.map(({ slot, routes }) => ServedSlot.make({ slot, routes })),
     });
   }
 }
@@ -208,7 +215,7 @@ export const GatewayAdminApi = HttpApi.make("GatewayAdminApi").add(
         error: ProviderCredentialError.annotate({ httpApiStatus: 503 }),
       }),
       HttpApiEndpoint.delete("disconnect", "/v1/provider-credentials/:provider", {
-        params: { provider: LlmProviderName },
+        params: { provider: modelProviders.slotFromName },
         success: Schema.Struct({ ok: Schema.Boolean }),
         error: ProviderCredentialError.annotate({ httpApiStatus: 503 }),
       }),

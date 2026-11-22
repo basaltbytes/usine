@@ -37,14 +37,13 @@ import { Attachments } from "../src/attachment/store.ts";
 import { CallerClaims, CallerTokens } from "../src/caller/caller.ts";
 import { ChatGptLogins } from "../src/chatgpt/logins.ts";
 import { gatewayServices } from "../src/gateway.ts";
-import { ChatGptLogin, HostFilePath, type LlmProviders, OpenAiProvider } from "../src/llm/llm.ts";
+import { ChatGptLogin, HostFilePath, LlmProvider, type LlmProviders } from "../src/llm/llm.ts";
 import { GatewayAddresses, gatewayLayer } from "../src/node/node.ts";
 import { GatewayProxy, REFUSAL_HEADER } from "../src/proxy/proxy.ts";
-import { UpstreamBase } from "../src/upstream.ts";
+import { openai, UpstreamBase } from "@usine/core/agent/provider";
 import {
   ATTACHMENT,
   CHATGPT_ACCOUNT,
-  NO_PROVIDERS,
   REPOSITORY,
   WORKER,
   authFileText,
@@ -533,10 +532,10 @@ describe("ChatGptLogins", () => {
 });
 
 const chatGptProviders = (login: ChatGptLogin): LlmProviders => ({
-  ...NO_PROVIDERS,
-  "openai-responses": Option.some(
-    OpenAiProvider.make({ upstream: UpstreamBase.make(BACKEND), credential: login }),
-  ),
+  [openai.slot]: LlmProvider.make({
+    upstream: Option.some(UpstreamBase.make(BACKEND)),
+    credential: login,
+  }),
 });
 
 const proxyFor = (login: ChatGptLogin) =>
@@ -724,13 +723,10 @@ describe("the Node gateway with a ChatGPT login", () => {
         open = finish;
       });
       const providers: LlmProviders = {
-        ...NO_PROVIDERS,
-        "openai-responses": Option.some(
-          OpenAiProvider.make({
-            upstream: UpstreamBase.make(`${backend.origin}/backend-api/codex`),
-            credential: login,
-          }),
-        ),
+        [openai.slot]: LlmProvider.make({
+          upstream: Option.some(UpstreamBase.make(`${backend.origin}/backend-api/codex`)),
+          credential: login,
+        }),
       };
       yield* Effect.gen(function* () {
         const caller = yield* attach;

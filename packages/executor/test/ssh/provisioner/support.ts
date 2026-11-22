@@ -1,3 +1,4 @@
+import { anthropic } from "@usine/core/agent/provider";
 import {
   BoxdRegion,
   BoxdSnapshotName,
@@ -29,7 +30,7 @@ export const hetznerSettings = (
   sshKey: HetznerResourceName.make("usine-orchestrator"),
   sshUser: SshUser.make("usine"),
   labels: { team: "platform" },
-  apiKeys: { anthropic: Option.none(), openai: Option.none() },
+  apiKeys: {},
   timings: ProvisionerTimings.make({}),
   reuse: Option.none(),
   ...overrides,
@@ -42,7 +43,7 @@ export const boatSettings = (overrides: Partial<BoatProvisioner> = {}): BoatProv
   size: "default",
   snapshot: Option.none(),
   tailnet: Option.none(),
-  apiKeys: { anthropic: Option.some(Redacted.make("sk-ant-api-for-tests")), openai: Option.none() },
+  apiKeys: { [anthropic.id]: Redacted.make("sk-ant-api-for-tests") },
   timings: ProvisionerTimings.make({}),
   reuse: Option.none(),
   ...overrides,
@@ -58,7 +59,7 @@ export const boxdSettings = (overrides: Partial<BoxdProvisioner> = {}): BoxdProv
   isolated: true,
   egress: Option.none(),
   tailnet: Option.none(),
-  apiKeys: { anthropic: Option.some(Redacted.make("sk-ant-api-for-tests")), openai: Option.none() },
+  apiKeys: { [anthropic.id]: Redacted.make("sk-ant-api-for-tests") },
   timings: ProvisionerTimings.make({}),
   ignoredReuse: Option.none(),
   ...overrides,

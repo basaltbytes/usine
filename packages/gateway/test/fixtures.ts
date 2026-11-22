@@ -8,6 +8,7 @@ import { DateTime, Effect, Layer, Option, Predicate, Redacted, Result, Schema } 
 import { Base64Url } from "effect/encoding";
 import { parseEgressAllowlist } from "../src/egress/egress.ts";
 import { GITHUB_ORIGINS, type GitHubOrigins } from "../src/github/github.ts";
+import { type ModelProviderCatalog, modelProviders } from "@usine/core/agent/provider";
 import type { LlmProviders } from "../src/llm/llm.ts";
 import { AdminToken, CallerKey, GatewaySettings, SettingsInForce } from "../src/settings.ts";
 
@@ -24,11 +25,15 @@ const CALLER_KEY_VALUE = "caller-key-for-tests-0123456789abcdef";
 /** The test allowlist; `localhost` is listed so tests can check that the private-address check refuses it. */
 const TEST_ALLOWLIST = ["registry.npmjs.org", "*.githubusercontent.com", "localhost"].join("\n");
 
-/** Returns test settings with the providers a test needs, and the same values in `SettingsInForce`. */
+/**
+ * Returns test settings with the providers a test needs, and the same values in `SettingsInForce`.
+ * The gateway serves the slots of `catalog`.
+ */
 export const settingsLayer = (
   providers: LlmProviders,
   callerKey: string = CALLER_KEY_VALUE,
   github: GitHubOrigins = GITHUB_ORIGINS,
+  catalog: ModelProviderCatalog = modelProviders,
 ) =>
   SettingsInForce.layer.pipe(
     Layer.provideMerge(NodeCrypto.layer),
@@ -39,6 +44,7 @@ export const settingsLayer = (
           return {
             domain: DOMAIN,
             github,
+            catalog,
             providers,
             egress: Result.getOrThrow(parseEgressAllowlist(TEST_ALLOWLIST)),
             adminToken: yield* Schema.decodeEffect(AdminToken)(ADMIN_TOKEN_VALUE),
@@ -49,10 +55,7 @@ export const settingsLayer = (
     ),
   );
 
-export const NO_PROVIDERS: LlmProviders = {
-  "anthropic-messages": Option.none(),
-  "openai-responses": Option.none(),
-};
+export const NO_PROVIDERS: LlmProviders = {};
 
 /** Returns an unsigned JWT with `claims`, which is all the Gateway reads of a ChatGPT token. */
 export const fakeJwt = (claims: Schema.Json) =>

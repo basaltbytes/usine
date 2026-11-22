@@ -1,7 +1,7 @@
 import { Harness } from "@usine/core/agent/brain";
 import type { PoolDescriptor } from "@usine/core/agent/pool";
+import { type GatewaySlot, ModelProvider, ModelProviderCatalog } from "@usine/core/agent/provider";
 import { type TokenBreakdown, UsdAmount } from "@usine/core/agent/session";
-import { GatewayLlmProtocol, GatewayLlmProvider } from "@usine/core/worker";
 import { Array as Arr, type Brand, Effect, Equal, Option, Record, Schema } from "effect";
 import { CapabilityProfile } from "./capability.ts";
 import { HarnessPool } from "./pool.ts";
@@ -67,25 +67,28 @@ export class CredentialWiring extends Schema.Class<
   }
 }
 
-/** A provider credential and the hosts used without a gateway credential. */
+/**
+ * How a harness on a worker reaches its providers: through a gateway slot, with an API key, or
+ * with a Cloudflare Worker's key, and the hosts of its own login.
+ */
 export class HarnessCredential extends Schema.Class<
   HarnessCredential,
   Brand.Brand<"@usine/agents/harness/HarnessCredential">
 >("@usine/agents/HarnessCredential")(
   Schema.Struct({
-    provider: GatewayLlmProvider,
-    protocol: GatewayLlmProtocol,
-    /** The base URL's path on the gateway's `llm.<domain>` host: the protocol, then an optional subpath. */
-    gatewayPath: Schema.NonEmptyString,
+    /** The base URL's path under the provider's slot or upstream, such as `/v1`, or empty. */
+    slotPath: Schema.String.check(
+      Schema.isPattern(/^(?:\/[A-Za-z0-9][A-Za-z0-9._~-]*)*$/u, {
+        message: "Expected an empty path or one such as /v1",
+      }),
+    ),
     /** None when credential wiring needs no attempt home. */
     home: Schema.Option(Schema.NonEmptyString),
     gateway: CredentialWiring,
     apiKey: CredentialWiring,
     cloudflare: CredentialWiring,
-    label: Schema.NonEmptyString,
+    /** The hosts of the harness's own login, which it reaches through the gateway's forward proxy. */
     hosts: Schema.Array(Schema.NonEmptyString),
-    apiHost: Schema.NonEmptyString,
-    apiKeyBaseUrl: Schema.NonEmptyString,
   }).check(
     Schema.makeFilter(
       ({ home, gateway, apiKey, cloudflare }) =>
@@ -93,14 +96,13 @@ export class HarnessCredential extends Schema.Class<
           !cloudflare.requiresHome) ||
         "Credential wiring requires an attempt home; Cloudflare wiring supports environment variables only",
     ),
-    Schema.makeFilter(
-      ({ protocol, gatewayPath }) =>
-        gatewayPath === protocol ||
-        gatewayPath.startsWith(`${protocol}/`) ||
-        "The gateway path starts with its protocol",
-    ),
   ),
-) {}
+) {
+  /** Returns the base URL that the API-key wiring gets for `provider`: its first upstream and `slotPath`. */
+  apiKeyBaseUrl(provider: ModelProvider): string {
+    return `${provider.protocols[0].upstream}${this.slotPath}`;
+  }
+}
 
 /** Worker installation and login requirements, without secret values. */
 export class WorkerRequirements extends Schema.Class<
@@ -146,42 +148,79 @@ const TokenRates = Schema.Struct({
   output: Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0)),
 });
 
-/** Platform-free harness data shared by configuration, workers, and operator reads. */
+/** The credential kind that determines each gateway credential route. */
+const GATEWAY_ROUTES = {
+  "gateway-api-key": "api-key",
+  "gateway-subscription": "subscription",
+} as const;
+
+/**
+ * Platform-free harness data shared by configuration, workers, and operator reads. A pool's
+ * gateway credential route needs a provider of the harness that accepts that kind of credential.
+ */
 export class HarnessDescriptor extends Schema.Class<
   HarnessDescriptor,
   Brand.Brand<"@usine/agents/harness/HarnessDescriptor">
->("@usine/agents/HarnessDescriptor")({
-  ...presentationFields,
-  worker: WorkerRequirements,
-  capabilities: Schema.NonEmptyArray(CapabilityProfile).check(
-    Schema.makeFilter(
-      (profiles) => {
-        const routes = profiles.flatMap(({ placements, credentials }) =>
-          placements.flatMap((placement) =>
-            credentials.map((credential) => `${placement}:${credential}`),
-          ),
-        );
-        return new Set(routes).size === routes.length;
-      },
-      { message: "Expected one capability profile per placement and credential route" },
+>("@usine/agents/HarnessDescriptor")(
+  Schema.Struct({
+    ...presentationFields,
+    worker: WorkerRequirements,
+    /** The model providers whose gateway slots the harness can use, in the order it prefers them. */
+    providers: Schema.Array(ModelProvider),
+    capabilities: Schema.NonEmptyArray(CapabilityProfile).check(
+      Schema.makeFilter(
+        (profiles) => {
+          const routes = profiles.flatMap(({ placements, credentials }) =>
+            placements.flatMap((placement) =>
+              credentials.map((credential) => `${placement}:${credential}`),
+            ),
+          );
+          return new Set(routes).size === routes.length;
+        },
+        { message: "Expected one capability profile per placement and credential route" },
+      ),
     ),
-  ),
-  placementReason: Schema.NonEmptyString,
-  credentialReason: Schema.NonEmptyString,
-  /** The billing pools of the harness's sessions; a credential route determines at most one. */
-  pools: Schema.NonEmptyArray(HarnessPool).check(
-    Schema.makeFilter(
-      (pools) => {
-        const ids = pools.map(({ pool }) => pool.id);
-        const routes = pools.flatMap(({ routes }) => routes);
-        return new Set(ids).size === ids.length && new Set(routes).size === routes.length;
-      },
-      { message: "Expected distinct pools, each credential route in at most one" },
+    placementReason: Schema.NonEmptyString,
+    credentialReason: Schema.NonEmptyString,
+    /** The billing pools of the harness's sessions; a credential route determines at most one. */
+    pools: Schema.NonEmptyArray(HarnessPool).check(
+      Schema.makeFilter(
+        (pools) => {
+          const ids = pools.map(({ pool }) => pool.id);
+          const routes = pools.flatMap(({ routes }) => routes);
+          return new Set(ids).size === ids.length && new Set(routes).size === routes.length;
+        },
+        { message: "Expected distinct pools, each credential route in at most one" },
+      ),
     ),
+    /** None when the harness supplies its own prices. */
+    prices: Schema.Option(Schema.Record(Schema.String, TokenRates)),
+  }).check(
+    Schema.makeFilter(
+      ({ worker, providers }) =>
+        Option.isNone(worker.credential) ||
+        providers.length > 0 ||
+        "A harness with credential wiring uses at least one provider",
+    ),
+    Schema.makeFilter(
+      ({ providers }) =>
+        new Set(providers.map(({ id }) => id)).size === providers.length ||
+        "A harness lists each provider once",
+    ),
+    Schema.makeFilter(({ pools, providers }) => {
+      const missing = pools
+        .flatMap(({ routes }) => routes)
+        .flatMap((route) =>
+          route === "gateway-api-key" || route === "gateway-subscription" ? [route] : [],
+        )
+        .find((route) => !providers.some((provider) => provider.accepts(GATEWAY_ROUTES[route])));
+      return (
+        missing === undefined ||
+        `The pool route ${missing} needs a provider that accepts a ${GATEWAY_ROUTES[missing]} credential`
+      );
+    }),
   ),
-  /** None when the harness supplies its own prices. */
-  prices: Schema.Option(Schema.Record(Schema.String, TokenRates)),
-}) {
+) {
   /** Why the harness can't turn its own tools off, or `None` when it lists the tools a role keeps. */
   get ownToolsKept(): Option.Option<string> {
     return Option.fromNullishOr(
@@ -210,9 +249,20 @@ export class HarnessDescriptor extends Schema.Class<
 const declaredPools = (descriptors: ReadonlyArray<HarnessDescriptor>) =>
   descriptors.flatMap(({ pools }) => pools.map(({ pool }) => pool));
 
+const declaredProviders = (descriptors: ReadonlyArray<HarnessDescriptor>) =>
+  descriptors.flatMap(({ providers }) => providers);
+
+/** Returns `declared` once each, in declaration order, if two that share an ID are the same. */
+const distinct = <A extends { readonly id: string }>(declared: ReadonlyArray<A>) =>
+  declared.every((value) =>
+    declared.every((other) => other.id !== value.id || Equal.equals(other, value)),
+  )
+    ? Option.some(Arr.dedupeWith(declared, (left, right) => left.id === right.id))
+    : Option.none();
+
 /**
- * A catalog rejects duplicate harness IDs and a pool ID that two harnesses define differently, and
- * validates registered harnesses at configuration boundaries.
+ * A catalog rejects duplicate harness IDs, and a pool ID or a provider ID that two harnesses define
+ * differently, and validates registered harnesses at configuration boundaries.
  */
 export class HarnessCatalog extends Schema.Class<
   HarnessCatalog,
@@ -224,14 +274,19 @@ export class HarnessCatalog extends Schema.Class<
         new Set(descriptors.map(({ id }) => id)).size === descriptors.length ||
         "Duplicate harness ID",
     ),
-    Schema.makeFilter(({ descriptors }) => {
-      const pools = declaredPools(descriptors);
-      return (
-        pools.every((pool) =>
-          pools.every((other) => other.id !== pool.id || Equal.equals(other, pool)),
-        ) || "A pool ID that two harnesses declare has one definition"
-      );
-    }),
+    Schema.makeFilter(
+      ({ descriptors }) =>
+        Option.isSome(distinct(declaredPools(descriptors))) ||
+        "A pool ID that two harnesses declare has one definition",
+    ),
+    Schema.makeFilter(
+      ({ descriptors }) =>
+        Option.isSome(
+          Option.flatMap(distinct(declaredProviders(descriptors)), (providers) =>
+            ModelProviderCatalog.makeOption({ providers }),
+          ),
+        ) || "A provider ID that two harnesses declare has one definition, and names one slot",
+    ),
   ),
 ) {
   get ids(): ReadonlyArray<Harness> {
@@ -241,6 +296,16 @@ export class HarnessCatalog extends Schema.Class<
   /** Every pool that a harness declares, once, in catalog order. */
   get pools(): ReadonlyArray<PoolDescriptor> {
     return Arr.dedupeWith(declaredPools(this.descriptors), (left, right) => left.id === right.id);
+  }
+
+  /** Every provider that a harness declares, once, in catalog order. */
+  get providers(): ModelProviderCatalog {
+    return ModelProviderCatalog.make({
+      providers: Arr.dedupeWith(
+        declaredProviders(this.descriptors),
+        (left, right) => left.id === right.id,
+      ),
+    });
   }
 
   get harness() {
@@ -280,14 +345,22 @@ export class HarnessCatalog extends Schema.Class<
   }
 
   /**
-   * Returns whether a Gateway that injects the credentials of `llmProviders` holds the credential
-   * that harness `id` uses on the Workers behind it. A harness without a provider credential, such
-   * as Pi, or an unknown harness, never uses the Gateway's.
+   * Returns the provider whose credential a Gateway that holds the slots `llmProviders` gives
+   * harness `id` on the Workers behind it: the first of the harness's providers that it holds. A
+   * harness without credential wiring, such as Pi, or an unknown harness, never uses the Gateway's.
    */
-  gatewayHolds(id: Harness, llmProviders: ReadonlyArray<GatewayLlmProtocol>): boolean {
-    return Option.exists(
-      Option.flatMap(this.get(id), (descriptor) => descriptor.worker.credential),
-      ({ protocol }) => llmProviders.includes(protocol),
+  gatewayProvider(
+    id: Harness,
+    llmProviders: ReadonlyArray<GatewaySlot>,
+  ): Option.Option<ModelProvider> {
+    return Option.flatMap(
+      Option.filter(this.get(id), ({ worker }) => Option.isSome(worker.credential)),
+      ({ providers }) => Arr.findFirst(providers, ({ slot }) => llmProviders.includes(slot)),
     );
+  }
+
+  /** Returns whether a Gateway that holds the slots `llmProviders` holds the credential that harness `id` uses. */
+  gatewayHolds(id: Harness, llmProviders: ReadonlyArray<GatewaySlot>): boolean {
+    return Option.isSome(this.gatewayProvider(id, llmProviders));
   }
 }

@@ -1,20 +1,24 @@
 import {
-  type GatewayCredentialKind,
-  GatewayLlmProtocol,
-  GatewayLlmProtocolFromName,
-} from "@usine/core/worker";
+  type GatewaySlot,
+  type GatewayVariable,
+  type KeyHeader,
+  type ModelProvider,
+  type ModelProviderCatalog,
+  type ProviderProtocol,
+  UpstreamBase,
+} from "@usine/core/agent/provider";
+import type { GatewayCredentialKind } from "@usine/core/worker";
 import { type Brand, Option, Redacted, Schema } from "effect";
 import { Headers } from "effect/http";
-import { UpstreamBase } from "../upstream.ts";
 
 const Secret = Schema.Redacted(Schema.NonEmptyString);
 
-/** An Anthropic API key, sent upstream as `x-api-key`. */
-export class AnthropicApiKey extends Schema.TaggedClass<
-  AnthropicApiKey,
-  Brand.Brand<"@usine/gateway/llm/llm/AnthropicApiKey">
->()("AnthropicApiKey", {
-  /** The nonempty API key sent in the upstream `x-api-key` header. */
+/** A static API key, sent in the key header of the protocol that serves each request. */
+export class ApiKey extends Schema.TaggedClass<
+  ApiKey,
+  Brand.Brand<"@usine/gateway/llm/llm/ApiKey">
+>()("ApiKey", {
+  /** The nonempty API key. */
   key: Secret,
 }) {}
 
@@ -30,30 +34,6 @@ export class AnthropicSubscriptionToken extends Schema.TaggedClass<
 >()("AnthropicSubscriptionToken", {
   /** The nonempty Claude subscription token sent as a bearer token with the OAuth beta flag. */
   token: Secret,
-}) {}
-
-/** The credential added to Anthropic requests. */
-export const AnthropicCredential = Schema.Union([AnthropicApiKey, AnthropicSubscriptionToken]);
-export type AnthropicCredential = typeof AnthropicCredential.Type;
-
-/** Claude Code's upstream. On the worker, `ANTHROPIC_BASE_URL` is `http://llm.<domain>/anthropic-messages`. */
-export class AnthropicProvider extends Schema.TaggedClass<
-  AnthropicProvider,
-  Brand.Brand<"@usine/gateway/llm/llm/AnthropicProvider">
->()("AnthropicProvider", {
-  /** The Anthropic-compatible base URL to which allowed API paths are appended. */
-  upstream: UpstreamBase,
-  /** The API key or subscription token that replaces the caller token upstream. */
-  credential: AnthropicCredential,
-}) {}
-
-/** An OpenAI-compatible API key, sent upstream as a bearer token. */
-export class OpenAiApiKey extends Schema.TaggedClass<
-  OpenAiApiKey,
-  Brand.Brand<"@usine/gateway/llm/llm/OpenAiApiKey">
->()("OpenAiApiKey", {
-  /** The nonempty API key sent in the upstream `Authorization: Bearer` header. */
-  key: Secret,
 }) {}
 
 /** An absolute path to a file on the gateway host. */
@@ -77,109 +57,93 @@ export class ChatGptLogin extends Schema.TaggedClass<
   tokenUrl: UpstreamBase,
 }) {}
 
-/** The credential added to OpenAI requests. */
-export const OpenAiCredential = Schema.Union([OpenAiApiKey, ChatGptLogin]);
-export type OpenAiCredential = typeof OpenAiCredential.Type;
+/** The ChatGPT backend that serves Codex's routes with a ChatGPT login. */
+export const CHATGPT_UPSTREAM = UpstreamBase.make("https://chatgpt.com/backend-api/codex");
+
+/** The gateway variable that replaces `CHATGPT_UPSTREAM`. */
+export const CHATGPT_UPSTREAM_VARIABLE = "USINE_GATEWAY_CHATGPT_UPSTREAM";
+
+/** The credential that the gateway holds for a provider: an API key, or a subscription login. */
+export const LlmCredential = Schema.Union([ApiKey, AnthropicSubscriptionToken, ChatGptLogin]);
+export type LlmCredential = typeof LlmCredential.Type;
 
 /**
- * Codex's upstream: an OpenAI-compatible API with an API key, or the ChatGPT backend with a
- * ChatGPT login. On the worker, the `model_provider` `base_url` is `http://llm.<domain>/openai-responses/v1`
- * in both cases.
+ * The credential that the gateway holds for a provider's slot, and the base URL that replaces the
+ * upstream of each of the provider's protocols, if any.
  */
-export class OpenAiProvider extends Schema.TaggedClass<
-  OpenAiProvider,
-  Brand.Brand<"@usine/gateway/llm/llm/OpenAiProvider">
->()("OpenAiProvider", {
-  /** The API base URL, or ChatGPT backend URL when using a ChatGPT login. */
-  upstream: UpstreamBase,
-  /** The API key or refreshable ChatGPT login that replaces the caller token upstream. */
-  credential: OpenAiCredential,
+export class LlmProvider extends Schema.TaggedClass<
+  LlmProvider,
+  Brand.Brand<"@usine/gateway/llm/llm/LlmProvider">
+>()("LlmProvider", {
+  /** The upstream base for every protocol, such as a ChatGPT login's backend; `None` for the catalog's. */
+  upstream: Schema.Option(UpstreamBase),
+  /** The API key or subscription login that replaces the caller token upstream. */
+  credential: LlmCredential,
 }) {}
 
-/** The LLM upstreams the gateway forwards to. Requests for a provider without a credential are refused. */
-export interface LlmProviders {
-  /** The configured Anthropic upstream and credential, or `None` to refuse Anthropic requests. */
-  readonly "anthropic-messages": Option.Option<AnthropicProvider>;
-  /** The configured OpenAI or ChatGPT upstream and credential, or `None` to refuse OpenAI requests. */
-  readonly "openai-responses": Option.Option<OpenAiProvider>;
-}
+/**
+ * The providers that the gateway holds a credential for, by slot. Requests for another slot are
+ * refused.
+ */
+export type LlmProviders = Readonly<Record<GatewaySlot, LlmProvider>>;
 
-/** A provider with its credential. */
-export type LlmProvider = AnthropicProvider | OpenAiProvider;
-
-/** The `llm.<domain>` path prefixes that select a provider. */
-export const LlmProviderName = GatewayLlmProtocol;
-export type LlmProviderName = GatewayLlmProtocol;
-
-const providerOfPrefix = Schema.decodeUnknownOption(GatewayLlmProtocolFromName);
-
-/** An LLM request's provider and the path after its prefix. */
-export interface LlmTarget {
-  readonly provider: LlmProviderName;
-  readonly rest: string;
-  readonly legacy: boolean;
-}
-
-/** Returns the provider from the first path segment; for example, `/anthropic-messages/v1/messages` is Anthropic's `/v1/messages`. */
-export const llmTarget = (pathname: string): Option.Option<LlmTarget> => {
-  const match = /^\/([a-z-]+)(\/.*)?$/u.exec(pathname);
-  if (match === null) return Option.none();
-  const prefix = match[1];
-  return Option.map(providerOfPrefix(prefix), (provider) => ({
-    provider,
-    rest: match[2] ?? "",
-    legacy: prefix !== provider,
-  }));
-};
-
-/** Returns the credential kind sent to `provider`: a subscription for a Claude token or a ChatGPT login. */
-export const credentialKind = (provider: LlmProvider): GatewayCredentialKind => {
-  switch (provider.credential._tag) {
-    case "AnthropicApiKey":
-    case "OpenAiApiKey":
-      return "api-key";
-    case "AnthropicSubscriptionToken":
-    case "ChatGptLogin":
-      return "subscription";
-  }
-};
-
-/** Returns the configured provider for `name` as a single forwardable value. */
-export const configuredProvider = (
-  providers: LlmProviders,
-  name: LlmProviderName,
-): Option.Option<LlmProvider> => providers[name];
+/** Returns the credential kind sent to the upstream: a subscription for a Claude token or a ChatGPT login. */
+export const credentialKind = ({ credential }: LlmProvider): GatewayCredentialKind =>
+  credential._tag === "ApiKey" ? "api-key" : "subscription";
 
 /**
- * The allowed API routes for each wire protocol. Each
- * pattern matches whole plain segments, so a percent-encoded separator or a dot segment never
- * matches, and other parts of the provider's API, such as files or organization administration,
- * can't be reached with the gateway's credential.
+ * Returns the upstream URL of `rest`, a path that `protocol` serves, without the query. The ChatGPT
+ * backend serves Codex's routes without `/v1`, so with a ChatGPT login `/v1/responses` is the
+ * backend's `/responses`.
  */
-const LLM_ROUTES = {
-  "anthropic-messages": [
-    /^\/v1\/messages$/u,
-    /^\/v1\/messages\/count_tokens$/u,
-    /^\/v1\/models$/u,
-    /^\/v1\/models\/[A-Za-z0-9][A-Za-z0-9._-]*$/u,
-  ],
-  "openai-responses": [/^\/v1\/responses$/u, /^\/v1\/responses\/compact$/u, /^\/v1\/models$/u],
-} as const satisfies Record<LlmProviderName, ReadonlyArray<RegExp>>;
+export const llmUpstream = (held: LlmProvider, protocol: ProviderProtocol, rest: string) => {
+  const base = Option.getOrElse(held.upstream, () => protocol.upstream);
+  const path =
+    held.credential._tag === "ChatGptLogin" && rest.startsWith("/v1/")
+      ? rest.slice("/v1".length)
+      : rest;
+  return `${base}${path}`;
+};
+
+/** The request headers that pass to every upstream that lists the headers it accepts. */
+const CONTENT_HEADERS: ReadonlyArray<string> = [
+  "accept",
+  "accept-encoding",
+  "content-encoding",
+  "content-length",
+  "content-type",
+  "user-agent",
+];
 
 /**
- * Returns the upstream path for `rest`, the path after the provider's prefix, if it's one of the
- * provider's `LLM_ROUTES`. Codex calls `<base_url>/responses` with `base_url` ending in `/v1`;
- * the ChatGPT backend serves the same routes without `/v1`, so with a ChatGPT login
- * `/v1/responses` is the backend's `/responses`.
+ * Returns the request headers that pass to `provider`'s upstream: every header, or the content
+ * headers and the ones that `passThrough` lists.
  */
-export const llmRoute = (provider: LlmProvider, rest: string): Option.Option<string> => {
-  const routes =
-    provider._tag === "AnthropicProvider"
-      ? LLM_ROUTES["anthropic-messages"]
-      : LLM_ROUTES["openai-responses"];
-  if (!routes.some((route) => route.test(rest))) return Option.none();
-  return Option.some(provider.credential._tag === "ChatGptLogin" ? rest.slice("/v1".length) : rest);
-};
+export const passingHeaders = (provider: ModelProvider, headers: Headers.Headers) =>
+  Option.match(provider.passThrough, {
+    onNone: () => headers,
+    onSome: (listed) => {
+      const kept = new Set<string>([...CONTENT_HEADERS, ...listed]);
+      return Headers.removeMany(
+        headers,
+        Object.keys(headers).filter((name) => !kept.has(name)),
+      );
+    },
+  });
+
+/** Returns the header name of each protocol's key, which can carry a caller token. */
+export const keyHeaders = (catalog: ModelProviderCatalog): ReadonlyArray<string> => [
+  ...new Set(catalog.providers.flatMap(({ protocols }) => protocols.map(({ key }) => key.header))),
+];
+
+/** Returns the gateway variable that sets the upstream of `held`'s credential, if any. */
+export const upstreamVariable = (
+  provider: ModelProvider,
+  held: LlmProvider,
+): Option.Option<GatewayVariable | typeof CHATGPT_UPSTREAM_VARIABLE> =>
+  held.credential._tag === "ChatGptLogin"
+    ? Option.some(CHATGPT_UPSTREAM_VARIABLE)
+    : provider.upstreamVariable;
 
 const OAUTH_BETA = "oauth-2025-04-20";
 
@@ -196,21 +160,21 @@ const withBeta = (incoming: Option.Option<string>, flag: string): string => {
 };
 
 /** A credential sent as it's configured, without a refresh. */
-export type StaticCredential = AnthropicApiKey | AnthropicSubscriptionToken | OpenAiApiKey;
+export type StaticCredential = ApiKey | AnthropicSubscriptionToken;
 
 /**
- * Adds `credential` to headers without the caller's credential. For a subscription token, also
- * merges the OAuth beta flag into the harness's flags.
+ * Adds `credential` to headers without the caller's credential: an API key in `key`, the key
+ * header of the request's protocol, or a Claude subscription token as a bearer token with the
+ * OAuth beta flag merged into the harness's flags.
  */
 export const withStaticCredential = (
   credential: StaticCredential,
+  key: KeyHeader,
   headers: Headers.Headers,
 ): Headers.Headers => {
   switch (credential._tag) {
-    case "OpenAiApiKey":
-      return Headers.set(headers, "authorization", `Bearer ${Redacted.value(credential.key)}`);
-    case "AnthropicApiKey":
-      return Headers.set(headers, "x-api-key", Redacted.value(credential.key));
+    case "ApiKey":
+      return Headers.set(headers, key.header, key.value(Redacted.value(credential.key)));
     case "AnthropicSubscriptionToken":
       return Headers.setAll(headers, {
         authorization: `Bearer ${Redacted.value(credential.token)}`,

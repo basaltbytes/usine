@@ -1,7 +1,9 @@
 import type { Harness } from "@usine/core/agent/brain";
 import { catalog } from "@usine/agents/harness";
-import { Option } from "effect";
-import type { CloudflareLlmProvider } from "@usine/core/worker";
+import { Option, Schema } from "effect";
+import { CloudflareLlmProvider } from "@usine/core/worker";
+
+const cloudflareProvider = Schema.decodeUnknownOption(CloudflareLlmProvider);
 
 /** The home directory of the image's `usine` user, where every command starts. */
 export const SANDBOX_HOME = "/home/usine";
@@ -69,12 +71,20 @@ export const harnessEnvironment = (
     },
     ...catalog.descriptors
       .filter(({ id }) => Option.contains(harness, id))
-      .flatMap(({ worker }) =>
-        Option.toArray(worker.credential)
-          .filter(({ provider }) => providers.includes(provider))
-          .map(({ provider, cloudflare }) => ({
-            ...cloudflare.render(`http://${PROVIDER_HOSTS[provider].sandbox}`, "").environment,
-            [cloudflare.tokenVariable]: PLACEHOLDER_CREDENTIAL,
-          })),
+      .flatMap(({ worker, providers: usable }) =>
+        Option.toArray(worker.credential).flatMap(({ cloudflare }) => {
+          const provider = usable
+            .flatMap(({ id }) => Option.toArray(cloudflareProvider(id)))
+            .find((id) => providers.includes(id));
+          return provider === undefined
+            ? []
+            : [
+                {
+                  ...cloudflare.render(`http://${PROVIDER_HOSTS[provider].sandbox}`, "")
+                    .environment,
+                  [cloudflare.tokenVariable]: PLACEHOLDER_CREDENTIAL,
+                },
+              ];
+        }),
       ),
   );

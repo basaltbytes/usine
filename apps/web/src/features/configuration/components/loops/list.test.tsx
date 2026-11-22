@@ -212,7 +212,7 @@ describe("Workers page", () => {
       "SSH user usine",
       "Labels team=platform",
       "API token Read from HCLOUD_TOKEN",
-      "Anthropic key Not set",
+      "API keys Not set",
       "Provider, gateway, and credentials",
       "configured interval since the last successful check",
       "Deferred",

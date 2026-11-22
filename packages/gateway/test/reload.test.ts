@@ -1,3 +1,4 @@
+import { modelProviders } from "@usine/core/agent/provider";
 import { jsonKey } from "@usine/core/json-key";
 // The Node server adapter requires native HTTP server and connection types.
 // @effect-diagnostics-next-line nodeBuiltinImport:off
@@ -14,6 +15,7 @@ import {
   Effect,
   Layer,
   Logger,
+  Option,
   Predicate,
   Redacted,
   Schedule,
@@ -22,7 +24,7 @@ import {
 } from "effect";
 import { FetchHttpClient, HttpClient, HttpClientRequest, HttpServerError } from "effect/http";
 import { HttpApiClient } from "effect/http-api";
-import { AttachRequest, GatewayAdminApi } from "../src/admin/api.ts";
+import { AttachRequest, GatewayAdminApi, LlmProviderList } from "../src/admin/api.ts";
 import { AnonymousCredential } from "../src/attachment/attachment.ts";
 import {
   EgressProxyListenError,
@@ -195,6 +197,16 @@ const adminClient = Effect.gen(function* () {
 });
 
 /** Returns the LLM providers the admin API reports, with each credential kind. */
+/** The provider report as orchestrators from before the provider catalog decode it. */
+const ReportBeforeCatalog = Schema.Struct({
+  providers: Schema.Array(
+    Schema.Struct({
+      provider: Schema.Literals(["anthropic", "openai", "anthropic-messages", "openai-responses"]),
+      credential: Schema.Literals(["api-key", "subscription"]),
+    }),
+  ),
+});
+
 const reportedProviders = Effect.gen(function* () {
   const client = yield* adminClient;
   const { providers } = yield* client.llm.providers();
@@ -335,6 +347,26 @@ describe("reloading the gateway", () => {
             { provider: "anthropic-messages", credential: "subscription" },
           ]);
           assert.notInclude(lines.join("\n"), SUBSCRIPTION_TOKEN);
+        }),
+      ).pipe(Effect.provide(NodeFileSystem.layer)),
+  );
+
+  it.live(
+    "the provider report lists every slot with its routes, in a shape that orchestrators from before the catalog read",
+    () =>
+      withGateway(["registry.npmjs.org"], () =>
+        Effect.gen(function* () {
+          const client = yield* adminClient;
+          const report = yield* client.llm.providers();
+          assert.deepStrictEqual(
+            report.slots?.map(({ slot, routes }) => [slot, routes]),
+            modelProviders.providers.map(({ slot, routes }) => [slot, routes]),
+          );
+          const encoded = yield* Schema.encodeEffect(LlmProviderList)(report);
+          assert.deepStrictEqual(
+            Schema.decodeUnknownOption(ReportBeforeCatalog)(encoded),
+            Option.some({ providers: [{ provider: "anthropic-messages", credential: "api-key" }] }),
+          );
         }),
       ).pipe(Effect.provide(NodeFileSystem.layer)),
   );

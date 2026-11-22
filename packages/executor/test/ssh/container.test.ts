@@ -1,3 +1,4 @@
+import { anthropic, openai } from "@usine/core/agent/provider";
 import { assert, describe, it } from "@effect/vitest";
 import { CHILD_KILL_SCRIPT, HostUnreachable, RemoteShell } from "@usine/agents/child-host";
 import { Agent } from "@usine/core/agent";
@@ -13,14 +14,7 @@ import { type AttemptSalvage, SalvageRef } from "@usine/core/attempt/salvage";
 import { ContainerMemoryMib, SshDestination, WorkerName } from "@usine/core/worker";
 import type { AttemptRequest } from "@usine/durable/attempt-runtime";
 import { completes, type StubParent, StubStorage } from "@usine/durable/testing";
-import {
-  AnthropicApiKey,
-  AnthropicProvider,
-  ChatGptLogin,
-  HostFilePath,
-  OpenAiProvider,
-  UpstreamBase,
-} from "@usine/gateway";
+import { ApiKey, LlmProvider, ChatGptLogin, HostFilePath, UpstreamBase } from "@usine/gateway";
 import { Deferred, Effect, Fiber, Layer, Option, Redacted, References, Schema } from "effect";
 // This Node boundary needs synchronous filesystem operations that FileSystem does not expose.
 // @effect-diagnostics-next-line nodeBuiltinImport:off
@@ -121,21 +115,17 @@ const LOGINS = [
 
 /** A Gateway that holds an Anthropic API key and a ChatGPT login. */
 const BOTH_PROVIDERS = {
-  "anthropic-messages": Option.some(
-    AnthropicProvider.make({
-      upstream: UpstreamBase.make("https://api.anthropic.com"),
-      credential: AnthropicApiKey.make({ key: Redacted.make("sk-ant-api03-for-executor-tests") }),
+  [anthropic.slot]: LlmProvider.make({
+    upstream: Option.some(UpstreamBase.make("https://api.anthropic.com")),
+    credential: ApiKey.make({ key: Redacted.make("sk-ant-api03-for-executor-tests") }),
+  }),
+  [openai.slot]: LlmProvider.make({
+    upstream: Option.some(UpstreamBase.make("https://chatgpt.com/backend-api/codex")),
+    credential: ChatGptLogin.make({
+      authFile: HostFilePath.make("/var/lib/usine-gateway/codex-auth.json"),
+      tokenUrl: UpstreamBase.make("https://auth.openai.com/oauth/token"),
     }),
-  ),
-  "openai-responses": Option.some(
-    OpenAiProvider.make({
-      upstream: UpstreamBase.make("https://chatgpt.com/backend-api/codex"),
-      credential: ChatGptLogin.make({
-        authFile: HostFilePath.make("/var/lib/usine-gateway/codex-auth.json"),
-        tokenUrl: UpstreamBase.make("https://auth.openai.com/oauth/token"),
-      }),
-    }),
-  ),
+  }),
 };
 
 const optionOf = (words: ReadonlyArray<string>, option: string) => words[words.indexOf(option) + 1];
@@ -629,16 +619,13 @@ describe("SSH Worker with Docker", () => {
     () => {
       const machine = dockerMachine();
       const gateway = fakeGateway(machine, {
-        "anthropic-messages": Option.none(),
-        "openai-responses": Option.some(
-          OpenAiProvider.make({
-            upstream: UpstreamBase.make("https://chatgpt.com/backend-api/codex"),
-            credential: ChatGptLogin.make({
-              authFile: HostFilePath.make("/var/lib/usine-gateway/codex-auth.json"),
-              tokenUrl: UpstreamBase.make("https://auth.openai.com/oauth/token"),
-            }),
+        [openai.slot]: LlmProvider.make({
+          upstream: Option.some(UpstreamBase.make("https://chatgpt.com/backend-api/codex")),
+          credential: ChatGptLogin.make({
+            authFile: HostFilePath.make("/var/lib/usine-gateway/codex-auth.json"),
+            tokenUrl: UpstreamBase.make("https://auth.openai.com/oauth/token"),
           }),
-        ),
+        }),
       });
       const codexRequest = CheckoutRequest.make({
         ...request,

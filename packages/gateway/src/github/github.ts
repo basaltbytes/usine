@@ -3,7 +3,7 @@ import { Option, Redacted, Result, Schema } from "effect";
 import { Base64 } from "effect/encoding";
 import { Headers } from "effect/http";
 import type { AttachmentCredential } from "../attachment/attachment.ts";
-import { UpstreamBase } from "../upstream.ts";
+import { UpstreamBase } from "@usine/core/agent/provider";
 
 /** The upstream origins for GitHub requests: `web` for git smart HTTP, `api` for REST and GraphQL, `uploads` for release asset uploads. */
 export interface GitHubOrigins {

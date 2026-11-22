@@ -1,18 +1,22 @@
 import type { harnessesLive } from "@usine/agents/harness/node";
 import { NodeCrypto } from "@effect/platform-node";
 import {
-  GATEWAY_LEGACY_PROVIDERS,
+  anthropic,
+  GatewaySlot,
+  type ModelProviderCatalog,
+  modelProviders,
+} from "@usine/core/agent/provider";
+import {
   GatewayAdminPort,
   GatewayDomain,
-  type GatewayLlmProtocol,
   SshDestination,
   type WorkerName,
 } from "@usine/core/worker";
 import {
   AdminToken,
   adminRoutes,
-  AnthropicApiKey,
-  AnthropicProvider,
+  ApiKey,
+  LlmProvider,
   Attachments,
   CallerKey,
   CallerTokens,
@@ -62,7 +66,7 @@ const GATEWAY = SshDestination.make("usine-gateway");
  */
 export const gatewayAddress = (
   options: {
-    readonly llmProviders?: ReadonlyArray<GatewayLlmProtocol>;
+    readonly llmProviders?: ReadonlyArray<string>;
     readonly adminToken?: string;
     readonly name?: WorkerName;
     readonly gateway?: SshDestination;
@@ -75,7 +79,9 @@ export const gatewayAddress = (
     destination: options.gateway ?? GATEWAY,
     adminPort: GatewayAdminPort.make(7070),
     adminToken: Redacted.make(options.adminToken ?? ADMIN_TOKEN),
-    llmProviders: options.llmProviders ?? ["anthropic-messages"],
+    llmProviders: (options.llmProviders ?? ["anthropic-messages"]).map((slot) =>
+      GatewaySlot.make(slot),
+    ),
   }),
 });
 
@@ -110,13 +116,10 @@ const bodyOf = (body: { readonly _tag: string }): AdminCall["body"] =>
 
 /** The default Gateway LLM providers: an Anthropic API key, matching `gatewayAddress`. */
 const GATEWAY_PROVIDERS: LlmProviders = {
-  "anthropic-messages": Option.some(
-    AnthropicProvider.make({
-      upstream: UpstreamBase.make("https://api.anthropic.com"),
-      credential: AnthropicApiKey.make({ key: Redacted.make("sk-ant-api03-for-executor-tests") }),
-    }),
-  ),
-  "openai-responses": Option.none(),
+  [anthropic.slot]: LlmProvider.make({
+    upstream: Option.some(UpstreamBase.make("https://api.anthropic.com")),
+    credential: ApiKey.make({ key: Redacted.make("sk-ant-api03-for-executor-tests") }),
+  }),
 };
 
 /**
@@ -128,18 +131,23 @@ const GATEWAY_PROVIDERS: LlmProviders = {
  * - `calls` records each request the executor sent, before the admin API handles it.
  * - A detach of an attachment in `refusedDetaches` returns a server error.
  * - While `reportsProviders` is false, the provider list returns 404.
- * - While `beforeProtocolSlots` is true, the provider list names providers as a Gateway from
- *   before protocol slots did, and the provider-credentials routes return 404.
+ * - While `reportsSlots` is false, the provider list omits the slots the Gateway serves, as a
+ *   Gateway from before the provider catalog did.
+ * - While `beforeProtocolSlots` is true, the provider list names providers by ID and omits the
+ *   slots, as a Gateway from before slots did, and the provider-credentials routes return 404.
+ * - The Gateway serves the slots of `catalog`.
  * - `settled` waits until no admin request is in flight.
  */
 export const fakeGateway = (
   machine: ReturnType<typeof fakeMachine>,
   providers: LlmProviders = GATEWAY_PROVIDERS,
+  catalog: ModelProviderCatalog = modelProviders,
 ) => {
   const calls: Array<AdminCall> = [];
   const switches = {
     refusedDetaches: new Set<string>(),
     reportsProviders: true,
+    reportsSlots: true,
     beforeProtocolSlots: false,
   };
   let inFlight = 0;
@@ -163,6 +171,7 @@ export const fakeGateway = (
       return {
         domain: DOMAIN,
         github: GITHUB_ORIGINS,
+        catalog,
         providers,
         egress: Result.getOrThrow(parseEgressAllowlist("")),
         adminToken: yield* Schema.decodeEffect(AdminToken)(ADMIN_TOKEN),
@@ -188,7 +197,9 @@ export const fakeGateway = (
     HttpClient.HttpClient,
     Effect.gen(function* () {
       const handler = yield* HttpRouter.toHttpEffect(adminRoutes);
-      const services = yield* Effect.context<Attachments | CallerTokens | SettingsInForce>();
+      const services = yield* Effect.context<
+        Attachments | CallerTokens | SettingsInForce | GatewaySettings
+      >();
       return HttpClient.make((request) =>
         Effect.gen(function* () {
           const url = new URL(request.url);
@@ -230,11 +241,19 @@ export const fakeGateway = (
             return HttpServerResponse.toClientResponse(HttpServerResponse.empty({ status: 404 }), {
               request,
             });
-          if (path === "/v1/providers" && switches.beforeProtocolSlots) {
+          if (
+            path === "/v1/providers" &&
+            (switches.beforeProtocolSlots || !switches.reportsSlots)
+          ) {
             const { providers } = yield* (yield* SettingsInForce).current;
-            const reported = LlmProviderList.fromProviders(providers).providers.map(
+            const reported = LlmProviderList.fromProviders(catalog, providers).providers.map(
               ({ provider, credential }) => ({
-                provider: GATEWAY_LEGACY_PROVIDERS[provider],
+                provider: switches.beforeProtocolSlots
+                  ? Option.match(catalog.find(provider), {
+                      onNone: () => provider,
+                      onSome: ({ id }) => id,
+                    })
+                  : provider,
                 credential,
               }),
             );

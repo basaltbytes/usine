@@ -1,5 +1,6 @@
 import { Harness } from "@usine/core/agent/brain";
 import { BillingPool, PoolDescriptor } from "@usine/core/agent/pool";
+import { anthropic } from "@usine/core/agent/provider";
 import { Option } from "effect";
 import { CapabilityProfile, Lacking } from "../capability.ts";
 import {
@@ -37,9 +38,7 @@ export const claude = HarnessDescriptor.make({
     },
     credential: Option.some(
       HarnessCredential.make({
-        provider: "anthropic",
-        protocol: "anthropic-messages",
-        gatewayPath: "anthropic-messages",
+        slotPath: "",
         home: Option.none(),
         gateway: CredentialWiring.make({
           tokenVariable: "ANTHROPIC_AUTH_TOKEN",
@@ -59,13 +58,11 @@ export const claude = HarnessDescriptor.make({
           },
           files: {},
         }),
-        label: "Anthropic",
         hosts: ["api.anthropic.com", "platform.claude.com"],
-        apiHost: "api.anthropic.com",
-        apiKeyBaseUrl: "https://api.anthropic.com/v1",
       }),
     ),
   }),
+  providers: [anthropic],
   capabilities: [
     CapabilityProfile.make({
       placements: ["orchestrator", "local", "ssh", "container", "sandbox"],

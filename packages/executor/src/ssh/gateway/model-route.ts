@@ -1,4 +1,6 @@
-import type { GatewayCredentialKind, GatewayLlmProtocol, WorkerName } from "@usine/core/worker";
+import { catalog } from "@usine/agents/harness";
+import type { GatewaySlot } from "@usine/core/agent/provider";
+import type { GatewayCredentialKind, WorkerName } from "@usine/core/worker";
 import { GatewayAdminPort } from "@usine/core/worker";
 import type { RepositoryName } from "@usine/core/repository";
 import { AnonymousCredential } from "@usine/gateway";
@@ -8,7 +10,7 @@ import { HttpClient, HttpClientRequest } from "effect/http";
 import { ChildProcessSpawner } from "effect/process";
 import { DEFAULT_SSH, remoteCommandsFor } from "../../remote/commands.ts";
 import type { SshWorkerGateway } from "../model.ts";
-import { gatewayAdminFor, type ReportedProviders } from "./admin.ts";
+import { gatewayAdminFor, type ProviderReport, reportedProviders } from "./admin.ts";
 import { type GatewayLlmPrefixes, llmPrefixOf } from "./environment.ts";
 import { gatewayForwardFor } from "./forward.ts";
 
@@ -20,17 +22,14 @@ export class GatewayModelError extends Schema.TaggedError<
 
 /** Model access for runtimes on the orchestrator, including the coordinator and supervisor. */
 export interface GatewayModelRoute {
+  /** Returns the kind of credential that the gateway holds for `slot`, or `None` for none. */
   readonly credential: (
-    protocol: GatewayLlmProtocol,
+    slot: GatewaySlot,
   ) => Effect.Effect<Option.Option<GatewayCredentialKind>, GatewayModelError>;
+  /** Posts `body` to `path` under `slot`, such as `/v1/messages` under `anthropic-messages`. */
   readonly request: (
-    protocol: GatewayLlmProtocol,
-    body: string,
-    headers: Readonly<Record<string, string>>,
-    signal?: AbortSignal,
-  ) => Effect.Effect<Response, GatewayModelError>;
-  /** Counts the input tokens of an Anthropic Messages request, without running it. */
-  readonly countTokens: (
+    slot: GatewaySlot,
+    path: string,
     body: string,
     headers: Readonly<Record<string, string>>,
     signal?: AbortSignal,
@@ -62,7 +61,7 @@ export const gatewayModelRouteFor = Effect.fn("GatewayModelRoute.open")(
       Effect.catchTag("GatewayForwardClosed", (error) => modelForward.reopen(error.generation)),
     );
     const probe = yield* http
-      .get(new URL("/openai-responses/v1/models", opened.url), {
+      .get(new URL("/", opened.url), {
         headers: { host: `llm.${gateway.domain}` },
       })
       .pipe(
@@ -82,15 +81,16 @@ export const gatewayModelRouteFor = Effect.fn("GatewayModelRoute.open")(
         message: `The coordinator can't reach the model proxy on gateway ${gateway.destination}.`,
       });
     }
-    const prefixes = yield* Ref.make<GatewayLlmPrefixes>("protocol");
-    /** Sends later requests to the path prefixes that `reported` shows, and logs each change. */
+    const providers = catalog.providers;
+    const prefixes = yield* Ref.make<GatewayLlmPrefixes>("slot");
+    /** Sends later requests to the path prefixes that `report` shows, and logs each change. */
     const recordPrefixes = Effect.fn("GatewayModelRoute.recordPrefixes")(function* (
-      reported: Option.Option<ReportedProviders>,
+      report: Option.Option<ProviderReport>,
     ) {
       // A Gateway that predates the provider report also predates protocol path prefixes.
-      const next = Option.match(reported, {
+      const next = Option.match(report, {
         onNone: (): GatewayLlmPrefixes => "provider",
-        onSome: ({ prefixes }) => prefixes,
+        onSome: (value) => reportedProviders(providers, value).prefixes,
       });
       const fields = { worker, gateway: gateway.destination, llmPrefixes: next };
       yield* Effect.annotateCurrentSpan(fields);
@@ -163,35 +163,35 @@ export const gatewayModelRouteFor = Effect.fn("GatewayModelRoute.open")(
         ),
       ),
     ).pipe(Effect.forkScoped);
-    const credential = Effect.fn("GatewayModelRoute.credential")(function* (
-      protocol: GatewayLlmProtocol,
-    ) {
-      yield* Effect.annotateCurrentSpan({ worker, protocol });
-      const listed = yield* readProviders;
-      if (Option.isNone(listed))
+    const credential = Effect.fn("GatewayModelRoute.credential")(function* (slot: GatewaySlot) {
+      yield* Effect.annotateCurrentSpan({ worker, slot });
+      const report = yield* readProviders;
+      if (Option.isNone(report))
         return yield* failed(
           "Upgrade @usine/gateway: the coordinator requires gateway credential reporting.",
         );
-      return Option.fromUndefinedOr(
-        listed.value.list.providers.find(({ provider }) => provider === protocol)?.credential,
-      );
+      return Option.fromUndefinedOr(reportedProviders(providers, report.value).credentials[slot]);
     });
+    /** Returns the `llm.<domain>` path prefix of `slot` on the Gateway. */
+    const prefixOf = (slot: GatewaySlot, current: GatewayLlmPrefixes) =>
+      Option.match(providers.find(slot), {
+        onNone: () => slot,
+        onSome: (provider) => llmPrefixOf(provider, current),
+      });
     const request = Effect.fn("GatewayModelRoute.request")(function* (
-      protocol: GatewayLlmProtocol,
+      slot: GatewaySlot,
       path: string,
       body: string,
       headers: Readonly<Record<string, string>>,
       signal?: AbortSignal,
     ) {
-      yield* Effect.annotateCurrentSpan({ worker, protocol, path });
+      yield* Effect.annotateCurrentSpan({ worker, slot, path });
       const forward = yield* modelForward.current.pipe(
         Effect.catchTag("GatewayForwardClosed", (error) => modelForward.reopen(error.generation)),
       );
       const current = yield* Ref.get(prefixes);
       const response = yield* http.execute(
-        HttpClientRequest.post(
-          new URL(`/${llmPrefixOf(protocol, current)}${path}`, forward.url),
-        ).pipe(
+        HttpClientRequest.post(new URL(`/${prefixOf(slot, current)}${path}`, forward.url)).pipe(
           HttpClientRequest.setHeaders(headers),
           // The gateway reads its own token header before Authorization, so no caller header stays.
           (request) =>
@@ -220,30 +220,18 @@ export const gatewayModelRouteFor = Effect.fn("GatewayModelRoute.open")(
       llmPrefixes: opening,
     });
     const route: GatewayModelRoute = {
-      credential: (protocol) =>
-        credential(protocol).pipe(
+      credential: (slot) =>
+        credential(slot).pipe(
           Effect.mapError((error) =>
             error._tag === "GatewayModelError"
               ? error
-              : failed(`Can't check gateway credential for ${protocol} at ${gateway.destination}.`),
+              : failed(`Can't check gateway credential for ${slot} at ${gateway.destination}.`),
           ),
         ),
-      request: (protocol, body, headers, signal) =>
-        request(
-          protocol,
-          protocol === "openai-responses" ? "/v1/responses" : "/v1/messages",
-          body,
-          headers,
-          signal,
-        ).pipe(
+      request: (slot, path, body, headers, signal) =>
+        request(slot, path, body, headers, signal).pipe(
           Effect.mapError(() =>
-            failed(`Can't call ${protocol} through gateway ${gateway.destination}.`),
-          ),
-        ),
-      countTokens: (body, headers, signal) =>
-        request("anthropic-messages", "/v1/messages/count_tokens", body, headers, signal).pipe(
-          Effect.mapError(() =>
-            failed(`Can't count tokens through gateway ${gateway.destination}.`),
+            failed(`Can't call ${slot}${path} through gateway ${gateway.destination}.`),
           ),
         ),
     };

@@ -1,3 +1,4 @@
+import { anthropic, openai } from "@usine/core/agent/provider";
 import { catalog } from "@usine/agents/harness";
 import { jsonKey } from "@usine/core/json-key";
 import { assert, describe, it } from "@effect/vitest";
@@ -14,7 +15,7 @@ import { WorkerName } from "@usine/core/worker";
 import type { AttemptRequest } from "@usine/durable/attempt-runtime";
 import { completes, type StubParent, StubStorage } from "@usine/durable/testing";
 import {
-  AnthropicProvider,
+  LlmProvider,
   AnthropicSubscriptionToken,
   Attachment,
   AttachmentId,
@@ -22,7 +23,6 @@ import {
   ChatGptLogin,
   HostFilePath,
   InstallationCredential,
-  OpenAiProvider,
   SettingsInForce,
   UpstreamBase,
 } from "@usine/gateway";
@@ -89,16 +89,13 @@ const codexRequest = CheckoutRequest.make({
 
 /** A Gateway whose OpenAI credential is a ChatGPT login. */
 const CHATGPT_PROVIDERS = {
-  "anthropic-messages": Option.none(),
-  "openai-responses": Option.some(
-    OpenAiProvider.make({
-      upstream: UpstreamBase.make("https://chatgpt.com/backend-api/codex"),
-      credential: ChatGptLogin.make({
-        authFile: HostFilePath.make("/var/lib/usine-gateway/chatgpt/auth.json"),
-        tokenUrl: UpstreamBase.make("https://auth.openai.com/oauth/token"),
-      }),
+  [openai.slot]: LlmProvider.make({
+    upstream: Option.some(UpstreamBase.make("https://chatgpt.com/backend-api/codex")),
+    credential: ChatGptLogin.make({
+      authFile: HostFilePath.make("/var/lib/usine-gateway/chatgpt/auth.json"),
+      tokenUrl: UpstreamBase.make("https://auth.openai.com/oauth/token"),
     }),
-  ),
+  }),
 };
 
 /** An attachment left by an earlier orchestrator process. */
@@ -898,15 +895,12 @@ describe("SSH Worker behind a Gateway", () => {
         yield* inForce.replace({
           ...(yield* inForce.current),
           providers: {
-            "anthropic-messages": Option.some(
-              AnthropicProvider.make({
-                upstream: UpstreamBase.make("https://api.anthropic.com"),
-                credential: AnthropicSubscriptionToken.make({
-                  token: Redacted.make("sk-ant-oat01-for-executor-tests"),
-                }),
+            [anthropic.slot]: LlmProvider.make({
+              upstream: Option.some(UpstreamBase.make("https://api.anthropic.com")),
+              credential: AnthropicSubscriptionToken.make({
+                token: Redacted.make("sk-ant-oat01-for-executor-tests"),
               }),
-            ),
-            "openai-responses": Option.none(),
+            }),
           },
         });
         yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
@@ -1211,7 +1205,7 @@ describe("SSH Worker behind a Gateway", () => {
         const inForce = yield* SettingsInForce;
         yield* inForce.replace({
           ...(yield* inForce.current),
-          providers: { "anthropic-messages": Option.none(), "openai-responses": Option.none() },
+          providers: {},
         });
         const missing = yield* executor.preflight(WORKER, [CODEX_BRAIN], 1).pipe(Effect.flip);
         assert(missing._tag === "WorkerCapabilityError");
