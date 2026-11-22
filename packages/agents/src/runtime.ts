@@ -23,7 +23,7 @@ import {
   ProviderCapacityFailure,
   QuestionFailure,
 } from "@usine/core/attempt/failure";
-import { type Brand, Context, Effect, Match, Option, Schema, Scope, Stream } from "effect";
+import { type Brand, Context, Effect, Layer, Match, Option, Schema, Scope, Stream } from "effect";
 import { ChildHost } from "./child-host/child-host.ts";
 
 /** The checkout directory of an attempt. */
@@ -55,7 +55,10 @@ export const InterruptedTool = Schema.Struct({
 });
 export type InterruptedTool = typeof InterruptedTool.Type;
 
-/** Checkpoints that must precede a child prompt. */
+/**
+ * Checkpoints that must precede a child prompt. Child sessions require it, so a durable delegation
+ * can't launch one without its journal.
+ */
 export class ChildSessionJournal extends Context.Service<
   ChildSessionJournal,
   {
@@ -73,18 +76,16 @@ export class ChildSessionJournal extends Context.Service<
     ) => Effect.Effect<void>;
   }
 >()("@usine/agents/runtime/ChildSessionJournal") {
-  static readonly current = Effect.map(
-    Effect.serviceOption(ChildSessionJournal),
-    Option.getOrElse(() =>
-      ChildSessionJournal.of({
-        started: () => Effect.void,
-        prompted: Effect.void,
-        continued: () => Effect.void,
-        received: () => Effect.void,
-        delivered: () => Effect.void,
-      }),
-    ),
-  );
+  /** Saves nothing: for a session that no delegation owns, such as the supervisor's, and for tests. */
+  static readonly noop = ChildSessionJournal.of({
+    started: () => Effect.void,
+    prompted: Effect.void,
+    continued: () => Effect.void,
+    received: () => Effect.void,
+    delivered: () => Effect.void,
+  });
+  /** Provides `noop`, for tests. */
+  static readonly layerNoop = Layer.succeed(ChildSessionJournal)(ChildSessionJournal.noop);
 }
 
 /** Usage that the orchestrator committed for a session before it reopened the conversation. */
@@ -96,9 +97,9 @@ const CommittedUsage = Schema.Struct({
 
 const restartFields = {
   /**
-   * Whether the native process acknowledged the task prompt before the restart. Only Claude records
-   * it; Codex reads the thread's turns, and Pi saves a conversation only after its first user
-   * message.
+   * Whether the native process acknowledged the task prompt before the restart. Every adapter
+   * records it, but only Claude Code reads it: Codex reads the thread's turns, and Pi saves a
+   * conversation only after its first user message.
    */
   prompted: Schema.Boolean.pipe(Schema.withConstructorDefault(Effect.succeed(true))),
   /** Continuation timestamps in milliseconds, retained across orchestrator restarts. */
@@ -615,10 +616,14 @@ export type OnDelivery = (
 export interface ChildBackendService {
   /** Stops a retained child without resuming its conversation or starting a turn. */
   readonly stop: (request: ChildRequest) => Effect.Effect<void, AgentSessionError>;
-  /** Starts the child described by `request` in the calling scope and returns its controls; await `result` separately before closing the scope. */
+  /**
+   * Starts the child described by `request` in the calling scope and returns its controls; await
+   * `result` separately before closing the scope. The child saves its checkpoints in the
+   * `ChildSessionJournal` of the calling context.
+   */
   readonly launch: (
     request: ChildRequest,
-  ) => Effect.Effect<RunningSession, AgentSessionError, Scope.Scope>;
+  ) => Effect.Effect<RunningSession, AgentSessionError, Scope.Scope | ChildSessionJournal>;
 }
 
 /** The service that runs tasks delegated by an attempt's parent. */

@@ -131,6 +131,24 @@ export const memoryAttemptJournalLayer = Layer.effect(
           yield* save(withDelegation(previous, record));
         }).pipe(serialized);
       }),
+      reserveWithProgress: Effect.fn("AttemptJournal.reserveWithProgress")(
+        function* (attemptId, envelopes, number, change) {
+          yield* Effect.annotateCurrentSpan({
+            attemptId,
+            envelopes: envelopes.length,
+            delegation: number,
+            change: change._tag,
+          });
+          yield* Effect.gen(function* () {
+            const previous = yield* stored(attemptId);
+            const record = yield* delegationOf(previous, number).pipe(
+              Effect.flatMap((current) => progressed(current, change)),
+            );
+            const next = yield* reserved(withDelegation(previous, record), envelopes);
+            yield* save(next);
+          }).pipe(serialized);
+        },
+      ),
       settleDelegation: Effect.fn("AttemptJournal.settleDelegation")(
         function* (attemptId, number, outcome) {
           yield* Effect.annotateCurrentSpan({ attemptId, delegation: number });

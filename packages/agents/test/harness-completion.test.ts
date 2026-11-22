@@ -36,6 +36,7 @@ import {
   UnknownModelError,
   UnsupportedEffortError,
   WorkingDirectory,
+  ChildSessionJournal,
 } from "../src/runtime.ts";
 import { isJsonObject } from "./replay/transcript.ts";
 
@@ -234,7 +235,9 @@ describe("structured completions through the registry", () => {
           RoleSpec.make({ ...decision, persistence: "saved" }),
         ]) {
           const spec = specFor(role);
-          const policy = yield* continuationPolicy(spec, "Approve?", RestartState.make({}));
+          const policy = yield* continuationPolicy(spec, "Approve?", RestartState.make({})).pipe(
+            Effect.provideService(ChildSessionJournal, ChildSessionJournal.noop),
+          );
           const refused = yield* runtime
             .open(spec, StartPrompt.make({ text: "Approve?" }), policy)
             .pipe(Effect.scoped, Effect.flip);

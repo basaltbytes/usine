@@ -2,7 +2,13 @@ import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import { RemoteShell } from "@usine/agents/child-host";
 import { ClaudeSdk, claudeChildLayer } from "@usine/agents/claude";
-import { ChildBackend, ChildRequest, HostLoginLock, WorkingDirectory } from "@usine/agents/runtime";
+import {
+  ChildBackend,
+  ChildRequest,
+  HostLoginLock,
+  WorkingDirectory,
+  ChildSessionJournal,
+} from "@usine/agents/runtime";
 import { AgentName } from "@usine/core/agent";
 import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { AgentSessionId, ChildSession } from "@usine/core/agent/session";
@@ -104,6 +110,7 @@ describe("Claude login lock", () => {
         }).pipe(
           Effect.provide(
             claudeChildLayer.pipe(
+              Layer.provideMerge(ChildSessionJournal.layerNoop),
               Layer.provide(hostLoginLockLayer),
               Layer.provide(NodeServices.layer),
               Layer.provideMerge(sdk),

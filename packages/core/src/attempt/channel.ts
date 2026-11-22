@@ -1,7 +1,12 @@
 import { type Brand, Effect, Option, Result, Schema } from "effect";
 import { Agent, CoordinatorKind } from "../agent/agent.ts";
 import { Effort, ModelId } from "../agent/brain.ts";
-import { AgentSessionEvent, AgentSessionId, ChildSessionBudget } from "../agent/session.ts";
+import {
+  AgentSessionEvent,
+  AgentSessionId,
+  ChildSessionBudget,
+  OperatorMessageId,
+} from "../agent/session.ts";
 import {
   AttemptId,
   AttemptTask,
@@ -168,11 +173,7 @@ export class Interrupted extends Schema.TaggedClass<
   Brand.Brand<"@usine/core/attempt/channel/Interrupted">
 >("AttemptChannel/Interrupted")("Interrupted", {}) {}
 
-/** A stable identity for one operator message, including repeated text. */
-export const OperatorMessageId = Schema.String.check(Schema.isUUID()).pipe(
-  Schema.brand("OperatorMessageId"),
-);
-export type OperatorMessageId = typeof OperatorMessageId.Type;
+export { OperatorMessageId } from "../agent/session.ts";
 // Schema constructors assign IDs synchronously in browser and server callers.
 // @effect-diagnostics-next-line cryptoRandomUUIDInEffect:off
 const newMessageId = Effect.sync(() => crypto.randomUUID());

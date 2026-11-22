@@ -117,10 +117,17 @@ const workerCommands = (exitCode: number, stdout = "") => {
   return { commands, layer };
 };
 
-/** The Claude backend, with a login lock that the test can also acquire, and `commands` on Workers. */
-const claudeChildWith = (commands: Layer.Layer<ChildProcessSpawner.ChildProcessSpawner>) =>
+/**
+ * The Claude backend, with a login lock that the test can also acquire, `commands` on Workers, and
+ * `journal` for its children's checkpoints.
+ */
+const claudeChildWith = (
+  commands: Layer.Layer<ChildProcessSpawner.ChildProcessSpawner>,
+  journal: Layer.Layer<ChildSessionJournal> = ChildSessionJournal.layerNoop,
+) =>
   claudeChildLayer.pipe(
     Layer.provideMerge(loginLock),
+    Layer.provideMerge(journal),
     Layer.provide(commands),
     Layer.provide(NodeCrypto.layer),
   );
@@ -332,7 +339,10 @@ describe("Claude child backend", () => {
   });
 
   it.effect("reports a failed native reopen as interrupted", () => {
-    const saved = HarnessSession.make({ cwd: request().cwd });
+    const saved = HarnessSession.make({
+      id: HarnessSessionId.make("saved-claude"),
+      cwd: request().cwd,
+    });
     const sdk = Layer.succeed(ClaudeSdk)({
       open: (_input, options) => {
         assert.strictEqual(options.resume, saved.id);
@@ -725,7 +735,6 @@ describe("Claude child backend", () => {
           const duplicate = yield* Queue.clear(receipts);
           assert.deepStrictEqual(duplicate, []);
         }).pipe(
-          Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk))),
           Effect.provideService(ChildSessionJournal, {
             started: (reference) =>
               Effect.sync(() => {
@@ -736,8 +745,46 @@ describe("Claude child backend", () => {
             received: () => Effect.void,
             delivered: () => Effect.void,
           }),
+          Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk))),
         );
       }).pipe(Effect.scoped),
+  );
+
+  it.effect("gives each new child its own conversation ID and saves it before the launch", () =>
+    Effect.gen(function* () {
+      const opened: Array<string | undefined> = [];
+      const started: Array<HarnessSession> = [];
+      const sdk = Layer.succeed(ClaudeSdk)({
+        open: (_input, options) => {
+          opened.push(options.sessionId);
+          return scripted([{ type: "result", subtype: "success", result: "Done" }]);
+        },
+      });
+      const journal = Layer.succeed(ChildSessionJournal)({
+        ...ChildSessionJournal.noop,
+        started: (reference) =>
+          Effect.sync(() => {
+            started.push(reference);
+          }),
+      });
+      const launch = Effect.gen(function* () {
+        const running = yield* (yield* ChildBackend).launch(request());
+        return (yield* running.result).message;
+      });
+      const messages = yield* Effect.all([launch, launch]).pipe(
+        Effect.provide(
+          claudeChildWith(workerCommands(0).layer, journal).pipe(Layer.provideMerge(sdk)),
+        ),
+        Effect.scoped,
+      );
+      assert.deepStrictEqual(messages, ["Done", "Done"]);
+      assert.lengthOf(opened, 2);
+      assert.notStrictEqual(opened[0], opened[1]);
+      assert.deepStrictEqual(
+        opened,
+        started.map(({ id }) => id),
+      );
+    }),
   );
 
   it.live("checkpoints a message only after the session has handled it", () =>
@@ -1329,6 +1376,59 @@ describe("Claude child backend", () => {
     }).pipe(Effect.scoped),
   );
 
+  // Two messages to an idle child can start one turn whose opening frame names only the first.
+  // Claude folds the second in at the turn's next tool result, after the tool call that it opened.
+  it.effect("counts a message that the opening frame of its turn leaves to be folded in", () =>
+    Effect.gen(function* () {
+      const { inputs, output, sdk } = yield* typedTurnSdk;
+      const result = yield* Effect.gen(function* () {
+        const running = yield* (yield* ChildBackend).launch(
+          ChildRequest.make({ ...request(), held: true }),
+        );
+        const { until } = yield* turnDriver(running, () => output);
+        yield* Queue.take(inputs);
+        yield* Queue.offer(output, {
+          type: "result",
+          subtype: "success",
+          result: "Waiting",
+          queued_turn_count: 0,
+        });
+        yield* until("SessionIdle");
+        const first = OperatorMessage.make({ message: "Check the build" });
+        const second = OperatorMessage.make({ message: "Then check the tests" });
+        for (const message of [first, second]) {
+          yield* running.intervene(message, noDelivery);
+          yield* Queue.take(inputs);
+        }
+        yield* Queue.offer(output, {
+          type: "assistant",
+          message: {
+            content: [{ type: "tool_use", id: "bash-1", name: "Bash", input: { command: "ls" } }],
+          },
+          user_message_uuids: [first.id],
+        });
+        yield* until("ToolStarted");
+        yield* Queue.offer(output, {
+          type: "user",
+          message: { content: [{ type: "tool_result", tool_use_id: "bash-1", content: "ok" }] },
+        });
+        yield* until("ToolFinished");
+        yield* Queue.offer(output, {
+          type: "result",
+          subtype: "success",
+          result: "Done",
+          queued_turn_count: 0,
+          user_message_uuids: [first.id, second.id],
+        });
+        yield* until("SessionIdle");
+        yield* running.intervene(Release.make(), noDelivery);
+        return yield* running.result;
+      }).pipe(Effect.scoped, Effect.provide(claudeChild.pipe(Layer.provide(sdk))));
+      assert.strictEqual(result.message, "Done");
+      assert.isTrue(result.answeredOperator);
+    }).pipe(Effect.scoped),
+  );
+
   // A steer sent after a result that left an earlier steer queued joins that steer's turn.
   it.effect(
     "counts a steer sent after a result queued a turn, when that turn calls no tool, acknowledged by queued_turn_count",
@@ -1423,7 +1523,12 @@ describe("Claude child backend", () => {
               ChildRequest.make({
                 ...request(undefined, undefined, exitingHost(0)),
                 resume: resumed
-                  ? Option.some(HarnessSession.make({ cwd: request().cwd }))
+                  ? Option.some(
+                      HarnessSession.make({
+                        id: HarnessSessionId.make("saved-claude"),
+                        cwd: request().cwd,
+                      }),
+                    )
                   : Option.none(),
               }),
             );
@@ -1483,7 +1588,12 @@ describe("Claude child backend", () => {
         const running = yield* (yield* ChildBackend).launch(
           ChildRequest.make({
             ...request(undefined, undefined, exitingHost(0)),
-            resume: Option.some(HarnessSession.make({ cwd: request().cwd })),
+            resume: Option.some(
+              HarnessSession.make({
+                id: HarnessSessionId.make("saved-claude"),
+                cwd: request().cwd,
+              }),
+            ),
           }),
         );
         const output = () => outputs.at(-1)!;
@@ -1627,7 +1737,12 @@ describe("Claude child backend", () => {
         const running = yield* (yield* ChildBackend).launch(
           ChildRequest.make({
             ...request(),
-            resume: Option.some(HarnessSession.make({ cwd: request().cwd })),
+            resume: Option.some(
+              HarnessSession.make({
+                id: HarnessSessionId.make("saved-claude"),
+                cwd: request().cwd,
+              }),
+            ),
             unread: [{ id: steer.id, message: steer.message }],
           }),
         );
@@ -2751,18 +2866,14 @@ describe("Claude child backend", () => {
         });
         const layer = claudeChildWith(
           Layer.succeed(ChildProcessSpawner.ChildProcessSpawner)(owner),
-        ).pipe(
-          Layer.provideMerge(sdk),
-          Layer.provideMerge(
-            Layer.succeed(ChildSessionJournal)({
-              started: () => Effect.void,
-              prompted: Deferred.succeed(prompted, undefined).pipe(Effect.andThen(commit)),
-              continued: () => Effect.void,
-              received: () => Effect.void,
-              delivered: () => Effect.void,
-            }),
-          ),
-        );
+          Layer.succeed(ChildSessionJournal)({
+            started: () => Effect.void,
+            prompted: Deferred.succeed(prompted, undefined).pipe(Effect.andThen(commit)),
+            continued: () => Effect.void,
+            received: () => Effect.void,
+            delivered: () => Effect.void,
+          }),
+        ).pipe(Layer.provideMerge(sdk));
         return { outputs, layer, prompted, inputs, launches };
       });
 

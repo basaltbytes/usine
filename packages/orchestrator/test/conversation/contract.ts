@@ -5,6 +5,7 @@ import { BrainSpec, Harness, ModelId } from "@usine/core/agent/brain";
 import {
   AgentSessionId,
   HarnessSession,
+  HarnessSessionId,
   RoleName,
   RoleSession,
   SessionTokensUpdated,
@@ -230,7 +231,10 @@ export const conversationStoreContract = (adapter: StoreAdapter) =>
               [second.turn.id, "Queued"],
             ],
           );
-          const saved = HarnessSession.make({ cwd: "/conversation" });
+          const saved = HarnessSession.make({
+            id: HarnessSessionId.make("saved-conversation"),
+            cwd: "/conversation",
+          });
           const answer = yield* store.answer(
             running,
             succeedTurn(running, at(5), saved, spent(120)),
@@ -356,7 +360,15 @@ export const conversationStoreContract = (adapter: StoreAdapter) =>
             yield* store.transition(queued, running);
             yield* store.answer(
               running,
-              succeedTurn(running, at(4), HarnessSession.make({ cwd: "/conversation" }), spent(10)),
+              succeedTurn(
+                running,
+                at(4),
+                HarnessSession.make({
+                  id: HarnessSessionId.make("saved-conversation"),
+                  cwd: "/conversation",
+                }),
+                spent(10),
+              ),
               Reply.make({ body: MessageBody.make("Nothing."), at: at(4) }),
             );
             yield* expectUnread(member, true);

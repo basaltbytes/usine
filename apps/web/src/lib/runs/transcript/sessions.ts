@@ -19,7 +19,11 @@ interface RecordedSessionEvent {
   readonly event: Exclude<
     AgentSessionEvent,
     {
-      readonly _tag: "PoolRateLimitsUpdated" | "SessionTokensUpdated" | "ProviderAnswered";
+      readonly _tag:
+        | "PoolRateLimitsUpdated"
+        | "SessionTokensUpdated"
+        | "ProviderAnswered"
+        | "OperatorMessageRead";
     }
   >;
 }
@@ -61,7 +65,8 @@ export const indexSessions = (
     if (
       event._tag === "PoolRateLimitsUpdated" ||
       event._tag === "SessionTokensUpdated" ||
-      event._tag === "ProviderAnswered"
+      event._tag === "ProviderAnswered" ||
+      event._tag === "OperatorMessageRead"
     )
       continue;
     const id = key(record.attemptId, event.session.id);

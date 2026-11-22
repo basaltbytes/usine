@@ -3,7 +3,12 @@ import { NodeServices } from "@effect/platform-node";
 import { assert, it } from "@effect/vitest";
 import { RemoteShell } from "@usine/agents/child-host";
 import { CodexAppServer, codexChildLayer, codexAppServerLive } from "@usine/agents/codex";
-import { ChildRequest, ChildBackend, WorkingDirectory } from "@usine/agents/runtime";
+import {
+  ChildRequest,
+  ChildBackend,
+  WorkingDirectory,
+  ChildSessionJournal,
+} from "@usine/agents/runtime";
 import { AgentName } from "@usine/core/agent";
 import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { WorkerName } from "@usine/core/worker";
@@ -264,6 +269,7 @@ relay.on('exit', code => { clearInterval(timer); process.exit(inputDropped ? 255
       ).pipe(
         Effect.provide(
           codexChildLayer.pipe(
+            Layer.provideMerge(ChildSessionJournal.layerNoop),
             Layer.provideMerge(
               failure === "before-initial-turn-exit"
                 ? Layer.effect(

@@ -21,7 +21,12 @@ import {
 import { continuationPolicy } from "../src/harness/continuation.ts";
 import { SessionSpec, StartPrompt } from "../src/harness/contract.ts";
 import { RolePlacements, RoleSpec } from "../src/harness/role.ts";
-import { HostLoginLock, RestartState, WorkingDirectory } from "../src/runtime.ts";
+import {
+  HostLoginLock,
+  RestartState,
+  WorkingDirectory,
+  ChildSessionJournal,
+} from "../src/runtime.ts";
 import type { HostToolResult } from "../src/harness/tools.ts";
 import { collectLogs } from "./logs.ts";
 
@@ -176,7 +181,9 @@ describe("Claude Code usine tool sets", () => {
     });
     return Effect.gen(function* () {
       const runtime = yield* claudeRuntime;
-      const policy = yield* continuationPolicy(spec, "Read the notes", RestartState.make({}));
+      const policy = yield* continuationPolicy(spec, "Read the notes", RestartState.make({})).pipe(
+        Effect.provideService(ChildSessionJournal, ChildSessionJournal.noop),
+      );
       const native = yield* runtime.open(
         spec,
         StartPrompt.make({ text: "Read the notes" }),
@@ -279,7 +286,11 @@ describe("Claude Code usine tool sets", () => {
     });
     return Effect.gen(function* () {
       const runtime = yield* claudeRuntime;
-      const policy = yield* continuationPolicy(remote, "Read the notes", RestartState.make({}));
+      const policy = yield* continuationPolicy(
+        remote,
+        "Read the notes",
+        RestartState.make({}),
+      ).pipe(Effect.provideService(ChildSessionJournal, ChildSessionJournal.noop));
       const native = yield* runtime.open(
         remote,
         StartPrompt.make({ text: "Read the notes" }),

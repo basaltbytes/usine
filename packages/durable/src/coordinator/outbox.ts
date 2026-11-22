@@ -52,8 +52,17 @@ export interface Outbox {
   readonly emit: (
     payloads: ReadonlyArray<AttemptChannel.OutboundPayload>,
   ) => Effect.Effect<void, AttemptFailure | JournalError>;
-  /** Like `emit`, but reports a failure through `failed`, for activity that has no caller to fail. */
-  readonly relay: (payloads: ReadonlyArray<AttemptChannel.OutboundPayload>) => Effect.Effect<void>;
+  /**
+   * Like `emit`, but reports a failure through `failed`, for activity that has no caller to fail.
+   * `write`, which must reserve exactly the envelopes it receives as `commit`'s does, can commit
+   * other changes with them.
+   */
+  readonly relay: (
+    payloads: ReadonlyArray<AttemptChannel.OutboundPayload>,
+    write?: (
+      outbound: ReadonlyArray<AttemptChannel.OutboundEnvelope>,
+    ) => Effect.Effect<void, JournalError>,
+  ) => Effect.Effect<void>;
   /**
    * Records the next operator input's sequence in the journal, appends the input to the attached
    * sink's transcript, and returns the sequence. Fails with `AgentFailure` while detached.
@@ -202,8 +211,11 @@ export const outboxFor = Effect.fn("Outbox.open")(function* (
   const emit = (payloads: ReadonlyArray<AttemptChannel.OutboundPayload>) =>
     commit(payloads, (outbound) => journal.reserve(attemptId, outbound));
 
-  const relay = (payloads: ReadonlyArray<AttemptChannel.OutboundPayload>) =>
-    emit(payloads).pipe(Effect.catch(reportFailure(payloads)));
+  const relay = (
+    payloads: ReadonlyArray<AttemptChannel.OutboundPayload>,
+    write = (outbound: ReadonlyArray<AttemptChannel.OutboundEnvelope>) =>
+      journal.reserve(attemptId, outbound),
+  ) => commit(payloads, write).pipe(Effect.catch(reportFailure(payloads)));
 
   const inbound = (intervention: AttemptChannel.Intervention) =>
     emission.withPermits(1)(

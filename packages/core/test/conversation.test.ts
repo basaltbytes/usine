@@ -12,6 +12,7 @@ import { BrainSpec, Harness, ModelId } from "../src/agent/brain.ts";
 import {
   AgentSessionId,
   HarnessSession,
+  HarnessSessionId,
   RoleName,
   RoleSession,
   SessionTokensUpdated,
@@ -74,7 +75,10 @@ const running = (turn: string, sequence: number) =>
   );
 
 it("resumes from the last saved session with the usage of the last ended turn", () => {
-  const first = HarnessSession.make({ cwd: "/first" });
+  const first = HarnessSession.make({
+    id: HarnessSessionId.make("first-conversation"),
+    cwd: "/first",
+  });
   const turns = [
     succeedTurn(running("t1", 1), at(2), first, usage(10)),
     failTurn(running("t2", 3), at(4), TurnError.make({ message: "The model refused" }), usage(25)),

@@ -407,6 +407,16 @@ export class AttemptJournal extends Context.Service<
       change: ProgressChange,
     ) => Effect.Effect<void, JournalError>;
     /**
+     * Appends `envelopes` to the outbox and applies `change` to the progress of started delegation
+     * `number` in one transaction. The envelopes' sequences continue the snapshot's `nextOutbound`.
+     */
+    readonly reserveWithProgress: (
+      attemptId: AttemptId,
+      envelopes: ReadonlyArray<AttemptChannel.OutboundEnvelope>,
+      number: ChildSessionCount,
+      change: ProgressChange,
+    ) => Effect.Effect<void, JournalError>;
+    /**
      * Records `outcome` as the event that ended delegation `number` unless one is recorded, and
      * returns the recorded one.
      */

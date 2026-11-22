@@ -9,7 +9,12 @@ import {
 } from "@usine/core/agent/session";
 import { Array as Arr, type Brand, Effect, Fiber, Option, Result, Schema, Stream } from "effect";
 import type { Tool, Toolkit } from "effect/ai";
-import { AgentResultError, AgentSessionError, RestartState } from "../../runtime.ts";
+import {
+  AgentResultError,
+  AgentSessionError,
+  ChildSessionJournal,
+  RestartState,
+} from "../../runtime.ts";
 import { type ContinuationPolicy, continuationPolicy } from "../continuation.ts";
 import { SessionSpec, StartPrompt, StartResume } from "../contract.ts";
 import { Harnesses } from "../registry.ts";
@@ -180,7 +185,10 @@ export const runSupervisorTurn = Effect.fn("Supervisor.turn")(function* <
       processUsage,
     })),
   });
-  const base = yield* continuationPolicy(spec, turn.message, restart);
+  // The supervisor saves its conversation from its events; no delegation journals it.
+  const base = yield* continuationPolicy(spec, turn.message, restart).pipe(
+    Effect.provideService(ChildSessionJournal, ChildSessionJournal.noop),
+  );
   const message = yield* Effect.gen(function* () {
     const native = yield* Option.match(turn.saved, {
       onNone: () => runtime.open(spec, StartPrompt.make({ text: turn.message }), base, tools),

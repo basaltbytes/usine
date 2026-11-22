@@ -40,15 +40,19 @@ import { Effect } from "effect";
 import { continuationPolicy } from "@usine/agents/continuation";
 import { type SessionSpec, StartPrompt } from "@usine/agents/harness/contract";
 import { Harnesses } from "@usine/agents/harness/node";
-import { RestartState } from "@usine/agents/runtime";
+import { ChildSessionJournal, RestartState } from "@usine/agents/runtime";
 
 const openSession = (spec: SessionSpec, prompt: string) =>
   Effect.gen(function* () {
     const runtime = yield* (yield* Harnesses).runtime(spec.session.brain.harness);
-    const policy = yield* continuationPolicy(spec, prompt, RestartState.make({}));
+    const policy = yield* continuationPolicy(spec, prompt, RestartState.make({})).pipe(
+      Effect.provideService(ChildSessionJournal, ChildSessionJournal.noop),
+    );
     return yield* runtime.open(spec, StartPrompt.make({ text: prompt }), policy);
   });
 ```
+
+The continuation policy saves the session's checkpoints, such as its saved conversation and the messages it read, in the `ChildSessionJournal` of the context that makes it, and adapters save through the policy. `ChildBackend.launch` requires the service, so a durable delegation that leaves out its journal doesn't compile. A session that no delegation journals, such as the supervisor's, takes `ChildSessionJournal.noop`; tests provide `ChildSessionJournal.layerNoop`.
 
 `complete(spec, prompt, output)` sends one prompt and returns a `Completion`: the value that the `output` schema decodes, and its usage as a `SessionTokensUpdated` whose session records the brain that ran and the billing pool. The output's JSON form must be an object, and every field needs a value, because strict provider modes require every property. Admission requires the role in the spec to return a structured value and keep no conversation, so it needs `structured-output` and `ephemeral`. A completion saves no conversation, returns no session reference, and offers the model no usine tools, so admission refuses a role that runs a usine tool set. Each adapter sends the output's JSON Schema, with closed objects and the root definition of an identified schema or `Schema.Class` inlined, and reports what its harness answered and the tokens it spent. `structuredCompletion` then decodes the value with the schema, rejecting properties that the schema doesn't model, and classifies and logs every failure in one place:
 
@@ -98,7 +102,9 @@ const noteHandlers = notes.toLayer({ read_note: ({ name }) => Effect.succeed(`No
 const openWithNotes = (spec: SessionSpec, prompt: string) =>
   Effect.gen(function* () {
     const runtime = yield* (yield* Harnesses).runtime(spec.session.brain.harness);
-    const policy = yield* continuationPolicy(spec, prompt, RestartState.make({}));
+    const policy = yield* continuationPolicy(spec, prompt, RestartState.make({})).pipe(
+      Effect.provideService(ChildSessionJournal, ChildSessionJournal.noop),
+    );
     return yield* runtime.open(spec, StartPrompt.make({ text: prompt }), policy, notes);
   }).pipe(Effect.provide(noteHandlers));
 ```
@@ -172,7 +178,9 @@ Child output becomes typed events: `SessionStarted`, `TextOutput` for completed 
 
 `ChildRequest.idle` restores a completed report without starting a turn. Release returns that report unless the child is paused; operator guidance starts another turn. `SessionIdle.message` supplies the report for durable recovery.
 
-`RunningSession.intervene(action, onDelivery)` applies steer, interrupt, and holds. A message to an idle or paused child starts a turn and emits `SessionResumed`. A message to a working child joins the turn and returns `InterventionState.queued`; `onDelivery` runs once, with the child's state when the harness reads it, or with none if the child stops first. Pi reads it when the queued steering message starts, Codex when it records a `userMessage` item, and Claude Code with a result whose `queued_turn_count` no longer counts it. A finished turn has read all its queued messages.
+`RunningSession.intervene(action, onDelivery)` applies steer, interrupt, and holds. A message to an idle or paused child starts a turn and emits `SessionResumed`. A message to a working child joins the turn and returns `InterventionState.queued`; `onDelivery` runs once, with the child's state when the harness reads it, or with none if the child stops first. Pi reads it when the queued steering message starts, Codex when it records a `userMessage` item, and Claude Code with a result whose `queued_turn_count` no longer counts it. A finished turn has read all its queued messages. Each operator message that the session reads, at once or later, emits `OperatorMessageRead` with the message's ID where the harness reported the read.
+
+The internal module `src/harness/receipts.ts` decides which queued messages a harness has read. Each adapter passes `sessionConversation` a `decode` function that turns one of its harness's signals into `Receipt`s, and calls `observe` with each signal. A receipt names messages by ID, by the text that the harness recorded with an optional native item ID, or by how many sent messages the harness still queues. `match` applies it to the conversation's unread messages, and the conversation emits `OperatorMessageRead`, saves new native item IDs with `ChildSessionJournal.received` before it reports the reads, runs `onDelivery`, and decides `answeredOperator`.
 
 ## Host login lock
 
@@ -236,7 +244,7 @@ Claude children save sessions, and Codex threads aren't ephemeral. `SessionStart
 
 Pi children save conversations in `<checkout>/.usine/pi/sessions`. Their `SessionStarted.harnessSession` records the Pi ID, checkout as `cwd`, and session directory as `home`. Keep the checkout and this directory to continue the conversation after the process exits. Every registered runtime requires `resume(request, savedReference)`: it returns `Some({ running, active })` when the native conversation is available and `None` when it cannot reopen it. Reopening sends no prompt. Call `running.steer` to supply explicit guidance, or use `launch` with `request.resume` to apply the shared continuation policy. Keep the scope open until `running.result` returns. Preflight uses in-memory sessions.
 
-Claude receives a usine-generated UUID as `sessionId` before its first prompt. `ChildSessionJournal.started` checkpoints the native reference before SDK startup, so recovery does not depend on an `init` message. Operator messages carry UUIDs through storage and transport. Claude receives each ID as `SDKUserMessage.uuid` and acknowledges `user_message_uuids`. A successful result's pending-send count also acknowledges submitted guidance folded without a UUID receipt. Codex correlates distinct native user-message item IDs with submitted input, restores those IDs on active-turn reattachment, and resubmits unconsumed guidance before the next operator message. Repeated native receipts are ignored, and identical text can have separate receipts. `sessionConversation.read(ids)` acknowledges only those IDs. Restored messages already submitted to a retained process wait for native delivery evidence without being sent again.
+Claude receives a usine-generated UUID as `sessionId` before its first prompt. `ChildSessionJournal.started` checkpoints the native reference before SDK startup, so recovery does not depend on an `init` message. Operator messages carry UUIDs through storage and transport. Claude receives each ID as `SDKUserMessage.uuid` and acknowledges `user_message_uuids`. A successful result's pending-send count also acknowledges submitted guidance folded without a UUID receipt. Codex correlates distinct native user-message item IDs with submitted input, restores those IDs on active-turn reattachment, and resubmits unconsumed guidance before the next operator message. Repeated native receipts are ignored, and identical text can have separate receipts. A receipt that names IDs acknowledges only those IDs. Restored messages already submitted to a retained process wait for native delivery evidence without being sent again.
 
 The durable parent's `subagent` tool resumes saved child conversations after an orchestrator restart in the retained checkout. An incompatible continuation returns an interrupted call with its committed output. Explicit Pi runtime callers can also use `resume`.
 

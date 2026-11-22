@@ -5,7 +5,12 @@ import { claudeChildLayer, claudeSdkLive } from "@usine/agents/claude";
 import { codexAppServerLive, codexChildLayer } from "@usine/agents/codex";
 import { catalog } from "@usine/agents/harness";
 import { harnessesLive } from "@usine/agents/harness/node";
-import { ChildBackend, ChildRequest, WorkingDirectory } from "@usine/agents/runtime";
+import {
+  ChildBackend,
+  ChildRequest,
+  WorkingDirectory,
+  ChildSessionJournal,
+} from "@usine/agents/runtime";
 import { AgentName } from "@usine/core/agent";
 import { BrainSpec, Harness, ModelId } from "@usine/core/agent/brain";
 import { AgentSessionId, ChildSession } from "@usine/core/agent/session";
@@ -133,7 +138,10 @@ it.live.skipIf(process.platform !== "linux")(
       Effect.provide(
         Layer.merge(
           harnessesLive.pipe(Layer.provide(hostLoginLockLayer)),
-          codexChildLayer.pipe(Layer.provide(codexAppServerLive)),
+          codexChildLayer.pipe(
+            Layer.provideMerge(ChildSessionJournal.layerNoop),
+            Layer.provide(codexAppServerLive),
+          ),
         ).pipe(Layer.provideMerge(NodeServices.layer)),
       ),
       Effect.timeout("20 seconds"),
@@ -303,10 +311,13 @@ describe.skipIf(process.platform !== "linux")("Claude container sessions (Linux 
       }).pipe(
         Effect.scoped,
         Effect.provide(
-          Layer.merge(harnessesLive, claudeChildLayer.pipe(Layer.provide(claudeSdkLive))).pipe(
-            Layer.provide(hostLoginLockLayer),
-            Layer.provideMerge(NodeServices.layer),
-          ),
+          Layer.merge(
+            harnessesLive,
+            claudeChildLayer.pipe(
+              Layer.provideMerge(ChildSessionJournal.layerNoop),
+              Layer.provide(claudeSdkLive),
+            ),
+          ).pipe(Layer.provide(hostLoginLockLayer), Layer.provideMerge(NodeServices.layer)),
         ),
         Effect.timeout("20 seconds"),
       ),

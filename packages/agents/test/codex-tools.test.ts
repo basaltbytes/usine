@@ -43,6 +43,7 @@ import {
   RestartState,
   SessionOperationError,
   WorkingDirectory,
+  ChildSessionJournal,
 } from "../src/runtime.ts";
 import { collectLogs } from "./logs.ts";
 
@@ -343,7 +344,9 @@ const loginLock = Layer.effect(
 const run = (observed: Observed) =>
   Effect.gen(function* () {
     const runtime = yield* codexRuntime;
-    const policy = yield* continuationPolicy(spec, "Probe", RestartState.make({}));
+    const policy = yield* continuationPolicy(spec, "Probe", RestartState.make({})).pipe(
+      Effect.provideService(ChildSessionJournal, ChildSessionJournal.noop),
+    );
     const native = yield* runtime.open(spec, StartPrompt.make({ text: "Probe" }), policy, tools);
     const events = yield* Effect.forkScoped(Stream.runCollect(native.running.events));
     yield* native.running.result;
@@ -468,7 +471,9 @@ describe("usine tool sets on Codex", () => {
         const logs = collectLogs(["Info"]);
         yield* Effect.gen(function* () {
           const runtime = yield* codexRuntime;
-          const policy = yield* continuationPolicy(spec, "Probe", RestartState.make({}));
+          const policy = yield* continuationPolicy(spec, "Probe", RestartState.make({})).pipe(
+            Effect.provideService(ChildSessionJournal, ChildSessionJournal.noop),
+          );
           const native = yield* runtime.open(
             spec,
             StartPrompt.make({ text: "Probe" }),
@@ -552,7 +557,9 @@ describe("usine tool sets on Codex", () => {
       const inbox = yield* Queue.make<CodexNotification, SessionOperationError | Cause.Done>();
       yield* Effect.gen(function* () {
         const runtime = yield* codexRuntime;
-        const policy = yield* continuationPolicy(spec, "Probe", RestartState.make({}));
+        const policy = yield* continuationPolicy(spec, "Probe", RestartState.make({})).pipe(
+          Effect.provideService(ChildSessionJournal, ChildSessionJournal.noop),
+        );
         const native = yield* runtime.open(
           spec,
           StartPrompt.make({ text: "Probe" }),
@@ -602,7 +609,9 @@ describe("usine tool sets on Codex", () => {
       });
       yield* Effect.gen(function* () {
         const runtime = yield* codexRuntime;
-        const policy = yield* continuationPolicy(spec, "Probe", RestartState.make({}));
+        const policy = yield* continuationPolicy(spec, "Probe", RestartState.make({})).pipe(
+          Effect.provideService(ChildSessionJournal, ChildSessionJournal.noop),
+        );
         const native = yield* runtime.open(
           spec,
           StartResume.make({ reference: saved }),
@@ -645,7 +654,9 @@ describe("usine tool sets on Codex", () => {
       });
       yield* Effect.gen(function* () {
         const runtime = yield* codexRuntime;
-        const policy = yield* continuationPolicy(remote, "Probe", RestartState.make({}));
+        const policy = yield* continuationPolicy(remote, "Probe", RestartState.make({})).pipe(
+          Effect.provideService(ChildSessionJournal, ChildSessionJournal.noop),
+        );
         const native = yield* runtime.open(
           remote,
           StartPrompt.make({ text: "Probe" }),

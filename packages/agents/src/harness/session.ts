@@ -13,7 +13,7 @@ import {
   ToolFinished,
   ToolStarted,
 } from "@usine/core/agent/session";
-import { Cause, Deferred, Effect, Option, Queue, Ref, Result, Schema } from "effect";
+import { Cause, Deferred, Effect, MutableRef, Option, Queue, Ref, Result, Schema } from "effect";
 import { addUsage, piMessageUsage, type SessionUsage } from "./usage.ts";
 import {
   type AgentSessionError,
@@ -74,6 +74,12 @@ export interface SessionChannel {
   ) => Effect.Effect<void>;
 }
 
+/** The tool calls that a session started, and the `started` count when each one finished. */
+interface ToolCounts {
+  readonly started: number;
+  readonly finishedAt: ReadonlyArray<number>;
+}
+
 export const sessionChannel = Effect.fn("SessionChannel.make")(function* (
   options: SessionChannelOptions,
 ) {
@@ -85,21 +91,23 @@ export const sessionChannel = Effect.fn("SessionChannel.make")(function* (
   const runCleanups = Effect.sync(() => {
     for (const cleanup of cleanups.splice(0)) cleanup();
   });
-  let toolCalls = 0;
-  // The `toolCalls` count at each finished tool call, in order.
-  const callsAtResults: Array<number> = [];
-  const count = (event: AgentSessionEvent) => {
-    if (event._tag === "ToolStarted") toolCalls += 1;
-    if (event._tag === "ToolFinished") callsAtResults.push(toolCalls);
-  };
+  const tools = yield* Ref.make<ToolCounts>({ started: 0, finishedAt: [] });
+  const count =
+    (event: AgentSessionEvent) =>
+    (current: ToolCounts): ToolCounts =>
+      event._tag === "ToolStarted"
+        ? { ...current, started: current.started + 1 }
+        : event._tag === "ToolFinished"
+          ? { ...current, finishedAt: [...current.finishedAt, current.started] }
+          : current;
 
   const emitUnsafe = (event: AgentSessionEvent) => {
-    count(event);
+    MutableRef.update(tools.ref, count(event));
     return Queue.offerUnsafe(events, event);
   };
 
   const emit = (event: AgentSessionEvent) =>
-    Effect.sync(() => count(event)).pipe(
+    Ref.update(tools, count(event)).pipe(
       Effect.andThen(Queue.offer(events, event)),
       Effect.flatMap((accepted) =>
         accepted
@@ -169,11 +177,11 @@ export const sessionChannel = Effect.fn("SessionChannel.make")(function* (
     },
     emit,
     emitUnsafe,
-    toolCalls: Effect.sync(() => toolCalls),
-    toolCallsUnsafe: () => toolCalls,
-    toolResults: Effect.sync(() => callsAtResults.length),
+    toolCalls: Effect.map(Ref.get(tools), ({ started }) => started),
+    toolCallsUnsafe: () => Ref.getUnsafe(tools).started,
+    toolResults: Effect.map(Ref.get(tools), ({ finishedAt }) => finishedAt.length),
     toolCallsAtResult: (results) =>
-      Effect.sync(() => Option.fromUndefinedOr(callsAtResults[results])),
+      Effect.map(Ref.get(tools), ({ finishedAt }) => Option.fromUndefinedOr(finishedAt[results])),
     fail,
     finish,
   } satisfies SessionChannel;

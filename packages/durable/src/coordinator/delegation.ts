@@ -1,6 +1,7 @@
 import type { ChildRequest } from "@usine/agents/runtime";
 import type { ChildSessionCount } from "@usine/core/agent/session";
 import type { AttemptId } from "@usine/core/attempt";
+import * as AttemptChannel from "@usine/core/attempt/channel";
 import { Effect, Option, Schema } from "effect";
 
 import type {
@@ -24,6 +25,7 @@ import {
   ToolStarted,
   UsageSaved,
 } from "./journal.ts";
+import type { Outbox } from "./outbox.ts";
 import type { Supervisor } from "./supervision.ts";
 
 /** The characters of a child's output that the coordinator retains, from its end. */
@@ -37,11 +39,13 @@ const asJson = (
 /**
  * The journal of delegation `number`, which the transition that decided it numbered within the
  * child-session budget, so `start` never refuses it. The child's supervision and queued operator
- * input come from the attempt journal.
+ * input come from the attempt journal. A tool event of the child goes through `outbox` with its
+ * change to the in-flight calls, in one transaction.
  */
 export const journalDelegation = (
   journal: AttemptJournal["Service"],
   supervisor: Supervisor,
+  outbox: Outbox,
   attemptId: AttemptId,
   number: ChildSessionCount,
 ): DelegationJournal => {
@@ -88,8 +92,17 @@ export const journalDelegation = (
     saveReceipts: (items) => save(ReceiptsSaved.make({ items })),
     saveUsage: (usage) =>
       asJson(usage).pipe(Effect.flatMap((json) => save(UsageSaved.make({ usage: json })))),
-    toolStarted: (callId, tool) => save(ToolStarted.make({ callId, tool })),
-    toolFinished: (callId) => save(ToolFinished.make({ callId })),
+    toolEvent: (event) =>
+      outbox.relay([AttemptChannel.SessionEvent.make({ event })], (outbound) =>
+        journal.reserveWithProgress(
+          attemptId,
+          outbound,
+          number,
+          event._tag === "ToolStarted"
+            ? ToolStarted.make({ callId: event.callId, tool: event.tool })
+            : ToolFinished.make({ callId: event.callId }),
+        ),
+      ),
     saveIdle: (report, answeredOperator) => save(IdleSaved.make({ report, answeredOperator })),
     saveOutput: (output) => save(OutputSaved.make({ output })),
     saveLaunched: save(Launched.make({})),

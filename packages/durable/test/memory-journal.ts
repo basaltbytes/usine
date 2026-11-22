@@ -1,4 +1,8 @@
-import { ChildSessionBudget, ChildSessionCount } from "@usine/core/agent/session";
+import {
+  type AgentSessionEvent,
+  ChildSessionBudget,
+  ChildSessionCount,
+} from "@usine/core/agent/session";
 import { AttemptId } from "@usine/core/attempt";
 import { Deferred, Effect, Option } from "effect";
 import { JournalError } from "../src/coordinator/journal.ts";
@@ -91,6 +95,8 @@ export const memoryJournal = (
           : effect,
       );
   const running: Array<string> = [];
+  /** The tool events that the journal relayed with their in-flight change. */
+  const relayed: Array<AgentSessionEvent> = [];
   const published: Array<DelegationDetails> = [];
   const waiting: Array<{ readonly sessionId: string; readonly ended: Deferred.Deferred<void> }> =
     [];
@@ -166,17 +172,15 @@ export const memoryJournal = (
       Effect.sync(() => {
         delegation.saved = Option.map(delegation.saved, (saved) => ({ ...saved, usage }));
       }).pipe(guarded("saveUsage")),
-    toolStarted: (callId, tool) =>
+    toolEvent: (event) =>
       Effect.sync(() => {
-        delegation.inFlight = [
-          ...delegation.inFlight.filter((call) => call.callId !== callId),
-          { callId, tool },
-        ];
-      }).pipe(guarded("toolStarted")),
-    toolFinished: (callId) =>
-      Effect.sync(() => {
-        delegation.inFlight = delegation.inFlight.filter((call) => call.callId !== callId);
-      }).pipe(guarded("toolFinished")),
+        const others = delegation.inFlight.filter((call) => call.callId !== event.callId);
+        delegation.inFlight =
+          event._tag === "ToolStarted"
+            ? [...others, { callId: event.callId, tool: event.tool }]
+            : others;
+        relayed.push(event);
+      }),
     saveIdle: (report, answeredOperator) =>
       Effect.sync(() => {
         delegation.idle = report;
@@ -221,5 +225,5 @@ export const memoryJournal = (
         if (waiter.sessionId === sessionId) yield* Deferred.succeed(waiter.ended, undefined);
         else waiting.push(waiter);
     });
-  return { journal, call, attempt, delegation, published, failing, release };
+  return { journal, call, attempt, delegation, published, relayed, failing, release };
 };
