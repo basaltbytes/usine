@@ -1,6 +1,6 @@
 import { queryOptions, useQuery } from "@tanstack/react-query";
 import type { Harness } from "@usine/core/agent/brain";
-import type { BillingPool } from "@usine/core/agent/pool";
+import { type BillingPool, declaredPool } from "@usine/core/agent/pool";
 import { api } from "~/lib/api";
 
 export const capabilitiesQuery = () =>
@@ -19,5 +19,5 @@ export const useHarnessLabel = () => {
 /** Returns a billing pool's label, or its ID before the labels load or for an undeclared pool. */
 export const usePoolLabel = () => {
   const { data } = useQuery(capabilitiesQuery());
-  return (id: BillingPool): string => data?.pools.find((pool) => pool.id === id)?.label ?? id;
+  return (id: BillingPool): string => declaredPool(data?.pools ?? [], id).label;
 };

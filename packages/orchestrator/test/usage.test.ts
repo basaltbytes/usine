@@ -228,33 +228,70 @@ describe("RunUsageReader", () => {
       ),
   );
 
-  it.effect("bills recorded pools independently of harness and model inference", () => {
-    const parent = ParentSession.make({
-      ...planParent,
-      pool: Option.some(BillingPool.make("apiKeys")),
-      endpoint: Option.some(EndpointName.make("private-endpoint")),
-    });
-    const added = ChildSession.make({
-      ...child("new", Harness.make("new-harness"), "qwen"),
-      pool: Option.some(BillingPool.make("apiKeys")),
-      endpoint: Option.some(EndpointName.make("ollama")),
-    });
-    return Effect.gen(function* () {
-      const usage = yield* (yield* RunUsageReader).read(runUsageSource(source));
-      assert.deepStrictEqual(
-        usage.sessions.map(({ pool, session }) => [pool, session.endpoint]),
-        [
-          ["apiKeys", parent.endpoint],
-          ["apiKeys", added.endpoint],
-        ],
+  it.effect(
+    "bills recorded pools independently of harness and model inference, and undeclared pools last under their IDs",
+    () => {
+      const parent = ParentSession.make({
+        ...planParent,
+        pool: Option.some(BillingPool.make("apiKeys")),
+        endpoint: Option.some(EndpointName.make("private-endpoint")),
+      });
+      const added = ChildSession.make({
+        ...child("new", Harness.make("new-harness"), "qwen"),
+        pool: Option.some(BillingPool.make("apiKeys")),
+        endpoint: Option.some(EndpointName.make("ollama")),
+      });
+      // Pools of a removed harness, which the catalog no longer declares.
+      const removed = ChildSession.make({
+        ...child("removed", Harness.make("removed-harness"), "old-model"),
+        pool: Option.some(BillingPool.make("removedPlan")),
+      });
+      const archived = ChildSession.make({
+        ...child("archived", Harness.make("removed-harness"), "old-model"),
+        pool: Option.some(BillingPool.make("archivedPlan")),
+      });
+      const lines = (
+        pools: ReadonlyArray<{
+          readonly pool: string;
+          readonly label: string;
+          readonly cost: { usd: number; estimate: boolean } | null;
+        }>,
+      ) => pools.map(({ pool, label, cost }) => [pool, label, cost === null ? null : { ...cost }]);
+      const expected = [
+        ["apiKeys", "API keys", { usd: 0.75, estimate: false }],
+        ["archivedPlan", "archivedPlan", { usd: 2, estimate: false }],
+        ["removedPlan", "removedPlan", { usd: 1, estimate: false }],
+      ];
+      return Effect.gen(function* () {
+        const usage = yield* (yield* RunUsageReader).read(runUsageSource(source));
+        assert.deepStrictEqual(
+          usage.sessions.map(({ pool, session }) => [pool, session.endpoint]),
+          [
+            ["removedPlan", removed.endpoint],
+            ["apiKeys", parent.endpoint],
+            ["archivedPlan", archived.endpoint],
+            ["apiKeys", added.endpoint],
+          ],
+        );
+        assert.deepStrictEqual(lines(usage.pools), expected);
+        const task = taskUsage(
+          catalog.pools,
+          [{ id: runId, attempts: [] }],
+          new Map([[runId, usage]]),
+        );
+        assert.deepStrictEqual(lines(task.pools), expected);
+      }).pipe(
+        Effect.provide(
+          readerOf([
+            report(1, removed, 1, Option.none()),
+            report(2, parent, 0.25, Option.none()),
+            report(3, archived, 2, Option.none()),
+            report(4, added, 0.5, Option.none()),
+          ]),
+        ),
       );
-      assert.deepStrictEqual(costs(usage.pools), [{ usd: 0.75, estimate: false }]);
-    }).pipe(
-      Effect.provide(
-        readerOf([report(1, parent, 0.25, Option.none()), report(2, added, 0.5, Option.none())]),
-      ),
-    );
-  });
+    },
+  );
 
   it.effect(
     "lists a plan pool that only a test harness declares under its label, as an estimate",

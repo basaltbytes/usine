@@ -68,6 +68,7 @@ import {
   SessionUsageView,
   UsageCostView,
 } from "../src/operator/usage.ts";
+import { catalogPools } from "./support/pools.ts";
 
 const at = (instant: string) => DateTime.makeUnsafe(`2026-10-${instant}:00.000Z`);
 const MINUTE = 60_000;
@@ -1021,6 +1022,7 @@ describe("OperatorStatistics", () => {
               Layer.provide(configurationLayer),
               Layer.provide(RunUsageReader.layer),
               Layer.provide(Layer.mergeAll(reader, items, budgets)),
+              Layer.provide(catalogPools),
             ),
           ),
         );

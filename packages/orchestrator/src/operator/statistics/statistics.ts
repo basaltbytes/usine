@@ -46,6 +46,7 @@ const makeStatistics = Effect.gen(function* () {
   const itemReader = yield* ItemProjectionReader;
   const usageReader = yield* RunUsageReader;
   const budgets = yield* CycleBudgets;
+  const pools = yield* BillingPools;
 
   const usageOf = (runs: ReadonlyArray<RunSummary>) =>
     Effect.forEach(
@@ -198,7 +199,6 @@ const makeStatistics = Effect.gen(function* () {
       ({ run, repository }) =>
         RunState.isOpen(run.state) && (admin || repositories.has(repository.toLowerCase())),
     );
-    const pools = yield* BillingPools;
     const view = runStatisticsView({
       window,
       now,

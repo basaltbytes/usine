@@ -30,6 +30,7 @@ import { Submission } from "../../src/engine/submission.ts";
 import { RunStore } from "../../src/store/store.ts";
 import { TranscriptAllQuery, TranscriptUsageQuery } from "../../src/transcript.ts";
 import { lifecycleSubmission, testAgent } from "./support.ts";
+import { undeclaredPools } from "../support.ts";
 
 describe("Attempt transcripts", () => {
   it.live("matches transcript usage across attempts, out-of-order reports, and redelivery", () =>
@@ -204,7 +205,14 @@ describe("Attempt transcripts", () => {
           assert.deepStrictEqual(nextTranscript, usage);
           yield* database.run(sql`DROP TRIGGER reject_usage`).execute();
         }
-      }).pipe(Effect.provide(RunStore.layer.pipe(Layer.provideMerge(localSqliteLayer(directory)))));
+      }).pipe(
+        Effect.provide(
+          RunStore.layer.pipe(
+            Layer.provideMerge(localSqliteLayer(directory)),
+            Layer.provide(undeclaredPools),
+          ),
+        ),
+      );
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 
@@ -269,7 +277,14 @@ describe("Attempt transcripts", () => {
         assert(entry !== undefined);
         assert.strictEqual(entry.envelope.version, version);
         assert.strictEqual(entry.envelope.payload._tag, "Interrupted");
-      }).pipe(Effect.provide(RunStore.layer.pipe(Layer.provideMerge(localSqliteLayer(directory)))));
+      }).pipe(
+        Effect.provide(
+          RunStore.layer.pipe(
+            Layer.provideMerge(localSqliteLayer(directory)),
+            Layer.provide(undeclaredPools),
+          ),
+        ),
+      );
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 
@@ -355,7 +370,14 @@ describe("Attempt transcripts", () => {
           assert.strictEqual(entry.envelope.target._tag, "Parent");
         }
         assert.strictEqual(entry.envelope.payload._tag, "Steer");
-      }).pipe(Effect.provide(RunStore.layer.pipe(Layer.provideMerge(localSqliteLayer(directory)))));
+      }).pipe(
+        Effect.provide(
+          RunStore.layer.pipe(
+            Layer.provideMerge(localSqliteLayer(directory)),
+            Layer.provide(undeclaredPools),
+          ),
+        ),
+      );
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 });

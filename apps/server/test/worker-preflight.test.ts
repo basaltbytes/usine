@@ -53,6 +53,7 @@ import { TestClock } from "effect/testing";
 import { assert, it } from "@effect/vitest";
 import { liveBackendLayer } from "../src/backend.ts";
 import { apiRoutes } from "../src/http.ts";
+import { catalogPools } from "../../../packages/orchestrator/test/support/pools.ts";
 
 const failedWorker = WorkerName.make("failed");
 const healthyWorker = WorkerName.make("healthy");
@@ -163,6 +164,7 @@ it.live(
           Layer.provide(Layer.mergeAll(executor, current, app)),
         );
         const engine = engineLayer(directory).pipe(
+          Layer.provide(catalogPools),
           Layer.provideMerge(scheduler),
           Layer.provide(
             Layer.succeed(TriggerCondition)({
@@ -187,6 +189,7 @@ it.live(
           ),
           Layer.provide(Layer.merge(idleTriggersLayer, MarcbachmannCelLayer)),
           Layer.provideMerge(engine),
+          Layer.provide(catalogPools),
         );
         yield* Effect.gen(function* () {
           const runs = yield* RunEngine;

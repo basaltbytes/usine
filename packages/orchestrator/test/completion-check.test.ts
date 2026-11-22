@@ -61,6 +61,7 @@ import { fixedConfigLayer } from "./support/current-instance.ts";
 import { testAppLayer, testBotAccount } from "./support/github-app.ts";
 import { submission, waitFor } from "./local-worker/support.ts";
 import { alwaysHoldsLayer, unmovedBaseRefHead } from "./support/polling.ts";
+import { catalogPools } from "./support/pools.ts";
 
 const repository = RepositoryName.make("acme/demo");
 const appActor = testBotAccount.login;
@@ -273,6 +274,7 @@ const withEngine = <A, E>(
     return yield* use.pipe(
       Effect.provide(
         engineLayer(directory).pipe(
+          Layer.provide(catalogPools),
           Layer.provide(reviewingExecutor(executions)),
           Layer.provide(check),
           Layer.provide(alwaysHoldsLayer),

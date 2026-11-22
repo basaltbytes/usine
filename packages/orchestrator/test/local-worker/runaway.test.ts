@@ -35,6 +35,7 @@ import {
   waitFor,
 } from "./support.ts";
 import { hostLoginLockLayer } from "@usine/executor";
+import { catalogPools } from "../support/pools.ts";
 
 /** Returns a new Attempt of a Run, as the engine passes it to the StepExecutor. */
 const freshExecution = (runId: RunId, attemptId: AttemptId) => {
@@ -107,6 +108,7 @@ describe("local worker runaway guard", () => {
             interruptGrace: "100 millis",
             harnessReadiness: harnessReady,
           }).pipe(
+            Layer.provide(catalogPools),
             Layer.provide(harnessesLive),
             Layer.provide(MarcbachmannCelLayer),
             Layer.provide(credentialLayer),

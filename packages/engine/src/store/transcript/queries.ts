@@ -1,4 +1,4 @@
-import type { BillingPool, PoolDescriptor } from "@usine/core/agent/pool";
+import { declaredPool, type PoolDescriptor } from "@usine/core/agent/pool";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 
 import { and, asc, desc, eq, gt, inArray, isNull, lt, sql } from "drizzle-orm";
@@ -29,15 +29,6 @@ const SealWatermarks = Schema.Struct({
   lastInboundSequence: Schema.NullOr(AttemptChannel.Sequence),
   lastOutboundSequence: Schema.NullOr(AttemptChannel.Sequence),
 });
-
-/**
- * Returns whether `pools` declares `pool` as reporting one window at a time, so a report that omits
- * a window leaves its last reading in place.
- */
-export const reportsWindowsSeparately = (
-  pools: ReadonlyArray<PoolDescriptor>,
-  pool: BillingPool,
-): boolean => pools.some(({ id, windows }) => id === pool && windows === "separately");
 
 /** Returns the transcript queries that run on the caller's transaction. */
 export const transcriptQueries = (
@@ -128,20 +119,21 @@ export const transcriptQueries = (
           target: poolRateLimits.pool,
           set: {
             ...limits,
-            envelope: reportsWindowsSeparately(pools, event.pool)
-              ? jsonSet(
-                  sql`excluded.envelope`,
-                  ["primary", "secondary"].map((window) => {
-                    const path = `$.payload.event.rateLimits.${window}`;
-                    return [
-                      path,
-                      jsonValue(
-                        sql`coalesce(${jsonExtract(sql`excluded.envelope`, path)}, ${jsonExtract(poolRateLimits.envelope, path)})`,
-                      ),
-                    ];
-                  }),
-                )
-              : limits.envelope,
+            envelope:
+              declaredPool(pools, event.pool).windows === "separately"
+                ? jsonSet(
+                    sql`excluded.envelope`,
+                    ["primary", "secondary"].map((window) => {
+                      const path = `$.payload.event.rateLimits.${window}`;
+                      return [
+                        path,
+                        jsonValue(
+                          sql`coalesce(${jsonExtract(sql`excluded.envelope`, path)}, ${jsonExtract(poolRateLimits.envelope, path)})`,
+                        ),
+                      ];
+                    }),
+                  )
+                : limits.envelope,
           },
           setWhere: gt(sql`excluded.sequence`, poolRateLimits.sequence),
         })

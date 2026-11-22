@@ -315,7 +315,8 @@ const makeOperatorObservation = Effect.gen(function* () {
   );
   const workerStatus = yield* WorkerStatus;
   const workerAttention = workerAttentionFor(reader, acknowledgements, workerStatus);
-  const poolAttention = poolAttentionFor(reader, acknowledgements);
+  const pools = yield* BillingPools;
+  const poolAttention = poolAttentionFor(reader, acknowledgements, pools);
   const webhookHealth = yield* WebhookHealth;
   const webhookAttention = webhookAttentionFor(webhookHealth, acknowledgements);
 
@@ -414,6 +415,7 @@ const makeOperatorObservation = Effect.gen(function* () {
             catalog.map(({ name }) => name),
             boardItems,
             projectRuns,
+            pools,
             cycleAsks.map(({ itemKey }) => itemKey),
             itemLoops,
             runUsage,
@@ -708,7 +710,6 @@ const makeOperatorObservation = Effect.gen(function* () {
     );
     if (changed.size === 0) return cached;
     const runs = new Map([...cached.usage.runs, ...read]);
-    const pools = yield* BillingPools;
     yield* Effect.logDebug("Refreshed the usage of Runs at work on the cached overview", {
       runsAtWork: read.length,
       changed: changed.size,
@@ -1361,6 +1362,7 @@ const makeOperator = Effect.gen(function* () {
   const polling = yield* PollingTriggers;
   const githubChanges = yield* RunGitHubChanges;
   const ci = yield* CiMonitor;
+  const pools = yield* BillingPools;
   const scope = yield* Effect.scope;
 
   const dismissNeed = Effect.fn("Operator.dismissNeed")(function* (
@@ -1640,6 +1642,7 @@ const makeOperator = Effect.gen(function* () {
         storedItems,
         // Placement reads no pause state, so these views leave every Loop unpaused.
         summaries.map((summary) => runSummaryView(summary, new Set(), runWorkers)),
+        pools,
         [],
         new Map(),
         new Map(),

@@ -48,6 +48,7 @@ import { RunDatabase } from "../../src/database/database.ts";
 import { changeTransaction } from "../../src/store/changes.ts";
 import { RunStore } from "../../src/store/store.ts";
 import { lifecycleSubmission } from "./support.ts";
+import { undeclaredPools } from "../support.ts";
 
 /** A pool that only test code declares, reported one window at a time like the Claude plan. */
 const separatePlan = PoolDescriptor.make({
@@ -71,7 +72,10 @@ it.effect(
         ItemProjectionWriter.layer,
         AttentionAcknowledgements.layer,
         CycleBudgets.layer,
-      ).pipe(Layer.provideMerge(localSqliteLayer(directory)));
+      ).pipe(
+        Layer.provideMerge(localSqliteLayer(directory)),
+        Layer.provide(Layer.succeed(BillingPools)([separatePlan])),
+      );
       yield* Effect.gen(function* () {
         const bus = yield* ChangeBus;
         const store = yield* RunStore;
@@ -304,7 +308,7 @@ it.effect(
         yield* expectUnchanged(
           acknowledgements.undo(AttentionKey.make(acknowledgement), [audience]),
         );
-      }).pipe(Effect.provide(services), Effect.provideService(BillingPools, [separatePlan]));
+      }).pipe(Effect.provide(services));
     }).pipe(
       Effect.provide(NodeServices.layer.pipe(Layer.provideMerge(changeBusLayer))),
       Effect.scoped,
@@ -322,7 +326,12 @@ it.effect("restores only the latest future pool reset deadlines after a store re
     const now = yield* DateTime.now;
     const withStore = <A, E, R>(operation: Effect.Effect<A, E, R | RunStore>) =>
       operation.pipe(
-        Effect.provide(RunStore.layer.pipe(Layer.provide(localSqliteLayer(directory)))),
+        Effect.provide(
+          RunStore.layer.pipe(
+            Layer.provide(localSqliteLayer(directory)),
+            Layer.provide(undeclaredPools),
+          ),
+        ),
         Effect.scoped,
       );
     yield* withStore(

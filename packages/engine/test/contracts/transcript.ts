@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest";
 import { BrainSpec, Harness, ModelId } from "@usine/core/agent/brain";
-import { BillingPool, BillingPools, PoolDescriptor } from "@usine/core/agent/pool";
+import { BillingPool, PoolDescriptor } from "@usine/core/agent/pool";
 import {
   AgentSessionId,
   ChildSession,
@@ -240,12 +240,12 @@ export const transcriptContract = (adapter: PersistenceAdapter) => {
             assert(original.envelope._tag === "OutboundEnvelope");
             assert(original.envelope.version === AttemptChannel.PROTOCOL_VERSION);
             yield* store.appendTranscript("outbound", original.envelope);
-          }).pipe(Effect.provide(fixture.open));
+          }).pipe(Effect.provide(fixture.openDeclaring([separatePlan])));
           yield* Effect.gen(function* () {
             const [latest] = yield* (yield* RunReader).latestPoolRateLimits;
             assert.deepStrictEqual(latest, report(second, reset, window(40, 10_080)));
-          }).pipe(Effect.provide(fixture.open));
-        }).pipe(Effect.provideService(BillingPools, [separatePlan]), Effect.scoped),
+          }).pipe(Effect.provide(fixture.openDeclaring([separatePlan])));
+        }).pipe(Effect.scoped),
     );
     it.live(
       "attributes interventions without adding Events and reads held sessions beyond the visible page",

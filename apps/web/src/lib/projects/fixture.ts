@@ -1,5 +1,5 @@
 import { catalog } from "@usine/agents/harness";
-import { BillingPool } from "@usine/core/agent/pool";
+import { BillingPool, declaredPool } from "@usine/core/agent/pool";
 import {
   isSettledItemState,
   LabelLaneSource,
@@ -145,17 +145,17 @@ const pool = (
   usd: number | null = null,
   unpriced = false,
 ): TaskPoolUsageView => {
-  const declared = catalog.pools.find(({ id }) => id === name);
+  const declared = declaredPool(catalog.pools, BillingPool.make(name));
   return TaskPoolUsageView.make({
-    pool: BillingPool.make(name),
-    label: declared?.label ?? name,
+    pool: declared.id,
+    label: declared.label,
     tokens: TokenCount.make(tokens),
     cost:
       usd === null
         ? null
         : UsageCostView.make({
             usd: UsdAmount.make(usd),
-            estimate: declared?.billing === "plan",
+            estimate: declared.billing === "plan",
           }),
     unpriced,
   });

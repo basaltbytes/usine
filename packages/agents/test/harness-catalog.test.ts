@@ -3,6 +3,7 @@ import { Harness } from "@usine/core/agent/brain";
 import { BillingPool, PoolDescriptor } from "@usine/core/agent/pool";
 import { Option, Schema } from "effect";
 import {
+  apiKeys,
   catalog,
   HarnessCatalog,
   HarnessCredential,
@@ -55,9 +56,14 @@ describe("harness catalog", () => {
       ],
     });
     assert.deepStrictEqual(extended.pools, [...catalog.pools, testPlan]);
+    // Claude Code reports its five-hour and weekly windows one at a time; Codex reports both.
     assert.deepStrictEqual(
-      catalog.pools.map(({ id }) => id),
-      ["apiKeys", "claudePlan", "chatgptPlan"],
+      catalog.pools.map(({ id, billing, windows }) => ({ id, billing, windows })),
+      [
+        { id: "apiKeys", billing: "metered", windows: "none" },
+        { id: "claudePlan", billing: "plan", windows: "separately" },
+        { id: "chatgptPlan", billing: "plan", windows: "together" },
+      ],
     );
     const relabelled = PoolDescriptor.make({ ...testPlan, label: "Another plan" });
     assert(
@@ -76,6 +82,24 @@ describe("harness catalog", () => {
       ),
       "a route determines one pool",
     );
+    assert(
+      Option.isNone(
+        HarnessDescriptor.makeOption({
+          ...pi,
+          pools: [
+            ...pi.pools,
+            HarnessPool.make({ pool: testPlan, routes: ["gateway-subscription"] }),
+            HarnessPool.make({ pool: testPlan, routes: [] }),
+          ],
+        }),
+      ),
+      "a descriptor lists each pool once",
+    );
+    for (const windows of ["together", "separately"] as const)
+      assert(
+        Option.isNone(PoolDescriptor.makeOption({ ...apiKeys, windows })),
+        "a metered pool has no plan windows",
+      );
   });
 
   it("rejects duplicate IDs so registration and lookup cannot disagree", () => {

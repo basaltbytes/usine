@@ -24,6 +24,7 @@ import {
 import { queriesFor } from "../../../src/store/queries.ts";
 import { lifecycleSubmission } from "../support.ts";
 import { seedReadFixture } from "./fixture.ts";
+import { undeclaredPools } from "../../support.ts";
 
 const ReadPlanReport = Schema.Struct({
   bytes: Schema.Finite,
@@ -173,6 +174,7 @@ it.live(
         Effect.provide(
           Layer.merge(RunReader.layer, RunStore.layer).pipe(
             Layer.provideMerge(Layer.merge(RunDatabase.layer(database), codec)),
+            Layer.provide(undeclaredPools),
           ),
         ),
       );

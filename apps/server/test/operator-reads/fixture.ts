@@ -83,6 +83,7 @@ import { type OperatorCall, OperatorUnavailableError } from "../../src/mcp/serve
 import { loadOperatorTools, MAX_RESULT_BYTES, PublishedApi } from "../../src/mcp/tools.ts";
 import { operatorOpenApi } from "../../src/openapi.ts";
 import { operatorToolkit } from "../../src/supervisor/toolkit.ts";
+import { catalogPools } from "../../../../packages/orchestrator/test/support/pools.ts";
 
 // The dogfood instance has five Loops and about 500 Items on its Board; the overview and the desk
 // each evaluate every Loop's trigger on every Item, and the web UI polls both at once.
@@ -697,6 +698,7 @@ export const checkReads = ({
         ),
     });
     const engine = engineLayer(InstanceDirectory.make(root)).pipe(
+      Layer.provide(catalogPools),
       Layer.provide(slowWorker),
       Layer.provide(
         Layer.succeed(TriggerCondition)({
@@ -710,6 +712,7 @@ export const checkReads = ({
       Layer.provide(Layer.mock(ConfigurationStore)({ list: () => Effect.succeed([]) })),
       Layer.provide(Layer.mergeAll(idleTriggersLayer, MarcbachmannCelLayer, WorkerStatus.idle)),
       Layer.provideMerge(engine),
+      Layer.provide(catalogPools),
     );
     const measurements = yield* Effect.gen(function* () {
       const items = yield* ItemProjectionWriter;

@@ -1,5 +1,10 @@
 import { catalog } from "@usine/agents/harness";
-import { BillingPool, BillingPools, type PoolDescriptor } from "@usine/core/agent/pool";
+import {
+  BillingPool,
+  BillingPools,
+  declaredPool,
+  type PoolDescriptor,
+} from "@usine/core/agent/pool";
 import {
   AgentSession,
   sessionPool,
@@ -127,19 +132,15 @@ export class TaskUsageView extends Schema.Class<
   cost: Schema.NullOr(UsageCostView),
 }) {}
 
-/** The members of one billing pool, with how the catalog presents and bills that pool. */
+/** The members of one billing pool, with the pool as `declaredPool` resolves it. */
 interface PoolGroup<A> {
-  readonly pool: BillingPool;
-  readonly label: string;
-  /** Whether the pool is a plan, whose prices estimate rather than bill usage (ADR 0013). */
-  readonly plan: boolean;
+  readonly pool: PoolDescriptor;
   readonly members: Arr.NonEmptyReadonlyArray<A>;
 }
 
 /**
  * Groups `members` by billing pool: the pools that `pools` declares in its order, then the
- * undeclared pools, such as those of a removed harness, by ID. An undeclared pool shows under its
- * ID and isn't a plan.
+ * undeclared pools, such as those of a removed harness, by ID.
  */
 export const poolGroups = <A extends { readonly pool: BillingPool }>(
   pools: ReadonlyArray<PoolDescriptor>,
@@ -150,32 +151,23 @@ export const poolGroups = <A extends { readonly pool: BillingPool }>(
     return index === -1 ? pools.length : index;
   };
   const order = Order.combine(
-    Order.mapInput(Order.Number, ({ pool }: PoolGroup<A>) => position(pool)),
-    Order.mapInput(Order.String, ({ pool }: PoolGroup<A>) => pool),
+    Order.mapInput(Order.Number, ({ pool }: PoolGroup<A>) => position(pool.id)),
+    Order.mapInput(Order.String, ({ pool }: PoolGroup<A>) => pool.id),
   );
   return Arr.sort(
-    Object.values(Arr.groupBy(members, ({ pool }) => pool)).map((group) => {
-      const pool = group[0].pool;
-      const declared = pools.find(({ id }) => id === pool);
-      return {
-        pool,
-        label: declared?.label ?? pool,
-        plan: declared?.billing === "plan",
-        members: group,
-      };
-    }),
+    Object.values(Arr.groupBy(members, ({ pool }) => pool)).map((group) => ({
+      pool: declaredPool(pools, group[0].pool),
+      members: group,
+    })),
     order,
   );
 };
 
-/** Whether `pools` declares `pool` as a plan. */
-const isPlan = (pools: ReadonlyArray<PoolDescriptor>, pool: BillingPool): boolean =>
-  pools.some(({ id, billing }) => id === pool && billing === "plan");
-
-const priced = (plan: boolean, usd: Option.Option<UsdAmount>): UsageCostView | null =>
+/** Prices usage in `pool`; a price in a plan pool is an estimate (ADR 0013). */
+const priced = (pool: PoolDescriptor, usd: Option.Option<UsdAmount>): UsageCostView | null =>
   Option.match(usd, {
     onNone: () => null,
-    onSome: (value) => UsageCostView.make({ usd: value, estimate: plan }),
+    onSome: (value) => UsageCostView.make({ usd: value, estimate: pool.billing === "plan" }),
   });
 
 /** Returns the harness's price, or for a Codex session, the OpenAI table's price of its breakdown. */
@@ -225,7 +217,7 @@ const runUsage = (
       session: report.session,
       pool,
       tokens: report.totalTokens,
-      cost: priced(isPlan(pools, pool), price),
+      cost: priced(declaredPool(pools, pool), price),
     });
   });
   const unknownModels = new Set(
@@ -239,14 +231,14 @@ const runUsage = (
         : [],
     ),
   );
-  const poolUsage = poolGroups(pools, sessions).map(({ pool, label, plan, members }) => {
+  const poolUsage = poolGroups(pools, sessions).map(({ pool, members }) => {
     const costs = members.flatMap(({ cost }) => (cost === null ? [] : [cost.usd]));
     return PoolUsageView.make({
-      pool,
-      label,
+      pool: pool.id,
+      label: pool.label,
       tokens: TokenCount.make(members.reduce((sum, { tokens }) => sum + tokens, 0)),
       cost: priced(
-        plan,
+        pool,
         costs.length === members.length
           ? Option.some(UsdAmount.make(costs.reduce((sum, usd) => sum + usd, 0)))
           : Option.none(),
@@ -301,14 +293,14 @@ const taskUsageTotals = (
   usage: ReadonlyMap<RunId, RunUsageView>,
 ): TaskUsageView => {
   const sessions = runIds.flatMap((id) => usage.get(id)?.sessions ?? []);
-  const poolUsage = poolGroups(pools, sessions).map(({ pool, label, plan, members }) => {
+  const poolUsage = poolGroups(pools, sessions).map(({ pool, members }) => {
     const costs = members.flatMap(({ cost }) => (cost === null ? [] : [cost.usd]));
     return TaskPoolUsageView.make({
-      pool,
-      label,
+      pool: pool.id,
+      label: pool.label,
       tokens: TokenCount.make(members.reduce((sum, { tokens }) => sum + tokens, 0)),
       cost: priced(
-        plan,
+        pool,
         costs.length === 0
           ? Option.none()
           : Option.some(UsdAmount.make(costs.reduce((sum, usd) => sum + usd, 0))),
@@ -363,6 +355,7 @@ const makeRunUsageReader = Effect.gen(function* () {
   const runs = yield* RunReader;
   const ended = yield* Effect.sync(() => new Map<AttemptId, ReadonlyArray<TranscriptEntry>>());
   const loggedModels = yield* Effect.sync(() => new Set<string>());
+  const pools = yield* BillingPools;
 
   const attemptReports = Effect.fn("RunUsageReader.attemptReports")(function* (
     attempt: RunUsageSource["attempts"][number],
@@ -377,7 +370,6 @@ const makeRunUsageReader = Effect.gen(function* () {
   const read = Effect.fn("RunUsageReader.read")(function* (snapshot: RunUsageSource) {
     yield* Effect.annotateCurrentSpan({ runId: snapshot.run.id });
     const attempts = yield* Effect.forEach(snapshot.attempts, attemptReports, { concurrency: 4 });
-    const pools = yield* BillingPools;
     const { view: usage, unknownModels } = runUsage(
       pools,
       attempts.flatMap(({ reports }) => reports),

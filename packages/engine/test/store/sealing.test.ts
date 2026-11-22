@@ -56,7 +56,7 @@ import {
   type TranscriptSequence,
   type TranscriptEntry,
 } from "../../src/transcript.ts";
-import { submission } from "../support.ts";
+import { submission, undeclaredPools } from "../support.ts";
 import { lifecycleSubmission, testAgent } from "./support.ts";
 
 const at = DateTime.makeUnsafe("2026-10-01T00:00:00Z");
@@ -130,7 +130,10 @@ const withSealing = <A, E>(
     const database = transcriptSealerLayer.pipe(Layer.provideMerge(localSqliteLayer(directory)));
     return yield* test(directory).pipe(
       Effect.provide(
-        Layer.merge(RunReader.layer, RunStore.layer).pipe(Layer.provideMerge(database)),
+        Layer.merge(RunReader.layer, RunStore.layer).pipe(
+          Layer.provideMerge(database),
+          Layer.provide(undeclaredPools),
+        ),
       ),
     );
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer));

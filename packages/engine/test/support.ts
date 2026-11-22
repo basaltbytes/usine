@@ -2,6 +2,7 @@ import { sqliteTempDirectory } from "../../../tooling/test/sqlite.mts";
 import { NodeServices } from "@effect/platform-node";
 import { Agent, AgentPersona, AgentName } from "@usine/core/agent";
 import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
+import { BillingPools } from "@usine/core/agent/pool";
 import { type AttemptId, AttemptTask, type StopReason } from "@usine/core/attempt";
 import { type AttemptFailure, InfraFailure } from "@usine/core/attempt/failure";
 import { Event, DedupKey, EventId } from "@usine/core/event";
@@ -23,6 +24,9 @@ import { CompletionCheck } from "../src/completion-check.ts";
 import { StepExecutor, type WorkerLease } from "../src/step-executor.ts";
 import { RunStore } from "../src/store/store.ts";
 import { savedSettings, TriggerCondition, TriggerRecheck } from "../src/trigger-condition.ts";
+
+/** Declares no billing pool, so each pool reads as metered usage without plan windows. */
+export const undeclaredPools = Layer.succeed(BillingPools)([]);
 
 export const stepResult = (message: string) => StepResult.make({ message, facts: [] });
 export const testAgent = Agent.make({
@@ -56,7 +60,13 @@ export const engineLayer = (
   executor: Layer.Layer<StepExecutor>,
   condition: Layer.Layer<TriggerCondition> = conditionLayer(stillMatches),
   check: Layer.Layer<CompletionCheck> = CompletionCheck.unverified,
-) => layer(directory).pipe(Layer.provide(executor), Layer.provide(condition), Layer.provide(check));
+) =>
+  layer(directory).pipe(
+    Layer.provide(executor),
+    Layer.provide(condition),
+    Layer.provide(check),
+    Layer.provide(undeclaredPools),
+  );
 
 /** Returns a `StepExecutor` that leases Worker `local` as `kind` and runs the next of `plans`. */
 export const executorLayer = (
@@ -228,4 +238,8 @@ export const committedBeforeCrash = <A, E>(
   Effect.gen(function* () {
     const store = yield* RunStore;
     return yield* write(store);
-  }).pipe(Effect.provide(RunStore.layer.pipe(Layer.provide(localSqliteLayer(directory)))));
+  }).pipe(
+    Effect.provide(
+      RunStore.layer.pipe(Layer.provide([localSqliteLayer(directory), undeclaredPools])),
+    ),
+  );

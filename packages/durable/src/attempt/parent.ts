@@ -1,6 +1,7 @@
 import {
   admitBrain,
   AdmissionContext,
+  apiKeys,
   catalog,
   RolePlacements,
   RoleSpec,
@@ -321,6 +322,6 @@ export const resolveParent = Effect.fn("ParentModel.resolve")(function* (
     model,
     pool,
     endpoint:
-      pool === "apiKeys" ? Option.some(EndpointName.make(selected.provider)) : Option.none(),
+      pool === apiKeys.id ? Option.some(EndpointName.make(selected.provider)) : Option.none(),
   } satisfies ResolvedParent;
 });

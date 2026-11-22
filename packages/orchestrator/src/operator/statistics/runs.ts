@@ -141,10 +141,10 @@ const usageSummary = (
     measured: units.length,
     tokens: TokenCount.make(tokens),
     meanTokens: units.length === 0 ? null : TokenCount.make(Math.round(tokens / units.length)),
-    pools: poolGroups(pools, sessions).map(({ pool, label, members }) =>
+    pools: poolGroups(pools, sessions).map(({ pool, members }) =>
       PoolTokensView.make({
-        pool,
-        label,
+        pool: pool.id,
+        label: pool.label,
         tokens: TokenCount.make(sum(members.map((session) => session.tokens))),
       }),
     ),

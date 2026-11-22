@@ -1,7 +1,6 @@
 import { TranscriptCodec } from "./transcript/codec.ts";
-import { reportsWindowsSeparately } from "./transcript/queries.ts";
 import { InstanceScope } from "@usine/core/access";
-import { BillingPools } from "@usine/core/agent/pool";
+import { BillingPools, declaredPool } from "@usine/core/agent/pool";
 import type { PoolRateLimitsUpdated } from "@usine/core/agent/session";
 import { latestPoolRateLimits } from "../run-reader/pool-rate-limits.ts";
 import { ChangeBus } from "@usine/core/changes";
@@ -165,8 +164,8 @@ const makeRunStore = Effect.gen(function* () {
     for (const window of ["primary", "secondary"] as const) {
       const key = `${event.pool}:${window}`;
       const limit = event.rateLimits[window];
-      if (Option.isNone(limit) && reportsWindowsSeparately(pools, event.pool)) {
-        yield* Effect.logDebug("Window unreported; keeping its pool reset deadline", {
+      if (Option.isNone(limit) && declaredPool(pools, event.pool).windows === "separately") {
+        yield* Effect.logInfo("Window unreported; keeping its pool reset deadline", {
           pool: event.pool,
           window,
         });

@@ -43,6 +43,7 @@ import { InstanceDirectory } from "@usine/core/instance";
 import { RunStore } from "../../src/store/store.ts";
 
 import { testAgent, lifecycleSubmission, withRunStore } from "./support.ts";
+import { undeclaredPools } from "../support.ts";
 
 /** Seeds a pending Run in an old schema directly, because the current store writes columns from later migrations. */
 const seedPendingRun = (runId: RunId) =>
@@ -218,7 +219,12 @@ describe("Attempt migrations", () => {
           assert(Schema.is(Schema.Int)(before));
           assert.strictEqual(after, before + 1);
         }).pipe(
-          Effect.provide(RunStore.layer.pipe(Layer.provideMerge(localSqliteLayer(directory)))),
+          Effect.provide(
+            RunStore.layer.pipe(
+              Layer.provideMerge(localSqliteLayer(directory)),
+              Layer.provide(undeclaredPools),
+            ),
+          ),
         );
       }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
@@ -318,7 +324,14 @@ describe("Run driver migration", () => {
         const store = yield* RunStore;
 
         assert.strictEqual((yield* store.snapshot(runId)).run.state._tag, "Pending");
-      }).pipe(Effect.provide(RunStore.layer.pipe(Layer.provideMerge(localSqliteLayer(directory)))));
+      }).pipe(
+        Effect.provide(
+          RunStore.layer.pipe(
+            Layer.provideMerge(localSqliteLayer(directory)),
+            Layer.provide(undeclaredPools),
+          ),
+        ),
+      );
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 });
@@ -385,7 +398,12 @@ describe("Event reopening migration", () => {
           const rows = yield* sql`PRAGMA foreign_key_check`;
           assert.deepStrictEqual(rows, []);
         }).pipe(
-          Effect.provide(RunStore.layer.pipe(Layer.provideMerge(localSqliteLayer(directory)))),
+          Effect.provide(
+            RunStore.layer.pipe(
+              Layer.provideMerge(localSqliteLayer(directory)),
+              Layer.provide(undeclaredPools),
+            ),
+          ),
         );
       }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
@@ -468,7 +486,12 @@ describe("Attempt salvage check migration", () => {
           assert(Schema.is(Schema.Int)(before));
           assert.strictEqual(after, before + 1);
         }).pipe(
-          Effect.provide(RunStore.layer.pipe(Layer.provideMerge(localSqliteLayer(directory)))),
+          Effect.provide(
+            RunStore.layer.pipe(
+              Layer.provideMerge(localSqliteLayer(directory)),
+              Layer.provide(undeclaredPools),
+            ),
+          ),
         );
       }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
@@ -533,7 +556,12 @@ describe("Attempt start migration", () => {
           );
           assert(attempts.every(({ reattachedAt }) => Option.isNone(reattachedAt)));
         }).pipe(
-          Effect.provide(RunStore.layer.pipe(Layer.provideMerge(localSqliteLayer(directory)))),
+          Effect.provide(
+            RunStore.layer.pipe(
+              Layer.provideMerge(localSqliteLayer(directory)),
+              Layer.provide(undeclaredPools),
+            ),
+          ),
         );
       }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
@@ -661,7 +689,12 @@ describe("Run approval source migration", () => {
               );
             assert.include(String(rejected.reason.cause), "CHECK constraint failed");
           }).pipe(
-            Effect.provide(RunStore.layer.pipe(Layer.provideMerge(localSqliteLayer(directory)))),
+            Effect.provide(
+              RunStore.layer.pipe(
+                Layer.provideMerge(localSqliteLayer(directory)),
+                Layer.provide(undeclaredPools),
+              ),
+            ),
           );
         }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
     );
@@ -722,7 +755,14 @@ describe("Run close time migration", () => {
           (yield* store.snapshot(runId)).closedAt,
           Option.some(DateTime.makeUnsafe("2026-10-19T01:00:00.000Z")),
         );
-      }).pipe(Effect.provide(RunStore.layer.pipe(Layer.provideMerge(localSqliteLayer(directory)))));
+      }).pipe(
+        Effect.provide(
+          RunStore.layer.pipe(
+            Layer.provideMerge(localSqliteLayer(directory)),
+            Layer.provide(undeclaredPools),
+          ),
+        ),
+      );
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 });

@@ -66,6 +66,7 @@ import {
   inertLabelReconcilerLayer,
   unmovedBaseRefHead,
 } from "./support/polling.ts";
+import { catalogPools } from "./support/pools.ts";
 
 const repository = RepositoryName.make("basaltbytes/usine");
 const developer = AgentFile.make({
@@ -262,6 +263,7 @@ const withFactory = <A, E>(
     });
     const directory = InstanceDirectory.make(currentDirectory);
     const engine = localEngineLayer(directory).pipe(
+      Layer.provide(catalogPools),
       Layer.provide(executor),
       Layer.provide(alwaysHoldsLayer),
       Layer.provide(CompletionCheck.unverified),
@@ -298,7 +300,11 @@ const withFactory = <A, E>(
     );
     return yield* test.pipe(
       Effect.provide(
-        Operator.layer.pipe(Layer.provide(configurationLayer), Layer.provideMerge(polling)),
+        Operator.layer.pipe(
+          Layer.provide(configurationLayer),
+          Layer.provideMerge(polling),
+          Layer.provide(catalogPools),
+        ),
       ),
     );
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer));

@@ -52,7 +52,7 @@ it("shows a changed preflight finding again and ignores acknowledgements of a di
   assert.deepStrictEqual(partitionNeeds([original], []).needsYou, [original]);
 });
 
-it("warns at 80 percent for either window and skips expired or undated windows", () => {
+it("warns at 80 percent for either window under its pool's label and skips expired or undated windows", () => {
   const now = DateTime.makeUnsafe("2026-10-29T00:00:00Z");
   const future = DateTime.add(now, { hours: 1 });
   const window = (usedPercent: number, resetsAt: Option.Option<DateTime.Utc>) =>
@@ -86,6 +86,18 @@ it("warns at 80 percent for either window and skips expired or undated windows",
     ],
   );
   assert(needs.every(({ login }) => Option.isNone(login)));
+  const removed = PoolRateLimitsUpdated.make({
+    ...snapshot,
+    pool: BillingPool.make("removedPlan"),
+  });
+  assert.deepStrictEqual(
+    poolLimitNeeds([removed], now, catalog.pools).map(({ pool, label }) => [pool, label]),
+    [
+      ["removedPlan", "removedPlan"],
+      ["removedPlan", "removedPlan"],
+    ],
+    "a pool that the catalog doesn't declare shows under its ID",
+  );
   for (const primary of [
     Option.none(),
     window(79.9, Option.some(future)),

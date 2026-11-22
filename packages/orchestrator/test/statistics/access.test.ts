@@ -22,6 +22,7 @@ import { OperatorStatistics } from "../../src/operator/statistics/statistics.ts"
 import { RunUsageReader } from "../../src/operator/usage.ts";
 import { configurationLayer } from "../support/configuration.ts";
 import { emptyCycleBudgets } from "../support/polling.ts";
+import { catalogPools } from "../support/pools.ts";
 
 const repository = RepositoryName.make("acme/visible");
 const id = RunId.make("visible-run");
@@ -139,6 +140,7 @@ it.effect("isolates project statistics from cached admin results and hides worke
           Layer.provide(reader),
           Layer.provide(Layer.mock(ItemProjectionReader)({})),
           Layer.provide(Layer.succeed(CycleBudgets, emptyCycleBudgets)),
+          Layer.provide(catalogPools),
         ),
       ),
     );

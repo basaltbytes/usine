@@ -32,6 +32,7 @@ import { DateTime, Effect, FileSystem, Layer, Option, Schema, Stream } from "eff
 import { TestClock } from "effect/testing";
 import { declaredWorkers, runView } from "../src/operator/projection.ts";
 import { credentialHolderOf } from "../src/credential-holders.ts";
+import { catalogPools } from "./support/pools.ts";
 
 /** Each Worker holds its own credential: none is declared with a Gateway. */
 const ownLogins = credentialHolderOf([]);
@@ -200,6 +201,7 @@ it.effect.each(["success", "restart", "cancel", "repeated", "ordinary"] as const
           Effect.succeed(TriggerRecheck.Matches({ settings: savedSettings(submission) })),
       });
       const runtime = layer(directory).pipe(
+        Layer.provide(catalogPools),
         Layer.provide(executor),
         Layer.provide(condition),
         Layer.provide(CompletionCheck.unverified),

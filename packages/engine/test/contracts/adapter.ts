@@ -1,3 +1,4 @@
+import type { PoolDescriptor } from "@usine/core/agent/pool";
 import { Context, Effect, type Layer, type Scope } from "effect";
 
 import type { AttentionAcknowledgements } from "../../src/attention/attention.ts";
@@ -46,8 +47,12 @@ export type PersistencePorts =
   | WriteFailures;
 
 export interface PersistenceFixture {
-  /** Opens the same store in a fresh scope, preserving committed records. */
+  /** Opens the same store in a fresh scope, preserving committed records, with no pool declared. */
   readonly open: Layer.Layer<PersistencePorts, EnginePersistenceError>;
+  /** Opens the store as `open` does, with `pools` declared. */
+  readonly openDeclaring: (
+    pools: ReadonlyArray<PoolDescriptor>,
+  ) => Layer.Layer<PersistencePorts, EnginePersistenceError>;
 }
 
 export interface PersistenceAdapter {

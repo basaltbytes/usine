@@ -25,6 +25,7 @@ import { credentialLayer, submission } from "./local-worker/support.ts";
 import { fixedConfigLayer } from "./support/current-instance.ts";
 import { testAppLayer, testCredentialsLayer } from "./support/github-app.ts";
 import { alwaysHoldsLayer } from "./support/polling.ts";
+import { catalogPools } from "./support/pools.ts";
 
 // Nothing listens on port 1, so the SSH executor's preflight fails at once.
 const unreachable = {
@@ -59,6 +60,7 @@ const startupFailure = (workers: NonNullable<(typeof UsineConfig.Encoded)["worke
         config,
         [],
       ).pipe(
+        Layer.provide(catalogPools),
         Layer.provide(harnessesLive),
         Layer.provide(MarcbachmannCelLayer),
         Layer.provide(credentialLayer),
@@ -139,6 +141,7 @@ const productionObservation = (
   environment: Record<string, string>,
 ) => {
   const engine = workerEngineLayer(directory, instanceId, config, []).pipe(
+    Layer.provide(catalogPools),
     Layer.provide(harnessesLive),
     Layer.provide(MarcbachmannCelLayer),
     Layer.provide(credentialLayer),
@@ -151,6 +154,7 @@ const productionObservation = (
     Layer.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: environment }))),
   );
   return OperatorObservation.layer.pipe(
+    Layer.provide(catalogPools),
     Layer.provide(configurationLayer),
     Layer.provide(Layer.merge(idleTriggersLayer, MarcbachmannCelLayer)),
     Layer.provideMerge(engine),

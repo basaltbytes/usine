@@ -1,3 +1,4 @@
+import { BillingPools } from "@usine/core/agent/pool";
 import {
   harvestedAttemptChanges,
   taskPullRequestState,
@@ -215,6 +216,7 @@ const makeTaskReader = Effect.gen(function* () {
   const itemReader = yield* ItemProjectionReader;
   const repositoryLabels = yield* RepositoryLabelProjectionReader;
   const budgets = yield* CycleBudgets;
+  const pools = yield* BillingPools;
 
   const read = Effect.fn("TaskReader.read")(function* (
     instance: LoadedInstance,
@@ -258,6 +260,7 @@ const makeTaskReader = Effect.gen(function* () {
       }),
       stored,
       summaries.map((summary) => runSummaryView(summary, paused, runWorkers, waits)),
+      pools,
       asks.map(({ itemKey }) => itemKey),
       new Map(),
       new Map(),

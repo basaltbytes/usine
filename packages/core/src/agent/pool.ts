@@ -41,11 +41,20 @@ export class PoolDescriptor extends Schema.Class<
 ) {}
 
 /**
- * The billing pools that the harness catalog declares, in catalog order. The orchestrator provides
- * them; without them, no pool is declared, so each pool shows under its ID as metered usage
- * without plan windows.
+ * The billing pools that the harness catalog declares, in catalog order. The server provides the
+ * catalog's pools; a test provides the pools that it declares.
  */
-export const BillingPools = Context.Reference<ReadonlyArray<PoolDescriptor>>(
-  "@usine/core/BillingPools",
-  { defaultValue: () => [] },
-);
+export class BillingPools extends Context.Service<BillingPools, ReadonlyArray<PoolDescriptor>>()(
+  "@usine/core/agent/pool/BillingPools",
+) {}
+
+/**
+ * Returns the pool of `pools` with ID `id`. For a pool that `pools` doesn't declare, such as one of
+ * a removed harness, returns a metered pool without plan windows that is labelled with its ID.
+ */
+export const declaredPool = (
+  pools: ReadonlyArray<PoolDescriptor>,
+  id: BillingPool,
+): PoolDescriptor =>
+  pools.find((pool) => pool.id === id) ??
+  PoolDescriptor.make({ id, label: id, billing: "metered", windows: "none" });
