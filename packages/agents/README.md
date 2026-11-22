@@ -168,7 +168,7 @@ Codex starts its app server in `/` and applies checkout trust through a top-leve
 
 ### OpenCode bridge
 
-The OpenCode bridge is a Node.js program without dependencies that runs `opencode serve --stdio` and relays its HTTP API as JSON lines on its standard streams, so a worker runs it as an ordinary child on every host kind. The child command is `node -e <bundle> <opencode command>`, and the bridge adds `serve --stdio --hostname 127.0.0.1 --port 0 --print-logs --log-level warn`, so OpenCode's warnings reach standard error and the process owner's stderr tail.
+The OpenCode bridge is a Node.js program without dependencies that runs `opencode serve --stdio` and relays its HTTP API as JSON lines on its standard streams, so a worker runs it as an ordinary child on every host kind. `bridgeCommand(opencode)` in `src/harness/opencode/bridge/client.ts` returns the child command, `node -e <bundle> <opencode command>`. The bridge adds `serve --stdio --hostname 127.0.0.1 --port 0 --print-logs --log-level warn`, so OpenCode's warnings reach standard error and the process owner's stderr tail.
 
 The bridge generates the server password and passes it to `serve` only in `OPENCODE_PASSWORD`, which `serve` removes from its own environment; no command line carries it. It reads `serve`'s ready line, `{"url": ...}`, subscribes to `GET /api/event`, and writes `{"ready":true}` when OpenCode's first event arrives. It holds request lines that arrive earlier until then. Each line is one JSON value, in arrival order:
 
@@ -182,7 +182,7 @@ The bridge generates the server password and passes it to `serve` only in `OPENC
 
 The bridge logs and skips an input line that has no request ID, and an event that isn't a JSON object. At end of input, it ends `serve`'s input and exits with `serve`'s exit code. When `serve` exits first, the bridge exits with that code. When OpenCode's event stream closes or refuses the subscription while `serve` runs, the bridge writes the reason to standard error, ends `serve`'s input, and exits with code 1 if `serve` exits with 0.
 
-`lines.ts` defines these lines as schemas.
+`lines.ts` defines these lines as schemas. `bridgeClient(streams)` reads a bridge's output and returns its client: `ready`, `events` in arrival order, `request(operation, request)`, which returns the answer with any HTTP status or fails after 60 seconds, and `close`, which ends the bridge's input. Request IDs carry the process owner's relay generation, so an answer to an earlier connection matches nothing. Lines that aren't bridge output, such as an event without a `type`, are logged and skipped.
 
 ## Session events and operator actions
 

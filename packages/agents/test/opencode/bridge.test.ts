@@ -7,14 +7,20 @@
 // @effect-diagnostics globalTimers:off
 // @effect-diagnostics processEnv:off
 // @effect-diagnostics schemaSync:off
+import { NodeServices } from "@effect/platform-node";
 import { afterEach, beforeAll, describe, expect, it } from "@effect/vitest";
 import { build } from "esbuild";
-import { Schema } from "effect";
+import { type Cause, Effect, Fiber, Option, Queue, Schema, Stream } from "effect";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { tmpdir } from "node:os";
+import { LocalProcess } from "../../src/child-host/child-host.ts";
+import { startChildProcess } from "../../src/child-host/node.ts";
 import { OPENCODE_BRIDGE } from "../../src/harness/opencode/bridge/bundle.js";
+import { bridgeClient, bridgeCommand } from "../../src/harness/opencode/bridge/client.ts";
 import { BridgeOutput, type BridgeRequest } from "../../src/harness/opencode/bridge/lines.ts";
 
 const decodeLine = Schema.decodeUnknownSync(Schema.fromJsonString(BridgeOutput));
+const childEnvironment = { PATH: process.env.PATH ?? "", FAKE_SERVE_SCENARIO: "ready" };
 let fakeServe: string;
 const bridges: Array<ChildProcessWithoutNullStreams> = [];
 
@@ -216,4 +222,49 @@ describe("OpenCode bridge", () => {
       );
     }
   });
+
+  it.live("runs as an ordinary child through ChildHost, with the typed client", () =>
+    Effect.gen(function* () {
+      const input = yield* Queue.make<Uint8Array, Cause.Done>();
+      const handle = yield* startChildProcess(
+        {
+          host: LocalProcess.make(),
+          cwd: tmpdir(),
+          environment: childEnvironment,
+          sessionId: Option.none(),
+        },
+        bridgeCommand({ command: process.execPath, args: ["-e", fakeServe], cwd: tmpdir() }),
+        Stream.fromQueue(input),
+      );
+      const client = yield* bridgeClient({
+        sessionId: Option.none(),
+        input,
+        output: handle.stdout,
+        generation: yield* handle.generation,
+      });
+      yield* client.ready;
+      const events = yield* Effect.forkScoped(Stream.runCollect(client.events));
+      const answer = yield* client.request("launch", {
+        method: "POST",
+        path: "/api/echo",
+        body: { title: "usine" },
+      });
+      expect(answer).toEqual({
+        id: 1,
+        status: 201,
+        body: {
+          method: "POST",
+          path: "/api/echo",
+          contentType: "application/json",
+          body: { title: "usine" },
+        },
+      });
+      yield* client.close;
+      const exit = yield* handle.exit;
+      expect(exit.exitCode).toBe(7);
+      expect(exit.stderrTail).toContain("fake serve: end of input");
+      const received = yield* Fiber.join(events);
+      expect(Array.from(received)).toEqual([{ type: "server.connected", data: {} }]);
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
 });
