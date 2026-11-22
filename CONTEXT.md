@@ -180,6 +180,10 @@ _Avoid_: stream, pipe, socket
 The stored attempt channel messages of one attempt.
 _Avoid_: log, session history, output
 
+**Background work**:
+Work that a session runs independently of its current turn, such as a test suite or a CI watch. A harness reports it as a snapshot in the session events.
+_Avoid_: background tasks, jobs, terminals
+
 **Preflight**:
 A check that a worker can run attempts. It fails with typed capability errors and installs nothing; an SSH worker's preflight pulls its attempt image.
 _Avoid_: bootstrap, provisioning, health check
