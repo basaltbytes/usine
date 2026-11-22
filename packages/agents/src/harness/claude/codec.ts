@@ -80,7 +80,6 @@ const backgroundWorkKind = (taskType: string | undefined): BackgroundWorkKind =>
     case "local_bash":
       return "command";
     case "local_agent":
-    case "remote_agent":
       return "agent";
     default:
       return "other";

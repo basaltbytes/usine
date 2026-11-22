@@ -2218,7 +2218,10 @@ describe("Claude child backend", () => {
             {
               type: "system",
               subtype: "background_tasks_changed",
-              tasks: [{ task_id: "gate", task_type: "local_bash", description: "Run gate" }],
+              tasks: [
+                { task_id: "gate", task_type: "local_bash", description: "Run gate" },
+                { task_id: "review", task_type: "local_agent", description: "Review the diff" },
+              ],
             },
             {
               type: "result",
@@ -2227,6 +2230,16 @@ describe("Claude child backend", () => {
               queued_turn_count: 0,
             },
             { type: "system", subtype: "session_state_changed", state: "idle" },
+            // A watcher that starts leaves the background work unchanged, so no event is emitted.
+            {
+              type: "system",
+              subtype: "background_tasks_changed",
+              tasks: [
+                { task_id: "gate", task_type: "local_bash", description: "Run gate" },
+                { task_id: "review", task_type: "local_agent", description: "Review the diff" },
+                { task_id: "watcher", ambient: true },
+              ],
+            },
             // An empty task snapshot is not a final answer; the notification still needs a turn.
             { type: "system", subtype: "background_tasks_changed", tasks: [] },
             { type: "system", subtype: "task_notification", task_id: "gate", status: "completed" },
@@ -2273,10 +2286,15 @@ describe("Claude child backend", () => {
             [
               Option.some([
                 BackgroundWork.make({ id: "gate", kind: "command", description: "Run gate" }),
+                BackgroundWork.make({
+                  id: "review",
+                  kind: "agent",
+                  description: "Review the diff",
+                }),
               ]),
               Option.some([]),
             ],
-            "the child reports each snapshot of its background work",
+            "the child reports each change to its background work once",
           );
         }).pipe(Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk)))),
       );
