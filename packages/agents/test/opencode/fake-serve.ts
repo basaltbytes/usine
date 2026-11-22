@@ -38,8 +38,12 @@ const SLOW_MS = 300;
  * and the bridge hold.
  */
 const FLOOD_EVENTS = 32;
-/** Text one byte longer than the bridge's 4 MiB line limit. */
-const LARGE_TEXT = "x".repeat(4 * 1024 ** 2 + 1);
+/** The bridge's line limit, 4 MiB. */
+const LINE_LIMIT = 4 * 1024 ** 2;
+/** Text one byte longer than the bridge's line limit. */
+const LARGE_TEXT = "x".repeat(LINE_LIMIT + 1);
+/** The bytes of `GET /api/large`'s body: far more than the bridge reads of a response. */
+const LARGE_RESPONSE_BYTES = 64 * 1024 ** 2;
 
 const subscribers = new Set<ServerResponse>();
 const held = new Set<ServerResponse>();
@@ -50,6 +54,11 @@ const emit = (event: OpenCodeEvent) => {
 const json = (response: ServerResponse, status: number, body: Schema.Json) => {
   response.writeHead(status, { "content-type": "application/json" });
   response.end(JSON.stringify(body));
+};
+/** Returns the JSON of `{"type": type, "data": {"text": ...}}` with `bytes` bytes. */
+const padded = (type: string, bytes: number) => {
+  const empty = JSON.stringify({ type, data: { text: "" } });
+  return JSON.stringify({ type, data: { text: "x".repeat(bytes - empty.length) } });
 };
 const readBody = (request: IncomingMessage, then: (body: string) => void) => {
   let text = "";
@@ -103,9 +112,41 @@ const routes = new Map<string, Route>(
       response.writeHead(204);
       response.end();
     },
-    "GET /api/large": (_request, response) => json(response, 200, { text: LARGE_TEXT }),
+    // Sends LARGE_RESPONSE_BYTES in 1 MiB chunks, waiting for `drain` when a write fills the
+    // connection's buffer. Reports on stderr a connection that closes before the end.
+    "GET /api/large": (_request, response) => {
+      response.writeHead(200, { "content-type": "text/plain" });
+      const chunk = "x".repeat(1024 ** 2);
+      let sent = 0;
+      response.on("close", () => {
+        if (sent < LARGE_RESPONSE_BYTES)
+          process.stderr.write(`fake serve: the large response closed after ${sent} bytes\n`);
+      });
+      const send = () => {
+        while (sent < LARGE_RESPONSE_BYTES) {
+          sent += chunk.length;
+          if (!response.write(chunk)) return void response.once("drain", send);
+        }
+        response.end();
+      };
+      send();
+    },
+    // A JSON body that fits in a line, inside an answer line that doesn't.
+    "GET /api/limit": (_request, response) => {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(padded("limit", LINE_LIMIT - 5));
+    },
+    // Sends event data longer than a line that isn't JSON; JSON data that fits in a line, in a data
+    // line that doesn't; JSON data in a data line that fits, in an event line that doesn't; and a
+    // small event.
     "POST /api/large-event": (_request, response) => {
-      emit({ type: "large", data: { text: LARGE_TEXT } });
+      for (const subscriber of subscribers)
+        for (const data of [
+          LARGE_TEXT,
+          padded("limit", LINE_LIMIT - 5),
+          padded("limit", LINE_LIMIT - 6),
+        ])
+          subscriber.write(`data: ${data}\n\n`);
       emit({ type: "after.large", data: {} });
       json(response, 200, {});
     },

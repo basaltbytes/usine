@@ -47,8 +47,6 @@ const SERVE_ARGUMENTS = [
  * event stream closes.
  */
 const GRACE_MS = 1000;
-/** Milliseconds to wait for OpenCode's first event once `serve` reports its address. */
-const READY_WAIT_MS = 30_000;
 /**
  * The most bytes in a line, without its newline, that the bridge reads or writes. It equals
  * `MAX_PROTOCOL_LINE_BYTES` in `child-host/lines.ts`, the longest line that the client reads.
@@ -58,6 +56,11 @@ const MAX_LINE_BYTES = 4 * 1024 ** 2;
 const MAX_HELD_BYTES = MAX_LINE_BYTES;
 /** The characters that the bridge keeps from the start of a line longer than `MAX_LINE_BYTES`. */
 const HEAD_LENGTH = 256;
+/**
+ * The most characters in a string request ID. It keeps each answer that the bridge writes with the
+ * ID shorter than `MAX_LINE_BYTES`, and equals the bound of `BridgeRequestId` in `lines.ts`.
+ */
+const MAX_ID_LENGTH = 128;
 
 const isObject = (value: Json): value is JsonObject =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -72,9 +75,10 @@ const parseJson = (text: string): { readonly value: Json } | undefined => {
   }
 };
 
-/** Returns `value` when it is a request ID: a string or a safe integer. */
+/** Returns `value` when it is a request ID: a string of at most `MAX_ID_LENGTH` characters or a safe integer. */
 const requestId = (value: Json | undefined): RequestId | undefined =>
-  typeof value === "string" || (typeof value === "number" && Number.isSafeInteger(value))
+  (typeof value === "string" && value.length <= MAX_ID_LENGTH) ||
+  (typeof value === "number" && Number.isSafeInteger(value))
     ? value
     : undefined;
 
@@ -170,37 +174,45 @@ const dataStart = (line: string): number | undefined => {
 
 /**
  * Returns a reader of event-stream text that calls `dispatch` with the data of each event, and
- * `oversized` with the size in bytes of each event's data that is longer than `MAX_LINE_BYTES`.
+ * `oversized` with the size in bytes of each event's data that is longer than `MAX_LINE_BYTES` or
+ * that has a line longer than `MAX_LINE_BYTES`.
  */
 const eventStream = (dispatch: (data: string) => void, oversized: (bytes: number) => void) => {
   const data: Array<string> = [];
   let fields = 0;
   let bytes = 0;
+  let tooLong = false;
   // Counts a data field of `size` bytes, and the newline that joins it to the previous one.
   const count = (size: number) => {
     bytes += (fields > 0 ? 1 : 0) + size;
     fields += 1;
-    if (bytes > MAX_LINE_BYTES) data.length = 0;
+    tooLong ||= bytes > MAX_LINE_BYTES;
+    if (tooLong) data.length = 0;
   };
   const reader = lineReader(
     (line) => {
       if (line === "") {
-        if (bytes > MAX_LINE_BYTES) oversized(bytes);
+        if (tooLong) oversized(bytes);
         else if (fields > 0) dispatch(data.join("\n"));
         data.length = 0;
         fields = 0;
         bytes = 0;
+        tooLong = false;
         return;
       }
       const start = dataStart(line);
       if (start === undefined) return;
       const value = line.slice(start);
       count(Buffer.byteLength(value));
-      if (bytes <= MAX_LINE_BYTES) data.push(value);
+      if (!tooLong) data.push(value);
     },
+    // A data line longer than `MAX_LINE_BYTES` has more than `MAX_LINE_BYTES - 6` bytes of data,
+    // which make an event line longer than `MAX_LINE_BYTES`.
     (lineBytes, head) => {
       const start = dataStart(head);
-      if (start !== undefined) count(lineBytes - start);
+      if (start === undefined) return;
+      tooLong = true;
+      count(lineBytes - start);
     },
   );
   return reader.push;
@@ -218,11 +230,21 @@ const answerBody = (text: string): Json => {
   return parseJson(text)?.value ?? text;
 };
 
+/**
+ * Runs the bridge with its arguments: the milliseconds to wait for OpenCode's first event once
+ * `serve` reports its address, then the OpenCode command with any leading arguments.
+ */
 const main = () => {
-  const [command, ...args] = process.argv.slice(1);
+  const [wait, command, ...args] = process.argv.slice(1);
   const warn = (message: string) => {
     process.stderr.write(`opencode bridge: ${message}\n`);
   };
+  const readyWaitMs = Number(wait);
+  if (!Number.isSafeInteger(readyWaitMs) || readyWaitMs <= 0) {
+    warn("missing the milliseconds to wait for OpenCode's first event");
+    process.exitCode = 2;
+    return;
+  }
   if (command === undefined) {
     warn("missing the OpenCode command");
     process.exitCode = 2;
@@ -367,9 +389,9 @@ const main = () => {
     readyWait = setTimeout(
       () =>
         fail(
-          `OpenCode sent no event within ${READY_WAIT_MS / 1000} seconds of reporting its address`,
+          `OpenCode sent no event within ${readyWaitMs / 1000} seconds of reporting its address`,
         ),
-      READY_WAIT_MS,
+      readyWaitMs,
     );
     const events = httpRequest(
       {

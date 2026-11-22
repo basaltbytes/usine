@@ -23,7 +23,16 @@ import {
 } from "../../src/harness/opencode/bridge/lines.ts";
 
 const decodeLine = Schema.decodeUnknownSync(Schema.fromJsonString(BridgeOutput));
-const childEnvironment = { PATH: process.env.PATH ?? "", FAKE_SERVE_SCENARIO: "ready" };
+/** Credentials that a worker's environment may hold, which the bridge must not pass to `serve`. */
+const inheritedCredentials = {
+  OPENCODE_SERVER_PASSWORD: "inherited",
+  OPENCODE_SERVER_USERNAME: "inherited",
+};
+const childEnvironment = {
+  ...inheritedCredentials,
+  PATH: process.env.PATH ?? "",
+  FAKE_SERVE_SCENARIO: "ready",
+};
 let fakeServe: string;
 const bridges: Array<ChildProcessWithoutNullStreams> = [];
 const helpers: Array<number> = [];
@@ -52,25 +61,27 @@ afterEach(() => {
     }
 });
 
-/** Code to run before the bridge that cuts its 30-second wait for OpenCode's first event to 300 ms. */
-const shortReadyWait =
-  "{const wait=setTimeout;globalThis.setTimeout=(callback,ms,...rest)=>wait(callback,ms===30000?300:ms,...rest)}";
+/** A wait for OpenCode's first event, in milliseconds, that tests can outlast. */
+const SHORT_READY_WAIT_MS = 300;
 
 /**
- * Starts the bundled bridge, after `preamble`, around the fake `serve` in `scenario`, with
- * `environment` added to its own, and records its output.
+ * Starts the bundled bridge around the fake `serve` in `scenario`, with `environment` added to its
+ * own and a wait of `readyWaitMs` for OpenCode's first event, and records its output.
  */
-const start = (scenario: string, environment: Record<string, string> = {}, preamble = "") => {
+const start = (
+  scenario: string,
+  environment: Record<string, string> = {},
+  readyWaitMs = 30_000,
+) => {
   const child = spawn(
     process.execPath,
-    ["-e", `${preamble}${OPENCODE_BRIDGE}`, process.execPath, "-e", fakeServe],
+    ["-e", OPENCODE_BRIDGE, String(readyWaitMs), process.execPath, "-e", fakeServe],
     {
       env: {
         ...process.env,
         ...environment,
+        ...inheritedCredentials,
         FAKE_SERVE_SCENARIO: scenario,
-        OPENCODE_SERVER_PASSWORD: "inherited",
-        OPENCODE_SERVER_USERNAME: "inherited",
       },
       stdio: ["pipe", "pipe", "pipe"],
     },
@@ -172,6 +183,17 @@ describe("OpenCode bridge", () => {
     ]);
   });
 
+  it("keeps relaying after the wait for the first event once that event arrives", async () => {
+    const bridge = start("ready", {}, SHORT_READY_WAIT_MS);
+    await eventually(() => bridge.lines.length >= 2);
+    const readyAt = Date.now();
+    await eventually(() => Date.now() - readyAt > 2 * SHORT_READY_WAIT_MS);
+    bridge.send({ id: 1, method: "GET", path: "/api/empty" });
+    await eventually(() => answerTo(bridge.lines, 1) !== undefined);
+    expect(answerTo(bridge.lines, 1)).toEqual({ id: 1, status: 204, body: null });
+    expect(bridge.stderr()).not.toContain("opencode bridge:");
+  });
+
   it("treats a ready line on a host that isn't a loopback address as a diagnostic", async () => {
     const bridge = start("foreign-url");
     await eventually(() => bridge.lines.length >= 2);
@@ -256,15 +278,20 @@ describe("OpenCode bridge", () => {
   it("answers a response too long for a line of 4 MiB with an error, and keeps running", async () => {
     const bridge = start("ready");
     await eventually(() => bridge.lines.length >= 1);
+    // The body of /api/large is longer than a line; the answer line to /api/limit is, its body isn't.
     bridge.send({ id: 1, method: "GET", path: "/api/large" });
-    await eventually(() => answerTo(bridge.lines, 1) !== undefined);
-    expect(answerTo(bridge.lines, 1)).toEqual({
-      id: 1,
-      error: "OpenCode's response is too long for a line of 4194304 bytes",
-    });
-    bridge.send({ id: 2, method: "GET", path: "/api/empty" });
-    await eventually(() => answerTo(bridge.lines, 2) !== undefined);
-    expect(answerTo(bridge.lines, 2)).toEqual({ id: 2, status: 204, body: null });
+    bridge.send({ id: 2, method: "GET", path: "/api/limit" });
+    await eventually(() => [1, 2].every((id) => answerTo(bridge.lines, id)));
+    for (const id of [1, 2])
+      expect(answerTo(bridge.lines, id)).toEqual({
+        id,
+        error: "OpenCode's response is too long for a line of 4194304 bytes",
+      });
+    // The bridge closes the connection once the body is too long, instead of reading all of it.
+    await eventually(() => bridge.stderr().includes("fake serve: the large response closed after"));
+    bridge.send({ id: 3, method: "GET", path: "/api/empty" });
+    await eventually(() => answerTo(bridge.lines, 3) !== undefined);
+    expect(answerTo(bridge.lines, 3)).toEqual({ id: 3, status: 204, body: null });
   });
 
   it("logs and skips an event too long for a line of 4 MiB, and keeps running", async () => {
@@ -273,16 +300,17 @@ describe("OpenCode bridge", () => {
     bridge.send({ id: 1, method: "POST", path: "/api/large-event" });
     await eventually(() => eventTypes(bridge.lines).includes("after.large"));
     expect(eventTypes(bridge.lines)).toEqual(["server.connected", "after.large"]);
-    const size = Buffer.byteLength(
-      JSON.stringify({ type: "large", data: { text: "x".repeat(LINE_LIMIT + 1) } }),
-    );
-    await eventually(() =>
-      bridge
-        .stderr()
-        .includes(
-          `opencode bridge: skipping an OpenCode event of ${size} bytes that is too long for a line of 4194304 bytes`,
-        ),
-    );
+    // Data longer than a line that isn't JSON, JSON data whose data line is longer than a line, and
+    // JSON data whose event line is.
+    for (const size of [LINE_LIMIT + 1, LINE_LIMIT - 5, LINE_LIMIT - 6])
+      await eventually(() =>
+        bridge
+          .stderr()
+          .includes(
+            `opencode bridge: skipping an OpenCode event of ${size} bytes that is too long for a line of 4194304 bytes`,
+          ),
+      );
+    expect(bridge.stderr()).not.toContain("isn't a JSON object");
   });
 
   it("logs and skips a line of serve's output longer than 4 MiB", async () => {
@@ -341,12 +369,12 @@ describe("OpenCode bridge", () => {
     );
   });
 
-  it("reports no first event within 30 seconds, ends serve's input, and exits with 1", async () => {
-    const bridge = start("no-events", { FAKE_SERVE_EXIT_CODE: "0" }, shortReadyWait);
+  it("reports no first event within its wait, ends serve's input, and exits with 1", async () => {
+    const bridge = start("no-events", { FAKE_SERVE_EXIT_CODE: "0" }, SHORT_READY_WAIT_MS);
     expect(await bridge.exit).toBe(1);
     expect(bridge.lines).toEqual([]);
     expect(bridge.stderr()).toMatch(
-      /opencode bridge: OpenCode sent no event within 30 seconds of reporting its address\n[^]*fake serve: end of input\n/u,
+      /opencode bridge: OpenCode sent no event within 0\.3 seconds of reporting its address\n[^]*fake serve: end of input\n/u,
     );
   });
 
@@ -375,6 +403,10 @@ describe("OpenCode bridge", () => {
     bridge.child.stdin.write(`${JSON.stringify({ id: 1, method: "get", path: "/api/start" })}\n`);
     bridge.child.stdin.write(`${JSON.stringify({ id: 2, method: "GET", path: "//host/api" })}\n`);
     bridge.child.stdin.write(`${JSON.stringify({ id: 3, method: "GET", path: "api/start" })}\n`);
+    // The bridge skips an ID longer than 128 characters, so that no answer that repeats an ID is
+    // longer than a line.
+    const longId = { id: "x".repeat(129), method: "get", path: "/api/start" };
+    bridge.child.stdin.write(`${JSON.stringify(longId)}\n`);
     bridge.send({ id: 4, method: "POST", path: "/api/garbage" });
     await eventually(() => answerTo(bridge.lines, 4) !== undefined);
     bridge.send({ id: 5, method: "GET", path: "/api/empty" });
@@ -385,6 +417,9 @@ describe("OpenCode bridge", () => {
     expect(eventTypes(bridge.lines)).toEqual(["server.connected", "after.garbage"]);
     expect(bridge.stderr()).toContain(
       "opencode bridge: skipping an input line of 13 bytes that isn't JSON",
+    );
+    expect(bridge.stderr()).toContain(
+      `opencode bridge: skipping an input line of ${JSON.stringify(longId).length} bytes that has no request ID`,
     );
     expect(bridge.stderr()).toContain(
       "opencode bridge: skipping an OpenCode event of 9 bytes that isn't a JSON object",

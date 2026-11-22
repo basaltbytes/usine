@@ -22,14 +22,17 @@ const decodeOutput = Schema.decodeUnknownEffect(Schema.fromJsonString(BridgeOutp
 const encodeRequest = Schema.encodeEffect(Schema.fromJsonString(BridgeRequest));
 const encoder = new TextEncoder();
 
+/** Milliseconds that the bridge waits for OpenCode's first event once `serve` reports its address. */
+const READY_WAIT_MS = 30_000;
+
 /**
  * Returns the command that runs the bridge in `opencode.cwd` around `opencode`, the OpenCode
- * command with any leading arguments. The bridge adds `serve` and its options, and runs with the
- * worker's `node`.
+ * command with any leading arguments. The bridge adds `serve` and its options, runs with the
+ * worker's `node`, and fails when OpenCode sends no event within 30 seconds of its address.
  */
 export const bridgeCommand = (opencode: ProcessCommand): ProcessCommand => ({
   command: "node",
-  args: ["-e", OPENCODE_BRIDGE, opencode.command, ...opencode.args],
+  args: ["-e", OPENCODE_BRIDGE, String(READY_WAIT_MS), opencode.command, ...opencode.args],
   cwd: opencode.cwd,
 });
 

@@ -2,9 +2,13 @@ import { Schema } from "effect";
 
 /**
  * The client's ID for a request, which the bridge copies into the answer: a sequence number, or a
- * string such as `<generation>:<sequence>` that keeps answers to an earlier connection apart.
+ * string of at most 128 characters, such as `<generation>:<sequence>`, that keeps answers to an
+ * earlier connection apart.
  */
-export const BridgeRequestId = Schema.Union([Schema.Int, Schema.String]);
+export const BridgeRequestId = Schema.Union([
+  Schema.Int,
+  Schema.String.check(Schema.isMaxLength(128)),
+]);
 export type BridgeRequestId = typeof BridgeRequestId.Type;
 
 /** An HTTP method of OpenCode's server API. */
