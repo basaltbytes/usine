@@ -116,10 +116,8 @@ export class HetznerProvisionerView extends Schema.TaggedClass<
   sshUser: SshUser,
   /** Labels applied to created Hetzner machines. */
   labels: Schema.Record(Schema.String, Schema.String),
-  /** The variable with the Anthropic API key for each Attempt, or null. */
-  anthropicKeyEnv: Schema.NullOr(Schema.String),
-  /** The variable with the OpenAI API key for each Attempt, or null. */
-  openaiKeyEnv: Schema.NullOr(Schema.String),
+  /** The variable with each provider's API key for each Attempt, by provider ID. */
+  apiKeys: Schema.Record(Schema.String, Schema.String),
 }) {}
 
 /** A Boat provisioner from `usine.yaml`, with the names of its variables only. */
@@ -131,10 +129,8 @@ export class BoatProvisionerView extends Schema.TaggedClass<
   tokenEnv: Schema.String,
   /** The Boat machine size to create. */
   size: BoatSize,
-  /** The variable with the Anthropic API key for each Attempt, or null. */
-  anthropicKeyEnv: Schema.NullOr(Schema.String),
-  /** The variable with the OpenAI API key for each Attempt, or null. */
-  openaiKeyEnv: Schema.NullOr(Schema.String),
+  /** The variable with each provider's API key for each Attempt, by provider ID. */
+  apiKeys: Schema.Record(Schema.String, Schema.String),
 }) {}
 
 /** A boxd provisioner with credential variable names only. */
@@ -153,8 +149,8 @@ export class BoxdProvisionerView extends Schema.TaggedClass<
   isolated: Schema.Boolean,
   /** The egress allowlist each machine gets, or null when egress is unrestricted. */
   egress: Schema.NullOr(Schema.Array(BoxdEgressEntry)),
-  anthropicKeyEnv: Schema.NullOr(Schema.String),
-  openaiKeyEnv: Schema.NullOr(Schema.String),
+  /** The variable with each provider's API key for each Attempt, by provider ID. */
+  apiKeys: Schema.Record(Schema.String, Schema.String),
 }) {}
 
 export const ProvisionerView = Schema.Union([
@@ -206,8 +202,7 @@ export const provisionerView = (worker: SshWorker): ProvisionerView | null =>
             sshKey: settings.sshKey,
             sshUser: settings.sshUser,
             labels: settings.labels,
-            anthropicKeyEnv: Option.getOrNull(settings.apiKeys.anthropic),
-            openaiKeyEnv: Option.getOrNull(settings.apiKeys.openai),
+            apiKeys: settings.apiKeys,
           })
         : settings.provider === "boxd"
           ? BoxdProvisionerView.make({
@@ -218,13 +213,11 @@ export const provisionerView = (worker: SshWorker): ProvisionerView | null =>
               snapshot: settings.snapshot,
               isolated: settings.isolated,
               egress: Option.getOrNull(settings.egress),
-              anthropicKeyEnv: Option.getOrNull(settings.apiKeys.anthropic),
-              openaiKeyEnv: Option.getOrNull(settings.apiKeys.openai),
+              apiKeys: settings.apiKeys,
             })
           : BoatProvisionerView.make({
               tokenEnv: settings.tokenEnv,
               size: settings.size,
-              anthropicKeyEnv: Option.getOrNull(settings.apiKeys.anthropic),
-              openaiKeyEnv: Option.getOrNull(settings.apiKeys.openai),
+              apiKeys: settings.apiKeys,
             }),
   });

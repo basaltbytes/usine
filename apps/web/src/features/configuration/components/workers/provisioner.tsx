@@ -92,12 +92,17 @@ export const ProvisionerFacts = ({ provisioner }: ProvisionerFactsProps) => (
       <Fact label="API token">
         <Variable name={provisioner.tokenEnv} />
       </Fact>
-      <Fact label="Anthropic key">
-        <Variable name={provisioner.anthropicKeyEnv} />
-      </Fact>
-      <Fact label="OpenAI key">
-        <Variable name={provisioner.openaiKeyEnv} />
-      </Fact>
+      {Object.keys(provisioner.apiKeys).length === 0 ? (
+        <Fact label="API keys">
+          <Variable name={null} />
+        </Fact>
+      ) : (
+        Object.entries(provisioner.apiKeys).map(([provider, variable]) => (
+          <Fact key={provider} label={`${provider} API key`}>
+            <Variable name={variable} />
+          </Fact>
+        ))
+      )}
     </Facts>
   </div>
 );

@@ -1,3 +1,4 @@
+import { catalog } from "@usine/agents/harness";
 import { Harnesses } from "@usine/agents/harness/node";
 import type { StepOutputStore } from "@usine/engine/step-outputs";
 import { workerConnectionsFor } from "./connections.ts";
@@ -97,21 +98,25 @@ const sshWorkerMachineOf = (worker: SshWorker, missing: MissingSecret) =>
       settings.tokenEnv,
       missing(`${settings.provider} API token`, settings.tokenEnv, "provisioner.token_env"),
     );
-    const apiKey = (provider: "anthropic" | "openai", label: string) =>
-      Effect.transposeOption(
-        Option.map(settings.apiKeys[provider], (variable) =>
-          secretFrom(
-            worker,
-            "harness-login",
+    const keys = yield* Effect.forEach(Object.entries(settings.apiKeys), ([provider, variable]) =>
+      Effect.map(
+        secretFrom(
+          worker,
+          "harness-login",
+          variable,
+          missing(
+            `${Option.match(catalog.providers.get(provider), {
+              onNone: () => provider,
+              onSome: ({ label }) => label,
+            })} API key`,
             variable,
-            missing(label, variable, `provisioner.api_keys.${provider}`),
+            `provisioner.api_keys.${provider}`,
           ),
         ),
-      );
-    const apiKeys = {
-      anthropic: yield* apiKey("anthropic", "Anthropic API key"),
-      openai: yield* apiKey("openai", "OpenAI API key"),
-    };
+        (key) => [provider, key] as const,
+      ),
+    );
+    const apiKeys = Object.fromEntries(keys);
     switch (settings.provider) {
       case "hetzner":
         return {

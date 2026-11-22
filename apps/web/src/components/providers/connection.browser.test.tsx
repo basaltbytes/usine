@@ -1,3 +1,4 @@
+import { anthropic, openai } from "@usine/core/agent/provider";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createRoot } from "react-dom/client";
 import { flushSync } from "react-dom";
@@ -19,7 +20,7 @@ const cases: ReadonlyArray<{
   {
     name: "Claude setup token",
     connection: {
-      provider: "anthropic-messages",
+      provider: anthropic.slot,
       credential: "subscription",
       expiresAt: null,
       lastRefresh: null,
@@ -31,7 +32,7 @@ const cases: ReadonlyArray<{
   {
     name: "native Claude OAuth login",
     connection: {
-      provider: "anthropic-messages",
+      provider: anthropic.slot,
       credential: "subscription",
       expiresAt: expiry,
       lastRefresh: null,
@@ -42,7 +43,7 @@ const cases: ReadonlyArray<{
   {
     name: "ChatGPT OAuth login",
     connection: {
-      provider: "openai-responses",
+      provider: openai.slot,
       credential: "subscription",
       expiresAt: expiry,
       lastRefresh: refreshed,
@@ -54,7 +55,7 @@ const cases: ReadonlyArray<{
   {
     name: "older gateway without refresh metadata",
     connection: {
-      provider: "anthropic-messages",
+      provider: anthropic.slot,
       credential: "subscription",
       expiresAt: null,
       lastRefresh: null,
