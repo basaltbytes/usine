@@ -265,12 +265,16 @@ describe("RunUsageReader", () => {
       return Effect.gen(function* () {
         const usage = yield* (yield* RunUsageReader).read(runUsageSource(source));
         assert.deepStrictEqual(
-          usage.sessions.map(({ pool, session }) => [pool, session.endpoint]),
+          usage.sessions.map(({ pool, session, cost }): ReadonlyArray<unknown> => [
+            pool,
+            session.endpoint,
+            cost?.estimate,
+          ]),
           [
-            ["removedPlan", removed.endpoint],
-            ["apiKeys", parent.endpoint],
-            ["archivedPlan", archived.endpoint],
-            ["apiKeys", added.endpoint],
+            ["removedPlan", removed.endpoint, true],
+            ["apiKeys", parent.endpoint, false],
+            ["archivedPlan", archived.endpoint, true],
+            ["apiKeys", added.endpoint, false],
           ],
         );
         assert.deepStrictEqual(lines(usage.pools), expected);

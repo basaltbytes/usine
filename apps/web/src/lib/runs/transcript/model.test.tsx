@@ -80,10 +80,28 @@ import { MessageScrollerProvider } from "~/components/ui/message-scroller";
 import { presentTool, type ToolSection } from "~/lib/runs/transcript/tool/presentation";
 import { fetchRunDetail } from "~/lib/runs/transcript/fetch";
 
-/** Renders `element` with the capabilities loaded, or still loading if `capabilities` is false. */
-const renderMarkup = (element: ReactNode, capabilities = true): string => {
-  const client = new QueryClient();
-  if (capabilities) client.setQueryData(capabilitiesQuery().queryKey, capabilitiesFixture());
+/** Puts the capabilities query of a client into each state that a render can start from. */
+const capabilitiesStates = {
+  loaded: (client: QueryClient) => {
+    client.setQueryData(capabilitiesQuery().queryKey, capabilitiesFixture());
+  },
+  loading: () => {},
+  failed: (client: QueryClient) => {
+    client
+      .getQueryCache()
+      .build(client, { queryKey: capabilitiesQuery().queryKey })
+      .setState({ status: "error", error: new Error("The capabilities are unavailable.") });
+  },
+};
+
+/** Renders `element` with the capabilities query in the `capabilities` state. */
+const renderMarkup = (
+  element: ReactNode,
+  capabilities: keyof typeof capabilitiesStates = "loaded",
+): string => {
+  // Keeps a failed query failed on mount instead of showing it as loading again.
+  const client = new QueryClient({ defaultOptions: { queries: { retryOnMount: false } } });
+  capabilitiesStates[capabilities](client);
   return renderToStaticMarkup(<QueryClientProvider client={client}>{element}</QueryClientProvider>);
 };
 
@@ -210,13 +228,13 @@ const history = { cursors: [], loading: false, error: null, load: () => {} };
 
 /**
  * Renders the reader for `events`, with the bursts that contain the `open` tool calls expanded and
- * the capabilities loaded unless `capabilities` is false.
+ * the capabilities query in the `capabilities` state.
  */
 const reader = (
   events: ReadonlyArray<TranscriptEventView>,
   attempts: ReadonlyArray<AttemptView> = [liveAttempt],
   open: ReadonlyArray<string> = [],
-  capabilities = true,
+  capabilities: keyof typeof capabilitiesStates = "loaded",
 ) =>
   renderMarkup(
     <TranscriptDisclosureProvider
@@ -250,15 +268,18 @@ describe("run transcript", () => {
     );
   });
 
-  it("shows a plan-window meter once the pool labels load, under its ID for an undeclared pool", () => {
+  it("shows a plan-window meter once the pool labels load, under its ID for an undeclared pool or if the labels fail to load", () => {
     const events = [rateLimits(1, 31), rateLimits(2, 12, "removedPlan")];
-    const loading = reader(events, [liveAttempt], [], false);
+    const loading = reader(events, [liveAttempt], [], "loading");
     assert.notInclude(loading, "chatgptPlan");
     assert.notInclude(loading, "31% used");
     assert.notInclude(loading, "removedPlan");
     const loaded = reader(events);
     assert.include(loaded, "ChatGPT plan 31% used");
     assert.include(loaded, "removedPlan 12% used");
+    const failed = reader(events, [liveAttempt], [], "failed");
+    assert.include(failed, "chatgptPlan 31% used");
+    assert.include(failed, "removedPlan 12% used");
   });
 
   it("shows an Agent's GitHub change as one line, labels in their GitHub colors and the comment linked, and the operator's Board move as theirs", () => {
