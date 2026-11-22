@@ -1463,6 +1463,92 @@ describe("Codex child backend", () => {
     }).pipe(Effect.scoped),
   );
 
+  it.effect("reads an operator message that repeats a task that its turn never recorded", () =>
+    Effect.gen(function* () {
+      const notifications = yield* Queue.make<CodexNotification, Cause.Done>();
+      const idle = yield* Queue.make<void>();
+      const started = yield* Queue.make<void>();
+      const receipts = yield* Queue.make<string>();
+      const calls: Array<{ method: string; params: Schema.Json }> = [];
+      let turns = 0;
+      const echo = OperatorMessage.make({ message: request().prompt });
+      const next = OperatorMessage.make({ message: "Check the tests" });
+      const responses: Readonly<Record<string, Schema.Json>> = successfulResponses([
+        { id: "gpt-5.6-terra", model: "gpt-5.6-terra" },
+      ]);
+      const completed = (turnId: string): CodexNotification => ({
+        method: "turn/completed",
+        params: { turn: { id: turnId, status: "completed", error: null } },
+      });
+      const server = Layer.succeed(CodexAppServer)({
+        stop: () => Effect.void,
+        open: () =>
+          Effect.succeed({
+            notifications: Stream.fromQueue(notifications),
+            notify: () => Effect.void,
+            close: Queue.end(notifications),
+            request: (_operation, method, params) =>
+              Effect.gen(function* () {
+                calls.push({ method, params });
+                if (method !== "turn/start") return responses[method] ?? {};
+                turns += 1;
+                yield* Queue.offer(started, undefined);
+                return { turn: { id: `turn-${turns}` } };
+              }),
+          }),
+      });
+      yield* Effect.gen(function* () {
+        const running = yield* (yield* ChildBackend).launch(
+          ChildRequest.make({ ...request(), held: true }),
+        );
+        yield* Queue.take(started);
+        yield* Effect.forkScoped(
+          running.events.pipe(
+            Stream.runForEach((event) =>
+              event._tag === "SessionIdle" ? Queue.offer(idle, undefined) : Effect.void,
+            ),
+          ),
+        );
+        // The task's turn ends without a record of the task.
+        yield* Queue.offer(notifications, completed("turn-1"));
+        yield* Queue.take(idle);
+        yield* running.intervene(echo, (state) =>
+          Queue.offer(receipts, Option.isSome(state) ? echo.id : "unread").pipe(Effect.asVoid),
+        );
+        yield* Queue.take(started);
+        yield* Queue.offer(notifications, {
+          method: "item/started",
+          params: {
+            threadId: "thread-1",
+            turnId: "turn-2",
+            item: userMessage("echo", echo.message),
+          },
+        });
+        const receipt = yield* Queue.take(receipts);
+        assert.strictEqual(receipt, echo.id, "the message's record reads it");
+        yield* Queue.offer(notifications, completed("turn-2"));
+        yield* Queue.take(idle);
+        yield* running.intervene(next, noDelivery);
+        yield* Queue.take(started);
+        yield* Queue.offer(notifications, completed("turn-3"));
+        yield* Queue.take(idle);
+        yield* running.intervene(Release.make(), noDelivery);
+        yield* running.result;
+
+        const inputs = calls
+          .filter(({ method }) => method === "turn/start" || method === "turn/steer")
+          .map(({ method, params }) => [method, jsonKey(params)] as const);
+        assert.deepStrictEqual(
+          inputs.map(([method]) => method),
+          ["turn/start", "turn/start", "turn/start"],
+          "the task, the message, and the next message each start a turn once",
+        );
+        assert.include(inputs[1]?.[1], echo.message);
+        assert.include(inputs[2]?.[1], next.message);
+      }).pipe(Effect.provide(codexChild.pipe(Layer.provide(server))));
+    }).pipe(Effect.scoped),
+  );
+
   for (const steer of ["accepted", "rejected"] as const)
     it.effect(`sends a steer again only if Codex accepted it as the turn ended (${steer})`, () =>
       Effect.gen(function* () {

@@ -799,6 +799,9 @@ const makeCodexSessions = Effect.gen(function* () {
               });
             }
             if (isTurnStatus(completed.turn.status, "completed")) yield* reportModelOutput();
+            // The turn's unrecorded own inputs leave `submitted` below, and the conversation drops
+            // them too, so that no record in a later turn matches them.
+            yield* conversation.turnEnded;
             const { interrupting: wasInterrupted } = yield* Ref.getAndUpdate(state, (current) => ({
               ...current,
               turnActive: false,

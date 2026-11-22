@@ -139,8 +139,8 @@ interface ConversationState {
  * the conversation records each change with `BackgroundWorkUpdated`. An answer while the snapshot
  * lists work waits for that work, up to `maxBackgroundWaitMinutes`: a turn that the work starts
  * replaces the answer, and an answer whose work ended returns once `BACKGROUND_TURN_GRACE` passes
- * without a turn. The adapter calls `turnStarted` and `processRestarted` from one fiber or
- * several: each takes the conversation's lock.
+ * without a turn. The adapter calls `turnStarted`, `turnEnded`, and `processRestarted` from one
+ * fiber or several: each takes the conversation's lock.
  */
 export const sessionConversation = Effect.fn("SessionConversation.make")(function* <S>(
   options: ConversationOptions<S>,
@@ -315,14 +315,32 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
     });
 
   /**
-   * Sends the session's own input `message`, such as its task, with `send`. The harness's record
-   * of it then reads no operator message with the same text. If `send` fails, `message` stays an
-   * own input until `recover` clears the own inputs.
+   * Sends the session's own input `message`, such as its task, with `send`, which starts a turn.
+   * The harness's record of it in that turn then reads no operator message with the same text. If
+   * `send` fails, `message` stays an own input until a turn ends or `recover` clears the own
+   * inputs. The caller holds the mutex.
    */
   const sendOwn = <A, E>(message: string, send: (message: string) => Effect.Effect<A, E>) =>
     updateInbox((inbox) => ({ ...inbox, own: [...inbox.own, message] })).pipe(
       Effect.andThen(send(message)),
     );
+
+  /**
+   * Drops the own inputs that the harness didn't record in the turn that ended, so that no record
+   * in a later turn takes an operator message's read. The caller holds the mutex.
+   */
+  const turnEnded = Effect.fn("SessionConversation.turnEnded")(function* () {
+    yield* Effect.annotateCurrentSpan({ sessionId: session.id });
+    const { inbox } = yield* Ref.getAndUpdate(state, (current) => ({
+      ...current,
+      inbox: { ...current.inbox, own: [] },
+    }));
+    if (inbox.own.length > 0)
+      yield* Effect.logInfo(
+        "The turn ended without the harness's record of the session's own input; dropping it",
+        { sessionId: session.id, dropped: inbox.own.length },
+      );
+  });
 
   yield* Effect.addFinalizer(() =>
     Effect.gen(function* () {
@@ -715,6 +733,11 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
      */
     turnStarted: mutex.withPermits(1)(cancelWait("turn started")),
     /**
+     * Records that the session's turn ended: drops the session's own inputs that the harness didn't
+     * record, because each belongs to the turn that it started.
+     */
+    turnEnded: mutex.withPermits(1)(turnEnded()),
+    /**
      * Records that the harness process restarted: ends the wait for its background work, keeps the
      * answer that an ended wait kept for the recovery, and records the work as not reported until
      * the new process reports it.
@@ -728,7 +751,13 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
       ),
     ),
     intervene,
-    sendOwn,
+    /**
+     * Sends the session's own input `message`, such as its task, with `send`, which starts a turn.
+     * The harness's record of it in that turn then reads no operator message with the same text.
+     * Holds the conversation's lock while it sends, so no receipt or turn end comes between.
+     */
+    sendOwn: <A, E>(message: string, send: (message: string) => Effect.Effect<A, E>) =>
+      mutex.withPermits(1)(sendOwn(message, send)),
     recover: Effect.fn("SessionConversation.recover")(function* (
       tools: ReadonlyArray<InterruptedTool>,
       send: (
