@@ -396,11 +396,14 @@ describe("Pi child backend", () => {
     }).pipe(Effect.scoped),
   );
 
-  it.effect("records the prompt receipt once Pi saves a user message", () =>
+  it.effect("records the prompt receipt once, after Pi saves a user message", () =>
     Effect.gen(function* () {
       const listeners: Array<(event: PiSessionEvent) => void> = [];
+      const trace: Array<string> = [];
       const publish = (event: PiSessionEvent) => {
         for (const listener of listeners) listener(event);
+        // As Pi does, appends the message once its listeners return, before it yields.
+        if (event.type === "message_end" && event.message.role === "user") trace.push("saved");
       };
       const task: PiMessage = { role: "user", content: childRequest.prompt, timestamp: 0 };
       const sdk = Layer.succeed(PiSdk)({
@@ -431,7 +434,6 @@ describe("Pi child backend", () => {
             },
           }),
       });
-      let prompted = 0;
       const result = yield* Effect.gen(function* () {
         const running = yield* (yield* ChildBackend).launch(childRequest);
         return yield* running.result;
@@ -440,7 +442,7 @@ describe("Pi child backend", () => {
         Effect.provideService(ChildSessionJournal, {
           started: () => Effect.void,
           prompted: Effect.sync(() => {
-            prompted += 1;
+            trace.push("prompted");
           }),
           continued: () => Effect.void,
           received: () => Effect.void,
@@ -450,7 +452,7 @@ describe("Pi child backend", () => {
       );
       for (let spin = 0; spin < 100; spin += 1) yield* Effect.yieldNow;
       assert.strictEqual(result.message, "Pi child done.");
-      assert.strictEqual(prompted, 1);
+      assert.deepStrictEqual(trace, ["saved", "saved", "prompted"]);
     }),
   );
 

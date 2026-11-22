@@ -152,9 +152,10 @@ export const piTurns = Effect.fn("PiTurns.start")(function* (options: {
   // Pi can report a message start twice; each message object counts once.
   const observed = new WeakSet<object>();
   const unsubscribe = options.sdk.subscribe((event) => {
-    // Pi appends a message to its conversation file after its listeners see `message_end`.
+    // Pi appends a message to its conversation file right after its listeners see `message_end`,
+    // before it yields, so the receipt waits for the scheduler.
     if (event.type === "message_end" && Option.isSome(piUserMessageText(event.message)))
-      Effect.runForkWith(context)(recordPrompt);
+      Effect.runForkWith(context)(Effect.andThen(Effect.yieldNow, recordPrompt));
     if (event.type !== "message_start") return;
     if (observed.has(event.message)) return;
     observed.add(event.message);
