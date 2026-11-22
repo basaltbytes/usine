@@ -1,7 +1,8 @@
 import { assert, describe, it } from "@effect/vitest";
 import { type Cause, Effect, Exit, Fiber, Option, Queue, Schema, Stream } from "effect";
 import { TestClock } from "effect/testing";
-import { bridgeClient } from "../../src/harness/opencode/bridge/client.ts";
+import { MAX_PROTOCOL_LINE_BYTES } from "../../src/child-host/lines.ts";
+import { type BridgeClient, bridgeClient } from "../../src/harness/opencode/bridge/client.ts";
 import { BridgeRequest, OpenCodePath } from "../../src/harness/opencode/bridge/lines.ts";
 import type { SessionOperationError } from "../../src/runtime.ts";
 import { collectLogs } from "../logs.ts";
@@ -21,7 +22,7 @@ const scripted = (generation: Option.Option<number> = Option.none()) =>
   Effect.gen(function* () {
     const input = yield* Queue.make<Uint8Array, Cause.Done>();
     const output = yield* Queue.make<Uint8Array, SessionOperationError | Cause.Done>();
-    const client = yield* bridgeClient({
+    const client: BridgeClient = yield* bridgeClient({
       sessionId: Option.none(),
       input,
       output: Stream.fromQueue(output),
@@ -182,6 +183,23 @@ describe("OpenCode bridge client", () => {
       );
     }).pipe(Effect.scoped, Effect.provide(logs.layer));
   });
+
+  it.effect("fails readiness and events on an output line longer than the protocol limit", () =>
+    Effect.gen(function* () {
+      const bridge = yield* scripted();
+      yield* bridge.emitText("x".repeat(MAX_PROTOCOL_LINE_BYTES + 1));
+      yield* bridge.emit({ ready: true });
+      const unready = yield* Effect.flip(bridge.client.ready);
+      const events = yield* Effect.flip(Stream.runDrain(bridge.client.events));
+      for (const error of [unready, events]) {
+        assert.strictEqual(error.operation, "stream");
+        assert.strictEqual(
+          error.message,
+          "The OpenCode bridge wrote a line longer than 4194304 bytes",
+        );
+      }
+    }).pipe(Effect.scoped),
+  );
 
   it.effect("fails a request when the bridge's input is closed", () =>
     Effect.gen(function* () {
