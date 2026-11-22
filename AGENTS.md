@@ -8,7 +8,7 @@ Before you name a concept, read the glossary in `CONTEXT.md`.
 
 usine must work with whichever model provider and login the operator has, on machines they choose.
 
-- **Three harnesses.** Pi reaches API keys and the subscriptions it supports, across providers. Claude Code is required for a Claude subscription, which works only inside it. Codex is the ChatGPT subscription's client. None is the default, and none is folded into another. Subscriptions and API keys are both supported.
+- **Harnesses side by side.** Pi reaches API keys and the subscriptions it supports, across providers. Claude Code is required for a Claude subscription, which works only inside it. Codex is the ChatGPT subscription's client. OpenCode runs on an OpenAI API key. None is the default, and none is folded into another. Subscriptions and API keys are both supported, and a new harness is one folder in `@usine/agents` and one catalog entry.
 - **Roles are declarations.** Write every role (the coordinator, the supervisor, the coding agent, and later roles) against the harness contract in `@usine/agents`. A role states the capabilities it needs; a harness descriptor states what it provides for each credential route, and refuses a role it can't serve, with a reason.
 - **No provider names in generic places.** Don't name a provider or harness in a role's interface, a configuration value, an issue title for a generic feature, or a prerequisite.
 - **One credential.** A feature uses the credential the attempt already has.

@@ -5,7 +5,7 @@ description: Agent harnesses, models, reasoning effort, personas, and preflight 
 
 Manage agents in **Configuration > Agents**, or edit an existing agent with `usine config edit agent developer`. An agent combines a brain spec and a persona. Loops reference its name. Saved edits apply to new runs after preflight; use **Edit and retry** to update a failed run's agent definition.
 
-Harness IDs use kebab case and must match an entry in the server’s harness catalog. The catalog contains `claude`, `codex`, and `pi`. An unregistered ID fails agent schema validation.
+Harness IDs use kebab case and must match an entry in the server’s harness catalog. The catalog contains `claude`, `codex`, `opencode`, and `pi`. An unregistered ID fails agent schema validation.
 
 The server builds one harness runtime registry at startup and shares it between worker preflight and child sessions. An incomplete registration fails startup. Preflight errors identify the harness installation to check: host-login routes include login guidance, gateway and API-key routes refer to the worker installation, and Cloudflare routes refer to the sandbox image. Successful binary probes log the installed version.
 
@@ -14,7 +14,7 @@ The server builds one harness runtime registry at startup and shares it between 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
 | name | kebab-case string | required | Unique instance-level agent name used by loops. |
-| `harness` | `claude`, `codex`, or `pi` | required | Coding-agent harness used by child sessions. |
+| `harness` | `claude`, `codex`, `opencode`, or `pi` | required | Coding-agent harness used by child sessions. |
 | `model` | non-blank string | required | Model ID understood by the harness, with `provider/model` for Pi. |
 | `effort` | effort | required | Reasoning effort of child sessions. |
 | `decision` | `model` and `effort` | none | Model and effort that decide a child's report, on the agent's own harness. See [Coordinator](#coordinator). |
@@ -30,7 +30,7 @@ Run the required checks, push the branch, and record blockers on the item.
 Do not merge pull requests.
 ```
 
-Effort values are `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max`. Claude Code disables thinking for `off` and treats `minimal` as `low`. Codex receives `off` as `none` and checks the selected model's supported efforts. Pi uses the value as its thinking level.
+Effort values are `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max`. Claude Code disables thinking for `off` and treats `minimal` as `low`. Codex receives `off` as `none` and checks the selected model's supported efforts. OpenCode selects the model variant with the effort's name, `none` for `off`, and refuses an effort that the model has no variant for. Pi uses the value as its thinking level.
 
 ## Coordinator
 
@@ -62,6 +62,7 @@ Complete one repository task at a time.
 | --- | --- | --- | --- |
 | `claude` | Claude Code with `auth status --json` | Claude subscription login, setup token, or API key | Local, SSH, Cloudflare |
 | `codex` | Codex CLI 0.164.0 | ChatGPT login or API key | Local, SSH, Cloudflare |
+| `opencode` | OpenCode 2.3.2 (`@opencode/cli`), Node.js | OpenAI API key, from the attempt or the gateway | Local, SSH |
 | `pi` | Bundled Pi runtime | API key for the selected provider or ChatGPT login for `openai-codex` | Local |
 
 For a worker using subscription logins, run these commands as the user running its children:
@@ -97,7 +98,15 @@ usine assigns Claude's native session UUID and saves it before sending the first
 
 A Claude Code child reports each change to its background tasks, without the watchers that Claude Code marks as ambient, and the run page shows the latest list as a note. A child that answers while its background tasks still run waits for that work and the turn it starts, without an operator hold. By default, the wait has no limit. If [`settings.max_background_wait_minutes`](/reference/configuration/settings/#background-work) is set and the child stays idle with background work for that many minutes after its answer, usine returns that answer and logs a warning with the limit and the remaining task IDs. Closing the child ends the Claude Code process, which stops its background tasks. When the attempt then ends, it frees its worker slot, and cleanup salvages its checkout as after a failure, so work that the child hasn't pushed is kept. A turn that starts within the limit runs to its own answer. If the operator holds or pauses the child when the limit passes, usine logs that, and the child stays open without reporting idle. A Release of a held child then returns the answer, unless a turn started first; that turn runs to its own answer. A paused child stays open until the operator's next message. If the Claude process resumes in the meantime, the child reports the kept answer as idle, and a Release returns it. The child then reports its background work as not reported until the new process lists its tasks. usine keeps the limit in memory: a child that was already waiting when usine restarted waits for its background work and the turn it starts without a limit.
 
-Children run without approval prompts. Claude Code ignores project settings, Codex treats the checkout as untrusted, and Pi ignores project-local configuration. Repository agent instructions still apply.
+Children run without approval prompts. Claude Code ignores project settings, Codex treats the checkout as untrusted, OpenCode ignores the checkout's configuration, and Pi ignores project-local configuration. Repository agent instructions still apply.
+
+### OpenCode children
+
+An OpenCode child runs `opencode serve` behind a small usine bridge on the worker, one per child, under the same process owner as Claude Code and Codex children. Set `model` to an OpenAI model ID from OpenCode's catalog, such as `gpt-5.4-mini`; OpenCode calls the OpenAI Responses API with the attempt's `OPENAI_API_KEY`, or through the gateway's `openai-responses` slot with the caller token. It uses no login of its own, so a worker without an OpenAI key at the attempt or the gateway refuses OpenCode agents, and Cloudflare sandboxes don't install it. Sessions record their usage under `apiKeys`, with the cost that OpenCode reports from its catalog prices.
+
+Each child gets its own OpenCode data directory: a directory per child in the attempt's OpenCode home on SSH workers, and next to the checkout otherwise. OpenCode reads only the checkout's root `AGENTS.md`: the checkout's `opencode.json`, `.opencode/`, plugins, skills, and `CLAUDE.md` files don't load. OpenCode's web fetch, web search, and question tools are off, as are its plugins and MCP servers, and it reads `.env` files without asking. Its tool commands inherit the OpenCode server's environment, including the child's `XDG_DATA_HOME`. The worker needs `rg` on its command path, which the attempt image and the Hetzner worker install; without it, OpenCode downloads ripgrep from GitHub.
+
+Steering and operator messages reach the running execution at its next step boundary, and OpenCode reports each read, which the run page shows. **Interrupt** stops the running execution and its command at once. A message sent after an interrupt starts a new execution, which answers the message, even when the interrupted execution's end arrives after it. A child whose answer leaves a background command or subagent running waits for that work and the execution that its end starts, and returns that answer; tokens and cost include every execution and every subagent. A provider rate limit that OpenCode would retry more than five minutes later, a quota, and a plan limit end the child with a capacity refusal, and the attempt waits for capacity. After an orchestrator restart, a child reopens its saved session from its data directory and receives the continuation instruction.
 
 By default, Claude Code children add no attribution to commits or pull request descriptions. usine starts each one with `attribution` set to an empty `commit` and `pr` text in Claude Code's flag settings, which take precedence over the worker user's `settings.json`. Instructions about attribution in the repository's `CLAUDE.md` or in Claude Code memory take precedence over these settings. A child in a repository that asks for a `Co-Authored-By` trailer or a `Generated with` line still adds it. Agents have no field for other harness settings.
 
@@ -111,7 +120,7 @@ Configuration import and saved edits check every coding-agent brain against each
 
 Preflight and child launch check the catalog associated with the registered harness runtimes, including custom harness descriptors. Preflight checks the same role requirements before tools and credentials; it does not install harnesses. Startup checks each rostered child brain on every worker. A changed roster is checked before the running configuration accepts it. Each attempt also checks its selected agent. Failures identify the worker, capability, and remediation.
 
-For workers using harness credentials, Claude Code must report a first-party subscription login, setup token, or API key, and Codex must report a ChatGPT login or API key. Gateway-injected and attempt API-key credentials use the same harness binary and version checks, with authentication supplied by their credential route. Claude Code accepts any installed version; Codex requires a supported version. Claude Code's host-login checks and child startup share a lock for the same worker login. Pi requires a local worker and an API key for the selected provider or an `openai-codex` ChatGPT login. Use [Run worker preflight](/guides/run-worker-preflight/) after fixing the machine.
+For workers using harness credentials, Claude Code must report a first-party subscription login, setup token, or API key, and Codex must report a ChatGPT login or API key. Gateway-injected and attempt API-key credentials use the same harness binary and version checks, with authentication supplied by their credential route. Claude Code accepts any installed version; Codex requires a supported version, and OpenCode requires 2.3.2. OpenCode preflight also starts OpenCode with a temporary data directory and checks the model and effort against the models that OpenCode lists, on every credential route, without a model request. Claude Code's host-login checks and child startup share a lock for the same worker login. Pi requires a local worker and an API key for the selected provider or an `openai-codex` ChatGPT login. Use [Run worker preflight](/guides/run-worker-preflight/) after fixing the machine.
 
 Every GitHub comment, issue, pull request, and review written by an agent ends with `— usine agent: <name>`. Agents share the App identity, so this signature attributes their work to an attempt. Commits use the App's bot identity.
 
