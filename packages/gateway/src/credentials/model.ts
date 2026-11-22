@@ -1,11 +1,12 @@
 import {
+  anthropic,
   type GatewaySlot,
   GatewaySlot as GatewaySlotSchema,
   type ModelProvider,
-  modelProviders,
+  openai,
   SubscriptionLogin,
 } from "@usine/core/agent/provider";
-import { Array as Arr, Option, Schema } from "effect";
+import { Schema } from "effect";
 
 const Secret = Schema.Redacted(Schema.NonEmptyString);
 export const ProviderCredential = Schema.Union([
@@ -16,31 +17,23 @@ export const ProviderCredential = Schema.Union([
 ]);
 export type ProviderCredential = typeof ProviderCredential.Type;
 
-/** Returns the provider whose subscription credential signs in with `login`. */
-const providerOfLogin = (login: SubscriptionLogin): Option.Option<ModelProvider> =>
-  Arr.findFirst(modelProviders.providers, ({ credentials }) =>
-    credentials.some(
-      (credential) => credential._tag === "Subscription" && credential.login === login,
-    ),
-  );
+/** The provider that accepts each kind of `ProviderCredential`. */
+const PROVIDER_OF_KIND = {
+  "claude-subscription": anthropic,
+  "anthropic-api-key": anthropic,
+  "chatgpt-subscription": openai,
+  "openai-api-key": openai,
+} as const satisfies Record<ProviderCredential["kind"], ModelProvider>;
 
-const SUBSCRIPTION = /^(.+)-subscription$/u;
-const isLogin = Schema.is(SubscriptionLogin);
+/** The provider whose subscription credential signs in with each login. */
+const PROVIDER_OF_LOGIN = {
+  claude: anthropic,
+  chatgpt: openai,
+} as const satisfies Record<SubscriptionLogin, ModelProvider>;
 
-/**
- * Returns the slot of the provider that a credential kind names: `<login>-subscription` names the
- * provider whose subscription signs in with that login, and `<provider ID>-api-key` the provider
- * with that ID.
- */
-export const credentialProvider = (credential: ProviderCredential): GatewaySlot => {
-  const login = SUBSCRIPTION.exec(credential.kind)?.[1];
-  const provider =
-    login !== undefined && isLogin(login)
-      ? providerOfLogin(login)
-      : modelProviders.get(credential.kind.slice(0, -"-api-key".length));
-  // SAFETY: each kind of `ProviderCredential` names a provider of `modelProviders`; the gateway's tests check it.
-  return Option.getOrThrow(Option.map(provider, ({ slot }) => slot));
-};
+/** Returns the slot of the provider that accepts `credential`. */
+export const credentialProvider = (credential: ProviderCredential): GatewaySlot =>
+  PROVIDER_OF_KIND[credential.kind].slot;
 
 export class ProviderCredentialError extends Schema.TaggedError<
   ProviderCredentialError,
@@ -66,8 +59,7 @@ export type LoginProvider = SubscriptionLogin;
 
 /** Returns the slot of the provider whose subscription signs in with `login`. */
 export const loginLlmProvider = (login: LoginProvider): GatewaySlot =>
-  // SAFETY: each login of `SubscriptionLogin` belongs to a provider of `modelProviders`; the gateway's tests check it.
-  Option.getOrThrow(Option.map(providerOfLogin(login), ({ slot }) => slot));
+  PROVIDER_OF_LOGIN[login].slot;
 export const ProviderLoginState = Schema.Union([
   Schema.Struct({ status: Schema.Literal("starting") }),
   Schema.Struct({

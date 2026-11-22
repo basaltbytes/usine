@@ -1,3 +1,4 @@
+import { anthropic, openai } from "@usine/core/agent/provider";
 import { assert, describe, it } from "@effect/vitest";
 import { RemoteShell } from "@usine/agents/child-host";
 import { Agent, AgentName, AgentPersona } from "@usine/core/agent";
@@ -124,7 +125,7 @@ const gatewayHetznerAddress = (
   machine: {
     _tag: "Provisioned",
     provisioner: hetznerSettings({
-      apiKeys: apiKeys.openai === undefined ? {} : { openai: Redacted.make(apiKeys.openai) },
+      apiKeys: apiKeys.openai === undefined ? {} : { [openai.id]: Redacted.make(apiKeys.openai) },
     }),
   },
 });
@@ -916,7 +917,7 @@ describe("Provisioned SSH Worker", () => {
           _tag: "Provisioned",
           provisioner: hetznerSettings({
             network: Option.none(),
-            apiKeys: { anthropic: Redacted.make(KEY), openai: Redacted.make(OPENAI_KEY) },
+            apiKeys: { [anthropic.id]: Redacted.make(KEY), [openai.id]: Redacted.make(OPENAI_KEY) },
           }),
         },
       };

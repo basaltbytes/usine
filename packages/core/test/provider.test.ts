@@ -49,6 +49,23 @@ describe("model providers", () => {
     );
   });
 
+  it("splits a path into the provider that its first segment names and the rest", () => {
+    assert.deepStrictEqual(
+      modelProviders.target("/anthropic-messages/v1/messages"),
+      Option.some({ provider: anthropic, rest: "/v1/messages", legacy: false }),
+    );
+    assert.deepStrictEqual(
+      modelProviders.target("/openai/v1/responses"),
+      Option.some({ provider: openai, rest: "/v1/responses", legacy: true }),
+    );
+    assert.deepStrictEqual(
+      modelProviders.target("/openai-responses"),
+      Option.some({ provider: openai, rest: "", legacy: false }),
+    );
+    for (const path of ["/google/v1/models", "/", "anthropic/v1/messages", "/Anthropic/v1"])
+      assert(Option.isNone(modelProviders.target(path)), path);
+  });
+
   it("refuses a provider name that names two providers", () => {
     const renamed = (id: string, slot: string) =>
       ModelProvider.make({

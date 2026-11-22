@@ -40,7 +40,7 @@ import { gatewayServices } from "../src/gateway.ts";
 import { ChatGptLogin, HostFilePath, LlmProvider, type LlmProviders } from "../src/llm/llm.ts";
 import { GatewayAddresses, gatewayLayer } from "../src/node/node.ts";
 import { GatewayProxy, REFUSAL_HEADER } from "../src/proxy/proxy.ts";
-import { UpstreamBase } from "@usine/core/agent/provider";
+import { openai, UpstreamBase } from "@usine/core/agent/provider";
 import {
   ATTACHMENT,
   CHATGPT_ACCOUNT,
@@ -532,7 +532,7 @@ describe("ChatGptLogins", () => {
 });
 
 const chatGptProviders = (login: ChatGptLogin): LlmProviders => ({
-  "openai-responses": LlmProvider.make({
+  [openai.slot]: LlmProvider.make({
     upstream: Option.some(UpstreamBase.make(BACKEND)),
     credential: login,
   }),
@@ -723,7 +723,7 @@ describe("the Node gateway with a ChatGPT login", () => {
         open = finish;
       });
       const providers: LlmProviders = {
-        "openai-responses": LlmProvider.make({
+        [openai.slot]: LlmProvider.make({
           upstream: Option.some(UpstreamBase.make(`${backend.origin}/backend-api/codex`)),
           credential: login,
         }),

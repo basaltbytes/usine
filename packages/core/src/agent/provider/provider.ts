@@ -61,18 +61,13 @@ export type UpstreamBase = typeof UpstreamBase.Type;
 
 const PLACEHOLDER = /\{[a-z][A-Za-z0-9]*\}/gu;
 const SEGMENT_TEXT = "[A-Za-z0-9][A-Za-z0-9._-]*";
-const matchers = new Map<string, RegExp>();
 
-/** Returns the expression that matches the paths of `route`, compiled once. */
+/** Returns the expression that matches the paths of `route`. */
 const matcherOf = (route: RoutePattern): RegExp => {
-  const known = matchers.get(route);
-  if (known !== undefined) return known;
   const literal = route
     .split(PLACEHOLDER)
     .map((part) => part.replace(/[.*+?^${}()|[\]\\/]/gu, "\\$&"));
-  const compiled = new RegExp(`^${literal.join(SEGMENT_TEXT)}$`, "u");
-  matchers.set(route, compiled);
-  return compiled;
+  return new RegExp(`^${literal.join(SEGMENT_TEXT)}$`, "u");
 };
 
 /** Returns whether `path`, a path without its query, is one that `route` serves. */
@@ -219,6 +214,15 @@ export class ModelProvider extends Schema.Class<
   }
 }
 
+/** A path on `llm.<domain>`, split into the provider that its first segment names and the rest. */
+export interface SlotTarget {
+  readonly provider: ModelProvider;
+  /** The path after the first segment, such as `/v1/messages`, or empty. */
+  readonly rest: string;
+  /** Whether the first segment is the provider ID, as before slots, instead of the slot. */
+  readonly legacy: boolean;
+}
+
 const namesOf = ({ id, slot }: ModelProvider): ReadonlyArray<string> => {
   const names: ReadonlyArray<string> = [id, slot];
   return Arr.dedupe(names);
@@ -247,6 +251,22 @@ export class ModelProviderCatalog extends Schema.Class<
   /** Returns the provider whose slot or ID is `name`. */
   find(name: string): Option.Option<ModelProvider> {
     return Arr.findFirst(this.providers, (provider) => namesOf(provider).includes(name));
+  }
+
+  /**
+   * Returns the provider whose slot or ID is the first segment of `pathname`, and the rest of the
+   * path. For example, `/anthropic-messages/v1/messages` is `/v1/messages` of the provider with
+   * that slot.
+   */
+  target(pathname: string): Option.Option<SlotTarget> {
+    const match = /^\/([a-z0-9-]+)(\/.*)?$/u.exec(pathname);
+    if (match === null) return Option.none();
+    const [, prefix = "", rest = ""] = match;
+    return Option.map(this.find(prefix), (provider) => ({
+      provider,
+      rest,
+      legacy: prefix !== provider.slot,
+    }));
   }
 
   /** Returns the provider whose ID is `id`. */

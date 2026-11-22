@@ -1,4 +1,5 @@
 import {
+  type GatewaySlot,
   type GatewayVariable,
   type KeyHeader,
   type ModelProvider,
@@ -84,33 +85,7 @@ export class LlmProvider extends Schema.TaggedClass<
  * The providers that the gateway holds a credential for, by slot. Requests for another slot are
  * refused.
  */
-export type LlmProviders = Readonly<Record<string, LlmProvider>>;
-
-/** An LLM request's provider, the path after its prefix, and whether the prefix was the provider ID. */
-export interface LlmTarget {
-  readonly provider: ModelProvider;
-  readonly rest: string;
-  /** Whether the request named the provider by its ID, as before slots, instead of its slot. */
-  readonly legacy: boolean;
-}
-
-/**
- * Returns the provider whose slot or ID is the first path segment; for example,
- * `/anthropic-messages/v1/messages` is `/v1/messages` of the provider with that slot.
- */
-export const llmTarget = (
-  catalog: ModelProviderCatalog,
-  pathname: string,
-): Option.Option<LlmTarget> => {
-  const match = /^\/([a-z0-9-]+)(\/.*)?$/u.exec(pathname);
-  if (match === null) return Option.none();
-  const prefix = match[1] ?? "";
-  return Option.map(catalog.find(prefix), (provider) => ({
-    provider,
-    rest: match[2] ?? "",
-    legacy: prefix !== provider.slot,
-  }));
-};
+export type LlmProviders = Readonly<Record<GatewaySlot, LlmProvider>>;
 
 /** Returns the credential kind sent to the upstream: a subscription for a Claude token or a ChatGPT login. */
 export const credentialKind = ({ credential }: LlmProvider): GatewayCredentialKind =>

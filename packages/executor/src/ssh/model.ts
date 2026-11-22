@@ -1,5 +1,5 @@
 import type { BoxdApiLayer } from "./provisioner/boxd/client.ts";
-import type { GatewaySlot } from "@usine/core/agent/provider";
+import type { GatewaySlot, ModelProviderId } from "@usine/core/agent/provider";
 import type { boxdExecLayer } from "./provisioner/boxd/exec.ts";
 import type { AttemptConnections } from "../attempt-connections.ts";
 import type { SshCommand } from "@usine/agents/child-host";
@@ -80,7 +80,7 @@ export interface SshWorkerContainer {
  * The provider API keys that each Attempt on a provisioned Worker gets in its environment, by
  * provider ID, such as `anthropic` for Claude Code's `ANTHROPIC_API_KEY`.
  */
-export type ProviderApiKeys = Readonly<Record<string, Redacted.Redacted<string>>>;
+export type ProviderApiKeys = Readonly<Record<ModelProviderId, Redacted.Redacted<string>>>;
 
 /** Creates each Attempt's machine as a Hetzner Cloud server from a snapshot. */
 export interface HetznerProvisioner {
@@ -272,7 +272,7 @@ export interface MachineGateway {
 }
 
 /** The credential kind the Gateway holds for each slot; see `MachineGateway.credentials`. */
-export type GatewayCredentials = Readonly<Record<string, GatewayCredentialKind>>;
+export type GatewayCredentials = Readonly<Record<GatewaySlot, GatewayCredentialKind>>;
 
 export interface SshMachine extends RemoteMachine {
   /** The Worker's address from `usine.yaml`; preflight checks its root. */

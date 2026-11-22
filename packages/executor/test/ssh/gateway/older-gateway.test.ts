@@ -1,3 +1,4 @@
+import { openai } from "@usine/core/agent/provider";
 import { assert, it } from "@effect/vitest";
 import { Agent } from "@usine/core/agent";
 import { BrainSpec, Harness, ModelId } from "@usine/core/agent/brain";
@@ -41,7 +42,7 @@ it.effect(
   () => {
     const machine = fakeMachine();
     const gateway = fakeGateway(machine, {
-      "openai-responses": LlmProvider.make({
+      [openai.slot]: LlmProvider.make({
         upstream: Option.some(UpstreamBase.make("https://api.openai.com")),
         credential: ApiKey.make({ key: Redacted.make("sk-older-gateway-test") }),
       }),

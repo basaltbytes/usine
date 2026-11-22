@@ -30,7 +30,6 @@ import { type ChatGptLoginUnavailable, ChatGptLogins } from "../chatgpt/logins.t
 import {
   type ChatGptLogin,
   keyHeaders,
-  llmTarget,
   llmUpstream,
   passingHeaders,
   withChatGptAccess,
@@ -337,7 +336,7 @@ export class GatewayProxy extends Context.Service<
           claims,
           live: { attachment },
         } = yield* authenticate(request);
-        const destination = llmTarget(settings.catalog, target.pathname);
+        const destination = settings.catalog.target(target.pathname);
         if (Option.isNone(destination))
           return yield* refusedCaller(
             claims,

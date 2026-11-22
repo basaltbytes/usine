@@ -1,3 +1,4 @@
+import { openai } from "@usine/core/agent/provider";
 import { assert, it } from "@effect/vitest";
 import { RemoteShell } from "@usine/agents/child-host";
 import { Agent } from "@usine/core/agent";
@@ -27,7 +28,7 @@ it.effect(
   () => {
     const machine = fakeMachine();
     const gateway = fakeGateway(machine, {
-      "openai-responses": LlmProvider.make({
+      [openai.slot]: LlmProvider.make({
         upstream: Option.some(UpstreamBase.make("https://api.openai.com")),
         credential: ApiKey.make({ key: Redacted.make("sk-shared-slot-test") }),
       }),

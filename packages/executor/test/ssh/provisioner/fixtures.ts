@@ -1,3 +1,4 @@
+import { anthropic } from "@usine/core/agent/provider";
 import { harnessesLive } from "@usine/agents/harness/node";
 import { Attachments } from "@usine/gateway";
 import { fakeGateway } from "../gateway/support.ts";
@@ -49,7 +50,7 @@ export const hetznerAddress: SshWorkerAddress = {
     provisioner: hetznerSettings({
       network: Option.none(),
       timings: ProvisionerTimings.make({ sshWait: ProvisionerSeconds.make(1) }),
-      apiKeys: { anthropic: Redacted.make(KEY) },
+      apiKeys: { [anthropic.id]: Redacted.make(KEY) },
     }),
   },
 };

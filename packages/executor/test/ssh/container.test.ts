@@ -1,3 +1,4 @@
+import { anthropic, openai } from "@usine/core/agent/provider";
 import { assert, describe, it } from "@effect/vitest";
 import { CHILD_KILL_SCRIPT, HostUnreachable, RemoteShell } from "@usine/agents/child-host";
 import { Agent } from "@usine/core/agent";
@@ -114,11 +115,11 @@ const LOGINS = [
 
 /** A Gateway that holds an Anthropic API key and a ChatGPT login. */
 const BOTH_PROVIDERS = {
-  "anthropic-messages": LlmProvider.make({
+  [anthropic.slot]: LlmProvider.make({
     upstream: Option.some(UpstreamBase.make("https://api.anthropic.com")),
     credential: ApiKey.make({ key: Redacted.make("sk-ant-api03-for-executor-tests") }),
   }),
-  "openai-responses": LlmProvider.make({
+  [openai.slot]: LlmProvider.make({
     upstream: Option.some(UpstreamBase.make("https://chatgpt.com/backend-api/codex")),
     credential: ChatGptLogin.make({
       authFile: HostFilePath.make("/var/lib/usine-gateway/codex-auth.json"),
@@ -618,7 +619,7 @@ describe("SSH Worker with Docker", () => {
     () => {
       const machine = dockerMachine();
       const gateway = fakeGateway(machine, {
-        "openai-responses": LlmProvider.make({
+        [openai.slot]: LlmProvider.make({
           upstream: Option.some(UpstreamBase.make("https://chatgpt.com/backend-api/codex")),
           credential: ChatGptLogin.make({
             authFile: HostFilePath.make("/var/lib/usine-gateway/codex-auth.json"),

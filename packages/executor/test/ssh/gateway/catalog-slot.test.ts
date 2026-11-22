@@ -116,7 +116,7 @@ const planHarnesses = harnessesLiveFrom(
 const PLAN_BRAIN = BrainSpec.make({ ...TEST_AGENT.brain, harness: planClient.id });
 
 const keyed: LlmProviders = {
-  "test-plan": LlmProvider.make({
+  [plan.slot]: LlmProvider.make({
     upstream: Option.none(),
     credential: ApiKey.make({ key: Redacted.make(PLAN_KEY) }),
   }),
@@ -328,7 +328,7 @@ describe("a provider slot that only the test's catalog declares", () => {
       });
       const gateway = fakeGateway(
         machine,
-        { ...keyed, "later-plan": keyed["test-plan"] ?? assert.fail("no test-plan key") },
+        { ...keyed, [later.slot]: keyed[plan.slot] ?? assert.fail("no test-plan key") },
         servingAlso(widened, later),
       );
       return Effect.gen(function* () {

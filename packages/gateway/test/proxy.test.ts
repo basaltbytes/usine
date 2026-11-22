@@ -40,6 +40,7 @@ import {
 import { GatewayProxy, REFUSAL_HEADER } from "../src/proxy/proxy.ts";
 import { llmProviders } from "../src/node/environment.ts";
 import {
+  anthropic,
   ApiKeyCredential,
   GatewaySlot,
   GatewayVariable,
@@ -49,6 +50,7 @@ import {
   ModelProviderCatalog,
   ModelProviderId,
   modelProviders,
+  openai,
   ProviderProtocol,
   RoutePattern,
   UpstreamBase,
@@ -429,7 +431,7 @@ describe("GatewayProxy", () => {
       }).pipe(
         Effect.provide(
           gateway({
-            "anthropic-messages": LlmProvider.make({
+            [anthropic.slot]: LlmProvider.make({
               upstream: Option.some(UpstreamBase.make("https://api.anthropic.com")),
               credential: ApiKey.make({ key: secret(ANTHROPIC_KEY) }),
             }),
@@ -460,7 +462,7 @@ describe("GatewayProxy", () => {
       }).pipe(
         Effect.provide(
           gateway({
-            "anthropic-messages": LlmProvider.make({
+            [anthropic.slot]: LlmProvider.make({
               upstream: Option.some(UpstreamBase.make("https://api.anthropic.com")),
               credential: AnthropicSubscriptionToken.make({ token: secret(SUBSCRIPTION_TOKEN) }),
             }),
@@ -502,7 +504,7 @@ describe("GatewayProxy", () => {
       }).pipe(
         Effect.provide(
           gateway({
-            "openai-responses": LlmProvider.make({
+            [openai.slot]: LlmProvider.make({
               upstream: Option.some(UpstreamBase.make("https://api.openai.com")),
               credential: ApiKey.make({ key: secret(OPENAI_KEY) }),
             }),
@@ -584,11 +586,11 @@ describe("GatewayProxy", () => {
       }).pipe(
         Effect.provide(
           gateway({
-            "anthropic-messages": LlmProvider.make({
+            [anthropic.slot]: LlmProvider.make({
               upstream: Option.some(UpstreamBase.make("https://api.anthropic.com")),
               credential: ApiKey.make({ key: secret(ANTHROPIC_KEY) }),
             }),
-            "openai-responses": LlmProvider.make({
+            [openai.slot]: LlmProvider.make({
               upstream: Option.some(UpstreamBase.make("https://api.openai.com")),
               credential: ApiKey.make({ key: secret(OPENAI_KEY) }),
             }),
@@ -793,14 +795,15 @@ describe("GatewayProxy", () => {
 
 describe("a provider slot that the catalog declares", () => {
   /** The plan's credential as the gateway reads it from its environment, which sets only the entry's variable. */
-  const planProviders = llmProviders(withPlan).pipe(
-    Effect.provideService(
-      ConfigProvider.ConfigProvider,
-      ConfigProvider.fromUnknown({ TEST_PLAN_API_KEY: PLAN_KEY }),
-    ),
-    Effect.provide([NodeFileSystem.layer, NodeCrypto.layer]),
-    Effect.orDie,
-  );
+  const planProviders = (catalog: ModelProviderCatalog) =>
+    llmProviders(catalog).pipe(
+      Effect.provideService(
+        ConfigProvider.ConfigProvider,
+        ConfigProvider.fromUnknown({ TEST_PLAN_API_KEY: PLAN_KEY }),
+      ),
+      Effect.provide([NodeFileSystem.layer, NodeCrypto.layer]),
+      Effect.orDie,
+    );
 
   it.effect(
     "sends the key in the header of each protocol, passes the listed header, refuses other routes, and returns error bodies unchanged",
@@ -880,7 +883,7 @@ describe("a provider slot that the catalog declares", () => {
       }).pipe(
         Effect.provide(
           Layer.unwrap(
-            Effect.map(planProviders, (providers) =>
+            Effect.map(planProviders(withPlan), (providers) =>
               gateway(
                 providers,
                 (url) =>
@@ -896,6 +899,47 @@ describe("a provider slot that the catalog declares", () => {
           ),
         ),
       ),
+  );
+
+  it.effect(
+    "removes a caller token from each protocol's key header for an entry without a pass-through list",
+    () => {
+      const open = ModelProvider.make({ ...plan, passThrough: Option.none() });
+      const withOpenPlan = ModelProviderCatalog.make({
+        providers: [...modelProviders.providers, open],
+      });
+      return Effect.gen(function* () {
+        const caller = yield* attach(installation);
+        const chat = yield* send(
+          "http://llm.gw.test/test-plan/chat/completions",
+          {
+            authorization: `Bearer ${caller}`,
+            "x-goog-api-key": caller,
+            "x-plan-session": "session-1",
+          },
+          { method: "POST", body: '{"model":"plan-model"}' },
+        );
+        assert.strictEqual(chat.status, 200);
+        const [toChat] = yield* sent;
+        assert(toChat !== undefined);
+        assert.deepStrictEqual(
+          [
+            Headers.get(toChat.headers, "authorization"),
+            Headers.get(toChat.headers, "x-goog-api-key"),
+            Headers.get(toChat.headers, "x-plan-session"),
+          ],
+          [Option.some(`Bearer ${PLAN_KEY}`), Option.none(), Option.some("session-1")],
+        );
+      }).pipe(
+        Effect.provide(
+          Layer.unwrap(
+            Effect.map(planProviders(withOpenPlan), (providers) =>
+              gateway(providers, ok, withOpenPlan),
+            ),
+          ),
+        ),
+      );
+    },
   );
 
   it.effect("refuses the slot while the gateway has no key for it", () =>

@@ -286,26 +286,49 @@ export interface ContainerSandboxOptions {
   readonly route: Option.Option<Effect.Effect<GatewayModelRoute, GatewayModelError>>;
 }
 
+/** The provider whose slot a supervisor turn's harness calls, and the turn's credential route. */
+interface HeldProvider {
+  readonly provider: ModelProvider;
+  readonly route: CredentialRoute;
+}
+
 /**
  * Returns the first of `providers` that `route`'s gateway holds a credential for, with the turn's
- * credential route, or the first provider with the `gateway` route when it holds none.
+ * credential route, or the first provider with the `gateway` route when it holds none. Logs the
+ * choice at info level.
  */
 const heldProvider = Effect.fn("SupervisorSandbox.heldProvider")(function* (
+  harness: Harness,
   route: GatewayModelRoute,
   providers: Arr.NonEmptyReadonlyArray<ModelProvider>,
 ) {
+  yield* Effect.annotateCurrentSpan({ harness });
+  const chosen = (held: HeldProvider, message: string) =>
+    Effect.annotateCurrentSpan({ slot: held.provider.slot, credentialRoute: held.route }).pipe(
+      Effect.andThen(
+        Effect.logInfo(message, {
+          harness,
+          slot: held.provider.slot,
+          credentialRoute: held.route,
+        }),
+      ),
+      Effect.as(held),
+    );
   for (const provider of providers) {
     const kind = yield* route.credential(provider.slot);
     if (Option.isSome(kind))
-      return {
-        provider,
-        route: kind.value === "subscription" ? "gateway-subscription" : "gateway-api-key",
-      } satisfies { readonly provider: ModelProvider; readonly route: CredentialRoute };
+      return yield* chosen(
+        {
+          provider,
+          route: kind.value === "subscription" ? "gateway-subscription" : "gateway-api-key",
+        },
+        "The supervisor's harness calls a provider slot that the gateway holds",
+      );
   }
-  return { provider: providers[0], route: "gateway" } satisfies {
-    readonly provider: ModelProvider;
-    readonly route: CredentialRoute;
-  };
+  return yield* chosen(
+    { provider: providers[0], route: "gateway" },
+    "The gateway holds no provider of the supervisor's harness; the harness calls its first provider's slot",
+  );
 });
 
 const unavailableBecause = (action: string) => (error: { readonly message: string }) =>
@@ -786,7 +809,7 @@ const makeContainerSandbox = Effect.fn("SupervisorSandbox.make")(function* (
     const wired = yield* Option.match(credentialOf(request.harness), {
       onNone: () => Effect.succeedNone,
       onSome: ({ credential: harnessCredential, providers }) =>
-        Effect.map(heldProvider(route, providers), ({ provider, route: held }) =>
+        Effect.map(heldProvider(request.harness, route, providers), ({ provider, route: held }) =>
           Option.some({
             route: held,
             wiring: wiringOf(request.harness, harnessCredential, provider, paths),

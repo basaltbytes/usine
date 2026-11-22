@@ -88,6 +88,7 @@ export {
   ProviderProtocol,
   RoutePattern,
   routeServes,
+  type SlotTarget,
   SubscriptionCredential,
   SubscriptionLogin,
   UpstreamBase,

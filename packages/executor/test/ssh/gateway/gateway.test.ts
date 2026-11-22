@@ -1,3 +1,4 @@
+import { anthropic, openai } from "@usine/core/agent/provider";
 import { catalog } from "@usine/agents/harness";
 import { jsonKey } from "@usine/core/json-key";
 import { assert, describe, it } from "@effect/vitest";
@@ -88,7 +89,7 @@ const codexRequest = CheckoutRequest.make({
 
 /** A Gateway whose OpenAI credential is a ChatGPT login. */
 const CHATGPT_PROVIDERS = {
-  "openai-responses": LlmProvider.make({
+  [openai.slot]: LlmProvider.make({
     upstream: Option.some(UpstreamBase.make("https://chatgpt.com/backend-api/codex")),
     credential: ChatGptLogin.make({
       authFile: HostFilePath.make("/var/lib/usine-gateway/chatgpt/auth.json"),
@@ -894,7 +895,7 @@ describe("SSH Worker behind a Gateway", () => {
         yield* inForce.replace({
           ...(yield* inForce.current),
           providers: {
-            "anthropic-messages": LlmProvider.make({
+            [anthropic.slot]: LlmProvider.make({
               upstream: Option.some(UpstreamBase.make("https://api.anthropic.com")),
               credential: AnthropicSubscriptionToken.make({
                 token: Redacted.make("sk-ant-oat01-for-executor-tests"),

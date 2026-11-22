@@ -31,7 +31,7 @@ import { AttachRequest, GatewayAdminApi } from "../../src/admin/api.ts";
 import { AnonymousCredential } from "../../src/attachment/attachment.ts";
 import { LlmProvider, AnthropicSubscriptionToken, type LlmProviders } from "../../src/llm/llm.ts";
 import { GatewayAddresses, gatewayLayer } from "../../src/node/node.ts";
-import { UpstreamBase } from "@usine/core/agent/provider";
+import { anthropic, UpstreamBase } from "@usine/core/agent/provider";
 import { ADMIN_TOKEN_VALUE, REPOSITORY, WORKER, secret, settingsLayer } from "../fixtures.ts";
 
 /*
@@ -222,7 +222,7 @@ const swap = (providers: LlmProviders) =>
   );
 
 const subscription = (upstream: string, token: string): LlmProviders => ({
-  "anthropic-messages": LlmProvider.make({
+  [anthropic.slot]: LlmProvider.make({
     upstream: Option.some(UpstreamBase.make(upstream)),
     credential: AnthropicSubscriptionToken.make({ token: secret(token) }),
   }),

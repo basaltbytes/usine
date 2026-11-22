@@ -1,6 +1,11 @@
 import type { harnessesLive } from "@usine/agents/harness/node";
 import { NodeCrypto } from "@effect/platform-node";
-import { GatewaySlot, type ModelProviderCatalog, modelProviders } from "@usine/core/agent/provider";
+import {
+  anthropic,
+  GatewaySlot,
+  type ModelProviderCatalog,
+  modelProviders,
+} from "@usine/core/agent/provider";
 import {
   GatewayAdminPort,
   GatewayDomain,
@@ -111,7 +116,7 @@ const bodyOf = (body: { readonly _tag: string }): AdminCall["body"] =>
 
 /** The default Gateway LLM providers: an Anthropic API key, matching `gatewayAddress`. */
 const GATEWAY_PROVIDERS: LlmProviders = {
-  "anthropic-messages": LlmProvider.make({
+  [anthropic.slot]: LlmProvider.make({
     upstream: Option.some(UpstreamBase.make("https://api.anthropic.com")),
     credential: ApiKey.make({ key: Redacted.make("sk-ant-api03-for-executor-tests") }),
   }),

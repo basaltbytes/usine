@@ -1,7 +1,8 @@
 import {
   anthropic,
-  type GatewaySlot,
+  GatewaySlot,
   modelProviders,
+  openai,
   UpstreamBase,
 } from "@usine/core/agent/provider";
 import {
@@ -59,9 +60,9 @@ type Stored = typeof Stored.Type;
 
 /** Each managed slot's credential, or `None` for a slot disconnected from the environment's credential. */
 const SnapshotJson = Schema.fromJsonString(
-  Schema.toCodecJson(Schema.Record(Schema.String, Schema.Option(Stored))),
+  Schema.toCodecJson(Schema.Record(GatewaySlot, Schema.Option(Stored))),
 );
-type Snapshot = Readonly<Record<string, Option.Option<LlmProvider>>>;
+type Snapshot = typeof SnapshotJson.Type;
 
 const fromStored = ({ upstream, credential }: Stored): LlmProvider =>
   LlmProvider.make({
@@ -71,30 +72,6 @@ const fromStored = ({ upstream, credential }: Stored): LlmProvider =>
         ? ApiKey.make({ key: credential.key })
         : credential,
   });
-
-const toStored = (slot: string, held: LlmProvider): Stored => {
-  const { credential } = held;
-  const upstream = Option.getOrElse(held.upstream, () =>
-    // SAFETY: the store holds only slots that `credentialProvider` returns, which `modelProviders` has.
-    Option.getOrThrow(
-      Option.map(modelProviders.find(slot), ({ protocols }) => protocols[0].upstream),
-    ),
-  );
-  if (credential._tag === "AnthropicSubscriptionToken")
-    return { _tag: "AnthropicProvider", upstream, credential };
-  if (credential._tag === "ChatGptLogin") return { _tag: "OpenAiProvider", upstream, credential };
-  return slot === anthropic.slot
-    ? {
-        _tag: "AnthropicProvider",
-        upstream,
-        credential: { _tag: "AnthropicApiKey", key: credential.key },
-      }
-    : {
-        _tag: "OpenAiProvider",
-        upstream,
-        credential: { _tag: "OpenAiApiKey", key: credential.key },
-      };
-};
 
 const failed = (cause: { readonly _tag: string }) =>
   ProviderCredentialError.make({
@@ -129,15 +106,12 @@ export class ProviderCredentials extends Context.Service<
         const file = `${directory}/provider-credentials.json`;
         let snapshot: Snapshot = {};
         if (yield* fs.exists(file).pipe(Effect.mapError(failed))) {
-          const stored = yield* fs
+          snapshot = yield* fs
             .readFileString(file)
             .pipe(
               Effect.flatMap(Schema.decodeUnknownEffect(SnapshotJson)),
               Effect.mapError(failed),
             );
-          snapshot = Object.fromEntries(
-            Object.entries(stored).map(([slot, held]) => [slot, Option.map(held, fromStored)]),
-          );
         }
         const apply = (providers: LlmProviders) =>
           Effect.succeed(
@@ -146,7 +120,7 @@ export class ProviderCredentials extends Context.Service<
                 Option.match(held, {
                   onNone: () =>
                     Object.fromEntries(Object.entries(applied).filter(([name]) => name !== slot)),
-                  onSome: (value) => ({ ...applied, [slot]: value }),
+                  onSome: (value) => ({ ...applied, [slot]: fromStored(value) }),
                 }),
               providers,
             ),
@@ -160,13 +134,7 @@ export class ProviderCredentials extends Context.Service<
           yield* Effect.annotateCurrentSpan({ provider });
           const uuid = yield* crypto.randomUUIDv4().pipe(Effect.orDie);
           const temporary = `${file}.${uuid}`;
-          const stored = Object.fromEntries(
-            Object.entries(next).map(([slot, held]) => [
-              slot,
-              Option.map(held, (value) => toStored(slot, value)),
-            ]),
-          );
-          const text = yield* Schema.encodeEffect(SnapshotJson)(stored).pipe(Effect.orDie);
+          const text = yield* Schema.encodeEffect(SnapshotJson)(next).pipe(Effect.orDie);
           yield* fs
             .makeDirectory(directory, { recursive: true, mode: 0o700 })
             .pipe(
@@ -188,21 +156,31 @@ export class ProviderCredentials extends Context.Service<
             connected: Option.isSome(Option.flatten(Option.fromUndefinedOr(next[provider]))),
           });
         }, Effect.uninterruptible);
-        /** Returns the credential that `credential` connects; a ChatGPT login is written to its own auth file first. */
+        /**
+         * Returns the stored credential that `credential` connects, with its upstream; a ChatGPT
+         * login is written to its own auth file first.
+         */
         const heldCredential = (credential: ProviderCredential) =>
           Effect.gen(function* () {
             switch (credential.kind) {
               case "anthropic-api-key":
+                return {
+                  _tag: "AnthropicProvider",
+                  upstream: anthropic.protocols[0].upstream,
+                  credential: { _tag: "AnthropicApiKey", key: credential.secret },
+                } satisfies Stored;
               case "openai-api-key":
-                return LlmProvider.make({
-                  upstream: Option.none(),
-                  credential: ApiKey.make({ key: credential.secret }),
-                });
+                return {
+                  _tag: "OpenAiProvider",
+                  upstream: openai.protocols[0].upstream,
+                  credential: { _tag: "OpenAiApiKey", key: credential.secret },
+                } satisfies Stored;
               case "claude-subscription":
-                return LlmProvider.make({
-                  upstream: Option.none(),
+                return {
+                  _tag: "AnthropicProvider",
+                  upstream: anthropic.protocols[0].upstream,
                   credential: AnthropicSubscriptionToken.make({ token: credential.secret }),
-                });
+                } satisfies Stored;
               case "chatgpt-subscription": {
                 const uuid = yield* crypto.randomUUIDv4().pipe(Effect.orDie);
                 const authFile = HostFilePath.make(`${directory}/codex-${uuid}.json`);
@@ -231,10 +209,11 @@ export class ProviderCredentials extends Context.Service<
                   tokenUrl: UpstreamBase.make(CHATGPT_TOKEN_URL),
                 });
                 yield* logins.reload(login).pipe(Effect.mapError(failed));
-                return LlmProvider.make({
-                  upstream: Option.some(CHATGPT_UPSTREAM),
+                return {
+                  _tag: "OpenAiProvider",
+                  upstream: CHATGPT_UPSTREAM,
                   credential: login,
-                });
+                } satisfies Stored;
               }
             }
           });

@@ -2,7 +2,7 @@
 import { createServer } from "node:http";
 import { catalog } from "@usine/agents/harness";
 import type { ModelId } from "@usine/core/agent/brain";
-import type { GatewaySlot, ModelProviderCatalog } from "@usine/core/agent/provider";
+import type { ModelProviderCatalog, SlotTarget } from "@usine/core/agent/provider";
 import { SupervisorLimits } from "@usine/core/worker";
 import { CALLER_CREDENTIAL_HEADERS } from "@usine/gateway/admin";
 import { Effect, Option, Result, Schema, Stream } from "effect";
@@ -21,19 +21,16 @@ export const modelRelayServer = () => {
   return server;
 };
 
-/** Returns the slot and path of a model request for a route of one of `providers`, such as `/anthropic-messages/v1/messages`. */
-const relayedRoute = (
-  providers: ModelProviderCatalog,
-  path: string,
-): Option.Option<{ readonly slot: GatewaySlot; readonly rest: string }> => {
-  const match = /^\/([a-z0-9-]+)(\/.*)$/u.exec(path);
-  if (match === null) return Option.none();
-  const [, prefix = "", rest = ""] = match;
-  return Option.flatMap(
-    Option.filter(providers.find(prefix), ({ slot }) => slot === prefix),
-    (provider) => Option.map(provider.protocolFor(rest), () => ({ slot: provider.slot, rest })),
+/**
+ * Returns the provider and path of a model request for a route under the slot of one of
+ * `providers`, such as `/anthropic-messages/v1/messages`. A path under a provider ID, as before
+ * slots, is refused.
+ */
+const relayedRoute = (providers: ModelProviderCatalog, path: string): Option.Option<SlotTarget> =>
+  Option.filter(
+    providers.target(path),
+    ({ provider, rest, legacy }) => !legacy && Option.isSome(provider.protocolFor(rest)),
   );
-};
 
 const requestOnlyHeaders: ReadonlySet<string> = new Set([
   ...CALLER_CREDENTIAL_HEADERS,
@@ -100,7 +97,12 @@ export const relayModelRequest = Effect.fn("SupervisorModelRelay.request")(
     const headers = Object.fromEntries(
       Object.entries(request.headers).filter(([name]) => !requestOnlyHeaders.has(name)),
     );
-    const response = yield* route.request(forward.value.slot, forward.value.rest, body, headers);
+    const response = yield* route.request(
+      forward.value.provider.slot,
+      forward.value.rest,
+      body,
+      headers,
+    );
     const kept = new Headers();
     response.headers.forEach((value, name) => {
       if (!connectionHeaders.has(name)) kept.append(name, value);

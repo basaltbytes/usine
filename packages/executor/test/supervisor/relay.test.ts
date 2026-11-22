@@ -222,6 +222,44 @@ describe("supervisor relay limits", () => {
     }).pipe(Effect.provide(logger));
   });
 
+  it.effect("refuses a route outside the slot's routes and a provider ID prefix", () =>
+    Effect.gen(function* () {
+      const forwarded: Array<string> = [];
+      const route: GatewayModelRoute = {
+        credential: () => Effect.succeedNone,
+        request: (slot, path) =>
+          Effect.sync(() => {
+            forwarded.push(`${slot}${path}`);
+            return new Response("ok");
+          }),
+      };
+      const statuses = yield* Effect.forEach(
+        [
+          "/anthropic-messages/v1/files",
+          "/anthropic-messages/v1/messages/batches",
+          "/anthropic-messages",
+          "/anthropic/v1/messages",
+          "/openai/v1/responses",
+        ],
+        (path) =>
+          relayModelRequest(route, model, limits).pipe(
+            Effect.provideService(
+              HttpServerRequest.HttpServerRequest,
+              HttpServerRequest.fromWeb(
+                new Request(`http://relay${path}`, {
+                  method: "POST",
+                  body: '{"model":"allowed"}',
+                }),
+              ),
+            ),
+            Effect.map((response) => response.status),
+          ),
+      );
+      assert.deepStrictEqual(statuses, [404, 404, 404, 404, 404]);
+      assert.deepStrictEqual(forwarded, []);
+    }),
+  );
+
   it("drops connections above the limit", async () => {
     const server = modelRelayServer();
     const sockets: Array<ReturnType<typeof connect>> = [];

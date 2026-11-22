@@ -268,7 +268,7 @@ ${["missing-token", "unreachable", "outdated", "older-gateway"]
         }
         const inForce = Context.get(gateway, SettingsInForce);
         const saved = yield* inForce.current;
-        const saved_ = saved.providers["anthropic-messages"];
+        const saved_ = saved.providers[anthropic.slot];
         assert(saved_ !== undefined && saved_.credential._tag === "ApiKey");
         assert.equal(Redacted.value(saved_.credential.key), secret);
         assert.notInclude(jsonKey(connected), secret);
