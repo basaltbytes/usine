@@ -318,6 +318,7 @@ describe("RunUsageReader", () => {
         AdmissionContext.make({ placement: "local", credential: "gateway-subscription" }),
       );
       assert(Result.isSuccess(admitted));
+      assert.deepStrictEqual(admitted.success.pool, Option.some(testPlan.id));
       // A runtime records the pool that admission determined on the session it opens.
       const session = ChildSession.make({
         ...child("test", testHarness.id, "test-model"),
