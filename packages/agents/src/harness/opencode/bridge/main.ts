@@ -76,18 +76,22 @@ const inputLine = (line: string): InputLine => {
   return { request: body === undefined ? { id, method, path } : { id, method, path, body } };
 };
 
-/** Returns the server address in `serve`'s ready line, `{"url": ...}`, or none for another line. */
+/** Returns whether `host`, an IP address or name from a parsed URL, is a loopback address. */
+const isLoopback = (host: string) => host === "::1" || /^127\.\d+\.\d+\.\d+$/u.test(host);
+
+/**
+ * Returns the server address in `serve`'s ready line, `{"url": ...}`, or none for another line,
+ * including a ready line whose host isn't a loopback address.
+ */
 const readyLine = (line: string): Server | undefined => {
   const parsed = parseJson(line);
   if (parsed === undefined || !isObject(parsed.value)) return undefined;
   const { url } = parsed.value;
   if (typeof url !== "string" || !URL.canParse(url)) return undefined;
   const address = new URL(url);
-  if (address.protocol !== "http:") return undefined;
-  return {
-    host: address.hostname.replace(/^\[(.*)\]$/u, "$1"),
-    port: address.port === "" ? 80 : Number(address.port),
-  };
+  const host = address.hostname.replace(/^\[(.*)\]$/u, "$1");
+  if (address.protocol !== "http:" || !isLoopback(host)) return undefined;
+  return { host, port: address.port === "" ? 80 : Number(address.port) };
 };
 
 /** Returns a reader of event-stream text that calls `dispatch` with the data of each event. */

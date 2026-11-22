@@ -166,6 +166,16 @@ describe("OpenCode bridge", () => {
     ]);
   });
 
+  it("treats a ready line on a host that isn't a loopback address as a diagnostic", async () => {
+    const bridge = start("foreign-url");
+    await eventually(() => bridge.lines.length >= 2);
+    expect(bridge.lines.slice(0, 2)).toEqual([
+      { ready: true },
+      { event: { type: "server.connected", data: {} } },
+    ]);
+    expect(bridge.stderr()).toMatch(/^\{"url":"http:\/\/192\.0\.2\.1:\d+"\}$/mu);
+  });
+
   it("exits with serve's code when serve exits before it is ready", async () => {
     const bridge = start("exit-before-ready");
     expect(await bridge.exit).toBe(3);

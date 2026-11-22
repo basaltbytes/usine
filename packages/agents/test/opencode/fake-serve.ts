@@ -16,6 +16,7 @@ type Route = (request: IncomingMessage, response: ServerResponse) => void;
  *
  * - `ready` starts at once.
  * - `slow` reports its URL and then registers event subscriptions after a delay.
+ * - `foreign-url` reports a URL on a host that isn't a loopback address before its own.
  * - `exit-before-ready` fails before its ready line.
  * - `refuse-events` answers the event subscription with 401.
  * - `refuse-events-at-end` holds the event subscription and answers it with 401 at end of input.
@@ -162,6 +163,8 @@ server.listen(0, "127.0.0.1", () => {
   const { port } = server.address() as AddressInfo;
   const ready = () => {
     process.stdout.write("a line before the ready line\n");
+    if (scenario === "foreign-url")
+      process.stdout.write(`${JSON.stringify({ url: `http://192.0.2.1:${port}` })}\n`);
     process.stdout.write(`${JSON.stringify({ url: `http://127.0.0.1:${port}` })}\n`);
   };
   if (scenario === "slow") setTimeout(ready, SLOW_MS);
