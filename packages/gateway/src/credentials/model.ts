@@ -1,5 +1,12 @@
+import {
+  anthropic,
+  type GatewaySlot,
+  GatewaySlot as GatewaySlotSchema,
+  type ModelProvider,
+  openai,
+  SubscriptionLogin,
+} from "@usine/core/agent/provider";
 import { Schema } from "effect";
-import { LlmProviderName } from "../llm/llm.ts";
 
 const Secret = Schema.Redacted(Schema.NonEmptyString);
 export const ProviderCredential = Schema.Union([
@@ -9,10 +16,24 @@ export const ProviderCredential = Schema.Union([
   Schema.Struct({ kind: Schema.Literal("openai-api-key"), secret: Secret }),
 ]);
 export type ProviderCredential = typeof ProviderCredential.Type;
-export const credentialProvider = (credential: ProviderCredential): LlmProviderName =>
-  credential.kind === "claude-subscription" || credential.kind === "anthropic-api-key"
-    ? "anthropic-messages"
-    : "openai-responses";
+
+/** The provider that accepts each kind of `ProviderCredential`. */
+const PROVIDER_OF_KIND = {
+  "claude-subscription": anthropic,
+  "anthropic-api-key": anthropic,
+  "chatgpt-subscription": openai,
+  "openai-api-key": openai,
+} as const satisfies Record<ProviderCredential["kind"], ModelProvider>;
+
+/** The provider whose subscription credential signs in with each login. */
+const PROVIDER_OF_LOGIN = {
+  claude: anthropic,
+  chatgpt: openai,
+} as const satisfies Record<SubscriptionLogin, ModelProvider>;
+
+/** Returns the slot of the provider that accepts `credential`. */
+export const credentialProvider = (credential: ProviderCredential): GatewaySlot =>
+  PROVIDER_OF_KIND[credential.kind].slot;
 
 export class ProviderCredentialError extends Schema.TaggedError<
   ProviderCredentialError,
@@ -20,7 +41,7 @@ export class ProviderCredentialError extends Schema.TaggedError<
 >()("ProviderCredentialError", { message: Schema.String }) {}
 
 export const ProviderConnection = Schema.Struct({
-  provider: LlmProviderName,
+  provider: GatewaySlotSchema,
   credential: Schema.NullOr(Schema.Literals(["api-key", "subscription"])),
   expiresAt: Schema.NullOr(Schema.String),
   lastRefresh: Schema.NullOr(Schema.String),
@@ -30,12 +51,15 @@ export const ProviderConnection = Schema.Struct({
 export type ProviderConnection = typeof ProviderConnection.Type;
 export const ProviderConnections = Schema.Struct({ providers: Schema.Array(ProviderConnection) });
 /** A provider whose status could not be read on its destination, such as a missing harness. */
-const ProviderUnavailable = Schema.Struct({ provider: LlmProviderName, error: Schema.String });
+const ProviderUnavailable = Schema.Struct({ provider: GatewaySlotSchema, error: Schema.String });
 
-export const LoginProvider = Schema.Literals(["claude", "chatgpt"]);
-export type LoginProvider = typeof LoginProvider.Type;
-export const loginLlmProvider = (provider: LoginProvider): LlmProviderName =>
-  provider === "claude" ? "anthropic-messages" : "openai-responses";
+/** A subscription login that usine signs in on a target. */
+export const LoginProvider = SubscriptionLogin;
+export type LoginProvider = SubscriptionLogin;
+
+/** Returns the slot of the provider whose subscription signs in with `login`. */
+export const loginLlmProvider = (login: LoginProvider): GatewaySlot =>
+  PROVIDER_OF_LOGIN[login].slot;
 export const ProviderLoginState = Schema.Union([
   Schema.Struct({ status: Schema.Literal("starting") }),
   Schema.Struct({

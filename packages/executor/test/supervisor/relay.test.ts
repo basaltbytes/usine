@@ -20,7 +20,6 @@ const MAX_RELAY_BODY_BYTES = 2 * 1024 ** 2;
 const model = ModelId.make("allowed");
 const unused: GatewayModelRoute = {
   credential: () => Effect.succeedNone,
-  countTokens: () => Effect.die("the test counts no tokens"),
   request: () => Effect.die("A refused request must not reach the gateway"),
 };
 const request = (body: string) =>
@@ -84,7 +83,6 @@ describe("supervisor relay limits", () => {
       const failed = yield* relayModelRequest(
         {
           credential: () => Effect.succeedNone,
-          countTokens: () => Effect.die("the test counts no tokens"),
           request: () =>
             Effect.fail(
               GatewayModelError.make({ message: "Failed to connect to secret.gateway:3210" }),
@@ -154,8 +152,7 @@ describe("supervisor relay limits", () => {
       });
       const route: GatewayModelRoute = {
         credential: () => Effect.succeedNone,
-        countTokens: () => Effect.die("the test counts no tokens"),
-        request: (_protocol, received) =>
+        request: (_slot, _path, received) =>
           Effect.sync(() => {
             assert.strictEqual(received, body);
             return new Response("ok");
@@ -184,12 +181,13 @@ describe("supervisor relay limits", () => {
       const counted: Array<{ body: string; headers: Readonly<Record<string, string>> }> = [];
       const route: GatewayModelRoute = {
         credential: () => Effect.succeedNone,
-        request: () => Effect.die("A token count must not run the model"),
-        countTokens: (body, headers) =>
-          Effect.sync(() => {
-            counted.push({ body, headers });
-            return Response.json({ input_tokens: 42 });
-          }),
+        request: (slot, path, body, headers) =>
+          slot === "anthropic-messages" && path === "/v1/messages/count_tokens"
+            ? Effect.sync(() => {
+                counted.push({ body, headers });
+                return Response.json({ input_tokens: 42 });
+              })
+            : Effect.die("A token count must not run the model"),
       };
       const count = (body: string) =>
         relayModelRequest(route, model, limits).pipe(
@@ -223,6 +221,44 @@ describe("supervisor relay limits", () => {
       assert.lengthOf(counted, 1);
     }).pipe(Effect.provide(logger));
   });
+
+  it.effect("refuses a route outside the slot's routes and a provider ID prefix", () =>
+    Effect.gen(function* () {
+      const forwarded: Array<string> = [];
+      const route: GatewayModelRoute = {
+        credential: () => Effect.succeedNone,
+        request: (slot, path) =>
+          Effect.sync(() => {
+            forwarded.push(`${slot}${path}`);
+            return new Response("ok");
+          }),
+      };
+      const statuses = yield* Effect.forEach(
+        [
+          "/anthropic-messages/v1/files",
+          "/anthropic-messages/v1/messages/batches",
+          "/anthropic-messages",
+          "/anthropic/v1/messages",
+          "/openai/v1/responses",
+        ],
+        (path) =>
+          relayModelRequest(route, model, limits).pipe(
+            Effect.provideService(
+              HttpServerRequest.HttpServerRequest,
+              HttpServerRequest.fromWeb(
+                new Request(`http://relay${path}`, {
+                  method: "POST",
+                  body: '{"model":"allowed"}',
+                }),
+              ),
+            ),
+            Effect.map((response) => response.status),
+          ),
+      );
+      assert.deepStrictEqual(statuses, [404, 404, 404, 404, 404]);
+      assert.deepStrictEqual(forwarded, []);
+    }),
+  );
 
   it("drops connections above the limit", async () => {
     const server = modelRelayServer();

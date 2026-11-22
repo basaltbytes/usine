@@ -748,7 +748,7 @@ workers:
         sshKey: provisioner.sshKey,
         sshUser: provisioner.sshUser,
         labels: provisioner.labels,
-        anthropicKey: Option.getOrNull(provisioner.apiKeys.anthropic),
+        apiKeys: provisioner.apiKeys,
       }).toEqual({
         tokenEnv: "HCLOUD_TOKEN",
         serverType: "cx33",
@@ -758,7 +758,7 @@ workers:
         sshKey: "usine-orchestrator",
         sshUser: "usine",
         labels: {},
-        anthropicKey: null,
+        apiKeys: {},
       });
       expect({ ...provisioner.timings }).toEqual({
         sshWait: 600,
@@ -841,12 +841,15 @@ workers:
       expect(boatProvisioner?.provider).toBe("boat");
       if (boatProvisioner?.provider !== "boat") return;
       expect(boatProvisioner.size).toBe("default");
-      expect(Option.getOrNull(boatProvisioner.apiKeys.anthropic)).toBe("USINE_ANTHROPIC_API_KEY");
+      expect(boatProvisioner.apiKeys).toEqual({ anthropic: "USINE_ANTHROPIC_API_KEY" });
       const [codex] = (yield* parse([...boat, "        openai: USINE_OPENAI_API_KEY"])).workers;
       expect(
-        codex?.kind === "ssh" &&
-          Option.flatMap(codex.provisioner, (settings) => settings.apiKeys.openai),
-      ).toEqual(Option.some("USINE_OPENAI_API_KEY"));
+        codex?.kind === "ssh" && Option.map(codex.provisioner, (settings) => settings.apiKeys),
+      ).toEqual(
+        Option.some({ anthropic: "USINE_ANTHROPIC_API_KEY", openai: "USINE_OPENAI_API_KEY" }),
+      );
+      const unknown = yield* Effect.flip(parse([...boat, "        google: USINE_GOOGLE_API_KEY"]));
+      expect(String(unknown)).toContain("google");
       const large = (yield* parse([...boat, "      size: large"])).workers[0];
       expect(
         large?.kind === "ssh" &&

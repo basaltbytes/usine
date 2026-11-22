@@ -1,9 +1,10 @@
+import { openai } from "@usine/core/agent/provider";
 import { assert, it } from "@effect/vitest";
 import { Agent } from "@usine/core/agent";
 import { BrainSpec, Harness, ModelId } from "@usine/core/agent/brain";
 import { AttemptId } from "@usine/core/attempt";
 import { completes, type StubParent } from "@usine/durable/testing";
-import { OpenAiApiKey, OpenAiProvider, UpstreamBase } from "@usine/gateway";
+import { ApiKey, LlmProvider, UpstreamBase } from "@usine/gateway";
 import { Effect, Layer, Option, Redacted } from "effect";
 import { CheckoutRequest, Executor } from "../../../src/executor.ts";
 import {
@@ -34,20 +35,17 @@ const sink = {
 };
 
 const OLDER_GATEWAY =
-  "Gateway usine-gateway is older than this orchestrator: it serves model requests only at /anthropic and /openai, which attempts call instead of /anthropic-messages and /openai-responses; it has no provider-credentials admin API, so Settings can't manage its provider logins. Upgrade @usine/gateway on it to the release that matches the orchestrator.";
+  "Gateway usine-gateway is older than this orchestrator: it serves model requests only at /anthropic and /openai, which attempts call instead of /anthropic-messages and /openai-responses; it doesn't report the provider slots it serves, so preflight can't check their routes; it has no provider-credentials admin API, so Settings can't manage its provider logins. Upgrade @usine/gateway on it to the release that matches the orchestrator.";
 
 it.effect(
   "keeps Codex on the provider prefixes of an older Gateway, reports the upgrade, and switches once the Gateway is upgraded",
   () => {
     const machine = fakeMachine();
     const gateway = fakeGateway(machine, {
-      "anthropic-messages": Option.none(),
-      "openai-responses": Option.some(
-        OpenAiProvider.make({
-          upstream: UpstreamBase.make("https://api.openai.com"),
-          credential: OpenAiApiKey.make({ key: Redacted.make("sk-older-gateway-test") }),
-        }),
-      ),
+      [openai.slot]: LlmProvider.make({
+        upstream: Option.some(UpstreamBase.make("https://api.openai.com")),
+        credential: ApiKey.make({ key: Redacted.make("sk-older-gateway-test") }),
+      }),
     });
     gateway.switches.beforeProtocolSlots = true;
     const logs = capturedLogs();

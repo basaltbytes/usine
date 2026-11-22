@@ -202,9 +202,10 @@ it.live(
             operator,
             configuration,
           );
-          const server = HttpRouter.serve(apiRoutes.pipe(HttpRouter.provideRequest(backend)), {
-            disableLogger: true,
-          }).pipe(Layer.provideMerge(NodeHttpServer.layerTest));
+          const server = HttpRouter.serve(
+            apiRoutes.pipe(Layer.provide(catalogPools), HttpRouter.provideRequest(backend)),
+            { disableLogger: true },
+          ).pipe(Layer.provideMerge(NodeHttpServer.layerTest));
           yield* Effect.gen(function* () {
             const client = yield* HttpClient.HttpClient;
             const overview = client.get("/api/overview").pipe(

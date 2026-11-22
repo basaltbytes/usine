@@ -155,7 +155,7 @@ const pool = (
         ? null
         : UsageCostView.make({
             usd: UsdAmount.make(usd),
-            estimate: declared.billing === "plan",
+            estimate: declared.billing !== "metered",
           }),
     unpriced,
   });

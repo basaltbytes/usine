@@ -3,7 +3,7 @@ import {
   AdmissionContext,
   codingAgent,
   type HarnessCatalog,
-  type HarnessCredential,
+  type HarnessDescriptor,
 } from "@usine/agents/harness";
 import { unreachableHost } from "../../child-command.ts";
 import { machineShellOf, type RemoteCommands } from "../../remote/commands.ts";
@@ -32,11 +32,12 @@ export const harnessCredentialGap = (
 ): Option.Option<WorkerCapabilityError> => {
   const worker = entry.address.name;
   const noGateway = "A subscription login needs a gateway, which this worker doesn't have.";
-  const missing = (label: string, { provider, protocol }: HarnessCredential) => {
+  const missing = ({ label, providers }: HarnessDescriptor) => {
     const head = `${label} on provisioned worker "${worker}" has no credential, because provisioned machines have no stored login.`;
+    const keys = providers.map(({ id }) => `provisioner.api_keys.${id}`).join(" or ");
     return Option.isSome(entry.gateway)
-      ? `${head} Add ${protocol} to the gateway's llm_providers, with a subscription credential or an API key on the gateway, or set provisioner.api_keys.${provider}.`
-      : `${head} Set provisioner.api_keys.${provider}. ${noGateway}`;
+      ? `${head} Add ${providers.map(({ slot }) => slot).join(" or ")} to the gateway's llm_providers, with a subscription credential or an API key on the gateway, or set ${keys}.`
+      : `${head} Set ${keys}. ${noGateway}`;
   };
   for (const brain of Arr.dedupe(brains)) {
     const harness = brain.harness;
@@ -65,12 +66,10 @@ export const harnessCredentialGap = (
       continue;
     const message = Option.match(catalog.get(harness), {
       onNone: () => `No provisioned worker credential for harness "${harness}".`,
-      onSome: ({ label, worker: requirements }) =>
-        Option.match(requirements.credential, {
-          onNone: () =>
-            `${label} on provisioned worker "${worker}" has no credential route for an API key or gateway.`,
-          onSome: (credential) => missing(label, credential),
-        }),
+      onSome: (descriptor) =>
+        Option.isNone(descriptor.worker.credential)
+          ? `${descriptor.label} on provisioned worker "${worker}" has no credential route for an API key or gateway.`
+          : missing(descriptor),
     });
     return Option.some(
       WorkerCapabilityError.make({

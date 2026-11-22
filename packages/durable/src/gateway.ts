@@ -15,7 +15,8 @@ import { openAIResponsesApi } from "@earendil-works/pi-ai/api/openai-responses.l
 import { anthropicMessagesApi } from "@earendil-works/pi-ai/api/anthropic-messages.lazy";
 import type { CredentialRoute } from "@usine/agents/harness";
 import { type PiAuthentication } from "@usine/agents/pi/authentication";
-import type { GatewayCredentialKind, GatewayLlmProtocol } from "@usine/core/worker";
+import { anthropic, type GatewaySlot, openai } from "@usine/core/agent/provider";
+import type { GatewayCredentialKind } from "@usine/core/worker";
 import { jsonKey } from "@usine/core/json-key";
 import { Effect, Option, Schema, Stream } from "effect";
 import { Sse } from "effect/encoding";
@@ -46,15 +47,25 @@ export interface ParentModelAccess {
 /** A gateway transport with no provider credential on the orchestrator. */
 export interface GatewayModelTransport {
   readonly credential: (
-    protocol: GatewayLlmProtocol,
+    slot: GatewaySlot,
   ) => Effect.Effect<Option.Option<GatewayCredentialKind>, ParentCredentialError>;
+  /** Posts `body` to `path` under `slot`, such as `/v1/messages` under `anthropic-messages`. */
   readonly request: (
-    protocol: GatewayLlmProtocol,
+    slot: GatewaySlot,
+    path: string,
     body: string,
     headers: Readonly<Record<string, string>>,
     signal?: AbortSignal,
   ) => Effect.Effect<Response, ParentCredentialError>;
 }
+
+/** The wire protocol, gateway slot, and model request path of each Pi provider that reaches the gateway. */
+const gatewayRouteOf = (provider: string) =>
+  provider === "anthropic"
+    ? ({ protocol: "anthropic-messages", slot: anthropic.slot, path: "/v1/messages" } as const)
+    : provider === "openai" || provider === "openai-codex"
+      ? ({ protocol: "openai-responses", slot: openai.slot, path: "/v1/responses" } as const)
+      : undefined;
 
 const Payload = Schema.Record(Schema.String, Schema.Unknown);
 
@@ -112,20 +123,14 @@ export const gatewayModelAccess: (
   const context = yield* Effect.context<never>();
   const run = Effect.runPromiseWith(context);
   const models = createModels();
-  const protocolFor = (provider: string): GatewayLlmProtocol | undefined =>
-    provider === "anthropic"
-      ? "anthropic-messages"
-      : provider === "openai" || provider === "openai-codex"
-        ? "openai-responses"
-        : undefined;
   const authentication = Effect.fn("GatewayModelAccess.authentication")(function* (
     provider: string,
   ) {
     yield* Effect.annotateCurrentSpan({ provider });
-    const protocol = protocolFor(provider);
-    if (protocol === undefined) return undefined;
+    const route = gatewayRouteOf(provider);
+    if (route === undefined) return undefined;
     const credential = yield* transport
-      .credential(protocol)
+      .credential(route.slot)
       .pipe(Effect.map(Option.getOrUndefined));
     if (credential === "api-key") return { _tag: "ApiKey" } as const;
     if (credential === "subscription" && provider === "openai-codex")
@@ -133,8 +138,9 @@ export const gatewayModelAccess: (
     return undefined;
   });
   for (const provider of [anthropicProvider(), openaiProvider(), openaiCodexProvider()]) {
-    const protocol = protocolFor(provider.id);
-    if (protocol === undefined) continue;
+    const route = gatewayRouteOf(provider.id);
+    if (route === undefined) continue;
+    const { protocol } = route;
     const baseUrl = `http://llm.gateway/${protocol}/v1`;
     const api = protocol === "openai-responses" ? openAIResponsesApi() : anthropicMessagesApi();
     const optionsFor = (context: TranscriptContext, options?: StreamOptions): StreamOptions => {
@@ -144,7 +150,8 @@ export const gatewayModelAccess: (
           const request = new Request(input, init);
           const response = await run(
             transport.request(
-              protocol,
+              route.slot,
+              route.path,
               await request.text(),
               Object.fromEntries(request.headers),
               request.signal,

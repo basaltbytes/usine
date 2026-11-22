@@ -29,7 +29,6 @@ import {
   ContainerPids,
   GatewayAdminPort,
   GatewayDomain,
-  GatewayLlmProtocolFromName,
   HetznerImage,
   HetznerLabels,
   HetznerLocation,
@@ -168,10 +167,11 @@ export class WorkerGateway extends Schema.Class<
   /** The orchestrator environment variable containing the gateway admin token. */
   adminTokenEnv: EnvironmentVariableName,
   /**
-   * The providers whose credentials the gateway injects; decoding defaults to none, and accepts
-   * the provider names of configurations written before protocol slots.
+   * The slots of the providers whose credentials the gateway injects, in the harness catalog's
+   * providers; decoding defaults to none, and accepts the provider IDs that configurations written
+   * before slots used.
    */
-  llmProviders: Schema.Array(GatewayLlmProtocolFromName)
+  llmProviders: Schema.Array(catalog.providers.slotFromName)
     .check(Schema.isUnique())
     .pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),
 }) {}
@@ -201,23 +201,11 @@ export class WorkerContainer extends Schema.Class<
 
 /**
  * Orchestrator environment-variable names for API keys delivered to attempts on provisioned
- * workers. Credentials are read when starting or adding the worker.
+ * workers, by the ID of a provider in the harness catalog, such as `anthropic`. Credentials are
+ * read when starting or adding the worker.
  */
-export class ProviderApiKeys extends Schema.Class<
-  ProviderApiKeys,
-  Brand.Brand<"@usine/config/factory/ProviderApiKeys">
->("@usine/config/ProviderApiKeys")({
-  /**
-   * The orchestrator variable containing the Anthropic key to expose as `ANTHROPIC_API_KEY`, or
-   * `None`.
-   */
-  anthropic: Schema.OptionFromOptionalKey(EnvironmentVariableName),
-  /**
-   * The orchestrator variable containing the OpenAI key to expose as `OPENAI_API_KEY`, or
-   * `None`.
-   */
-  openai: Schema.OptionFromOptionalKey(EnvironmentVariableName),
-}) {}
+export const ProviderApiKeys = Schema.Record(catalog.providers.providerId, EnvironmentVariableName);
+export type ProviderApiKeys = typeof ProviderApiKeys.Type;
 
 const ProviderApiKeysFromYaml = ProviderApiKeys.pipe(
   Schema.withDecodingDefaultKey(Effect.succeed({})),
@@ -481,15 +469,16 @@ const boxdEgressConflict = (worker: SshWorker, egress: BoxdEgressAllowlist): str
   const { domain, llmProviders } = worker.gateway.value;
   const served = [
     ...GITHUB_HOSTS.map((host) => ({ host, at: `git.${domain}` })),
-    ...catalog.descriptors.flatMap(({ worker: requirements }) =>
-      Option.toArray(requirements.credential).flatMap((credential) =>
-        llmProviders.includes(credential.protocol)
-          ? Array.from(new Set([...credential.hosts, credential.apiHost]), (host) => ({
-              host,
-              at: `llm.${domain}`,
-            }))
-          : [],
-      ),
+    ...catalog.descriptors.flatMap(({ worker: requirements, providers }) =>
+      Option.toArray(requirements.credential).flatMap((credential) => {
+        const held = providers.filter(({ slot }) => llmProviders.includes(slot));
+        return held.length === 0
+          ? []
+          : Array.from(
+              new Set([...credential.hosts, ...held.flatMap(({ hosts }) => hosts)]),
+              (host) => ({ host, at: `llm.${domain}` }),
+            );
+      }),
     ),
   ];
   const admitted = served.find(({ host }) => boxdEgressAdmits(egress, host));

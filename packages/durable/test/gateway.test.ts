@@ -223,12 +223,12 @@ it.live.each([
   ({ model, credential, protocol, callId, toolCall, final }) =>
     Effect.gen(function* () {
       const database = yield* temporaryDatabase;
-      const sent: Array<{ protocol: string; body: string }> = [];
+      const sent: Array<{ slot: string; path: string; body: string }> = [];
       const access = yield* gatewayModelAccess({
         credential: () => Effect.succeedSome(credential),
-        request: (protocol, body) =>
+        request: (slot, path, body) =>
           Effect.sync(() => {
-            sent.push({ protocol, body });
+            sent.push({ slot, path, body });
             return sent.length === 1 ? toolCall() : final();
           }),
       });
@@ -261,7 +261,11 @@ it.live.each([
       );
       assert.lengthOf(sent, 2);
       for (const message of sent) {
-        assert.strictEqual(message.protocol, protocol);
+        assert.strictEqual(message.slot, protocol);
+        assert.strictEqual(
+          message.path,
+          protocol === "openai-responses" ? "/v1/responses" : "/v1/messages",
+        );
         const body = yield* Schema.decodeEffect(RequestBody)(message.body);
         assert.include(declaredTools(body), "subagent");
         if (protocol === "openai-responses") {
@@ -285,13 +289,13 @@ it.live(
   () =>
     Effect.gen(function* () {
       const database = yield* temporaryDatabase;
-      const sent: Array<{ protocol: string; body: string }> = [];
+      const sent: Array<{ slot: string; body: string }> = [];
       let current: GatewayCredentialKind | undefined = "api-key";
       const access = yield* gatewayModelAccess({
         credential: () => Effect.succeed(Option.fromUndefinedOr(current)),
-        request: (protocol, body) =>
+        request: (slot, _path, body) =>
           Effect.sync(() => {
-            sent.push({ protocol, body });
+            sent.push({ slot, body });
             return response("response.completed");
           }),
       });
@@ -340,7 +344,7 @@ it.live(
         ),
       );
       assert.lengthOf(sent, 1);
-      assert.strictEqual(sent[0]?.protocol, "openai-responses");
+      assert.strictEqual(sent[0]?.slot, "openai-responses");
       const body = yield* Schema.decodeUnknownEffect(
         Schema.fromJsonString(
           Schema.Struct({
@@ -393,7 +397,7 @@ it.live("streams without an admin credential lookup and lifts only the initial s
     const sent: Array<string> = [];
     const access = yield* gatewayModelAccess({
       credential: () => Effect.die("streaming must not query the admin API"),
-      request: (_protocol, body) =>
+      request: (_slot, _path, body) =>
         Effect.sync(() => {
           sent.push(body);
           return response("response.done");
@@ -453,10 +457,8 @@ it.live("passes non-JSON Codex data to the SDK's malformed-event error", () =>
 it.effect("selects a gateway-authenticated provider when no parent model is configured", () =>
   Effect.gen(function* () {
     const access = yield* gatewayModelAccess({
-      credential: (protocol) =>
-        Effect.succeed(
-          protocol === "openai-responses" ? Option.some("subscription") : Option.none(),
-        ),
+      credential: (slot) =>
+        Effect.succeed(slot === "openai-responses" ? Option.some("subscription") : Option.none()),
       request: () => Effect.die("selection must not send model requests"),
     });
     const selected = yield* resolveParent(

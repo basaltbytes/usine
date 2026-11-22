@@ -1,3 +1,4 @@
+import { anthropic, type GatewaySlot, openai } from "@usine/core/agent/provider";
 import { LoadedInstance } from "@usine/config/instance";
 import {
   ConfigurationStore,
@@ -74,7 +75,7 @@ const makeProviderTargets = Effect.fn("ProviderTargets.make")(function* (
   const claudeCommand = Effect.fn("ProviderTargets.claudeCommand")(function* (
     action: "status" | "logout",
   ) {
-    yield* Effect.annotateCurrentSpan({ target: "local", provider: "anthropic-messages", action });
+    yield* Effect.annotateCurrentSpan({ target: "local", provider: anthropic.slot, action });
     return yield* Effect.scoped(
       Effect.gen(function* () {
         const child = yield* spawner
@@ -252,7 +253,7 @@ const makeProviderTargets = Effect.fn("ProviderTargets.make")(function* (
       }),
     )(nativeClaude.claudeAiOauth);
     const connection = {
-      provider: "anthropic-messages" as const,
+      provider: anthropic.slot,
       credential:
         !claude.loggedIn || claude.apiProvider !== "firstParty"
           ? null
@@ -317,7 +318,7 @@ const makeProviderTargets = Effect.fn("ProviderTargets.make")(function* (
         )
       : Option.none();
     return {
-      provider: "openai-responses" as const,
+      provider: openai.slot,
       credential: Option.isSome(tokenFields)
         ? ("subscription" as const)
         : Option.isSome(Schema.decodeUnknownOption(Schema.NonEmptyString)(codex.OPENAI_API_KEY))
@@ -331,7 +332,7 @@ const makeProviderTargets = Effect.fn("ProviderTargets.make")(function* (
   });
   const statusErrors = new Map<string, string>();
   const isolated = <A>(
-    provider: "anthropic-messages" | "openai-responses",
+    provider: GatewaySlot,
     connection: Effect.Effect<A, ProviderCredentialError>,
   ) =>
     connection.pipe(
@@ -355,15 +356,12 @@ const makeProviderTargets = Effect.fn("ProviderTargets.make")(function* (
       ),
     );
   const localStatus = Effect.all(
-    [
-      isolated("anthropic-messages", claudeConnection),
-      isolated("openai-responses", codexConnection),
-    ],
+    [isolated(anthropic.slot, claudeConnection), isolated(openai.slot, codexConnection)],
     { concurrency: "unbounded" },
   );
   const replaceLocal = (credential: ProviderCredential) =>
     Effect.gen(function* () {
-      if (credentialProvider(credential) === "anthropic-messages") {
+      if (credentialProvider(credential) === anthropic.slot) {
         const settings = yield* read(claudeFile);
         const configured = yield* environment(settings);
         const env = { ...configured };
@@ -392,11 +390,7 @@ const makeProviderTargets = Effect.fn("ProviderTargets.make")(function* (
       return gateway;
     });
   const routeWorkers = Effect.fn("ProviderTargets.routeWorkers")(
-    function* (
-      target: string,
-      provider: "anthropic-messages" | "openai-responses",
-      action: "connect" | "disconnect",
-    ) {
+    function* (target: string, provider: GatewaySlot, action: "connect" | "disconnect") {
       yield* Effect.annotateCurrentSpan({ target, provider, action });
       const snapshot = yield* configuration.read;
       if (Option.isNone(snapshot.instance)) return;
@@ -521,7 +515,7 @@ const makeProviderTargets = Effect.fn("ProviderTargets.make")(function* (
     }),
     disconnect: Effect.fn("ProviderTargets.disconnect")(function* (
       target: string,
-      provider: "anthropic-messages" | "openai-responses",
+      provider: GatewaySlot,
     ) {
       yield* Effect.annotateCurrentSpan({ target, provider });
       if (target === "local" && (yield* gateways).size > 0)
@@ -530,7 +524,7 @@ const makeProviderTargets = Effect.fn("ProviderTargets.make")(function* (
         const gateway = yield* selected(target);
         yield* Effect.scoped(remote(gateway, "DELETE", provider));
         yield* routeWorkers(target, provider, "disconnect");
-      } else if (provider === "openai-responses")
+      } else if (provider === openai.slot)
         yield* fs.remove(codexFile, { force: true }).pipe(Effect.mapError(localFailure));
       else {
         yield* claudeCommand("logout");
@@ -565,7 +559,7 @@ export class ProviderTargets extends Context.Service<
     ) => Effect.Effect<void, ProviderCredentialError>;
     readonly disconnect: (
       target: string,
-      provider: "anthropic-messages" | "openai-responses",
+      provider: GatewaySlot,
     ) => Effect.Effect<void, ProviderCredentialError>;
   }
 >()("@usine/server/providers/targets/ProviderTargets") {

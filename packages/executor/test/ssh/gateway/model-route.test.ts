@@ -1,4 +1,5 @@
 import { assert, it } from "@effect/vitest";
+import { GatewaySlot } from "@usine/core/agent/provider";
 import { jsonKey } from "@usine/core/json-key";
 import { RepositoryName } from "@usine/core/repository";
 import { WorkerName } from "@usine/core/worker";
@@ -9,6 +10,9 @@ import { HttpClient, HttpClientResponse, HttpServerRequest, HttpServerResponse }
 import { gatewayModelRouteFor } from "../../../src/ssh/gateway/model-route.ts";
 import { fakeMachine } from "../support.ts";
 import { advance, fakeGateway, gatewayAddress } from "./support.ts";
+
+const ANTHROPIC = GatewaySlot.make("anthropic-messages");
+const OPENAI = GatewaySlot.make("openai-responses");
 
 const fixture = () => {
   const machine = fakeMachine();
@@ -107,15 +111,16 @@ it.effect(
             RepositoryName.make("usine/coordinator"),
             settings.value,
           );
-          const anthropic = yield* route.credential("anthropic-messages");
-          const openai = yield* route.credential("openai-responses");
+          const anthropic = yield* route.credential(ANTHROPIC);
+          const openai = yield* route.credential(OPENAI);
           assert.deepStrictEqual(anthropic, Option.some("api-key"));
           assert.deepStrictEqual(openai, Option.none());
           const first = yield* store.list;
           assert.lengthOf(first, 1);
           assert.strictEqual(first[0]?.credential._tag, "AnonymousCredential");
           const answer = yield* route.request(
-            "anthropic-messages",
+            ANTHROPIC,
+            "/v1/messages",
             '{"model":"claude-sonnet-4-6"}',
             {
               authorization: "Bearer local-login-must-not-escape",
@@ -133,9 +138,14 @@ it.effect(
           assert.isUndefined(upstream[0]?.headers.authorization);
           assert.notInclude(jsonKey(upstream), "local-");
           assert.notInclude(jsonKey(upstream), "ugw1.");
-          const counted = yield* route.countTokens('{"model":"claude-sonnet-4-6"}', {
-            "x-api-key": "local-api-key-must-not-escape",
-          });
+          const counted = yield* route.request(
+            ANTHROPIC,
+            "/v1/messages/count_tokens",
+            '{"model":"claude-sonnet-4-6"}',
+            {
+              "x-api-key": "local-api-key-must-not-escape",
+            },
+          );
           assert.strictEqual(counted.status, 200);
           yield* Effect.promise(() => counted.text());
           assert.lengthOf(upstream, 2);
@@ -150,7 +160,7 @@ it.effect(
           yield* advance(gateway, 3);
           const restored = yield* store.list;
           assert.strictEqual(restored[0]?.id, first[0]?.id);
-          const renewed = yield* route.request("anthropic-messages", "{}", {});
+          const renewed = yield* route.request(ANTHROPIC, "/v1/messages", "{}", {});
           assert.strictEqual(renewed.status, 200);
           yield* Effect.promise(() => renewed.text());
         }),
@@ -199,21 +209,22 @@ it.effect(
         RepositoryName.make("usine/coordinator"),
         settings.value,
       );
-      const credential = yield* route.credential("anthropic-messages");
+      const credential = yield* route.credential(ANTHROPIC);
       assert.deepStrictEqual(credential, Option.some("api-key"));
       const answer = yield* route.request(
-        "anthropic-messages",
+        ANTHROPIC,
+        "/v1/messages",
         '{"model":"claude-sonnet-4-6"}',
         {},
       );
       const text = yield* Effect.promise(() => answer.text());
       assert.strictEqual(text, "gateway model answer");
-      assert.deepStrictEqual(llm, ["/openai-responses/v1/models", "/anthropic/v1/messages"]);
+      assert.deepStrictEqual(llm, ["/", "/anthropic/v1/messages"]);
       assert.strictEqual(new URL(upstream[0]?.path ?? "").pathname, "/v1/messages");
       gateway.switches.beforeProtocolSlots = false;
-      const upgraded = yield* route.credential("anthropic-messages");
+      const upgraded = yield* route.credential(ANTHROPIC);
       assert.deepStrictEqual(upgraded, Option.some("api-key"));
-      const after = yield* route.request("anthropic-messages", "{}", {});
+      const after = yield* route.request(ANTHROPIC, "/v1/messages", "{}", {});
       assert.strictEqual(after.status, 200);
       yield* Effect.promise(() => after.text());
       assert.strictEqual(llm.at(-1), "/anthropic-messages/v1/messages");
@@ -235,10 +246,10 @@ it.effect("switches to the protocol prefixes on the renewal after a gateway upgr
     );
     gateway.switches.beforeProtocolSlots = false;
     yield* advance(gateway, 3);
-    const answer = yield* route.request("anthropic-messages", "{}", {});
+    const answer = yield* route.request(ANTHROPIC, "/v1/messages", "{}", {});
     assert.strictEqual(answer.status, 200);
     yield* Effect.promise(() => answer.text());
-    assert.deepStrictEqual(llm, ["/openai-responses/v1/models", "/anthropic-messages/v1/messages"]);
+    assert.deepStrictEqual(llm, ["/", "/anthropic-messages/v1/messages"]);
     assert.include(
       infos,
       "The gateway serves protocol path prefixes; the orchestrator model route uses them",
@@ -267,9 +278,9 @@ it.effect("requires credential reporting from older gateways", () => {
       RepositoryName.make("usine/coordinator"),
       settings.value,
     );
-    const failure = yield* route.credential("openai-responses").pipe(Effect.flip);
+    const failure = yield* route.credential(OPENAI).pipe(Effect.flip);
     assert.include(failure.message, "Upgrade @usine/gateway");
-    const answer = yield* route.request("anthropic-messages", "{}", {});
+    const answer = yield* route.request(ANTHROPIC, "/v1/messages", "{}", {});
     yield* Effect.promise(() => answer.text());
     assert.strictEqual(llm.at(-1), "/anthropic/v1/messages");
   }).pipe(Effect.provide(transport.pipe(Layer.provideMerge(machine.layer))), Effect.scoped);
@@ -398,7 +409,7 @@ it.effect("aborts the model HTTP request on signal abort", () => {
       RepositoryName.make("usine/coordinator"),
       settings.value,
     ).pipe(Effect.provideService(HttpClient.HttpClient, intercepted));
-    const answer = yield* route.request("anthropic-messages", "{}", {}, controller.signal);
+    const answer = yield* route.request(ANTHROPIC, "/v1/messages", "{}", {}, controller.signal);
     assert(answer.body !== null);
     const reader = answer.body.getReader();
     yield* Effect.promise(() => reader.read());

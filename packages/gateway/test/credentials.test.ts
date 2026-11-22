@@ -1,12 +1,26 @@
+import { anthropic, GatewaySlot, modelProviders, openai } from "@usine/core/agent/provider";
 import { jsonKey } from "@usine/core/json-key";
 import { NodeServices } from "@effect/platform-node";
 import { assert, it } from "@effect/vitest";
-import { DateTime, Effect, FileSystem, Layer, Logger, Option, Redacted, Scope, Exit } from "effect";
+import {
+  DateTime,
+  Effect,
+  FileSystem,
+  Layer,
+  Logger,
+  Option,
+  Record,
+  Redacted,
+  Scope,
+  Exit,
+} from "effect";
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/http";
 import { HttpApiClient } from "effect/http-api";
 import { GatewayAdminApi } from "../src/admin/api.ts";
 import { GatewayAddresses, gatewayLayer } from "../src/node/node.ts";
 import { SettingsInForce } from "../src/settings.ts";
+import { credentialProvider, loginLlmProvider } from "../src/credentials/model.ts";
+import { CHATGPT_UPSTREAM, type LlmProviders } from "../src/llm/llm.ts";
 import { ProviderCredentials } from "../src/credentials/store.ts";
 import {
   ADMIN_TOKEN_VALUE,
@@ -17,6 +31,11 @@ import {
 } from "./fixtures.ts";
 
 const listener = { host: "127.0.0.1", port: 0 };
+const upstreamsOf = (providers: LlmProviders) => Record.map(providers, ({ upstream }) => upstream);
+const connectedUpstreams = {
+  [anthropic.slot]: Option.some(anthropic.protocols[0].upstream),
+  [openai.slot]: Option.some(CHATGPT_UPSTREAM),
+};
 it.live(
   "persists admin credential handoffs, applies them after restart, and exposes only metadata",
   () =>
@@ -76,7 +95,7 @@ it.live(
           ["subscription", "subscription"],
         );
         assert.deepEqual(state.providers[0], {
-          provider: "anthropic-messages",
+          provider: GatewaySlot.make("anthropic-messages"),
           credential: "subscription",
           expiresAt: null,
           lastRefresh: null,
@@ -96,7 +115,7 @@ it.live(
         const persisted = yield* fs.stat(`${directory}/provider-credentials.json`);
         assert.equal(persisted.mode & 0o777, 0o600);
         const current = yield* SettingsInForce.pipe(Effect.provideContext(context));
-        assert.isTrue(Option.isSome((yield* current.current).providers["openai-responses"]));
+        assert.deepStrictEqual(upstreamsOf((yield* current.current).providers), connectedUpstreams);
         yield* Scope.close(scope, Exit.void);
         const restarted = yield* Layer.build(start());
         const found = yield* Effect.serviceOption(ProviderCredentials).pipe(
@@ -116,15 +135,41 @@ it.live(
           Effect.provideContext(restarted),
           Effect.flatMap((settings) => settings.current),
         );
-        yield* credentials.disconnect("anthropic-messages");
-        yield* credentials.disconnect("openai-responses");
+        assert.deepStrictEqual(upstreamsOf(beforeDisconnect.providers), connectedUpstreams);
+        yield* credentials.disconnect(GatewaySlot.make("anthropic-messages"));
+        yield* credentials.disconnect(GatewaySlot.make("openai-responses"));
         assert.deepEqual(
           (yield* credentials.status).map(({ credential }) => credential),
           [null, null],
         );
         const next = yield* credentials.apply(beforeDisconnect.providers);
-        assert.isTrue(Option.isNone(next["anthropic-messages"]));
-        assert.isTrue(Option.isNone(next["openai-responses"]));
+        assert.deepStrictEqual(next, {});
       }),
     ).pipe(Effect.provide([NodeServices.layer, FetchHttpClient.layer])),
 );
+
+it("connects each credential kind and login to the provider that accepts it", () => {
+  const secret = Redacted.make("private-fixture");
+  for (const kind of ["anthropic-api-key", "openai-api-key"] as const) {
+    const provider = modelProviders.find(credentialProvider({ kind, secret }));
+    assert(
+      Option.exists(
+        provider,
+        (found) => found.accepts("api-key") && kind === `${found.id}-api-key`,
+      ),
+      kind,
+    );
+  }
+  for (const login of ["claude", "chatgpt"] as const) {
+    const slot = loginLlmProvider(login);
+    assert.strictEqual(credentialProvider({ kind: `${login}-subscription`, secret }), slot);
+    assert(
+      Option.exists(modelProviders.find(slot), ({ credentials }) =>
+        credentials.some(
+          (credential) => credential._tag === "Subscription" && credential.login === login,
+        ),
+      ),
+      login,
+    );
+  }
+});

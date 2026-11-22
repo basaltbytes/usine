@@ -1621,8 +1621,11 @@ describe("SSH Workers on reload", () => {
         assert.strictEqual(provisioner.provider, "hetzner");
         assert.strictEqual(Redacted.value(provisioner.token), "hcloud-token");
         assert.deepStrictEqual(
-          Option.map(provisioner.apiKeys.anthropic, Redacted.value),
-          Option.some("sk-ant-api-key"),
+          Object.entries(provisioner.apiKeys).map(([provider, key]) => [
+            provider,
+            Redacted.value(key),
+          ]),
+          [["anthropic", "sk-ant-api-key"]],
         );
 
         yield* writeInstanceFiles(root, [

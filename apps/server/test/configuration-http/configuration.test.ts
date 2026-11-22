@@ -1,4 +1,5 @@
 import { Harness } from "@usine/core/agent/brain";
+import { BillingPool, BillingPools, PoolDescriptor } from "@usine/core/agent/pool";
 import { jsonKey } from "@usine/core/json-key";
 import { LoopFile } from "@usine/config/loop";
 import { ManagedRepo } from "@usine/config/factory";
@@ -580,6 +581,26 @@ it("serves installation repositories, live labels and supported harnesses, and r
       expect(latestResponse).toMatchObject({
         status: 503,
         body: { error: "BackendUnavailableError" },
+      });
+    }).pipe(Effect.scoped),
+  ));
+
+it("serves the billing pools that the server provides at GET /capabilities", () =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const testPlan = PoolDescriptor.make({
+        id: BillingPool.make("testPlan"),
+        label: "Test plan",
+        billing: "plan",
+        windows: "together",
+      });
+      const { request } = yield* harness(Layer.empty, Layer.succeed(BillingPools)([testPlan]));
+      const response = yield* request("GET", "/capabilities");
+      expect(response).toMatchObject({
+        status: 200,
+        body: {
+          pools: [{ id: "testPlan", label: "Test plan", billing: "plan", windows: "together" }],
+        },
       });
     }).pipe(Effect.scoped),
   ));

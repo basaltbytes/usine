@@ -79,11 +79,11 @@ import { HttpClient, HttpRouter } from "effect/http";
 import { assert } from "vitest";
 import { liveBackendLayer } from "../../src/backend.ts";
 import { apiRoutes } from "../../src/http.ts";
+import { catalogPools } from "../../../../packages/orchestrator/test/support/pools.ts";
 import { type OperatorCall, OperatorUnavailableError } from "../../src/mcp/server.ts";
 import { loadOperatorTools, MAX_RESULT_BYTES, PublishedApi } from "../../src/mcp/tools.ts";
 import { operatorOpenApi } from "../../src/openapi.ts";
 import { operatorToolkit } from "../../src/supervisor/toolkit.ts";
-import { catalogPools } from "../../../../packages/orchestrator/test/support/pools.ts";
 
 // The dogfood instance has five Loops and about 500 Items on its Board; the overview and the desk
 // each evaluate every Loop's trigger on every Item, and the web UI polls both at once.
@@ -744,7 +744,10 @@ export const checkReads = ({
         configuration,
       );
       const server = HttpRouter.serve(
-        apiRoutes.pipe(HttpRouter.provideRequest(Layer.merge(backend, githubFiles))),
+        apiRoutes.pipe(
+          Layer.provide(catalogPools),
+          HttpRouter.provideRequest(Layer.merge(backend, githubFiles)),
+        ),
         { disableLogger: true },
       ).pipe(Layer.provideMerge(NodeHttpServer.layerTest));
 

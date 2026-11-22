@@ -1,4 +1,5 @@
 import { Harness } from "@usine/core/agent/brain";
+import { anthropic, openai } from "@usine/core/agent/provider";
 import { Option } from "effect";
 import { CapabilityProfile, Lacking } from "../capability.ts";
 import { HarnessDescriptor, WorkerRequirements } from "../harness.ts";
@@ -14,6 +15,8 @@ export const pi = HarnessDescriptor.make({
     login: { mounted: [], seeded: [] },
     credential: Option.none(),
   }),
+  // Pi on the orchestrator reaches these providers' slots through the gateway's model route.
+  providers: [anthropic, openai],
   capabilities: [
     CapabilityProfile.make({
       placements: ["orchestrator"],

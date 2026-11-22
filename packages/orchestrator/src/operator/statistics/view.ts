@@ -112,7 +112,7 @@ export class TaskTimeView extends Schema.Class<
 
 /**
  * The median cost of the priced tasks: those whose sessions all have a price. `estimate` is true if
- * a session of a priced task is in a plan pool.
+ * a session of a priced task is in a pool that isn't metered.
  */
 export class TaskCostView extends Schema.Class<
   TaskCostView,
@@ -122,7 +122,7 @@ export class TaskCostView extends Schema.Class<
   tasks: PositiveCount,
   /** The median total cost per priced task in US dollars. */
   medianUsd: UsdAmount,
-  /** Whether any priced task includes subscription-plan usage estimated at API rates. */
+  /** Whether any priced task includes usage in a pool that isn't metered, estimated at API rates. */
   estimate: Schema.Boolean,
 }) {}
 
@@ -301,7 +301,7 @@ export class PoolTokensView extends Schema.Class<
 
 /**
  * The cost of the priced Runs or Attempts: those with a price for each session. `estimate` is true
- * if a priced session is in a plan pool.
+ * if a priced session is in a pool that isn't metered.
  */
 export class CostSummaryView extends Schema.Class<
   CostSummaryView,
@@ -311,7 +311,7 @@ export class CostSummaryView extends Schema.Class<
   usd: UsdAmount,
   /** The mean cost per fully priced run or attempt in US dollars. */
   meanUsd: UsdAmount,
-  /** Whether any included cost estimates subscription-plan usage. */
+  /** Whether any included cost estimates usage in a pool that isn't metered. */
   estimate: Schema.Boolean,
   /** The number of entries with a price for every session. */
   priced: PositiveCount,

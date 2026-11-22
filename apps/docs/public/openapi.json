@@ -57686,10 +57686,7 @@
                                       "properties": {
                                         "provider": {
                                           "type": "string",
-                                          "enum": [
-                                            "anthropic-messages",
-                                            "openai-responses"
-                                          ]
+                                          "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
                                         },
                                         "credential": {
                                           "anyOf": [
@@ -57742,10 +57739,7 @@
                                       "properties": {
                                         "provider": {
                                           "type": "string",
-                                          "enum": [
-                                            "anthropic-messages",
-                                            "openai-responses"
-                                          ]
+                                          "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
                                         },
                                         "error": {
                                           "type": "string"
@@ -66238,25 +66232,11 @@
               }
             ]
           },
-          "anthropicKeyEnv": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "openaiKeyEnv": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
+          "apiKeys": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
           }
         },
         "required": [
@@ -66268,8 +66248,7 @@
           "snapshot",
           "isolated",
           "egress",
-          "anthropicKeyEnv",
-          "openaiKeyEnv"
+          "apiKeys"
         ],
         "additionalProperties": false
       },
@@ -66294,33 +66273,18 @@
               "xlarge"
             ]
           },
-          "anthropicKeyEnv": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "openaiKeyEnv": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
+          "apiKeys": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
           }
         },
         "required": [
           "_tag",
           "tokenEnv",
           "size",
-          "anthropicKeyEnv",
-          "openaiKeyEnv"
+          "apiKeys"
         ],
         "additionalProperties": false
       },
@@ -66384,25 +66348,11 @@
               "type": "string"
             }
           },
-          "anthropicKeyEnv": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "openaiKeyEnv": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
+          "apiKeys": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
           }
         },
         "required": [
@@ -66416,8 +66366,7 @@
           "sshKey",
           "sshUser",
           "labels",
-          "anthropicKeyEnv",
-          "openaiKeyEnv"
+          "apiKeys"
         ],
         "additionalProperties": false
       },
@@ -66554,10 +66503,7 @@
             "type": "array",
             "items": {
               "type": "string",
-              "enum": [
-                "anthropic-messages",
-                "openai-responses"
-              ]
+              "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
             }
           }
         },

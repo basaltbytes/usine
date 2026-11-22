@@ -75,7 +75,7 @@ Preflight reaches the admin API and the gateway from the worker. A test attempt 
 
 The executor manages its own admin API forward; omit `LocalForward` from the gateway SSH alias. A private Hetzner worker reaches the gateway only. A Boat worker uses [the Tailscale connection procedure](/guides/connect-boat-to-a-gateway/). A long-lived worker outside the private network uses [worker-level tailnet settings](/guides/add-an-ssh-worker/#home-worker-on-a-mac).
 
-Gateway slots use wire protocols. In the SSH worker’s `gateway.llm_providers`, use `anthropic-messages` for the Anthropic Messages API and `openai-responses` for the OpenAI Responses API or a ChatGPT login. Credential environment-variable names stay the same. See the [worker reference](/reference/configuration/workers/#gateway).
+Each model provider that usine knows has one slot at the gateway, which holds its credential. In the SSH worker’s `gateway.llm_providers`, use `anthropic-messages` for the Anthropic API and `openai-responses` for the OpenAI API or a ChatGPT login. See the [worker reference](/reference/configuration/workers/#gateway).
 
 ## Upgrade the gateway
 
@@ -97,7 +97,9 @@ Upgrade the gateway before the orchestrator, to the `@usine/gateway` version tha
 
 For one release, an upgraded gateway also accepts the previous `/anthropic` and `/openai` prefixes and logs a deprecation warning, so attempts configured by the previous orchestrator can finish.
 
-If the orchestrator is upgraded first, attempts keep running. While the gateway reports its providers as `anthropic` and `openai` instead of protocol IDs, attempts call `/anthropic` and `/openai/v1`, the coordinator and supervisor do the same, and the orchestrator logs a warning once for each worker. **Needs attention** shows **Gateway upgrade needed** for each worker behind a gateway that is older than the orchestrator, including a gateway without the provider-credentials admin API that **Settings > Provider connections** uses. After you upgrade the gateway, the next preflight switches attempts to the protocol paths and removes the entry; run [worker preflight](/guides/run-worker-preflight/) to check at once. The coordinator and supervisor switch within two minutes, without a restart. A gateway without credential reporting fails preflight with an instruction to upgrade `@usine/gateway`.
+Preflight checks that the gateway serves each slot in a worker's `llm_providers`, and every route under it that the orchestrator's harnesses call. A gateway that lacks one fails preflight with an instruction to upgrade `@usine/gateway` on it. A gateway newer than the orchestrator works with it: the orchestrator ignores slots and routes that it doesn't use.
+
+If the orchestrator is upgraded first, attempts keep running. While the gateway reports its providers as `anthropic` and `openai` instead of slots, attempts call `/anthropic` and `/openai/v1`, the coordinator and supervisor do the same, and the orchestrator logs a warning once for each worker. **Needs attention** shows **Gateway upgrade needed** for each worker behind a gateway that is older than the orchestrator, including a gateway without the provider-credentials admin API that **Settings > Provider connections** uses, and a gateway that doesn't report the slots it serves, which preflight then can't check. Such a gateway serves `anthropic-messages` and `openai-responses`; a worker that lists another slot fails preflight until you upgrade the gateway. After you upgrade the gateway, the next preflight switches attempts to the slot paths and removes the entry; run [worker preflight](/guides/run-worker-preflight/) to check at once. The coordinator and supervisor switch within two minutes, without a restart. A gateway without credential reporting fails preflight with an instruction to upgrade `@usine/gateway`.
 
 ## Orchestrator credentials
 

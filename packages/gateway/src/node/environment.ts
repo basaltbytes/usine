@@ -1,3 +1,11 @@
+import {
+  type AcceptedCredential,
+  GatewaySlot,
+  type ModelProvider,
+  type ModelProviderCatalog,
+  modelProviders,
+  UpstreamBase,
+} from "@usine/core/agent/provider";
 import { GatewayDomain } from "@usine/core/worker";
 import {
   type Brand,
@@ -14,34 +22,30 @@ import { GITHUB_ORIGINS } from "../github/github.ts";
 import { checkAuthFileWritable, readAuthFile } from "../chatgpt/auth-file.ts";
 import { CHATGPT_TOKEN_URL } from "../chatgpt/logins.ts";
 import {
-  AnthropicApiKey,
-  AnthropicProvider,
   AnthropicSubscriptionToken,
+  ApiKey,
+  CHATGPT_UPSTREAM,
+  CHATGPT_UPSTREAM_VARIABLE,
   ChatGptLogin,
   HostFilePath,
-  LlmProviderName,
+  type LlmCredential,
+  LlmProvider,
   type LlmProviders,
-  OpenAiApiKey,
-  OpenAiProvider,
 } from "../llm/llm.ts";
 import { AdminToken, CallerKey, GatewaySettings } from "../settings.ts";
-import { UpstreamBase } from "../upstream.ts";
 
 /** The allowlist path if `USINE_GATEWAY_EGRESS_ALLOWLIST` isn't set. */
 export const DEFAULT_EGRESS_ALLOWLIST_PATH = "/etc/usine-gateway/egress-allowlist";
 
 const Secret = Schema.RedactedFromValue(Schema.NonEmptyString);
 
-const upstream = (name: string, fallback: string) =>
-  Config.schema(UpstreamBase, name).pipe(Config.withDefault(UpstreamBase.make(fallback)));
-
 /** The error when two credentials are set for one provider, such as an API key and a subscription token. */
 export class ConflictingProviderCredentials extends Schema.TaggedError<
   ConflictingProviderCredentials,
   Brand.Brand<"@usine/gateway/node/environment/ConflictingProviderCredentials">
 >()("ConflictingProviderCredentials", {
-  /** The provider for which both an API key and a subscription credential were configured. */
-  provider: LlmProviderName,
+  /** The slot of the provider for which both an API key and a subscription credential were configured. */
+  provider: GatewaySlot,
   /** The conflicting variable names and the configuration change required to select one credential. */
   message: Schema.String,
 }) {}
@@ -92,93 +96,86 @@ export const readSettingsSource = Effect.fn("GatewayNode.readSettingsSource")(fu
   return { files, provider } satisfies SettingsSource;
 });
 
-/** Returns the credential set for `provider`, or fails if both of its variables are set. */
-const onlyOne = <A, B>(
-  provider: LlmProviderName,
-  [firstName, first]: readonly [string, Option.Option<A>],
-  [secondName, second]: readonly [string, Option.Option<B>],
-): Effect.Effect<Option.Option<A | B>, ConflictingProviderCredentials> =>
-  Option.isSome(first) && Option.isSome(second)
-    ? Effect.fail(
-        ConflictingProviderCredentials.make({
-          provider,
-          message: `${firstName} and ${secondName} are both set, and the gateway sends only one ${provider} credential. Unset one of them.`,
-        }),
-      )
-    : Effect.succeed(Option.isSome(first) ? first : second);
+/** Returns the credential that `accepted`'s variable sets, with the variable, if it's set. */
+const configuredCredential = Effect.fn("GatewayNode.configuredCredential")(function* (
+  accepted: AcceptedCredential,
+) {
+  const { variable } = accepted;
+  const set = (credential: Option.Option<LlmCredential>) =>
+    Option.map(credential, (value) => ({ variable, value }));
+  if (accepted._tag === "ApiKey") {
+    const key = yield* Config.option(Config.schema(Secret, variable));
+    return set(Option.map(key, (value) => ApiKey.make({ key: value })));
+  }
+  switch (accepted.login) {
+    case "claude": {
+      const token = yield* Config.option(Config.schema(Secret, variable));
+      return set(Option.map(token, (value) => AnthropicSubscriptionToken.make({ token: value })));
+    }
+    case "chatgpt": {
+      const authFile = yield* Config.option(Config.schema(HostFilePath, variable));
+      return set(
+        Option.map(authFile, (path) =>
+          ChatGptLogin.make({ authFile: path, tokenUrl: UpstreamBase.make(CHATGPT_TOKEN_URL) }),
+        ),
+      );
+    }
+  }
+});
 
 /**
- * The LLM providers and credentials from the settings. A ChatGPT login's auth file is read and
- * parsed, and its directory checked for writing, so an unusable file fails here, before the
- * gateway listens or a reload applies it.
+ * Returns the credential and upstream that the settings set for `provider`, or fails if two of its
+ * credential variables are set. A ChatGPT login's auth file is read and parsed, and its directory
+ * checked for writing.
  */
-export const llmProviders = Effect.gen(function* () {
-  const anthropicKey = yield* Config.option(Config.schema(Secret, "ANTHROPIC_API_KEY"));
-  const subscription = yield* Config.option(
-    Config.schema(Secret, "USINE_GATEWAY_ANTHROPIC_SUBSCRIPTION_TOKEN"),
+const configuredProvider = Effect.fn("GatewayNode.configuredProvider")(function* (
+  provider: ModelProvider,
+) {
+  const set = (yield* Effect.forEach(provider.credentials, configuredCredential)).flatMap(
+    Option.toArray,
   );
-  const openAiKey = yield* Config.option(Config.schema(Secret, "OPENAI_API_KEY"));
-  const chatGptAuthFile = yield* Config.option(
-    Config.schema(HostFilePath, "USINE_GATEWAY_CHATGPT_AUTH_FILE"),
-  );
-  const anthropicUpstream = yield* upstream(
-    "USINE_GATEWAY_ANTHROPIC_UPSTREAM",
-    "https://api.anthropic.com",
-  );
-  const openAiUpstream = yield* upstream("USINE_GATEWAY_OPENAI_UPSTREAM", "https://api.openai.com");
-  const chatGptUpstream = yield* upstream(
-    "USINE_GATEWAY_CHATGPT_UPSTREAM",
-    "https://chatgpt.com/backend-api/codex",
-  );
-  const anthropicCredential = yield* onlyOne(
-    "anthropic-messages",
-    ["ANTHROPIC_API_KEY", Option.map(anthropicKey, (key) => AnthropicApiKey.make({ key }))],
-    [
-      "USINE_GATEWAY_ANTHROPIC_SUBSCRIPTION_TOKEN",
-      Option.map(subscription, (token) => AnthropicSubscriptionToken.make({ token })),
-    ],
-  );
-  const openAiCredential = yield* onlyOne(
-    "openai-responses",
-    ["OPENAI_API_KEY", Option.map(openAiKey, (key) => OpenAiApiKey.make({ key }))],
-    [
-      "USINE_GATEWAY_CHATGPT_AUTH_FILE",
-      Option.map(chatGptAuthFile, (authFile) =>
-        ChatGptLogin.make({ authFile, tokenUrl: UpstreamBase.make(CHATGPT_TOKEN_URL) }),
-      ),
-    ],
-  );
-  if (Option.isSome(openAiCredential) && openAiCredential.value._tag === "ChatGptLogin") {
-    yield* readAuthFile(openAiCredential.value.authFile);
-    yield* checkAuthFileWritable(openAiCredential.value.authFile);
+  const [first, second] = set;
+  if (first === undefined) return Option.none<LlmProvider>();
+  if (second !== undefined)
+    return yield* ConflictingProviderCredentials.make({
+      provider: provider.slot,
+      message: `${first.variable} and ${second.variable} are both set, and the gateway sends only one ${provider.slot} credential. Unset one of them.`,
+    });
+  const credential = first.value;
+  if (credential._tag === "ChatGptLogin") {
+    yield* readAuthFile(credential.authFile);
+    yield* checkAuthFileWritable(credential.authFile);
+    const upstream = yield* Config.schema(UpstreamBase, CHATGPT_UPSTREAM_VARIABLE).pipe(
+      Config.withDefault(CHATGPT_UPSTREAM),
+    );
+    return Option.some(LlmProvider.make({ upstream: Option.some(upstream), credential }));
   }
-  return {
-    "anthropic-messages": Option.map(anthropicCredential, (credential) =>
-      AnthropicProvider.make({ upstream: anthropicUpstream, credential }),
-    ),
-    "openai-responses": Option.map(openAiCredential, (credential) =>
-      OpenAiProvider.make({
-        upstream: credential._tag === "ChatGptLogin" ? chatGptUpstream : openAiUpstream,
-        credential,
-      }),
-    ),
-  } satisfies LlmProviders;
+  const upstream = Option.isSome(provider.upstreamVariable)
+    ? yield* Config.option(Config.schema(UpstreamBase, provider.upstreamVariable.value))
+    : Option.none<UpstreamBase>();
+  return Option.some(LlmProvider.make({ upstream, credential }));
 });
 
-/** Returns each provider's credential kind for a log line, or `none`. */
-const providerCredentials = ({
-  "anthropic-messages": anthropic,
-  "openai-responses": openai,
-}: LlmProviders) => ({
-  "anthropic-messages": Option.match(anthropic, {
-    onNone: () => "none",
-    onSome: (held) => held.credential._tag,
-  }),
-  "openai-responses": Option.match(openai, {
-    onNone: () => "none",
-    onSome: (held) => held.credential._tag,
-  }),
+/**
+ * The credentials and upstreams that the settings set for the providers of `catalog`, by slot. An
+ * unusable ChatGPT auth file fails here, before the gateway listens or a reload applies it.
+ */
+export const llmProviders = Effect.fn("GatewayNode.llmProviders")(function* (
+  catalog: ModelProviderCatalog,
+) {
+  const held = yield* Effect.forEach(catalog.providers, (provider) =>
+    Effect.map(configuredProvider(provider), (configured) =>
+      Option.map(configured, (value) => [provider.slot, value] as const),
+    ),
+  );
+  return Object.fromEntries(held.flatMap(Option.toArray)) satisfies LlmProviders;
 });
+
+/** Returns each slot's credential kind for a log line, or `none`. */
+const providerCredentials = (catalog: ModelProviderCatalog, providers: LlmProviders) =>
+  Object.fromEntries(
+    catalog.slots.map((slot) => [slot, providers[slot]?.credential._tag ?? "none"] as const),
+  );
 
 export const egressAllowlistPath = Config.String("USINE_GATEWAY_EGRESS_ALLOWLIST").pipe(
   Config.withDefault(DEFAULT_EGRESS_ALLOWLIST_PATH),
@@ -250,26 +247,37 @@ export interface StartupSettings {
   readonly listeners: GatewayListeners;
 }
 
-const startupSettings = Effect.gen(function* () {
-  const { domain, adminToken, callerKey, listeners } = yield* restartSettings;
-  const path = yield* egressAllowlistPath;
-  const egress = yield* readEgressAllowlist(path);
-  yield* Effect.logInfo("Loaded the egress allowlist", { path, rules: egress.rules.length });
-  const providers = yield* llmProviders;
-  yield* Effect.logInfo("Configured LLM providers", providerCredentials(providers));
-  const settings = { domain, github: GITHUB_ORIGINS, providers, egress, adminToken, callerKey };
-  return { settings, listeners } satisfies StartupSettings;
-});
+const startupSettings = (catalog: ModelProviderCatalog) =>
+  Effect.gen(function* () {
+    const { domain, adminToken, callerKey, listeners } = yield* restartSettings;
+    const path = yield* egressAllowlistPath;
+    const egress = yield* readEgressAllowlist(path);
+    yield* Effect.logInfo("Loaded the egress allowlist", { path, rules: egress.rules.length });
+    const providers = yield* llmProviders(catalog);
+    yield* Effect.logInfo("Configured LLM providers", providerCredentials(catalog, providers));
+    const settings = {
+      domain,
+      github: GITHUB_ORIGINS,
+      catalog,
+      providers,
+      egress,
+      adminToken,
+      callerKey,
+    };
+    return { settings, listeners } satisfies StartupSettings;
+  });
 
 /**
- * Reads the gateway's settings from `source`. Fails on a missing secret, an invalid value, an
- * unreadable allowlist, or an unusable ChatGPT auth file, so the gateway stops before it listens.
+ * Reads the gateway's settings from `source`, for the providers of `catalog`. Fails on a missing
+ * secret, an invalid value, an unreadable allowlist, or an unusable ChatGPT auth file, so the
+ * gateway stops before it listens.
  */
 export const readStartupSettings = Effect.fn("GatewayNode.readStartupSettings")(function* (
   source: SettingsSource,
+  catalog: ModelProviderCatalog = modelProviders,
 ) {
   yield* Effect.logInfo("Reading the gateway settings", { environmentFiles: source.files });
-  return yield* startupSettings.pipe(
+  return yield* startupSettings(catalog).pipe(
     Effect.provideService(ConfigProvider.ConfigProvider, source.provider),
   );
 });

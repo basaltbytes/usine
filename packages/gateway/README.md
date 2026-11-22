@@ -1,12 +1,10 @@
 # @usine/gateway
 
-Credential slots and admin provider summaries use wire-protocol IDs: `anthropic-messages` and `openai-responses`. Workers select them in `gateway.llm_providers` and call `/anthropic-messages` or `/openai-responses/v1`. Upgrade the gateway and orchestrator together and replace the previous `anthropic` and `openai` gateway slot IDs. Credential environment-variable names stay the same.
-
 The service on the gateway host in front of usine's worker VMs ([ADR 0027](../../docs/adr/0027-gateway-credential-proxy.md), [#223](https://github.com/basaltbytes/usine/issues/223)). Worker VMs have no public address or GitHub token. They reach GitHub through the gateway, which adds the credential. For a provider in the worker's `llm_providers`, they reach the LLM the same way with the gateway's credential: an API key, a Claude subscription token, or a ChatGPT login, so the worker holds no subscription login for it. For any other provider, the harness on a long-lived worker uses its own login, a subscription or an API key, through the gateway's forward proxy, which allows only allowlisted hosts: package registries and the harness login hosts. A machine provisioned for one attempt holds no login: for a provider whose credential the gateway doesn't hold, the attempt gets the provider's API key from `provisioner.api_keys`. [Workers and the gateway](https://github.com/basaltbytes/usine/blob/main/docs/architecture/workers-and-gateway.mdx) describes the deployment.
 
 The gateway serves:
 
-- **A reverse proxy** for workers on the private network. `git.<domain>` serves git smart HTTP at `/OWNER/REPO.git`, release downloads, and the GitHub REST and GraphQL API under `/api/`, as GitHub Enterprise Server does, so `gh` works with `GH_HOST=git.<domain>`. It adds the installation token that the executor attached for that worker and repo; see [GitHub paths](#github-paths). `llm.<domain>` serves the Anthropic API under `/anthropic-messages`, and under `/openai-responses` an OpenAI-compatible API or, with a [ChatGPT login](#chatgpt-login), the ChatGPT backend that Codex uses, with the gateway's credential. Other hosts are refused; the forward proxy serves the allowlisted ones.
+- **A reverse proxy** for workers on the private network. `git.<domain>` serves git smart HTTP at `/OWNER/REPO.git`, release downloads, and the GitHub REST and GraphQL API under `/api/`, as GitHub Enterprise Server does, so `gh` works with `GH_HOST=git.<domain>`. It adds the installation token that the executor attached for that worker and repo; see [GitHub paths](#github-paths). `llm.<domain>` serves one slot for each [model provider](#model-providers) in usine's catalog, under `/<slot>`, with the gateway's credential: the Anthropic API under `/anthropic-messages`, and under `/openai-responses` an OpenAI-compatible API or, with a [ChatGPT login](#chatgpt-login), the ChatGPT backend that Codex uses. Other hosts are refused; the forward proxy serves the allowlisted ones.
 - **A forward proxy** for `HTTPS_PROXY` and `HTTP_PROXY`: `CONNECT` on port 443 for HTTPS and absolute-form requests for plain HTTP mirrors, to allowlisted hosts only. A tunnel opens only if the client's TLS ClientHello names the CONNECT host. A ClientHello naming another host or none, an encrypted ClientHello, or non-TLS bytes end the tunnel (`server-name-mismatch`, `server-name-missing`, `not-tls`). It resolves each name itself and refuses private, loopback, and link-local addresses. Before a plain HTTP request leaves, it removes `X-Usine-Gateway-Token` and any `Authorization` or `x-api-key` value that is a caller token, and leaves other credentials alone.
 - **An admin API** for the executor: attach, renew, detach, and list a worker's repo credentials, and list the [LLM providers](#llm-providers) it has credentials for. It requires the admin token as a bearer token. The gateway command persists encrypted attachments across restarts. A [reload](#reload) keeps them.
 
@@ -34,8 +32,8 @@ On Hetzner Cloud, `gateway.sh install` does either on the gateway VM and restart
 
 | Import | Contents |
 | --- | --- |
-| `@usine/gateway` | The platform-free core: `GatewaySettings`, `SettingsInForce` (the allowlist and LLM providers that a reload replaces), `Attachments`, `CallerTokens`, `ChatGptLogins` (the ChatGPT logins and their refresh), `GatewayProxy` (the reverse proxy as an `HttpServerRequest` handler), `adminRoutes` (the admin API for an `HttpRouter`), `gatewayServices`, the egress allowlist parser, and the domain records. It needs an `HttpClient` that leaves `content-encoding` alone and returns redirects without following them, a `FileSystem` for ChatGPT auth files, and `Crypto` for auth-file names. The Node entry point supplies `NodeCrypto.layer`. |
-| `@usine/gateway/admin` | `GatewayAdminApi`, the admin API contract for `HttpApiClient.make` in the executor, with the records a client sends and reads (`AttachRequest`, `InstallationCredential`, `Attached`, `AttachmentId`, `CallerToken`, `Detached`, `AttachmentList`, `LlmProviderList`), `GATEWAY_TOKEN_HEADER`, and `CALLER_CREDENTIAL_HEADERS`, every request header that the gateway reads a caller credential from. |
+| `@usine/gateway` | The platform-free core: `GatewaySettings` (with the provider catalog it serves), `SettingsInForce` (the allowlist and LLM providers that a reload replaces), `Attachments`, `CallerTokens`, `ChatGptLogins` (the ChatGPT logins and their refresh), `GatewayProxy` (the reverse proxy as an `HttpServerRequest` handler), `adminRoutes` (the admin API for an `HttpRouter`), `gatewayServices`, the egress allowlist parser, and the domain records. It needs an `HttpClient` that leaves `content-encoding` alone and returns redirects without following them, a `FileSystem` for ChatGPT auth files, and `Crypto` for auth-file names. The Node entry point supplies `NodeCrypto.layer`. |
+| `@usine/gateway/admin` | `GatewayAdminApi`, the admin API contract for `HttpApiClient.make` in the executor, with the records a client sends and reads (`AttachRequest`, `InstallationCredential`, `Attached`, `AttachmentId`, `CallerToken`, `Detached`, `AttachmentList`, `LlmProviderList`, `ServedSlot`), `GATEWAY_TOKEN_HEADER`, and `CALLER_CREDENTIAL_HEADERS`, every request header that the gateway reads a caller credential from. |
 | `@usine/gateway/node` | `gatewayLayer` (the three servers on Node, with undici upstream), `gatewayFromEnvironment`, `settingsFromEnvironment`, `GatewayAddresses`, and `GatewayReload`. |
 | `usine-gateway` | The gateway VM's command. It reads the settings below, reloads on SIGHUP, and logs one JSON object per line. |
 
@@ -114,15 +112,33 @@ GitHub redirects some requests for a renamed or transferred repo: API calls to `
 
 The gateway checks the followed request like any other. An attachment learns the repo's new name only from a permanent redirect (301 or 308) of the repo itself to the same path with another owner or repo name: git's `/OWNER/REPO/info/refs`, which starts every clone and fetch, or the API's `/repos/OWNER/REPO`. Before the attachment learns the name, the gateway confirms it with GitHub's API and the attachment's credential: `/repos/OWNER/REPO` with the attached name must redirect to `/repositories/ID`, and the `full_name` of that repo must be the new name. The attachment then serves paths with either name until it's detached or expires. Other attachments, temporary redirects, redirects of anything else, such as a release download or `/repositories/ID/...`, and names that the API doesn't confirm teach no name, so a path with another name is still refused with `repository-mismatch`. A release download under the repo's former name works once a git clone or fetch under that name has taught the attachment the new name.
 
+## Model providers
+
+A model provider is one entry in usine's catalog, `modelProviders` in `@usine/core/agent/provider`, which the gateway bundles: the orchestrator declares the same entries through its harnesses, and never sends the gateway an upstream. An entry has:
+
+- an `id`, such as `anthropic`, which names the provider in a provisioned worker's `api_keys`, and a `slot`, such as `anthropic-messages`, which names its credential at the gateway, its path prefix on `llm.<domain>`, and its value in `llm_providers`;
+- a `label` for messages;
+- its `protocols`: each wire protocol's `upstream` base URL, the `routes` under the slot that it serves, and the `key` header and scheme that a static key goes in;
+- the `credentials` it accepts: a static key that the gateway reads from a `variable`, and at most one subscription login (`claude` or `chatgpt`), whose sign-in, refresh, and account header the gateway implements;
+- optionally, `passThrough`, the request headers that reach the upstream besides the content headers (`accept`, `accept-encoding`, `content-encoding`, `content-length`, `content-type`, and `user-agent`), and `upstreamVariable`, the variable that replaces every protocol's upstream.
+
+A path under a slot goes to the upstream of the protocol whose routes include it, with the key in that protocol's header; so one key can serve several protocols, such as an OpenAI-compatible `/chat/completions` with `authorization: Bearer` and an Anthropic `/messages` with `x-api-key`. A route is a path with `{name}` placeholders, such as `/v1/models/{model}`, each matching one plain segment. Every response, error bodies included, returns unchanged. A provider with a static key needs only its entry: the gateway reads its variable, serves its slot, and reports it, with no other change in the gateway, the executor, or configuration.
+
+The gateway also reads the caller token from each protocol's key header, such as `x-goog-api-key`, and removes all of them before it adds the key.
+
 ## LLM providers
 
-`GET /v1/providers` lists the providers the gateway has a credential for, with each credential's kind, never the credential:
+`GET /v1/providers` lists the providers the gateway has a credential for, with each credential's kind, never the credential, and every slot that its catalog has, with its routes:
 
 ```json
-{"providers": [{"provider": "anthropic-messages", "credential": "api-key"}]}
+{"providers": [{"provider": "anthropic-messages", "credential": "api-key"}],
+ "slots": [{"slot": "anthropic-messages", "routes": ["/v1/messages", "/v1/messages/count_tokens", "/v1/models", "/v1/models/{model}"]},
+           {"slot": "openai-responses", "routes": ["/v1/responses", "/v1/responses/compact", "/v1/models"]}]}
 ```
 
-`credential` is `api-key` for `ANTHROPIC_API_KEY` and `OPENAI_API_KEY`, and `subscription` for `USINE_GATEWAY_ANTHROPIC_SUBSCRIPTION_TOKEN` and `USINE_GATEWAY_CHATGPT_AUTH_FILE`. Providers without a credential are absent. The list follows a [reload](#reload). The executor reads it when it checks a worker whose `llm_providers` lists a provider, so usage counts Claude Code and Codex children on the gateway's API key in the API keys pool, and on a subscription in the Claude or ChatGPT plan pool ([ADR 0013](../../docs/adr/0013-cost-accounting-native-meters-guardrails.md)). Gateways released before this endpoint answer 404.
+`credential` is `api-key` for a static key, such as `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`, and `subscription` for a login, such as `USINE_GATEWAY_ANTHROPIC_SUBSCRIPTION_TOKEN` or `USINE_GATEWAY_CHATGPT_AUTH_FILE`. Providers without a credential are absent from `providers`. The list follows a [reload](#reload). The executor reads it when it checks a worker whose `llm_providers` lists a provider, so usage counts Claude Code and Codex children on the gateway's API key in the API keys pool, and on a subscription in the Claude or ChatGPT plan pool ([ADR 0013](../../docs/adr/0013-cost-accounting-native-meters-guardrails.md)).
+
+The executor's preflight refuses a gateway that doesn't serve a slot that the worker's `llm_providers` lists, or a route under it that the orchestrator's catalog declares, and asks to upgrade the gateway to the orchestrator's release. Slots and routes that only the gateway serves are ignored, so a gateway newer than the orchestrator works with it. Gateways released before `slots` omit it; the orchestrator then checks only their credentials and asks for an upgrade without blocking attempts. Orchestrators released before `slots` ignore it. Gateways released before this endpoint answer 404.
 
 ## Managed provider connections
 
@@ -154,27 +170,29 @@ A client that sends every request through `HTTPS_PROXY`, as Claude Code does, st
 
 The [CLI reference](https://docs.usine.dev/reference/cli/) lists every `usine-gateway` variable, with defaults and the environment file rules. Changing `USINE_GATEWAY_CALLER_KEY` invalidates every caller token.
 
-Each provider holds one credential; setting both of a provider's variables is an error.
+Each provider holds one credential; setting two of a provider's credential variables is an error. The variables come from the provider's catalog entry; for the built-in providers, they are:
 
-| Provider | Variable | Credential | Sent upstream as |
+| Slot | Variable | Credential | Sent upstream as |
 | --- | --- | --- | --- |
-| `anthropic` | `ANTHROPIC_API_KEY` | An Anthropic API key | `x-api-key` |
-| `anthropic` | `USINE_GATEWAY_ANTHROPIC_SUBSCRIPTION_TOKEN` | A Claude subscription token from `claude setup-token` | A bearer token, with the OAuth beta flag merged into `anthropic-beta` |
-| `openai` | `OPENAI_API_KEY` | An OpenAI-compatible API key | A bearer token |
-| `openai` | `USINE_GATEWAY_CHATGPT_AUTH_FILE` | The absolute path of a Codex `auth.json` with a ChatGPT login | A bearer token with the login's access token, and `ChatGPT-Account-ID`; see [ChatGPT login](#chatgpt-login) |
+| `anthropic-messages` | `ANTHROPIC_API_KEY` | An Anthropic API key | `x-api-key` |
+| `anthropic-messages` | `USINE_GATEWAY_ANTHROPIC_SUBSCRIPTION_TOKEN` | A Claude subscription token from `claude setup-token` | A bearer token, with the OAuth beta flag merged into `anthropic-beta` |
+| `openai-responses` | `OPENAI_API_KEY` | An OpenAI-compatible API key | A bearer token |
+| `openai-responses` | `USINE_GATEWAY_CHATGPT_AUTH_FILE` | The absolute path of a Codex `auth.json` with a ChatGPT login | A bearer token with the login's access token, and `ChatGPT-Account-ID`; see [ChatGPT login](#chatgpt-login) |
 
 `USINE_GATEWAY_ANTHROPIC_UPSTREAM` (default `https://api.anthropic.com`) is the Anthropic upstream. `USINE_GATEWAY_OPENAI_UPSTREAM` (default `https://api.openai.com`) is the upstream for an OpenAI API key and can be any OpenAI-compatible provider, and `USINE_GATEWAY_CHATGPT_UPSTREAM` (default `https://chatgpt.com/backend-api/codex`) the one for a ChatGPT login. A provider without a credential is refused with `provider-not-configured`.
 
 ### LLM routes
 
-Each provider serves only the routes its harness calls, whatever the credential, so a worker can't use the gateway's credential for the rest of the provider's API, such as files, batches, or organization administration. A route matches whole path segments, so a percent-encoded separator (`%2F`, `%5C`), a doubled or trailing `/`, or a dot segment, which URL parsing resolves first, never reaches the upstream. Other paths are refused with `unsupported-path` before any credential is used or refreshed.
+Each slot serves only the routes in its provider's entry, whatever the credential, so a worker can't use the gateway's credential for the rest of the provider's API, such as files, batches, or organization administration. A route matches whole path segments, so a percent-encoded separator (`%2F`, `%5C`), a doubled or trailing `/`, or a dot segment, which URL parsing resolves first, never reaches the upstream. Other paths are refused with `unsupported-path` before any credential is used or refreshed.
+
+For the built-in providers, these are the routes that their harnesses call:
 
 | Prefix | Routes | Harness |
 | --- | --- | --- |
 | `/anthropic-messages` | `/v1/messages`, `/v1/messages/count_tokens`, `/v1/models`, `/v1/models/MODEL` | Claude Code |
 | `/openai-responses` | `/v1/responses`, `/v1/responses/compact`, `/v1/models` | Codex |
 
-The query string passes unchanged, such as Claude Code's `?beta=true`.
+The query string passes unchanged, such as Claude Code's `?beta=true`. A request under a provider's ID instead of its slot, such as `/anthropic/v1/messages`, works as before slots and logs `Deprecated LLM path prefix`.
 
 ## Claude subscription token
 
@@ -208,7 +226,7 @@ Make the gateway's login separate from the one on your own machine. A refresh to
 
 ## Reload
 
-On SIGHUP, `usine-gateway` rereads its environment files and allowlist, and replaces the egress allowlist and the LLM provider settings: `ANTHROPIC_API_KEY`, `USINE_GATEWAY_ANTHROPIC_SUBSCRIPTION_TOKEN`, `OPENAI_API_KEY`, `USINE_GATEWAY_CHATGPT_AUTH_FILE`, the three upstreams, and `USINE_GATEWAY_EGRESS_ALLOWLIST`. It also rereads the ChatGPT auth file, so copying a new `auth.json` over the old one and reloading replaces the login. Under systemd, `ExecReload=kill -HUP $MAINPID` makes `systemctl reload usine-gateway` send it.
+On SIGHUP, `usine-gateway` rereads its environment files and allowlist, and replaces the egress allowlist and the LLM provider settings: each provider's credential and upstream variables, such as `ANTHROPIC_API_KEY`, `USINE_GATEWAY_ANTHROPIC_SUBSCRIPTION_TOKEN`, `OPENAI_API_KEY`, `USINE_GATEWAY_CHATGPT_AUTH_FILE`, and the three upstreams, and `USINE_GATEWAY_EGRESS_ALLOWLIST`. It also rereads the ChatGPT auth file, so copying a new `auth.json` over the old one and reloading replaces the login. Under systemd, `ExecReload=kill -HUP $MAINPID` makes `systemctl reload usine-gateway` send it.
 
 Attachments, the admin API, listening sockets, and open tunnels stay, so running attempts keep their GitHub and LLM requests. An open tunnel stays until a side closes it; each new `CONNECT` or plain HTTP request uses the new allowlist, and each later LLM request the new key. An open tunnel isn't closed when its host leaves the allowlist, because closing it would cut a running download; restart the gateway to close every tunnel. The domain, listeners, admin token, and caller key change only with a restart. A reload that finds one of them changed logs `Settings changed that take effect only after a restart` at warning level with the variable names, and applies the rest.
 
@@ -225,6 +243,8 @@ Each reload ends with `Reloaded the gateway settings`, which gives the environme
 ## Tests
 
 `pnpm --filter @usine/gateway test` runs the unit tests and an end-to-end test that starts the gateway on loopback ports, clones `octocat/Hello-World` through it, calls `gh api` through a Unix socket as a worker does, and opens a tunnel to `registry.npmjs.org`. It needs network access but no secret.
+
+`test/proxy.test.ts` registers a provider that only the test defines, with one key for two protocols that take it in different headers, and checks the slot's upstreams, headers, refused routes, and unchanged error bodies.
 
 The unit tests for the ChatGPT login (`test/chatgpt.test.ts`) use stand-ins for the token endpoint and the ChatGPT backend: refresh timing, write-back of rotated tokens, one refresh for concurrent requests, failed and rejected refreshes, header rewriting, refused paths, and streaming through the Node gateway.
 

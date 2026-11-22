@@ -1,3 +1,4 @@
+import type { ModelProviderCatalog } from "@usine/core/agent/provider";
 import type { GatewayDomain } from "@usine/core/worker";
 import { Context, Effect, Layer, Ref, Schema } from "effect";
 import type { EgressAllowlist } from "./egress/egress.ts";
@@ -32,6 +33,11 @@ export class GatewaySettings extends Context.Service<
     readonly domain: GatewayDomain;
     /** The GitHub upstream origins fixed for this process. */
     readonly github: GitHubOrigins;
+    /**
+     * The providers whose slots the gateway serves; the command serves `modelProviders` from
+     * `@usine/core/agent/provider`.
+     */
+    readonly catalog: ModelProviderCatalog;
     /** The startup LLM providers; requests use the current providers from `SettingsInForce`. */
     readonly providers: LlmProviders;
     /** The startup egress allowlist; requests use the current allowlist from `SettingsInForce`. */

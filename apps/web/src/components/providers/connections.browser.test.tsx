@@ -1,3 +1,4 @@
+import { anthropic, openai } from "@usine/core/agent/provider";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createRoot } from "react-dom/client";
 import { flushSync } from "react-dom";
@@ -22,13 +23,13 @@ it.each([{ width: 390, height: 844, device: "phone" }])(
           label: "usine-gateway",
           providers: [
             {
-              provider: "anthropic-messages",
+              provider: anthropic.slot,
               credential: null,
               expiresAt: null,
               lastRefresh: null,
             },
             {
-              provider: "openai-responses",
+              provider: openai.slot,
               credential: "subscription",
               expiresAt: "2027-01-01T00:00:00Z",
               lastRefresh: "2026-11-01T12:00:00Z",
@@ -149,7 +150,7 @@ it.each([{ width: 390, height: 844, device: "phone" }])(
 
 it.each([
   {
-    provider: "anthropic-messages" as const,
+    provider: anthropic.slot,
     message: "Claude Code not found on PATH. Install it to connect Claude.",
     unavailable: "Claude",
     available: "ChatGPT",
@@ -163,7 +164,7 @@ it.each([
         {
           target: "local",
           label: "Local harnesses",
-          providers: ["anthropic-messages" as const, "openai-responses" as const].map((entry) =>
+          providers: [anthropic.slot, openai.slot].map((entry) =>
             entry === provider
               ? { provider: entry, error: message }
               : { provider: entry, credential: null, expiresAt: null, lastRefresh: null },

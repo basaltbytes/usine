@@ -1,3 +1,4 @@
+import { openai } from "@usine/core/agent/provider";
 import { assert, it } from "@effect/vitest";
 import { RemoteShell } from "@usine/agents/child-host";
 import { Agent } from "@usine/core/agent";
@@ -5,7 +6,7 @@ import { BrainSpec } from "@usine/core/agent/brain";
 import { jsonKey } from "@usine/core/json-key";
 import type { AttemptRequest } from "@usine/durable/attempt-runtime";
 import { completes, type StubParent } from "@usine/durable/testing";
-import { OpenAiApiKey, OpenAiProvider, UpstreamBase } from "@usine/gateway";
+import { ApiKey, LlmProvider, UpstreamBase } from "@usine/gateway";
 import { Effect, Layer, Option, Redacted, Schema } from "effect";
 import { CheckoutRequest, Executor } from "../../../src/executor.ts";
 import { sharedHarness, sharedHarnesses } from "../harnesses.ts";
@@ -27,13 +28,10 @@ it.effect(
   () => {
     const machine = fakeMachine();
     const gateway = fakeGateway(machine, {
-      "anthropic-messages": Option.none(),
-      "openai-responses": Option.some(
-        OpenAiProvider.make({
-          upstream: UpstreamBase.make("https://api.openai.com"),
-          credential: OpenAiApiKey.make({ key: Redacted.make("sk-shared-slot-test") }),
-        }),
-      ),
+      [openai.slot]: LlmProvider.make({
+        upstream: Option.some(UpstreamBase.make("https://api.openai.com")),
+        credential: ApiKey.make({ key: Redacted.make("sk-shared-slot-test") }),
+      }),
     });
     const logs = capturedLogs();
     let given: AttemptRequest | undefined;

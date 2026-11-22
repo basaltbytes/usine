@@ -1,5 +1,6 @@
 import { Harness } from "@usine/core/agent/brain";
 import { BillingPool, PoolDescriptor } from "@usine/core/agent/pool";
+import { openai } from "@usine/core/agent/provider";
 import { Option } from "effect";
 import { CODEX_PROTOCOL } from "../../protocol/codex/version.ts";
 import { CapabilityProfile, Lacking } from "../capability.ts";
@@ -72,9 +73,7 @@ export const codex = HarnessDescriptor.make({
     },
     credential: Option.some(
       HarnessCredential.make({
-        provider: "openai",
-        protocol: "openai-responses",
-        gatewayPath: "openai-responses/v1",
+        slotPath: "/v1",
         home: Option.some("CODEX_HOME"),
         gateway: CredentialWiring.make({
           tokenVariable: "USINE_GATEWAY_TOKEN",
@@ -99,13 +98,11 @@ export const codex = HarnessDescriptor.make({
           environment: {},
           files: {},
         }),
-        label: "OpenAI",
         hosts: ["chatgpt.com", "auth.openai.com"],
-        apiHost: "api.openai.com",
-        apiKeyBaseUrl: "https://api.openai.com/v1",
       }),
     ),
   }),
+  providers: [openai],
   capabilities: [
     CapabilityProfile.make({
       placements: ["orchestrator", "local", "ssh", "container", "sandbox"],

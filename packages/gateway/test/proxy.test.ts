@@ -1,7 +1,18 @@
 import { jsonKey } from "@usine/core/json-key";
-import { NodeFileSystem } from "@effect/platform-node";
+import { NodeCrypto, NodeFileSystem } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
-import { Context, DateTime, Effect, Layer, Logger, Option, Redacted, Ref, Stream } from "effect";
+import {
+  ConfigProvider,
+  Context,
+  DateTime,
+  Effect,
+  Layer,
+  Logger,
+  Option,
+  Redacted,
+  Ref,
+  Stream,
+} from "effect";
 import { Base64 } from "effect/encoding";
 import {
   Headers,
@@ -21,15 +32,30 @@ import { Attachments } from "../src/attachment/store.ts";
 import { CallerClaims, CallerTokens } from "../src/caller/caller.ts";
 import { gatewayServices } from "../src/gateway.ts";
 import {
-  AnthropicApiKey,
-  AnthropicProvider,
+  ApiKey,
+  LlmProvider,
   AnthropicSubscriptionToken,
   type LlmProviders,
-  OpenAiApiKey,
-  OpenAiProvider,
 } from "../src/llm/llm.ts";
 import { GatewayProxy, REFUSAL_HEADER } from "../src/proxy/proxy.ts";
-import { UpstreamBase } from "../src/upstream.ts";
+import { llmProviders } from "../src/node/environment.ts";
+import {
+  anthropic,
+  ApiKeyCredential,
+  GatewaySlot,
+  GatewayVariable,
+  HeaderName,
+  KeyHeader,
+  ModelProvider,
+  ModelProviderCatalog,
+  ModelProviderId,
+  modelProviders,
+  openai,
+  ProviderProtocol,
+  RoutePattern,
+  UpstreamBase,
+  WireProtocol,
+} from "@usine/core/agent/provider";
 import {
   ATTACHMENT,
   NO_PROVIDERS,
@@ -46,6 +72,36 @@ const SUBSCRIPTION_TOKEN = "sk-ant-oat01-subscriptionForTests0123456789";
 const OPENAI_KEY = "sk-proj-keyForTests0123456789";
 const ASSET_URL =
   "https://release-assets.githubusercontent.com/github-production-release-asset/42/asset?sp=r&sig=signature-for-tests";
+
+const PLAN_KEY = "plan-key-for-tests-0123456789";
+
+/**
+ * A provider that only this test defines: one static key for two protocols, which take the key
+ * in different headers, and one header that passes to the upstream.
+ */
+const plan = ModelProvider.make({
+  id: ModelProviderId.make("test-plan"),
+  slot: GatewaySlot.make("test-plan"),
+  label: "Test plan",
+  protocols: [
+    ProviderProtocol.make({
+      protocol: WireProtocol.make("openai-chat-completions"),
+      upstream: UpstreamBase.make("https://plan.test/openai/v1"),
+      routes: [RoutePattern.make("/chat/completions")],
+      key: KeyHeader.make({ header: HeaderName.make("authorization"), scheme: "bearer" }),
+    }),
+    ProviderProtocol.make({
+      protocol: WireProtocol.make("google-generate-content"),
+      upstream: UpstreamBase.make("https://plan.test/google/v1beta"),
+      routes: [RoutePattern.make("/models/{model}:streamGenerateContent")],
+      key: KeyHeader.make({ header: HeaderName.make("x-goog-api-key"), scheme: "none" }),
+    }),
+  ],
+  credentials: [ApiKeyCredential.make({ variable: GatewayVariable.make("TEST_PLAN_API_KEY") })],
+  passThrough: Option.some([HeaderName.make("x-plan-session")]),
+});
+
+const withPlan = ModelProviderCatalog.make({ providers: [...modelProviders.providers, plan] });
 
 interface Sent {
   readonly method: string;
@@ -124,12 +180,16 @@ const captureLogs = Logger.layer([
   }),
 ]);
 
-const gateway = (providers: LlmProviders, answer: Answer = ok) =>
+const gateway = (
+  providers: LlmProviders,
+  answer: Answer = ok,
+  catalog: ModelProviderCatalog = modelProviders,
+) =>
   GatewayProxy.layer.pipe(
     Layer.provideMerge(gatewayServices),
     Layer.provide(fakeClient),
     Layer.provideMerge(Upstream.answering(answer)),
-    Layer.provideMerge(settingsLayer(providers)),
+    Layer.provideMerge(settingsLayer(providers, undefined, undefined, catalog)),
     Layer.provideMerge(captureLogs),
     Layer.provide(NodeFileSystem.layer),
   );
@@ -371,13 +431,10 @@ describe("GatewayProxy", () => {
       }).pipe(
         Effect.provide(
           gateway({
-            ...NO_PROVIDERS,
-            "anthropic-messages": Option.some(
-              AnthropicProvider.make({
-                upstream: UpstreamBase.make("https://api.anthropic.com"),
-                credential: AnthropicApiKey.make({ key: secret(ANTHROPIC_KEY) }),
-              }),
-            ),
+            [anthropic.slot]: LlmProvider.make({
+              upstream: Option.some(UpstreamBase.make("https://api.anthropic.com")),
+              credential: ApiKey.make({ key: secret(ANTHROPIC_KEY) }),
+            }),
           }),
         ),
       ),
@@ -405,13 +462,10 @@ describe("GatewayProxy", () => {
       }).pipe(
         Effect.provide(
           gateway({
-            ...NO_PROVIDERS,
-            "anthropic-messages": Option.some(
-              AnthropicProvider.make({
-                upstream: UpstreamBase.make("https://api.anthropic.com"),
-                credential: AnthropicSubscriptionToken.make({ token: secret(SUBSCRIPTION_TOKEN) }),
-              }),
-            ),
+            [anthropic.slot]: LlmProvider.make({
+              upstream: Option.some(UpstreamBase.make("https://api.anthropic.com")),
+              credential: AnthropicSubscriptionToken.make({ token: secret(SUBSCRIPTION_TOKEN) }),
+            }),
           }),
         ),
       ),
@@ -450,13 +504,10 @@ describe("GatewayProxy", () => {
       }).pipe(
         Effect.provide(
           gateway({
-            ...NO_PROVIDERS,
-            "openai-responses": Option.some(
-              OpenAiProvider.make({
-                upstream: UpstreamBase.make("https://api.openai.com"),
-                credential: OpenAiApiKey.make({ key: secret(OPENAI_KEY) }),
-              }),
-            ),
+            [openai.slot]: LlmProvider.make({
+              upstream: Option.some(UpstreamBase.make("https://api.openai.com")),
+              credential: ApiKey.make({ key: secret(OPENAI_KEY) }),
+            }),
           }),
         ),
       ),
@@ -535,18 +586,14 @@ describe("GatewayProxy", () => {
       }).pipe(
         Effect.provide(
           gateway({
-            "anthropic-messages": Option.some(
-              AnthropicProvider.make({
-                upstream: UpstreamBase.make("https://api.anthropic.com"),
-                credential: AnthropicApiKey.make({ key: secret(ANTHROPIC_KEY) }),
-              }),
-            ),
-            "openai-responses": Option.some(
-              OpenAiProvider.make({
-                upstream: UpstreamBase.make("https://api.openai.com"),
-                credential: OpenAiApiKey.make({ key: secret(OPENAI_KEY) }),
-              }),
-            ),
+            [anthropic.slot]: LlmProvider.make({
+              upstream: Option.some(UpstreamBase.make("https://api.anthropic.com")),
+              credential: ApiKey.make({ key: secret(ANTHROPIC_KEY) }),
+            }),
+            [openai.slot]: LlmProvider.make({
+              upstream: Option.some(UpstreamBase.make("https://api.openai.com")),
+              credential: ApiKey.make({ key: secret(OPENAI_KEY) }),
+            }),
           }),
         ),
       ),
@@ -743,5 +790,170 @@ describe("GatewayProxy", () => {
         const response = yield* sent;
         assert.deepStrictEqual(response, []);
       }).pipe(Effect.provide(gateway(NO_PROVIDERS))),
+  );
+});
+
+describe("a provider slot that the catalog declares", () => {
+  /** The plan's credential as the gateway reads it from its environment, which sets only the entry's variable. */
+  const planProviders = (catalog: ModelProviderCatalog) =>
+    llmProviders(catalog).pipe(
+      Effect.provideService(
+        ConfigProvider.ConfigProvider,
+        ConfigProvider.fromUnknown({ TEST_PLAN_API_KEY: PLAN_KEY }),
+      ),
+      Effect.provide([NodeFileSystem.layer, NodeCrypto.layer]),
+      Effect.orDie,
+    );
+
+  it.effect(
+    "sends the key in the header of each protocol, passes the listed header, refuses other routes, and returns error bodies unchanged",
+    () =>
+      Effect.gen(function* () {
+        lines.length = 0;
+        const caller = yield* attach(installation);
+        const chat = yield* send(
+          "http://llm.gw.test/test-plan/chat/completions",
+          {
+            authorization: `Bearer ${caller}`,
+            "content-type": "application/json",
+            "x-plan-session": "session-1",
+            "x-repository-hash": "a1b2c3",
+          },
+          { method: "POST", body: '{"model":"plan-model"}' },
+        );
+        assert.strictEqual(chat.status, 200);
+        const streamed = yield* send(
+          "http://llm.gw.test/test-plan/models/plan-model-2.5:streamGenerateContent?alt=sse",
+          { "x-goog-api-key": caller, "x-plan-session": "session-1" },
+          { method: "POST", body: "{}" },
+        );
+        assert.strictEqual(streamed.status, 429);
+        assert.strictEqual(streamed.body, '{"error":{"code":"plan_limit_reached"}}');
+        const [toChat, toGoogle] = yield* sent;
+        assert(toChat !== undefined && toGoogle !== undefined);
+        assert.strictEqual(toChat.url, "https://plan.test/openai/v1/chat/completions");
+        assert.deepStrictEqual(
+          [
+            Headers.get(toChat.headers, "authorization"),
+            Headers.get(toChat.headers, "x-plan-session"),
+            Headers.get(toChat.headers, "content-type"),
+            Headers.get(toChat.headers, "x-repository-hash"),
+          ],
+          [
+            Option.some(`Bearer ${PLAN_KEY}`),
+            Option.some("session-1"),
+            Option.some("application/json"),
+            Option.none(),
+          ],
+        );
+        assert.strictEqual(
+          toGoogle.url,
+          "https://plan.test/google/v1beta/models/plan-model-2.5:streamGenerateContent?alt=sse",
+        );
+        assert.deepStrictEqual(
+          [
+            Headers.get(toGoogle.headers, "x-goog-api-key"),
+            Headers.get(toGoogle.headers, "authorization"),
+          ],
+          [Option.some(PLAN_KEY), Option.none()],
+        );
+
+        for (const path of [
+          "/test-plan/v1/chat/completions",
+          "/test-plan/files",
+          "/test-plan/models/plan-model:generateContent",
+          "/test-plan/models/..:streamGenerateContent",
+        ]) {
+          const refused = yield* send(
+            `http://llm.gw.test${path}`,
+            { authorization: `Bearer ${caller}` },
+            { method: "POST", body: "{}" },
+          );
+          assert.deepStrictEqual(
+            [refused.status, refused.headers.get(REFUSAL_HEADER)],
+            [404, "unsupported-path"],
+            path,
+          );
+        }
+        const forwarded = yield* sent;
+        assert.lengthOf(forwarded, 2, "no refused route reached an upstream");
+        const logged = lines.join("\n");
+        assert.include(logged, '"provider":"test-plan"');
+        for (const value of [caller, PLAN_KEY]) assert.notInclude(logged, value);
+      }).pipe(
+        Effect.provide(
+          Layer.unwrap(
+            Effect.map(planProviders(withPlan), (providers) =>
+              gateway(
+                providers,
+                (url) =>
+                  url.pathname.includes(":streamGenerateContent")
+                    ? new Response('{"error":{"code":"plan_limit_reached"}}', {
+                        status: 429,
+                        headers: { "content-type": "application/json" },
+                      })
+                    : ok(url),
+                withPlan,
+              ),
+            ),
+          ),
+        ),
+      ),
+  );
+
+  it.effect(
+    "removes a caller token from each protocol's key header for an entry without a pass-through list",
+    () => {
+      const open = ModelProvider.make({ ...plan, passThrough: Option.none() });
+      const withOpenPlan = ModelProviderCatalog.make({
+        providers: [...modelProviders.providers, open],
+      });
+      return Effect.gen(function* () {
+        const caller = yield* attach(installation);
+        const chat = yield* send(
+          "http://llm.gw.test/test-plan/chat/completions",
+          {
+            authorization: `Bearer ${caller}`,
+            "x-goog-api-key": caller,
+            "x-plan-session": "session-1",
+          },
+          { method: "POST", body: '{"model":"plan-model"}' },
+        );
+        assert.strictEqual(chat.status, 200);
+        const [toChat] = yield* sent;
+        assert(toChat !== undefined);
+        assert.deepStrictEqual(
+          [
+            Headers.get(toChat.headers, "authorization"),
+            Headers.get(toChat.headers, "x-goog-api-key"),
+            Headers.get(toChat.headers, "x-plan-session"),
+          ],
+          [Option.some(`Bearer ${PLAN_KEY}`), Option.none(), Option.some("session-1")],
+        );
+      }).pipe(
+        Effect.provide(
+          Layer.unwrap(
+            Effect.map(planProviders(withOpenPlan), (providers) =>
+              gateway(providers, ok, withOpenPlan),
+            ),
+          ),
+        ),
+      );
+    },
+  );
+
+  it.effect("refuses the slot while the gateway has no key for it", () =>
+    Effect.gen(function* () {
+      const caller = yield* attach(installation);
+      const refused = yield* send("http://llm.gw.test/test-plan/chat/completions", {
+        authorization: `Bearer ${caller}`,
+      });
+      assert.deepStrictEqual(
+        [refused.status, refused.headers.get(REFUSAL_HEADER)],
+        [503, "provider-not-configured"],
+      );
+      const forwarded = yield* sent;
+      assert.deepStrictEqual(forwarded, []);
+    }).pipe(Effect.provide(gateway(NO_PROVIDERS, ok, withPlan))),
   );
 });

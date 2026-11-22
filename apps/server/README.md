@@ -26,7 +26,7 @@ One `usine up` runs per instance folder. It holds `.usine/instance.lock` from st
 
 At startup, a failed worker preflight excludes that worker from scheduling while the other workers start and the API listens. **Needs attention** shows the worker and its preflight message. Checks retry after 1, 2, 5, and 10 minutes, then every 10 minutes; a passing check restores scheduling and clears the entry. A configuration revision that changes the worker's slot count checks it immediately. Configuration writes still refuse a revision whose preflight fails. Startup exits with an error if every worker fails preflight, or if a database, GitHub App, or listen-address error prevents startup.
 
-`GET /api/configuration/capabilities` returns registered harness IDs, reasoning efforts, and `harnessDetails` with each harness’s label and terminal resume metadata. These values come from `@usine/agents/harness`.
+`GET /api/configuration/capabilities` returns registered harness IDs, reasoning efforts, `harnessDetails` with each harness’s label and terminal resume metadata, and the `pools` that the operator routes read from `BillingPools` when they're built. These values come from `@usine/agents/harness`: the server provides the harness catalog's pools.
 
 ## Manage the instance
 

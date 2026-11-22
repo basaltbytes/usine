@@ -1,3 +1,4 @@
+import { anthropic, modelProviders, openai } from "@usine/core/agent/provider";
 import { BrainSpec, Harness, ModelId } from "@usine/core/agent/brain";
 import { preflight } from "@usine/agents/preflight";
 import { harnessesLive, ProbeTarget } from "@usine/agents/harness/node";
@@ -61,7 +62,8 @@ it.live(
         const settings = GatewaySettings.of({
           domain: GatewayDomain.make("gw.test"),
           github: GITHUB_ORIGINS,
-          providers: { "anthropic-messages": Option.none(), "openai-responses": Option.none() },
+          catalog: modelProviders,
+          providers: {},
           adminToken: AdminToken.make(Redacted.make("test-admin-token-private-0123456789")),
           callerKey: CallerKey.make(Redacted.make("test-caller-key-private-0123456789")),
           egress: EgressAllowlist.make({ rules: [] }),
@@ -262,18 +264,15 @@ ${["missing-token", "unreachable", "outdated", "older-gateway"]
         if (Option.isSome(snapshot.instance)) {
           const worker = snapshot.instance.value.config.workers[0];
           assert(worker?.kind === "ssh" && Option.isSome(worker.gateway));
-          assert.deepEqual(worker.gateway.value.llmProviders, ["anthropic-messages"]);
+          assert.deepEqual(worker.gateway.value.llmProviders, [anthropic.slot]);
         }
         const inForce = Context.get(gateway, SettingsInForce);
         const saved = yield* inForce.current;
-        assert(Option.isSome(saved.providers["anthropic-messages"]));
-        assert(saved.providers["anthropic-messages"].value.credential._tag === "AnthropicApiKey");
-        assert.equal(
-          Redacted.value(saved.providers["anthropic-messages"].value.credential.key),
-          secret,
-        );
+        const saved_ = saved.providers[anthropic.slot];
+        assert(saved_ !== undefined && saved_.credential._tag === "ApiKey");
+        assert.equal(Redacted.value(saved_.credential.key), secret);
         assert.notInclude(jsonKey(connected), secret);
-        yield* targets.disconnect("test-gateway", "anthropic-messages").pipe(
+        yield* targets.disconnect("test-gateway", anthropic.slot).pipe(
           Effect.provideService(
             ConfigProvider.ConfigProvider,
             ConfigProvider.fromUnknown({
@@ -383,9 +382,9 @@ ${["missing-token", "unreachable", "outdated", "older-gateway"]
           secret: Redacted.make("fixture-api-key"),
         });
         assert.equal((yield* verifyLocalClaude)._tag, "HarnessReady");
-        yield* local.disconnect("local", "anthropic-messages");
+        yield* local.disconnect("local", anthropic.slot);
         assert.equal((yield* verifyLocalClaude)._tag, "HarnessUnavailableError");
-        yield* local.disconnect("local", "openai-responses");
+        yield* local.disconnect("local", openai.slot);
         const empty = yield* local.list;
         assert.deepEqual(
           empty[0] !== undefined && "providers" in empty[0]
@@ -453,7 +452,7 @@ it.live("manages ChatGPT on a local host without Claude Code", () =>
       });
       const initial = yield* providers;
       assert.deepEqual(initial, {
-        provider: "openai-responses",
+        provider: openai.slot,
         credential: null,
         expiresAt: null,
         lastRefresh: null,

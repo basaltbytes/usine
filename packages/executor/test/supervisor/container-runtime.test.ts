@@ -66,8 +66,7 @@ describe.skipIf(Option.isNone(runtime))(
           }> = [];
           const route: GatewayModelRoute = {
             credential: () => Effect.succeedSome("api-key"),
-            countTokens: () => Effect.die("the test counts no tokens"),
-            request: (_protocol, body, headers) =>
+            request: (_slot, _path, body, headers) =>
               Effect.sync(() => {
                 relayed.push({ body, headers: { ...headers } });
                 return new Response(`relayed ${body}`, { status: 200 });
@@ -285,7 +284,6 @@ describe.skipIf(Option.isNone(runtime))(
           const root = `${instance}/supervisor`;
           const route: GatewayModelRoute = {
             credential: () => Effect.succeedNone,
-            countTokens: () => Effect.die("the test counts no tokens"),
             request: () => Effect.die("no model request"),
           };
           const layer = sandboxLayer({
@@ -404,7 +402,6 @@ describe.skipIf(Option.isNone(runtime))(
           });
           const route: GatewayModelRoute = {
             credential: () => Effect.succeedNone,
-            countTokens: () => Effect.die("the test counts no tokens"),
             request: () => Effect.die("no model request"),
           };
           const layer = sandboxLayer({

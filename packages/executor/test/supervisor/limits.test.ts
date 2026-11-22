@@ -27,8 +27,7 @@ it.live("passes configured message limits to the supervisor seat and its model r
         route: Option.some(
           Effect.succeed({
             credential: () => Effect.succeedNone,
-            countTokens: () => Effect.die("the test counts no tokens"),
-            request: (_protocol, body) =>
+            request: (_slot, _path, body) =>
               Effect.sync(() => {
                 forwarded.push(body);
                 return new Response("ok");

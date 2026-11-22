@@ -1,7 +1,8 @@
 import { type HarnessCatalog } from "@usine/agents/harness";
 import type { Harness } from "@usine/core/agent/brain";
+import type { ModelProvider } from "@usine/core/agent/provider";
 import type { AttemptId } from "@usine/core/attempt";
-import { Effect, Option, Redacted } from "effect";
+import { Array as Arr, Effect, Option, Redacted } from "effect";
 import type { ExecutorOperation } from "../executor.ts";
 import { type RemoteCommands, sendingShell } from "../remote/commands.ts";
 import type { MachineCredentialRoute, RemoteAccess } from "../remote/machine.ts";
@@ -9,7 +10,7 @@ import type { AttemptHomes } from "./attempt-homes.ts";
 import { writeMachineFiles } from "./gateway/attachments.ts";
 import type { MachineGateway, SshMachine, SshWorkerAddress } from "./model.ts";
 
-/** Returns whether the Gateway holds a credential for `harness`'s provider. */
+/** Returns whether the Gateway holds a credential for one of `harness`'s providers. */
 export const gatewayHolds = (
   catalog: HarnessCatalog,
   gateway: Option.Option<MachineGateway>,
@@ -17,24 +18,34 @@ export const gatewayHolds = (
 ): boolean =>
   Option.exists(gateway, ({ settings }) => catalog.gatewayHolds(harness, settings.llmProviders));
 
+/** A provider API key that an Attempt gets, and its provider. */
+export interface ProvisionedApiKey {
+  readonly provider: ModelProvider;
+  readonly key: Redacted.Redacted<string>;
+}
+
 /**
- * Returns the API key that each Attempt on a Worker's machine gets for `harness`, or `None` if
- * the Worker isn't provisioned, the provisioner sets no key, or the Gateway has the provider's
- * credential.
+ * Returns the API key that each Attempt on a Worker's machine gets for `harness`: the key of its
+ * first provider that the provisioner sets one for. `None` if the Worker isn't provisioned, the
+ * provisioner sets no key for the harness's providers, or the Gateway holds one of them.
  */
 export const provisionedApiKey = (
   catalog: HarnessCatalog,
   worker: { readonly address: SshWorkerAddress; readonly gateway: Option.Option<MachineGateway> },
   harness: Harness,
-): Option.Option<Redacted.Redacted<string>> => {
+): Option.Option<ProvisionedApiKey> => {
   const { machine } = worker.address;
   if (machine._tag !== "Provisioned" || gatewayHolds(catalog, worker.gateway, harness))
     return Option.none();
+  const { apiKeys } = machine.provisioner;
   return Option.flatMap(
-    Option.flatMap(catalog.get(harness), (descriptor) =>
-      Option.map(descriptor.worker.credential, ({ provider }) => provider),
+    Option.filter(catalog.get(harness), ({ worker: requirements }) =>
+      Option.isSome(requirements.credential),
     ),
-    (provider) => machine.provisioner.apiKeys[provider],
+    ({ providers }) =>
+      Arr.findFirst(providers, (provider) =>
+        Option.map(Option.fromUndefinedOr(apiKeys[provider.id]), (key) => ({ provider, key })),
+      ),
   );
 };
 
@@ -69,12 +80,14 @@ export const withApiKeys = Effect.fn("SshExecutor.withApiKeys")(function* (
   const keyed = catalog.descriptors
     .filter(({ id }) => Option.contains(harness, id))
     .flatMap((descriptor) =>
-      Option.toArray(provisionedApiKey(catalog, machine, descriptor.id)).flatMap((key) =>
-        Option.toArray(descriptor.worker.credential).map((credential) => ({
-          descriptor,
-          credential,
-          key,
-        })),
+      Option.toArray(provisionedApiKey(catalog, machine, descriptor.id)).flatMap(
+        ({ provider, key }) =>
+          Option.toArray(descriptor.worker.credential).map((credential) => ({
+            descriptor,
+            credential,
+            provider,
+            key,
+          })),
       ),
     );
   if (keyed.length === 0) {
@@ -84,12 +97,12 @@ export const withApiKeys = Effect.fn("SshExecutor.withApiKeys")(function* (
     });
     return access;
   }
-  const wirings = yield* Effect.forEach(keyed, ({ descriptor, credential }) =>
+  const wirings = yield* Effect.forEach(keyed, ({ descriptor, credential, provider }) =>
     Effect.gen(function* () {
       const homes = yield* Effect.forEach(Option.toArray(credential.home), () =>
         holdAttemptHome(machine, attemptId, descriptor),
       );
-      const wiring = credential.apiKey.render(credential.apiKeyBaseUrl, homes[0] ?? "");
+      const wiring = credential.apiKey.render(credential.apiKeyBaseUrl(provider), homes[0] ?? "");
       if (wiring.files.length > 0)
         yield* writeMachineFiles(commands, operation, machine.shell, wiring.files);
       return { wiring, homes };
@@ -102,6 +115,7 @@ export const withApiKeys = Effect.fn("SshExecutor.withApiKeys")(function* (
     attemptId,
     worker: machine.address.name,
     harnesses: keyed.map(({ descriptor }) => descriptor.id),
+    providers: keyed.map(({ provider }) => provider.id),
   });
   const values = Object.values(secrets).map(Redacted.value);
   return {

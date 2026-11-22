@@ -57,7 +57,7 @@ A transcript's `Started` payload has a `parentModel` with the selected Pi parent
 
 Session records in transcripts and usage responses include an optional `pool` resolved at launch and an optional `endpoint` provider name for API-key models. Usage reads the recorded pool; older records without it use the historical harness and model rule. Endpoint names exclude URLs and credentials.
 
-Usage and statistics responses list pools in catalog order, each with its `pool` ID and `label`; a pool warning in Needs you also has the pool's `label`. A cost in a plan pool is an estimate. A pool that the catalog doesn't declare, such as one of a removed harness, comes after the declared pools, with its ID as its label, and its cost isn't an estimate.
+Usage and statistics responses list pools in catalog order, each with its `pool` ID and `label`; a pool warning in Needs you also has the pool's `label`. A cost in a plan pool is an estimate. A pool that the catalog doesn't declare, such as one of a removed harness, comes after the declared pools, with its ID as its label, and its cost is an estimate because usine can't tell how it was billed.
 
 ## Item text
 

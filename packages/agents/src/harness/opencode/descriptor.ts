@@ -1,4 +1,5 @@
 import { Harness } from "@usine/core/agent/brain";
+import { openai } from "@usine/core/agent/provider";
 import { Option } from "effect";
 import { CapabilityProfile, Lacking } from "../capability.ts";
 import {
@@ -38,9 +39,7 @@ export const opencode = HarnessDescriptor.make({
     login: { mounted: [], seeded: [] },
     credential: Option.some(
       HarnessCredential.make({
-        provider: "openai",
-        protocol: "openai-responses",
-        gatewayPath: "openai-responses/v1",
+        slotPath: "/v1",
         home: Option.some(OPENCODE_HOME),
         gateway: wiring("USINE_GATEWAY_TOKEN"),
         apiKey: wiring("OPENAI_API_KEY"),
@@ -50,13 +49,11 @@ export const opencode = HarnessDescriptor.make({
           environment: {},
           files: {},
         }),
-        label: "OpenAI",
         hosts: [],
-        apiHost: "api.openai.com",
-        apiKeyBaseUrl: "https://api.openai.com/v1",
       }),
     ),
   }),
+  providers: [openai],
   capabilities: [
     CapabilityProfile.make({
       placements: ["local", "ssh", "container"],

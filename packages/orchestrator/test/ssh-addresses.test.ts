@@ -97,8 +97,7 @@ it.effect(
       assert.strictEqual(size, null, "a worker without provisioner.size has no size");
       const viewed: ReadonlyArray<string> | null = view.egress;
       assert.deepStrictEqual(viewed, ["*.tailscale.com", "registry.npmjs.org"]);
-      assert.isTrue(Option.isNone(provisioner.apiKeys.anthropic));
-      assert.isTrue(Option.isNone(provisioner.apiKeys.openai));
+      assert.deepStrictEqual(provisioner.apiKeys, {});
       assert(Option.isSome(provisioner.tailnet));
       assert.strictEqual(Redacted.value(provisioner.tailnet.value.clientSecret), "client-secret");
       const decodedValue1 = jsonKey(worker);

@@ -26,7 +26,7 @@ import { AnonymousCredential } from "../src/attachment/attachment.ts";
 import { CallerTokens } from "../src/caller/caller.ts";
 import { serveEgressProxy } from "../src/node/egress-proxy.ts";
 import { GatewayAddresses, gatewayLayer, type Listener } from "../src/node/node.ts";
-import { UpstreamBase } from "../src/upstream.ts";
+import { UpstreamBase } from "@usine/core/agent/provider";
 import { ADMIN_TOKEN_VALUE, NO_PROVIDERS, REPOSITORY, WORKER, settingsLayer } from "./fixtures.ts";
 import { rawThroughTunnel, silentTunnel, tlsThroughTunnel } from "./tunnel.ts";
 
