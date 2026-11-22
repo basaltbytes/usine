@@ -4,7 +4,13 @@ import { rejectionMessage } from "~/lib/api";
 import { useQuery } from "@tanstack/react-query";
 import { providersQuery } from "~/lib/providers/queries";
 import { ProviderConnectionRow, ProviderUnavailableRow } from "./connection";
-import { providersTitle, providersHelp, targetLabel, refreshProviders } from "./strings";
+import {
+  providerName,
+  providersTitle,
+  providersHelp,
+  targetLabel,
+  refreshProviders,
+} from "./strings";
 
 export const ProviderConnections = () => {
   const { data, error, refetch } = useQuery(providersQuery());
@@ -33,27 +39,25 @@ export const ProviderConnections = () => {
               {"error" in destination ? (
                 <ErrorAlert message={destination.error} />
               ) : (
-                destination.providers.map((connection) => {
-                  const provider =
-                    connection.provider === "anthropic-messages" ? "claude" : "chatgpt";
-                  return "error" in connection ? (
+                destination.providers.map((connection) =>
+                  "error" in connection ? (
                     <ProviderUnavailableRow
-                      key={provider}
-                      provider={provider}
+                      key={connection.provider}
+                      name={providerName(connection)}
                       message={connection.error}
                     />
                   ) : (
                     <ProviderConnectionRow
-                      key={provider}
+                      key={connection.provider}
                       target={target}
-                      provider={provider}
                       connection={connection}
                       login={data.logins.find(
-                        (login) => login.target === target && login.provider === provider,
+                        (login) =>
+                          login.target === target && login.provider === connection.accepts.login,
                       )}
                     />
-                  );
-                })
+                  ),
+                )
               )}
             </div>
           );

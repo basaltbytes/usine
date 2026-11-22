@@ -1,4 +1,11 @@
-import { anthropic, type GatewaySlot, openai } from "@usine/core/agent/provider";
+import { catalog } from "@usine/agents/harness";
+import {
+  anthropic,
+  type GatewaySlot,
+  type ModelProvider,
+  ModelProviderCatalog,
+  openai,
+} from "@usine/core/agent/provider";
 import { LoadedInstance } from "@usine/config/instance";
 import {
   ConfigurationStore,
@@ -26,8 +33,8 @@ import {
   ProviderCredentialError,
   readAuthFile,
   ProviderConnections,
-  credentialProvider,
   ProviderCredential,
+  providerEntry,
   type ProviderStatus,
   type ProviderTarget,
 } from "@usine/gateway/credentials";
@@ -41,6 +48,13 @@ const unreachableClaude = () =>
   );
 const localFailure = () =>
   failed("Could not read or save the local harness login. Check its directory permissions.");
+/** The providers whose credentials the local Claude Code and Codex logins hold. */
+const localProviders = ModelProviderCatalog.make({ providers: [anthropic, openai] });
+/** Returns the provider that `credential` connects, by its ID or login, and its credential kind. */
+const connecting = (credential: ProviderCredential) =>
+  credential._tag === "StaticKey"
+    ? { named: credential.provider, kind: "api-key" as const }
+    : { named: credential.login, kind: "subscription" as const };
 const makeProviderTargets = Effect.fn("ProviderTargets.make")(function* (
   workers: Effect.Effect<readonly Worker[]>,
   release: Option.Option<ReleaseVersion>,
@@ -62,15 +76,13 @@ const makeProviderTargets = Effect.fn("ProviderTargets.make")(function* (
     Config.withDefault("/usr/local/bin:/usr/bin:/bin"),
     Effect.orDie,
   );
+  const matchingRelease = Option.match(release, {
+    onNone: () => "Install the @usine/gateway release that matches this orchestrator on it.",
+    onSome: (version) => `Install @usine/gateway@${version} on it.`,
+  });
   const olderGateway = (destination: string) =>
     failed(
-      `Gateway ${destination} is older than this orchestrator: it has no provider-credentials admin API. ${Option.match(
-        release,
-        {
-          onNone: () => "Install the @usine/gateway release that matches this orchestrator on it.",
-          onSome: (version) => `Install @usine/gateway@${version} on it.`,
-        },
-      )}`,
+      `Gateway ${destination} is older than this orchestrator: it has no provider-credentials admin API. ${matchingRelease}`,
     );
   const claudeCommand = Effect.fn("ProviderTargets.claudeCommand")(function* (
     action: "status" | "logout",
@@ -230,9 +242,11 @@ const makeProviderTargets = Effect.fn("ProviderTargets.make")(function* (
       if (Number(exit) !== 0)
         return yield* status === "404"
           ? olderGateway(gateway.destination)
-          : failed(
-              "The gateway refused the credential request. Check its version, admin token, and service logs.",
-            );
+          : status === "422"
+            ? failed(`Gateway ${gateway.destination} doesn't serve ${provider}. ${matchingRelease}`)
+            : failed(
+                "The gateway refused the credential request. Check its version, admin token, and service logs.",
+              );
       return output.slice(0, Math.max(statusLine, 0));
     },
     Effect.timeoutOrElse({
@@ -254,6 +268,7 @@ const makeProviderTargets = Effect.fn("ProviderTargets.make")(function* (
     )(nativeClaude.claudeAiOauth);
     const connection = {
       provider: anthropic.slot,
+      ...providerEntry(anthropic),
       credential:
         !claude.loggedIn || claude.apiProvider !== "firstParty"
           ? null
@@ -319,6 +334,7 @@ const makeProviderTargets = Effect.fn("ProviderTargets.make")(function* (
       : Option.none();
     return {
       provider: openai.slot,
+      ...providerEntry(openai),
       credential: Option.isSome(tokenFields)
         ? ("subscription" as const)
         : Option.isSome(Schema.decodeUnknownOption(Schema.NonEmptyString)(codex.OPENAI_API_KEY))
@@ -332,50 +348,52 @@ const makeProviderTargets = Effect.fn("ProviderTargets.make")(function* (
   });
   const statusErrors = new Map<string, string>();
   const isolated = <A>(
-    provider: GatewaySlot,
+    provider: ModelProvider,
     connection: Effect.Effect<A, ProviderCredentialError>,
   ) =>
     connection.pipe(
       Effect.tap(() =>
         Effect.gen(function* () {
-          if (statusErrors.delete(provider))
-            yield* Effect.logInfo("Local provider status available", { provider });
+          if (statusErrors.delete(provider.slot))
+            yield* Effect.logInfo("Local provider status available", { provider: provider.slot });
         }),
       ),
       Effect.catchTag("ProviderCredentialError", (error) =>
         Effect.gen(function* () {
-          if (statusErrors.get(provider) !== error.message) {
-            statusErrors.set(provider, error.message);
+          if (statusErrors.get(provider.slot) !== error.message) {
+            statusErrors.set(provider.slot, error.message);
             yield* Effect.logInfo("Local provider status unavailable", {
-              provider,
+              provider: provider.slot,
               message: error.message,
             });
           }
-          return { provider, error: error.message };
+          return { provider: provider.slot, ...providerEntry(provider), error: error.message };
         }),
       ),
     );
   const localStatus = Effect.all(
-    [isolated(anthropic.slot, claudeConnection), isolated(openai.slot, codexConnection)],
+    [isolated(anthropic, claudeConnection), isolated(openai, codexConnection)],
     { concurrency: "unbounded" },
   );
   const replaceLocal = (credential: ProviderCredential) =>
     Effect.gen(function* () {
-      if (credentialProvider(credential) === anthropic.slot) {
+      const provider = credential.providerIn(localProviders);
+      if (Option.isNone(provider))
+        return yield* failed(
+          `Connect ${connecting(credential).named} on a gateway: without one, usine connects only the providers of the local Claude Code and Codex.`,
+        );
+      if (provider.value.slot === anthropic.slot) {
         const settings = yield* read(claudeFile);
         const configured = yield* environment(settings);
         const env = { ...configured };
         delete env.ANTHROPIC_API_KEY;
         delete env.CLAUDE_CODE_OAUTH_TOKEN;
-        env[
-          credential.kind === "claude-subscription"
-            ? "CLAUDE_CODE_OAUTH_TOKEN"
-            : "ANTHROPIC_API_KEY"
-        ] = Redacted.value(credential.secret);
+        env[credential._tag === "LoginSecret" ? "CLAUDE_CODE_OAUTH_TOKEN" : "ANTHROPIC_API_KEY"] =
+          Redacted.value(credential.secret);
         return yield* write(claudeHome, claudeFile, { ...settings, env });
       }
       const data =
-        credential.kind === "chatgpt-subscription"
+        credential._tag === "LoginSecret"
           ? yield* Schema.decodeEffect(Json)(Redacted.value(credential.secret)).pipe(
               Effect.mapError(localFailure),
             )
@@ -389,9 +407,24 @@ const makeProviderTargets = Effect.fn("ProviderTargets.make")(function* (
         return yield* failed("This gateway is no longer configured. Refresh the page.");
       return gateway;
     });
+  /**
+   * Routes the gateway's workers to the slot of `used`, or away from it. Configuration lists only the
+   * slots of providers that this orchestrator's harnesses use, so routing skips any other provider.
+   */
   const routeWorkers = Effect.fn("ProviderTargets.routeWorkers")(
-    function* (target: string, provider: GatewaySlot, action: "connect" | "disconnect") {
-      yield* Effect.annotateCurrentSpan({ target, provider, action });
+    function* (
+      target: string,
+      named: string,
+      used: Option.Option<ModelProvider>,
+      action: "connect" | "disconnect",
+    ) {
+      yield* Effect.annotateCurrentSpan({ target, provider: named, action });
+      if (Option.isNone(used))
+        return yield* Effect.logInfo(
+          "Kept the worker routing: no harness of this orchestrator uses the provider",
+          { target, provider: named, action },
+        );
+      const provider = used.value.slot;
       const snapshot = yield* configuration.read;
       if (Option.isNone(snapshot.instance)) return;
       const instance = snapshot.instance.value;
@@ -448,9 +481,31 @@ const makeProviderTargets = Effect.fn("ProviderTargets.make")(function* (
     }
     const gateway = yield* selected(target);
     const text = yield* Effect.scoped(remote(gateway, "GET", ""));
-    const { providers } = yield* Schema.decodeEffect(Schema.fromJsonString(ProviderConnections))(
+    const reported = yield* Schema.decodeEffect(Schema.fromJsonString(ProviderConnections))(
       text,
     ).pipe(Effect.mapError(() => failed("Upgrade the gateway to enable provider connections.")));
+    // A gateway up to 0.3.0 reports only the state, of the providers in this orchestrator's catalog.
+    const providers = reported.providers.flatMap((connection) =>
+      "id" in connection
+        ? [connection]
+        : Option.toArray(catalog.providers.find(connection.provider)).map((provider) => ({
+            ...connection,
+            ...providerEntry(provider),
+          })),
+    );
+    if (providers.length < reported.providers.length)
+      yield* Effect.logDebug(
+        "Left out the slots that the gateway and this orchestrator don't describe",
+        {
+          target,
+          slots: reported.providers
+            .filter(
+              (connection) => !providers.some(({ provider }) => provider === connection.provider),
+            )
+            .map(({ provider }) => provider)
+            .join(","),
+        },
+      );
     return { target, label: gateway.destination, providers };
   });
   // Settings polls the list, so each destination's error is logged when it changes.
@@ -493,25 +548,18 @@ const makeProviderTargets = Effect.fn("ProviderTargets.make")(function* (
       target: string,
       credential: ProviderCredential,
     ) {
-      yield* Effect.annotateCurrentSpan({
-        target,
-        provider: credentialProvider(credential),
-        kind: credential.kind,
-      });
+      const { named, kind } = connecting(credential);
+      yield* Effect.annotateCurrentSpan({ target, provider: named, kind });
       if (target === "local") {
         if ((yield* gateways).size > 0)
           return yield* failed("Choose the configured gateway for this instance.");
         yield* replaceLocal(credential);
       } else {
         const gateway = yield* selected(target);
-        yield* Effect.scoped(remote(gateway, "PUT", credentialProvider(credential), credential));
-        yield* routeWorkers(target, credentialProvider(credential), "connect");
+        yield* Effect.scoped(remote(gateway, "PUT", named, credential));
+        yield* routeWorkers(target, named, credential.providerIn(catalog.providers), "connect");
       }
-      yield* Effect.logInfo("Provider connected", {
-        target,
-        provider: credentialProvider(credential),
-        kind: credential.kind,
-      });
+      yield* Effect.logInfo("Provider connected", { target, provider: named, kind });
     }),
     disconnect: Effect.fn("ProviderTargets.disconnect")(function* (
       target: string,
@@ -523,9 +571,13 @@ const makeProviderTargets = Effect.fn("ProviderTargets.make")(function* (
       if (target !== "local") {
         const gateway = yield* selected(target);
         yield* Effect.scoped(remote(gateway, "DELETE", provider));
-        yield* routeWorkers(target, provider, "disconnect");
+        yield* routeWorkers(target, provider, catalog.providers.find(provider), "disconnect");
       } else if (provider === openai.slot)
         yield* fs.remove(codexFile, { force: true }).pipe(Effect.mapError(localFailure));
+      else if (provider !== anthropic.slot)
+        return yield* failed(
+          `Disconnect ${provider} on a gateway: without one, usine connects only the providers of the local Claude Code and Codex.`,
+        );
       else {
         yield* claudeCommand("logout");
         const settings = yield* read(claudeFile);

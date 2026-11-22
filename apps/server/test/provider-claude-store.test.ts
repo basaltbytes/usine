@@ -8,6 +8,7 @@ import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { jsonKey } from "@usine/core/json-key";
 import { ConfigProvider, Context, Effect, FileSystem, Layer, Option, Redacted } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
+import { LoginSecret, StaticKey } from "@usine/gateway/credentials";
 import { ProviderTargets } from "../src/providers/targets.ts";
 
 it.live("reads native Claude logins and clears an overridden Keychain login on disconnect", () =>
@@ -90,16 +91,20 @@ it.live("reads native Claude logins and clears an overridden Keychain login on d
       const nativeCredential = yield* credential;
       assert.equal(nativeCredential, "subscription");
       assert.isUndefined((yield* connection).refreshable);
-      for (const kind of ["claude-subscription", "anthropic-api-key"] as const) {
-        yield* targets.replace("local", { kind, secret: Redacted.make("fixture-managed-secret") });
+      const secret = Redacted.make("fixture-managed-secret");
+      for (const managed of [
+        LoginSecret.make({ login: "claude", secret }),
+        StaticKey.make({ provider: anthropic.id, secret }),
+      ]) {
+        yield* targets.replace("local", managed);
         const connectedCredential = yield* credential;
         assert.equal(
           connectedCredential,
-          kind === "claude-subscription" ? "subscription" : "api-key",
+          managed._tag === "LoginSecret" ? "subscription" : "api-key",
         );
         assert.equal(
           (yield* connection).refreshable,
-          kind === "claude-subscription" ? false : undefined,
+          managed._tag === "LoginSecret" ? false : undefined,
         );
       }
       yield* fs.writeFileString(

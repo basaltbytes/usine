@@ -57724,13 +57724,51 @@
                                         },
                                         "refreshable": {
                                           "type": "boolean"
+                                        },
+                                        "id": {
+                                          "type": "string",
+                                          "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+                                        },
+                                        "label": {
+                                          "type": "string",
+                                          "minLength": 1
+                                        },
+                                        "accepts": {
+                                          "type": "object",
+                                          "properties": {
+                                            "apiKey": {
+                                              "type": "boolean"
+                                            },
+                                            "login": {
+                                              "anyOf": [
+                                                {
+                                                  "type": "string",
+                                                  "enum": [
+                                                    "claude",
+                                                    "chatgpt"
+                                                  ]
+                                                },
+                                                {
+                                                  "type": "null"
+                                                }
+                                              ]
+                                            }
+                                          },
+                                          "required": [
+                                            "apiKey",
+                                            "login"
+                                          ],
+                                          "additionalProperties": false
                                         }
                                       },
                                       "required": [
                                         "provider",
                                         "credential",
                                         "expiresAt",
-                                        "lastRefresh"
+                                        "lastRefresh",
+                                        "id",
+                                        "label",
+                                        "accepts"
                                       ],
                                       "additionalProperties": false
                                     },
@@ -57741,12 +57779,50 @@
                                           "type": "string",
                                           "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
                                         },
+                                        "id": {
+                                          "type": "string",
+                                          "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+                                        },
+                                        "label": {
+                                          "type": "string",
+                                          "minLength": 1
+                                        },
+                                        "accepts": {
+                                          "type": "object",
+                                          "properties": {
+                                            "apiKey": {
+                                              "type": "boolean"
+                                            },
+                                            "login": {
+                                              "anyOf": [
+                                                {
+                                                  "type": "string",
+                                                  "enum": [
+                                                    "claude",
+                                                    "chatgpt"
+                                                  ]
+                                                },
+                                                {
+                                                  "type": "null"
+                                                }
+                                              ]
+                                            }
+                                          },
+                                          "required": [
+                                            "apiKey",
+                                            "login"
+                                          ],
+                                          "additionalProperties": false
+                                        },
                                         "error": {
                                           "type": "string"
                                         }
                                       },
                                       "required": [
                                         "provider",
+                                        "id",
+                                        "label",
+                                        "accepts",
                                         "error"
                                       ],
                                       "additionalProperties": false
@@ -58160,7 +58236,7 @@
             }
           }
         },
-        "description": "Returns credential metadata and pending authorization prompts for configured gateways or local harnesses. Requires instance admin or setup access.",
+        "description": "Returns the providers of configured gateways or local harnesses, each with its ID, display name, the credentials it accepts, and credential metadata, and pending authorization prompts. Requires instance admin or setup access.",
         "summary": "Read provider connections",
         "x-usine-permission": "setup"
       }
@@ -59542,7 +59618,7 @@
             }
           }
         },
-        "description": "Saves an API key on the selected destination and updates gateway worker routing.",
+        "description": "Saves an API key on the selected destination and updates gateway worker routing. `provider` names a provider that the destination lists, by its slot or ID, or by the subscription login it accepts.",
         "summary": "Connect a provider API key",
         "requestBody": {
           "content": {
@@ -59556,10 +59632,7 @@
                   },
                   "provider": {
                     "type": "string",
-                    "enum": [
-                      "claude",
-                      "chatgpt"
-                    ]
+                    "minLength": 1
                   },
                   "key": {
                     "type": "string",
@@ -59893,10 +59966,7 @@
                   },
                   "provider": {
                     "type": "string",
-                    "enum": [
-                      "claude",
-                      "chatgpt"
-                    ]
+                    "minLength": 1
                   }
                 },
                 "required": [

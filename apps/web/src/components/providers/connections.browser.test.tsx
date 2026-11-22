@@ -1,4 +1,18 @@
-import { anthropic, openai } from "@usine/core/agent/provider";
+import {
+  anthropic,
+  ApiKeyCredential,
+  GatewaySlot,
+  GatewayVariable,
+  HeaderName,
+  KeyHeader,
+  ModelProvider,
+  ModelProviderId,
+  openai,
+  ProviderProtocol,
+  RoutePattern,
+  UpstreamBase,
+  WireProtocol,
+} from "@usine/core/agent/provider";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createRoot } from "react-dom/client";
 import { flushSync } from "react-dom";
@@ -6,7 +20,7 @@ import { expect, it } from "vitest";
 import { commands, page } from "vitest/browser";
 import { ProviderConnections } from "./connections";
 import { timestampLabel } from "~/lib/strings";
-import type { ProviderStatus } from "@usine/gateway/credentials";
+import { providerEntry, type ProviderStatus } from "@usine/gateway/credentials";
 import "~/index.css";
 
 it.each([{ width: 390, height: 844, device: "phone" }])(
@@ -24,12 +38,14 @@ it.each([{ width: 390, height: 844, device: "phone" }])(
           providers: [
             {
               provider: anthropic.slot,
+              ...providerEntry(anthropic),
               credential: null,
               expiresAt: null,
               lastRefresh: null,
             },
             {
               provider: openai.slot,
+              ...providerEntry(openai),
               credential: "subscription",
               expiresAt: "2027-01-01T00:00:00Z",
               lastRefresh: "2026-11-01T12:00:00Z",
@@ -164,10 +180,16 @@ it.each([
         {
           target: "local",
           label: "Local harnesses",
-          providers: [anthropic.slot, openai.slot].map((entry) =>
-            entry === provider
-              ? { provider: entry, error: message }
-              : { provider: entry, credential: null, expiresAt: null, lastRefresh: null },
+          providers: [anthropic, openai].map((entry) =>
+            entry.slot === provider
+              ? { provider: entry.slot, ...providerEntry(entry), error: message }
+              : {
+                  provider: entry.slot,
+                  ...providerEntry(entry),
+                  credential: null,
+                  expiresAt: null,
+                  lastRefresh: null,
+                },
           ),
         },
       ],
@@ -202,3 +224,78 @@ it.each([
     }
   },
 );
+
+it("connects the API key of a provider without a subscription login, with no sign-in", async () => {
+  const plan = ModelProvider.make({
+    id: ModelProviderId.make("test-plan"),
+    slot: GatewaySlot.make("test-plan"),
+    label: "Test plan",
+    protocols: [
+      ProviderProtocol.make({
+        protocol: WireProtocol.make("openai-chat-completions"),
+        upstream: UpstreamBase.make("https://plan.test/v1"),
+        routes: [RoutePattern.make("/chat/completions")],
+        key: KeyHeader.make({ header: HeaderName.make("authorization"), scheme: "bearer" }),
+      }),
+    ],
+    credentials: [ApiKeyCredential.make({ variable: GatewayVariable.make("TEST_PLAN_API_KEY") })],
+  });
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const sent: unknown[] = [];
+  let credential: "api-key" | null = null;
+  const state = (): ProviderStatus => ({
+    targets: [
+      {
+        target: "gateway",
+        label: "usine-gateway",
+        providers: [
+          {
+            provider: plan.slot,
+            ...providerEntry(plan),
+            credential,
+            expiresAt: null,
+            lastRefresh: null,
+          },
+        ],
+      },
+    ],
+    logins: [],
+  });
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input, init) => {
+    if (String(input).endsWith("/key")) {
+      sent.push(JSON.parse(String(init?.body)));
+      credential = "api-key";
+      return Response.json({ ok: true });
+    }
+    return Response.json(state());
+  };
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  try {
+    flushSync(() =>
+      root.render(
+        <QueryClientProvider client={client}>
+          <ProviderConnections />
+        </QueryClientProvider>,
+      ),
+    );
+    await expect.element(page.getByRole("heading", { name: "Test plan" })).toBeVisible();
+    expect(page.getByRole("button", { name: /^Connect /u }).elements()).toHaveLength(0);
+    expect(host.querySelectorAll("details")).toHaveLength(0);
+    await page.getByLabelText("API key", { exact: true }).fill("private-plan-key");
+    await page.getByRole("button", { name: "Save API key", exact: true }).click();
+    await expect.element(page.getByText("Connected · API key", { exact: true })).toBeVisible();
+    await expect
+      .element(page.getByRole("button", { name: "Disconnect Test plan", exact: true }))
+      .toBeVisible();
+    expect(sent).toEqual([{ target: "gateway", provider: "test-plan", key: "private-plan-key" }]);
+    expect(host.textContent).not.toContain("private-plan-key");
+  } finally {
+    root.unmount();
+    host.remove();
+    client.clear();
+    globalThis.fetch = originalFetch;
+  }
+});

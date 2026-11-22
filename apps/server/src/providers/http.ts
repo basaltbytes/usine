@@ -1,7 +1,7 @@
 import { Effect, Option } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
 import { authFailure } from "../auth/model.ts";
-import { ProviderApi, BeginRequest, CodeRequest, KeyRequest } from "./api.ts";
+import { ProviderApi, BeginRequest, CodeRequest, DisconnectRequest, KeyRequest } from "./api.ts";
 import { ProviderLogins } from "./control.ts";
 
 export const providerRoutes = HttpRouter.addAll(
@@ -41,7 +41,7 @@ export const providerRoutes = HttpRouter.addAll(
             break;
           }
           case "disconnect": {
-            const payload = yield* HttpServerRequest.schemaBodyJson(BeginRequest, {
+            const payload = yield* HttpServerRequest.schemaBodyJson(DisconnectRequest, {
               onExcessProperty: "error",
             });
             yield* logins.disconnect(payload.target, payload.provider);

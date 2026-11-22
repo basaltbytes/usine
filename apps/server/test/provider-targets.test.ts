@@ -1,4 +1,20 @@
-import { anthropic, modelProviders, openai } from "@usine/core/agent/provider";
+import {
+  anthropic,
+  ApiKeyCredential,
+  GatewaySlot,
+  GatewayVariable,
+  HeaderName,
+  KeyHeader,
+  ModelProvider,
+  ModelProviderCatalog,
+  ModelProviderId,
+  modelProviders,
+  openai,
+  ProviderProtocol,
+  RoutePattern,
+  UpstreamBase,
+  WireProtocol,
+} from "@usine/core/agent/provider";
 import { BrainSpec, Harness, ModelId } from "@usine/core/agent/brain";
 import { preflight } from "@usine/agents/preflight";
 import { harnessesLive, ProbeTarget } from "@usine/agents/harness/node";
@@ -47,10 +63,31 @@ import { ProviderLogins } from "../src/providers/control.ts";
 import { ProviderLoginRunner } from "../src/providers/runner.ts";
 import { ProviderTargets } from "../src/providers/targets.ts";
 import { ReleaseVersion } from "@usine/core/upgrade";
-import type { ProviderTarget } from "@usine/gateway/credentials";
+import {
+  LoginSecret,
+  providerEntry,
+  type ProviderTarget,
+  StaticKey,
+} from "@usine/gateway/credentials";
 
 const credentialOf = (connection: ProviderTarget["providers"][number] | undefined) =>
   connection !== undefined && "credential" in connection ? connection.credential : undefined;
+
+/** A provider that only this test defines, with a static key. */
+const plan = ModelProvider.make({
+  id: ModelProviderId.make("test-plan"),
+  slot: GatewaySlot.make("test-plan"),
+  label: "Test plan",
+  protocols: [
+    ProviderProtocol.make({
+      protocol: WireProtocol.make("openai-chat-completions"),
+      upstream: UpstreamBase.make("https://plan.test/v1"),
+      routes: [RoutePattern.make("/chat/completions")],
+      key: KeyHeader.make({ header: HeaderName.make("authorization"), scheme: "bearer" }),
+    }),
+  ],
+  credentials: [ApiKeyCredential.make({ variable: GatewayVariable.make("TEST_PLAN_API_KEY") })],
+});
 
 it.live(
   "hands credentials to the gateway admin API and updates routing; uses native files without a gateway",
@@ -62,7 +99,7 @@ it.live(
         const settings = GatewaySettings.of({
           domain: GatewayDomain.make("gw.test"),
           github: GITHUB_ORIGINS,
-          catalog: modelProviders,
+          catalog: ModelProviderCatalog.make({ providers: [...modelProviders.providers, plan] }),
           providers: {},
           adminToken: AdminToken.make(Redacted.make("test-admin-token-private-0123456789")),
           callerKey: CallerKey.make(Redacted.make("test-caller-key-private-0123456789")),
@@ -236,7 +273,10 @@ ${["missing-token", "unreachable", "outdated", "older-gateway"]
         );
         const secret = 'private-key-with-"quotes"-and-\\slashes';
         yield* targets
-          .replace("test-gateway", { kind: "anthropic-api-key", secret: Redacted.make(secret) })
+          .replace(
+            "test-gateway",
+            StaticKey.make({ provider: anthropic.id, secret: Redacted.make(secret) }),
+          )
           .pipe(
             Effect.provideService(
               ConfigProvider.ConfigProvider,
@@ -294,6 +334,42 @@ ${["missing-token", "unreachable", "outdated", "older-gateway"]
             : undefined,
           null,
         );
+        const planKey = "plan-key-for-server-tests-0123456789";
+        const gatewayToken = ConfigProvider.fromUnknown({
+          TEST_GATEWAY_ADMIN_TOKEN: Redacted.value(settings.adminToken),
+        });
+        yield* logins
+          .apiKey("test-gateway", plan.id, Redacted.make(planKey))
+          .pipe(Effect.provideService(ConfigProvider.ConfigProvider, gatewayToken));
+        const planConnected = yield* targets
+          .get("test-gateway")
+          .pipe(Effect.provideService(ConfigProvider.ConfigProvider, gatewayToken));
+        assert.deepStrictEqual(
+          planConnected.providers.find(({ provider }) => provider === plan.slot),
+          {
+            provider: plan.slot,
+            id: plan.id,
+            label: "Test plan",
+            accepts: { apiKey: true, login: null },
+            credential: "api-key",
+            expiresAt: null,
+            lastRefresh: null,
+            refreshable: false,
+          },
+        );
+        const planHeld = (yield* inForce.current).providers[plan.slot];
+        assert(planHeld !== undefined && planHeld.credential._tag === "ApiKey");
+        assert.equal(Redacted.value(planHeld.credential.key), planKey);
+        const unrouted = yield* store.read;
+        assert(Option.isSome(unrouted.instance));
+        const routedWorker = unrouted.instance.value.config.workers[0];
+        assert(routedWorker?.kind === "ssh" && Option.isSome(routedWorker.gateway));
+        assert.deepEqual(routedWorker.gateway.value.llmProviders, []);
+        yield* logins
+          .disconnect("test-gateway", plan.id)
+          .pipe(Effect.provideService(ConfigProvider.ConfigProvider, gatewayToken));
+        assert.isUndefined((yield* inForce.current).providers[plan.slot]);
+        assert.notInclude(jsonKey(planConnected), planKey);
         const nativeSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
         yield* fs.writeFileString(`${directory}/codex`, "#!/bin/sh\nexit 0\n", { mode: 0o700 });
         const claudeStatus = ChildProcessSpawner.make((command) => {
@@ -334,14 +410,14 @@ ${["missing-token", "unreachable", "outdated", "older-gateway"]
           ),
         );
         const local = Context.get(localContext, ProviderTargets);
-        yield* local.replace("local", {
-          kind: "claude-subscription",
-          secret: Redacted.make("private-claude-token"),
-        });
-        yield* local.replace("local", {
-          kind: "openai-api-key",
-          secret: Redacted.make("private-openai-key"),
-        });
+        yield* local.replace(
+          "local",
+          LoginSecret.make({ login: "claude", secret: Redacted.make("private-claude-token") }),
+        );
+        yield* local.replace(
+          "local",
+          StaticKey.make({ provider: openai.id, secret: Redacted.make("private-openai-key") }),
+        );
         const nativeSettings = yield* fs.readFileString(`${directory}/custom claude/settings.json`);
         const nativeAuth = yield* fs.readFileString(`${directory}/custom codex/auth.json`);
         const env = yield* Schema.decodeEffect(
@@ -377,10 +453,10 @@ ${["missing-token", "unreachable", "outdated", "older-gateway"]
           Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, claudeStatus),
         );
         assert.equal((yield* verifyLocalClaude)._tag, "HarnessReady");
-        yield* local.replace("local", {
-          kind: "anthropic-api-key",
-          secret: Redacted.make("fixture-api-key"),
-        });
+        yield* local.replace(
+          "local",
+          StaticKey.make({ provider: anthropic.id, secret: Redacted.make("fixture-api-key") }),
+        );
         assert.equal((yield* verifyLocalClaude)._tag, "HarnessReady");
         yield* local.disconnect("local", anthropic.slot);
         assert.equal((yield* verifyLocalClaude)._tag, "HarnessUnavailableError");
@@ -453,6 +529,7 @@ it.live("manages ChatGPT on a local host without Claude Code", () =>
       const initial = yield* providers;
       assert.deepEqual(initial, {
         provider: openai.slot,
+        ...providerEntry(openai),
         credential: null,
         expiresAt: null,
         lastRefresh: null,

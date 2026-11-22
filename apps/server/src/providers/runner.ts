@@ -14,13 +14,13 @@ import {
   Stream,
 } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
-import { ProviderCredentialError, type ProviderCredential } from "@usine/gateway/credentials";
+import { LoginSecret, ProviderCredentialError } from "@usine/gateway/credentials";
 
 import type { LoginProvider } from "@usine/gateway/credentials";
 export type LoginPrompt = { readonly url: string; readonly code: string | null };
 export interface LoginProcess {
   readonly prompt: Effect.Effect<LoginPrompt, ProviderCredentialError>;
-  readonly result: Effect.Effect<ProviderCredential, ProviderCredentialError>;
+  readonly result: Effect.Effect<LoginSecret, ProviderCredentialError>;
   readonly submit: (code: Redacted.Redacted<string>) => Effect.Effect<void>;
 }
 export class ProviderLoginRunner extends Context.Service<
@@ -83,7 +83,7 @@ export const providerLoginRunnerLayer = Layer.effect(
           .pipe(Effect.mapError(failure));
         const input = yield* Queue.unbounded<Uint8Array>();
         const prompt = yield* Deferred.make<LoginPrompt, ProviderCredentialError>();
-        const result = yield* Deferred.make<ProviderCredential, ProviderCredentialError>();
+        const result = yield* Deferred.make<LoginSecret, ProviderCredentialError>();
         const options = {
           env: {
             PATH: path,
@@ -142,10 +142,10 @@ export const providerLoginRunnerLayer = Layer.effect(
           if (provider === "claude") {
             const token = /sk-ant-oat01-[A-Za-z0-9_-]+/u.exec(output.replace(ansi, ""))?.[0];
             if (token === undefined) return yield* failure();
-            yield* Deferred.succeed(result, {
-              kind: "claude-subscription" as const,
-              secret: Redacted.make(token),
-            });
+            yield* Deferred.succeed(
+              result,
+              LoginSecret.make({ login: "claude", secret: Redacted.make(token) }),
+            );
             return;
           }
           const auth = yield* fs.readFileString(`${directory}/auth.json`);
@@ -159,10 +159,10 @@ export const providerLoginRunnerLayer = Layer.effect(
               }),
             ),
           )(auth);
-          yield* Deferred.succeed(result, {
-            kind: "chatgpt-subscription" as const,
-            secret: Redacted.make(auth),
-          });
+          yield* Deferred.succeed(
+            result,
+            LoginSecret.make({ login: "chatgpt", secret: Redacted.make(auth) }),
+          );
         }).pipe(
           Effect.scoped,
           Effect.timeout("15 minutes"),

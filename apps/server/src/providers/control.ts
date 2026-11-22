@@ -1,11 +1,12 @@
 import { Context, Crypto, Effect, Fiber, Layer, Redacted, Semaphore } from "effect";
 import {
-  loginLlmProvider,
   type LoginProvider,
   type ProviderLoginView,
   ProviderCredentialError,
   type ProviderStatus,
+  StaticKey,
 } from "@usine/gateway/credentials";
+import { providerNamed } from "./api.ts";
 import { ProviderTargets } from "./targets.ts";
 import { ProviderLoginRunner, type LoginProcess } from "./runner.ts";
 
@@ -27,14 +28,16 @@ export class ProviderLogins extends Context.Service<
       code: Redacted.Redacted<string>,
     ) => Effect.Effect<void, ProviderCredentialError>;
     readonly cancel: (id: string) => Effect.Effect<void, ProviderCredentialError>;
+    /** Connects `key` for the provider of `target` that `provider` names: its slot, ID, or login. */
     readonly apiKey: (
       target: string,
-      provider: LoginProvider,
+      provider: string,
       key: Redacted.Redacted<string>,
     ) => Effect.Effect<void, ProviderCredentialError>;
+    /** Disconnects the provider of `target` that `provider` names: its slot, ID, or login. */
     readonly disconnect: (
       target: string,
-      provider: LoginProvider,
+      provider: string,
     ) => Effect.Effect<void, ProviderCredentialError>;
   }
 >()("@usine/server/providers/control/ProviderLogins") {
@@ -57,6 +60,18 @@ export class ProviderLogins extends Context.Service<
             }),
           ),
         );
+      /** Returns the provider of `target` that `name` names, if the destination can read its status. */
+      const listed = Effect.fn("ProviderLogins.listed")(function* (target: string, name: string) {
+        const { label, providers } = yield* targets.get(target);
+        const connection = providerNamed(providers, name);
+        if (connection === undefined)
+          return yield* ProviderCredentialError.make({
+            message: `${label} has no provider ${name}. Choose ${providers.map(({ id }) => id).join(", ")}.`,
+          });
+        if ("error" in connection)
+          return yield* ProviderCredentialError.make({ message: connection.error });
+        return connection;
+      });
       const stop = Effect.fn("ProviderLogins.cancel")(function* (session: Session) {
         const { provider, target, id } = session.view;
         yield* Effect.annotateCurrentSpan({ provider, target, loginId: id });
@@ -65,21 +80,26 @@ export class ProviderLogins extends Context.Service<
         session.process = undefined;
         yield* Effect.logInfo("Provider login cancelled", { provider, target, loginId: id });
       });
+      /** Stops the pending sign-in with `login` on `target`, if any. */
+      const stopLogin = (target: string, login: LoginProvider | null) =>
+        Effect.forEach(
+          [...sessions.values()].filter(
+            (session) =>
+              session.view.target === target && session.view.provider === login && active(session),
+          ),
+          stop,
+          { discard: true },
+        );
       return {
-        status: Effect.map(targets.list, (listed) => ({
-          targets: listed,
+        status: Effect.map(targets.list, (destinations) => ({
+          targets: destinations,
           logins: [...sessions.values()].map(({ view }) => view),
         })).pipe(Effect.withSpan("ProviderLogins.status")),
         begin: Effect.fn("ProviderLogins.begin")((target: string, provider: LoginProvider) =>
           lock.withPermit(
             Effect.gen(function* () {
               yield* Effect.annotateCurrentSpan({ target, provider });
-              const { providers } = yield* targets.get(target);
-              const connection = providers.find(
-                (entry) => entry.provider === loginLlmProvider(provider),
-              );
-              if (connection !== undefined && "error" in connection)
-                return yield* ProviderCredentialError.make({ message: connection.error });
+              yield* listed(target, provider);
               for (const [id, session] of sessions) {
                 if (session.view.target !== target || session.view.provider !== provider) continue;
                 if (active(session)) {
@@ -179,37 +199,30 @@ export class ProviderLogins extends Context.Service<
           ),
         ),
         apiKey: Effect.fn("ProviderLogins.apiKey")(
-          (target: string, provider: LoginProvider, key: Redacted.Redacted<string>) =>
+          (target: string, provider: string, key: Redacted.Redacted<string>) =>
             lock.withPermit(
               Effect.gen(function* () {
-                for (const session of sessions.values())
-                  if (
-                    session.view.target === target &&
-                    session.view.provider === provider &&
-                    active(session)
-                  )
-                    yield* stop(session);
-                yield* targets.replace(target, {
-                  kind: provider === "claude" ? "anthropic-api-key" : "openai-api-key",
-                  secret: key,
-                });
+                const connection = yield* listed(target, provider);
+                if (!connection.accepts.apiKey)
+                  return yield* ProviderCredentialError.make({
+                    message: `${connection.label} doesn't take an API key on this destination.`,
+                  });
+                yield* stopLogin(target, connection.accepts.login);
+                yield* targets.replace(
+                  target,
+                  StaticKey.make({ provider: connection.id, secret: key }),
+                );
               }),
             ),
         ),
-        disconnect: Effect.fn("ProviderLogins.disconnect")(
-          (target: string, provider: LoginProvider) =>
-            lock.withPermit(
-              Effect.gen(function* () {
-                for (const session of sessions.values())
-                  if (
-                    session.view.target === target &&
-                    session.view.provider === provider &&
-                    active(session)
-                  )
-                    yield* stop(session);
-                yield* targets.disconnect(target, loginLlmProvider(provider));
-              }),
-            ),
+        disconnect: Effect.fn("ProviderLogins.disconnect")((target: string, provider: string) =>
+          lock.withPermit(
+            Effect.gen(function* () {
+              const connection = yield* listed(target, provider);
+              yield* stopLogin(target, connection.accepts.login);
+              yield* targets.disconnect(target, connection.provider);
+            }),
+          ),
         ),
       };
     }),

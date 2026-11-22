@@ -3,9 +3,12 @@ import { assert, it } from "@effect/vitest";
 import { Deferred, Effect, Layer, Logger, Option, Redacted, Ref, Schema } from "effect";
 import { HttpRouter } from "effect/http";
 import { jsonKey } from "@usine/core/json-key";
+import { anthropic, openai } from "@usine/core/agent/provider";
 import {
+  LoginSecret,
   ProviderCredentialError,
   type ProviderCredential,
+  providerEntry,
   ProviderStatus,
 } from "@usine/gateway/credentials";
 import { ProviderLogins } from "../src/providers/control.ts";
@@ -41,7 +44,14 @@ it.live(
     const lines: string[] = [];
     return Effect.scoped(
       Effect.gen(function* () {
-        const outcome = yield* Deferred.make<ProviderCredential, ProviderCredentialError>();
+        const outcome = yield* Deferred.make<LoginSecret, ProviderCredentialError>();
+        const providers = [anthropic, openai].map((provider) => ({
+          provider: provider.slot,
+          ...providerEntry(provider),
+          credential: null,
+          expiresAt: null,
+          lastRefresh: null,
+        }));
         const saved = yield* Ref.make<readonly ProviderCredential[]>([]);
         const layer = ProviderLogins.layer.pipe(
           Layer.provide([
@@ -60,8 +70,8 @@ it.live(
                 }),
             }),
             Layer.succeed(ProviderTargets, {
-              list: Effect.succeed([{ target: "local", label: "Local harnesses", providers: [] }]),
-              get: (target) => Effect.succeed({ target, label: "Local harnesses", providers: [] }),
+              list: Effect.succeed([{ target: "local", label: "Local harnesses", providers }]),
+              get: (target) => Effect.succeed({ target, label: "Local harnesses", providers }),
               replace: (_target, credential) => Ref.update(saved, (all) => [...all, credential]),
               disconnect: () => Effect.void,
             }),
@@ -85,10 +95,13 @@ it.live(
         const afterCancel = yield* Ref.get(saved);
         assert.lengthOf(afterCancel, 0);
         const connected = yield* logins.begin("local", "chatgpt");
-        yield* Deferred.succeed(outcome, {
-          kind: "chatgpt-subscription" as const,
-          secret: Redacted.make("private-access-and-refresh-tokens"),
-        });
+        yield* Deferred.succeed(
+          outcome,
+          LoginSecret.make({
+            login: "chatgpt",
+            secret: Redacted.make("private-access-and-refresh-tokens"),
+          }),
+        );
         yield* Effect.sleep("20 millis");
         assert.equal(
           (yield* logins.status).logins.find(({ id }) => id === connected.id)?.state.status,

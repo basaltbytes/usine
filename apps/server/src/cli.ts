@@ -1,4 +1,3 @@
-import { LoginProvider } from "@usine/gateway/credentials";
 import type { HttpServerError } from "effect/http";
 import { UiOrigin } from "@usine/config/factory";
 import { ReleaseVersion, UpgradeChannel } from "@usine/core/upgrade";
@@ -84,8 +83,8 @@ Options:
   -h, --help                   Print this help
   -v, --version                Print the installed @usine/server version
 
-  login <claude|chatgpt>       Connect a provider; --api-key reads an API key
-  logout <claude|chatgpt>      Disconnect a provider; --target selects a gateway
+  login <provider>             Connect a provider, such as claude or chatgpt; --api-key reads an API key
+  logout <provider>            Disconnect a provider; --target selects a gateway
 
 Environment:
   USINE_PORT                     Listen on this port if --port is not set
@@ -233,7 +232,8 @@ export class ProviderCommand extends Schema.TaggedClass<
   { readonly brand: unique symbol }
 >()("ProviderCommand", {
   action: Schema.Literals(["login", "logout"]),
-  provider: LoginProvider,
+  /** The provider's ID or slot, or the subscription login it accepts, such as `claude`. */
+  provider: Schema.NonEmptyString,
   mode: Schema.Literals(["subscription", "api-key"]),
   target: Schema.Option(Schema.NonEmptyString),
 }) {}
@@ -535,8 +535,8 @@ export const parseCli = Effect.fn("Cli.parse")((
     case "login":
     case "logout": {
       const [provider, ...flags] = rest;
-      if (!Schema.is(LoginProvider)(provider))
-        return Effect.fail(usageError("Choose claude or chatgpt."));
+      if (provider === undefined || provider === "" || provider.startsWith("-"))
+        return Effect.fail(usageError("Choose a provider, such as claude or chatgpt."));
       let mode: "subscription" | "api-key" = "subscription";
       let target = Option.none<string>();
       while (flags.length > 0) {

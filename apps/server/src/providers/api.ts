@@ -1,17 +1,38 @@
-import { LoginProvider, ProviderLoginView, ProviderStatus } from "@usine/gateway/credentials";
+import {
+  LoginProvider,
+  ProviderLoginView,
+  ProviderStatus,
+  type ProviderTarget,
+} from "@usine/gateway/credentials";
 import { Schema } from "effect";
 import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/http-api";
 import { AuthenticationError } from "../auth/api.ts";
 import { AuthError } from "../auth/model.ts";
 
-const destination = { target: Schema.NonEmptyString, provider: LoginProvider };
 const ok = Schema.Struct({ ok: Schema.Boolean });
 const secret = Schema.Redacted(
   Schema.NonEmptyString.check(Schema.isMaxLength(4096), Schema.isPattern(/^[^\r\n]+$/u)),
 );
-export const BeginRequest = Schema.Struct(destination);
+/** A provider of the destination, named by its slot or ID, or by the subscription login it accepts. */
+const named = { target: Schema.NonEmptyString, provider: Schema.NonEmptyString };
+export const BeginRequest = Schema.Struct({
+  target: Schema.NonEmptyString,
+  provider: LoginProvider,
+});
 export const CodeRequest = Schema.Struct({ id: Schema.String, code: secret });
-export const KeyRequest = Schema.Struct({ ...destination, key: secret });
+export const KeyRequest = Schema.Struct({ ...named, key: secret });
+export const DisconnectRequest = Schema.Struct(named);
+
+type ListedProvider = ProviderTarget["providers"][number];
+
+/** Returns the provider that `name` names on a destination: its slot, its ID, or its subscription login. */
+export const providerNamed = (
+  providers: ReadonlyArray<ListedProvider>,
+  name: string,
+): ListedProvider | undefined =>
+  providers.find(
+    ({ provider, id, accepts }) => provider === name || id === name || accepts.login === name,
+  );
 const error = AuthError.fields.status.literals.map((status) =>
   AuthenticationError.annotate({
     httpApiStatus: status,
@@ -26,7 +47,7 @@ export const ProviderApi = HttpApiGroup.make("providers").add(
     .annotate(OpenApi.Summary, "Read provider connections")
     .annotate(
       OpenApi.Description,
-      "Returns credential metadata and pending authorization prompts for configured gateways or local harnesses. Requires instance admin or setup access.",
+      "Returns the providers of configured gateways or local harnesses, each with its ID, display name, the credentials it accepts, and credential metadata, and pending authorization prompts. Requires instance admin or setup access.",
     ),
   HttpApiEndpoint.post("begin", "/api/providers/login", {
     payload: BeginRequest,
@@ -66,10 +87,10 @@ export const ProviderApi = HttpApiGroup.make("providers").add(
     .annotate(OpenApi.Summary, "Connect a provider API key")
     .annotate(
       OpenApi.Description,
-      "Saves an API key on the selected destination and updates gateway worker routing.",
+      "Saves an API key on the selected destination and updates gateway worker routing. `provider` names a provider that the destination lists, by its slot or ID, or by the subscription login it accepts.",
     ),
   HttpApiEndpoint.post("disconnect", "/api/providers/disconnect", {
-    payload: BeginRequest,
+    payload: DisconnectRequest,
     success: ok,
     error,
   })
