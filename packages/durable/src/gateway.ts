@@ -13,9 +13,10 @@ import { openaiProvider } from "@earendil-works/pi-ai/providers/openai";
 import { openaiCodexProvider } from "@earendil-works/pi-ai/providers/openai-codex";
 import { openAIResponsesApi } from "@earendil-works/pi-ai/api/openai-responses.lazy";
 import { anthropicMessagesApi } from "@earendil-works/pi-ai/api/anthropic-messages.lazy";
-import type { CredentialRoute } from "@usine/agents/harness";
+import { catalog, type CredentialRoute } from "@usine/agents/harness";
 import { type PiAuthentication } from "@usine/agents/pi/authentication";
-import { anthropic, type GatewaySlot, openai } from "@usine/core/agent/provider";
+import { Harness } from "@usine/core/agent/brain";
+import type { GatewaySlot } from "@usine/core/agent/provider";
 import type { GatewayCredentialKind } from "@usine/core/worker";
 import { jsonKey } from "@usine/core/json-key";
 import { Effect, Option, Schema, Stream } from "effect";
@@ -59,13 +60,31 @@ export interface GatewayModelTransport {
   ) => Effect.Effect<Response, ParentCredentialError>;
 }
 
-/** The wire protocol, gateway slot, and model request path of each Pi provider that reaches the gateway. */
-const gatewayRouteOf = (provider: string) =>
-  provider === "anthropic"
-    ? ({ protocol: "anthropic-messages", slot: anthropic.slot, path: "/v1/messages" } as const)
-    : provider === "openai" || provider === "openai-codex"
-      ? ({ protocol: "openai-responses", slot: openai.slot, path: "/v1/responses" } as const)
-      : undefined;
+/** The wire protocol that each Pi provider speaks to the gateway, and its model request path. */
+const PI_PROTOCOLS: Readonly<Record<string, { readonly protocol: string; readonly path: string }>> =
+  {
+    anthropic: { protocol: "anthropic-messages", path: "/v1/messages" },
+    openai: { protocol: "openai-responses", path: "/v1/responses" },
+    "openai-codex": { protocol: "openai-responses", path: "/v1/responses" },
+  };
+
+/** The providers of the Pi harness in the catalog, whose slots Pi reaches through the gateway. */
+const piProviders = Option.match(catalog.get(Harness.make("pi")), {
+  onNone: () => [],
+  onSome: ({ providers }) => providers,
+});
+
+/**
+ * Returns the wire protocol, gateway slot, and model request path of the Pi provider `provider`:
+ * the slot of the first of Pi's catalog providers that serves its protocol.
+ */
+const gatewayRouteOf = (provider: string) => {
+  const spoken = PI_PROTOCOLS[provider];
+  const slot = piProviders.find(({ protocols }) =>
+    protocols.some(({ protocol }) => protocol === spoken?.protocol),
+  )?.slot;
+  return spoken === undefined || slot === undefined ? undefined : { ...spoken, slot };
+};
 
 const Payload = Schema.Record(Schema.String, Schema.Unknown);
 
