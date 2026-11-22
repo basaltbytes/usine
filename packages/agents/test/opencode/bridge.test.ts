@@ -300,9 +300,9 @@ describe("OpenCode bridge", () => {
     bridge.send({ id: 1, method: "POST", path: "/api/large-event" });
     await eventually(() => eventTypes(bridge.lines).includes("after.large"));
     expect(eventTypes(bridge.lines)).toEqual(["server.connected", "after.large"]);
-    // Data longer than a line that isn't JSON, JSON data whose data line is longer than a line, and
-    // JSON data whose event line is.
-    for (const size of [LINE_LIMIT + 1, LINE_LIMIT - 5, LINE_LIMIT - 6])
+    // Data longer than a line that isn't JSON, JSON data whose data line is longer than a line, JSON
+    // data whose event line is, and two data lines that join to data longer than a line.
+    for (const size of [LINE_LIMIT + 1, LINE_LIMIT - 5, LINE_LIMIT - 6, 6 * 1024 ** 2 + 1])
       await eventually(() =>
         bridge
           .stderr()

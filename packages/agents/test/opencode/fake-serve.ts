@@ -137,14 +137,16 @@ const routes = new Map<string, Route>(
       response.end(padded("limit", LINE_LIMIT - 5));
     },
     // Sends event data longer than a line that isn't JSON; JSON data that fits in a line, in a data
-    // line that doesn't; JSON data in a data line that fits, in an event line that doesn't; and a
-    // small event.
+    // line that doesn't; JSON data in a data line that fits, in an event line that doesn't; two data
+    // lines of 3 MiB that each fit in a line, and join to data that doesn't; and a small event.
     "POST /api/large-event": (_request, response) => {
+      const third = "x".repeat(3 * 1024 ** 2);
       for (const subscriber of subscribers)
         for (const data of [
           LARGE_TEXT,
           padded("limit", LINE_LIMIT - 5),
           padded("limit", LINE_LIMIT - 6),
+          `${third}\ndata: ${third}`,
         ])
           subscriber.write(`data: ${data}\n\n`);
       emit({ type: "after.large", data: {} });
