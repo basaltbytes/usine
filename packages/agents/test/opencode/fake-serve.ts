@@ -18,6 +18,7 @@ type Route = (request: IncomingMessage, response: ServerResponse) => void;
  * - `slow` reports its URL and then registers event subscriptions after a delay.
  * - `foreign-url` reports a URL on a host that isn't a loopback address before its own.
  * - `exit-before-ready` fails before its ready line.
+ * - `no-events` accepts the event subscription and sends no event.
  * - `refuse-events` answers the event subscription with 401.
  * - `refuse-events-at-end` holds the event subscription and answers it with 401 at end of input.
  * - `helper` starts a detached process that keeps its stdout and stderr open after it exits.
@@ -56,6 +57,10 @@ const routes = new Map<string, Route>(
   Object.entries({
     "GET /api/event": (_request, response) => {
       if (scenario === "refuse-events") return json(response, 401, { _tag: "UnauthorizedError" });
+      if (scenario === "no-events") {
+        response.writeHead(200, { "content-type": "text/event-stream" });
+        return void response.write(": heartbeat\n\n");
+      }
       if (scenario === "refuse-events-at-end") {
         held.add(response);
         return void process.stderr.write("fake serve: holding the event subscription\n");

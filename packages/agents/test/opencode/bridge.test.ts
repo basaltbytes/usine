@@ -53,14 +53,18 @@ afterEach(() => {
     }
 });
 
+/** Code to run before the bridge that cuts its 30-second wait for OpenCode's first event to 300 ms. */
+const shortReadyWait =
+  "{const wait=setTimeout;globalThis.setTimeout=(callback,ms,...rest)=>wait(callback,ms===30000?300:ms,...rest)}";
+
 /**
- * Starts the bundled bridge around the fake `serve` in `scenario`, with `environment` added to its
- * own, and records its output.
+ * Starts the bundled bridge, after `preamble`, around the fake `serve` in `scenario`, with
+ * `environment` added to its own, and records its output.
  */
-const start = (scenario: string, environment: Record<string, string> = {}) => {
+const start = (scenario: string, environment: Record<string, string> = {}, preamble = "") => {
   const child = spawn(
     process.execPath,
-    ["-e", OPENCODE_BRIDGE, process.execPath, "-e", fakeServe],
+    ["-e", `${preamble}${OPENCODE_BRIDGE}`, process.execPath, "-e", fakeServe],
     {
       env: {
         ...process.env,
@@ -231,6 +235,15 @@ describe("OpenCode bridge", () => {
     expect(bridge.lines).toEqual([]);
     expect(bridge.stderr()).toMatch(
       /opencode bridge: OpenCode refused the event subscription with status 401\n[^]*fake serve: end of input\n/u,
+    );
+  });
+
+  it("reports no first event within 30 seconds, ends serve's input, and exits with 1", async () => {
+    const bridge = start("no-events", { FAKE_SERVE_EXIT_CODE: "0" }, shortReadyWait);
+    expect(await bridge.exit).toBe(1);
+    expect(bridge.lines).toEqual([]);
+    expect(bridge.stderr()).toMatch(
+      /opencode bridge: OpenCode sent no event within 30 seconds of reporting its address\n[^]*fake serve: end of input\n/u,
     );
   });
 

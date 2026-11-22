@@ -47,6 +47,8 @@ const SERVE_ARGUMENTS = [
  * event stream closes.
  */
 const GRACE_MS = 1000;
+/** Milliseconds to wait for OpenCode's first event once `serve` reports its address. */
+const READY_WAIT_MS = 30_000;
 
 const isObject = (value: Json): value is JsonObject =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -147,6 +149,7 @@ const main = () => {
   let closing = false;
   let failed = false;
   let finished = false;
+  let readyWait: ReturnType<typeof setTimeout> | undefined;
   const waiting: Array<string> = [];
 
   const writeLine = (value: Json) => {
@@ -235,6 +238,13 @@ const main = () => {
     if (!closing) setTimeout(() => fail(reason), GRACE_MS);
   };
   const subscribe = (target: Server) => {
+    readyWait = setTimeout(
+      () =>
+        fail(
+          `OpenCode sent no event within ${READY_WAIT_MS / 1000} seconds of reporting its address`,
+        ),
+      READY_WAIT_MS,
+    );
     const events = httpRequest(
       {
         host: target.host,
@@ -256,6 +266,7 @@ const main = () => {
             // OpenCode sends its first event once the subscription is registered.
             if (!ready) {
               ready = true;
+              clearTimeout(readyWait);
               writeLine({ ready: true });
               for (const line of waiting.splice(0)) handle(line);
             }
@@ -302,6 +313,7 @@ const main = () => {
     if (serve.pid === undefined) finish(127);
   });
   serve.on("exit", (code, signal) => {
+    clearTimeout(readyWait);
     const exitCode = code ?? (signal === null ? 1 : 128 + (constants.signals[signal] ?? 0));
     const done = () => finish(failed && exitCode === 0 ? 1 : exitCode);
     serve.on("close", done);
