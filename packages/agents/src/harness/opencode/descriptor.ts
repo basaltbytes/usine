@@ -33,7 +33,7 @@ export const opencode = HarnessDescriptor.make({
   label: "OpenCode",
   worker: WorkerRequirements.make({
     // The launcher's install script fetches only the binary of the worker's platform.
-    install: [{ name: "@opencode/cli", version: OPENCODE_VERSION, optionalDependencies: "omit" }],
+    install: [{ name: "@opencode/cli", version: OPENCODE_VERSION, method: "launcher" }],
     versions: [OPENCODE_VERSION],
     login: { mounted: [], seeded: [] },
     credential: Option.some(

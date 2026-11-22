@@ -122,7 +122,7 @@ describe("harness catalog", () => {
     const inputs = workerImageInputs(catalog, "container");
     assert.deepStrictEqual(workerImageInputs(HarnessCatalog.make({ descriptors: [pi] }), "local"), {
       npmPackages: [],
-      npmPackagesWithoutOptional: [],
+      launcherPackages: [],
       tag: "",
     });
     assert.deepStrictEqual(
@@ -132,31 +132,31 @@ describe("harness catalog", () => {
       ),
       {
         npmPackages: [...inputs.npmPackages, "new-harness@1.2.3", "its-helper@4.5.6"],
-        npmPackagesWithoutOptional: [],
+        launcherPackages: [],
         tag: "claude-2.1.311-codex-0.164.0-new-harness-1.2.3-4.5.6",
       },
     );
   });
 
-  it("installs a launcher without its optional dependencies only where its harness runs", () => {
+  it("installs a launcher into its own prefix only where its harness runs", () => {
     const launcher = HarnessDescriptor.make({
       ...pi,
       id: Harness.make("launched"),
       capabilities: [CapabilityProfile.make({ ...pi.capabilities[0], placements: ["container"] })],
       worker: WorkerRequirements.make({
         ...pi.worker,
-        install: [{ name: "launched", version: "1.0.0", optionalDependencies: "omit" }],
+        install: [{ name: "launched", version: "1.0.0", method: "launcher" }],
       }),
     });
     const source = HarnessCatalog.make({ descriptors: [codex, launcher] });
     assert.deepStrictEqual(workerImageInputs(source, "container"), {
       npmPackages: ["@openai/codex@0.164.0"],
-      npmPackagesWithoutOptional: ["launched@1.0.0"],
+      launcherPackages: ["launched@1.0.0"],
       tag: "codex-0.164.0-launched-1.0.0",
     });
     assert.deepStrictEqual(workerImageInputs(source, "sandbox"), {
       npmPackages: ["@openai/codex@0.164.0"],
-      npmPackagesWithoutOptional: [],
+      launcherPackages: [],
       tag: "codex-0.164.0",
     });
   });
@@ -218,17 +218,16 @@ describe("harness catalog", () => {
       const dockerfile = read(file);
       assert.include(dockerfile, `ARG HARNESS_PACKAGES="${inputs.npmPackages.join(" ")}"`);
       assert.match(dockerfile, /^RUN npm install -g .*\$\{HARNESS_PACKAGES\}/mu);
-      if (inputs.npmPackagesWithoutOptional.length === 0)
-        assert.notInclude(dockerfile, "ARG HARNESS_PACKAGES_WITHOUT_OPTIONAL=");
+      if (inputs.launcherPackages.length === 0)
+        assert.notInclude(dockerfile, "ARG HARNESS_LAUNCHERS=");
       else {
-        assert.include(
-          dockerfile,
-          `ARG HARNESS_PACKAGES_WITHOUT_OPTIONAL="${inputs.npmPackagesWithoutOptional.join(" ")}"`,
-        );
+        assert.include(dockerfile, `ARG HARNESS_LAUNCHERS="${inputs.launcherPackages.join(" ")}"`);
+        // A global install would get every optional platform package of a launcher.
         assert.match(
           dockerfile,
-          /^\s+npm install -g --omit=optional \$\{HARNESS_PACKAGES_WITHOUT_OPTIONAL\};/mu,
+          /^\s+npm install --prefix (\S+) --omit=optional \$\{HARNESS_LAUNCHERS\} \\$/mu,
         );
+        assert.notMatch(dockerfile, /npm install -g[^\n]*HARNESS_LAUNCHERS/u);
       }
     }
     // The sandbox image runs no harness without a sandbox placement.
@@ -241,9 +240,10 @@ describe("harness catalog", () => {
       ssh.npmPackages.join(" "),
     );
     assert.strictEqual(
-      /^\s+npm install -g --omit=optional (.*)$/mu.exec(cloudInit)?.[1],
-      ssh.npmPackagesWithoutOptional.join(" "),
+      /^\s+launchers="(.*)"$/mu.exec(cloudInit)?.[1],
+      ssh.launcherPackages.join(" "),
     );
+    assert.match(cloudInit, /^\s+npm install --prefix (\S+) --omit=optional \$launchers$/mu);
     assert.strictEqual(
       read("infra/worker-image/tag.txt"),
       `${workerImageInputs(catalog, "container").tag}\n`,

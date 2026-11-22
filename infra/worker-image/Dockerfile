@@ -12,9 +12,10 @@ ARG NODE_MAJOR=22
 # packageManager field, the harness packages from their descriptors.
 ARG PNPM_VERSION=11.20.0
 ARG HARNESS_PACKAGES="@anthropic-ai/claude-code@2.1.311 @openai/codex@0.164.0"
-# Installed without their optional dependencies: each package's install script
-# fetches only the binary of the image's platform.
-ARG HARNESS_PACKAGES_WITHOUT_OPTIONAL="@opencode/cli@2.3.2"
+# Launchers install into their own prefix without their optional dependencies, so
+# each launcher's install script fetches only the binary of the image's platform:
+# npm installs every optional dependency of a global package.
+ARG HARNESS_LAUNCHERS="@opencode/cli@2.3.2"
 # The worker's SSH user ID, so that files the attempt writes in its mounted
 # checkout belong to that user. Preflight compares the two.
 ARG USINE_UID=1000
@@ -46,9 +47,13 @@ ARG BOXD_SHA256_AMD64=38371394b448850f32a2b6b297fe5141c5d8e2afd40037e8d4c93a0a00
 ARG BOXD_SHA256_ARM64=86479f787620fd970c10453cdeb15f871b7ce818e559925e3d6ebfc3c2052b13
 RUN --mount=type=bind,source=install-boxd.sh,target=/tmp/install-boxd.sh sh /tmp/install-boxd.sh
 
+# The launcher prefix must hold the launchers and no platform package.
 RUN npm install -g "pnpm@${PNPM_VERSION}" ${HARNESS_PACKAGES} \
- && if [ -n "${HARNESS_PACKAGES_WITHOUT_OPTIONAL}" ]; then \
-      npm install -g --omit=optional ${HARNESS_PACKAGES_WITHOUT_OPTIONAL}; \
+ && if [ -n "${HARNESS_LAUNCHERS}" ]; then \
+      npm install --prefix /usr/local/lib/usine-launchers --omit=optional ${HARNESS_LAUNCHERS} \
+      && test "$(npm ls --prefix /usr/local/lib/usine-launchers --all --parseable | wc -l)" \
+        -eq "$(($(echo ${HARNESS_LAUNCHERS} | wc -w) + 1))" \
+      && ln -s /usr/local/lib/usine-launchers/node_modules/.bin/* /usr/local/bin/; \
     fi \
  && npm cache clean --force
 

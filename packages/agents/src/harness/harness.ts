@@ -112,12 +112,14 @@ export class WorkerRequirements extends Schema.Class<
       name: Schema.NonEmptyString,
       version: Schema.NonEmptyString,
       /**
-       * `omit` installs the package without its optional dependencies, for a launcher whose
-       * install script fetches only the binary of the worker's platform.
+       * `global` installs the package with `npm install -g`. `launcher` installs it without its
+       * optional dependencies into a prefix of its own and links its commands onto `PATH`, so
+       * that its install script fetches only the binary of the worker's platform: npm installs
+       * every optional dependency of a global package.
        */
-      optionalDependencies: Schema.Literals(["include", "omit"]).pipe(
-        Schema.withConstructorDefault(Effect.succeed("include" as const)),
-        Schema.withDecodingDefaultKey(Effect.succeed("include" as const)),
+      method: Schema.Literals(["global", "launcher"]).pipe(
+        Schema.withConstructorDefault(Effect.succeed("global" as const)),
+        Schema.withDecodingDefaultKey(Effect.succeed("global" as const)),
       ),
     }),
   ),
