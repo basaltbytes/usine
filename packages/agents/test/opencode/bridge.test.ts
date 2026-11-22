@@ -293,6 +293,18 @@ describe("OpenCode bridge", () => {
     );
   });
 
+  it("stops reading OpenCode's events while its reader is slow, then relays them", async () => {
+    const bridge = start("ready");
+    await eventually(() => bridge.lines.length >= 2);
+    bridge.child.stdout.pause();
+    bridge.send({ id: 1, method: "POST", path: "/api/flood" });
+    // Serve can't send every event while the bridge holds none of them.
+    await eventually(() => bridge.stderr().includes("fake serve: flood stalled"));
+    bridge.child.stdout.resume();
+    await eventually(() => bridge.stderr().includes("fake serve: flood sent"));
+    await eventually(() => eventTypes(bridge.lines).filter((type) => type === "flood").length === 32);
+  });
+
   it("reports an event stream that closes while serve runs, and exits with 1", async () => {
     const bridge = start("ready", { FAKE_SERVE_EXIT_CODE: "0" });
     await eventually(() => bridge.lines.length >= 1);

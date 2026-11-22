@@ -391,6 +391,18 @@ const main = () => {
           writeLine({ ready: true });
           for (const line of waiting.splice(0)) handle(line);
         };
+        // Holds OpenCode's events while standard output is full, so a slow reader leaves no backlog
+        // in the bridge.
+        let paused = false;
+        const forward = (line: string) => {
+          if (process.stdout.write(line) || paused) return;
+          paused = true;
+          response.pause();
+          process.stdout.once("drain", () => {
+            paused = false;
+            response.resume();
+          });
+        };
         const tooLong = (bytes: number) =>
           warn(
             `skipping an OpenCode event of ${bytes} bytes that is too long for a line of ${MAX_LINE_BYTES} bytes`,
@@ -408,7 +420,7 @@ const main = () => {
                 );
               const line = outputLine({ event: event.value });
               if (line === undefined) return tooLong(Buffer.byteLength(data));
-              process.stdout.write(line);
+              forward(line);
             },
             (bytes) => {
               arrived();

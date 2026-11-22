@@ -31,6 +31,11 @@ const password = process.env.OPENCODE_PASSWORD;
 // Like `serve --stdio`, which keeps the password from the commands it runs.
 delete process.env.OPENCODE_PASSWORD;
 const SLOW_MS = 300;
+/**
+ * The number of 1 MiB events that `POST /api/flood` sends: more than the TCP buffers between serve
+ * and the bridge hold.
+ */
+const FLOOD_EVENTS = 32;
 /** Text one byte longer than the bridge's 4 MiB line limit. */
 const LARGE_TEXT = "x".repeat(4 * 1024 ** 2 + 1);
 
@@ -106,6 +111,31 @@ const routes = new Map<string, Route>(
       emit({ type: "large", data: { text: LARGE_TEXT } });
       emit({ type: "after.large", data: {} });
       json(response, 200, {});
+    },
+    // Sends FLOOD_EVENTS events of 1 MiB to the first subscriber, waiting for `drain` when a write
+    // fills its buffer. Reports on stderr each wait that lasts a second, and the end.
+    "POST /api/flood": (_request, response) => {
+      json(response, 200, {});
+      const [subscriber] = subscribers;
+      if (subscriber === undefined) return;
+      const frame = `data: ${JSON.stringify({ type: "flood", data: { text: "x".repeat(1024 ** 2) } })}\n\n`;
+      let sent = 0;
+      const send = () => {
+        while (sent < FLOOD_EVENTS) {
+          sent += 1;
+          if (subscriber.write(frame)) continue;
+          const stalled = setTimeout(
+            () => process.stderr.write(`fake serve: flood stalled after ${sent} events\n`),
+            1000,
+          );
+          return void subscriber.once("drain", () => {
+            clearTimeout(stalled);
+            send();
+          });
+        }
+        process.stderr.write("fake serve: flood sent\n");
+      };
+      send();
     },
     "GET /api/text": (_request, response) => {
       response.writeHead(502, { "content-type": "text/plain" });
