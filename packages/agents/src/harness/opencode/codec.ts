@@ -173,6 +173,11 @@ export type Job = (typeof Jobs.Type)["data"][number];
 /** The body of `POST /api/session/:id/prompt`: the inbox item that holds the input. */
 export const PostedInput = Schema.Struct({ data: Schema.Struct({ id: Schema.String }) });
 
+/** A delivered operator input from `GET /api/session/:id/message/:messageId`. */
+export const DeliveredMessage = Schema.Struct({
+  data: Schema.Struct({ id: Schema.String, type: Schema.Literal("user") }),
+});
+
 /** The body of `GET /api/session/:id/inbox`: the input that the session hasn't read. */
 export const Inbox = Schema.Struct({ data: Schema.Array(Schema.Struct({ id: Schema.String })) });
 

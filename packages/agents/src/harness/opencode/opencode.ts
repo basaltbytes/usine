@@ -819,9 +819,23 @@ const makeOpenCodeSessions = Effect.gen(function* () {
       }),
     );
 
-    /** Sends the input of a continuation after a restart. */
-    const recoverInput = (message: string, messageId?: OperatorMessageId) =>
-      steer(message, messageId);
+    /** Resends unread input and reconciles delivery events lost before the session reopened. */
+    const recoverInput = Effect.fn("OpenCodeRuntime.recoverInput")(function* (
+      message: string,
+      messageId?: OperatorMessageId,
+    ) {
+      yield* Effect.annotateCurrentSpan({ sessionId, messageId });
+      const taken = yield* steer(message, messageId);
+      if (messageId === undefined) return taken;
+      const inputId = openCodeMessageId(sessionId, messageId);
+      if (!(yield* (yield* current).messageDelivered(id, inputId))) return taken;
+      yield* updatePending((pending) => removed(pending, inputId));
+      yield* Effect.logInfo("OpenCode already delivered the resent operator message", {
+        sessionId,
+        messageId,
+      });
+      return "read" as const;
+    });
 
     /** Reopens the session on a new bridge after the remote process was lost. */
     const restart = Effect.fn("OpenCodeRuntime.restart")(function* (error: AgentSessionError) {

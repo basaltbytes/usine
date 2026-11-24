@@ -63,6 +63,8 @@ export interface ScriptedBridge {
   ) => Effect.Effect<void>;
   /** Sets the running background work that job queries list from now on. */
   readonly setJobs: (jobs: ReadonlyArray<Schema.Json>) => Effect.Effect<void>;
+  /** Sends the next job query to `request` for the test to answer. */
+  readonly holdNextJobs: Effect.Effect<void>;
   /** Sets the items that inbox queries list from now on. */
   readonly setInbox: (items: ReadonlyArray<Schema.Json>) => Effect.Effect<void>;
   /** Sets the sessions that active-session queries list from now on. */
@@ -118,6 +120,7 @@ export const scriptedServer = Effect.gen(function* () {
           body: Schema.Json,
         ) => emit({ id: sent.id, status, body });
         const jobs = yield* Ref.make<ReadonlyArray<Schema.Json>>([]);
+        const holdJobs = yield* Ref.make(false);
         const inbox = yield* Ref.make<ReadonlyArray<Schema.Json>>([]);
         const active = yield* Ref.make<ReadonlyArray<string>>([]);
         const environments = yield* Ref.make<ReadonlyArray<string>>([]);
@@ -149,9 +152,11 @@ export const scriptedServer = Effect.gen(function* () {
                 answer(sent, { data: Object.fromEntries(ids.map((id) => [id, {}])) }),
               );
             if (sent.path.startsWith("/api/experimental/job"))
-              return Effect.flatMap(Ref.get(jobs), (running) =>
-                answer(sent, { data: [...running] }),
-              );
+              return Effect.gen(function* () {
+                if (yield* Ref.getAndSet(holdJobs, false))
+                  return yield* Queue.offer(others, sent).pipe(Effect.asVoid);
+                return yield* answer(sent, { data: [...(yield* Ref.get(jobs))] });
+              });
             return Queue.offer(others, sent).pipe(Effect.asVoid);
           }),
           Effect.forever,
@@ -165,6 +170,7 @@ export const scriptedServer = Effect.gen(function* () {
           emit,
           reply,
           setJobs: (running) => Ref.set(jobs, running),
+          holdNextJobs: Ref.set(holdJobs, true),
           setInbox: (items) => Ref.set(inbox, items),
           setActive: (ids) => Ref.set(active, ids),
           environments: Ref.get(environments),

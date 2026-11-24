@@ -99,6 +99,43 @@ describe("OpenCode runtime", () => {
     }).pipe(Effect.scoped),
   );
 
+  it.live("ends the interrupted turn when its late steer failed before the terminal event", () =>
+    Effect.gen(function* () {
+      const { bridge, running, until } = yield* launched("OLD");
+      yield* interrupted(bridge, running);
+      const steering = yield* Effect.forkScoped(
+        running.intervene(Steer.make({ message: "Change the final reply." }), () => Effect.void),
+      );
+      const posted = yield* bridge.request;
+      yield* bridge.reply(posted, 500, { message: "The session can't take input" });
+      const refused = yield* Fiber.join(steering).pipe(Effect.flip);
+      assert.strictEqual(refused._tag, "SessionOperationError");
+      for (const line of oldExecutionEnds) yield* bridge.emit(line);
+      const idle = yield* until("SessionIdle");
+      assert(idle._tag === "SessionIdle");
+      assert.deepStrictEqual(idle.message, Option.some("OLD"));
+    }).pipe(Effect.scoped),
+  );
+
+  it.live("retries an interrupt that OpenCode refused in the same execution", () =>
+    Effect.gen(function* () {
+      const { bridge, running, until } = yield* launched("OLD");
+      const pause = yield* Effect.forkScoped(
+        running.intervene(Interrupt.make(), () => Effect.void),
+      );
+      const first = yield* bridge.request;
+      assert.strictEqual(first.path, `/api/session/${SESSION}/interrupt`);
+      yield* bridge.reply(first, 500, { message: "Interrupt failed" });
+      const refused = yield* Fiber.join(pause).pipe(Effect.flip);
+      assert.strictEqual(refused._tag, "SessionOperationError");
+      yield* interrupted(bridge, running);
+      for (const line of oldExecutionEnds) yield* bridge.emit(line);
+      const idle = yield* until("SessionIdle");
+      assert(idle._tag === "SessionIdle");
+      assert.deepStrictEqual(idle.message, Option.some("OLD"));
+    }).pipe(Effect.scoped),
+  );
+
   it.live("ends the turn at the interrupt when a steer comes before the interrupt's answer", () =>
     Effect.gen(function* () {
       const { bridge, running, until } = yield* launched("OLD");

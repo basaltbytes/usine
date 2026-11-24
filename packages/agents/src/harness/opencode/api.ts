@@ -2,8 +2,8 @@ import type { AgentSessionId } from "@usine/core/agent/session";
 import { Effect, Option, Schema } from "effect";
 import { type SessionOperation, SessionOperationError } from "../../runtime.ts";
 import type { BridgeClient } from "./bridge/client.ts";
-import { type BridgeAnswer, type OpenCodeMethod, OpenCodePath } from "./bridge/lines.ts";
-import { ApiError } from "./codec.ts";
+import { BridgeAnswer, type OpenCodeMethod, OpenCodePath } from "./bridge/lines.ts";
+import { ApiError, DeliveredMessage } from "./codec.ts";
 
 /** OpenCode's API through one bridge, for one session or for none, as in preflight. */
 export interface OpenCodeApi {
@@ -34,6 +34,11 @@ export interface OpenCodeApi {
     operation: SessionOperation,
     session: string,
   ) => Effect.Effect<void, SessionOperationError>;
+  /** Whether the saved session has delivered operator input `message` into its message history. */
+  readonly messageDelivered: (
+    session: string,
+    message: string,
+  ) => Effect.Effect<boolean, SessionOperationError>;
 }
 
 /** Returns the API of the bridge that `client` talks to, with errors naming `sessionId`. */
@@ -79,23 +84,40 @@ export const openCodeApi = (
     const answer = yield* client.setToolEnvironment(operation, session);
     yield* accepted(operation, `the command environment of ${session}`, answer);
   });
-  return {
-    send,
-    setToolEnvironment,
-    read: (schema, operation, method, path, body) =>
-      send(operation, method, path, body).pipe(
-        Effect.flatMap((answer) =>
-          Schema.decodeUnknownEffect(schema)(answer).pipe(
-            Effect.mapError((cause) =>
-              failure(
-                operation,
-                `OpenCode answered ${method} ${path} with an unexpected body`,
-                cause,
-              ),
+  const read: OpenCodeApi["read"] = (schema, operation, method, path, body) =>
+    send(operation, method, path, body).pipe(
+      Effect.flatMap((answer) =>
+        Schema.decodeUnknownEffect(schema)(answer).pipe(
+          Effect.mapError((cause) =>
+            failure(
+              operation,
+              `OpenCode answered ${method} ${path} with an unexpected body`,
+              cause,
             ),
           ),
         ),
       ),
+    );
+  return {
+    send,
+    setToolEnvironment,
+    read,
+    messageDelivered: Effect.fn("OpenCodeApi.messageDelivered")(function* (session, message) {
+      yield* Effect.annotateCurrentSpan({ openCodeSessionId: session, messageId: message });
+      return yield* read(
+        DeliveredMessage,
+        "steer",
+        "GET",
+        `/api/session/${encodeURIComponent(session)}/message/${encodeURIComponent(message)}`,
+      ).pipe(
+        Effect.as(true),
+        Effect.catchTag("SessionOperationError", (error) =>
+          Schema.is(BridgeAnswer)(error.cause) && error.cause.status === 404
+            ? Effect.succeed(false)
+            : Effect.fail(error),
+        ),
+      );
+    }),
   };
 };
 

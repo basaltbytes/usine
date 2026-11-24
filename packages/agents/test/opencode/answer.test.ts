@@ -31,6 +31,33 @@ const woken = (notice: string) => [
 ];
 
 describe("OpenCode answer", () => {
+  it.live("recounts a steer posted while the success handler reads running jobs", () =>
+    Effect.gen(function* () {
+      const { bridge, running, seen, ended } = yield* launched("OLD");
+      yield* bridge.holdNextJobs;
+      for (const line of firstExecutionEnds) yield* bridge.emit(line);
+      const jobs = yield* bridge.request;
+      assert(jobs.path.startsWith("/api/experimental/job"));
+      const guidance = Steer.make({ message: "Reply STEERED instead." });
+      const steering = yield* Effect.forkScoped(running.intervene(guidance, () => Effect.void));
+      const posted = yield* bridge.request;
+      const id = assertPrompt(posted, guidance.message);
+      assert(Option.isSome(id));
+      yield* bridge.reply(posted, 200, { data: { id: id.value } });
+      yield* Fiber.join(steering);
+      for (const line of execution(id.value, "STEERED")) yield* bridge.emit(line);
+      yield* bridge.reply(jobs, 200, { data: [] });
+      const result = yield* running.result;
+      yield* ended;
+      assert.strictEqual(result.message, "STEERED");
+      assert(
+        seen.some(
+          (value) => value._tag === "OperatorMessageRead" && value.messageId === guidance.id,
+        ),
+      );
+    }).pipe(Effect.scoped),
+  );
+
   it.live("answers with the steer that the execution's end delivers, read ahead", () =>
     Effect.gen(function* () {
       const { bridge, running, seen, ended } = yield* launched("OLD");
