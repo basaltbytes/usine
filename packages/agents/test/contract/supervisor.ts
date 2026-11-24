@@ -94,7 +94,7 @@ export const runSupervisorScenario = (
   Effect.gen(function* () {
     const fixture = yield* toolFixture(provider, "supervisor", mode, options);
     const { worker, cwd, environment } = fixture.request;
-    const host = yield* replayContainerHost(fixture.tape);
+    const host = yield* replayContainerHost(provider, fixture.tape);
     // The session reads the instance's source from its working directory, one directory per
     // repository, as the supervisor sandbox mounts it.
     const fs = yield* FileSystem.FileSystem;

@@ -121,9 +121,14 @@ export const processTransport = (
               }
             : command.options;
           const handle = yield* live.spawn(
-            ChildProcess.make(command.command, command.args, options),
+            fault === "early-exit"
+              ? ChildProcess.make(
+                  process.execPath,
+                  ["-e", "process.stderr.write('replayed early exit'); process.exit(7)"],
+                  options,
+                )
+              : ChildProcess.make(command.command, command.args, options),
           );
-          if (fault === "early-exit") process.kill(handle.pid, "SIGKILL");
           const exitCode = yield* Effect.cached(
             handle.exitCode.pipe(
               Effect.tap((code) => Effect.sync(() => tape.exit(`${port}/exit`, code, null))),

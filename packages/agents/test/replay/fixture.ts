@@ -465,10 +465,20 @@ export const openFixture = (
           const frame = input(entry.payload);
           return Option.isSome(frame) ? [{ port: entry.port, payload: frame.value }] : [];
         });
+        const acknowledgement = Schema.decodeUnknownOption(Schema.Struct({ ack: Schema.Int }));
+        const acknowledged = recorded.reduce((sequence, entry) => {
+          if (entry.type !== "emit_inbound" || entry.port !== "process:1/stdout") return sequence;
+          const frame = acknowledgement(entry.payload);
+          return Option.isSome(frame) ? Math.max(sequence, frame.value.ack) : sequence;
+        }, 0);
         assert.deepStrictEqual(
           inputs.filter((entry) => entry.port === "process:2/stdin").map((entry) => entry.payload),
-          inputs.filter((entry) => entry.port === "process:1/stdin").map((entry) => entry.payload),
-          "the replacement relay replays buffered input without starting a new thread",
+          inputs
+            .filter(
+              (entry) => entry.port === "process:1/stdin" && entry.payload.sequence > acknowledged,
+            )
+            .map((entry) => entry.payload),
+          "the replacement relay replays only unacknowledged input without starting a new thread",
         );
         const sequences = new Map<string, Set<number>>();
         for (const entry of tape.entries) {
