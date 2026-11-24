@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest";
-import { TokenBreakdown } from "@usine/core/agent/session";
+import { TokenBreakdown, UsdAmount } from "@usine/core/agent/session";
 import { Option } from "effect";
 import { openAiPrice } from "../src/openai-prices.ts";
 import { supportedCodexVersions } from "../src/preflight/preflight.ts";
@@ -82,6 +82,20 @@ describe("OpenAI prices", () => {
       .flat()
       .filter((model) => Option.isNone(openAiPrice(model, tokens({}))));
     assert.deepStrictEqual(unpriced, []);
+  });
+
+  it("prices GPT-6.2 Astra input, cache reads, cache writes, and output", () => {
+    for (const [kind, rate] of [
+      ["input", 8],
+      ["cachedInput", 0.4],
+      ["cacheWrite", 10],
+      ["output", 40],
+    ] as const) {
+      assert.deepStrictEqual(
+        openAiPrice("gpt-6.2-astra", tokens({ [kind]: 1_000_000 })),
+        Option.some(UsdAmount.make(rate)),
+      );
+    }
   });
 
   it("prices each kind of token at its own rate per million tokens", () => {

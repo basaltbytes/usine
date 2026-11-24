@@ -3778,6 +3778,57 @@ describe("Codex child backend", () => {
     },
   );
 
+  for (const cliVersion of ["0.172.0", undefined]) {
+    const release =
+      cliVersion === undefined ? "Codex CLI (version unreported)" : `Codex CLI ${cliVersion}`;
+    for (const offeredModels of [["gpt-5.6-sol", "gpt-5.5"], []]) {
+      it.effect(
+        `reports ${release} and its ${offeredModels.length} offered models on an unknown model`,
+        () => {
+          const logs = collectLogs(["Error"]);
+          const server = connectionLayer({
+            ...successfulResponses(offeredModels.map((id) => ({ id, model: id }))),
+            initialize:
+              cliVersion === undefined
+                ? {}
+                : { userAgent: `usine/${cliVersion} (Linux; x86_64) (usine; 0.0.1)` },
+          });
+          return Effect.scoped(
+            Effect.gen(function* () {
+              const backend = yield* ChildBackend;
+              const error = yield* Effect.flip(backend.launch(request("gpt-never-existed")));
+              const matchesError = Schema.is(UnknownModelError)(error);
+              assert(matchesError);
+              assert.strictEqual(error.harness, "codex");
+              assert.strictEqual(error.model, "gpt-never-existed");
+              assert.strictEqual(
+                error.message,
+                `${release} has no model "gpt-never-existed". Offered models: ${offeredModels.length === 0 ? "none" : offeredModels.join(", ")}.`,
+              );
+              assert.deepStrictEqual(
+                logs.records.map(({ message }) => message),
+                [
+                  [
+                    "Codex rejected an unknown model",
+                    {
+                      model: "gpt-never-existed",
+                      offered: offeredModels,
+                      cliVersion: cliVersion ?? null,
+                    },
+                  ],
+                ],
+              );
+            }).pipe(
+              Effect.provide(
+                codexChild.pipe(Layer.provide(server), Layer.provideMerge(logs.layer)),
+              ),
+            ),
+          );
+        },
+      );
+    }
+  }
+
   it.effect("rejects an effort the selected model does not support", () => {
     const server = connectionLayer(
       successfulResponses([
