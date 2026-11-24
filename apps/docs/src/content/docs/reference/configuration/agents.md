@@ -61,7 +61,7 @@ Complete one repository task at a time.
 | Harness | Version requirement | Authentication | Workers |
 | --- | --- | --- | --- |
 | `claude` | Claude Code with `auth status --json` | Claude subscription login, setup token, or API key | Local, SSH, Cloudflare |
-| `codex` | Codex CLI 0.164.0 | ChatGPT login or API key | Local, SSH, Cloudflare |
+| `codex` | Codex CLI 0.172.0; preflight also accepts 0.164.0 and 0.159.0 through 0.159.3 | ChatGPT login or API key | Local, SSH, Cloudflare |
 | `pi` | Bundled Pi runtime | API key for the selected provider or ChatGPT login for `openai-codex` | Local |
 
 For a worker using subscription logins, run these commands as the user running its children:

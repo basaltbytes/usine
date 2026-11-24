@@ -1,5 +1,5 @@
 import { Harness } from "@usine/core/agent/brain";
-import { Effect, Schema } from "effect";
+import { Effect, Option, Schema } from "effect";
 import { ModelListParams, ModelListResponse } from "../../protocol/codex/codex.ts";
 import { UnknownModelError, UnsupportedEffortError } from "../../runtime.ts";
 import type { SessionSpec } from "../contract.ts";
@@ -8,12 +8,14 @@ import { decodeResponse } from "./codec.ts";
 
 /**
  * Checks the brain of `spec` against the app server's model catalog. Returns the reasoning effort
- * to send for the model, and fails for a model or effort that Codex doesn't offer.
+ * to send for the model, and fails for a model or effort that Codex doesn't offer. `cliVersion` is
+ * the version that `initializeCodex` returned; the unknown-model error names it.
  */
 export const checkCodexModel = Effect.fn("Codex.checkModel")(function* (
   connection: CodexConnection,
   client: CodexClient,
   spec: SessionSpec,
+  cliVersion: Option.Option<string>,
 ) {
   const models: Array<(typeof ModelListResponse.Type.data)[number]> = [];
   let cursor: string | null = null;
@@ -32,11 +34,20 @@ export const checkCodexModel = Effect.fn("Codex.checkModel")(function* (
     (model) => model.id === requestedModel || model.model === requestedModel,
   );
   if (catalogModel === undefined) {
-    yield* Effect.logError("Codex rejected an unknown model", { model: requestedModel });
+    const offered = models.map(({ id }) => id);
+    yield* Effect.logError("Codex rejected an unknown model", {
+      model: requestedModel,
+      offered,
+      cliVersion: Option.getOrNull(cliVersion),
+    });
+    const release = Option.match(cliVersion, {
+      onNone: () => "Codex CLI (version unreported)",
+      onSome: (version) => `Codex CLI ${version}`,
+    });
     return yield* UnknownModelError.make({
       harness: Harness.make("codex"),
       model: requestedModel,
-      message: `Codex has no model "${requestedModel}"`,
+      message: `${release} has no model "${requestedModel}". Offered models: ${offered.length > 0 ? offered.join(", ") : "none"}.`,
     });
   }
   const effort = spec.session.brain.effort === "off" ? "none" : spec.session.brain.effort;

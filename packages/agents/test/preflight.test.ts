@@ -180,7 +180,7 @@ describe("worker harness readiness", () => {
       ).matchAll(pattern),
     ].map(([, version]) => version);
 
-  it("pins the Codex conformance baseline in the Hetzner worker image", () => {
+  it("pins the installed Codex release in the Hetzner worker image", () => {
     const pins = cloudInitPins(/@openai\/codex@(\S+)/gu);
     assert.deepStrictEqual(pins, [CODEX_CLI_VERSION]);
     assert.deepStrictEqual(

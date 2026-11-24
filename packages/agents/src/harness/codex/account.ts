@@ -7,15 +7,25 @@ import {
   AccountResponse,
   type GetAccountParams,
   type InitializeParams,
+  InitializeResponse,
 } from "../../protocol/codex/codex.ts";
 import { apiKeys } from "../pool.ts";
 import type { CodexConnection } from "./app-server.ts";
 import { chatgptPlan } from "./descriptor.ts";
 
+/** Returns the Codex CLI version from an `initialize` user agent, or None for another format. */
+const cliVersionOf = (response: Schema.Json): Option.Option<string> =>
+  Schema.decodeUnknownOption(InitializeResponse)(response).pipe(
+    Option.flatMap(({ userAgent }) =>
+      Option.fromNullishOr(/^[^/\s]+\/([0-9][^\s]*)/u.exec(userAgent)?.[1]),
+    ),
+  );
+
 /**
  * Sends `initialize` and `initialized` to the app server; must run before account checks or
  * creating a child. `experimentalApi` opts the connection into experimental request fields, which
- * a thread that registers usine tools needs.
+ * a thread that registers usine tools needs. Returns the Codex CLI version that the app server
+ * reports, or None when the server was already initialized or its user agent has another format.
  */
 export const initializeCodex = Effect.fn("Codex.initialize")(function* (
   connection: CodexConnection,
@@ -27,7 +37,8 @@ export const initializeCodex = Effect.fn("Codex.initialize")(function* (
       ? { experimentalApi: true, requestAttestation: false }
       : null,
   } satisfies InitializeParams;
-  yield* connection.request("launch", "initialize", params).pipe(
+  const cliVersion = yield* connection.request("launch", "initialize", params).pipe(
+    Effect.map(cliVersionOf),
     Effect.catchTag("SessionOperationError", (error) =>
       Schema.is(
         Schema.Struct({
@@ -35,11 +46,14 @@ export const initializeCodex = Effect.fn("Codex.initialize")(function* (
           message: Schema.Literal("Already initialized"),
         }),
       )(error.cause)
-        ? Effect.logDebug("Attached to an initialized Codex app-server")
+        ? Effect.logDebug("Attached to an initialized Codex app-server").pipe(
+            Effect.as(Option.none<string>()),
+          )
         : Effect.fail(error),
     ),
   );
   yield* connection.notify("launch", "initialized", {});
+  return cliVersion;
 });
 
 /** Returns the error for when Codex cannot confirm a supported billing pool. */

@@ -8,8 +8,22 @@ const tokens = (fields: Partial<ConstructorParameters<typeof TokenBreakdown>[0]>
   TokenBreakdown.make({ input: 0, cachedInput: 0, cacheWrite: 0, output: 0, ...fields });
 
 // The models with `visibility: "list"` in `codex-rs/models-manager/models.json` at each
-// `rust-v<version>` tag of openai/codex. Hidden models have no price on OpenAI's pricing page.
+// `rust-v<version>` tag of openai/codex, or for 0.172.0 in the catalog that the npm release's
+// binary bundles. Hidden models have no price on OpenAI's pricing page.
 const codexCatalogs = {
+  "0.172.0": [
+    "gpt-6.2-sol",
+    "gpt-6.2-astra",
+    "gpt-6-astra",
+    "gpt-6.1-sol",
+    "gpt-6.1-terra",
+    "gpt-6-sol",
+    "gpt-6-luna",
+    "gpt-5.6-sol",
+    "gpt-5.6-terra",
+    "gpt-5.6-luna",
+    "gpt-5.5",
+  ],
   "0.164.0": [
     "gpt-6-astra",
     "gpt-6.1-sol",

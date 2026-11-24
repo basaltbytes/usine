@@ -193,10 +193,10 @@ const makeCodexSessions = Effect.gen(function* () {
       start._tag === "StartResume" ? { ...launch, transport: "resume" } : launch;
     const connection = yield* appServer.open(client);
     yield* checkContinuationHome(spec, start, home, defaultHome);
-    yield* initializeCodex(connection, initialization);
+    const cliVersion = yield* initializeCodex(connection, initialization);
     const billing = yield* codexChildAccount(connection, spec.session.brain, spec.admitted.pool);
 
-    const effort = yield* checkCodexModel(connection, client, spec);
+    const effort = yield* checkCodexModel(connection, client, spec, cliVersion);
     const requestedModel = spec.session.brain.model;
     const thread = yield* Option.match(startReference(start), {
       onNone: () =>

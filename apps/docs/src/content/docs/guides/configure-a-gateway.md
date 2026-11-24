@@ -37,7 +37,7 @@ Instance admin access, a matching usine checkout, a Hetzner project, the `hcloud
 4. Install the pinned harnesses on the orchestrator, where usine starts their login commands:
 
    ```sh
-   npm install --global @anthropic-ai/claude-code@2.1.311 @openai/codex@0.164.0
+   npm install --global @anthropic-ai/claude-code@2.1.311 @openai/codex@0.172.0
    ```
 
    Linux also needs `script` from util-linux and `curl` on the gateway. macOS includes `script`.
