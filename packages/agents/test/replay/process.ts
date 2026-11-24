@@ -68,10 +68,15 @@ export const encodeWire = (payload: Schema.Json) => {
   );
 };
 
+interface CommandInvocation {
+  readonly command: string;
+  readonly args: ReadonlyArray<string>;
+}
+
 export const processTransport = (
   tape: Tape,
   live?: ChildProcessSpawner.ChildProcessSpawner["Service"],
-  fault: "early-exit" | "none" = "none",
+  normalizeCommand?: (command: CommandInvocation) => CommandInvocation,
 ) =>
   Layer.succeed(ChildProcessSpawner.ChildProcessSpawner)(
     ChildProcessSpawner.make((command) =>
@@ -81,12 +86,16 @@ export const processTransport = (
         tape.bind(process.execPath, "$NODE");
         tape.bind(CHILD_LIFELINE, "$CHILD_LIFELINE");
         tape.bind("'" + PROCESS_OWNER.replaceAll("'", `'"'"'`) + "'", "'$PROCESS_OWNER'");
+        const recorded = normalizeCommand?.({ command: command.command, args: command.args }) ?? {
+          command: command.command,
+          args: command.args,
+        };
         tape.outbound(
           port,
           parseCommandJson(
             commandJson({
-              command: command.command,
-              args: command.args,
+              command: recorded.command,
+              args: recorded.args,
               cwd: command.options.cwd,
               env: command.options.env,
             }),
@@ -121,13 +130,7 @@ export const processTransport = (
               }
             : command.options;
           const handle = yield* live.spawn(
-            fault === "early-exit"
-              ? ChildProcess.make(
-                  process.execPath,
-                  ["-e", "process.stderr.write('replayed early exit'); process.exit(7)"],
-                  options,
-                )
-              : ChildProcess.make(command.command, command.args, options),
+            ChildProcess.make(command.command, command.args, options),
           );
           const exitCode = yield* Effect.cached(
             handle.exitCode.pipe(

@@ -2,6 +2,7 @@ import { replayContainerHost } from "./container-seat.ts";
 import { assert } from "@effect/vitest";
 import { type BrainSpec } from "@usine/core/agent/brain";
 import {
+  type AgentSessionEvent,
   AgentSessionId,
   type HarnessSession,
   type SessionTokensUpdated,
@@ -11,12 +12,13 @@ import { Tool, Toolkit } from "effect/ai";
 import type { CredentialRoute } from "../../src/harness/capability.ts";
 import {
   runSupervisorTurn,
+  type SupervisorReply,
   SupervisorSeat,
   SupervisorTurn,
 } from "../../src/harness/supervisor/turn.ts";
 import type { FixtureOptions } from "../replay/fixture.ts";
 import type { Transcript } from "../replay/transcript.ts";
-import { type ToolProvider, toolFixture } from "./host-tools.ts";
+import { listedTools, type ToolProvider, toolFixture } from "./host-tools.ts";
 
 /** The run that the `overview` tool reports as waiting for approval. */
 export const WAITING_RUN = "run-7431";
@@ -85,6 +87,75 @@ const recordedRoutes = {
   codex: "gateway-subscription",
 } satisfies Record<SupervisorProvider, CredentialRoute>;
 
+/** The names under which `provider` lists the toolkit's tools. */
+const operatorNames = (provider: SupervisorProvider) =>
+  Object.keys(operatorTools.tools).map((name) =>
+    provider === "claude" ? `mcp__usine__${name}` : provider === "codex" ? `usine.${name}` : name,
+  );
+
+/**
+ * The harness tools that each recorded session lists: Claude Code's and Pi's read and search
+ * tools. Codex lists its own tools only in its model requests, which its traffic doesn't carry.
+ */
+const readTools = {
+  claude: ["Glob", "Grep", "Read"],
+  pi: ["find", "grep", "ls", "read"],
+  codex: [],
+} satisfies Record<SupervisorProvider, ReadonlyArray<string>>;
+
+/** The tool with which each recorded session read the source file. */
+const sourceReads = {
+  claude: "Read",
+  pi: "read",
+  codex: "command",
+} satisfies Record<SupervisorProvider, string>;
+
+const started = (events: ReadonlyArray<AgentSessionEvent>) =>
+  events.flatMap((event) => (event._tag === "ToolStarted" ? [event.tool] : []));
+const finished = (events: ReadonlyArray<AgentSessionEvent>) =>
+  events.flatMap((event) =>
+    event._tag === "ToolFinished" ? [{ tool: event.tool, isError: event.isError }] : [],
+  );
+
+/** Checks the answers, tool events, offered tool lists, and session resume before saving or returning. */
+const assertSupervisorOutcome = (
+  provider: SupervisorProvider,
+  replies: readonly [SupervisorReply, SupervisorReply],
+  entries: Transcript["entries"],
+): void => {
+  const [first, second] = replies;
+  assert.include(first.message, SOURCE_WORD, "the answer quotes the repository file");
+  assert.include(first.message, WAITING_RUN);
+  assert.deepStrictEqual(started(first.events), [sourceReads[provider], "overview"]);
+  assert.deepStrictEqual(finished(first.events), [
+    { tool: sourceReads[provider], isError: false },
+    { tool: "overview", isError: false },
+  ]);
+  assert.strictEqual(first.events.at(-1)?._tag, "SessionFinished");
+
+  assert(entries.length > 0, "the scenario recorded traffic");
+  const listed = listedTools(provider, entries);
+  assert.isNotEmpty(listed, "the recorded traffic shows the session's tool list");
+  for (const offered of listed)
+    assert.deepStrictEqual(
+      [...offered].sort(),
+      [...readTools[provider], ...operatorNames(provider)].sort(),
+      "the session lists the harness's read and search tools and the operator tools",
+    );
+
+  assert.include(second.message, WAITING_RUN, "the second turn recalls the first");
+  assert.include(second.message, RESUMED);
+  assert.deepStrictEqual(started(second.events), []);
+  assert.strictEqual(second.events.at(-1)?._tag, "SessionFinished");
+  assert.strictEqual(second.saved.id, first.saved.id, "the second turn reopens the session");
+  const reopened = second.events.find((event) => event._tag === "SessionStarted");
+  assert(reopened?._tag === "SessionStarted");
+  assert.deepStrictEqual(
+    Option.map(reopened.harnessSession, ({ id }) => id),
+    Option.some(first.saved.id),
+  );
+};
+
 /** The two turns of the supervisor scenario on `provider`, and the recorded traffic. */
 export const runSupervisorScenario = (
   provider: SupervisorProvider,
@@ -131,10 +202,10 @@ export const runSupervisorScenario = (
       Effect.provide(Layer.merge(operatorToolHandlers, fixture.harnesses)),
       fixture.tape.guard,
     );
-    yield* fixture.save;
     const tape = fixture.tape;
     const entries: Transcript["entries"] =
       tape.source === "record" ? tape.entries : tape.source.entries;
-    assert(entries.length > 0, "the scenario recorded traffic");
+    assertSupervisorOutcome(provider, replies, entries);
+    yield* fixture.save;
     return { replies, entries, brain };
   });

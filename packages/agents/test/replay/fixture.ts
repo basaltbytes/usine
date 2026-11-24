@@ -228,7 +228,7 @@ export const openFixture = (
               return [[key, value]];
             }),
           )
-        : source.environment;
+        : { ...source.environment };
     if (source !== "record" && env.PATH !== undefined && environment.PATH !== undefined) {
       tape.bind(env.PATH, "$PATH");
       environment.PATH = env.PATH;
@@ -270,11 +270,7 @@ export const openFixture = (
       assert.include(installed, version, "record fixtures with the pinned harness version");
     }
     const spawner = mode === "record" ? yield* ChildProcessSpawner.ChildProcessSpawner : undefined;
-    const processes = processTransport(
-      tape,
-      spawner,
-      scenario === "early-exit" && provider === "codex" ? "early-exit" : "none",
-    );
+    const processes = processTransport(tape, spawner);
     const ssh = fileURLToPath(new URL("../fixtures/replay-ssh.sh", import.meta.url));
     tape.bind(ssh, "$SSH_SHIM");
     const host =
@@ -315,11 +311,24 @@ export const openFixture = (
       Layer.provide(harness),
       Layer.provideMerge(NodeServices.layer),
     );
+    const earlyExitCodex = provider === "codex" && scenario === "early-exit";
+    let requestEnvironment = environment;
+    if (earlyExitCodex) {
+      yield* fs.writeFileString(
+        `${cwd}/codex`,
+        "#!/usr/bin/env node\nprocess.stderr.write('replayed early exit'); process.exitCode = 7;\n",
+      );
+      yield* fs.chmod(`${cwd}/codex`, 0o755);
+      requestEnvironment = {
+        ...environment,
+        PATH: environment.PATH === undefined ? cwd : `${cwd}:${environment.PATH}`,
+      };
+    }
     const request = ChildRequest.make({
       worker: WorkerName.make("replay-worker"),
       machine: Option.none(),
       host,
-      environment,
+      environment: requestEnvironment,
       cwd: WorkingDirectory.make(cwd),
       session: ChildSession.make({
         id: AgentSessionId.make("replay-parent:child:1"),
@@ -330,19 +339,11 @@ export const openFixture = (
       }),
       prompt: "Reply with exactly REPLAY_DONE. Do not use tools.",
     });
-    if (mode === "replay" && provider === "codex" && scenario === "early-exit") {
-      yield* fs.writeFileString(
-        `${cwd}/codex`,
-        "#!/usr/bin/env node\nprocess.stderr.write('replayed early exit'); process.exitCode = 7;\n",
-      );
-      yield* fs.chmod(`${cwd}/codex`, 0o755);
+    if (mode === "replay" && earlyExitCodex) {
       return {
         tape: new Tape("record"),
         cwd,
-        request: ChildRequest.make({
-          ...request,
-          environment: { ...environment, PATH: `${cwd}:${environment.PATH}` },
-        }),
+        request,
         backend: codexChildLayer.pipe(
           Layer.provideMerge(ChildSessionJournal.layerNoop),
           Layer.provide(codexAppServerLive),

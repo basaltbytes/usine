@@ -16,6 +16,7 @@ import {
   Layer,
   Logger,
   Option,
+  Predicate,
   Queue,
   Ref,
   Schedule,
@@ -31,7 +32,7 @@ import {
   ChildSessionJournal,
   ChildSessionLifecycle,
 } from "../../src/runtime.ts";
-import { Tape } from "./transcript.ts";
+import { isJsonObject, Tape } from "./transcript.ts";
 import { TestClock } from "effect/testing";
 import { runScenario } from "./scenarios.ts";
 import { assertProvenCapabilities } from "../contract/capabilities.ts";
@@ -165,6 +166,74 @@ describe("recorded harness transports", () => {
         20_000,
       );
     }
+
+  it.live(
+    "codex: transport-loss replays only unacknowledged input after partial acknowledgement",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const fixture = yield* openFixture("codex", "transport-loss", "replay", {
+            transform: (transcript) => {
+              const entries: Array<(typeof transcript.entries)[number]> = [];
+              let insertedFirstAck = false;
+              let insertedSecondAck = false;
+              for (const entry of transcript.entries) {
+                // Acknowledge sequences 1–2 on the first relay before model/list answers so
+                // history deterministically drops them ahead of the transport drop.
+                if (
+                  !insertedFirstAck &&
+                  entry.type === "emit_inbound" &&
+                  entry.port === "process:1/stdout" &&
+                  isJsonObject(entry.payload) &&
+                  entry.payload.offset === 18568
+                ) {
+                  entries.push({
+                    type: "emit_inbound",
+                    port: "process:1/stdout",
+                    payload: { offset: 18568, ack: 2 },
+                  });
+                  insertedFirstAck = true;
+                }
+                // Drop sequences 1–2 from the replacement relay's expected replay.
+                if (
+                  entry.type === "expect_outbound" &&
+                  entry.port === "process:2/stdin" &&
+                  isJsonObject(entry.payload) &&
+                  Predicate.isNumber(entry.payload.sequence) &&
+                  entry.payload.sequence <= 2
+                )
+                  continue;
+                entries.push(entry);
+                // Queue a later ACK on the replacement relay before its replayed inputs arrive
+                // so reading ACKs from process:2/stdout instead of process:1/stdout fails.
+                if (
+                  !insertedSecondAck &&
+                  entry.type === "emit_inbound" &&
+                  entry.port === "process:2/stdout" &&
+                  isJsonObject(entry.payload) &&
+                  entry.payload.ready === true
+                ) {
+                  entries.push({
+                    type: "emit_inbound",
+                    port: "process:2/stdout",
+                    payload: { offset: 26022, ack: 5 },
+                  });
+                  insertedSecondAck = true;
+                }
+              }
+              assert(insertedFirstAck && insertedSecondAck);
+              return { ...transcript, entries };
+            },
+          });
+          yield* runScenario("transport-loss", fixture.request, fixture.controls).pipe(
+            Effect.provide(fixture.backend),
+            fixture.tape.guard,
+          );
+          yield* fixture.save;
+        }),
+      ).pipe(Effect.provide(NodeServices.layer), Effect.timeout("15 seconds")),
+    20_000,
+  );
 });
 
 it("redacts credential values before JSON escaping", () => {

@@ -19,7 +19,18 @@ import {
 } from "@usine/core/agent/session";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { MessageSizeMib, WorkerName } from "@usine/core/worker";
-import { Array as Arr, Effect, Layer, Option, Result, Schema, Stream } from "effect";
+import {
+  Array as Arr,
+  Cause,
+  Effect,
+  FileSystem,
+  Layer,
+  Option,
+  Predicate,
+  Result,
+  Schema,
+  Stream,
+} from "effect";
 import { ExecShell, LocalProcess } from "../../src/child-host/child-host.ts";
 import { AdmissionContext, admitBrain } from "../../src/harness/admission.ts";
 import {
@@ -53,42 +64,20 @@ import {
 } from "../../src/runtime.ts";
 import { collectLogs } from "../logs.ts";
 import { assertProvenCapabilities } from "./capabilities.ts";
-import { listedTools } from "./host-tools.ts";
-import { isJsonObject, type Transcript } from "../replay/transcript.ts";
+import { replayContainerHost } from "./container-seat.ts";
+import { isJsonObject, Tape, type Transcript } from "../replay/transcript.ts";
+import { remoteCommandLine } from "../../src/child-host/child-host.ts";
+import { PROCESS_OWNER } from "../../src/child-host/supervisor.ts";
 import {
   operatorToolHandlers,
   operatorTools,
   RESUMED,
   runSupervisorScenario,
-  SOURCE_WORD,
   supervisorMessages,
   type SupervisorProvider,
   supervisorProviders,
   WAITING_RUN,
 } from "./supervisor.ts";
-
-/** The names under which `provider` lists the toolkit's tools. */
-const operatorNames = (provider: SupervisorProvider) =>
-  Object.keys(operatorTools.tools).map((name) =>
-    provider === "claude" ? `mcp__usine__${name}` : provider === "codex" ? `usine.${name}` : name,
-  );
-
-/**
- * The harness tools that each recorded session lists: Claude Code's and Pi's read and search
- * tools. Codex lists its own tools only in its model requests, which its traffic doesn't carry.
- */
-const readTools = {
-  claude: ["Glob", "Grep", "Read"],
-  pi: ["find", "grep", "ls", "read"],
-  codex: [],
-} satisfies Record<SupervisorProvider, ReadonlyArray<string>>;
-
-/** The tool with which each recorded session read the source file. */
-const sourceReads = {
-  claude: "Read",
-  pi: "read",
-  codex: "command",
-} satisfies Record<SupervisorProvider, string>;
 
 const container = { runtime: "docker", name: "test-container" };
 const seat = SupervisorSeat.make({
@@ -246,12 +235,137 @@ const onUsageCredits = (transcript: Transcript): Transcript => {
   };
 };
 
-const started = (events: ReadonlyArray<AgentSessionEvent>) =>
-  events.flatMap((event) => (event._tag === "ToolStarted" ? [event.tool] : []));
-const finished = (events: ReadonlyArray<AgentSessionEvent>) =>
-  events.flatMap((event) =>
-    event._tag === "ToolFinished" ? [{ tool: event.tool, isError: event.isError }] : [],
-  );
+/**
+ * Rewrites the committed native Codex supervisor transcript into the container process-owner
+ * framing that a live Codex supervisor recording produces.
+ */
+const asFramedContainer = (transcript: Transcript): Transcript => {
+  const shellQuote = (value: string) => `'${value.replaceAll("'", `'"'"'`)}'`;
+  const encodeJson = (value: Schema.Json) =>
+    // @effect-diagnostics-next-line schemaSync:off
+    Schema.encodeSync(Schema.fromJsonString(Schema.Json))(value);
+  const turns = [
+    { source: "process:1", base: 1, mode: "replace" },
+    { source: "process:2", base: 4, mode: "resume" },
+  ] as const;
+  const entries: Array<Transcript["entries"][number]> = [];
+  for (const { source, base, mode } of turns) {
+    const port = `process:${base}`;
+    const turnEntries = transcript.entries.filter(
+      (entry) => entry.port === source || entry.port.startsWith(`${source}/`),
+    );
+    const launch = turnEntries.find(
+      (entry) => entry.type === "expect_outbound" && entry.port === source,
+    );
+    assert(
+      launch?.type === "expect_outbound" &&
+        isJsonObject(launch.payload) &&
+        Array.isArray(launch.payload.args),
+    );
+    // Native launch args are ["-e", "$CHILD_LIFELINE", pidFile, "", "codex", ...args, "-c", "cli_auth_credentials_store=..."].
+    const codexArgs = launch.payload.args.slice(4).filter(Predicate.isString);
+    const remoteArgs =
+      codexArgs.at(-2) === "-c" && codexArgs.at(-1) === 'cli_auth_credentials_store="file"'
+        ? codexArgs.slice(0, -2)
+        : codexArgs;
+    const ownerCommand = [
+      "node",
+      "-e",
+      "$PROCESS_OWNER",
+      mode,
+      "$WORKTREE.child-1.pid",
+      "0",
+      "120000",
+      ...remoteArgs,
+    ]
+      .map(shellQuote)
+      .join(" ");
+    entries.push(
+      {
+        type: "expect_outbound",
+        port,
+        payload: {
+          command: "$CONTAINER_RUNTIME",
+          args: ["exec", "-i", "$CONTRACT_CONTAINER", "sh", "-c", `cd '/' && exec ${ownerCommand}`],
+        },
+      },
+      {
+        type: "expect_outbound",
+        port: `${port}/stdin`,
+        payload: { ...transcript.environment },
+      },
+      {
+        type: "emit_inbound",
+        port: `${port}/stdout`,
+        payload: { offset: 0, ready: true, sequence: 0, retained: false },
+      },
+    );
+    let sequence = 0;
+    let offset = 0;
+    for (const entry of turnEntries) {
+      if (entry.type === "expect_outbound" && entry.port === `${source}/stdin`) {
+        sequence += 1;
+        if (isJsonObject(entry.payload) && entry.payload.eof === true) {
+          entries.push({
+            type: "expect_outbound",
+            port: `${port}/stdin`,
+            payload: { sequence, eof: true },
+          });
+        } else {
+          entries.push({
+            type: "expect_outbound",
+            port: `${port}/stdin`,
+            payload: { sequence, data: { base64: `${encodeJson(entry.payload)}\n` } },
+          });
+        }
+      } else if (entry.type === "emit_inbound" && entry.port === `${source}/stdout`) {
+        const line = `${encodeJson(entry.payload)}\n`;
+        offset += Buffer.byteLength(line);
+        entries.push({
+          type: "emit_inbound",
+          port: `${port}/stdout`,
+          payload: { offset, stdout: { base64: line } },
+        });
+      }
+    }
+    entries.push(
+      {
+        type: "emit_inbound",
+        port: `${port}/stdout`,
+        payload: { offset, exitCode: 0, stderrTail: "" },
+      },
+      { type: "runtime_exit", port: `${port}/stdout`, code: 0, error: null },
+      { type: "runtime_exit", port: `${port}/exit`, code: 0, error: null },
+    );
+    for (const [step, action] of [
+      [1, "stop"],
+      [2, "remove"],
+    ] as const) {
+      const cleanup = `process:${base + step}`;
+      entries.push(
+        {
+          type: "expect_outbound",
+          port: cleanup,
+          payload: {
+            command: "$CONTAINER_RUNTIME",
+            args: [
+              "exec",
+              "-i",
+              "$CONTRACT_CONTAINER",
+              "sh",
+              "-c",
+              `exec 'node' '-e' '$PROCESS_OWNER' '${action}' '$WORKTREE.child-1.pid' '0' '120000'`,
+            ],
+          },
+        },
+        { type: "expect_outbound", port: `${cleanup}/stdin`, payload: { eof: true } },
+        { type: "runtime_exit", port: `${cleanup}/stdout`, code: 0, error: null },
+        { type: "runtime_exit", port: `${cleanup}/exit`, code: 0, error: null },
+      );
+    }
+  }
+  return { ...transcript, entries };
+};
 
 describe("the supervisor role", () => {
   it.effect("passes the seat's frame allowance into the Codex connection", () => {
@@ -301,42 +415,10 @@ describe("the supervisor role", () => {
       () =>
         Effect.gen(function* () {
           const logs = collectLogs(["Info"]);
-          const { replies, entries, brain } = yield* runSupervisorScenario(provider, "replay").pipe(
+          const { replies, brain } = yield* runSupervisorScenario(provider, "replay").pipe(
             Effect.provide(logs.layer),
           );
           const [first, second] = replies;
-          assert.include(first.message, SOURCE_WORD, "the answer quotes the repository file");
-          assert.include(first.message, WAITING_RUN);
-          assert.deepStrictEqual(started(first.events), [sourceReads[provider], "overview"]);
-          assert.deepStrictEqual(finished(first.events), [
-            { tool: sourceReads[provider], isError: false },
-            { tool: "overview", isError: false },
-          ]);
-          assert.strictEqual(first.events.at(-1)?._tag, "SessionFinished");
-
-          const listed = listedTools(provider, entries);
-          assert.isNotEmpty(listed, "the recorded traffic shows the session's tool list");
-          for (const offered of listed)
-            assert.deepStrictEqual(
-              [...offered].sort(),
-              [...readTools[provider], ...operatorNames(provider)].sort(),
-              "the session lists the harness's read and search tools and the operator tools",
-            );
-
-          assert.include(second.message, WAITING_RUN, "the second turn recalls the first");
-          assert.include(second.message, RESUMED);
-          assert.deepStrictEqual(started(second.events), []);
-          assert.strictEqual(
-            second.saved.id,
-            first.saved.id,
-            "the second turn reopens the session",
-          );
-          const reopened = second.events.find((event) => event._tag === "SessionStarted");
-          assert(reopened?._tag === "SessionStarted");
-          assert.deepStrictEqual(
-            Option.map(reopened.harnessSession, ({ id }) => id),
-            Option.some(first.saved.id),
-          );
 
           assert(Option.isSome(first.usage) && Option.isSome(second.usage));
           assert.isAtLeast(
@@ -395,6 +477,131 @@ describe("the supervisor role", () => {
         }).pipe(Effect.provide(NodeServices.layer), Effect.timeout("20 seconds")),
       30_000,
     );
+
+  it.live(
+    "codex: replays framed container traffic and decodes offered tools",
+    () =>
+      Effect.gen(function* () {
+        const { replies } = yield* runSupervisorScenario("codex", "replay", {
+          transform: asFramedContainer,
+        });
+        for (const reply of replies)
+          assertProvenCapabilities(Harness.make("codex"), "supervisor", reply.events);
+      }).pipe(Effect.provide(NodeServices.layer), Effect.timeout("20 seconds")),
+    30_000,
+  );
+
+  it.live(
+    "codex: normalizes container runtime, container name, and process owner at their argument positions",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const fs = yield* FileSystem.FileSystem;
+          const directory = yield* fs.makeTempDirectoryScoped({ prefix: "codex-container-" });
+          const runtime = `${directory}/runtime`;
+          yield* fs.writeFileString(
+            runtime,
+            '#!/bin/sh\n[ "$1" = exec ] && [ "$2" = -i ] && [ "$3" = codex ] || exit 125\nexit 0\n',
+          );
+          yield* fs.chmod(runtime, 0o700);
+          const recordTape = new Tape("record");
+          const recordedHost = yield* replayContainerHost("codex", recordTape, {
+            runtime,
+            name: "codex",
+          });
+          const invocation = {
+            cwd: "/",
+            command: "node",
+            args: [
+              "-e",
+              PROCESS_OWNER,
+              "replace",
+              "/tmp/worktree.child-1.pid",
+              "0",
+              "120000",
+              "codex",
+              "app-server",
+              "--stdio",
+            ],
+            environment: {},
+          };
+          const recordedProcess = yield* recordedHost.transport.run(
+            remoteCommandLine(recordedHost, invocation),
+            Stream.empty,
+          );
+          const recordedExit = yield* recordedProcess.exitCode;
+          assert.strictEqual(recordedExit, 0);
+          yield* Stream.runDrain(recordedProcess.stdout);
+
+          const launch = recordTape.entries[0];
+          assert(launch?.type === "expect_outbound" && isJsonObject(launch.payload));
+          assert.strictEqual(launch.payload.command, "$CONTAINER_RUNTIME");
+          assert(Array.isArray(launch.payload.args));
+          assert.deepStrictEqual(launch.payload.args.slice(0, 5), [
+            "exec",
+            "-i",
+            "$CONTRACT_CONTAINER",
+            "sh",
+            "-c",
+          ]);
+          const inner = launch.payload.args[5];
+          assert.isString(inner);
+          assert.include(inner, "'$PROCESS_OWNER'");
+          assert.include(inner, "'codex' 'app-server'");
+          assert.notInclude(inner, "$CONTRACT_CONTAINER");
+          assert.isBelow(inner.length, 500);
+
+          const replayTape = new Tape({
+            protocol: "codex-app-server",
+            harnessVersion: "0.172.0",
+            model: "gpt-6.2-astra",
+            scenario: "supervisor",
+            environment: {},
+            entries: recordTape.entries,
+          });
+          const replayedHost = yield* replayContainerHost("codex", replayTape);
+          const replayedProcess = yield* replayedHost.transport.run(
+            remoteCommandLine(replayedHost, invocation),
+            Stream.empty,
+          );
+          const replayedExit = yield* replayedProcess.exitCode;
+          assert.strictEqual(replayedExit, 0);
+          yield* Stream.runDrain(replayedProcess.stdout);
+          replayTape.assertComplete();
+        }),
+      ).pipe(Effect.provide(NodeServices.layer), Effect.timeout("15 seconds")),
+    20_000,
+  );
+
+  it.live(
+    "codex: rejects a supervisor answer with the wrong run ID before saving",
+    () =>
+      Effect.gen(function* () {
+        const replaceRunId = (value: Schema.Json): Schema.Json =>
+          Predicate.isString(value)
+            ? value.replaceAll(WAITING_RUN, "run-9999")
+            : Array.isArray(value)
+              ? value.map(replaceRunId)
+              : isJsonObject(value)
+                ? Object.fromEntries(
+                    Object.entries(value).map(([key, item]) => [key, replaceRunId(item)]),
+                  )
+                : value;
+        const exit = yield* runSupervisorScenario("codex", "replay", {
+          transform: (transcript) => ({
+            ...transcript,
+            entries: transcript.entries.map((entry) =>
+              entry.type === "emit_inbound"
+                ? { ...entry, payload: replaceRunId(entry.payload) }
+                : entry,
+            ),
+          }),
+        }).pipe(Effect.exit);
+        assert(exit._tag === "Failure");
+        assert.include(Cause.pretty(exit.cause), WAITING_RUN);
+      }).pipe(Effect.provide(NodeServices.layer), Effect.timeout("20 seconds")),
+    30_000,
+  );
 
   it.live(
     "claude: keeps answering after a request on usage credits",
