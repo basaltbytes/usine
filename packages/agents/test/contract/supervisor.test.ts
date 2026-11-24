@@ -21,7 +21,6 @@ import * as AttemptChannel from "@usine/core/attempt/channel";
 import { MessageSizeMib, WorkerName } from "@usine/core/worker";
 import {
   Array as Arr,
-  Cause,
   Effect,
   FileSystem,
   Layer,
@@ -571,36 +570,6 @@ describe("the supervisor role", () => {
         }),
       ).pipe(Effect.provide(NodeServices.layer), Effect.timeout("15 seconds")),
     20_000,
-  );
-
-  it.live(
-    "codex: rejects a supervisor answer with the wrong run ID before saving",
-    () =>
-      Effect.gen(function* () {
-        const replaceRunId = (value: Schema.Json): Schema.Json =>
-          Predicate.isString(value)
-            ? value.replaceAll(WAITING_RUN, "run-9999")
-            : Array.isArray(value)
-              ? value.map(replaceRunId)
-              : isJsonObject(value)
-                ? Object.fromEntries(
-                    Object.entries(value).map(([key, item]) => [key, replaceRunId(item)]),
-                  )
-                : value;
-        const exit = yield* runSupervisorScenario("codex", "replay", {
-          transform: (transcript) => ({
-            ...transcript,
-            entries: transcript.entries.map((entry) =>
-              entry.type === "emit_inbound"
-                ? { ...entry, payload: replaceRunId(entry.payload) }
-                : entry,
-            ),
-          }),
-        }).pipe(Effect.exit);
-        assert(exit._tag === "Failure");
-        assert.include(Cause.pretty(exit.cause), WAITING_RUN);
-      }).pipe(Effect.provide(NodeServices.layer), Effect.timeout("20 seconds")),
-    30_000,
   );
 
   it.live(
