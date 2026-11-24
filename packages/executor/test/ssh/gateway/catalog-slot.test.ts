@@ -307,6 +307,27 @@ describe("a provider slot that only the test's catalog declares", () => {
   );
 
   it.effect(
+    "reads the slot's credential from providers when the gateway reports slots without credentials",
+    () => {
+      const machine = fakeMachine();
+      const gateway = fakeGateway(machine, keyed, servingAlso(plan));
+      gateway.switches.reportsSlotCredentials = false;
+      return Effect.gen(function* () {
+        const executor = yield* Executor;
+        const report = yield* executor.preflight(WORKER, [PLAN_BRAIN], 1);
+        assert.deepStrictEqual(report.gatewayUpgrade, Option.none());
+      }).pipe(
+        Effect.provide(
+          gatewayRuntime(machine, mintingProvider(), gateway, {
+            address: gatewayAddress({ llmProviders: ["test-plan"] }),
+            harnesses: planHarnesses,
+          }),
+        ),
+      );
+    },
+  );
+
+  it.effect(
     "works with a gateway newer than the orchestrator, which serves more slots and routes",
     () => {
       const machine = fakeMachine();
@@ -315,6 +336,9 @@ describe("a provider slot that only the test's catalog declares", () => {
         id: ModelProviderId.make("later-plan"),
         slot: GatewaySlot.make("later-plan"),
         label: "Later plan",
+        credentials: [
+          ApiKeyCredential.make({ variable: GatewayVariable.make("LATER_PLAN_API_KEY") }),
+        ],
       });
       const widened = ModelProvider.make({
         ...plan,

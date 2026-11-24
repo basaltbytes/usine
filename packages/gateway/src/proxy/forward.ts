@@ -1,3 +1,4 @@
+import { HOP_BY_HOP_HEADERS } from "@usine/core/agent/provider";
 import { Effect, Option } from "effect";
 import {
   Headers,
@@ -7,28 +8,13 @@ import {
   HttpServerResponse,
 } from "effect/http";
 
-/** Connection-level headers that are never forwarded (RFC 9110, section 7.6.1). */
-const HOP_BY_HOP = [
-  "connection",
-  "keep-alive",
-  "proxy-authenticate",
-  "proxy-authorization",
-  "proxy-connection",
-  "te",
-  "trailer",
-  "transfer-encoding",
-  "upgrade",
-  "expect",
-  "host",
-] as const;
-
 /** Returns `headers` without hop-by-hop headers, including those listed in `Connection`. */
 export const endToEndHeaders = (headers: Headers.Headers): Headers.Headers => {
   const listed = Option.match(Headers.get(headers, "connection"), {
     onNone: (): ReadonlyArray<string> => [],
     onSome: (value) => value.split(",").map((name) => name.trim().toLowerCase()),
   });
-  return [...HOP_BY_HOP, ...listed].reduce(
+  return [...HOP_BY_HOP_HEADERS, ...listed].reduce(
     (remaining, name) => Headers.remove(remaining, name),
     headers,
   );

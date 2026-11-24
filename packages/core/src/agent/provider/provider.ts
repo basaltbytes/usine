@@ -28,12 +28,22 @@ export type WireProtocol = typeof WireProtocol.Type;
  * A path that a protocol serves under its provider's slot, such as `/v1/models/{model}`. A
  * placeholder in braces matches one segment of letters, digits, `.`, `_`, and `-` that starts with
  * a letter or digit, so a dot segment, an empty segment, or a percent-encoded separator never
- * matches.
+ * matches. A route has no `.` or `..` segment, and a literal separates two placeholders in one
+ * segment.
  */
 export const RoutePattern = Schema.String.check(
   Schema.isPattern(/^(?:\/(?:[A-Za-z0-9._~:-]|\{[a-z][A-Za-z0-9]*\})+)+$/u, {
     message: "Expected a route such as /v1/messages or /v1/models/{model}",
   }),
+  Schema.makeFilter(
+    (route) =>
+      !route.split("/").some((segment) => segment === "." || segment === "..") ||
+      "Expected a route without a . or .. segment",
+  ),
+  Schema.makeFilter(
+    (route) =>
+      !route.includes("}{") || "Expected a literal between two placeholders in one segment",
+  ),
 ).pipe(Schema.brand("RoutePattern"));
 export type RoutePattern = typeof RoutePattern.Type;
 
@@ -42,6 +52,32 @@ export const HeaderName = Schema.String.check(
   Schema.isPattern(/^[a-z0-9][a-z0-9-]*$/u, { message: "Expected a lowercase header name" }),
 ).pipe(Schema.brand("HeaderName"));
 export type HeaderName = typeof HeaderName.Type;
+
+/**
+ * The request headers that apply to one connection or route a request (RFC 9110, section 7.6.1),
+ * which a proxy never forwards.
+ */
+export const HOP_BY_HOP_HEADERS = [
+  "connection",
+  "keep-alive",
+  "proxy-authenticate",
+  "proxy-authorization",
+  "proxy-connection",
+  "te",
+  "trailer",
+  "transfer-encoding",
+  "upgrade",
+  "expect",
+  "host",
+] as const;
+
+/** The headers that a key can't go in: the hop-by-hop headers and those that frame a body. */
+const UNKEYABLE_HEADERS: ReadonlyArray<string> = [
+  ...HOP_BY_HOP_HEADERS,
+  "content-encoding",
+  "content-length",
+  "content-type",
+];
 
 /** The name of an environment variable that the gateway reads, such as `ANTHROPIC_API_KEY`. */
 export const GatewayVariable = Schema.String.check(
@@ -60,26 +96,115 @@ export const UpstreamBase = Schema.String.check(
 export type UpstreamBase = typeof UpstreamBase.Type;
 
 const PLACEHOLDER = /\{[a-z][A-Za-z0-9]*\}/gu;
-const SEGMENT_TEXT = "[A-Za-z0-9][A-Za-z0-9._-]*";
 
-/** Returns the expression that matches the paths of `route`. */
-const matcherOf = (route: RoutePattern): RegExp => {
-  const literal = route
-    .split(PLACEHOLDER)
-    .map((part) => part.replace(/[.*+?^${}()|[\]\\/]/gu, "\\$&"));
-  return new RegExp(`^${literal.join(SEGMENT_TEXT)}$`, "u");
+const ALPHANUMERIC = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+/** The characters that a placeholder's first character can be. */
+const PLACEHOLDER_FIRST = ALPHANUMERIC;
+/** The characters that a placeholder's later characters can be. */
+const PLACEHOLDER_REST = `${ALPHANUMERIC}._-`;
+
+/** A route segment: each literal character, and `null` for each placeholder. */
+type SegmentParts = ReadonlyArray<string | null>;
+
+/** Each segment of `route`, the first being the empty one before its leading `/`. */
+const segmentsOf = (route: RoutePattern): ReadonlyArray<SegmentParts> =>
+  route
+    .split("/")
+    .map((segment) =>
+      segment
+        .split(PLACEHOLDER)
+        .flatMap((literal, index) => [...(index === 0 ? [] : [null]), ...literal]),
+    );
+
+/**
+ * Returns the steps from `state` in `parts`: the characters that the next one can be, as a string,
+ * and the state it reaches. State `2 * i` is before part `i`, and `2 * i + 1` is inside the
+ * placeholder at part `i`.
+ */
+const steps = (parts: SegmentParts, state: number): ReadonlyArray<readonly [string, number]> => {
+  if (state % 2 === 1) return [[PLACEHOLDER_REST, state]];
+  const part = parts[state / 2];
+  if (part === undefined) return [];
+  return part === null ? [[PLACEHOLDER_FIRST, state + 1]] : [[part, state + 2]];
 };
 
-/** Returns whether `path`, a path without its query, is one that `route` serves. */
-export const routeServes = (route: RoutePattern, path: string): boolean =>
-  matcherOf(route).test(path);
+/** Returns `state` and the state after the placeholder that it is inside, if any. */
+const settled = (state: number): ReadonlyArray<number> =>
+  state % 2 === 1 ? [state, state + 1] : [state];
+
+/**
+ * Returns whether `text`, one segment of a path, matches `parts`, in time linear in its length: the
+ * walk keeps the set of states that the characters read so far reach.
+ */
+const segmentMatches = (parts: SegmentParts, text: string): boolean => {
+  let states = settled(0);
+  for (const character of text) {
+    states = Arr.dedupe(
+      states.flatMap((state) =>
+        steps(parts, state).flatMap(([expected, next]) =>
+          expected.includes(character) ? settled(next) : [],
+        ),
+      ),
+    );
+    if (states.length === 0) return false;
+  }
+  return states.includes(2 * parts.length);
+};
+
+/** Returns whether `path`, a path without its query, matches the segments of a route. */
+const routeMatches = (segments: ReadonlyArray<SegmentParts>, path: string): boolean => {
+  const texts = path.split("/");
+  return (
+    texts.length === segments.length &&
+    segments.every((parts, index) => segmentMatches(parts, texts[index] ?? ""))
+  );
+};
+
+/**
+ * Returns whether one string matches both `left` and `right`, two route segments, by walking every
+ * pair of states that a common prefix reaches.
+ */
+const segmentsOverlap = (left: SegmentParts, right: SegmentParts): boolean => {
+  const seen = new Set<string>();
+  const pending: Array<readonly [number, number]> = [[0, 0]];
+  for (let pair = pending.pop(); pair !== undefined; pair = pending.pop())
+    for (const leftState of settled(pair[0]))
+      for (const rightState of settled(pair[1])) {
+        const key = `${String(leftState)},${String(rightState)}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        if (leftState === 2 * left.length && rightState === 2 * right.length) return true;
+        for (const [leftCharacter, leftNext] of steps(left, leftState))
+          for (const [rightCharacter, rightNext] of steps(right, rightState))
+            if ([...leftCharacter].some((character) => rightCharacter.includes(character)))
+              pending.push([leftNext, rightNext]);
+      }
+  return false;
+};
+
+/** Returns whether a path matches both `left` and `right`. */
+const routesOverlap = (left: RoutePattern, right: RoutePattern): boolean => {
+  const leftSegments = segmentsOf(left);
+  const rightSegments = segmentsOf(right);
+  return (
+    leftSegments.length === rightSegments.length &&
+    leftSegments.every((parts, index) => segmentsOverlap(parts, rightSegments[index] ?? []))
+  );
+};
 
 /** Where a static key goes in a request: in `header`, after `Bearer ` with `bearer`, or alone with `none`. */
 export class KeyHeader extends Schema.Class<
   KeyHeader,
   Brand.Brand<"@usine/core/agent/provider/KeyHeader">
 >("Agent/KeyHeader")({
-  header: HeaderName,
+  /** The header, which is neither hop-by-hop nor one that frames the body, such as `content-length`. */
+  header: HeaderName.check(
+    Schema.makeFilter(
+      (header) =>
+        !UNKEYABLE_HEADERS.includes(header) ||
+        `Expected a key header other than ${UNKEYABLE_HEADERS.join(", ")}`,
+    ),
+  ),
   scheme: Schema.Literals(["bearer", "none"]),
 }) {
   /** Returns the header value that carries `key`. */
@@ -100,9 +225,11 @@ export class ProviderProtocol extends Schema.Class<
   routes: Schema.NonEmptyArray(RoutePattern).check(Schema.isUnique()),
   key: KeyHeader,
 }) {
+  readonly #segments = this.routes.map(segmentsOf);
+
   /** Returns whether `path`, a path under the slot without its query, is one of the routes. */
   serves(path: string): boolean {
-    return this.routes.some((route) => routeServes(route, path));
+    return this.#segments.some((segments) => routeMatches(segments, path));
   }
 }
 
@@ -172,10 +299,18 @@ export class ModelProvider extends Schema.Class<
         new Set(protocols.map(({ protocol }) => protocol)).size === protocols.length ||
         "A provider serves each protocol once",
     ),
-    Schema.makeFilter(({ protocols }) => {
-      const routes = protocols.flatMap(({ routes }) => routes);
-      return new Set(routes).size === routes.length || "A route belongs to one protocol";
-    }),
+    Schema.makeFilter(
+      ({ protocols }) =>
+        !protocols.some((protocol, index) =>
+          protocols
+            .slice(index + 1)
+            .some((other) =>
+              protocol.routes.some((route) =>
+                other.routes.some((otherRoute) => routesOverlap(route, otherRoute)),
+              ),
+            ),
+        ) || "A path matches the routes of one protocol",
+    ),
     Schema.makeFilter(
       ({ credentials }) =>
         new Set(credentials.map(kindOf)).size === credentials.length ||
@@ -228,8 +363,13 @@ const namesOf = ({ id, slot }: ModelProvider): ReadonlyArray<string> => {
   return Arr.dedupe(names);
 };
 
+/** The gateway variables that `provider` reads: its credentials' and its upstream variable. */
+const variablesOf = ({ credentials, upstreamVariable }: ModelProvider) =>
+  Arr.dedupe([...credentials.map(({ variable }) => variable), ...Option.toArray(upstreamVariable)]);
+
 /**
- * Model providers whose IDs and slots are all distinct, so a name finds one provider. Configuration
+ * Model providers whose IDs and slots are all distinct, so a name finds one provider, and that read
+ * no gateway variable in common, so a key goes only to its own provider's upstream. Configuration
  * accepts a provider ID wherever it accepts a slot.
  */
 export class ModelProviderCatalog extends Schema.Class<
@@ -240,6 +380,13 @@ export class ModelProviderCatalog extends Schema.Class<
     Schema.makeFilter(({ providers }) => {
       const names = providers.flatMap(namesOf);
       return new Set(names).size === names.length || "Each provider ID and slot names one provider";
+    }),
+    Schema.makeFilter(({ providers }) => {
+      const variables = providers.flatMap(variablesOf);
+      return (
+        new Set(variables).size === variables.length ||
+        "Each gateway variable belongs to one provider"
+      );
     }),
   ),
 ) {

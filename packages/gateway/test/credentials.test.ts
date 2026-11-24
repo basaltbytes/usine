@@ -11,6 +11,7 @@ import {
   Option,
   Record,
   Redacted,
+  Schema,
   Scope,
   Exit,
 } from "effect";
@@ -173,3 +174,62 @@ it("connects each credential kind and login to the provider that accepts it", ()
     );
   }
 });
+
+it.live(
+  "ignores a stored credential under a slot whose provider doesn't accept it, and logs it without its value",
+  () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const directory = yield* fs.makeTempDirectoryScoped();
+        const file = `${directory}/provider-credentials.json`;
+        const warnings: string[] = [];
+        const logs = Logger.layer([
+          Logger.make(({ logLevel, message }) => {
+            if (logLevel === "Warn") warnings.push(jsonKey(message));
+          }),
+        ]);
+        const start = () =>
+          gatewayLayer(
+            { proxy: listener, egress: listener, admin: listener },
+            undefined,
+            directory,
+          ).pipe(Layer.provide(settingsLayer(NO_PROVIDERS)), Layer.provide(logs));
+        const secret = "sk-ant-api03-misplaced-private-fixture";
+        const first = yield* Scope.make();
+        const connected = yield* Layer.buildWithScope(start(), first);
+        const credentials = yield* Effect.serviceOption(ProviderCredentials).pipe(
+          Effect.provideContext(connected),
+        );
+        if (Option.isNone(credentials))
+          return yield* Effect.die("Provider credential service missing");
+        yield* credentials.value.replace({
+          kind: "anthropic-api-key",
+          secret: Redacted.make(secret),
+        });
+        yield* Scope.close(first, Exit.void);
+
+        const StoredFile = Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown));
+        const stored = yield* fs
+          .readFileString(file)
+          .pipe(Effect.flatMap(Schema.decodeUnknownEffect(StoredFile)));
+        const record = stored[anthropic.slot];
+        assert(record !== undefined);
+        const misplaced = { [anthropic.slot]: record, [openai.slot]: record, "test-plan": record };
+        const text = yield* Schema.encodeEffect(StoredFile)(misplaced);
+        yield* fs.writeFileString(file, text);
+        const restarted = yield* Layer.build(start());
+        const { providers } = yield* SettingsInForce.pipe(
+          Effect.provideContext(restarted),
+          Effect.flatMap((settings) => settings.current),
+        );
+        assert.deepStrictEqual(Object.keys(providers), [anthropic.slot]);
+        const ignored = warnings.filter((line) => line.includes("Ignored a stored provider"));
+        assert.strictEqual(ignored.length, 2);
+        assert.include(ignored[0], `"slot":"${openai.slot}"`);
+        assert.include(ignored[0], '"kind":"AnthropicProvider"');
+        assert.include(ignored[1], '"slot":"test-plan"');
+        assert.notInclude(warnings.join("\n"), secret);
+      }),
+    ).pipe(Effect.provide([NodeServices.layer, FetchHttpClient.layer])),
+);

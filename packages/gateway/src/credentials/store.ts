@@ -58,6 +58,12 @@ const Stored = Schema.Union([
 ]);
 type Stored = typeof Stored.Type;
 
+/** The slot of the provider that accepts each kind of stored credential. */
+const SLOT_OF_STORED = {
+  AnthropicProvider: anthropic.slot,
+  OpenAiProvider: openai.slot,
+} as const satisfies Record<Stored["_tag"], GatewaySlot>;
+
 /** Each managed slot's credential, or `None` for a slot disconnected from the environment's credential. */
 const SnapshotJson = Schema.fromJsonString(
   Schema.toCodecJson(Schema.Record(GatewaySlot, Schema.Option(Stored))),
@@ -106,12 +112,26 @@ export class ProviderCredentials extends Context.Service<
         const file = `${directory}/provider-credentials.json`;
         let snapshot: Snapshot = {};
         if (yield* fs.exists(file).pipe(Effect.mapError(failed))) {
-          snapshot = yield* fs
+          const stored = yield* fs
             .readFileString(file)
             .pipe(
               Effect.flatMap(Schema.decodeUnknownEffect(SnapshotJson)),
               Effect.mapError(failed),
             );
+          const entries = Object.entries(stored);
+          const misplaced = entries.flatMap(([slot, held]) =>
+            Option.isSome(held) && SLOT_OF_STORED[held.value._tag] !== slot
+              ? [{ slot, kind: held.value._tag }]
+              : [],
+          );
+          for (const fields of misplaced)
+            yield* Effect.logWarning(
+              "Ignored a stored provider credential under a slot whose provider doesn't accept it",
+              { file, ...fields },
+            );
+          snapshot = Object.fromEntries(
+            entries.filter(([slot]) => !misplaced.some((ignored) => ignored.slot === slot)),
+          );
         }
         const apply = (providers: LlmProviders) =>
           Effect.succeed(
