@@ -2,6 +2,7 @@ import { describe, expect, it } from "@effect/vitest";
 import { Effect, Option, Schema } from "effect";
 import {
   AccountResponse,
+  AccountUpdated,
   AgentMessageItem,
   ModelListResponse,
   ThreadStartResponse,
@@ -12,6 +13,7 @@ import {
   ItemNotification,
   RateLimitsUpdated,
   CodexTokenUsage,
+  UserMessageItem,
   isTurnStatus,
   isToolStatus,
   isApprovalToolStatus,
@@ -22,7 +24,7 @@ import {
 } from "../src/protocol/codex/codex.ts";
 import packageJson from "../package.json" with { type: "json" };
 import { CODEX_PROTOCOL } from "../src/protocol/codex/version.ts";
-import { CODEX_CLI_VERSION } from "../src/harness/codex/descriptor.ts";
+import { CODEX_CLI_VERSION, codex } from "../src/harness/codex/descriptor.ts";
 import { unsupportedCodexVersion } from "../src/harness/codex/preflight.ts";
 import { ThreadTokenUsageUpdatedNotification } from "../src/protocol/codex/generated.ts";
 import { UsageCount } from "../src/protocol/count.ts";
@@ -209,14 +211,135 @@ describe("generated Codex protocol selections", () => {
     }),
   );
 
-  it("matches the preflight baseline and refuses a newer worker protocol", () => {
-    expect(CODEX_PROTOCOL.version).toBe(CODEX_CLI_VERSION);
+  it("accepts the installed release and the protocol baseline, and refuses other releases", () => {
     expect(packageJson.devDependencies["@pwrdrvr/codex-app-server-protocol"]).toBe(
       CODEX_PROTOCOL.version,
     );
-    expect(Option.isNone(unsupportedCodexVersion(`codex-cli ${CODEX_PROTOCOL.version}`))).toBe(
-      true,
-    );
+    expect(codex.worker.install).toEqual([{ name: "@openai/codex", version: CODEX_CLI_VERSION }]);
+    expect(codex.worker.versions).toContain(CODEX_CLI_VERSION);
+    expect(codex.worker.versions).toContain(CODEX_PROTOCOL.version);
+    expect(Option.isNone(unsupportedCodexVersion(`codex-cli ${CODEX_CLI_VERSION}`))).toBe(true);
     expect(Option.isSome(unsupportedCodexVersion("codex-cli 0.165.0"))).toBe(true);
   });
+});
+
+// Each case is a payload shape that Codex 0.172.0's schema adds to a type that the adapter selects
+// from the 0.164.0 baseline.
+describe("Codex 0.172.0 additions to the selected types", () => {
+  it.effect("decodes a GCP account, a workspace name, a user ID, and an update reason", () =>
+    Effect.gen(function* () {
+      const gcp = yield* Schema.decodeUnknownEffect(AccountResponse)({
+        account: { type: "gcp" },
+        requiresOpenaiAuth: false,
+        userId: "user",
+      });
+      expect(gcp.account).toEqual({ type: "gcp" });
+      const chatgpt = yield* Schema.decodeUnknownEffect(AccountResponse)({
+        account: {
+          type: "chatgpt",
+          email: "operator@example.com",
+          planType: "pro",
+          workspaceName: "Workspace",
+        },
+        requiresOpenaiAuth: true,
+      });
+      expect(chatgpt.account).toEqual({ type: "chatgpt", email: "operator@example.com" });
+      const updated = yield* Schema.decodeUnknownEffect(AccountUpdated)({
+        authMode: "chatgpt",
+        reason: "workspaceRoutingReady",
+      });
+      expect(updated).toEqual({ authMode: "chatgpt" });
+    }),
+  );
+
+  it.effect("decodes the new turn error codes", () =>
+    Effect.gen(function* () {
+      for (const code of ["modelNotFound", "projectSpendLimitExceeded", "inferenceHookDenied"]) {
+        const completion = yield* Schema.decodeEffect(TurnCompleted)({
+          turn: {
+            id: "turn",
+            status: "failed",
+            error: { message: "Failed", codexErrorInfo: code },
+          },
+        });
+        expect(completion.turn.error?.codexErrorInfo).toBe(code);
+      }
+    }),
+  );
+
+  it.effect("decodes item timestamps, content token counts, and new item fields", () =>
+    Effect.gen(function* () {
+      const notification = yield* Schema.decodeUnknownEffect(ItemNotification)({
+        threadId: "thread",
+        turnId: "turn",
+        contentTokenCount: 12,
+        item: {
+          type: "functionCallOutput",
+          startedAtMs: 1,
+          completedAtMs: 2,
+          output: [{ type: "inputAudio", file_id: "file" }],
+        },
+      });
+      expect(notification.threadId).toBe("thread");
+      const message = yield* Schema.decodeUnknownEffect(AgentMessageItem)({
+        type: "agentMessage",
+        id: "message",
+        text: "Done",
+        moderation: { moderated: false },
+        startedAtMs: 1,
+      });
+      expect(message).toEqual({ type: "agentMessage", id: "message", text: "Done" });
+      const user = yield* Schema.decodeEffect(UserMessageItem)({
+        type: "userMessage",
+        id: "user",
+        content: [{ type: "audio", fileId: "file" }],
+      });
+      expect(user.content).toEqual([{ type: "audio", fileId: "file" }]);
+      for (const item of [
+        { type: "mcpToolCall", id: "mcp", status: "completed", environmentId: "env" },
+        { type: "imageGeneration", id: "image", status: "completed", generationId: "generation" },
+      ])
+        expect(Schema.is(ToolItem)(item)).toBe(true);
+    }),
+  );
+
+  it.effect("decodes models with Daybreak availability", () =>
+    Effect.gen(function* () {
+      const models = yield* Schema.decodeUnknownEffect(ModelListResponse)({
+        data: [
+          {
+            id: "gpt-6.2-astra",
+            model: "gpt-6.2-astra",
+            availableAccessPrograms: { daybreakAvailability: "available" },
+          },
+        ],
+        nextCursor: null,
+      });
+      expect(models.data).toEqual([{ id: "gpt-6.2-astra", model: "gpt-6.2-astra" }]);
+    }),
+  );
+
+  it.effect("decodes the experimental thread start and resume fields", () =>
+    Effect.gen(function* () {
+      const extra = {
+        activePermissionProfile: null,
+        multiAgentMode: "default",
+        runtimeWorkspaceRoots: ["/work"],
+      };
+      const started = yield* Schema.decodeUnknownEffect(ThreadStartResponse)({
+        ...extra,
+        modelProvider: "openai",
+        thread: { id: "thread", canAcceptDirectInput: true, environments: null },
+        model: "gpt-6.2-astra",
+      });
+      expect(started.thread.id).toBe("thread");
+      const resumed = yield* Schema.decodeUnknownEffect(ThreadResumeResponse)({
+        ...extra,
+        initialTurnsPage: null,
+        modelProvider: "openai",
+        thread: { id: "thread", turns: [], extra: null },
+      });
+      expect(resumed.thread.turns).toEqual([]);
+    }),
+  );
 });

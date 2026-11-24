@@ -70,9 +70,9 @@ export const codexCompletion = (appServer: CodexAppServer["Service"]) =>
       host: spec.host,
     };
     const connection = yield* appServer.open(client);
-    yield* initializeCodex(connection);
+    const cliVersion = yield* initializeCodex(connection);
     const billing = yield* codexChildAccount(connection, spec.session.brain, spec.admitted.pool);
-    const effort = yield* checkCodexModel(connection, client, spec);
+    const effort = yield* checkCodexModel(connection, client, spec, cliVersion);
     // An ephemeral thread writes no rollout, so nothing can resume it. Codex keeps its own tools,
     // so the sandbox is read-only.
     const threadParams: ThreadStartParams = {

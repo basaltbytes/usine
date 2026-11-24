@@ -21,13 +21,20 @@ export const chatgptPlan = PoolDescriptor.make({
   windows: "together",
 });
 
-/** The pinned app-server protocol baseline used by the conformance check. */
-export const CODEX_CLI_VERSION = CODEX_PROTOCOL.version;
+/**
+ * The Codex CLI release that worker images install. It can be newer than the app-server protocol
+ * baseline in `CODEX_PROTOCOL`, which the conformance check compiles against.
+ */
+export const CODEX_CLI_VERSION = "0.172.0";
 
 // Standard tier, up to 272K input tokens. Read from
-// https://developers.openai.com/api/docs/pricing on 2026-10-26.
-// Cache writes use the 30-minute rate, as Codex sets no retention.
+// https://developers.openai.com/api/docs/pricing on 2026-10-26, and from
+// https://developers.openai.com/api/docs/models/<model> for the GPT-6.2 models and gpt-6.1-terra
+// on 2026-11-24. Cache writes use the 30-minute rate, as Codex sets no retention.
 const prices = {
+  "gpt-6.2-astra": { input: 8, cachedInput: 0.4, cacheWrite: 10, output: 40 },
+  "gpt-6.2-sol": { input: 2, cachedInput: 0.1, cacheWrite: 2.5, output: 10 },
+  "gpt-6.1-terra": { input: 1, cachedInput: 0.05, cacheWrite: 1.25, output: 5 },
   "gpt-6-astra": { input: 10, cachedInput: 1, cacheWrite: 12.5, output: 50 },
   "gpt-6.1-sol": { input: 2, cachedInput: 0.1, cacheWrite: 2.5, output: 10 },
   "gpt-6-sol": { input: 2, cachedInput: 0.2, cacheWrite: 2.5, output: 10 },
@@ -65,7 +72,14 @@ export const codex = HarnessDescriptor.make({
   label: "Codex",
   worker: WorkerRequirements.make({
     install: [{ name: "@openai/codex", version: CODEX_CLI_VERSION }],
-    versions: [CODEX_CLI_VERSION, "0.159.0", "0.159.1", "0.159.2", "0.159.3"],
+    versions: [
+      CODEX_CLI_VERSION,
+      CODEX_PROTOCOL.version,
+      "0.159.0",
+      "0.159.1",
+      "0.159.2",
+      "0.159.3",
+    ],
     login: {
       environment: ["CODEX_HOME"],
       mounted: [".codex/auth.json"],

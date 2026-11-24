@@ -103,6 +103,12 @@ export interface InitializeParams {
   } | null;
 }
 
+/** The `initialize` response field that names the app server's release. */
+export const InitializeResponse = Schema.Struct({
+  /** `<client name>/<Codex CLI version> (<platform>) ...`. */
+  userAgent: Schema.String,
+});
+
 export const ModelListParams = Schema.Struct({
   cursor: Schema.optionalKey(Schema.NullOr(Schema.String)),
   limit: Schema.optionalKey(Schema.NullOr(Schema.Finite)),

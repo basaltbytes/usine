@@ -252,14 +252,18 @@ export const openFixture = (
         : undefined;
     const descriptor = catalog.descriptors.find(({ id }) => id === provider);
     const version = descriptor?.worker.install[0]?.version;
-    assert(version !== undefined);
+    assert(descriptor !== undefined && version !== undefined);
     if (source !== "record") {
       assert.strictEqual(source.scenario, scenario);
       assert.strictEqual(
         source.protocol,
         provider === "claude" ? "claude-sdk" : "codex-app-server",
       );
-      assert.strictEqual(source.harnessVersion, version);
+      // A fixture stays valid while preflight accepts the release that recorded it.
+      assert.include(
+        descriptor.worker.versions.length > 0 ? descriptor.worker.versions : [version],
+        source.harnessVersion,
+      );
     } else {
       const versionSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
       const installed = yield* versionSpawner.string(ChildProcess.make(provider, ["--version"]));

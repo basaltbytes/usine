@@ -3731,20 +3731,52 @@ describe("Codex child backend", () => {
     },
   );
 
-  it.effect("rejects a model absent from the app-server catalog", () => {
-    const server = connectionLayer(
-      successfulResponses([{ id: "gpt-5.6-sol", model: "gpt-5.6-sol" }]),
-    );
-    return Effect.scoped(
-      Effect.gen(function* () {
-        const backend = yield* ChildBackend;
-        const error = yield* Effect.flip(backend.launch(request("gpt-never-existed")));
-        const matchesError = Schema.is(UnknownModelError)(error);
-        assert(matchesError);
-        assert.strictEqual(error.harness, "codex");
-      }).pipe(Effect.provide(codexChild.pipe(Layer.provideMerge(server)))),
-    );
-  });
+  it.effect(
+    "names the offered models and the CLI version for a model absent from the catalog",
+    () => {
+      const server = connectionLayer({
+        ...successfulResponses([
+          { id: "gpt-6-astra", model: "gpt-6-astra" },
+          { id: "gpt-5.6-sol", model: "gpt-5.6-sol" },
+        ]),
+        initialize: {
+          codexHome: "/home/usine/.codex",
+          platformFamily: "unix",
+          platformOs: "linux",
+          userAgent: "usine/0.164.0 (Debian 13.0.0; x86_64) unknown (usine; 0.0.1)",
+        },
+      });
+      const logs = collectLogs(["Error"]);
+      return Effect.scoped(
+        Effect.gen(function* () {
+          const backend = yield* ChildBackend;
+          const error = yield* Effect.flip(backend.launch(request("gpt-6.2-astra")));
+          const matchesError = Schema.is(UnknownModelError)(error);
+          assert(matchesError);
+          assert.strictEqual(error.harness, "codex");
+          assert.strictEqual(
+            error.message,
+            'Codex CLI 0.164.0 has no model "gpt-6.2-astra". Offered models: gpt-6-astra, gpt-5.6-sol.',
+          );
+          assert.deepStrictEqual(
+            logs.records.map(({ message }) => message),
+            [
+              [
+                "Codex rejected an unknown model",
+                {
+                  model: "gpt-6.2-astra",
+                  offered: ["gpt-6-astra", "gpt-5.6-sol"],
+                  cliVersion: "0.164.0",
+                },
+              ],
+            ],
+          );
+        }).pipe(
+          Effect.provide(codexChild.pipe(Layer.provide(server), Layer.provideMerge(logs.layer))),
+        ),
+      );
+    },
+  );
 
   it.effect("rejects an effort the selected model does not support", () => {
     const server = connectionLayer(
