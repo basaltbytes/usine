@@ -392,7 +392,7 @@ export const projectTranscript = (
   events: ReadonlyArray<TranscriptEventView>,
   attempts: ReadonlyArray<AttemptView>,
   sessionState: ReadonlyArray<TranscriptEventView> = [],
-  earlierUnloaded: ReadonlySet<AttemptId> = new Set(),
+  earlierUnloaded: ReadonlySet<AttemptId>,
 ): TranscriptProjection => {
   const terminalAttempts = new Set(
     attempts.filter(({ outcome }) => outcome !== null).map(({ id }) => id),

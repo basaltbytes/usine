@@ -7,6 +7,6 @@ A child's wait for its background work now ends only for the answer that started
 
 A held child that last reported idle now emits `SessionResumed` when an operator message starts its turn, even if a later answer that waits for background work replaced the idle report. The run page then shows the child working instead of waiting for input.
 
-A turn end no longer drops an own input that the harness holds for its next turn, such as a Codex continuation sent while a turn is interrupting. An operator message that repeats that input stays unread until the harness records it.
+A turn end no longer drops an own input that the harness holds for its next turn. An operator message that repeats that input stays unread until the harness records it.
 
 The run page shows the "No background work" note for a child's first loaded snapshot when the rows from the child's start aren't loaded, because the work that the snapshot ended can be on an earlier page.

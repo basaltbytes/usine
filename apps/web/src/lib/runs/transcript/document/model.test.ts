@@ -113,7 +113,7 @@ const attempt = (outcome: AttemptView["outcome"]) =>
 const document = (
   events: ReadonlyArray<TranscriptEventView>,
   attempts: ReadonlyArray<AttemptView>,
-) => readerDocument(projectTranscript(events, attempts), attempts, events);
+) => readerDocument(projectTranscript(events, attempts, [], new Set()), attempts, events);
 const shown = (rows: ReadonlyArray<ChapterRow>) =>
   rows.flatMap((row) =>
     row._tag === "Message" ? [`${row.speaker.name}: ${row.text}`] : [row._tag],

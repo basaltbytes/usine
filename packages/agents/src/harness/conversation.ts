@@ -474,7 +474,7 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
       });
       return;
     }
-    yield* Ref.update(state, (current) => ({ ...current, closing: true }));
+    yield* transition((current) => ({ ...current, answer: Option.none(), closing: true }));
     yield* options.beforeFinish.pipe(Effect.tapError(channel.fail));
     yield* channel.finish(session, message, answeredOperator, limitPassed);
   });
