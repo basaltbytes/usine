@@ -54,12 +54,19 @@ export type Receipt = Data.TaggedEnum<{
 }>;
 export const Receipt = Data.taggedEnum<Receipt>();
 
+/**
+ * How this process delivered an unread operator message to the native session: `unsent` when
+ * restored from the journal without this process sending it, `sent` when sent to the active or
+ * starting turn, and `after-turn` when the harness holds it until the running turn ends.
+ */
+type MessageDelivery = "unsent" | "sent" | "after-turn";
+
 /** An operator message that the session hasn't read. */
 export interface Unread {
   readonly id: OperatorMessageId;
   readonly message: string;
-  /** Whether this process sent the message to the native session. */
-  readonly sent: boolean;
+  /** Whether this process sent the message to the active turn, holds it for the next, or neither. */
+  readonly delivery: MessageDelivery;
   /** The session's count of finished tool calls when the message was queued. */
   readonly queuedAfter: number;
   /** The tool-call count where the message starts a turn of its own, if it does. */
@@ -71,10 +78,15 @@ export interface Inbox<A extends Unread> {
   /** Oldest first. */
   readonly unread: ReadonlyArray<A>;
   /**
-   * The texts of the inputs that this process sent on the session's own behalf, such as its task or
-   * a continuation message, that the harness hasn't recorded, oldest first.
+   * The texts of the inputs that this process sent on the session's own behalf to the active turn,
+   * such as its task or a continuation message, that the harness hasn't recorded, oldest first.
    */
   readonly own: ReadonlyArray<string>;
+  /**
+   * The texts of the session's own inputs that the harness accepted with `after-turn`, held until
+   * `turnEnded` starts the next turn, oldest first. A receipt of the ending turn never matches them.
+   */
+  readonly nextOwn: ReadonlyArray<string>;
   /** The native items that the session already counted, which acknowledge nothing again. */
   readonly counted: ReadonlyArray<string>;
   /** The turn whose items `saved` lists. */
@@ -139,6 +151,41 @@ const acknowledged = <A extends Unread>(
 });
 
 /**
+ * Ends the active turn in `inbox`: drops unrecorded active-turn own inputs, activates own inputs
+ * and operator messages held with `after-turn` for the next turn, and reports the counts.
+ */
+export const advanceTurn = <A extends Unread>(inbox: Inbox<A>) => {
+  const dropped = inbox.own.length;
+  const kept = inbox.nextOwn.length;
+  const promoted = inbox.unread.filter(({ delivery }) => delivery === "after-turn").length;
+  return {
+    inbox: {
+      ...inbox,
+      own: inbox.nextOwn,
+      nextOwn: [],
+      unread: inbox.unread.map((queued) =>
+        queued.delivery === "after-turn" ? { ...queued, delivery: "sent" as const } : queued,
+      ),
+    },
+    dropped,
+    kept,
+    promoted,
+  };
+};
+
+/** Resets process-bound inbox state after a native process restarts. */
+export const resetProcess = <A extends Unread>(inbox: Inbox<A>): Inbox<A> => ({
+  ...inbox,
+  unread: inbox.unread.map((queued) => ({
+    ...queued,
+    delivery: "unsent" as const,
+    turnStart: Option.none(),
+  })),
+  own: [],
+  nextOwn: [],
+});
+
+/**
  * Applies `receipt` to `inbox`: the messages that it acknowledges leave the inbox, oldest first.
  * `calls` is the session's current count of started tool calls.
  */
@@ -183,12 +230,13 @@ export const match = <A extends Unread>(
           { save, own: Option.some({ item }) },
         );
       const message = counted.unread.find(
-        (candidate) => (at === "restored" || candidate.sent) && candidate.message === text,
+        (candidate) =>
+          (at === "restored" || candidate.delivery === "sent") && candidate.message === text,
       );
       return acknowledged(counted, message === undefined ? [] : [{ message, at }], { save });
     },
     ByCount: ({ unread }) => {
-      const sent = inbox.unread.filter((message) => message.sent);
+      const sent = inbox.unread.filter((message) => message.delivery === "sent");
       return acknowledged(
         inbox,
         sent
@@ -197,7 +245,10 @@ export const match = <A extends Unread>(
       );
     },
     TurnsQueued: ({ turns }) => {
-      const queued = turns > 0 ? inbox.unread.filter((message) => message.sent).slice(-turns) : [];
+      const queued =
+        turns > 0
+          ? inbox.unread.filter((message) => message.delivery === "sent").slice(-turns)
+          : [];
       return acknowledged(
         {
           ...inbox,

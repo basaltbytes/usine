@@ -112,11 +112,10 @@ import {
 export { CodexAppServer, codexAppServerLive, type CodexConnection } from "./app-server.ts";
 
 /** An input that the session sent to a Codex turn, or holds for the next one. */
-interface TurnInput {
-  readonly message: string;
-  /** The operator message that the input carries, or `undefined` for the session's own input. */
-  readonly id: OperatorMessageId | undefined;
-}
+type TurnInput =
+  | { readonly kind: "operator"; readonly message: string; readonly id: OperatorMessageId }
+  | { readonly kind: "own"; readonly message: string }
+  | { readonly kind: "steer"; readonly message: string };
 
 /** What a Codex child session tracks about its app-server and turns. */
 interface CodexState {
@@ -306,7 +305,13 @@ const makeCodexSessions = Effect.gen(function* () {
       turnActive: Option.isSome(thread.activeTurn),
       interrupting: false,
       pending: [],
-      submitted: Option.isSome(thread.activeTurn) ? policy.restored.unread : [],
+      submitted: Option.isSome(thread.activeTurn)
+        ? policy.restored.unread.map(({ id, message }): TurnInput => ({
+            kind: "operator",
+            id,
+            message,
+          }))
+        : [],
       retries: 0,
       retrying: false,
       rateLimits: Option.none(),
@@ -321,18 +326,14 @@ const makeCodexSessions = Effect.gen(function* () {
       }));
     // A turn that ends while the send is in flight has moved the input to `pending`.
     const forgetInput = (input: TurnInput) => dropInputs((candidate) => candidate === input);
-    const startTurn = Effect.fn("CodexRuntime.startTurn")(function* (
-      message: string,
-      id?: OperatorMessageId,
-    ) {
+    const startTurn = Effect.fn("CodexRuntime.startTurn")(function* (input: TurnInput) {
       yield* Effect.annotateCurrentSpan({ sessionId: session.id });
       const encodedTurnStartParams = yield* Schema.encodeEffect(
         Schema.toCodecJson(TurnStartParams),
       )({
         ...turnParams,
-        input: [{ type: "text", text: message, text_elements: [] }],
+        input: [{ type: "text", text: input.message, text_elements: [] }],
       }).pipe(Effect.orDie);
-      const input: TurnInput = { message, id };
       const { connection } = yield* Ref.updateAndGet(state, (current) => ({
         ...current,
         submitted: [...current.submitted, input],
@@ -438,55 +439,50 @@ const makeCodexSessions = Effect.gen(function* () {
           ),
         );
     });
-    const submit: (
-      message: string,
-      id?: OperatorMessageId,
-    ) => Effect.Effect<MessageTaken, AgentSessionError> = Effect.fn("CodexRuntime.submit")(
-      function* (message, id) {
-        yield* Effect.annotateCurrentSpan({ sessionId: session.id });
-        const current = yield* Ref.get(state);
-        if (current.interrupting) {
-          yield* Ref.update(state, (latest) => ({
-            ...latest,
-            pending: [...latest.pending, { message, id }],
-          }));
-          return "queued" as const;
-        }
-        if (!current.turnActive) {
-          const messages = yield* Ref.modify(state, (latest) => [
-            [...latest.pending, { message, id }],
-            { ...latest, pending: [] },
-          ]);
-          for (const input of messages) {
-            const { turnActive } = yield* Ref.get(state);
-            if (!turnActive) yield* startTurn(input.message, input.id);
-            else yield* submit(input.message, input.id);
-          }
-          return "queued" as const;
-        }
-        // Codex records steered input as a user message once the running turn reads it.
-        const encodedTurnSteerParams = yield* Schema.encodeEffect(
-          Schema.toCodecJson(TurnSteerParams),
-        )({
-          threadId: thread.id,
-          expectedTurnId: current.turnId,
-          input: [{ type: "text", text: message, text_elements: [] }],
-        }).pipe(Effect.orDie);
-        const input: TurnInput = { message, id };
+    const submit: (input: TurnInput) => Effect.Effect<MessageTaken, AgentSessionError> = Effect.fn(
+      "CodexRuntime.submit",
+    )(function* (input) {
+      yield* Effect.annotateCurrentSpan({ sessionId: session.id });
+      const current = yield* Ref.get(state);
+      if (current.interrupting) {
         yield* Ref.update(state, (latest) => ({
           ...latest,
-          submitted: [...latest.submitted, input],
+          pending: [...latest.pending, input],
         }));
-        yield* current.connection
-          .request("steer", "turn/steer", encodedTurnSteerParams)
-          .pipe(Effect.onError(() => forgetInput(input)));
+        return "after-turn" as const;
+      }
+      if (!current.turnActive) {
+        const messages = yield* Ref.modify(state, (latest) => [
+          [...latest.pending, input],
+          { ...latest, pending: [] },
+        ]);
+        for (const next of messages) {
+          const { turnActive } = yield* Ref.get(state);
+          if (!turnActive) yield* startTurn(next);
+          else yield* submit(next);
+        }
         return "queued" as const;
-      },
-    );
+      }
+      // Codex records steered input as a user message once the running turn reads it.
+      const encodedTurnSteerParams = yield* Schema.encodeEffect(
+        Schema.toCodecJson(TurnSteerParams),
+      )({
+        threadId: thread.id,
+        expectedTurnId: current.turnId,
+        input: [{ type: "text", text: input.message, text_elements: [] }],
+      }).pipe(Effect.orDie);
+      yield* Ref.update(state, (latest) => ({
+        ...latest,
+        submitted: [...latest.submitted, input],
+      }));
+      yield* current.connection
+        .request("steer", "turn/steer", encodedTurnSteerParams)
+        .pipe(Effect.onError(() => forgetInput(input)));
+      return "queued" as const;
+    });
     // A turn is active only once `turn/start` answers, so a concurrent input waits for that answer.
     const inputs = yield* Semaphore.make(1);
-    const steer = (message: string, id?: OperatorMessageId) =>
-      inputs.withPermits(1)(submit(message, id));
+    const steer = (input: TurnInput) => inputs.withPermits(1)(submit(input));
     const conversation = yield* sessionConversation({
       session,
       channel,
@@ -494,17 +490,12 @@ const makeCodexSessions = Effect.gen(function* () {
       submitted: Option.isSome(thread.activeTurn) ? policy.restored.unread.map(({ id }) => id) : [],
       items,
       decode: codexReceipts,
-      send: (message, _activity, id) => steer(message, id),
+      send: (message, _activity, id) => steer({ kind: "operator", message, id }),
       pause: Effect.flatMap(Ref.get(state), ({ toolsInFlight }) =>
         toolsInFlight.size === 0 ? interruptTurn() : Effect.void,
       ),
       beforeFinish: Effect.flatMap(Ref.get(state), ({ connection }) => connection.close),
       maxBackgroundWaitMinutes: spec.maxBackgroundWaitMinutes,
-      // An own input sent while a turn is interrupting waits in `pending` for the next turn.
-      heldOwnInputs: Effect.map(
-        Ref.get(state),
-        ({ pending }) => pending.filter(({ id }) => id === undefined).length,
-      ),
     });
 
     /**
@@ -524,7 +515,7 @@ const makeCodexSessions = Effect.gen(function* () {
       });
 
     const recoverInput = (message: string, id?: OperatorMessageId) =>
-      steer(message, id).pipe(
+      steer(id === undefined ? { kind: "own", message } : { kind: "operator", message, id }).pipe(
         Effect.tap(() =>
           Effect.all([conversation.isPaused, Ref.get(state)]).pipe(
             Effect.flatMap(([paused, { toolsInFlight }]) =>
@@ -591,6 +582,7 @@ const makeCodexSessions = Effect.gen(function* () {
       }));
       const interruptedTools = [...toolsInFlight].map(([callId, tool]) => ({ callId, tool }));
       yield* readLastTurn(restored.lastTurn);
+      yield* conversation.processRestarted;
       yield* conversation.recover(interruptedTools, recoverInput, restored.empty);
     });
     const opened = yield* Ref.get(state);
@@ -605,7 +597,9 @@ const makeCodexSessions = Effect.gen(function* () {
       Option.isNone(policy.restored.idle) &&
       Option.isSome(prompt)
     )
-      yield* conversation.sendOwn(prompt.value, startTurn).pipe(Effect.catch(resume));
+      yield* conversation
+        .sendOwn(prompt.value, (message) => startTurn({ kind: "own", message }))
+        .pipe(Effect.catch(resume));
     const consumeNotifications = Stream.unwrap(
       Effect.map(Ref.get(state), ({ connection }) => connection.notifications),
     ).pipe(
@@ -653,7 +647,9 @@ const makeCodexSessions = Effect.gen(function* () {
                 item: message.value,
                 turn: notification.value.turnId,
               });
-              return yield* dropInputs(({ id }) => id !== undefined && read.includes(id));
+              return yield* dropInputs(
+                (input) => input.kind === "operator" && read.includes(input.id),
+              );
             }
             if (notification.value.turnId !== (yield* Ref.get(state)).turnId) {
               return yield* Effect.logDebug("Skipping a Codex item from another turn", {
@@ -805,26 +801,31 @@ const makeCodexSessions = Effect.gen(function* () {
             }
             if (isTurnStatus(completed.turn.status, "completed")) yield* reportModelOutput();
             // The turn's unrecorded own inputs leave `submitted` below, and the conversation drops
-            // them too, so that no record in a later turn matches them.
-            yield* conversation.turnEnded;
-            const { interrupting: wasInterrupted } = yield* Ref.getAndUpdate(state, (current) => ({
-              ...current,
-              turnActive: false,
-              interrupting: false,
-            }));
+            // them too while activating any inputs held for the next turn, atomically with
+            // clearing `interrupting` so no concurrent input is stranded in `after-turn`.
+            const { wasInterrupted, hasNewGuidance, unread } = yield* conversation.turnEnded(
+              inputs.withPermits(1)(
+                Ref.modify(state, (current) => {
+                  const unread = current.submitted.filter((input) => input.kind === "operator");
+                  return [
+                    {
+                      wasInterrupted: current.interrupting,
+                      hasNewGuidance: current.pending.length > 0,
+                      unread,
+                    },
+                    {
+                      ...current,
+                      turnActive: false,
+                      interrupting: false,
+                      toolsInFlight: new Map(),
+                      submitted: [],
+                      pending: [...unread, ...current.pending],
+                    },
+                  ];
+                }),
+              ),
+            );
             yield* tools.cancelAll;
-            const { hasNewGuidance, unread } = yield* Ref.modify(state, (current) => {
-              const unread = current.submitted.filter((input) => input.id !== undefined);
-              return [
-                { hasNewGuidance: current.pending.length > 0, unread },
-                {
-                  ...current,
-                  toolsInFlight: new Map(),
-                  submitted: [],
-                  pending: [...unread, ...current.pending],
-                },
-              ];
-            });
             if (unread.length > 0)
               yield* Effect.logInfo("Codex turn ended with unconsumed input", {
                 sessionId: session.id,
@@ -842,8 +843,7 @@ const makeCodexSessions = Effect.gen(function* () {
                   Arr.last(current.pending),
                   { ...current, pending: current.pending.slice(0, -1) },
                 ]);
-                if (Option.isSome(nextMessage))
-                  yield* steer(nextMessage.value.message, nextMessage.value.id);
+                if (Option.isSome(nextMessage)) yield* steer(nextMessage.value);
                 return;
               }
               const { finalText, lastText } = yield* Ref.get(state);
@@ -905,7 +905,7 @@ const makeCodexSessions = Effect.gen(function* () {
       events: Stream.fromQueue(channel.events),
       interrupt,
       result: Deferred.await(channel.result),
-      steer: (message: string) => steer(message).pipe(Effect.asVoid),
+      steer: (message: string) => steer({ kind: "steer", message }).pipe(Effect.asVoid),
       intervene: conversation.intervene,
     } satisfies RunningSession;
     const { turnActive } = yield* Ref.get(state);

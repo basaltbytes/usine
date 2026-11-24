@@ -29,11 +29,11 @@ import { ChildSessionJournal, RestartState } from "../../src/runtime.ts";
 const id = (index: number) =>
   OperatorMessageId.make(`00000000-0000-4000-8000-${String(index).padStart(12, "0")}`);
 
-/** An unread message that this process sent, unless `sent` is false. */
+/** An unread message that this process sent, unless `delivery` overrides it. */
 const unread = (index: number, message: string, options: Partial<Unread> = {}): Unread => ({
   id: id(index),
   message,
-  sent: true,
+  delivery: "sent",
   queuedAfter: 0,
   turnStart: Option.none(),
   ...options,
@@ -42,6 +42,7 @@ const unread = (index: number, message: string, options: Partial<Unread> = {}): 
 const inbox = (...messages: ReadonlyArray<Unread>): Inbox<Unread> => ({
   unread: messages,
   own: [],
+  nextOwn: [],
   counted: [],
   turn: Option.none(),
   saved: [],
@@ -120,7 +121,7 @@ describe("receipt matching on Claude Code's decoder", () => {
       inbox(
         unread(1, "Read in this turn"),
         unread(2, "Queued as a turn"),
-        unread(3, "Restored, not sent", { sent: false }),
+        unread(3, "Restored, not sent", { delivery: "unsent" }),
       ),
       claudeReceipts({
         message: { type: "result", subtype: "success", result: "Done", queued_turn_count: 1 },
@@ -164,7 +165,7 @@ describe("receipt matching on Codex's decoder", () => {
     });
     const { steps, inbox: after } = applied(
       inbox(
-        unread(1, "Check the diff", { sent: false }),
+        unread(1, "Check the diff", { delivery: "unsent" }),
         unread(2, "Check the diff"),
         unread(3, "Check the diff"),
       ),
@@ -212,7 +213,7 @@ describe("receipt matching on Codex's decoder", () => {
 
   it("reads restored messages that a restored turn's items record, saving each item", () => {
     const { steps } = applied(
-      inbox(unread(1, "Check the diff", { sent: false })),
+      inbox(unread(1, "Check the diff", { delivery: "unsent" })),
       codexReceipts({
         _tag: "Restored",
         turn: "turn-1",
@@ -264,30 +265,54 @@ describe("receipt matching on Codex's decoder", () => {
   });
 
   it("counts a restored turn's items without reading when the session saved none before", () => {
-    const { steps, inbox: after } = applied(inbox(unread(1, "Check the diff", { sent: false })), [
-      ...codexReceipts({
-        _tag: "Restored",
-        turn: "turn-1",
-        items: [userMessage("item-1", "Check the diff")],
-        known: false,
-      }),
-      ...codexReceipts({
-        _tag: "Recorded",
-        item: userMessage("item-1", "Check the diff"),
-        turn: "turn-1",
-      }),
-    ]);
+    const { steps, inbox: after } = applied(
+      inbox(unread(1, "Check the diff", { delivery: "unsent" })),
+      [
+        ...codexReceipts({
+          _tag: "Restored",
+          turn: "turn-1",
+          items: [userMessage("item-1", "Check the diff")],
+          known: false,
+        }),
+        ...codexReceipts({
+          _tag: "Recorded",
+          item: userMessage("item-1", "Check the diff"),
+          turn: "turn-1",
+        }),
+      ],
+    );
     assert.deepStrictEqual(reads(steps), []);
     assert.deepStrictEqual(steps[0]?.save, Option.some(["item-1"]));
     assert.isTrue(Option.isSome(steps[1]?.repeated ?? Option.none()));
     assert.deepStrictEqual(after.counted, ["item-1"]);
+  });
+
+  it("ignores next-turn own inputs and after-turn operator messages on live receipts", () => {
+    const { steps, inbox: after } = applied(
+      {
+        ...inbox(unread(1, "Continue the task.", { delivery: "after-turn" })),
+        nextOwn: ["Continue the task."],
+      },
+      codexReceipts({
+        _tag: "Recorded",
+        item: userMessage("old-turn", "Continue the task."),
+        turn: "turn-1",
+      }),
+    );
+    assert.deepStrictEqual(reads(steps), []);
+    assert.deepStrictEqual(steps[0]?.own, Option.none());
+    assert.deepStrictEqual(after.nextOwn, ["Continue the task."]);
+    assert.deepStrictEqual(
+      after.unread.map(({ id }) => id),
+      [id(1)],
+    );
   });
 });
 
 describe("receipt matching on Pi's decoder", () => {
   it("reads the sent message whose text starts, at the tool-call count of its start", () => {
     const { steps } = applied(
-      inbox(unread(1, "Run the tests.", { sent: false }), unread(2, "Run the tests.")),
+      inbox(unread(1, "Run the tests.", { delivery: "unsent" }), unread(2, "Run the tests.")),
       piReceipts({
         message: { role: "user", content: "Run the tests.", timestamp: 0 },
         toolCalls: 4,

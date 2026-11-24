@@ -1,7 +1,7 @@
 import { assert, describe, it } from "@effect/vitest";
 import { BackgroundWork } from "@usine/core/agent/session";
 import { Interrupt, OperatorMessage, Release, Steer } from "@usine/core/attempt/channel";
-import { Deferred, Duration, Effect, Fiber, Option, Predicate } from "effect";
+import { Clock, Deferred, Duration, Effect, Fiber, Option, Predicate } from "effect";
 import { TestClock } from "effect/testing";
 import { RestartState } from "../../../src/runtime.ts";
 import { sessionChannel } from "../../../src/harness/session.ts";
@@ -240,24 +240,82 @@ describe("background work", () => {
   );
 
   it.effect.each([
-    { snapshot: Option.none<ReadonlyArray<BackgroundWork>>(), label: "unreported work" },
-    { snapshot: nothingRuns, label: "finished work" },
-  ])("stops a waiting answer's timers when a later answer returns ($label)", ({ snapshot }) => {
-    const logs = capturedLogs();
-    return Effect.gen(function* () {
-      const session = yield* conversation(child("returned-answer"), {}, Option.some(10));
-      yield* session.reportBackground(Option.some([ciWatch]));
-      yield* session.finish("Waiting for CI");
-      yield* session.reportBackground(snapshot);
-      yield* session.finish("CI passed");
-      assert.strictEqual((yield* Fiber.join(session.result)).message, "CI passed");
-      yield* TestClock.adjust("10 minutes");
-      assert.isFalse(
-        logged(logs, "returning its answer"),
-        "the earlier wait ended with its answer",
-      );
-    }).pipe(Effect.provide(logs.layer));
-  });
+    {
+      snapshot: Option.none<ReadonlyArray<BackgroundWork>>(),
+      label: "unreported work",
+      expectedSleeps: 1,
+    },
+    { snapshot: nothingRuns, label: "finished work", expectedSleeps: 2 },
+  ])(
+    "stops a waiting answer's timers when a later answer returns ($label)",
+    ({ snapshot, expectedSleeps }) => {
+      const logs = capturedLogs();
+      return TestClock.testClockWith((base) => {
+        const active = new Set<symbol>();
+        const clock: Clock.Clock = {
+          currentTimeMillisUnsafe: () => base.currentTimeMillisUnsafe(),
+          currentTimeMillis: base.currentTimeMillis,
+          currentTimeNanosUnsafe: () => base.currentTimeNanosUnsafe(),
+          currentTimeNanos: base.currentTimeNanos,
+          monotonicTimeNanosUnsafe: () => base.monotonicTimeNanosUnsafe(),
+          monotonicTimeNanos: base.monotonicTimeNanos,
+          sleep: (duration) =>
+            Effect.acquireUseRelease(
+              Effect.sync(() => {
+                const token = Symbol();
+                active.add(token);
+                return token;
+              }),
+              () => base.sleep(duration),
+              (token) =>
+                Effect.sync(() => {
+                  active.delete(token);
+                }),
+            ),
+        };
+        return Effect.gen(function* () {
+          const session = yield* conversation(child("returned-answer"), {}, Option.some(10));
+          yield* session.reportBackground(Option.some([ciWatch]));
+          yield* session.finish("Waiting for CI");
+          yield* session.reportBackground(snapshot);
+          while (active.size < expectedSleeps) yield* Effect.yieldNow;
+          yield* session.finish("CI passed");
+          assert.strictEqual((yield* Fiber.join(session.result)).message, "CI passed");
+          assert.strictEqual(
+            active.size,
+            0,
+            "the earlier wait's scheduled sleeps are cancelled as soon as the final answer returns",
+          );
+          const cancelEntry = logs.entries.find(
+            ({ logLevel, message }) =>
+              logLevel === "Info" &&
+              Array.isArray(message) &&
+              String(message[0]).includes(
+                "A later final answer cancels the previous wait for background work",
+              ),
+          );
+          assert.isDefined(
+            cancelEntry,
+            "the final return logs that it cancelled the previous wait",
+          );
+          assert.deepStrictEqual(
+            Array.isArray(cancelEntry.message) ? cancelEntry.message[1] : undefined,
+            {
+              sessionId: "returned-answer",
+              replacedBy: "Final",
+              limit: true,
+              grace: expectedSleeps === 2,
+            },
+          );
+          yield* base.adjust("10 minutes");
+          assert.isFalse(
+            logged(logs, "returning its answer"),
+            "the earlier wait ended with its answer",
+          );
+        }).pipe(Effect.provideService(Clock.Clock, clock));
+      }).pipe(Effect.provide(logs.layer));
+    },
+  );
 
   it.effect("gives a replacement waiting answer its own wait limit", () =>
     Effect.gen(function* () {

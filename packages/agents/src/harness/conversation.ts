@@ -33,16 +33,25 @@ import {
   SessionOperationError,
 } from "../runtime.ts";
 import type { ContinuationPolicy } from "./continuation.ts";
-import { type Inbox, match, Receipt, type ReadPoint, type Unread } from "./receipts.ts";
+import {
+  advanceTurn,
+  type Inbox,
+  match,
+  Receipt,
+  type ReadPoint,
+  resetProcess,
+  type Unread,
+} from "./receipts.ts";
 import type { SessionChannel } from "./session.ts";
 
 /**
- * How the harness accepted an operator message: `read` if it starts the next turn of an idle
- * session or joins the running turn immediately, `queued` if the harness reads it at its next
- * boundary, and `next-turn` if no turn runs and the harness reads it when the next turn starts,
- * before that turn's tool calls.
+ * How the harness accepted an operator message or own input: `read` if it starts the next turn of
+ * an idle session or joins the running turn immediately, `queued` if the harness reads it at its
+ * next boundary in the running turn, `next-turn` if no turn runs and the harness reads it when the
+ * next turn starts (before that turn's tool calls), and `after-turn` if a turn is ending and the
+ * harness holds the input until `turnEnded` before sending it to the next turn.
  */
-export type MessageTaken = "read" | "queued" | "next-turn";
+export type MessageTaken = "read" | "queued" | "next-turn" | "after-turn";
 
 /** The native records of input that a restored session counted; see `Inbox`. */
 export interface RestoredItems {
@@ -80,12 +89,6 @@ interface ConversationOptions<S> {
    * turn, or `None` for no limit.
    */
   readonly maxBackgroundWaitMinutes: Option.Option<number>;
-  /**
-   * Counts the session's latest own inputs that the harness holds for the turn after the running
-   * one, such as a continuation sent while a turn is interrupting. A turn end keeps them. Runs under
-   * the conversation's lock; without it, the harness holds none.
-   */
-  readonly heldOwnInputs?: Effect.Effect<number>;
 }
 
 /**
@@ -182,7 +185,6 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
   const { restored, journal } = policy;
   const mutex = yield* Semaphore.make(1);
   const scope = yield* Effect.scope;
-  const heldOwnInputs = options.heldOwnInputs ?? Effect.succeed(0);
   const restoredAt = yield* channel.toolCalls;
   const restoredAfter = yield* channel.toolResults;
   const submitted = options.submitted ?? [];
@@ -201,10 +203,11 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
         ...message,
         onDelivery: (delivered) => journal.delivered(message.id, delivered),
         queuedAfter: restoredAfter,
-        sent: submitted.includes(message.id),
+        delivery: submitted.includes(message.id) ? ("sent" as const) : ("unsent" as const),
         turnStart: Option.none(),
       })),
       own: [],
+      nextOwn: [],
       counted: options.items?.counted ?? [],
       turn: options.items?.turn ?? Option.none(),
       saved: options.items?.saved ?? [],
@@ -318,8 +321,9 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
   });
 
   /**
-   * Records how the harness took queued message `id`: a read is reported now, and a message for
-   * the next turn notes where that turn starts. The caller holds the mutex.
+   * Records how the harness took queued message `id`: a read is reported now, a message for the
+   * next turn notes where that turn starts, and an `after-turn` message waits until `turnEnded`
+   * before live receipts can match it. The caller holds the mutex.
    */
   const took = (id: OperatorMessageId, taken: MessageTaken) =>
     Effect.gen(function* () {
@@ -330,7 +334,7 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
           message.id === id
             ? {
                 ...message,
-                sent: true,
+                delivery: taken === "after-turn" ? ("after-turn" as const) : ("sent" as const),
                 turnStart: taken === "next-turn" ? Option.some(calls) : Option.none(),
               }
             : message,
@@ -345,36 +349,42 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
           sessionId: session.id,
           toolCalls: calls,
         });
+      if (taken === "after-turn")
+        yield* Effect.logInfo(
+          "The harness holds the operator message until the current turn ends",
+          { sessionId: session.id },
+        );
     });
 
   /**
-   * Sends the session's own input `message`, such as its task, with `send`, which starts a turn or
-   * joins the running one. The harness's record of it in that turn then reads no operator message
-   * with the same text. If `send` fails, `message` stays an own input until a turn ends or
-   * `recover` clears the own inputs. The caller holds the mutex.
+   * Sends the session's own input `message`, such as its task, with `send`, which starts a turn,
+   * joins the running one, or holds the input (`after-turn`) for the turn after the running one.
+   * The harness's record of it in that turn then reads no operator message with the same text, and
+   * an `after-turn` input stays separate until `turnEnded` so a delayed receipt of the ending turn
+   * never consumes it. If `send` fails, `message` stays an own input until a turn ends or a
+   * process restart clears the own inputs. The caller holds the mutex.
    */
-  const sendOwn = <A, E>(message: string, send: (message: string) => Effect.Effect<A, E>) =>
-    updateInbox((inbox) => ({ ...inbox, own: [...inbox.own, message] })).pipe(
-      Effect.andThen(send(message)),
+  const sendOwn = <A extends MessageTaken | void, E>(
+    message: string,
+    send: (message: string) => Effect.Effect<A, E>,
+  ) =>
+    send(message).pipe(
+      Effect.tap((taken) =>
+        updateInbox((inbox) =>
+          taken === "after-turn"
+            ? { ...inbox, nextOwn: [...inbox.nextOwn, message] }
+            : { ...inbox, own: [...inbox.own, message] },
+        ),
+      ),
+      Effect.onError(() => updateInbox((inbox) => ({ ...inbox, own: [...inbox.own, message] }))),
     );
 
-  /**
-   * Drops the own inputs that the harness didn't record in the turn that ended, so that no record
-   * in a later turn takes an operator message's read. Keeps the latest own inputs that the harness
-   * holds for its next turn, which the ended turn never took. The caller holds the mutex.
-   */
   const turnEnded = Effect.fn("SessionConversation.turnEnded")(function* () {
     yield* Effect.annotateCurrentSpan({ sessionId: session.id });
-    const held = yield* heldOwnInputs;
-    const { inbox } = yield* Ref.getAndUpdate(state, (current) => ({
-      ...current,
-      inbox: {
-        ...current.inbox,
-        own: current.inbox.own.slice(Math.max(0, current.inbox.own.length - held)),
-      },
-    }));
-    const kept = Math.min(held, inbox.own.length);
-    const dropped = inbox.own.length - kept;
+    const { dropped, kept, promoted } = yield* Ref.modify(state, (current) => {
+      const next = advanceTurn(current.inbox);
+      return [next, { ...current, inbox: next.inbox }];
+    });
     if (dropped > 0)
       yield* Effect.logInfo(
         "The turn ended without the harness's record of the session's own input; dropping it",
@@ -382,10 +392,21 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
       );
     if (kept > 0)
       yield* Effect.logInfo(
-        "The harness holds the session's own input for its next turn; keeping it past the turn end",
+        "The harness held the session's own input for its next turn; activating it after the turn end",
         { sessionId: session.id, kept },
       );
+    if (promoted > 0)
+      yield* Effect.logInfo(
+        "The harness held operator messages for its next turn; activating them after the turn end",
+        { sessionId: session.id, promoted },
+      );
   });
+
+  function endTurn(): Effect.Effect<void>;
+  function endTurn<A, E>(after: Effect.Effect<A, E>): Effect.Effect<A, E>;
+  function endTurn<A, E>(after?: Effect.Effect<A, E>): Effect.Effect<A | void, E> {
+    return mutex.withPermits(1)(turnEnded().pipe(Effect.andThen(after ?? Effect.void)));
+  }
 
   yield* Effect.addFinalizer(() =>
     Effect.gen(function* () {
@@ -430,12 +451,17 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
         ),
       );
       // A dropped wait, or one that its own timer ends, logs why where it ends.
-      if (running === undefined && Option.isSome(next.answer))
+      if (running === undefined && (Option.isSome(next.answer) || next.closing))
         yield* Effect.logInfo(
-          "A later answer replaces the answer that waits for background work; stopping its wait",
+          next.closing
+            ? "A later final answer cancels the previous wait for background work"
+            : "A later answer replaces the answer that waits for background work; stopping its wait",
           {
             sessionId: session.id,
-            replacedBy: next.answer.value._tag,
+            replacedBy: Option.match(next.answer, {
+              onNone: () => "Final",
+              onSome: ({ _tag }) => _tag,
+            }),
             limit: Option.isSome(timers.limit),
             grace: Option.isSome(timers.grace),
           },
@@ -706,7 +732,9 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
     const before = yield* Ref.get(state);
     const idle = Option.exists(before.answer, Answer.$is("Idle"));
     const stopped = idle || before.paused;
-    const replayed = stopped ? before.inbox.unread.filter(({ sent }) => !sent) : [];
+    const replayed = stopped
+      ? before.inbox.unread.filter(({ delivery }) => delivery === "unsent")
+      : [];
     for (const [index, unsent] of replayed.entries()) {
       const activity = index === 0 && idle ? "idle" : "running";
       const replayTaken = yield* options.send(unsent.message, activity, unsent.id);
@@ -748,7 +776,7 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
             message: action.message,
             onDelivery,
             queuedAfter,
-            sent: true,
+            delivery: taken === "after-turn" ? ("after-turn" as const) : ("sent" as const),
             turnStart: Option.none(),
           },
         ],
@@ -828,17 +856,19 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
     turnStarted: mutex.withPermits(1)(cancelWait("turn started")),
     /**
      * Records that the session's turn ended: drops the session's own inputs that the harness didn't
-     * record, because each belongs to the turn that it started, except those that the harness holds
-     * for its next turn.
+     * record, activates any inputs held with `after-turn` for the next turn, and optionally runs
+     * `after` under the same lock so the adapter updates its turn state atomically.
      */
-    turnEnded: mutex.withPermits(1)(turnEnded()),
+    turnEnded: endTurn,
     /**
      * Records that the harness process restarted: ends the wait for its background work, keeps the
-     * answer that an ended wait kept for the recovery, and records the work as not reported until
-     * the new process reports it.
+     * answer that an ended wait kept for the recovery, clears the earlier process's own inputs and
+     * marks queued operator messages unsent for the new process, and records the work as not
+     * reported until the new process reports it.
      */
     processRestarted: mutex.withPermits(1)(
       cancelWait("process restarted").pipe(
+        Effect.andThen(updateInbox(resetProcess)),
         Effect.andThen(Ref.get(state)),
         Effect.flatMap(({ background }) =>
           Option.isSome(background) ? reportBackground(Option.none()) : Effect.void,
@@ -847,14 +877,17 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
     ),
     intervene,
     /**
-     * Sends the session's own input `message`, such as its task, with `send`, which starts a turn or
-     * joins the running one. The harness's record of it in that turn then reads no operator message
-     * with the same text. Holds the conversation's lock while it sends: a receipt that is saving
-     * when the send starts can't write back an inbox without `message`, and a turn end that arrives
-     * during the send counts `message` among the inputs that the harness holds for its next turn.
+     * Sends the session's own input `message`, such as its task, with `send`, which starts a turn,
+     * joins the running one, or holds the input (`after-turn`) for the turn after the running one.
+     * The harness's record of it in that turn then reads no operator message with the same text.
+     * Holds the conversation's lock while it sends: a receipt that is saving when the send starts
+     * can't write back an inbox without `message`, and a turn end that arrives during the send
+     * activates `message` if `send` returned `after-turn`.
      */
-    sendOwn: <A, E>(message: string, send: (message: string) => Effect.Effect<A, E>) =>
-      mutex.withPermits(1)(sendOwn(message, send)),
+    sendOwn: <A extends MessageTaken | void, E>(
+      message: string,
+      send: (message: string) => Effect.Effect<A, E>,
+    ) => mutex.withPermits(1)(sendOwn(message, send)),
     recover: Effect.fn("SessionConversation.recover")(function* (
       tools: ReadonlyArray<InterruptedTool>,
       send: (
@@ -887,20 +920,7 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
           yield* finish(message, limitPassed);
         } else yield* finish("Session interrupted before its turn returned");
       }
-      // A new native process has read none of the queued messages and records none of the earlier
-      // process's own inputs.
-      const recovering = yield* Ref.updateAndGet(state, (current) => ({
-        ...current,
-        inbox: {
-          ...current.inbox,
-          unread: current.inbox.unread.map((queued) => ({
-            ...queued,
-            sent: false,
-            turnStart: Option.none(),
-          })),
-          own: [],
-        },
-      }));
+      const recovering = yield* Ref.get(state);
       /**
        * Records the harness's own input: it resumes a session that last reported idle and doesn't
        * reply to the operator.
@@ -927,7 +947,9 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
           empty,
         },
         tools,
-        recovering.inbox.unread.map(({ id, message }) => ({ id, message })),
+        recovering.inbox.unread
+          .filter(({ delivery }) => delivery === "unsent")
+          .map(({ id, message }) => ({ id, message })),
         channel.emit,
         (message, id) =>
           id === undefined
