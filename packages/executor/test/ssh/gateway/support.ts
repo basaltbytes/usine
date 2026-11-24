@@ -133,6 +133,8 @@ const GATEWAY_PROVIDERS: LlmProviders = {
  * - While `reportsProviders` is false, the provider list returns 404.
  * - While `reportsSlots` is false, the provider list omits the slots the Gateway serves, as a
  *   Gateway from before the provider catalog did.
+ * - While `reportsSlotCredentials` is false, the provider list omits each slot's credential and
+ *   lists every slot that holds one in `providers`, as a Gateway from before slot credentials did.
  * - While `beforeProtocolSlots` is true, the provider list names providers by ID and omits the
  *   slots, as a Gateway from before slots did, and the provider-credentials routes return 404.
  * - The Gateway serves the slots of `catalog`.
@@ -148,6 +150,7 @@ export const fakeGateway = (
     refusedDetaches: new Set<string>(),
     reportsProviders: true,
     reportsSlots: true,
+    reportsSlotCredentials: true,
     beforeProtocolSlots: false,
   };
   let inFlight = 0;
@@ -259,6 +262,19 @@ export const fakeGateway = (
             );
             return HttpServerResponse.toClientResponse(
               HttpServerResponse.jsonUnsafe({ providers: reported }),
+              { request },
+            );
+          }
+          if (path === "/v1/providers" && !switches.reportsSlotCredentials) {
+            const { providers } = yield* (yield* SettingsInForce).current;
+            const slots = LlmProviderList.fromProviders(catalog, providers).slots ?? [];
+            return HttpServerResponse.toClientResponse(
+              HttpServerResponse.jsonUnsafe({
+                providers: slots.flatMap(({ slot, credential }) =>
+                  credential === undefined ? [] : [{ provider: slot, credential }],
+                ),
+                slots: slots.map(({ slot, routes }) => ({ slot, routes })),
+              }),
               { request },
             );
           }

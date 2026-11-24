@@ -54,6 +54,12 @@ const Stored = Schema.Union([
 ]);
 type Stored = typeof Stored.Type;
 
+/** The slot of the provider that accepts each kind of stored credential. */
+const SLOT_OF_STORED = {
+  AnthropicProvider: anthropic.slot,
+  OpenAiProvider: openai.slot,
+} as const satisfies Record<Stored["_tag"], GatewaySlot>;
+
 /**
  * Returns the entry of a static key for `slot` in the format of gateways up to 0.3.0, which has one
  * for the built-in providers' slots only.
@@ -166,7 +172,23 @@ export class ProviderCredentials extends Context.Service<
               Effect.flatMap(Schema.decodeUnknownEffect(SnapshotJson)),
               Effect.mapError(failed),
             );
-          snapshot = { stored, staticKeys };
+          const entries = Object.entries(stored);
+          const misplaced = entries.flatMap(([slot, held]) =>
+            Option.isSome(held) && SLOT_OF_STORED[held.value._tag] !== slot
+              ? [{ slot, kind: held.value._tag }]
+              : [],
+          );
+          for (const fields of misplaced)
+            yield* Effect.logWarning(
+              "Ignored a stored provider credential under a slot whose provider doesn't accept it",
+              { file, ...fields },
+            );
+          snapshot = {
+            stored: Object.fromEntries(
+              entries.filter(([slot]) => !misplaced.some((ignored) => ignored.slot === slot)),
+            ),
+            staticKeys,
+          };
         }
         const apply = (providers: LlmProviders) =>
           Effect.succeed(
