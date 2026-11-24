@@ -228,7 +228,7 @@ export const openFixture = (
               return [[key, value]];
             }),
           )
-        : source.environment;
+        : { ...source.environment };
     if (source !== "record" && env.PATH !== undefined && environment.PATH !== undefined) {
       tape.bind(env.PATH, "$PATH");
       environment.PATH = env.PATH;
@@ -270,11 +270,7 @@ export const openFixture = (
       assert.include(installed, version, "record fixtures with the pinned harness version");
     }
     const spawner = mode === "record" ? yield* ChildProcessSpawner.ChildProcessSpawner : undefined;
-    const processes = processTransport(
-      tape,
-      spawner,
-      scenario === "early-exit" && provider === "codex" ? "early-exit" : "none",
-    );
+    const processes = processTransport(tape, spawner);
     const ssh = fileURLToPath(new URL("../fixtures/replay-ssh.sh", import.meta.url));
     tape.bind(ssh, "$SSH_SHIM");
     const host =
@@ -315,11 +311,24 @@ export const openFixture = (
       Layer.provide(harness),
       Layer.provideMerge(NodeServices.layer),
     );
+    const earlyExitCodex = provider === "codex" && scenario === "early-exit";
+    let requestEnvironment = environment;
+    if (earlyExitCodex) {
+      yield* fs.writeFileString(
+        `${cwd}/codex`,
+        "#!/usr/bin/env node\nprocess.stderr.write('replayed early exit'); process.exitCode = 7;\n",
+      );
+      yield* fs.chmod(`${cwd}/codex`, 0o755);
+      requestEnvironment = {
+        ...environment,
+        PATH: environment.PATH === undefined ? cwd : `${cwd}:${environment.PATH}`,
+      };
+    }
     const request = ChildRequest.make({
       worker: WorkerName.make("replay-worker"),
       machine: Option.none(),
       host,
-      environment,
+      environment: requestEnvironment,
       cwd: WorkingDirectory.make(cwd),
       session: ChildSession.make({
         id: AgentSessionId.make("replay-parent:child:1"),
@@ -330,19 +339,11 @@ export const openFixture = (
       }),
       prompt: "Reply with exactly REPLAY_DONE. Do not use tools.",
     });
-    if (mode === "replay" && provider === "codex" && scenario === "early-exit") {
-      yield* fs.writeFileString(
-        `${cwd}/codex`,
-        "#!/usr/bin/env node\nprocess.stderr.write('replayed early exit'); process.exitCode = 7;\n",
-      );
-      yield* fs.chmod(`${cwd}/codex`, 0o755);
+    if (mode === "replay" && earlyExitCodex) {
       return {
         tape: new Tape("record"),
         cwd,
-        request: ChildRequest.make({
-          ...request,
-          environment: { ...environment, PATH: `${cwd}:${environment.PATH}` },
-        }),
+        request,
         backend: codexChildLayer.pipe(
           Layer.provideMerge(ChildSessionJournal.layerNoop),
           Layer.provide(codexAppServerLive),
@@ -465,10 +466,20 @@ export const openFixture = (
           const frame = input(entry.payload);
           return Option.isSome(frame) ? [{ port: entry.port, payload: frame.value }] : [];
         });
+        const acknowledgement = Schema.decodeUnknownOption(Schema.Struct({ ack: Schema.Int }));
+        const acknowledged = recorded.reduce((sequence, entry) => {
+          if (entry.type !== "emit_inbound" || entry.port !== "process:1/stdout") return sequence;
+          const frame = acknowledgement(entry.payload);
+          return Option.isSome(frame) ? Math.max(sequence, frame.value.ack) : sequence;
+        }, 0);
         assert.deepStrictEqual(
           inputs.filter((entry) => entry.port === "process:2/stdin").map((entry) => entry.payload),
-          inputs.filter((entry) => entry.port === "process:1/stdin").map((entry) => entry.payload),
-          "the replacement relay replays buffered input without starting a new thread",
+          inputs
+            .filter(
+              (entry) => entry.port === "process:1/stdin" && entry.payload.sequence > acknowledged,
+            )
+            .map((entry) => entry.payload),
+          "the replacement relay replays only unacknowledged input without starting a new thread",
         );
         const sequences = new Map<string, Set<number>>();
         for (const entry of tape.entries) {

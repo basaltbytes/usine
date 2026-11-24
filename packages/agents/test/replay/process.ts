@@ -68,10 +68,15 @@ export const encodeWire = (payload: Schema.Json) => {
   );
 };
 
+interface CommandInvocation {
+  readonly command: string;
+  readonly args: ReadonlyArray<string>;
+}
+
 export const processTransport = (
   tape: Tape,
   live?: ChildProcessSpawner.ChildProcessSpawner["Service"],
-  fault: "early-exit" | "none" = "none",
+  normalizeCommand?: (command: CommandInvocation) => CommandInvocation,
 ) =>
   Layer.succeed(ChildProcessSpawner.ChildProcessSpawner)(
     ChildProcessSpawner.make((command) =>
@@ -81,12 +86,16 @@ export const processTransport = (
         tape.bind(process.execPath, "$NODE");
         tape.bind(CHILD_LIFELINE, "$CHILD_LIFELINE");
         tape.bind("'" + PROCESS_OWNER.replaceAll("'", `'"'"'`) + "'", "'$PROCESS_OWNER'");
+        const recorded = normalizeCommand?.({ command: command.command, args: command.args }) ?? {
+          command: command.command,
+          args: command.args,
+        };
         tape.outbound(
           port,
           parseCommandJson(
             commandJson({
-              command: command.command,
-              args: command.args,
+              command: recorded.command,
+              args: recorded.args,
               cwd: command.options.cwd,
               env: command.options.env,
             }),
@@ -123,7 +132,6 @@ export const processTransport = (
           const handle = yield* live.spawn(
             ChildProcess.make(command.command, command.args, options),
           );
-          if (fault === "early-exit") process.kill(handle.pid, "SIGKILL");
           const exitCode = yield* Effect.cached(
             handle.exitCode.pipe(
               Effect.tap((code) => Effect.sync(() => tape.exit(`${port}/exit`, code, null))),
