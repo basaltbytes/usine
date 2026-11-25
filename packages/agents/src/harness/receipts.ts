@@ -173,17 +173,27 @@ export const advanceTurn = <A extends Unread>(inbox: Inbox<A>) => {
   };
 };
 
-/** Resets process-bound inbox state after a native process restarts. */
-export const resetProcess = <A extends Unread>(inbox: Inbox<A>): Inbox<A> => ({
-  ...inbox,
-  unread: inbox.unread.map((queued) => ({
-    ...queued,
-    delivery: "unsent" as const,
-    turnStart: Option.none(),
-  })),
-  own: [],
-  nextOwn: [],
-});
+/** Resets process-bound inbox state after a native process restarts and reports the counts. */
+export const resetProcess = <A extends Unread>(inbox: Inbox<A>) => {
+  const droppedOwn = inbox.own.length;
+  const droppedNextOwn = inbox.nextOwn.length;
+  const reset = inbox.unread.filter(({ delivery }) => delivery !== "unsent").length;
+  return {
+    inbox: {
+      ...inbox,
+      unread: inbox.unread.map((queued) => ({
+        ...queued,
+        delivery: "unsent" as const,
+        turnStart: Option.none(),
+      })),
+      own: [],
+      nextOwn: [],
+    },
+    droppedOwn,
+    droppedNextOwn,
+    reset,
+  };
+};
 
 /**
  * Applies `receipt` to `inbox`: the messages that it acknowledges leave the inbox, oldest first.

@@ -16,10 +16,12 @@ import type { ContinuationPolicy } from "../../src/harness/continuation.ts";
 import { sessionConversation } from "../../src/harness/conversation.ts";
 import { piReceipts } from "../../src/harness/pi/turns.ts";
 import {
+  advanceTurn,
   type Inbox,
   match,
   type Matched,
   Receipt,
+  resetProcess,
   type Unread,
 } from "../../src/harness/receipts.ts";
 import { sessionChannel } from "../../src/harness/session.ts";
@@ -135,6 +137,49 @@ describe("receipt matching on Claude Code's decoder", () => {
       [
         [id(2), Option.some(5)],
         [id(3), Option.none()],
+      ],
+    );
+  });
+
+  it("ignores unsent and after-turn messages in ByCount and TurnsQueued", () => {
+    const mixed = applied(
+      inbox(
+        unread(1, "Read in this turn"),
+        unread(2, "Queued as a turn"),
+        unread(3, "Restored, not sent", { delivery: "unsent" }),
+        unread(4, "Held for next turn", { delivery: "after-turn" }),
+      ),
+      claudeReceipts({
+        message: { type: "result", subtype: "success", result: "Done", queued_turn_count: 1 },
+        betweenTurns: false,
+      }),
+      5,
+    );
+    assert.deepStrictEqual(reads(mixed.steps), [[id(1), "turn"]]);
+    assert.deepStrictEqual(
+      mixed.inbox.unread.map(({ id, turnStart }) => [id, turnStart]),
+      [
+        [id(2), Option.some(5)],
+        [id(3), Option.none()],
+        [id(4), Option.none()],
+      ],
+    );
+
+    const noneSent = applied(
+      inbox(
+        unread(1, "Restored, not sent", { delivery: "unsent" }),
+        unread(2, "Held for next turn", { delivery: "after-turn" }),
+      ),
+      [Receipt.ByCount({ unread: 0 }), Receipt.TurnsQueued({ turns: 1 })],
+      7,
+    );
+    assert.deepStrictEqual(reads(noneSent.steps), []);
+    assert.strictEqual(noneSent.steps[1]?.turnsQueued, 0);
+    assert.deepStrictEqual(
+      noneSent.inbox.unread.map(({ id, turnStart }) => [id, turnStart]),
+      [
+        [id(1), Option.none()],
+        [id(2), Option.none()],
       ],
     );
   });
@@ -305,6 +350,65 @@ describe("receipt matching on Codex's decoder", () => {
     assert.deepStrictEqual(
       after.unread.map(({ id }) => id),
       [id(1)],
+    );
+  });
+
+  it("resetProcess clears own and nextOwn and resets delivered messages to unsent", () => {
+    const start: Inbox<Unread> = {
+      unread: [
+        unread(1, "Already unsent", { delivery: "unsent" }),
+        unread(2, "Sent to active turn", { delivery: "sent", turnStart: Option.some(2) }),
+        unread(3, "Held for next turn", { delivery: "after-turn", turnStart: Option.some(3) }),
+      ],
+      own: ["Task"],
+      nextOwn: ["Continue"],
+      counted: ["item-1"],
+      turn: Option.some("turn-1"),
+      saved: ["item-1"],
+    };
+    const result = resetProcess(start);
+    assert.strictEqual(result.droppedOwn, 1);
+    assert.strictEqual(result.droppedNextOwn, 1);
+    assert.strictEqual(result.reset, 2);
+    assert.deepStrictEqual(result.inbox.own, []);
+    assert.deepStrictEqual(result.inbox.nextOwn, []);
+    assert.deepStrictEqual(
+      result.inbox.unread.map(({ id, delivery, turnStart }) => [id, delivery, turnStart]),
+      [
+        [id(1), "unsent", Option.none()],
+        [id(2), "unsent", Option.none()],
+        [id(3), "unsent", Option.none()],
+      ],
+    );
+    assert.deepStrictEqual(result.inbox.counted, ["item-1"]);
+    assert.deepStrictEqual(result.inbox.turn, Option.some("turn-1"));
+    assert.deepStrictEqual(result.inbox.saved, ["item-1"]);
+  });
+
+  it("advanceTurn drops active own inputs and promotes after-turn inputs", () => {
+    const start: Inbox<Unread> = {
+      unread: [
+        unread(1, "Unsent", { delivery: "unsent" }),
+        unread(2, "Held for next turn", { delivery: "after-turn" }),
+      ],
+      own: ["Old"],
+      nextOwn: ["Continue"],
+      counted: [],
+      turn: Option.none(),
+      saved: [],
+    };
+    const result = advanceTurn(start);
+    assert.strictEqual(result.dropped, 1);
+    assert.strictEqual(result.kept, 1);
+    assert.strictEqual(result.promoted, 1);
+    assert.deepStrictEqual(result.inbox.own, ["Continue"]);
+    assert.deepStrictEqual(result.inbox.nextOwn, []);
+    assert.deepStrictEqual(
+      result.inbox.unread.map(({ id, delivery }) => [id, delivery]),
+      [
+        [id(1), "unsent"],
+        [id(2), "sent"],
+      ],
     );
   });
 });

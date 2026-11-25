@@ -1,9 +1,9 @@
 import { assert, it } from "@effect/vitest";
 import { NodeServices } from "@effect/platform-node";
 import { HarnessSession, HarnessSessionId } from "@usine/core/agent/session";
-import { OperatorMessage, type OperatorMessageId } from "@usine/core/attempt/channel";
+import { Interrupt, OperatorMessage, type OperatorMessageId } from "@usine/core/attempt/channel";
 import { Cause, Deferred, Effect, Fiber, Layer, Option, Queue, Stream } from "effect";
-import { ChildSessionJournal } from "../../../src/runtime.ts";
+import { ChildRequest, ChildSessionJournal } from "../../../src/runtime.ts";
 import { childContinuation, CONTINUATION_MESSAGE } from "../../../src/harness/continuation.ts";
 import { HarnessCatalog } from "../../../src/harness/harness.ts";
 import { CodexAppServer, type CodexNotification } from "../../../src/harness/codex/app-server.ts";
@@ -299,4 +299,327 @@ it.effect(
         }),
       );
     }),
+);
+
+it.effect("returns after-turn when an interrupt starts while submit drains pending inputs", () =>
+  Effect.gen(function* () {
+    const notifications = yield* Queue.make<CodexNotification, Cause.Done>();
+    const receipts = yield* Queue.make<ReadonlyArray<string>>();
+    const promptedStarted = yield* Deferred.make<void>();
+    const releasePrompted = yield* Deferred.make<void>();
+    const turn3Started = yield* Deferred.make<void>();
+    const reads: Array<OperatorMessageId> = [];
+    let turns = 1;
+    const saved = savedSession();
+    const responses = new Map(
+      Object.entries({
+        ...successfulResponses([{ id: "gpt-5.6-terra", model: "gpt-5.6-terra" }]),
+        "thread/resume": {
+          modelProvider: "openai",
+          thread: {
+            id: saved.id,
+            turns: [{ id: "turn-1", status: "inProgress", items: [] }],
+          },
+        },
+      }),
+    );
+    const server = Layer.succeed(CodexAppServer)({
+      stop: () => Effect.void,
+      open: () =>
+        Effect.succeed({
+          notifications: Stream.fromQueue(notifications),
+          notify: () => Effect.void,
+          close: Queue.end(notifications).pipe(Effect.asVoid),
+          request: (_operation, method) =>
+            Effect.gen(function* () {
+              if (method !== "turn/start") return responses.get(method) ?? {};
+              turns += 1;
+              if (turns === 3) yield* Deferred.succeed(turn3Started, undefined);
+              return { turn: { id: `turn-${turns}` } };
+            }),
+        }),
+    });
+    const m1 = OperatorMessage.make({ message: "First operator message." });
+    const m2 = OperatorMessage.make({ message: CONTINUATION_MESSAGE });
+    yield* Effect.gen(function* () {
+      const runtime = yield* codexRuntime;
+      const sessions = childContinuation(HarnessCatalog.make({ descriptors: [codex] }), runtime);
+      const resumed = yield* sessions.resume(
+        ChildRequest.make({
+          ...request(),
+          held: true,
+          unread: [{ id: m1.id, message: m1.message }],
+        }),
+        saved,
+      );
+      assert(Option.isSome(resumed));
+      const session = resumed.value;
+      const idle = yield* session.running.events.pipe(
+        Stream.filter((event) => event._tag === "SessionIdle"),
+        Stream.take(1),
+        Stream.runDrain,
+        Effect.forkChild,
+      );
+      yield* Queue.offer(notifications, {
+        method: "turn/completed",
+        params: { turn: { id: "turn-1", status: "completed", error: null } },
+      });
+      yield* Fiber.join(idle);
+
+      const intervening = yield* session.running
+        .intervene(m2, (state) =>
+          Effect.sync(() => {
+            if (Option.isSome(state)) reads.push(m2.id);
+          }),
+        )
+        .pipe(Effect.forkChild);
+      yield* Deferred.await(promptedStarted);
+      yield* session.running.interrupt;
+      yield* Deferred.succeed(releasePrompted, undefined);
+      yield* Fiber.join(intervening);
+
+      assert.strictEqual(turns, 2, "m2 waits in pending for turn-3 instead of starting a turn");
+      yield* recordInTurn(
+        notifications,
+        receipts,
+        saved.id,
+        "turn-2",
+        "in-turn-2",
+        CONTINUATION_MESSAGE,
+      );
+      assert.deepStrictEqual(
+        reads,
+        [],
+        "m2 was held with after-turn and must not be acknowledged by turn-2",
+      );
+
+      yield* Queue.offer(notifications, {
+        method: "turn/completed",
+        params: { turn: { id: "turn-2", status: "interrupted", error: null } },
+      });
+      yield* Deferred.await(turn3Started);
+      yield* recordInTurn(
+        notifications,
+        receipts,
+        saved.id,
+        "turn-3",
+        "in-turn-3",
+        CONTINUATION_MESSAGE,
+      );
+      assert.deepStrictEqual(reads, [m2.id]);
+    }).pipe(
+      Effect.provide([server, NodeServices.layer]),
+      Effect.provideService(ChildSessionJournal, {
+        ...ChildSessionJournal.noop,
+        prompted: Deferred.succeed(promptedStarted, undefined).pipe(
+          Effect.andThen(Deferred.await(releasePrompted)),
+        ),
+        received: (items) => Queue.offer(receipts, items).pipe(Effect.asVoid),
+      }),
+    );
+  }),
+);
+
+it.effect(
+  "keeps turnEnded atomic with Codex turn-end state reset under concurrent recover and intervene",
+  () =>
+    Effect.gen(function* () {
+      const notifications = yield* Queue.make<CodexNotification, Cause.Done>();
+      const receipts = yield* Queue.make<ReadonlyArray<string>>();
+      const continuedStarted = yield* Deferred.make<void>();
+      const releaseContinued = yield* Deferred.make<void>();
+      const turnCompletedRead = yield* Deferred.make<void>();
+      const nextTurn = yield* Deferred.make<void>();
+      const reads: Array<OperatorMessageId> = [];
+      let turns = 0;
+      let continuations = 0;
+      const saved = savedSession();
+      const responses = resumedResponses(saved);
+      const turn1Completed: CodexNotification = {
+        method: "turn/completed",
+        params: { turn: { id: "turn-1", status: "interrupted", error: null } },
+      };
+      const server = Layer.succeed(CodexAppServer)({
+        stop: () => Effect.void,
+        open: () =>
+          Effect.succeed({
+            notifications: Stream.fromQueue(notifications).pipe(
+              Stream.tap((notification) =>
+                notification === turn1Completed
+                  ? Deferred.succeed(turnCompletedRead, undefined)
+                  : Effect.void,
+              ),
+            ),
+            notify: () => Effect.void,
+            close: Queue.end(notifications).pipe(Effect.asVoid),
+            request: (_operation, method) =>
+              Effect.gen(function* () {
+                if (method !== "turn/start") return responses.get(method) ?? {};
+                turns += 1;
+                if (turns === 2) yield* Deferred.succeed(nextTurn, undefined);
+                return { turn: { id: `turn-${turns}` } };
+              }),
+          }),
+      });
+      yield* Effect.gen(function* () {
+        const runtime = yield* codexRuntime;
+        const sessions = childContinuation(HarnessCatalog.make({ descriptors: [codex] }), runtime);
+        const resumed = yield* sessions.resume(request(), saved);
+        assert(Option.isSome(resumed));
+        const session = resumed.value;
+        yield* session.recover([]);
+        yield* session.running.interrupt;
+
+        const recovering = yield* session.recover([]).pipe(Effect.forkChild);
+        yield* Deferred.await(continuedStarted);
+        yield* Queue.offer(notifications, turn1Completed);
+        yield* Deferred.await(turnCompletedRead);
+        yield* Effect.yieldNow;
+        yield* Effect.yieldNow;
+
+        const repeated = OperatorMessage.make({ message: CONTINUATION_MESSAGE });
+        const intervening = yield* session.running
+          .intervene(repeated, (state) =>
+            Effect.sync(() => {
+              if (Option.isSome(state)) reads.push(repeated.id);
+            }),
+          )
+          .pipe(Effect.forkChild({ startImmediately: true }));
+
+        yield* Deferred.succeed(releaseContinued, undefined);
+        yield* Fiber.join(recovering);
+        yield* Fiber.join(intervening);
+        yield* Deferred.await(nextTurn);
+
+        yield* recordInTurn(
+          notifications,
+          receipts,
+          saved.id,
+          "turn-2",
+          "first",
+          CONTINUATION_MESSAGE,
+        );
+        assert.deepStrictEqual(
+          reads,
+          [],
+          "turn-2's continuation was not dropped by turn-1's turnEnded",
+        );
+        yield* recordInTurn(
+          notifications,
+          receipts,
+          saved.id,
+          "turn-2",
+          "second",
+          CONTINUATION_MESSAGE,
+        );
+        assert.deepStrictEqual(
+          reads,
+          [repeated.id],
+          "the concurrent operator message was not stranded in after-turn",
+        );
+      }).pipe(
+        Effect.provide([server, NodeServices.layer]),
+        Effect.provideService(ChildSessionJournal, {
+          ...ChildSessionJournal.noop,
+          continued: () =>
+            Effect.gen(function* () {
+              continuations += 1;
+              if (continuations !== 2) return;
+              yield* Deferred.succeed(continuedStarted, undefined);
+              yield* Deferred.await(releaseContinued);
+            }),
+          received: (items) => Queue.offer(receipts, items).pipe(Effect.asVoid),
+        }),
+      );
+    }),
+);
+
+it.effect("holds the conversation lock across turnEnded until Codex resets its turn state", () =>
+  Effect.gen(function* () {
+    const notifications = yield* Queue.make<CodexNotification, Cause.Done>();
+    const steerStarted = yield* Deferred.make<void>();
+    const releaseSteer = yield* Deferred.make<void>();
+    const turnCompletedRead = yield* Deferred.make<void>();
+    let interrupts = 0;
+    const saved = savedSession();
+    const responses = new Map(
+      Object.entries({
+        ...successfulResponses([{ id: "gpt-5.6-terra", model: "gpt-5.6-terra" }]),
+        "thread/resume": {
+          modelProvider: "openai",
+          thread: {
+            id: saved.id,
+            turns: [{ id: "turn-1", status: "inProgress", items: [] }],
+          },
+        },
+      }),
+    );
+    const turn1Completed: CodexNotification = {
+      method: "turn/completed",
+      params: { turn: { id: "turn-1", status: "completed", error: null } },
+    };
+    const server = Layer.succeed(CodexAppServer)({
+      stop: () => Effect.void,
+      open: () =>
+        Effect.succeed({
+          notifications: Stream.fromQueue(notifications).pipe(
+            Stream.tap((notification) =>
+              notification === turn1Completed
+                ? Deferred.succeed(turnCompletedRead, undefined)
+                : Effect.void,
+            ),
+          ),
+          notify: () => Effect.void,
+          close: Queue.end(notifications).pipe(Effect.asVoid),
+          request: (_operation, method) =>
+            Effect.gen(function* () {
+              if (method === "turn/steer") {
+                yield* Deferred.succeed(steerStarted, undefined);
+                yield* Deferred.await(releaseSteer);
+                return {};
+              }
+              if (method === "turn/interrupt") {
+                interrupts += 1;
+                return {};
+              }
+              return responses.get(method) ?? {};
+            }),
+        }),
+    });
+    yield* Effect.gen(function* () {
+      const runtime = yield* codexRuntime;
+      const sessions = childContinuation(HarnessCatalog.make({ descriptors: [codex] }), runtime);
+      const resumed = yield* sessions.resume(
+        ChildRequest.make({ ...request(), held: true }),
+        saved,
+      );
+      assert(Option.isSome(resumed));
+      const session = resumed.value;
+
+      const steering = yield* session.running.steer("In-flight steer").pipe(Effect.forkChild);
+      yield* Deferred.await(steerStarted);
+      yield* Queue.offer(notifications, turn1Completed);
+      yield* Deferred.await(turnCompletedRead);
+      yield* Effect.yieldNow;
+      yield* Effect.yieldNow;
+
+      const pausing = yield* session.running
+        .intervene(Interrupt.make(), () => Effect.void)
+        .pipe(Effect.forkChild);
+      yield* Effect.yieldNow;
+      yield* Effect.yieldNow;
+
+      yield* Deferred.succeed(releaseSteer, undefined);
+      yield* Fiber.join(steering);
+      yield* Fiber.join(pausing);
+      assert.strictEqual(
+        interrupts,
+        0,
+        "turnEnded held the conversation lock until Codex cleared turnActive, so Interrupt did not send turn/interrupt",
+      );
+    }).pipe(
+      Effect.provide([server, NodeServices.layer]),
+      Effect.provideService(ChildSessionJournal, ChildSessionJournal.noop),
+    );
+  }),
 );

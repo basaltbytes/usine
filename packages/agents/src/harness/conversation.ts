@@ -867,13 +867,22 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
      * reported until the new process reports it.
      */
     processRestarted: mutex.withPermits(1)(
-      cancelWait("process restarted").pipe(
-        Effect.andThen(updateInbox(resetProcess)),
-        Effect.andThen(Ref.get(state)),
-        Effect.flatMap(({ background }) =>
-          Option.isSome(background) ? reportBackground(Option.none()) : Effect.void,
-        ),
-      ),
+      Effect.gen(function* () {
+        yield* cancelWait("process restarted");
+        const { droppedOwn, droppedNextOwn, reset } = yield* Ref.modify(state, (current) => {
+          const next = resetProcess(current.inbox);
+          return [next, { ...current, inbox: next.inbox }];
+        });
+        if (droppedOwn > 0 || droppedNextOwn > 0 || reset > 0)
+          yield* Effect.logInfo("Reset process-bound conversation inbox after restart", {
+            sessionId: session.id,
+            droppedOwn,
+            droppedNextOwn,
+            reset,
+          });
+        const { background } = yield* Ref.get(state);
+        if (Option.isSome(background)) yield* reportBackground(Option.none());
+      }),
     ),
     intervene,
     /**

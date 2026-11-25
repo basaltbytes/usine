@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest";
-import { OperatorMessage } from "@usine/core/attempt/channel";
+import { OperatorMessage, type OperatorMessageId } from "@usine/core/attempt/channel";
 import { Deferred, Effect, Fiber, Option } from "effect";
 import { ChildSessionJournal, RestartState } from "../../../src/runtime.ts";
 import { sessionChannel } from "../../../src/harness/session.ts";
@@ -186,6 +186,67 @@ describe("own inputs", () => {
         read,
         [],
         "the save didn't write back an inbox without the task, so the record is the task's",
+      );
+    }),
+  );
+
+  it.effect("recover skips unread operator messages that are already sent or after-turn", () =>
+    Effect.gen(function* () {
+      const restoredUnsent = OperatorMessage.make({ message: "Restored guidance." });
+      const alreadySent = OperatorMessage.make({ message: "Already sent guidance." });
+      const heldAfterTurn = OperatorMessage.make({ message: "Held for next turn." });
+      let disposition: MessageTaken = "queued";
+      const session = child("recover-skips-sent");
+      const channel = yield* sessionChannel({ sessionId: session.id, label: "Conversation test" });
+      const policy = policyOf(
+        RestartState.make({
+          unread: [{ id: restoredUnsent.id, message: restoredUnsent.message }],
+        }),
+      );
+      const controls = yield* sessionConversation({
+        session,
+        channel,
+        policy: {
+          ...policy,
+          recover: (_state, _tools, unread, _emit, send) =>
+            Effect.gen(function* () {
+              yield* send("Continue the task.");
+              for (const message of unread) yield* send(message.message, message.id);
+            }),
+        },
+        decode: (receipt: Receipt) => [receipt],
+        send: () => Effect.sync(() => disposition),
+        pause: Effect.void,
+        beforeFinish: Effect.void,
+        maxBackgroundWaitMinutes: Option.none(),
+      });
+      yield* controls.intervene(alreadySent, noDelivery);
+      disposition = "after-turn";
+      yield* controls.intervene(heldAfterTurn, noDelivery);
+
+      const recoveredIds: Array<OperatorMessageId | undefined> = [];
+      yield* controls.recover([], (_message, id) =>
+        Effect.sync(() => {
+          recoveredIds.push(id);
+          return "after-turn" as const;
+        }),
+      );
+      assert.deepStrictEqual(
+        recoveredIds,
+        [undefined, restoredUnsent.id],
+        "recover sends only its continuation and unsent unread messages",
+      );
+      const { read } = yield* controls.observe(
+        Receipt.ByText({
+          text: alreadySent.message,
+          at: "now",
+          item: Option.some({ id: "sent-item", turn: "turn-1" }),
+        }),
+      );
+      assert.deepStrictEqual(
+        read,
+        [alreadySent.id],
+        "the already-sent message stayed sent instead of being downgraded to after-turn",
       );
     }),
   );

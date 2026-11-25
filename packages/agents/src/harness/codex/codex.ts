@@ -456,12 +456,17 @@ const makeCodexSessions = Effect.gen(function* () {
           [...latest.pending, input],
           { ...latest, pending: [] },
         ]);
+        let taken: MessageTaken = "queued";
         for (const next of messages) {
           const { turnActive } = yield* Ref.get(state);
-          if (!turnActive) yield* startTurn(next);
-          else yield* submit(next);
+          if (!turnActive) {
+            yield* startTurn(next);
+            taken = "queued";
+          } else {
+            taken = yield* submit(next);
+          }
         }
-        return "queued" as const;
+        return taken;
       }
       // Codex records steered input as a user message once the running turn reads it.
       const encodedTurnSteerParams = yield* Schema.encodeEffect(
