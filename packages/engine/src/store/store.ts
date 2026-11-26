@@ -76,7 +76,6 @@ import type { CapacityWait } from "../engine/capacity/state.ts";
 import type { RetryOutcome, RetryRequest } from "../engine/retry.ts";
 import { StepExecution } from "../step-executor.ts";
 import { TranscriptEntry, TranscriptQuery } from "../transcript.ts";
-import { attemptQueries } from "./queries/attempts.ts";
 import { leftoverQueries } from "./queries/leftovers.ts";
 import { persistence, submissionFromRow } from "./codec.ts";
 import { queriesFor, type RunQueries, runTransaction } from "./queries/queries.ts";
@@ -687,7 +686,7 @@ const makeRunStore = Effect.gen(function* () {
 
   const attemptWindows = Effect.fn("RunStore.attemptWindows")(function* (attemptId: AttemptId) {
     yield* Effect.annotateCurrentSpan({ attemptId });
-    const windows = yield* attemptQueries(database).attemptWindows(attemptId);
+    const windows = yield* queries.attemptWindows(attemptId);
     yield* Effect.logDebug(
       "Read the Attempt's window and the Attempts of the same Agent that overlap it on its Item",
       {
