@@ -29,6 +29,12 @@ export const anthropic = ModelProvider.make({
         (route) => RoutePattern.make(route),
       ),
       key: KeyHeader.make({ header: HeaderName.make("x-api-key"), scheme: "none" }),
+      methods: Option.some({
+        [RoutePattern.make("/v1/messages")]: ["POST"],
+        [RoutePattern.make("/v1/messages/count_tokens")]: ["POST"],
+        [RoutePattern.make("/v1/models")]: ["GET"],
+        [RoutePattern.make("/v1/models/{model}")]: ["GET"],
+      }),
     }),
   ],
   credentials: [
@@ -57,6 +63,11 @@ export const openai = ModelProvider.make({
         RoutePattern.make(route),
       ),
       key: KeyHeader.make({ header: HeaderName.make("authorization"), scheme: "bearer" }),
+      methods: Option.some({
+        [RoutePattern.make("/v1/responses")]: ["POST"],
+        [RoutePattern.make("/v1/responses/compact")]: ["POST"],
+        [RoutePattern.make("/v1/models")]: ["GET"],
+      }),
     }),
   ],
   credentials: [
@@ -87,7 +98,10 @@ export {
   ModelProviderCatalog,
   ModelProviderId,
   ProviderProtocol,
+  type ProviderSelectors,
+  RouteMethod,
   RoutePattern,
+  selectProvider,
   type SlotTarget,
   SubscriptionCredential,
   SubscriptionLogin,

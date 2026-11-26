@@ -48,7 +48,7 @@ printf '%s\\n' 'sk-ant-oat01-private-subscription-token'
             code: "ABCD-EFGH",
           });
           const credential = yield* login.result;
-          assert.equal(credential.kind, "chatgpt-subscription");
+          assert.equal(credential.login, "chatgpt");
           assert.include(Redacted.value(credential.secret), "private-refresh");
         }),
       );
@@ -65,7 +65,7 @@ printf '%s\\n' 'sk-ant-oat01-private-subscription-token'
           });
           yield* login.submit(Redacted.make("authorization-code"));
           const credential = yield* login.result;
-          assert.equal(credential.kind, "claude-subscription");
+          assert.equal(credential.login, "claude");
           assert.equal(
             Redacted.value(credential.secret),
             "sk-ant-oat01-private-subscription-token",

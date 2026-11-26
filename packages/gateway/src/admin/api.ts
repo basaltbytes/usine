@@ -2,15 +2,10 @@ import {
   ProviderCredential,
   ProviderCredentialError,
   ProviderConnections,
+  SLOTS_BEFORE_CATALOG,
+  UnservedProvider,
 } from "../credentials/model.ts";
-import {
-  anthropic,
-  GatewaySlot,
-  type ModelProviderCatalog,
-  modelProviders,
-  openai,
-  RoutePattern,
-} from "@usine/core/agent/provider";
+import { GatewaySlot, type ModelProviderCatalog, RoutePattern } from "@usine/core/agent/provider";
 import { RepositoryName } from "@usine/core/repository";
 import { GatewayCredentialKind, WorkerName } from "@usine/core/worker";
 import { type Brand, Schema } from "effect";
@@ -135,12 +130,6 @@ export class ServedSlot extends Schema.Class<
 }) {}
 
 /**
- * The slots that orchestrators from before the provider catalog decode in a report's `providers`;
- * any other slot there fails their whole read.
- */
-const SLOTS_BEFORE_CATALOG: ReadonlyArray<GatewaySlot> = [anthropic.slot, openai.slot];
-
-/**
  * The LLM providers the gateway forwards to, and every slot that its provider catalog has. Each
  * slot that holds a credential has its kind in `slots`, and also in `providers` when orchestrators
  * from before the catalog decode the slot.
@@ -231,12 +220,19 @@ export const GatewayAdminApi = HttpApi.make("GatewayAdminApi").add(
       HttpApiEndpoint.put("connect", "/v1/provider-credentials", {
         payload: ProviderCredential,
         success: Schema.Struct({ ok: Schema.Boolean }),
-        error: ProviderCredentialError.annotate({ httpApiStatus: 503 }),
+        error: [
+          ProviderCredentialError.annotate({ httpApiStatus: 503 }),
+          UnservedProvider.annotate({ httpApiStatus: 422 }),
+        ],
       }),
+      /** Disconnects the provider whose slot or ID is `provider`. */
       HttpApiEndpoint.delete("disconnect", "/v1/provider-credentials/:provider", {
-        params: { provider: modelProviders.slotFromName },
+        params: { provider: Schema.String },
         success: Schema.Struct({ ok: Schema.Boolean }),
-        error: ProviderCredentialError.annotate({ httpApiStatus: 503 }),
+        error: [
+          ProviderCredentialError.annotate({ httpApiStatus: 503 }),
+          UnservedProvider.annotate({ httpApiStatus: 422 }),
+        ],
       }),
     )
     .middleware(AdminAuthorization),

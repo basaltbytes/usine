@@ -1,9 +1,7 @@
 import type { Harness } from "@usine/core/agent/brain";
-import { catalog } from "@usine/agents/harness";
-import { Option, Schema } from "effect";
-import { CloudflareLlmProvider } from "@usine/core/worker";
-
-const cloudflareProvider = Schema.decodeUnknownOption(CloudflareLlmProvider);
+import type { ModelProviderId } from "@usine/core/agent/provider";
+import { catalog, type HarnessCatalog } from "@usine/agents/harness";
+import { Option } from "effect";
 
 /** The home directory of the image's `usine` user, where every command starts. */
 export const SANDBOX_HOME = "/home/usine";
@@ -24,16 +22,10 @@ export const DRAIN_MARKER = `${SANDBOX_HOME}/.usine/draining`;
 export const CONTAINER_CA = "/etc/cloudflare/certs/cloudflare-containers-ca.crt";
 
 /**
- * The host that each provider's outbound handler serves over plain HTTP inside the sandbox, and
- * the upstream it forwards to over HTTPS.
+ * Returns the host that the outbound handler of the provider with ID `provider` serves over plain
+ * HTTP inside the sandbox, such as `anthropic.usine.internal`.
  */
-export const PROVIDER_HOSTS = {
-  anthropic: { sandbox: "anthropic.usine.internal", upstream: "api.anthropic.com" },
-  openai: { sandbox: "openai.usine.internal", upstream: "api.openai.com" },
-} as const satisfies Record<
-  CloudflareLlmProvider,
-  { readonly sandbox: string; readonly upstream: string }
->;
+export const sandboxHost = (provider: ModelProviderId): string => `${provider}.usine.internal`;
 
 /** The GitHub hosts whose requests the GitHub outbound handler authenticates. */
 export const GITHUB_HOSTS = ["github.com", "api.github.com"] as const;
@@ -47,18 +39,22 @@ export type GitHubHost = (typeof GITHUB_HOSTS)[number];
 export const PLACEHOLDER_CREDENTIAL = "usine-placeholder";
 
 /**
- * Returns the environment that points the harnesses, git, and gh at the outbound handlers, for
- * a sandbox whose handlers hold keys for `providers`. It contains no secret.
+ * Returns the environment that points the harnesses of `harnesses`, git, and gh at the outbound
+ * handlers, for a sandbox whose handlers hold keys for `providers`. It contains no secret.
  *
  * - git and gh use HTTPS to GitHub, and trust the container's certificate authority, as
  *   Cloudflare's coding-agent runner sets it up. gh sends the placeholder as its token.
- * - Claude Code calls the Anthropic handler over plain HTTP with the placeholder as its key.
- * - Codex reads the placeholder from `OPENAI_API_KEY`; the image's Codex configuration points
- *   its `usine` model provider at the OpenAI handler.
+ * - A harness calls the handler of the first of its providers that the sandbox holds a key for,
+ *   over plain HTTP with the placeholder as its key. Its base URL is the handler's host and the
+ *   path of its gateway wiring, so the handler serves the provider's routes as the gateway does.
+ * - Codex reads the placeholder from `OPENAI_API_KEY`. Its app-server launch sets the base URL of
+ *   the image's `usine` model provider from `USINE_CODEX_BASE_URL`; without that variable, the
+ *   image's configuration points the provider at the OpenAI handler.
  */
 export const harnessEnvironment = (
-  providers: ReadonlyArray<CloudflareLlmProvider>,
+  providers: ReadonlyArray<ModelProviderId>,
   harness: Option.Option<Harness>,
+  harnesses: HarnessCatalog = catalog,
 ): Record<string, string> =>
   Object.assign(
     {
@@ -69,18 +65,16 @@ export const harnessEnvironment = (
       GH_TOKEN: PLACEHOLDER_CREDENTIAL,
       GH_PROMPT_DISABLED: "1",
     },
-    ...catalog.descriptors
+    ...harnesses.descriptors
       .filter(({ id }) => Option.contains(harness, id))
       .flatMap(({ worker, providers: usable }) =>
-        Option.toArray(worker.credential).flatMap(({ cloudflare }) => {
-          const provider = usable
-            .flatMap(({ id }) => Option.toArray(cloudflareProvider(id)))
-            .find((id) => providers.includes(id));
+        Option.toArray(worker.credential).flatMap(({ cloudflare, slotPath }) => {
+          const provider = usable.find(({ id }) => providers.includes(id));
           return provider === undefined
             ? []
             : [
                 {
-                  ...cloudflare.render(`http://${PROVIDER_HOSTS[provider].sandbox}`, "")
+                  ...cloudflare.render(`http://${sandboxHost(provider.id)}${slotPath}`, "")
                     .environment,
                   [cloudflare.tokenVariable]: PLACEHOLDER_CREDENTIAL,
                 },

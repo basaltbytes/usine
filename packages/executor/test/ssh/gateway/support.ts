@@ -176,6 +176,7 @@ export const fakeGateway = (
         github: GITHUB_ORIGINS,
         catalog,
         providers,
+        upstreams: {},
         egress: Result.getOrThrow(parseEgressAllowlist("")),
         adminToken: yield* Schema.decodeEffect(AdminToken)(ADMIN_TOKEN),
         callerKey: yield* Schema.decodeEffect(CallerKey)(

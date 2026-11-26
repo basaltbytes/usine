@@ -1,6 +1,15 @@
+import type { LoginProvider, ProviderTarget } from "@usine/gateway/credentials";
+
 export const providersTitle = "Provider connections";
 export const providersHelp = "Connect the plans or API keys that your harnesses use.";
-export const providerNames = { claude: "Claude", chatgpt: "ChatGPT" } as const;
+/** The name of each subscription login. */
+const loginNames = { claude: "Claude", chatgpt: "ChatGPT" } as const satisfies Record<
+  LoginProvider,
+  string
+>;
+/** Returns a provider's name: its subscription login's, or its display name without one. */
+export const providerName = ({ label, accepts }: ProviderTarget["providers"][number]) =>
+  accepts.login === null ? label : loginNames[accepts.login];
 export const connect = (name: string) => `Connect ${name}`;
 export const replace = (name: string) => `Replace ${name} login`;
 export const disconnect = (name: string) => `Disconnect ${name}`;

@@ -1,16 +1,12 @@
 import type { AttemptConnections } from "../attempt-connections.ts";
 import type { SshCommand } from "@usine/agents/child-host";
-import type {
-  CloudflareImageName,
-  CloudflareInstanceType,
-  CloudflareLlmProvider,
-  WorkerName,
-} from "@usine/core/worker";
+import type { ModelProviderId } from "@usine/core/agent/provider";
+import type { CloudflareImageName, CloudflareInstanceType, WorkerName } from "@usine/core/worker";
 import type { Duration, Effect, Redacted } from "effect";
 
 /** A provider API key that the Worker's outbound handler holds for each Attempt. */
 export interface CloudflareProviderKey {
-  readonly provider: CloudflareLlmProvider;
+  readonly provider: ModelProviderId;
   readonly apiKey: Redacted.Redacted<string>;
 }
 

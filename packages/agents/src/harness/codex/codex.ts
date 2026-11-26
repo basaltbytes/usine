@@ -943,7 +943,7 @@ export const codexChildLayer = Layer.effect(
   ),
 );
 
-export { codexConfigArgs } from "./app-server.ts";
+export { codexAppServerCommand, codexConfigArgs } from "./app-server.ts";
 
 /** Combines preflight and scoped sessions for registration. */
 export const codexRuntime = Effect.gen(function* () {

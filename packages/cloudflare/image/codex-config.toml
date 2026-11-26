@@ -1,10 +1,11 @@
-# Codex's model provider in a usine sandbox. The Worker's OpenAI outbound handler serves
-# openai.usine.internal over plain HTTP and replaces the placeholder in OPENAI_API_KEY with the
-# Attempt's API key.
+# Codex's model provider in a usine sandbox. Each provider's outbound handler in the Worker serves
+# <provider ID>.usine.internal over plain HTTP and replaces the placeholder in OPENAI_API_KEY with
+# the Attempt's API key. usine launches Codex with a base_url override for the provider that the
+# Attempt has a key for, from USINE_CODEX_BASE_URL; base_url below is the OpenAI handler's.
 model_provider = "usine"
 
 [model_providers.usine]
-name = "OpenAI through the usine sandbox Worker"
+name = "The usine sandbox Worker"
 base_url = "http://openai.usine.internal/v1"
 env_key = "OPENAI_API_KEY"
 wire_api = "responses"

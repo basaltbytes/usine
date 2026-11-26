@@ -19,7 +19,6 @@ import {
   TailnetAddress,
   CloudflareImageName,
   CloudflareInstanceType,
-  CloudflareLlmProvider,
   SupervisorLimits,
   ContainerCpus,
   ContainerImage,
@@ -554,8 +553,14 @@ export class CloudflareLlmProviderKey extends Schema.Class<
   CloudflareLlmProviderKey,
   Brand.Brand<"@usine/config/factory/CloudflareLlmProviderKey">
 >("@usine/config/CloudflareLlmProviderKey")({
-  /** The LLM provider whose outbound requests need an API key. */
-  provider: CloudflareLlmProvider,
+  /** The ID of the catalog provider whose outbound requests need an API key. */
+  provider: catalog.providers.providerId.check(
+    Schema.makeFilter(
+      (id) =>
+        Option.exists(catalog.providers.get(id), (provider) => provider.accepts("api-key")) ||
+        `Provider "${id}" takes no API key`,
+    ),
+  ),
   /** The orchestrator environment variable containing the provider API key. */
   apiKeyEnv: EnvironmentVariableName,
 }) {}

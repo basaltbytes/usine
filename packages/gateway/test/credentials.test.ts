@@ -1,31 +1,68 @@
-import { anthropic, GatewaySlot, modelProviders, openai } from "@usine/core/agent/provider";
+import {
+  anthropic,
+  ApiKeyCredential,
+  SubscriptionCredential,
+  GatewaySlot,
+  GatewayVariable,
+  HeaderName,
+  KeyHeader,
+  ModelProvider,
+  ModelProviderCatalog,
+  ModelProviderId,
+  modelProviders,
+  openai,
+  ProviderProtocol,
+  RoutePattern,
+  UpstreamBase,
+  WireProtocol,
+} from "@usine/core/agent/provider";
 import { jsonKey } from "@usine/core/json-key";
-import { NodeServices } from "@effect/platform-node";
+// The stand-in upstream and the proxy requests need Node's HTTP server and client.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
+import { createServer, request } from "node:http";
+import { NodeCrypto, NodeServices } from "@effect/platform-node";
 import { assert, it } from "@effect/vitest";
 import {
+  ConfigProvider,
+  Context,
   DateTime,
   Effect,
   FileSystem,
   Layer,
   Logger,
   Option,
+  Predicate,
   Record,
   Redacted,
   Schema,
   Scope,
   Exit,
+  Tracer,
 } from "effect";
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/http";
 import { HttpApiClient } from "effect/http-api";
-import { GatewayAdminApi } from "../src/admin/api.ts";
-import { GatewayAddresses, gatewayLayer } from "../src/node/node.ts";
-import { SettingsInForce } from "../src/settings.ts";
-import { credentialProvider, loginLlmProvider } from "../src/credentials/model.ts";
-import { CHATGPT_UPSTREAM, type LlmProviders } from "../src/llm/llm.ts";
+import { AttachRequest, GatewayAdminApi } from "../src/admin/api.ts";
+import { AnonymousCredential } from "../src/attachment/attachment.ts";
+import { Attachments } from "../src/attachment/store.ts";
+import { GatewayAddresses, GatewayReload, gatewayLayer } from "../src/node/node.ts";
+import { readSettingsSource, readStartupSettings } from "../src/node/environment.ts";
+import { gatewayReloadLayer } from "../src/node/reload.ts";
+import { GatewaySettings, SettingsInForce } from "../src/settings.ts";
+import { LoginSecret, ProviderCredential, StaticKey } from "../src/credentials/model.ts";
+import {
+  AnthropicSubscriptionToken,
+  ApiKey,
+  CHATGPT_UPSTREAM,
+  ChatGptLogin,
+  LlmProvider,
+  type LlmProviders,
+} from "../src/llm/llm.ts";
 import { ProviderCredentials } from "../src/credentials/store.ts";
 import {
   ADMIN_TOKEN_VALUE,
   NO_PROVIDERS,
+  REPOSITORY,
+  WORKER,
   settingsLayer,
   authFileText,
   chatGptAccessToken,
@@ -34,9 +71,203 @@ import {
 const listener = { host: "127.0.0.1", port: 0 };
 const upstreamsOf = (providers: LlmProviders) => Record.map(providers, ({ upstream }) => upstream);
 const connectedUpstreams = {
-  [anthropic.slot]: Option.some(anthropic.protocols[0].upstream),
+  [anthropic.slot]: Option.none(),
   [openai.slot]: Option.some(CHATGPT_UPSTREAM),
 };
+
+const PLAN_KEY = "plan-key-for-credential-tests-0123456789";
+const ANTHROPIC_KEY = "sk-ant-api03-keyForCredentialTests0123";
+
+const Secret = Schema.Redacted(Schema.NonEmptyString);
+
+/** The admin API's credential payload as gateways up to 0.3.0 decode it. */
+const CredentialUpTo030 = Schema.Struct({
+  kind: Schema.Literals([
+    "claude-subscription",
+    "anthropic-api-key",
+    "chatgpt-subscription",
+    "openai-api-key",
+  ]),
+  secret: Secret,
+});
+
+/** `provider-credentials.json` as gateways up to 0.3.0 decode it. */
+const FileUpTo030 = Schema.fromJsonString(
+  Schema.toCodecJson(
+    Schema.Record(
+      GatewaySlot,
+      Schema.Option(
+        Schema.Union([
+          Schema.TaggedStruct("AnthropicProvider", {
+            upstream: UpstreamBase,
+            credential: Schema.Union([
+              Schema.TaggedStruct("AnthropicApiKey", { key: Secret }),
+              AnthropicSubscriptionToken,
+            ]),
+          }),
+          Schema.TaggedStruct("OpenAiProvider", {
+            upstream: UpstreamBase,
+            credential: Schema.Union([
+              Schema.TaggedStruct("OpenAiApiKey", { key: Secret }),
+              ChatGptLogin,
+            ]),
+          }),
+        ]),
+      ),
+    ),
+  ),
+);
+
+/**
+ * A stand-in for a provider's upstream that records the path and the `authorization` or
+ * `x-api-key` of each request.
+ */
+const standIn = Effect.gen(function* () {
+  const seen: Array<readonly [string, string]> = [];
+  const server = createServer((incoming, response) => {
+    const key = incoming.headers.authorization ?? incoming.headers["x-api-key"];
+    seen.push([incoming.url ?? "", Predicate.isString(key) ? key : "none"]);
+    incoming.resume();
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end("{}");
+  });
+  yield* Effect.acquireRelease(
+    Effect.callback<void>((resume) => {
+      server.listen(0, "127.0.0.1", () => resume(Effect.void));
+    }),
+    () =>
+      Effect.sync(() => {
+        server.closeAllConnections();
+        server.close();
+      }),
+  );
+  const address = server.address();
+  assert(address !== null && !Predicate.isString(address));
+  return { origin: `http://127.0.0.1:${address.port}`, seen };
+});
+
+/** The gateway variable that replaces the upstream of `planAt`'s provider. */
+const PLAN_UPSTREAM = "TEST_PLAN_UPSTREAM";
+
+/**
+ * A provider that only this test defines, with a static key, at `origin`. Its slot differs from
+ * its ID, so a test sees which one the gateway keys a credential by.
+ */
+const planAt = (origin: string) =>
+  ModelProvider.make({
+    id: ModelProviderId.make("test-plan"),
+    slot: GatewaySlot.make("test-plan-chat"),
+    label: "Test plan",
+    protocols: [
+      ProviderProtocol.make({
+        protocol: WireProtocol.make("openai-chat-completions"),
+        upstream: UpstreamBase.make(`${origin}/v1`),
+        routes: [RoutePattern.make("/chat/completions")],
+        key: KeyHeader.make({ header: HeaderName.make("authorization"), scheme: "bearer" }),
+      }),
+    ],
+    credentials: [ApiKeyCredential.make({ variable: GatewayVariable.make("TEST_PLAN_API_KEY") })],
+    upstreamVariable: Option.some(GatewayVariable.make(PLAN_UPSTREAM)),
+  });
+
+/** A report of `GET /v1/provider-credentials` as orchestrators up to 0.6.0 decode it. */
+const ConnectionsUpTo060 = Schema.fromJsonString(
+  Schema.Struct({
+    providers: Schema.Array(
+      Schema.Struct({
+        provider: Schema.Literals(["anthropic-messages", "openai-responses"]),
+        credential: Schema.NullOr(Schema.Literals(["api-key", "subscription"])),
+        expiresAt: Schema.NullOr(Schema.String),
+        lastRefresh: Schema.NullOr(Schema.String),
+      }),
+    ),
+  }),
+);
+
+/**
+ * The gateway as `usine-gateway` composes it, serving `catalog`, with its settings from the
+ * environment and `variables`, and its state in `directory`.
+ */
+const gatewayServing = (
+  catalog: ModelProviderCatalog,
+  directory: string,
+  variables: Readonly<Record<string, string>> = {},
+) =>
+  Layer.unwrap(
+    Effect.gen(function* () {
+      const base = ConfigProvider.fromEnv({
+        env: {
+          ...variables,
+          USINE_GATEWAY_DOMAIN: "gw.test",
+          USINE_GATEWAY_ADMIN_TOKEN: ADMIN_TOKEN_VALUE,
+          USINE_GATEWAY_CALLER_KEY: "caller-key-for-credential-tests-0123456789",
+          USINE_GATEWAY_PROXY_PORT: "0",
+          USINE_GATEWAY_EGRESS_PORT: "0",
+          USINE_GATEWAY_ADMIN_PORT: "0",
+          USINE_GATEWAY_EGRESS_ALLOWLIST: `${directory}/egress-allowlist`,
+        },
+      });
+      const source = yield* readSettingsSource(base);
+      const started = yield* readStartupSettings(source, catalog);
+      return gatewayReloadLayer(started, base).pipe(
+        Layer.provide(NodeCrypto.layer),
+        Layer.provideMerge(gatewayLayer(started.listeners, Attachments.layer, directory)),
+        Layer.provide(Layer.succeed(GatewaySettings)(started.settings)),
+      );
+    }),
+  );
+
+/** Returns the admin API client of the gateway in `context`. */
+const adminOf = (context: Context.Context<GatewayAddresses>) =>
+  Effect.gen(function* () {
+    const { admin } = Context.get(context, GatewayAddresses);
+    return yield* HttpApiClient.make(GatewayAdminApi, {
+      baseUrl: `http://${admin.host}:${admin.port}`,
+      transformClient: HttpClient.mapRequest(HttpClientRequest.bearerToken(ADMIN_TOKEN_VALUE)),
+    });
+  });
+
+/**
+ * Attaches the test repository on the gateway in `context`, then returns a request from the
+ * attempt to `path` on `llm.gw.test`, which resolves to the response status.
+ */
+const attemptOn = (context: Context.Context<GatewayAddresses>) =>
+  Effect.gen(function* () {
+    const client = yield* adminOf(context);
+    const now = yield* DateTime.now;
+    const { callerToken } = yield* client.attachments.attach({
+      payload: AttachRequest.make({
+        worker: WORKER,
+        repository: REPOSITORY,
+        credential: AnonymousCredential.make(),
+        expiresAt: DateTime.add(now, { minutes: 60 }),
+      }),
+    });
+    const { proxy } = Context.get(context, GatewayAddresses);
+    return (path: string) =>
+      Effect.callback<number>((resume) => {
+        const outgoing = request(
+          {
+            host: proxy.host,
+            port: proxy.port,
+            method: "POST",
+            path,
+            headers: {
+              host: "llm.gw.test",
+              authorization: `Bearer ${Redacted.value(callerToken)}`,
+              "content-type": "application/json",
+            },
+          },
+          (response) => {
+            response.resume();
+            response.once("end", () => resume(Effect.succeed(response.statusCode ?? 0)));
+          },
+        );
+        outgoing.once("error", (error) => resume(Effect.die(error)));
+        outgoing.end('{"model":"plan-model"}');
+      });
+  });
+
 it.live(
   "persists admin credential handoffs, applies them after restart, and exposes only metadata",
   () =>
@@ -58,15 +289,10 @@ it.live(
           ).pipe(Layer.provide(settingsLayer(NO_PROVIDERS)), Layer.provide(logs));
         const scope = yield* Scope.make();
         const context = yield* Layer.buildWithScope(start(), scope);
-        const address = context.pipe((context) => Effect.provideContext(GatewayAddresses, context));
-        const { admin } = yield* address;
-        const client = yield* HttpApiClient.make(GatewayAdminApi, {
-          baseUrl: `http://127.0.0.1:${admin.port}`,
-          transformClient: HttpClient.mapRequest(HttpClientRequest.bearerToken(ADMIN_TOKEN_VALUE)),
-        });
+        const client = yield* adminOf(context);
         const claudeSecret = "sk-ant-oat01-private-fixture";
         yield* client.llm.connect({
-          payload: { kind: "claude-subscription", secret: Redacted.make(claudeSecret) },
+          payload: LoginSecret.make({ login: "claude", secret: Redacted.make(claudeSecret) }),
         });
         const now = yield* DateTime.now;
         const expiry = DateTime.add(now, { hours: 1 });
@@ -75,14 +301,14 @@ it.live(
           refresh: "refresh-private-fixture",
         });
         yield* client.llm.connect({
-          payload: { kind: "chatgpt-subscription", secret: Redacted.make(auth) },
+          payload: LoginSecret.make({ login: "chatgpt", secret: Redacted.make(auth) }),
         });
         const malformed = yield* client.llm
           .connect({
-            payload: {
-              kind: "chatgpt-subscription",
+            payload: LoginSecret.make({
+              login: "chatgpt",
               secret: Redacted.make("private-malformed-auth"),
-            },
+            }),
           })
           .pipe(Effect.flip);
         assert.notInclude(jsonKey(malformed), "private-malformed-auth");
@@ -97,6 +323,9 @@ it.live(
         );
         assert.deepEqual(state.providers[0], {
           provider: GatewaySlot.make("anthropic-messages"),
+          id: anthropic.id,
+          label: "Anthropic",
+          accepts: { apiKey: true, login: "claude" },
           credential: "subscription",
           expiresAt: null,
           lastRefresh: null,
@@ -137,43 +366,333 @@ it.live(
           Effect.flatMap((settings) => settings.current),
         );
         assert.deepStrictEqual(upstreamsOf(beforeDisconnect.providers), connectedUpstreams);
-        yield* credentials.disconnect(GatewaySlot.make("anthropic-messages"));
-        yield* credentials.disconnect(GatewaySlot.make("openai-responses"));
+        yield* credentials.disconnect("anthropic-messages");
+        yield* credentials.disconnect("openai");
         assert.deepEqual(
           (yield* credentials.status).map(({ credential }) => credential),
           [null, null],
         );
-        const next = yield* credentials.apply(beforeDisconnect.providers);
+        const next = yield* credentials.apply(
+          beforeDisconnect.providers,
+          beforeDisconnect.upstreams,
+        );
         assert.deepStrictEqual(next, {});
       }),
     ).pipe(Effect.provide([NodeServices.layer, FetchHttpClient.layer])),
 );
 
-it("connects each credential kind and login to the provider that accepts it", () => {
-  const secret = Redacted.make("private-fixture");
-  for (const kind of ["anthropic-api-key", "openai-api-key"] as const) {
-    const provider = modelProviders.find(credentialProvider({ kind, secret }));
-    assert(
-      Option.exists(
-        provider,
-        (found) => found.accepts("api-key") && kind === `${found.id}-api-key`,
-      ),
-      kind,
+it.live(
+  "connects a static key for a provider that only the test's catalog has: requests leave with it through a reload and a restart, until it's disconnected",
+  () => {
+    const spans: Array<Tracer.NativeSpan> = [];
+    const tracer = Tracer.make({
+      span(options) {
+        const span = new Tracer.NativeSpan(options);
+        spans.push(span);
+        return span;
+      },
+    });
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const directory = yield* fs.makeTempDirectoryScoped();
+        yield* fs.writeFileString(`${directory}/egress-allowlist`, "registry.npmjs.org\n");
+        const upstream = yield* standIn;
+        const catalogUpstream = yield* standIn;
+        const anthropicUpstream = yield* standIn;
+        const plan = planAt(catalogUpstream.origin);
+        const catalog = ModelProviderCatalog.make({
+          providers: [...modelProviders.providers, plan],
+        });
+        const lines: string[] = [];
+        const logs = Logger.layer([
+          Logger.make(({ message }) => {
+            lines.push(jsonKey(message));
+          }),
+        ]);
+        const start = gatewayServing(catalog, directory, {
+          [PLAN_UPSTREAM]: `${upstream.origin}/v1`,
+          USINE_GATEWAY_ANTHROPIC_UPSTREAM: anthropicUpstream.origin,
+        }).pipe(Layer.provide(logs));
+        const scope = yield* Scope.make();
+        const first = yield* Layer.buildWithScope(start, scope);
+        const client = yield* adminOf(first);
+        yield* client.llm.connect({
+          payload: StaticKey.make({ provider: plan.id, secret: Redacted.make(PLAN_KEY) }),
+        });
+        const unserved = yield* client.llm
+          .connect({
+            payload: StaticKey.make({
+              provider: ModelProviderId.make("unknown-plan"),
+              secret: Redacted.make(PLAN_KEY),
+            }),
+          })
+          .pipe(Effect.flip);
+        assert.strictEqual(unserved._tag, "UnservedProvider");
+        const report = yield* client.llm.connections();
+        const providers = report.catalog ?? [];
+        assert.deepStrictEqual(providers.at(-1), {
+          provider: plan.slot,
+          id: plan.id,
+          label: "Test plan",
+          accepts: { apiKey: true, login: null },
+          credential: "api-key",
+          expiresAt: null,
+          lastRefresh: null,
+          refreshable: false,
+        });
+        const { admin } = Context.get(first, GatewayAddresses);
+        const legacy = yield* HttpClient.get(
+          `http://${admin.host}:${admin.port}/v1/provider-credentials`,
+          { headers: { authorization: `Bearer ${ADMIN_TOKEN_VALUE}` } },
+        ).pipe(
+          Effect.flatMap((response) => response.text),
+          Effect.flatMap(Schema.decodeUnknownEffect(ConnectionsUpTo060)),
+        );
+        assert.deepStrictEqual(
+          legacy.providers.map(({ provider }): string => provider),
+          [anthropic.slot, openai.slot],
+        );
+        const Saved = Schema.fromJsonString(
+          Schema.Struct({ staticKeys: Schema.Record(Schema.String, Schema.String) }),
+        );
+        const saved = yield* fs
+          .readFileString(`${directory}/provider-credentials.json`)
+          .pipe(Effect.flatMap(Schema.decodeUnknownEffect(Saved)));
+        assert.deepStrictEqual(Object.keys(saved.staticKeys), [plan.slot]);
+        const ask = yield* attemptOn(first);
+        const path = `/${plan.slot}/chat/completions`;
+        const connected = yield* ask(path);
+        yield* Effect.flatMap(GatewayReload, ({ reload }) => reload).pipe(
+          Effect.provideContext(first),
+        );
+        const reloaded = yield* ask(path);
+        yield* Scope.close(scope, Exit.void);
+
+        const restarted = yield* Layer.build(start);
+        const askAgain = yield* attemptOn(restarted);
+        const afterRestart = yield* askAgain(path);
+        const again = yield* adminOf(restarted);
+        yield* again.llm.disconnect({ params: { provider: plan.id } });
+        const afterDisconnect = yield* askAgain(path);
+        assert.deepStrictEqual(
+          [connected, reloaded, afterRestart, afterDisconnect],
+          [200, 200, 200, 503],
+        );
+        const disconnected = yield* again.llm.connections();
+        assert.strictEqual(disconnected.catalog?.at(-1)?.credential, null);
+
+        assert.deepStrictEqual(upstream.seen, [
+          ["/v1/chat/completions", `Bearer ${PLAN_KEY}`],
+          ["/v1/chat/completions", `Bearer ${PLAN_KEY}`],
+          ["/v1/chat/completions", `Bearer ${PLAN_KEY}`],
+        ]);
+        assert.deepStrictEqual(catalogUpstream.seen, []);
+        assert.deepStrictEqual(anthropicUpstream.seen, []);
+        assert.isTrue(spans.some(({ name }) => name === "ProviderCredentials.replace"));
+        const exposed =
+          jsonKey(providers) +
+          jsonKey(disconnected) +
+          jsonKey(unserved) +
+          lines.join("\n") +
+          jsonKey(spans.map((span) => [...span.attributes]));
+        assert.notInclude(exposed, PLAN_KEY);
+      }),
+    ).pipe(
+      Effect.provide([NodeServices.layer, FetchHttpClient.layer]),
+      Effect.provideService(Tracer.Tracer, tracer),
     );
-  }
-  for (const login of ["claude", "chatgpt"] as const) {
-    const slot = loginLlmProvider(login);
-    assert.strictEqual(credentialProvider({ kind: `${login}-subscription`, secret }), slot);
-    assert(
-      Option.exists(modelProviders.find(slot), ({ credentials }) =>
-        credentials.some(
-          (credential) => credential._tag === "Subscription" && credential.login === login,
-        ),
-      ),
-      login,
+  },
+);
+
+it.live(
+  "sends each connected built-in static key and the Claude token to the upstream that the environment sets for its slot, through a reload and a restart",
+  () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const directory = yield* fs.makeTempDirectoryScoped();
+        yield* fs.writeFileString(`${directory}/egress-allowlist`, "registry.npmjs.org\n");
+        const anthropicUpstream = yield* standIn;
+        const openaiUpstream = yield* standIn;
+        const start = gatewayServing(modelProviders, directory, {
+          USINE_GATEWAY_ANTHROPIC_UPSTREAM: anthropicUpstream.origin,
+          USINE_GATEWAY_OPENAI_UPSTREAM: openaiUpstream.origin,
+        });
+        const messages = `/${anthropic.slot}/v1/messages`;
+        const responses = `/${openai.slot}/v1/responses`;
+        const openaiKey = "sk-proj-connected-key-for-upstream-tests";
+        const claudeToken = "sk-ant-oat01-upstream-private-fixture";
+        /** Returns the status of each request through `context` after a reload of it. */
+        const askThroughReload = (
+          context: Context.Context<GatewayAddresses | GatewayReload>,
+          paths: ReadonlyArray<string>,
+        ) =>
+          Effect.gen(function* () {
+            const ask = yield* attemptOn(context);
+            const before = yield* Effect.forEach(paths, ask);
+            yield* Effect.flatMap(GatewayReload, ({ reload }) => reload).pipe(
+              Effect.provideContext(context),
+            );
+            return [...before, ...(yield* Effect.forEach(paths, ask))];
+          });
+
+        const keyed = yield* Scope.make();
+        const first = yield* Layer.buildWithScope(start, keyed);
+        const client = yield* adminOf(first);
+        yield* client.llm.connect({
+          payload: StaticKey.make({ provider: anthropic.id, secret: Redacted.make(ANTHROPIC_KEY) }),
+        });
+        yield* client.llm.connect({
+          payload: StaticKey.make({ provider: openai.id, secret: Redacted.make(openaiKey) }),
+        });
+        const withKeys = yield* askThroughReload(first, [messages, responses]);
+        yield* Scope.close(keyed, Exit.void);
+
+        const token = yield* Scope.make();
+        const second = yield* Layer.buildWithScope(start, token);
+        const afterRestart = yield* askThroughReload(second, [messages, responses]);
+        yield* (yield* adminOf(second)).llm.connect({
+          payload: LoginSecret.make({ login: "claude", secret: Redacted.make(claudeToken) }),
+        });
+        const withToken = yield* askThroughReload(second, [messages]);
+        yield* Scope.close(token, Exit.void);
+
+        const third = yield* Layer.build(start);
+        const tokenAfterRestart = yield* askThroughReload(third, [messages]);
+
+        assert.deepStrictEqual(
+          [...withKeys, ...afterRestart, ...withToken, ...tokenAfterRestart],
+          Array.from({ length: 12 }, () => 200),
+        );
+        const anthropicKey = ["/v1/messages", ANTHROPIC_KEY] as const;
+        const tokenSent = ["/v1/messages", `Bearer ${claudeToken}`] as const;
+        assert.deepStrictEqual(anthropicUpstream.seen, [
+          ...Array.from({ length: 4 }, () => anthropicKey),
+          ...Array.from({ length: 4 }, () => tokenSent),
+        ]);
+        assert.deepStrictEqual(
+          openaiUpstream.seen,
+          Array.from({ length: 4 }, () => ["/v1/responses", `Bearer ${openaiKey}`] as const),
+        );
+      }),
+    ).pipe(Effect.provide([NodeServices.layer, FetchHttpClient.layer])),
+);
+
+it.live(
+  "reads a file from gateways up to 0.3.0 and writes one they read, with the other providers' keys aside",
+  () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const directory = yield* fs.makeTempDirectoryScoped();
+        const file = `${directory}/provider-credentials.json`;
+        const upTo030 = yield* Schema.encodeEffect(FileUpTo030)({
+          [anthropic.slot]: Option.some({
+            _tag: "AnthropicProvider",
+            upstream: anthropic.protocols[0].upstream,
+            credential: { _tag: "AnthropicApiKey", key: Redacted.make(ANTHROPIC_KEY) },
+          }),
+          [openai.slot]: Option.none(),
+        });
+        yield* fs.writeFileString(file, upTo030);
+        const plan = planAt("https://plan.test");
+        const catalog = ModelProviderCatalog.make({
+          providers: [...modelProviders.providers, plan],
+        });
+        const fromEnvironment = LlmProvider.make({
+          upstream: Option.none(),
+          credential: ApiKey.make({ key: Redacted.make("sk-proj-environment-key") }),
+        });
+        const start = () =>
+          gatewayLayer(
+            { proxy: listener, egress: listener, admin: listener },
+            undefined,
+            directory,
+          ).pipe(
+            Layer.provide(
+              settingsLayer({ [openai.slot]: fromEnvironment }, undefined, undefined, catalog),
+            ),
+          );
+        const storeOf = (context: Context.Context<GatewayAddresses>) =>
+          Effect.flatMap(
+            Effect.serviceOption(ProviderCredentials).pipe(Effect.provideContext(context)),
+            Option.match({
+              onNone: () => Effect.die("The gateway has no provider credential store"),
+              onSome: Effect.succeed,
+            }),
+          );
+        const kinds = (context: Context.Context<GatewayAddresses>) =>
+          Effect.flatMap(storeOf(context), ({ status }) =>
+            Effect.map(status, (providers) =>
+              providers.map(({ provider, credential }) => [provider, credential]),
+            ),
+          );
+        const scope = yield* Scope.make();
+        const first = yield* Layer.buildWithScope(start(), scope);
+        const loaded = yield* kinds(first);
+        assert.deepStrictEqual(loaded, [
+          [anthropic.slot, "api-key"],
+          [openai.slot, null],
+          [plan.slot, null],
+        ]);
+        const store = yield* storeOf(first);
+        yield* store.replace(
+          StaticKey.make({ provider: plan.id, secret: Redacted.make(PLAN_KEY) }),
+        );
+        yield* store.replace(
+          StaticKey.make({ provider: openai.id, secret: Redacted.make("sk-proj-connected-key") }),
+        );
+        const text = yield* fs.readFileString(file);
+        const written = yield* Schema.decodeEffect(FileUpTo030)(text);
+        assert.deepStrictEqual(
+          Record.map(written, (held) =>
+            Option.map(held, ({ _tag, credential }) => [_tag, credential._tag]),
+          ),
+          {
+            [anthropic.slot]: Option.some(["AnthropicProvider", "AnthropicApiKey"]),
+            [openai.slot]: Option.some(["OpenAiProvider", "OpenAiApiKey"]),
+          },
+        );
+        yield* Scope.close(scope, Exit.void);
+
+        const restarted = yield* Layer.build(start());
+        const reread = yield* kinds(restarted);
+        assert.deepStrictEqual(reread, [
+          [anthropic.slot, "api-key"],
+          [openai.slot, "api-key"],
+          [plan.slot, "api-key"],
+        ]);
+      }),
+    ).pipe(Effect.provide([NodeServices.layer, FetchHttpClient.layer])),
+);
+
+it.effect("encodes each built-in credential with the kind that gateways up to 0.3.0 accept", () =>
+  Effect.gen(function* () {
+    const secret = Redacted.make("private-fixture");
+    const credentials = [
+      LoginSecret.make({ login: "claude", secret }),
+      StaticKey.make({ provider: anthropic.id, secret }),
+      LoginSecret.make({ login: "chatgpt", secret }),
+      StaticKey.make({ provider: openai.id, secret }),
+    ];
+    const kinds = yield* Effect.forEach(credentials, (credential) =>
+      Effect.gen(function* () {
+        const encoded = yield* Schema.encodeEffect(ProviderCredential)(credential);
+        assert.isTrue(Schema.is(CredentialUpTo030)(encoded));
+        const decoded = yield* Schema.decodeEffect(ProviderCredential)(encoded);
+        assert.deepStrictEqual(decoded, credential);
+        return [encoded.kind, Option.getOrNull(credential.providerIn(modelProviders))?.slot];
+      }),
     );
-  }
-});
+    assert.deepStrictEqual(kinds, [
+      ["claude-subscription", anthropic.slot],
+      ["anthropic-api-key", anthropic.slot],
+      ["chatgpt-subscription", openai.slot],
+      ["openai-api-key", openai.slot],
+    ]);
+  }),
+);
 
 it.live(
   "ignores a stored credential under a slot whose provider doesn't accept it, and logs it without its value",
@@ -189,12 +708,15 @@ it.live(
             if (logLevel === "Warn") warnings.push(jsonKey(message));
           }),
         ]);
-        const start = () =>
+        const start = (catalog: ModelProviderCatalog = modelProviders) =>
           gatewayLayer(
             { proxy: listener, egress: listener, admin: listener },
             undefined,
             directory,
-          ).pipe(Layer.provide(settingsLayer(NO_PROVIDERS)), Layer.provide(logs));
+          ).pipe(
+            Layer.provide(settingsLayer(NO_PROVIDERS, undefined, undefined, catalog)),
+            Layer.provide(logs),
+          );
         const secret = "sk-ant-api03-misplaced-private-fixture";
         const first = yield* Scope.make();
         const connected = yield* Layer.buildWithScope(start(), first);
@@ -203,10 +725,9 @@ it.live(
         );
         if (Option.isNone(credentials))
           return yield* Effect.die("Provider credential service missing");
-        yield* credentials.value.replace({
-          kind: "anthropic-api-key",
-          secret: Redacted.make(secret),
-        });
+        yield* credentials.value.replace(
+          StaticKey.make({ provider: anthropic.id, secret: Redacted.make(secret) }),
+        );
         yield* Scope.close(first, Exit.void);
 
         const StoredFile = Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown));
@@ -215,10 +736,31 @@ it.live(
           .pipe(Effect.flatMap(Schema.decodeUnknownEffect(StoredFile)));
         const record = stored[anthropic.slot];
         assert(record !== undefined);
-        const misplaced = { [anthropic.slot]: record, [openai.slot]: record, "test-plan": record };
+        // The test's provider now takes only the ChatGPT login, in place of OpenAI, so its saved static key no longer applies.
+        const plan = planAt("https://plan.test");
+        const loginOnly = ModelProvider.make({
+          id: plan.id,
+          slot: plan.slot,
+          label: plan.label,
+          protocols: plan.protocols,
+          credentials: [
+            SubscriptionCredential.make({
+              login: "chatgpt",
+              variable: GatewayVariable.make("TEST_PLAN_AUTH_FILE"),
+            }),
+          ],
+        });
+        const misplaced = {
+          [anthropic.slot]: record,
+          [openai.slot]: record,
+          "test-plan": record,
+          staticKeys: { [plan.slot]: PLAN_KEY },
+        };
         const text = yield* Schema.encodeEffect(StoredFile)(misplaced);
         yield* fs.writeFileString(file, text);
-        const restarted = yield* Layer.build(start());
+        const restarted = yield* Layer.build(
+          start(ModelProviderCatalog.make({ providers: [anthropic, loginOnly] })),
+        );
         const { providers } = yield* SettingsInForce.pipe(
           Effect.provideContext(restarted),
           Effect.flatMap((settings) => settings.current),
@@ -229,7 +771,118 @@ it.live(
         assert.include(ignored[0], `"slot":"${openai.slot}"`);
         assert.include(ignored[0], '"kind":"AnthropicProvider"');
         assert.include(ignored[1], '"slot":"test-plan"');
+        const ignoredKeys = warnings.filter((line) => line.includes("Ignored a stored static key"));
+        assert.strictEqual(ignoredKeys.length, 1);
+        assert.include(ignoredKeys[0], `"slot":"${plan.slot}"`);
+        const store = yield* Effect.serviceOption(ProviderCredentials).pipe(
+          Effect.provideContext(restarted),
+        );
+        if (Option.isNone(store)) return yield* Effect.die("Provider credential service missing");
+        const listed = yield* store.value.status;
+        assert.deepStrictEqual(
+          listed
+            .filter(({ provider }) => provider === plan.slot)
+            .map(({ accepts, credential }) => [accepts.apiKey, credential]),
+          [[false, null]],
+        );
+        const refused = yield* store.value
+          .replace(StaticKey.make({ provider: plan.id, secret: Redacted.make(PLAN_KEY) }))
+          .pipe(Effect.flip);
+        assert.strictEqual(refused._tag, "UnservedProvider");
+        // Anthropic now takes only the Claude login, so its saved static key no longer applies.
+        const claudeOnly = ModelProvider.make({
+          id: anthropic.id,
+          slot: anthropic.slot,
+          label: anthropic.label,
+          protocols: anthropic.protocols,
+          credentials: [
+            SubscriptionCredential.make({
+              login: "claude",
+              variable: GatewayVariable.make("USINE_GATEWAY_ANTHROPIC_SUBSCRIPTION_TOKEN"),
+            }),
+          ],
+          upstreamVariable: anthropic.upstreamVariable,
+        });
+        const loginOnlyAnthropic = yield* Layer.build(
+          start(ModelProviderCatalog.make({ providers: [claudeOnly] })),
+        );
+        const withoutKey = yield* SettingsInForce.pipe(
+          Effect.provideContext(loginOnlyAnthropic),
+          Effect.flatMap((settings) => settings.current),
+        );
+        assert.deepStrictEqual(Object.keys(withoutKey.providers), []);
+        const ignoredKey = warnings.filter(
+          (line) =>
+            line.includes("Ignored a stored provider") &&
+            line.includes(`"slot":"${anthropic.slot}"`),
+        );
+        assert.strictEqual(ignoredKey.length, 1);
         assert.notInclude(warnings.join("\n"), secret);
+        assert.notInclude(warnings.join("\n"), PLAN_KEY);
+      }),
+    ).pipe(Effect.provide([NodeServices.layer, FetchHttpClient.layer])),
+);
+
+it.live(
+  "keeps a login across a restart when the catalog's provider that signs in with it has a slot of its own",
+  () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const directory = yield* fs.makeTempDirectoryScoped();
+        const claude = ModelProvider.make({
+          id: anthropic.id,
+          slot: GatewaySlot.make("claude-messages"),
+          label: anthropic.label,
+          protocols: anthropic.protocols,
+          credentials: anthropic.credentials,
+          upstreamVariable: anthropic.upstreamVariable,
+        });
+        const catalog = ModelProviderCatalog.make({ providers: [claude, openai] });
+        const start = () =>
+          gatewayLayer(
+            { proxy: listener, egress: listener, admin: listener },
+            undefined,
+            directory,
+          ).pipe(Layer.provide(settingsLayer(NO_PROVIDERS, undefined, undefined, catalog)));
+        const storeOf = (context: Context.Context<GatewayAddresses>) =>
+          Effect.flatMap(
+            Effect.serviceOption(ProviderCredentials).pipe(Effect.provideContext(context)),
+            Option.match({
+              onNone: () => Effect.die("The gateway has no provider credential store"),
+              onSome: Effect.succeed,
+            }),
+          );
+        const kinds = (context: Context.Context<GatewayAddresses>) =>
+          Effect.flatMap(storeOf(context), ({ status }) =>
+            Effect.map(status, (providers) =>
+              providers.map(({ provider, credential }) => [provider, credential]),
+            ),
+          );
+        const scope = yield* Scope.make();
+        const first = yield* Layer.buildWithScope(start(), scope);
+        yield* Effect.flatMap(storeOf(first), ({ replace }) =>
+          replace(
+            LoginSecret.make({ login: "claude", secret: Redacted.make("sk-ant-oat01-private") }),
+          ),
+        );
+        const connected = yield* kinds(first);
+        yield* Scope.close(scope, Exit.void);
+        const again = yield* Layer.build(start());
+        const restarted = yield* kinds(again);
+        assert.deepStrictEqual(
+          [connected, restarted],
+          [
+            [
+              [claude.slot, "subscription"],
+              [openai.slot, null],
+            ],
+            [
+              [claude.slot, "subscription"],
+              [openai.slot, null],
+            ],
+          ],
+        );
       }),
     ).pipe(Effect.provide([NodeServices.layer, FetchHttpClient.layer])),
 );

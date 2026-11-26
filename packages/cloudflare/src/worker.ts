@@ -1,7 +1,7 @@
 // SDK hooks, transactions, and async iterators require Promise callbacks.
 // @effect-diagnostics asyncFunction:off
 import { Files, SandboxFileError } from "@cloudflare/sandbox";
-import { CloudflareLlmProvider } from "@usine/core/worker";
+import { modelProviders } from "@usine/core/agent/provider";
 import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
 import {
   type Cause,
@@ -10,7 +10,6 @@ import {
   Effect,
   Layer,
   Logger,
-  Match,
   Option,
   Queue,
   Redacted,
@@ -18,15 +17,18 @@ import {
 } from "effect";
 import { HttpRouter } from "effect/http";
 import { type AccessToken, accessGranted } from "./access.ts";
-import { ProcessId, ProviderCredential, SandboxName, SandboxSummary } from "./api/api.ts";
-import { GITHUB_HOSTS } from "./api/harness.ts";
+import { ProcessId, SandboxName, SandboxSummary } from "./api/api.ts";
 import { AttachOffsets } from "./api/stream.ts";
 import { registryRoutes, RegistryStorage, SandboxLookup, SandboxLookupFailed } from "./registry.ts";
 import {
   allowedHostsOf,
   forwardRequest,
+  GitHubProps,
   gitHubRequest,
-  providerRequest,
+  providerOutbound,
+  ProviderProps,
+  register,
+  registrationOf,
 } from "./sandbox/outbound.ts";
 import {
   ContainerFailure,
@@ -197,39 +199,12 @@ const containerOf = (
         container.setInactivityTimeout(Duration.toMillis(inactivity)),
       ),
     intercept: (interception) =>
-      Match.valueTags(interception, {
-        GitHub: ({ host, token }) =>
-          tryContainer("intercept", () =>
-            container.interceptOutboundHttps(
-              host,
-              exports.GitHubOutbound({ props: { host, token: Redacted.value(token) } }),
-            ),
-          ),
-        Provider: ({ host, provider, credential }) =>
-          Schema.encodeEffect(ProviderCredential)(credential).pipe(
-            Effect.mapError((cause) => containerFailure("intercept")(cause)),
-            Effect.flatMap((encoded) =>
-              tryContainer("intercept", () =>
-                container.interceptOutboundHttp(
-                  host,
-                  exports.ProviderOutbound({
-                    props: { provider, credential: encoded },
-                  }),
-                ),
-              ),
-            ),
-          ),
-        Allowed: ({ host }) =>
-          tryContainer("intercept", () =>
-            container.interceptOutboundHttps(host, exports.AllowedOutbound({ props: {} })),
-          ),
-        Denied: ({ host, scheme }) =>
-          tryContainer("intercept", () =>
-            scheme === "https"
-              ? container.interceptOutboundHttps(host, exports.DeniedOutbound({ props: {} }))
-              : container.interceptOutboundHttp(host, exports.DeniedOutbound({ props: {} })),
-          ),
-      }),
+      registrationOf(interception).pipe(
+        Effect.mapError((cause) => containerFailure("intercept")(cause)),
+        Effect.flatMap((registration) =>
+          tryContainer("intercept", () => register<Fetcher>(container, exports, registration)),
+        ),
+      ),
   };
 };
 
@@ -348,6 +323,7 @@ export class AttemptSandbox extends DurableObject<Env> {
           onNone: () => [],
           onSome: ({ allowedHosts }) => allowedHosts,
         }),
+        providers: modelProviders,
       }),
       logger,
     );
@@ -494,15 +470,6 @@ export class SandboxRegistry extends DurableObject<Env> {
   }
 }
 
-const GitHubProps = Schema.Struct({
-  host: Schema.Literals(GITHUB_HOSTS),
-  token: Schema.NonEmptyString,
-});
-const ProviderProps = Schema.Struct({
-  provider: CloudflareLlmProvider,
-  credential: ProviderCredential,
-});
-
 /** Adds the Attempt's installation token to the sandbox's requests for GitHub. */
 export class GitHubOutbound extends WorkerEntrypoint<Env, typeof GitHubProps.Encoded> {
   override async fetch(request: Request): Promise<Response> {
@@ -520,30 +487,13 @@ export class GitHubOutbound extends WorkerEntrypoint<Env, typeof GitHubProps.Enc
 }
 
 /**
- * Sends the sandbox's plain HTTP requests for a provider to the provider, with its API key.
- * Refuses a request for a route that the harnesses don't call with status 404.
+ * Sends the sandbox's plain HTTP requests for a provider to the upstream of the protocol that
+ * serves the path, with the provider's API key. Refuses a path outside the provider's routes in
+ * the catalog, or a method that its route doesn't accept, with status 404.
  */
 export class ProviderOutbound extends WorkerEntrypoint<Env, typeof ProviderProps.Encoded> {
   override async fetch(request: Request): Promise<Response> {
-    // Cloudflare calls this handler outside the Effect runtime.
-    // @effect-diagnostics-next-line schemaSync:off
-    const props = Schema.decodeSync(ProviderProps)(this.ctx.props);
-    const forwarded = providerRequest(request, props.provider, props.credential);
-    if (Option.isNone(forwarded)) {
-      await run(
-        Effect.logWarning("Refused a sandbox request for a route the harnesses don't call", {
-          handler: props.provider,
-          method: request.method,
-          host: new URL(request.url).host,
-          path: new URL(request.url).pathname,
-        }),
-      );
-      return plain(
-        404,
-        `usine forwards only the routes Claude Code and Codex call to ${props.provider}.\n`,
-      );
-    }
-    return run(forwardRequest(props.provider, request, forwarded.value));
+    return run(providerOutbound(this.ctx.props, request));
   }
 }
 

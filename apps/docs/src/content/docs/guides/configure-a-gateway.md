@@ -52,7 +52,7 @@ Instance admin access, a matching usine checkout, a Hetzner project, the `hcloud
    ```
 
 7. Edit the SSH worker in **Configuration > Workers**. Set gateway domain `gw.internal`, destination `usine-gateway`, admin-token variable `USINE_GATEWAY_ADMIN_TOKEN`, and leave credential providers empty until you connect. Save.
-8. Open **Configuration > Settings > Provider connections**. Select **Connect Claude** and **Connect ChatGPT** for the gateway. ChatGPT displays a device code; enable device authorization in your ChatGPT security settings if required. Claude opens an authorization page and asks you to paste the resulting code into usine. **Use an API key** connects either provider with usage-based billing.
+8. Open **Configuration > Settings > Provider connections**. Select **Connect Claude** and **Connect ChatGPT** for the gateway. ChatGPT displays a device code; enable device authorization in your ChatGPT security settings if required. Claude opens an authorization page and asks you to paste the resulting code into usine. **Use an API key** connects either provider with usage-based billing. Settings lists every provider that the gateway serves; a provider that takes only an API key shows its key field.
 
    For a headless orchestrator, run these from the instance folder while `usine up` runs:
 
@@ -63,7 +63,7 @@ Instance admin access, a matching usine checkout, a Hetzner project, the `hcloud
 
    Each gateway reports its connection state separately. A gateway that cannot report its state shows an error beside its destination; healthy gateways keep their connection controls. A gateway without the provider-credentials admin API shows that it is older than the orchestrator and names the `@usine/gateway` version to install. A CLI command with `--target` checks the selected gateway.
 
-   Add `--target usine-gateway` when the instance has several gateways. Add `--api-key` for masked API-key entry. usine transfers completed credentials through the gateway admin API over SSH, saves them with mode `0600`, and updates the workers’ `llm_providers` in a configuration revision. Claude selects `anthropic-messages`; ChatGPT selects `openai-responses`. No provider credential requires a manual SSH transfer or service reload.
+   Add `--target usine-gateway` when the instance has several gateways. Add `--api-key` for masked API-key entry. usine transfers completed credentials through the gateway admin API over SSH, saves them with mode `0600`, and updates the workers’ `llm_providers` in a configuration revision. Claude selects `anthropic-messages`; ChatGPT selects `openai-responses`. Routing changes only for providers that the orchestrator's harnesses use. No provider credential requires a manual SSH transfer or service reload. For another provider, run `usine login <provider ID> --api-key`.
 
    Settings shows each credential kind, reported expiry, and last refresh. **Replace** starts a separate login and keeps the current credential until authorization succeeds. **Disconnect** removes the managed credential and worker routing. `usine logout claude` and `usine logout chatgpt` perform the same actions.
 

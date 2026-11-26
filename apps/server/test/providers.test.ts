@@ -3,9 +3,12 @@ import { assert, it } from "@effect/vitest";
 import { Deferred, Effect, Layer, Logger, Option, Redacted, Ref, Schema } from "effect";
 import { HttpRouter } from "effect/http";
 import { jsonKey } from "@usine/core/json-key";
+import { anthropic, GatewaySlot, ModelProviderId, openai } from "@usine/core/agent/provider";
 import {
+  LoginSecret,
   ProviderCredentialError,
   type ProviderCredential,
+  providerEntry,
   ProviderStatus,
 } from "@usine/gateway/credentials";
 import { ProviderLogins } from "../src/providers/control.ts";
@@ -41,7 +44,25 @@ it.live(
     const lines: string[] = [];
     return Effect.scoped(
       Effect.gen(function* () {
-        const outcome = yield* Deferred.make<ProviderCredential, ProviderCredentialError>();
+        const outcome = yield* Deferred.make<LoginSecret, ProviderCredentialError>();
+        const listed = [anthropic, openai].map((provider) => ({
+          provider: provider.slot,
+          ...providerEntry(provider),
+          credential: null,
+          expiresAt: null,
+          lastRefresh: null,
+        }));
+        // A provider that the destination lists without an API key, as a gateway's catalog can.
+        const keyless = {
+          provider: GatewaySlot.make("keyless-messages"),
+          id: ModelProviderId.make("keyless"),
+          label: "Keyless",
+          accepts: { apiKey: false, login: null },
+          credential: null,
+          expiresAt: null,
+          lastRefresh: null,
+        };
+        const providers = [...listed, keyless];
         const saved = yield* Ref.make<readonly ProviderCredential[]>([]);
         const layer = ProviderLogins.layer.pipe(
           Layer.provide([
@@ -60,8 +81,9 @@ it.live(
                 }),
             }),
             Layer.succeed(ProviderTargets, {
-              list: Effect.succeed([{ target: "local", label: "Local harnesses", providers: [] }]),
-              get: (target) => Effect.succeed({ target, label: "Local harnesses", providers: [] }),
+              list: Effect.succeed([{ target: "local", label: "Local harnesses", providers }]),
+              get: (target) => Effect.succeed({ target, label: "Local harnesses", providers }),
+              providers: () => Effect.succeed({ label: "Local harnesses", providers }),
               replace: (_target, credential) => Ref.update(saved, (all) => [...all, credential]),
               disconnect: () => Effect.void,
             }),
@@ -85,10 +107,13 @@ it.live(
         const afterCancel = yield* Ref.get(saved);
         assert.lengthOf(afterCancel, 0);
         const connected = yield* logins.begin("local", "chatgpt");
-        yield* Deferred.succeed(outcome, {
-          kind: "chatgpt-subscription" as const,
-          secret: Redacted.make("private-access-and-refresh-tokens"),
-        });
+        yield* Deferred.succeed(
+          outcome,
+          LoginSecret.make({
+            login: "chatgpt",
+            secret: Redacted.make("private-access-and-refresh-tokens"),
+          }),
+        );
         yield* Effect.sleep("20 millis");
         assert.equal(
           (yield* logins.status).logins.find(({ id }) => id === connected.id)?.state.status,
@@ -96,6 +121,12 @@ it.live(
         );
         const afterConnect = yield* Ref.get(saved);
         assert.lengthOf(afterConnect, 1);
+        const keyRefused = yield* logins
+          .apiKey("local", keyless.id, Redacted.make("private-keyless-key"))
+          .pipe(Effect.flip);
+        assert.equal(keyRefused.message, "Keyless doesn't take an API key on this destination.");
+        const afterRefusal = yield* Ref.get(saved);
+        assert.lengthOf(afterRefusal, 1);
         const app = HttpRouter.toWebHandler(
           providerRoutes.pipe(HttpRouter.provideRequest(Layer.succeed(ProviderLogins, logins))),
           { disableLogger: true },

@@ -6,7 +6,11 @@ import { expect, it } from "vitest";
 import { page } from "vitest/browser";
 import { ProviderConnections } from "./connections";
 import { timestampLabel } from "~/lib/strings";
-import type { ProviderConnection, ProviderStatus } from "@usine/gateway/credentials";
+import {
+  providerEntry,
+  type ProviderConnection,
+  type ProviderStatus,
+} from "@usine/gateway/credentials";
 import "~/index.css";
 
 const expiry = "2027-01-01T00:00:00Z";
@@ -21,6 +25,7 @@ const cases: ReadonlyArray<{
     name: "Claude setup token",
     connection: {
       provider: anthropic.slot,
+      ...providerEntry(anthropic),
       credential: "subscription",
       expiresAt: null,
       lastRefresh: null,
@@ -33,6 +38,7 @@ const cases: ReadonlyArray<{
     name: "native Claude OAuth login",
     connection: {
       provider: anthropic.slot,
+      ...providerEntry(anthropic),
       credential: "subscription",
       expiresAt: expiry,
       lastRefresh: null,
@@ -44,6 +50,7 @@ const cases: ReadonlyArray<{
     name: "ChatGPT OAuth login",
     connection: {
       provider: openai.slot,
+      ...providerEntry(openai),
       credential: "subscription",
       expiresAt: expiry,
       lastRefresh: refreshed,
@@ -56,6 +63,7 @@ const cases: ReadonlyArray<{
     name: "older gateway without refresh metadata",
     connection: {
       provider: anthropic.slot,
+      ...providerEntry(anthropic),
       credential: "subscription",
       expiresAt: null,
       lastRefresh: null,

@@ -2,7 +2,6 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import {
   ProviderLoginView as ProviderLoginViewSchema,
-  type LoginProvider,
   type ProviderConnection,
   type ProviderLoginView,
 } from "@usine/gateway/credentials";
@@ -30,7 +29,7 @@ import {
   noRefresh,
   opening,
   pending,
-  providerNames,
+  providerName,
   replace,
   saveKey,
   starting,
@@ -44,14 +43,14 @@ import {
 } from "./strings";
 
 export const ProviderUnavailableRow = ({
-  provider,
+  name,
   message,
 }: {
-  readonly provider: LoginProvider;
+  readonly name: string;
   readonly message: string;
 }) => (
-  <section className="flex flex-col gap-1 border-t py-4" aria-label={providerNames[provider]}>
-    <h3 className="font-medium">{providerNames[provider]}</h3>
+  <section className="flex flex-col gap-1 border-t py-4" aria-label={name}>
+    <h3 className="font-medium">{name}</h3>
     <p className="text-xs text-muted-foreground" role="status">
       {message}
     </p>
@@ -60,13 +59,11 @@ export const ProviderUnavailableRow = ({
 
 type ProviderConnectionRowProps = {
   readonly target: string;
-  readonly provider: LoginProvider;
   readonly connection: ProviderConnection;
   readonly login: ProviderLoginView | undefined;
 };
 export const ProviderConnectionRow = ({
   target,
-  provider,
   connection,
   login,
 }: ProviderConnectionRowProps) => {
@@ -74,7 +71,9 @@ export const ProviderConnectionRow = ({
   const [key, setKey] = useState("");
   const [code, setCode] = useState("");
   const [actionError, setActionError] = useState<string | null>(null);
-  const name = providerNames[provider];
+  const name = providerName(connection);
+  const { provider } = connection;
+  const signIn = connection.accepts.login;
   const action = useMutation({
     gcTime: 0,
     mutationFn: ({
@@ -99,10 +98,10 @@ export const ProviderConnectionRow = ({
     },
   });
   const begin = useMutation({
-    mutationFn: () =>
+    mutationFn: (login: string) =>
       authRequest("/api/providers/login", ProviderLoginViewSchema, {
         method: "POST",
-        body: { target, provider },
+        body: { target, provider: login },
       }),
     onSuccess: () => queries.invalidateQueries(providersQuery()),
   });
@@ -112,6 +111,32 @@ export const ProviderConnectionRow = ({
   const failure = actionError ?? (begin.error === null ? null : rejectionMessage(begin.error));
   const unreportedExpiry = connection.refreshable === false ? tokenExpiryUnknown : unknownTime;
   const unreportedRefresh = connection.refreshable === false ? noRefresh : unknownTime;
+  const keyForm = (
+    <form
+      className="space-y-2"
+      onSubmit={(event) => {
+        event.preventDefault();
+        action.mutate({
+          path: "/api/providers/key",
+          method: "PUT",
+          body: { target, provider, key },
+        });
+      }}
+    >
+      <Label htmlFor={`${target}-${provider}-key`}>{keyLabel}</Label>
+      <Input
+        id={`${target}-${provider}-key`}
+        type="password"
+        autoComplete="off"
+        value={key}
+        onChange={(event) => setKey(event.target.value)}
+        required
+      />
+      <Button type="submit" disabled={busy}>
+        {busy ? working : saveKey}
+      </Button>
+    </form>
+  );
   return (
     <section className="flex flex-col gap-3 border-t py-4" aria-label={name}>
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -124,14 +149,16 @@ export const ProviderConnectionRow = ({
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <CommandButton
-            command={connection.credential === null ? connect(name) : replace(name)}
-            variant="outline"
-            disabled={busy || waiting}
-            onClick={() => begin.mutate()}
-          >
-            {connection.credential === null ? connect(name) : replace(name)}
-          </CommandButton>
+          {signIn !== null && (
+            <CommandButton
+              command={connection.credential === null ? connect(name) : replace(name)}
+              variant="outline"
+              disabled={busy || waiting}
+              onClick={() => begin.mutate(signIn)}
+            >
+              {connection.credential === null ? connect(name) : replace(name)}
+            </CommandButton>
+          )}
           {connection.credential !== null && (
             <CommandButton
               command={disconnect(name)}
@@ -192,7 +219,7 @@ export const ProviderConnectionRow = ({
             {opening}
           </Button>
           {state.code !== null && <p className="font-mono text-md select-all">{state.code}</p>}
-          {provider === "claude" ? (
+          {signIn === "claude" ? (
             <form
               className="space-y-2"
               onSubmit={(event) => {
@@ -243,37 +270,18 @@ export const ProviderConnectionRow = ({
           {cancelled}
         </p>
       )}
-      {!waiting && (
-        <details className="space-y-3">
-          <summary className="w-fit cursor-pointer text-xs text-muted-foreground">
-            {apiKeyChoice}
-          </summary>
-          <form
-            className="space-y-2"
-            onSubmit={(event) => {
-              event.preventDefault();
-              action.mutate({
-                path: "/api/providers/key",
-                method: "PUT",
-                body: { target, provider, key },
-              });
-            }}
-          >
-            <Label htmlFor={`${target}-${provider}-key`}>{keyLabel}</Label>
-            <Input
-              id={`${target}-${provider}-key`}
-              type="password"
-              autoComplete="off"
-              value={key}
-              onChange={(event) => setKey(event.target.value)}
-              required
-            />
-            <Button type="submit" disabled={busy}>
-              {busy ? working : saveKey}
-            </Button>
-          </form>
-        </details>
-      )}
+      {!waiting &&
+        connection.accepts.apiKey &&
+        (signIn === null ? (
+          keyForm
+        ) : (
+          <details className="space-y-3">
+            <summary className="w-fit cursor-pointer text-xs text-muted-foreground">
+              {apiKeyChoice}
+            </summary>
+            {keyForm}
+          </details>
+        ))}
       {failure !== null && <ErrorAlert message={failure} />}
     </section>
   );

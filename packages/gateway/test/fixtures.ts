@@ -46,6 +46,7 @@ export const settingsLayer = (
             github,
             catalog,
             providers,
+            upstreams: {},
             egress: Result.getOrThrow(parseEgressAllowlist(TEST_ALLOWLIST)),
             adminToken: yield* Schema.decodeEffect(AdminToken)(ADMIN_TOKEN_VALUE),
             callerKey: yield* Schema.decodeEffect(CallerKey)(callerKey),

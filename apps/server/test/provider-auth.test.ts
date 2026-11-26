@@ -1,9 +1,41 @@
+// The CLI case types an API key on a stand-in terminal, which only the unstable Terminal API builds.
+// @effect-diagnostics unstableApiUsage:off
 import { administratorPermissions } from "@usine/core/access";
 import { InstanceDirectory } from "@usine/core/instance";
-import { type ProviderLoginView } from "@usine/gateway/credentials";
+import {
+  anthropic,
+  ApiKeyCredential,
+  GatewaySlot,
+  GatewayVariable,
+  HeaderName,
+  KeyHeader,
+  ModelProvider,
+  ModelProviderId,
+  openai,
+  ProviderProtocol,
+  RoutePattern,
+  UpstreamBase,
+  WireProtocol,
+} from "@usine/core/agent/provider";
+import {
+  providerEntry,
+  type ProviderLoginView,
+  type ProviderTarget,
+} from "@usine/gateway/credentials";
 import { NodeHttpServer, NodeServices } from "@effect/platform-node";
 import { assert, it } from "@effect/vitest";
-import { Context, DateTime, Effect, FileSystem, Layer, Option, Redacted } from "effect";
+import {
+  type Cause,
+  Context,
+  DateTime,
+  Effect,
+  FileSystem,
+  Layer,
+  Option,
+  Queue,
+  Redacted,
+  Terminal,
+} from "effect";
 import { FetchHttpClient, HttpRouter, HttpServer } from "effect/http";
 import { Port, ProviderCommand } from "../src/cli.ts";
 import {
@@ -19,6 +51,24 @@ import { providerRoutes } from "../src/providers/http.ts";
 import { authenticatedRoutes } from "../src/auth/http.ts";
 import { authFixture, alice, localSecret } from "./auth/fixture.ts";
 
+/** A terminal on which the operator types `text`, then presses Enter. */
+const typing = (text: string) =>
+  Terminal.make({
+    columns: Effect.succeed(80),
+    rows: Effect.succeed(24),
+    readInput: Effect.gen(function* () {
+      const input = yield* Queue.make<Terminal.UserInput, Cause.Done>();
+      const key = (name: string) => ({ name, ctrl: false, meta: false, shift: false });
+      yield* Queue.offerAll(input, [
+        ...[...text].map((character) => ({ input: Option.some(character), key: key(character) })),
+        { input: Option.none(), key: key("enter") },
+      ]);
+      return input;
+    }),
+    readLine: Effect.succeed(text),
+    display: () => Effect.void,
+  });
+
 it.live("logs in and out through the authenticated provider API using FetchHttpClient", () =>
   Effect.scoped(
     Effect.gen(function* () {
@@ -29,7 +79,31 @@ it.live("logs in and out through the authenticated provider API using FetchHttpC
       yield* fs.makeDirectory(files.folder);
       yield* fs.writeFileString(`${files.folder}/admin-token`, localSecret, { mode: 0o600 });
       const services = yield* authFixture();
-      const connected = new Set<string>();
+      const plan = ModelProvider.make({
+        id: ModelProviderId.make("test-plan"),
+        slot: GatewaySlot.make("test-plan"),
+        label: "Test plan",
+        protocols: [
+          ProviderProtocol.make({
+            protocol: WireProtocol.make("openai-chat-completions"),
+            upstream: UpstreamBase.make("https://plan.test/v1"),
+            routes: [RoutePattern.make("/chat/completions")],
+            key: KeyHeader.make({ header: HeaderName.make("authorization"), scheme: "bearer" }),
+          }),
+        ],
+        credentials: [
+          ApiKeyCredential.make({ variable: GatewayVariable.make("TEST_PLAN_API_KEY") }),
+        ],
+      });
+      const connections = [anthropic, openai, plan].map((provider) => ({
+        provider: provider.slot,
+        ...providerEntry(provider),
+        credential: null,
+        expiresAt: null,
+        lastRefresh: null,
+      }));
+      let providers: ReadonlyArray<ProviderTarget["providers"][number]> = connections;
+      const calls: string[] = [];
       let logins: readonly ProviderLoginView[] = [];
       const server = yield* Layer.build(
         HttpRouter.serve(
@@ -38,7 +112,7 @@ it.live("logs in and out through the authenticated provider API using FetchHttpC
             HttpRouter.provideRequest(
               Layer.succeed(ProviderLogins, {
                 status: Effect.sync(() => ({
-                  targets: [{ target: "local", label: "Local harnesses", providers: [] }],
+                  targets: [{ target: "local", label: "Local harnesses", providers }],
                   logins,
                 })),
                 begin: (target, provider) =>
@@ -49,17 +123,20 @@ it.live("logs in and out through the authenticated provider API using FetchHttpC
                       provider,
                       state: { status: "connected" },
                     };
-                    connected.add(`${target}/${provider}`);
+                    calls.push(`begin ${target}/${provider}`);
                     logins = [login];
                     return login;
                   }),
                 disconnect: (target, provider) =>
                   Effect.sync(() => {
-                    connected.delete(`${target}/${provider}`);
+                    calls.push(`disconnect ${target}/${provider}`);
                   }),
                 submit: () => Effect.die("unexpected code submission"),
                 cancel: () => Effect.die("unexpected cancellation"),
-                apiKey: () => Effect.die("unexpected API key"),
+                apiKey: (target, provider, key) =>
+                  Effect.sync(() => {
+                    calls.push(`key ${target}/${provider} ${Redacted.value(key)}`);
+                  }),
               }),
             ),
           ),
@@ -83,17 +160,60 @@ it.live("logs in and out through the authenticated provider API using FetchHttpC
           }),
         }),
       );
-      for (const provider of ["claude", "chatgpt"] as const) {
-        const command = {
-          provider,
-          mode: "subscription" as const,
-          target: Option.none<string>(),
-        };
-        yield* providerCommand(directory, ProviderCommand.make({ ...command, action: "login" }));
-        assert.isTrue(connected.has(`local/${provider}`));
-        yield* providerCommand(directory, ProviderCommand.make({ ...command, action: "logout" }));
-        assert.isFalse(connected.has(`local/${provider}`));
+      const command = (
+        provider: string,
+        action: "login" | "logout",
+        mode: "subscription" | "api-key" = "subscription",
+      ) =>
+        providerCommand(
+          directory,
+          ProviderCommand.make({ provider, action, mode, target: Option.none() }),
+        );
+      for (const provider of ["claude", "openai"]) {
+        yield* command(provider, "login");
+        yield* command(provider, "logout");
       }
+      assert.deepStrictEqual(calls, [
+        "begin local/claude",
+        "disconnect local/anthropic-messages",
+        "begin local/chatgpt",
+        "disconnect local/openai-responses",
+      ]);
+      const unknown = yield* command("unknown-plan", "login").pipe(Effect.flip);
+      assert.strictEqual(
+        unknown.message,
+        "Local harnesses has no provider unknown-plan. Choose anthropic or claude (Anthropic: a subscription, or an API key with --api-key); openai or chatgpt (OpenAI: a subscription, or an API key with --api-key); test-plan (Test plan: an API key with --api-key).",
+      );
+      const keyOnly = yield* command("test-plan", "login").pipe(Effect.flip);
+      assert.strictEqual(
+        keyOnly.message,
+        "Test plan takes an API key. Run usine login test-plan --api-key.",
+      );
+
+      // The local Codex auth file is unreadable: a key or a logout replaces it, and a sign-in waits.
+      const error = "Could not read the Codex auth file.";
+      providers = connections.map((connection) =>
+        connection.provider === openai.slot
+          ? {
+              provider: connection.provider,
+              id: connection.id,
+              label: connection.label,
+              accepts: connection.accepts,
+              error,
+            }
+          : connection,
+      );
+      calls.length = 0;
+      yield* command("openai", "login", "api-key").pipe(
+        Effect.provideService(Terminal.Terminal, typing("sk-proj-replacement")),
+      );
+      yield* command("openai", "logout");
+      const signIn = yield* command("openai", "login").pipe(Effect.flip);
+      assert.deepStrictEqual(calls, [
+        "key local/openai-responses sk-proj-replacement",
+        "disconnect local/openai-responses",
+      ]);
+      assert.strictEqual(signIn.message, `Local harnesses: ${error}`);
     }),
   ).pipe(Effect.provide([NodeServices.layer, FetchHttpClient.layer])),
 );

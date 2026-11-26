@@ -16,7 +16,9 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi, type MockInstance } from "vitest";
 import { commands, page, userEvent } from "vitest/browser";
 import { entityKey } from "~/features/configuration/lib/entities";
+import { keyedProviders } from "~/features/configuration/lib/providers";
 import { entityQuery } from "~/features/configuration/queries";
+import { workerFormCopy } from "~/features/configuration/strings";
 import { configurationFixture, configurationJson } from "~/lib/configuration/fixture";
 import { configurationQuery } from "~/lib/configuration/queries";
 import { overviewQuery, attentionQuery, projectId } from "~/lib/overview";
@@ -720,6 +722,16 @@ it.each([
   await editText();
   await page.getByRole("textbox", { name: "Configuration text" }).fill(scenario.source);
   await button("Edit as form").click();
+  expect(page.getByRole("textbox", { name: / API key variable$/ }).elements()).toHaveLength(
+    keyedProviders.length,
+  );
+  for (const { label } of keyedProviders) {
+    await expect
+      .element(
+        page.getByRole("textbox", { name: workerFormCopy.apiKeyVariable(label), exact: true }),
+      )
+      .toBeVisible();
+  }
   await page.getByRole("textbox", { name: scenario.label, exact: true }).fill(scenario.next);
   await expect.poll(() => document.documentElement.scrollWidth).toBeLessThanOrEqual(390);
   await button("Save").click();

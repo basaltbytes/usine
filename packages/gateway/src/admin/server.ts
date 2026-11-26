@@ -1,5 +1,5 @@
 import { ProviderCredentials } from "../credentials/store.ts";
-import { ProviderCredentialError } from "../credentials/model.ts";
+import { connectionsReport, ProviderCredentialError } from "../credentials/model.ts";
 import { Effect, Layer, Option, Redacted } from "effect";
 import { HttpApiBuilder, HttpApiError } from "effect/http-api";
 import { Attachment, type AttachmentId, newAttachmentId } from "../attachment/attachment.ts";
@@ -98,26 +98,28 @@ const attachmentHandlers = HttpApiBuilder.group(GatewayAdminApi, "attachments", 
     ),
 );
 
-const credentials = <A>(
-  use: (store: ProviderCredentials["Service"]) => Effect.Effect<A, ProviderCredentialError>,
-) =>
-  Effect.flatMap(Effect.serviceOption(ProviderCredentials), (store) =>
-    Option.match(store, {
-      onNone: () =>
-        Effect.fail(
-          ProviderCredentialError.make({
-            message: "Upgrade the gateway to enable provider connections.",
-          }),
-        ),
-      onSome: use,
-    }),
+const credentials = <A, E>(
+  use: (store: ProviderCredentials["Service"]) => Effect.Effect<A, E>,
+): Effect.Effect<A, E | ProviderCredentialError> =>
+  Effect.flatMap(
+    Effect.serviceOption(ProviderCredentials),
+    (store): Effect.Effect<A, E | ProviderCredentialError> =>
+      Option.match(store, {
+        onNone: () =>
+          Effect.fail(
+            ProviderCredentialError.make({
+              message: "Upgrade the gateway to enable provider connections.",
+            }),
+          ),
+        onSome: use,
+      }),
   );
 
 /** Handlers that return the current LLM providers, including changes from a reload. */
 const llmHandlers = HttpApiBuilder.group(GatewayAdminApi, "llm", (routes) =>
   routes
     .handle("connections", () =>
-      credentials((store) => Effect.map(store.status, (providers) => ({ providers }))),
+      credentials((store) => Effect.map(store.status, connectionsReport)),
     )
     .handle("connect", ({ payload }) =>
       credentials((store) => store.replace(payload)).pipe(Effect.as({ ok: true })),

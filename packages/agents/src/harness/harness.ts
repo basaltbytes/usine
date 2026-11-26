@@ -98,7 +98,11 @@ export class HarnessCredential extends Schema.Class<
     ),
   ),
 ) {
-  /** Returns the base URL that the API-key wiring gets for `provider`: its first upstream and `slotPath`. */
+  /**
+   * Returns the base URL that the API-key wiring gets for `provider`: the upstream that its
+   * protocols share, and `slotPath`. A descriptor that offers the `api-key` route outside a sandbox
+   * lists only providers whose protocols share an upstream.
+   */
   apiKeyBaseUrl(provider: ModelProvider): string {
     return `${provider.protocols[0].upstream}${this.slotPath}`;
   }
@@ -220,6 +224,19 @@ export class HarnessDescriptor extends Schema.Class<
         new Set(providers.map(({ id }) => id)).size === providers.length ||
         "A harness lists each provider once",
     ),
+    Schema.makeFilter(({ capabilities, providers }) => {
+      const direct = capabilities.some(
+        ({ placements, credentials }) =>
+          credentials.includes("api-key") &&
+          placements.some((placement) => placement !== "sandbox"),
+      );
+      const split = providers.find(({ sharedUpstream }) => Option.isNone(sharedUpstream));
+      return (
+        !direct ||
+        split === undefined ||
+        `The api-key route outside a sandbox can't reach ${split.label}: with an attempt API key, the harness calls one upstream, and ${split.label}'s protocols have different upstreams. Reach it through the gateway, or in a sandbox, whose handler sends each path to its protocol's upstream.`
+      );
+    }),
     Schema.makeFilter(({ pools, providers }) => {
       const missing = pools
         .flatMap(({ routes }) => routes)

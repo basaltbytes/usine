@@ -3,7 +3,8 @@ import type { AttemptId } from "@usine/core/attempt";
 import { attemptConnectionsFor } from "../attempt-connections.ts";
 import { RemoteShell, type SshCommand } from "@usine/agents/child-host";
 import { type SandboxName, SandboxOwner } from "@usine/cloudflare";
-import type { CloudflareLlmProvider, WorkerName } from "@usine/core/worker";
+import type { ModelProviderId } from "@usine/core/agent/provider";
+import type { WorkerName } from "@usine/core/worker";
 import { Array as Arr, Context, Effect, Equal, Option, Redacted, Schema, Semaphore } from "effect";
 import { HttpClient } from "effect/http";
 import { type ExecutorOperation, ExecutorOperationError } from "../executor.ts";
@@ -28,7 +29,7 @@ export interface CloudflareWorker {
   /** This instance's owner of the Worker's sandboxes. */
   readonly owner: SandboxOwner;
   readonly client: SandboxClient;
-  readonly providers: ReadonlyArray<CloudflareLlmProvider>;
+  readonly providers: ReadonlyArray<ModelProviderId>;
   /** Returns the shell that runs commands in the sandbox `name`, through the sandbox shell. */
   readonly shellFor: (name: SandboxName) => RemoteShell;
 }

@@ -1,6 +1,7 @@
 import { Checkbox } from "~/components/ui/checkbox";
 import { Label } from "~/components/ui/label";
 import { type FormFieldsProps, fieldValue, withField } from "~/features/configuration/lib/forms";
+import { keyedProviders } from "~/features/configuration/lib/providers";
 import { formCopy, workerFormCopy as copy } from "~/features/configuration/strings";
 import { Fields, type FieldDefinition } from "./fields";
 import { ListField } from "./list-field";
@@ -73,18 +74,12 @@ export const ProvisionerFields = (fields: FormFieldsProps) => {
                   { path: "provisioner.size", label: copy.size, optional: true },
                   { path: "provisioner.snapshot", label: copy.snapshot, optional: true },
                 ]),
-          {
-            path: "provisioner.api_keys.anthropic",
-            label: copy.anthropic,
+          ...keyedProviders.map(({ id, label }) => ({
+            path: `provisioner.api_keys.${id}`,
+            label: copy.apiKeyVariable(label),
             optional: true,
             description: formCopy.secret,
-          },
-          {
-            path: "provisioner.api_keys.openai",
-            label: copy.openai,
-            optional: true,
-            description: formCopy.secret,
-          },
+          })),
           ...timingFields,
         ]}
       />

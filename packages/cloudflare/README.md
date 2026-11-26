@@ -1,6 +1,6 @@
 # @usine/cloudflare
 
-The sandbox environment reads provider credential variables from the selected harness descriptor. `harnessEnvironment(providers, harness)` takes `Option<Harness>`: `Some` adds that harness's provider wiring, and `None` returns the base git, gh, and certificate environment. Other harnesses' wiring does not enter child or tool commands. Outbound handlers replace the placeholder credential with the provider API key; sandbox environment variables contain no provider secrets.
+The sandbox environment reads provider credential variables from the selected harness descriptor. `harnessEnvironment(providers, harness, harnesses)` takes the IDs of the providers that the sandbox holds keys for, `Option<Harness>`, and the harness catalog, `catalog` from `@usine/agents/harness` by default: `Some` adds that harness's wiring for the first of its providers with a key, with the base URL `http://<provider ID>.usine.internal` and the harness's `slotPath`, and `None` returns the base git, gh, and certificate environment. For Codex, the wiring sets `USINE_CODEX_BASE_URL`, from which the app-server launch overrides the base URL of the image's `usine` model provider. Other harnesses' wiring does not enter child or tool commands. Outbound handlers replace the placeholder credential with the provider API key; sandbox environment variables contain no provider secrets.
 
 The Cloudflare Worker that runs each usine Attempt in its own sandbox, for `cloudflare` Workers in `usine.yaml` ([#551](https://github.com/basaltbytes/usine/issues/551)). You deploy it to your Cloudflare account; usine's executor calls it over HTTPS with a Cloudflare Access service token.
 
@@ -9,13 +9,12 @@ Each sandbox is a Durable Object that owns one container, started from an image 
 | Host in the sandbox | Handler | Upstream |
 | --- | --- | --- |
 | `github.com`, `api.github.com` over HTTPS | Adds the Attempt's installation token | GitHub |
-| `anthropic.usine.internal` over HTTP | Replaces the placeholder key with the Anthropic API key | `https://api.anthropic.com` |
-| `openai.usine.internal` over HTTP | Replaces the placeholder key with the OpenAI API key | `https://api.openai.com` |
+| `<provider ID>.usine.internal` over HTTP, such as `anthropic.usine.internal` | Replaces the placeholder key with the provider's API key | The upstream of the provider's protocol that serves the path, such as `https://api.anthropic.com` |
 | Each host in `ALLOWED_HOSTS` over HTTPS | Forwards the request unchanged | The host |
 
 While a sandbox has no installation token or no key for a provider, such as a sandbox that the executor keeps after its Attempt, the handler for that host refuses every request with status 403. `ALLOWED_HOSTS` can't name a GitHub or provider host.
 
-A provider handler adds the key only to the requests that Claude Code and Codex send: Anthropic's `POST /v1/messages`, `POST /v1/messages/count_tokens`, and `GET /v1/models`, and OpenAI's `POST /v1/responses`, `POST /v1/responses/compact`, and `GET /v1/models`. These are the paths that the Gateway's `llm.<domain>` serves ([ADR 0027](../../docs/adr/0027-gateway-credential-proxy.md)), each with the method that the harnesses use. The handler refuses every other method and path, such as the files or organization administration APIs, with status 404, before it adds the key.
+The Worker serves a handler for each provider in its catalog, `modelProviders` from `@usine/core/agent/provider`, that takes an API key and whose upstreams all use HTTPS; `SandboxSettings.providers` holds the catalog, and the Worker denies the host of a provider it doesn't serve and leaves out its grant, with a warning. A running container keeps its last handler for a host, so the sandbox stores the provider hosts that it registered and denies each one over HTTP that the catalog no longer has, such as after a deployment that removes a provider, even when `ALLOWED_HOSTS` lists it. A handler adds the key only to the provider's routes in the catalog, as the gateway's `llm.<domain>` does ([ADR 0027](../../docs/adr/0027-gateway-credential-proxy.md)): Anthropic's `/v1/messages`, `/v1/messages/count_tokens`, `/v1/models`, and `/v1/models/{model}`, and OpenAI's `/v1/responses`, `/v1/responses/compact`, and `/v1/models`. It sends each path to the upstream of the protocol that serves it, with the key in that protocol's header, and passes the headers that the provider's entry allows. It refuses every other path, such as the files or organization administration APIs, and a method that the route's entry doesn't list, such as `GET /v1/responses`, with status 404, before it adds the key. It doesn't follow an upstream's redirect: it returns the redirect to the sandbox, so the key goes only to the provider's upstream. The built-in routes take `POST` for messages and responses and `GET` for models; a protocol without `methods` accepts every method.
 
 HTTPS interception needs the container to trust Cloudflare's container certificate authority. The executor sets `GIT_SSL_CAINFO`, `CURL_CA_BUNDLE`, `SSL_CERT_FILE`, and `NODE_EXTRA_CA_CERTS` to it for every command, as Cloudflare's coding-agent runner does. Claude Code and Codex use plain HTTP to their handlers, with a placeholder key.
 
@@ -99,7 +98,7 @@ The Sandbox SDK 1.0 needs the `durable_object` scheduling policy, which rejects 
 
 ## Develop
 
-`pnpm test` runs unit tests in Node: the routes and streams against fake ports, and the process file scripts with the local `sh`. The process file tests run only on Linux because the container scripts require GNU `tee`, `/proc`, and `setsid`. Other platforms skip that suite. The Durable Object's container calls need Cloudflare's container runtime, so no test runs the Worker itself.
+`pnpm test` runs unit tests in Node: the routes and streams against fake ports, and the process file scripts with the local `sh`. The process file tests run only on Linux because the container scripts require GNU `tee`, `/proc`, and `setsid`. Other platforms skip that suite. The Durable Object's container calls need Cloudflare's container runtime, so no test runs the Worker itself; the tests register handlers and answer requests through `registrationOf` and `providerOutbound`, which the Worker calls.
 
 ## Schema contracts
 

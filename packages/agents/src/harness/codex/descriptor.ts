@@ -48,6 +48,20 @@ const prices = {
   "gpt-5.2": { input: 1.75, cachedInput: 0.175, output: 14 },
 };
 
+/**
+ * The ID of the model provider that the Cloudflare sandbox image's Codex configuration defines and
+ * selects (`packages/cloudflare/image/codex-config.toml`).
+ */
+export const CODEX_SANDBOX_PROVIDER = "usine";
+
+/**
+ * The variable that holds the base URL of the sandbox's model provider. When a Codex process's
+ * environment sets it, the app-server launch overrides the `base_url` of
+ * {@link CODEX_SANDBOX_PROVIDER}, because Codex reads a provider's base URL only from its
+ * configuration.
+ */
+export const CODEX_SANDBOX_BASE_URL = "USINE_CODEX_BASE_URL";
+
 const credentialConfig = (id: string, name: string, tokenVariable: string) =>
   [
     `model_provider = "${id}"`,
@@ -109,7 +123,7 @@ export const codex = HarnessDescriptor.make({
         }),
         cloudflare: CredentialWiring.make({
           tokenVariable: "OPENAI_API_KEY",
-          environment: {},
+          environment: { [CODEX_SANDBOX_BASE_URL]: "{{baseUrl}}" },
           files: {},
         }),
         hosts: ["chatgpt.com", "auth.openai.com"],

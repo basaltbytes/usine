@@ -1,4 +1,4 @@
-import type { ModelProviderCatalog } from "@usine/core/agent/provider";
+import type { GatewaySlot, ModelProviderCatalog, UpstreamBase } from "@usine/core/agent/provider";
 import type { GatewayDomain } from "@usine/core/worker";
 import { Context, Effect, Layer, Ref, Schema } from "effect";
 import type { EgressAllowlist } from "./egress/egress.ts";
@@ -40,6 +40,8 @@ export class GatewaySettings extends Context.Service<
     readonly catalog: ModelProviderCatalog;
     /** The startup LLM providers; requests use the current providers from `SettingsInForce`. */
     readonly providers: LlmProviders;
+    /** The startup upstream overrides; connected credentials use the current ones from `SettingsInForce`. */
+    readonly upstreams: UpstreamOverrides;
     /** The startup egress allowlist; requests use the current allowlist from `SettingsInForce`. */
     readonly egress: EgressAllowlist;
     /** The bearer token required for the executor to call the admin API. */
@@ -49,12 +51,20 @@ export class GatewaySettings extends Context.Service<
   }
 >()("@usine/gateway/settings/GatewaySettings") {}
 
-/** The settings a reload replaces: the egress allowlist and LLM providers. */
+/**
+ * The base URL that the upstream variable of a slot's provider sets, by slot. It replaces the
+ * catalog's upstreams for an API key or a Claude subscription token in the slot.
+ */
+export type UpstreamOverrides = Readonly<Record<GatewaySlot, UpstreamBase>>;
+
+/** The settings a reload replaces: the egress allowlist, LLM providers, and upstream overrides. */
 export interface ReloadableSettings {
   /** The allowlist to use for new forward-proxy requests and tunnels. */
   readonly egress: EgressAllowlist;
   /** The LLM upstreams and credentials to use for subsequent reverse-proxy requests. */
   readonly providers: LlmProviders;
+  /** The upstream overrides that apply to the credentials connected through the admin API. */
+  readonly upstreams: UpstreamOverrides;
 }
 
 /**
@@ -78,8 +88,8 @@ export class SettingsInForce extends Context.Service<
   static readonly layer = Layer.effect(
     SettingsInForce,
     Effect.gen(function* () {
-      const { egress, providers } = yield* GatewaySettings;
-      const inForce = yield* Ref.make<ReloadableSettings>({ egress, providers });
+      const { egress, providers, upstreams } = yield* GatewaySettings;
+      const inForce = yield* Ref.make<ReloadableSettings>({ egress, providers, upstreams });
       return { current: Ref.get(inForce), replace: (next) => Ref.set(inForce, next) };
     }),
   );

@@ -268,6 +268,14 @@ _Avoid_: LLM provider, vendor, protocol
 A model provider's place at the gateway, such as `anthropic-messages`: the credential that the gateway holds for the provider, and its path prefix on `llm.<domain>`. A worker's `llm_providers` lists slots.
 _Avoid_: protocol slot, gateway provider
 
+**Static key**:
+A model provider's credential that stays the same until an operator replaces it, such as an API key. usine connects one for any catalog provider that accepts it.
+_Avoid_: API token, secret
+
+**Subscription login**:
+A subscription's credential from its provider's own sign-in: a Claude setup token (`claude`), which lasts a year and is replaced, or a ChatGPT login (`chatgpt`), which usine refreshes. usine implements each one's sign-in, so the logins are a closed set.
+_Avoid_: OAuth token, account login
+
 **Runaway guard**:
 Optional per-attempt limits on wall-clock time and tokens, set in `usine.yaml`. Exceeding a limit fails the attempt without an automatic retry.
 _Avoid_: budget, timeout, kill switch

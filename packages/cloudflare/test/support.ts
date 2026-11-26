@@ -1,5 +1,6 @@
 // SDK hooks, transactions, and async iterators require Promise callbacks.
 // @effect-diagnostics asyncFunction:off
+import { anthropic, type ModelProviderCatalog, modelProviders } from "@usine/core/agent/provider";
 import { AttemptId } from "@usine/core/attempt";
 import { CloudflareImageName } from "@usine/core/worker";
 import { DateTime, Effect, Layer, Option, Redacted } from "effect";
@@ -35,7 +36,7 @@ const credentials = (token = "ghs_first") =>
     github: Option.some(Redacted.make(token)),
     providers: [
       ProviderGrant.make({
-        provider: "anthropic",
+        provider: anthropic.id,
         credential: ApiKeyCredential.make({ key: Redacted.make("sk-ant-key") }),
       }),
     ],
@@ -52,6 +53,7 @@ export const storedSandbox = (leaseUntil: DateTime.Utc, held = false) =>
     leaseUntil,
     held,
     credentials: credentials(),
+    providerHosts: ["anthropic.usine.internal", "openai.usine.internal"],
   });
 
 const encoder = new TextEncoder();
@@ -123,6 +125,8 @@ interface FakeSandboxState {
   beforeRead: (path: string) => Effect.Effect<void>;
   /** Runs before the container registers an outbound handler; the default returns at once. */
   beforeIntercept: () => Effect.Effect<void>;
+  /** The Worker's catalog, which a test replaces to deploy another Worker over a running container. */
+  catalog: ModelProviderCatalog;
 }
 
 export const fakeSandbox = (allowedHosts: ReadonlyArray<string> = ["registry.npmjs.org"]) => {
@@ -142,6 +146,7 @@ export const fakeSandbox = (allowedHosts: ReadonlyArray<string> = ["registry.npm
     run: () => finishedProcess(""),
     beforeRead: () => Effect.void,
     beforeIntercept: () => Effect.void,
+    catalog: modelProviders,
   };
   const layer = Layer.mergeAll(
     Layer.succeed(SandboxContainer)({
@@ -209,7 +214,12 @@ export const fakeSandbox = (allowedHosts: ReadonlyArray<string> = ["registry.npm
       record: (sandbox) => Effect.sync(() => void state.recorded.push(sandbox)),
       forget: (name) => Effect.sync(() => void state.forgotten.push(name)),
     }),
-    Layer.succeed(SandboxSettings)({ allowedHosts }),
+    Layer.succeed(SandboxSettings)({
+      allowedHosts,
+      get providers() {
+        return state.catalog;
+      },
+    }),
   );
   return { state, layer };
 };

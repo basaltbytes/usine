@@ -1,5 +1,6 @@
+import { selectProvider } from "@usine/core/agent/provider";
 import { InstanceDirectory } from "@usine/core/instance";
-import { loginLlmProvider, ProviderLoginView, ProviderStatus } from "@usine/gateway/credentials";
+import { ProviderLoginView, ProviderStatus, type ProviderTarget } from "@usine/gateway/credentials";
 import { Console, Effect, Option, Redacted, Schema } from "effect";
 import { Prompt } from "effect/cli";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
@@ -7,6 +8,20 @@ import { instanceFiles, readRecord } from "../instance/record.ts";
 import { readAdminToken } from "../auth/local.ts";
 import { authFailure } from "../auth/model.ts";
 import type { ProviderCommand } from "../cli.ts";
+import { listedSelectors } from "./api.ts";
+
+/** Describes each provider by the names it takes and the credentials it accepts. */
+const choices = (providers: ProviderTarget["providers"]) =>
+  providers
+    .map(({ id, label, accepts }) => {
+      const names = accepts.login === null ? id : `${id} or ${accepts.login}`;
+      const kinds = [
+        ...(accepts.login === null ? [] : ["a subscription"]),
+        ...(accepts.apiKey ? ["an API key with --api-key"] : []),
+      ];
+      return `${names} (${label}: ${kinds.join(", or ")})`;
+    })
+    .join("; ");
 
 export const providerCommand = Effect.fn("Cli.providerLogin")(function* (
   directory: InstanceDirectory,
@@ -59,25 +74,41 @@ export const providerCommand = Effect.fn("Cli.providerLogin")(function* (
       400,
     );
   if ("error" in target) return yield* authFailure(`${target.label}: ${target.error}`, 503);
-  const connection = target.providers.find(
-    ({ provider }) => provider === loginLlmProvider(command.provider),
-  );
-  if (connection !== undefined && "error" in connection)
+  const selected = selectProvider(target.providers, command.provider, listedSelectors);
+  if (Option.isNone(selected))
+    return yield* authFailure(
+      `${target.label} has no provider ${command.provider}. Choose ${choices(target.providers)}.`,
+      400,
+    );
+  const connection = selected.value;
+  // An unreadable status blocks only a sign-in, so a key or a logout can replace a broken credential.
+  if ("error" in connection && command.action === "login" && command.mode === "subscription")
     return yield* authFailure(`${target.label}: ${connection.error}`, 503);
-  const body = { target: target.target, provider: command.provider };
+  const body = { target: target.target, provider: connection.provider };
   const ok = Schema.Struct({ ok: Schema.Boolean });
   if (command.action === "logout") {
     yield* request("POST", "/api/providers/disconnect", ok, body);
     return yield* Console.log(`Disconnected ${command.provider} from ${target.label}.`);
   }
   if (command.mode === "api-key") {
+    if (!connection.accepts.apiKey)
+      return yield* authFailure(`${connection.label} doesn't take an API key.`, 400);
     const key = yield* Prompt.run(Prompt.Password({ message: "API key" })).pipe(
       Effect.mapError(() => authFailure("API key entry cancelled.", 400)),
     );
     yield* request("PUT", "/api/providers/key", ok, { ...body, key: Redacted.value(key) });
     return yield* Console.log(`Connected ${command.provider} on ${target.label}.`);
   }
-  const started = yield* request("POST", "/api/providers/login", ProviderLoginView, body);
+  const signIn = connection.accepts.login;
+  if (signIn === null)
+    return yield* authFailure(
+      `${connection.label} takes an API key. Run usine login ${command.provider} --api-key.`,
+      400,
+    );
+  const started = yield* request("POST", "/api/providers/login", ProviderLoginView, {
+    target: target.target,
+    provider: signIn,
+  });
   const cancel = request("DELETE", `/api/providers/login/${started.id}`, ok).pipe(
     Effect.tapError(() =>
       Effect.logWarning("Could not cancel the provider login", { loginId: started.id }),
@@ -102,7 +133,7 @@ export const providerCommand = Effect.fn("Cli.providerLogin")(function* (
         yield* Console.log(
           `Open ${state.url}${state.code === null ? "." : ` and enter ${state.code}.`}`,
         );
-        if (command.provider === "claude") {
+        if (signIn === "claude") {
           yield* Console.log("Paste the code from Claude, then press Enter:");
           const code = yield* Prompt.run(
             Prompt.Password({ message: "Claude authorization code" }),

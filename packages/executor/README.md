@@ -334,6 +334,7 @@ Preflight calls `GET /v1/health`, checks that the Worker has the image, that the
 The Cloudflare layer needs a `ChildProcessSpawner`, a `CredentialProvider`, an `AttemptRuntime`, a `Harnesses` registry, and an `HttpClient` for the sandbox API.
 
 ```ts
+import { anthropic } from "@usine/core/agent/provider"
 import { CloudflareImageName, WorkerName } from "@usine/core/worker"
 import { layer } from "@usine/executor/cloudflare"
 import { Redacted } from "effect"
@@ -349,7 +350,7 @@ const executorLayer = layer({
       image: CloudflareImageName.make("usine"),
       instanceType: "standard-4",
       providers: [
-        { provider: "anthropic", apiKey: Redacted.make(process.env.ANTHROPIC_API_KEY ?? "") },
+        { provider: anthropic.id, apiKey: Redacted.make(process.env.ANTHROPIC_API_KEY ?? "") },
       ],
     },
   ],

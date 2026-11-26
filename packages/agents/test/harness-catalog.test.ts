@@ -4,12 +4,20 @@ import { BillingPool, PoolDescriptor } from "@usine/core/agent/pool";
 import {
   anthropic,
   ApiKeyCredential,
+  GatewaySlot,
   GatewayVariable,
+  HeaderName,
+  KeyHeader,
   ModelProvider,
+  ModelProviderId,
   modelProviders,
   openai,
+  ProviderProtocol,
+  RoutePattern,
+  UpstreamBase,
+  WireProtocol,
 } from "@usine/core/agent/provider";
-import { Option, Schema } from "effect";
+import { Array as Arr, Effect, Option, Schema, SchemaIssue } from "effect";
 import {
   apiKeys,
   CapabilityProfile,
@@ -194,6 +202,58 @@ describe("harness catalog", () => {
         `rejects ${slotPath}`,
       );
   });
+
+  it.effect(
+    "gives the API-key wiring the upstream that a provider's protocols share, and refuses the api-key route outside a sandbox when they have different ones",
+    () =>
+      Effect.gen(function* () {
+        const protocol = (name: string, upstream: string, route: string) =>
+          ProviderProtocol.make({
+            protocol: WireProtocol.make(name),
+            upstream: UpstreamBase.make(upstream),
+            routes: [RoutePattern.make(route)],
+            key: KeyHeader.make({ header: HeaderName.make("authorization"), scheme: "bearer" }),
+          });
+        const planAt = (messages: string) =>
+          ModelProvider.make({
+            id: ModelProviderId.make("test-plan"),
+            slot: GatewaySlot.make("test-plan"),
+            label: "Test plan",
+            protocols: [
+              protocol("openai-chat-completions", "https://plan.test", "/v1/chat/completions"),
+              protocol("anthropic-messages", messages, "/v1/messages"),
+            ],
+            credentials: [
+              ApiKeyCredential.make({ variable: GatewayVariable.make("TEST_PLAN_API_KEY") }),
+            ],
+          });
+        const offering = (provider: ModelProvider, placements: CapabilityProfile["placements"]) =>
+          HarnessDescriptor.makeEffect({
+            ...codex,
+            id: Harness.make("plan-client"),
+            providers: [provider],
+            capabilities: Arr.map(codex.capabilities, (profile) =>
+              CapabilityProfile.make({ ...profile, placements }),
+            ),
+            pools: [HarnessPool.make({ pool: apiKeys, routes: ["gateway-api-key"] })],
+          });
+        const shared = planAt("https://plan.test");
+        const split = planAt("https://plan.test/anthropic");
+        const onMachines = yield* offering(shared, ["ssh", "container"]);
+        assert(Option.isSome(onMachines.worker.credential));
+        assert.strictEqual(
+          onMachines.worker.credential.value.apiKeyBaseUrl(shared),
+          "https://plan.test/v1",
+        );
+        const refused = yield* Effect.flip(offering(split, ["ssh", "sandbox"]));
+        assert.include(
+          SchemaIssue.makeFormatterDefault()(refused),
+          "The api-key route outside a sandbox can't reach Test plan",
+        );
+        const inSandbox = yield* offering(split, ["sandbox"]);
+        assert.deepStrictEqual(inSandbox.providers, [split]);
+      }),
+  );
 
   it("gives a harness the Gateway's credential of the first provider it lists that the Gateway holds", () => {
     const claude = Harness.make("claude");
