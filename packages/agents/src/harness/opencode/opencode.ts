@@ -72,6 +72,7 @@ import {
 import { opencode } from "./descriptor.ts";
 import { checkModel } from "./model.ts";
 import { openCodePreflight } from "./preflight.ts";
+import { type RestoredInput, restoredInput } from "./restored.ts";
 import { type OpenCodeConnection, OpenCodeServer } from "./server.ts";
 import {
   answerDue,
@@ -240,6 +241,12 @@ const makeOpenCodeSessions = Effect.gen(function* () {
           .read(ActiveSessions, "launch", "GET", "/api/session/active")
           .pipe(Effect.map(({ data: running }) => Object.hasOwn(running, id)))
       : false;
+    // A retained bridge kept what OpenCode delivered and queued, but events and posts may be lost.
+    const restoredInputs: RestoredInput = connection.retained
+      ? yield* restoredInput(api, id, sessionId, policy.restored.unread)
+      : { delivered: [], queued: [], lost: policy.restored.unread };
+    // `recover` sends lost messages to an idle session; a running one gets them at once.
+    const resent = active && !policy.restored.paused ? restoredInputs.lost : [];
 
     const operatorIds = yield* Ref.make<OperatorIds>(
       new Map(
@@ -253,7 +260,10 @@ const makeOpenCodeSessions = Effect.gen(function* () {
       connection,
       api,
       execution: active ? Execution.Running() : Execution.Idle(),
-      pending: emptyPending,
+      pending: restoredInputs.queued.reduce(
+        (pending, messageId) => enqueued(pending, openCodeMessageId(sessionId, messageId)),
+        emptyPending,
+      ),
       toolNames: new Map(),
       toolsInFlight: new Map(),
       lastText: Option.none(),
@@ -349,7 +359,11 @@ const makeOpenCodeSessions = Effect.gen(function* () {
       session,
       channel,
       policy,
-      submitted: connection.retained ? policy.restored.unread.map(({ id: unread }) => unread) : [],
+      submitted: [
+        ...restoredInputs.delivered,
+        ...restoredInputs.queued,
+        ...resent.map(({ id: messageId }) => messageId),
+      ],
       decode: openCodeReceipts,
       send: (message, _activity, messageId) => steer(message, messageId),
       pause: Effect.suspend(() => pauseExecution),
@@ -896,6 +910,14 @@ const makeOpenCodeSessions = Effect.gen(function* () {
       }
     }).pipe(Effect.catch(fail));
     yield* Effect.forkScoped(consume);
+    for (const messageId of restoredInputs.delivered) yield* conversation.observe(messageId);
+    for (const message of resent) {
+      yield* Effect.logInfo("Resending an operator message that the running session never got", {
+        sessionId,
+        messageId: message.id,
+      });
+      yield* steer(message.message, message.id);
+    }
 
     const prompt = startPrompt(start);
     if (Option.isSome(prompt) && !policy.restored.paused && Option.isNone(policy.restored.idle)) {

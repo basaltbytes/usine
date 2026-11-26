@@ -88,12 +88,24 @@ const models = {
   ],
 };
 
+/** How the bridges of `scriptedServerWith` start. */
+export interface ScriptedOptions {
+  /** Whether the process owner kept each bridge running across the restart. */
+  readonly retained?: boolean;
+  /** The sessions that active-session queries list until the test sets them. */
+  readonly active?: ReadonlyArray<string>;
+  /** The items that inbox queries list until the test sets them. */
+  readonly inbox?: ReadonlyArray<Schema.Json>;
+}
+
 /**
  * A fake `OpenCodeServer` whose bridges the test scripts. `bridge` completes when the runtime opens
  * the first one, after the ready line, and `bridges` takes each one in the order that the runtime
  * opens them, the first included.
  */
-export const scriptedServer = Effect.gen(function* () {
+export const scriptedServerWith = Effect.fn("ScriptedServer.make")(function* (
+  options: ScriptedOptions,
+) {
   const bridge = yield* Deferred.make<ScriptedBridge>();
   const bridges = yield* Queue.unbounded<ScriptedBridge>();
   const layer = Layer.succeed(OpenCodeServer)({
@@ -121,8 +133,8 @@ export const scriptedServer = Effect.gen(function* () {
         ) => emit({ id: sent.id, status, body });
         const jobs = yield* Ref.make<ReadonlyArray<Schema.Json>>([]);
         const holdJobs = yield* Ref.make(false);
-        const inbox = yield* Ref.make<ReadonlyArray<Schema.Json>>([]);
-        const active = yield* Ref.make<ReadonlyArray<string>>([]);
+        const inbox = yield* Ref.make<ReadonlyArray<Schema.Json>>(options.inbox ?? []);
+        const active = yield* Ref.make<ReadonlyArray<string>>(options.active ?? []);
         const environments = yield* Ref.make<ReadonlyArray<string>>([]);
         const answered = yield* Ref.make<ReadonlyArray<BridgeRequest>>([]);
         const others = yield* Queue.unbounded<BridgeRequest>();
@@ -180,11 +192,14 @@ export const scriptedServer = Effect.gen(function* () {
         yield* Deferred.succeed(bridge, scripted);
         yield* Queue.offer(bridges, scripted);
         yield* client.ready;
-        return { ...client, retained: false };
+        return { ...client, retained: options.retained ?? false };
       }),
   });
   return { bridge: Deferred.await(bridge), bridges: Queue.take(bridges), layer };
 });
+
+/** `scriptedServerWith` with new bridges that are idle and empty. */
+export const scriptedServer = scriptedServerWith({});
 
 /** The child backend over `server`, with a journal that saves nothing. */
 export const scriptedBackend = (server: Layer.Layer<OpenCodeServer>) =>

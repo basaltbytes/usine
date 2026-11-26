@@ -1,10 +1,16 @@
 import { assert, describe, it } from "@effect/vitest";
-import { HarnessSession, HarnessSessionId } from "@usine/core/agent/session";
+import {
+  type AgentSessionEvent,
+  HarnessSession,
+  HarnessSessionId,
+} from "@usine/core/agent/session";
 import { Steer } from "@usine/core/attempt/channel";
-import { Effect, Fiber, Option, Stream } from "effect";
+import { Effect, Fiber, type Layer, Option, Stream } from "effect";
 import { RemoteShell } from "../../src/child-host/child-host.ts";
 import { ChildProcessLost } from "../../src/child-host/process.ts";
 import { CONTINUATION_MESSAGE } from "../../src/harness/continuation.ts";
+import { openCodeMessageId } from "../../src/harness/opencode/codec.ts";
+import type { OpenCodeServer } from "../../src/harness/opencode/server.ts";
 import { ChildBackend, ChildRequest, SessionOperationError } from "../../src/runtime.ts";
 import {
   assertPrompt,
@@ -12,8 +18,10 @@ import {
   event,
   execution,
   launched,
+  type ScriptedBridge,
   scriptedBackend,
   scriptedServer,
+  scriptedServerWith,
   SESSION,
   tokens,
 } from "./scripted-bridge.ts";
@@ -50,6 +58,51 @@ const answeredWithBackground = [
   event("session.usage.updated", { cost: 0.01, tokens: tokens(100, 10) }),
   event("session.execution.succeeded"),
 ];
+
+/** A remote request that resumes the scripted session with `guidance` restored as unread. */
+const resumed = (guidance: Steer) =>
+  ChildRequest.make({
+    ...remoteRequest,
+    resume: Option.some(
+      HarnessSession.make({
+        id: HarnessSessionId.make(SESSION),
+        cwd: remoteRequest.cwd,
+        home: Option.some("/work/opencode"),
+      }),
+    ),
+    unread: [{ id: guidance.id, message: guidance.message }],
+  });
+
+/** Launches `resumed(guidance)` over `server` in a scoped fiber. */
+const launchResumed = (server: Layer.Layer<OpenCodeServer>, guidance: Steer) =>
+  Effect.gen(function* () {
+    const backend = yield* ChildBackend;
+    return yield* backend.launch(resumed(guidance));
+  }).pipe(Effect.provide(scriptedBackend(server)), Effect.forkScoped);
+
+/** Answers the runtime's lookup of the restored steer with `status`, and returns its input ID. */
+const restoredLookup = (bridge: ScriptedBridge, status: number) =>
+  Effect.gen(function* () {
+    const lookup = yield* bridge.request;
+    assert.strictEqual(lookup.method, "GET");
+    const prefix = `/api/session/${SESSION}/message/`;
+    assert(lookup.path.startsWith(prefix), `${lookup.path} looks up a message`);
+    const inputId = lookup.path.slice(prefix.length);
+    yield* bridge.reply(
+      lookup,
+      status,
+      status === 200 ? { data: { id: inputId, type: "user" } } : { message: "Message not found" },
+    );
+    return inputId;
+  });
+
+/** Asserts that the session reported reading `guidance` once. */
+const assertReadOnce = (seen: ReadonlyArray<AgentSessionEvent>, guidance: Steer) =>
+  assert.strictEqual(
+    seen.filter((value) => value._tag === "OperatorMessageRead" && value.messageId === guidance.id)
+      .length,
+    1,
+  );
 
 describe("OpenCode restart", () => {
   for (const delivery of ["delivered", "pending", "lookup failed"] as const)
@@ -119,21 +172,7 @@ describe("OpenCode restart", () => {
     Effect.gen(function* () {
       const guidance = Steer.make({ message: "Reply STEERED instead." });
       const server = yield* scriptedServer;
-      const request = ChildRequest.make({
-        ...remoteRequest,
-        resume: Option.some(
-          HarnessSession.make({
-            id: HarnessSessionId.make(SESSION),
-            cwd: remoteRequest.cwd,
-            home: Option.some("/work/opencode"),
-          }),
-        ),
-        unread: [{ id: guidance.id, message: guidance.message }],
-      });
-      const launching = yield* Effect.gen(function* () {
-        const backend = yield* ChildBackend;
-        return yield* backend.launch(request);
-      }).pipe(Effect.provide(scriptedBackend(server.layer)), Effect.forkScoped);
+      const launching = yield* launchResumed(server.layer, guidance);
       const bridge = yield* server.bridge;
       assert.strictEqual(bridge.target.transport, "resume");
       const continued = yield* bridge.request;
@@ -149,16 +188,84 @@ describe("OpenCode restart", () => {
       const running = yield* Fiber.join(launching);
       for (const line of execution("msg_continue", "RESUMED")) yield* bridge.emit(line);
       const result = yield* running.result;
-      const seen = yield* Stream.runCollect(running.events);
       assert.strictEqual(result.message, "RESUMED");
-      assert.strictEqual(
-        seen.filter(
-          (value) => value._tag === "OperatorMessageRead" && value.messageId === guidance.id,
-        ).length,
-        1,
-      );
+      const seen = yield* Stream.runCollect(running.events);
+      assertReadOnce(seen, guidance);
     }).pipe(Effect.scoped),
   );
+
+  for (const status of ["delivered", "lost"] as const)
+    it.live(`reconciles a restored steer with an idle retained bridge: ${status}`, () =>
+      Effect.gen(function* () {
+        const guidance = Steer.make({ message: "Reply STEERED instead." });
+        const server = yield* scriptedServerWith({ retained: true });
+        const launching = yield* launchResumed(server.layer, guidance);
+        const bridge = yield* server.bridge;
+        const inputId = yield* restoredLookup(bridge, status === "delivered" ? 200 : 404);
+        const continued = yield* bridge.request;
+        assertPrompt(continued, CONTINUATION_MESSAGE);
+        yield* bridge.reply(continued, 200, { data: { id: "msg_continue" } });
+        if (status === "lost") {
+          const resent = yield* bridge.request;
+          assert.deepStrictEqual(assertPrompt(resent, guidance.message), Option.some(inputId));
+          yield* bridge.reply(resent, 200, { data: { id: inputId } });
+          const again = yield* bridge.request;
+          assert.strictEqual(again.path, `/api/session/${SESSION}/message/${inputId}`);
+          yield* bridge.reply(again, 404, { message: "Message not found" });
+        }
+        const running = yield* Fiber.join(launching);
+        for (const line of execution("msg_continue", "RESUMED")) yield* bridge.emit(line);
+        if (status === "lost") {
+          const early = yield* running.result.pipe(Effect.timeoutOption("200 millis"));
+          assert(Option.isNone(early), "the resent steer still requires its execution");
+          for (const line of execution(inputId, "STEERED")) yield* bridge.emit(line);
+        }
+        const result = yield* running.result;
+        assert.strictEqual(result.message, status === "delivered" ? "RESUMED" : "STEERED");
+        const seen = yield* Stream.runCollect(running.events);
+        assertReadOnce(seen, guidance);
+      }).pipe(Effect.scoped),
+    );
+
+  for (const status of ["delivered", "queued", "lost"] as const)
+    it.live(`reconciles a restored steer with a running retained bridge: ${status}`, () =>
+      Effect.gen(function* () {
+        const guidance = Steer.make({ message: "Reply STEERED instead." });
+        const inputId = openCodeMessageId(childRequest.session.id, guidance.id);
+        const server = yield* scriptedServerWith({
+          retained: true,
+          active: [SESSION],
+          inbox: status === "queued" ? [{ id: inputId }] : [],
+        });
+        const launching = yield* launchResumed(server.layer, guidance);
+        const bridge = yield* server.bridge;
+        if (status !== "queued") {
+          const looked = yield* restoredLookup(bridge, status === "delivered" ? 200 : 404);
+          assert.strictEqual(looked, inputId);
+        }
+        if (status === "lost") {
+          const resent = yield* bridge.request;
+          assert.deepStrictEqual(assertPrompt(resent, guidance.message), Option.some(inputId));
+          yield* bridge.reply(resent, 200, { data: { id: inputId } });
+        }
+        const running = yield* Fiber.join(launching);
+        yield* bridge.setActive([]);
+        yield* bridge.setInbox([]);
+        for (const line of [
+          ...(status === "delivered"
+            ? []
+            : [event("session.inbox.delivered", { inboxID: inputId })]),
+          event("session.text.ended", { text: "STEERED" }),
+          event("session.step.ended"),
+          event("session.execution.succeeded"),
+        ])
+          yield* bridge.emit(line);
+        const result = yield* running.result;
+        assert.strictEqual(result.message, "STEERED");
+        const seen = yield* Stream.runCollect(running.events);
+        assertReadOnce(seen, guidance);
+      }).pipe(Effect.scoped),
+    );
 
   it.live("reopens the saved session on a new remote bridge and continues it", () =>
     Effect.gen(function* () {
