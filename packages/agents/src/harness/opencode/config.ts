@@ -139,7 +139,7 @@ const SERVE_ONLY_PREFIX = "USINE_OPENCODE_SERVE_";
 
 /**
  * Returns the environment of a session's bridge: the session's environment, and for `serve` only
- * OpenCode's data and configuration in `data`, the checkout's own configuration turned off, no
+ * OpenCode's data, database, and configuration in `data`, the checkout's own configuration turned off, no
  * catalog download, no free models, and `config` as its configuration. Tool commands get the
  * session's environment, which keeps the worker's data and configuration directories, once the
  * runtime sets each OpenCode session's command environment from the bridge.
@@ -153,6 +153,8 @@ export const serveEnvironment = (
   ...Object.fromEntries(
     Object.entries({
       XDG_DATA_HOME: data,
+      // OpenCode's default path under `XDG_DATA_HOME`, which a worker's `OPENCODE_DB` would move.
+      OPENCODE_DB: `${data}/opencode/opencode.db`,
       XDG_CONFIG_HOME: `${data}/config`,
       OPENCODE_CONFIG_PROJECT_DISABLE: "1",
       OPENCODE_DISABLE_CLAUDE_CODE: "1",

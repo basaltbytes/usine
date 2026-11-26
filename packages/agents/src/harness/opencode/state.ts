@@ -104,15 +104,16 @@ export const executionInterrupted = (
 };
 
 /**
- * Returns the reason of the paused execution that ends the turn once input `key` failed, if no
- * late input still keeps it open, and the execution after the failure.
+ * Returns the reason of the paused execution that ends the turn once OpenCode won't deliver the
+ * inputs `dropped`, if no late input still keeps it open, and the execution after the drop.
  */
-export const lateInputFailed = (
+export const lateInputsDropped = (
   execution: Execution,
-  key: number,
+  dropped: ReadonlyArray<number>,
 ): readonly [Option.Option<string>, Execution] => {
-  if (execution._tag !== "AwaitingSuccessor") return [Option.none(), execution];
-  const late = execution.late.filter((other) => other !== key);
+  if (execution._tag !== "AwaitingSuccessor" || dropped.length === 0)
+    return [Option.none(), execution];
+  const late = execution.late.filter((other) => !dropped.includes(other));
   return late.length > 0
     ? [Option.none(), Execution.AwaitingSuccessor({ ...execution, late })]
     : [Option.some(execution.reason), Execution.Idle()];
@@ -232,6 +233,10 @@ export const removed = (pending: Pending, id: string): Pending => {
     deliveredEarly: early ? new Set(pending.deliveredEarly).add(id) : pending.deliveredEarly,
   });
 };
+
+/** Returns the keys of the inputs that `before` tracks and `after` doesn't. */
+export const droppedInputs = (before: Pending, after: Pending): ReadonlyArray<number> =>
+  before.inputs.filter((input) => !isPending(after, input.key)).map((input) => input.key);
 
 /** Returns how many inputs and queued items OpenCode hasn't delivered. */
 export const unread = (pending: Pending): number =>
