@@ -43,6 +43,11 @@ const SERVE_ARGUMENTS = [
   "warn",
 ];
 /**
+ * The prefix of the variables that the bridge sets on `serve` only, without the prefix. Tool
+ * commands get the bridge's environment without them, through each session's command environment.
+ */
+const SERVE_ONLY_PREFIX = "USINE_OPENCODE_SERVE_";
+/**
  * Milliseconds to wait for `serve`'s remaining output after it exits, and for its exit after its
  * event stream closes.
  */
@@ -82,13 +87,32 @@ const requestId = (value: Json | undefined): RequestId | undefined =>
     ? value
     : undefined;
 
-const inputLine = (line: string): InputLine => {
+/** The OpenCode session ID that an environment line names, such as `ses_dfda5480fffekNd7DilJmssCG2`. */
+const SESSION_ID = /^ses_[A-Za-z0-9]+$/u;
+
+/**
+ * Parses an input line: a request, or an environment line `{"id":...,"environment":"<session>"}`,
+ * which becomes `PUT /api/session/<session>/environment` with `tools` as the session's variables.
+ */
+const inputLine = (line: string, tools: JsonObject): InputLine => {
   const parsed = parseJson(line);
   if (parsed === undefined) return { invalid: "isn't JSON" };
   if (!isObject(parsed.value)) return { invalid: "isn't a JSON object" };
-  const { method, path, body } = parsed.value;
+  const { method, path, body, environment } = parsed.value;
   const id = requestId(parsed.value.id);
   if (id === undefined) return { invalid: "has no request ID" };
+  if (environment !== undefined) {
+    if (typeof environment !== "string" || !SESSION_ID.test(environment))
+      return { id, invalid: "names no OpenCode session" };
+    return {
+      request: {
+        id,
+        method: "PUT",
+        path: `/api/session/${environment}/environment`,
+        body: { variables: tools },
+      },
+    };
+  }
   if (typeof method !== "string" || !/^[A-Z]+$/u.test(method))
     return { id, invalid: "has no HTTP method" };
   // Keeps the request target in origin form. The host and port come from serve's ready line.
@@ -260,8 +284,16 @@ const main = () => {
     OPENCODE_SERVER_USERNAME: _inheritedUserName,
     ...environment
   } = process.env;
+  const tools: Record<string, string> = {};
+  const serveOnly: Record<string, string> = {};
+  for (const [name, value] of Object.entries(environment)) {
+    if (value === undefined) continue;
+    if (!name.startsWith(SERVE_ONLY_PREFIX)) tools[name] = value;
+    else if (name.length > SERVE_ONLY_PREFIX.length)
+      serveOnly[name.slice(SERVE_ONLY_PREFIX.length)] = value;
+  }
   const serve = spawn(command, [...args, ...SERVE_ARGUMENTS], {
-    env: { ...environment, OPENCODE_PASSWORD: password },
+    env: { ...tools, ...serveOnly, OPENCODE_PASSWORD: password },
     stdio: ["pipe", "pipe", "pipe"],
   });
 
@@ -352,7 +384,7 @@ const main = () => {
 
   // Relays the request in `line`, or answers it with the reason it is invalid or `refused`.
   const handle = (line: string, refused?: string) => {
-    const parsed = inputLine(line);
+    const parsed = inputLine(line, tools);
     if ("request" in parsed) {
       if (refused !== undefined)
         return writeLine({ id: parsed.request.id, error: `The request ${refused}` });

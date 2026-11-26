@@ -1,11 +1,4 @@
-import {
-  catalog,
-  HarnessCatalog,
-  HarnessCredential,
-  HarnessDescriptor,
-  CredentialWiring,
-  WorkerRequirements,
-} from "@usine/agents/harness";
+import { catalog } from "@usine/agents/harness";
 import { jsonKey } from "@usine/core/json-key";
 import { assert, describe, it } from "@effect/vitest";
 import { Harness } from "@usine/core/agent/brain";
@@ -92,29 +85,8 @@ describe("An Attempt's environment behind a Gateway", () => {
   });
 
   it("isolates each harness's wiring when every descriptor is registered", () => {
-    const claude = catalog.descriptors.find(({ id }) => id === "claude");
-    assert(claude !== undefined && Option.isSome(claude.worker.credential));
-    const opencode = HarnessDescriptor.make({
-      ...claude,
-      id: Harness.make("opencode"),
-      worker: WorkerRequirements.make({
-        ...claude.worker,
-        credential: Option.some(
-          HarnessCredential.make({
-            ...claude.worker.credential.value,
-            home: Option.some("XDG_DATA_HOME"),
-            gateway: CredentialWiring.make({
-              tokenVariable: "OPENCODE_TOKEN",
-              environment: { XDG_DATA_HOME: "{{home}}", OPENCODE_CONFIG_CONTENT: "{{baseUrl}}" },
-              files: {},
-            }),
-          }),
-        ),
-      }),
-    });
-    const source = HarnessCatalog.make({ descriptors: [...catalog.descriptors, opencode] });
     const options = {
-      catalog: source,
+      catalog,
       domain: GatewayDomain.make("gw.internal"),
       llmProviders: slots("anthropic-messages", "openai-responses"),
       llmPrefixes: "slot" as const,
@@ -122,18 +94,29 @@ describe("An Attempt's environment behind a Gateway", () => {
       homes: { ...DIRECTORIES.homes, opencode: "/attempt/opencode" },
       callerToken: Redacted.make(CALLER_TOKEN),
     };
-    for (const harness of source.ids) {
+    for (const harness of catalog.ids) {
       const { exported, sent } = gatewayEnvironment({ ...options, harness: Option.some(harness) });
       const environment = { ...exported, ...sent };
       assert.strictEqual("ANTHROPIC_BASE_URL" in environment, harness === "claude");
       assert.strictEqual("ANTHROPIC_AUTH_TOKEN" in environment, harness === "claude");
       assert.strictEqual("CODEX_HOME" in environment, harness === "codex");
-      assert.strictEqual("USINE_GATEWAY_TOKEN" in environment, harness === "codex");
-      assert.strictEqual("XDG_DATA_HOME" in environment, harness === "opencode");
-      assert.strictEqual("OPENCODE_CONFIG_CONTENT" in environment, harness === "opencode");
-      assert.strictEqual("OPENCODE_TOKEN" in environment, harness === "opencode");
+      assert.strictEqual(
+        "USINE_GATEWAY_TOKEN" in environment,
+        harness === "codex" || harness === "opencode",
+      );
+      assert.strictEqual("USINE_OPENCODE_HOME" in environment, harness === "opencode");
+      assert.strictEqual("USINE_OPENCODE_BASE_URL" in environment, harness === "opencode");
       assert.strictEqual(exported.GH_HOST, "git.gw.internal");
     }
+    const opencode = gatewayEnvironment({
+      ...options,
+      harness: Option.some(Harness.make("opencode")),
+    });
+    assert.strictEqual(opencode.exported.USINE_OPENCODE_HOME, "/attempt/opencode");
+    assert.strictEqual(
+      opencode.exported.USINE_OPENCODE_BASE_URL,
+      "http://llm.gw.internal/openai-responses/v1",
+    );
     assert.deepStrictEqual(
       gatewayEnvironment({ ...options, harness: Option.none() }).exported,
       WITHOUT_LLM,

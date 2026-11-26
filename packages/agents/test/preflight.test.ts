@@ -23,6 +23,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { LocalProcess, RemoteShell } from "../src/child-host/child-host.ts";
 import { CodexAppServer, type CodexConnection } from "../src/harness/codex/app-server.ts";
+import { OpenCodeServer } from "../src/harness/opencode/server.ts";
 import { PiSdk, type PiStartOptions, type PiStartResult } from "../src/harness/pi/sdk.ts";
 import { probeOutput } from "../src/preflight/command.ts";
 import { CODEX_CLI_VERSION } from "../src/preflight/preflight.ts";
@@ -57,6 +58,12 @@ const verifyHarness = (
       harnessesLayer.pipe(
         Layer.provide(claudeSdkLive),
         Layer.provide(Layer.succeed(HostLoginLock)({ withLock: () => (effect) => effect })),
+        Layer.provide(
+          Layer.succeed(OpenCodeServer)({
+            open: () => Effect.die("OpenCode must not start for another harness"),
+            stop: () => Effect.void,
+          }),
+        ),
       ),
     ),
   );

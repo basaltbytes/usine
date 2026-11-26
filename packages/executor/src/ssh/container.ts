@@ -37,7 +37,7 @@ import type { SshMachine, SshWorkerAddress } from "./model.ts";
  * `infra/worker-image/Dockerfile` with this release's harness versions.
  */
 export const ATTEMPT_IMAGE = ContainerImage.make(
-  `ghcr.io/basaltbytes/usine-worker:${workerImageInputs(catalog).tag}`,
+  `ghcr.io/basaltbytes/usine-worker:${workerImageInputs(catalog, "container").tag}`,
 );
 
 /** Prints the host UID/GID and image UID/GID, separated by spaces. */

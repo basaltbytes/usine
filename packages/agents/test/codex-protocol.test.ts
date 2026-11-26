@@ -215,7 +215,9 @@ describe("generated Codex protocol selections", () => {
     expect(packageJson.devDependencies["@pwrdrvr/codex-app-server-protocol"]).toBe(
       CODEX_PROTOCOL.version,
     );
-    expect(codex.worker.install).toEqual([{ name: "@openai/codex", version: CODEX_CLI_VERSION }]);
+    expect(codex.worker.install).toEqual([
+      { name: "@openai/codex", version: CODEX_CLI_VERSION, method: "global" },
+    ]);
     expect(codex.worker.versions).toContain(CODEX_CLI_VERSION);
     expect(codex.worker.versions).toContain(CODEX_PROTOCOL.version);
     expect(Option.isNone(unsupportedCodexVersion(`codex-cli ${CODEX_CLI_VERSION}`))).toBe(true);

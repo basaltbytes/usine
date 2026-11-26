@@ -28,7 +28,7 @@
 > [!WARNING]
 > usine is alpha software. The configuration format, the CLI, and the `@usine/*` package APIs can change in any release. Back up the instance folder and read the release notes before you upgrade.
 
-usine is a self-hosted orchestrator for coding agents. It watches the GitHub repositories you register. When an issue or pull request matches a loop you wrote, usine starts Claude Code, Codex, or Pi in a checkout on one of your workers. The agent does the task and usually ends by opening or updating a pull request.
+usine is a self-hosted orchestrator for coding agents. It watches the GitHub repositories you register. When an issue or pull request matches a loop you wrote, usine starts Claude Code, Codex, OpenCode, or Pi in a checkout on one of your workers. The agent does the task and usually ends by opening or updating a pull request.
 
 You decide which work starts on its own and which waits for your approval. A web UI shows every run, its transcript, and the runs that need a decision from you.
 
@@ -78,8 +78,8 @@ usine ships no built-in loop. Loops usually hand work to each other with labels:
 
 ## Features
 
-- Runs Claude Code, Codex, and Pi. An agent names a harness, a model, a reasoning effort, and standing instructions.
-- Runs on whichever single login or key you have: a Claude subscription through Claude Code, a ChatGPT subscription through Codex or Pi, or an API key for Claude Code, Codex, or any provider that Pi supports. The event-driven coordinator needs no model credential of its own.
+- Runs Claude Code, Codex, OpenCode, and Pi. An agent names a harness, a model, a reasoning effort, and standing instructions.
+- Runs on whichever single login or key you have: a Claude subscription through Claude Code, a ChatGPT subscription through Codex or Pi, or an API key for Claude Code, Codex, OpenCode, or any provider that Pi supports. The event-driven coordinator needs no model credential of its own.
 - Triggers on issues, pull requests, and schedules. Each loop selects its items with an expression, so one instance serves many repositories with different rules.
 - Starts runs on its own or holds each one for your approval, per loop.
 - Waits for CI after a fix is pushed and moves the pull request back to review when the checks pass. A cycle budget stops a review and fix cycle that doesn't converge.
@@ -135,7 +135,7 @@ usine is a pnpm monorepo. The engine is published as separate packages under the
 | [`@usine/config`](./packages/config)             | Configuration validation, revisions, and import and export               |
 | [`@usine/expression`](./packages/expression)     | CEL expression checking and evaluation                                   |
 | [`@usine/github`](./packages/github)             | GitHub App authentication, polling, and scoped tokens                    |
-| [`@usine/agents`](./packages/agents)             | Claude Code, Codex, and Pi backends, prompts, and harness preflight      |
+| [`@usine/agents`](./packages/agents)             | Claude Code, Codex, OpenCode, and Pi backends, prompts, and preflight    |
 | [`@usine/durable`](./packages/durable)           | The durable conversation of each attempt, resumed after a restart        |
 | [`@usine/executor`](./packages/executor)         | Worker adapters: local, SSH, Cloudflare, and provisioned machines        |
 | [`@usine/gateway`](./packages/gateway)           | Credential proxy for GitHub and model providers, with an egress allowlist |

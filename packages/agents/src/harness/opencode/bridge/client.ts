@@ -10,7 +10,7 @@ import {
   BridgeEvent,
   BridgeOutput,
   BridgeReady,
-  BridgeRequest,
+  BridgeInput,
   BridgeRequestFailed,
   type BridgeRequestId,
   type OpenCodeEvent,
@@ -19,7 +19,7 @@ import {
 } from "./lines.ts";
 
 const decodeOutput = Schema.decodeUnknownEffect(Schema.fromJsonString(BridgeOutput));
-const encodeRequest = Schema.encodeEffect(Schema.fromJsonString(BridgeRequest));
+const encodeInput = Schema.encodeEffect(Schema.fromJsonString(BridgeInput));
 const encoder = new TextEncoder();
 
 /** Milliseconds that the bridge waits for OpenCode's first event once `serve` reports its address. */
@@ -78,6 +78,15 @@ export interface BridgeClient {
   readonly request: (
     operation: SessionOperation,
     request: OpenCodeRequest,
+  ) => Effect.Effect<BridgeAnswer, SessionOperationError>;
+  /**
+   * Sets the command environment of OpenCode session `session` to the bridge's own environment,
+   * without the variables that the bridge sets on `serve` only, and returns OpenCode's answer as
+   * `request` does.
+   */
+  readonly setToolEnvironment: (
+    operation: SessionOperation,
+    session: string,
   ) => Effect.Effect<BridgeAnswer, SessionOperationError>;
   /**
    * Ends the bridge's input. The bridge then ends OpenCode's input and exits with OpenCode's exit
@@ -184,16 +193,17 @@ export const bridgeClient = Effect.fn("OpenCodeBridge.client")(function* (stream
     Effect.forkScoped,
   );
 
-  const request: BridgeClient["request"] = Effect.fn("OpenCodeBridge.request")(
-    function* (operation, call) {
-      yield* Effect.annotateCurrentSpan({
-        operation,
-        method: call.method,
-        path: call.path,
-        sessionId,
-      });
-      // The request is registered before the checks in `write`, so a failure after them rejects it.
-      const write = (id: BridgeRequestId) =>
+  /** Writes the input line that `line` returns for a request ID, and waits for its answer. */
+  const send = (
+    operation: SessionOperation,
+    target: string,
+    line: (id: BridgeRequestId) => BridgeInput,
+  ) =>
+    // The request is registered before the checks in `write`, so a failure after them rejects it.
+    pending.send({
+      operation,
+      generation: streams.generation,
+      write: (id: BridgeRequestId) =>
         Effect.gen(function* () {
           if (yield* Ref.get(closing))
             return yield* failure(
@@ -203,27 +213,47 @@ export const bridgeClient = Effect.fn("OpenCodeBridge.client")(function* (stream
             );
           const previous = yield* Ref.get(failed);
           if (Option.isSome(previous)) return yield* previous.value;
-          const line = yield* encodeRequest({ id, ...call }).pipe(Effect.orDie);
-          if (!(yield* Queue.offer(streams.input, encoder.encode(`${line}\n`))))
+          const encoded = yield* encodeInput(line(id)).pipe(
+            Effect.mapError((cause) =>
+              failure(operation, `Invalid OpenCode bridge input for ${target}`, cause),
+            ),
+          );
+          if (!(yield* Queue.offer(streams.input, encoder.encode(`${encoded}\n`))))
             return yield* failure(
               operation,
               "The OpenCode bridge's input is closed",
               new Error("closed"),
             );
-        });
-      return yield* pending.send({
+        }),
+      timedOut: (timeout) =>
+        failure(
+          operation,
+          `OpenCode didn't answer ${target} within ${timeout}`,
+          new Error("request timed out"),
+        ),
+    });
+
+  const request: BridgeClient["request"] = Effect.fn("OpenCodeBridge.request")(
+    function* (operation, call) {
+      yield* Effect.annotateCurrentSpan({
         operation,
-        generation: streams.generation,
-        write,
-        timedOut: (timeout) =>
-          failure(
-            operation,
-            `OpenCode didn't answer ${call.method} ${call.path} within ${timeout}`,
-            new Error("request timed out"),
-          ),
+        method: call.method,
+        path: call.path,
+        sessionId,
       });
+      return yield* send(operation, `${call.method} ${call.path}`, (id) => ({ id, ...call }));
     },
   );
+
+  const setToolEnvironment: BridgeClient["setToolEnvironment"] = Effect.fn(
+    "OpenCodeBridge.setToolEnvironment",
+  )(function* (operation, session) {
+    yield* Effect.annotateCurrentSpan({ operation, openCodeSessionId: session, sessionId });
+    return yield* send(operation, `the command environment of ${session}`, (id) => ({
+      id,
+      environment: session,
+    }));
+  });
 
   const close = Effect.gen(function* () {
     yield* Effect.annotateCurrentSpan({ sessionId });
@@ -235,6 +265,7 @@ export const bridgeClient = Effect.fn("OpenCodeBridge.client")(function* (stream
     ready: Deferred.await(ready),
     events: Stream.fromQueue(events),
     request,
+    setToolEnvironment,
     close,
   } satisfies BridgeClient;
 });

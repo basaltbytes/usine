@@ -9,14 +9,14 @@ import { Capability, CapabilityProfile } from "../../src/harness/capability.ts";
 import { catalog } from "../../src/harness/catalog.ts";
 import { HarnessCatalog, HarnessDescriptor } from "../../src/harness/harness.ts";
 import { RolePlacements, RoleSpec } from "../../src/harness/role.ts";
-import { fixtureFile, type Provider } from "../replay/fixture.ts";
+import { fixtureFile, type Provider, type RecordedHarness } from "../replay/fixture.ts";
 import { Scenario } from "../replay/transcript.ts";
 import { capabilityProofs, type Proof, replayedScenarios } from "./capabilities.ts";
 
 const packageFile = (file: string) => fileURLToPath(new URL(`../../${file}`, import.meta.url));
 const isScenario = Schema.is(Scenario);
 const isCapability = Schema.is(Capability);
-const isRecordedHarness = Schema.is(Schema.Literals(["claude", "codex", "pi"]));
+const isRecordedHarness = Schema.is(Schema.Literals(["claude", "codex", "pi", "opencode"]));
 
 /** Why `descriptor` declares a capability that the contract suite doesn't prove for it. */
 const unproven = (descriptor: HarnessDescriptor) =>
@@ -24,7 +24,7 @@ const unproven = (descriptor: HarnessDescriptor) =>
     const fs = yield* FileSystem.FileSystem;
     const problems: Array<string> = [];
     const declared = new Set(descriptor.capabilities.flatMap(({ supported }) => supported));
-    const harness: Option.Option<Provider> = isRecordedHarness(descriptor.id)
+    const harness: Option.Option<RecordedHarness> = isRecordedHarness(descriptor.id)
       ? Option.some(descriptor.id)
       : Option.none();
     for (const capability of declared) {

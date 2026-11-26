@@ -54,7 +54,7 @@ A loop belongs to a project and defines a trigger and the agent run to start for
 
 ## Agent
 
-An agent is an instance-level definition of standing instructions and a brain spec: its harness, model, and reasoning effort. Multiple loops can reference the same agent. The harness is the coding-agent CLI, such as Claude Code, Codex, or Pi. [Write an agent](/guides/write-an-agent/).
+An agent is an instance-level definition of standing instructions and a brain spec: its harness, model, and reasoning effort. Multiple loops can reference the same agent. The harness is the coding-agent CLI, such as Claude Code, Codex, OpenCode, or Pi. [Write an agent](/guides/write-an-agent/).
 
 ## Run
 

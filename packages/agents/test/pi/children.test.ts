@@ -280,7 +280,15 @@ describe("harness runtime registration", () => {
         Effect.gen(function* () {
           const dispatcher = yield* ChildBackend;
           for (const harness of extended.ids) {
-            const child = request(harness);
+            // OpenCode runs only on an API key.
+            const keyed = harness === "opencode";
+            const base = request(harness);
+            const child = keyed
+              ? ChildRequest.make({
+                  ...base,
+                  environment: { ...base.environment, OPENAI_API_KEY: "test-key" },
+                })
+              : base;
             const running = yield* dispatcher.launch(child);
             assert.strictEqual((yield* running.result).message, harness);
             const readiness = yield* preflight(
@@ -291,7 +299,7 @@ describe("harness runtime registration", () => {
                 worker: child.worker,
                 machine: child.machine,
                 placement: "local",
-                credential: "host-login",
+                credential: keyed ? "api-key" : "host-login",
               }),
             );
             assert.strictEqual(readiness._tag, "HarnessReady");

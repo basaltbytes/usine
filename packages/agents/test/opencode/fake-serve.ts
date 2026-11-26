@@ -108,6 +108,16 @@ const routes = new Map<string, Route>(
         }),
       );
     },
+    // The variables that the tests set to tell serve's environment from the bridge's.
+    "GET /api/environment": (_request, response) =>
+      json(response, 200, {
+        shared: process.env.FAKE_SHARED ?? null,
+        serveOnly: process.env.FAKE_SERVE_ONLY ?? null,
+        prefixed: Object.keys(process.env).some((name) => name.startsWith("USINE_OPENCODE_SERVE_")),
+      }),
+    "PUT /api/session/ses_fake/environment": (request, response) => {
+      readBody(request, (body) => json(response, 200, JSON.parse(body)));
+    },
     "GET /api/empty": (_request, response) => {
       response.writeHead(204);
       response.end();

@@ -7,6 +7,7 @@ import { claudeSdkLive } from "./claude/sdk.ts";
 import { claudeRuntime } from "./claude/claude.ts";
 import { codexAppServerLive } from "./codex/app-server.ts";
 import { codexRuntime } from "./codex/codex.ts";
+import { openCodeRuntime, openCodeServerLive } from "./opencode/opencode.ts";
 import { piSdkLive } from "./pi/sdk.ts";
 import { piRuntime } from "./pi/pi.ts";
 import { Harnesses } from "./registry.ts";
@@ -21,12 +22,12 @@ const harnessesFor = (
   configure: (runtimes: ReadonlyArray<HarnessRuntime>) => ReadonlyArray<HarnessRuntime>,
 ) =>
   Layer.unwrap(
-    Effect.map(Effect.all([claudeRuntime, codexRuntime, piRuntime]), (runtimes) =>
+    Effect.map(Effect.all([claudeRuntime, codexRuntime, piRuntime, openCodeRuntime]), (runtimes) =>
       Harnesses.layerFrom(source, configure(runtimes)),
     ),
   ).pipe(Layer.provide(NodeCrypto.layer));
 
-const sdkLive = Layer.mergeAll(claudeSdkLive, codexAppServerLive, piSdkLive);
+const sdkLive = Layer.mergeAll(claudeSdkLive, codexAppServerLive, piSdkLive, openCodeServerLive);
 
 /** Registers every catalog descriptor with its runtime using supplied SDK services. */
 export const harnessesLayer = harnessesFor(catalog, (runtimes) => runtimes);

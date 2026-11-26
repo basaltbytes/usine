@@ -828,6 +828,14 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
   if (Option.isSome(restored.idle)) yield* finish(restored.idle.value);
   else if (restored.paused) yield* finish("Session paused before restart");
 
+  /** Returns `message`, or waits for the background work that the latest snapshot lists. */
+  const answer = (message: string) =>
+    Effect.flatMap(Ref.get(state), ({ background }) =>
+      Option.exists(background, Arr.isReadonlyArrayNonEmpty)
+        ? awaitBackgroundWork(message)
+        : finish(message),
+    );
+
   return {
     /**
      * Returns `message`, the answer of the session's last turn, or keeps it as the idle report
@@ -835,13 +843,22 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
      * first waits for that work, up to the configured limit: until the work starts a turn, or until
      * a snapshot lists none and no turn starts within `BACKGROUND_TURN_GRACE`.
      */
-    finish: (message: string) =>
+    finish: (message: string) => mutex.withPermits(1)(answer(message)),
+    /**
+     * Returns `message` as `finish` does, unless `unread` counts input that the harness hasn't
+     * read. `unread` runs under the conversation's lock, so it counts an operator message that was
+     * being sent. That input starts another turn, whose answer the session returns instead.
+     */
+    finishUnlessUnread: (message: string, unread: Effect.Effect<number>) =>
       mutex.withPermits(1)(
-        Effect.flatMap(Ref.get(state), ({ background }) =>
-          Option.exists(background, Arr.isReadonlyArrayNonEmpty)
-            ? awaitBackgroundWork(message)
-            : finish(message),
-        ),
+        Effect.gen(function* () {
+          const count = yield* unread;
+          if (count === 0) return yield* answer(message);
+          yield* Effect.logInfo(
+            "Session answered with input that its harness hasn't read; waiting for the turn that the input starts",
+            { sessionId: session.id, unread: count },
+          );
+        }),
       ),
     /**
      * Records a snapshot of the session's background work that replaces the previous one: every

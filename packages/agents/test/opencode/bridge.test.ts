@@ -17,8 +17,8 @@ import { startChildProcess } from "../../src/child-host/node.ts";
 import { OPENCODE_BRIDGE } from "../../src/harness/opencode/bridge/bundle.js";
 import { bridgeClient, bridgeCommand } from "../../src/harness/opencode/bridge/client.ts";
 import {
+  type BridgeInput,
   BridgeOutput,
-  type BridgeRequest,
   OpenCodePath,
 } from "../../src/harness/opencode/bridge/lines.ts";
 
@@ -102,7 +102,7 @@ const start = (
     child.on("close", resolve);
     child.on("error", reject);
   });
-  const send = (request: typeof BridgeRequest.Encoded) =>
+  const send = (request: typeof BridgeInput.Encoded) =>
     child.stdin.write(`${JSON.stringify(request)}\n`);
   return { child, lines, stderr: () => stderr, exit, send };
 };
@@ -164,6 +164,35 @@ describe("OpenCode bridge", () => {
     expect(answerTo(bridge.lines, 5)).toEqual({ id: 5, status: 404, body: null });
     // A line before serve's ready line is a diagnostic.
     expect(bridge.stderr()).toContain("a line before the ready line");
+  });
+
+  it("sets serve-only variables on serve, and its own environment on a session's commands", async () => {
+    const bridge = start("ready", {
+      FAKE_SHARED: "worker",
+      FAKE_SERVE_ONLY: "worker",
+      USINE_OPENCODE_SERVE_FAKE_SERVE_ONLY: "serve",
+    });
+    await eventually(() => bridge.lines.length >= 2);
+    bridge.send({ id: 1, method: "GET", path: "/api/environment" });
+    bridge.send({ id: 2, environment: "ses_fake" });
+    bridge.send({ id: 3, environment: "../api/flood" });
+    await eventually(() => [1, 2, 3].every((id) => answerTo(bridge.lines, id)));
+    expect(answerTo(bridge.lines, 1)).toEqual({
+      id: 1,
+      status: 200,
+      body: { shared: "worker", serveOnly: "serve", prefixed: false },
+    });
+    const commands = answerTo(bridge.lines, 2);
+    expect(commands).toMatchObject({
+      id: 2,
+      status: 200,
+      body: { variables: { FAKE_SHARED: "worker", FAKE_SERVE_ONLY: "worker" } },
+    });
+    expect(JSON.stringify(commands)).not.toMatch(/PASSWORD|USINE_OPENCODE_SERVE_/u);
+    expect(answerTo(bridge.lines, 3)).toEqual({
+      id: 3,
+      error: "The request names no OpenCode session",
+    });
   });
 
   it("waits through a slow start and answers requests sent before it was ready", async () => {

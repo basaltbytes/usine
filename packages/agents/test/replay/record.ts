@@ -7,14 +7,39 @@ import {
   openPiFixture,
   piScenarios,
   type Provider,
+  type RecordedHarness,
   recordingModel,
   scenarios,
 } from "./fixture.ts";
+import { openCodeScenarios, openOpenCodeFixture } from "./opencode.ts";
 import { runScenario } from "./scenarios.ts";
 import { runToolScenario, toolProviders, toolScenariosOf } from "../contract/host-tools.ts";
 import { runSupervisorScenario, supervisorProviders } from "../contract/supervisor.ts";
 
-export const recordContracts = (provider: Provider): void => {
+export const recordContracts = (harness: RecordedHarness): void => {
+  if (harness === "opencode") {
+    for (const scenario of openCodeScenarios)
+      it.live.skipIf(recordingModel(harness) === undefined)(
+        `records ${harness}: ${scenario}`,
+        () =>
+          Effect.scoped(
+            Effect.gen(function* () {
+              const fixture = yield* openOpenCodeFixture(scenario, "record");
+              yield* runScenario(scenario, fixture.request, fixture.controls).pipe(
+                Effect.provide(fixture.backend),
+                fixture.tape.guard,
+              );
+              yield* fixture.save;
+            }),
+          ).pipe(Effect.provide(NodeServices.layer)),
+        240_000,
+      );
+    return;
+  }
+  recordProvider(harness);
+};
+
+const recordProvider = (provider: Provider): void => {
   for (const scenario of provider === "pi" ? piScenarios : scenarios)
     it.live.skipIf(recordingModel(provider) === undefined)(
       `records ${provider}: ${scenario}`,

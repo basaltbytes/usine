@@ -209,7 +209,7 @@ A named definition of standing instructions and a brain spec (harness, model, re
 _Avoid_: profile, bot, teammate, persona
 
 **Harness**:
-The CLI or SDK that runs an agent session: Claude Code, Codex, or Pi. An agent's brain spec names it.
+The CLI or SDK that runs an agent session: Claude Code, Codex, OpenCode, or Pi. An agent's brain spec names it.
 _Avoid_: backend, adapter, runner, agent
 
 **Role**:

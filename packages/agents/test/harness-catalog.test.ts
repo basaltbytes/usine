@@ -12,6 +12,7 @@ import {
 import { Option, Schema } from "effect";
 import {
   apiKeys,
+  CapabilityProfile,
   catalog,
   HarnessCatalog,
   HarnessCredential,
@@ -20,7 +21,7 @@ import {
   WorkerRequirements,
   workerImageInputs,
 } from "../src/harness/catalog.ts";
-import { codex } from "../src/harness/codex/descriptor.ts";
+import { CODEX_CLI_VERSION, codex } from "../src/harness/codex/descriptor.ts";
 import { pi } from "../src/harness/pi/descriptor.ts";
 // Generated image inputs are checked against the source descriptors.
 // @effect-diagnostics-next-line nodeBuiltinImport:off
@@ -126,18 +127,46 @@ describe("harness catalog", () => {
         ],
       }),
     });
-    const inputs = workerImageInputs(catalog);
-    assert.deepStrictEqual(workerImageInputs(HarnessCatalog.make({ descriptors: [pi] })), {
+    const inputs = workerImageInputs(catalog, "orchestrator");
+    assert.deepStrictEqual(workerImageInputs(HarnessCatalog.make({ descriptors: [pi] }), "local"), {
       npmPackages: [],
+      launcherPackages: [],
       tag: "",
     });
     assert.deepStrictEqual(
-      workerImageInputs(HarnessCatalog.make({ descriptors: [...catalog.descriptors, added] })),
+      workerImageInputs(
+        HarnessCatalog.make({ descriptors: [...catalog.descriptors, added] }),
+        "orchestrator",
+      ),
       {
         npmPackages: [...inputs.npmPackages, "new-harness@1.2.3", "its-helper@4.5.6"],
+        launcherPackages: [],
         tag: `${inputs.tag}-new-harness-1.2.3-4.5.6`,
       },
     );
+  });
+
+  it("installs a launcher into its own prefix only where its harness runs", () => {
+    const launcher = HarnessDescriptor.make({
+      ...pi,
+      id: Harness.make("launched"),
+      capabilities: [CapabilityProfile.make({ ...pi.capabilities[0], placements: ["container"] })],
+      worker: WorkerRequirements.make({
+        ...pi.worker,
+        install: [{ name: "launched", version: "1.0.0", method: "launcher" }],
+      }),
+    });
+    const source = HarnessCatalog.make({ descriptors: [codex, launcher] });
+    assert.deepStrictEqual(workerImageInputs(source, "container"), {
+      npmPackages: [`@openai/codex@${CODEX_CLI_VERSION}`],
+      launcherPackages: ["launched@1.0.0"],
+      tag: `codex-${CODEX_CLI_VERSION}-launched-1.0.0`,
+    });
+    assert.deepStrictEqual(workerImageInputs(source, "sandbox"), {
+      npmPackages: [`@openai/codex@${CODEX_CLI_VERSION}`],
+      launcherPackages: [],
+      tag: `codex-${CODEX_CLI_VERSION}`,
+    });
   });
 
   it("rejects credential file recipes without an attempt home and unsupported Cloudflare files", () => {
@@ -227,18 +256,43 @@ describe("harness catalog", () => {
   it("generates both Dockerfiles, cloud-init, and the published image tag from the descriptors", () => {
     const read = (path: string) =>
       readFileSync(new URL(`../../../${path}`, import.meta.url), "utf8");
-    const inputs = workerImageInputs(catalog);
-    for (const file of ["infra/worker-image/Dockerfile", "packages/cloudflare/image/Dockerfile"]) {
+    for (const [file, placement] of [
+      ["infra/worker-image/Dockerfile", "container"],
+      ["packages/cloudflare/image/Dockerfile", "sandbox"],
+    ] as const) {
+      const inputs = workerImageInputs(catalog, placement);
       const dockerfile = read(file);
       assert.include(dockerfile, `ARG HARNESS_PACKAGES="${inputs.npmPackages.join(" ")}"`);
       assert.match(dockerfile, /^RUN npm install -g .*\$\{HARNESS_PACKAGES\}/mu);
+      if (inputs.launcherPackages.length === 0)
+        assert.notInclude(dockerfile, "ARG HARNESS_LAUNCHERS=");
+      else {
+        assert.include(dockerfile, `ARG HARNESS_LAUNCHERS="${inputs.launcherPackages.join(" ")}"`);
+        // A global install would get every optional platform package of a launcher.
+        assert.match(
+          dockerfile,
+          /^\s+npm install --prefix (\S+) --omit=optional \$\{HARNESS_LAUNCHERS\} \\$/mu,
+        );
+        assert.notMatch(dockerfile, /npm install -g[^\n]*HARNESS_LAUNCHERS/u);
+      }
     }
+    // The sandbox image runs no harness without a sandbox placement.
+    assert.notInclude(read("packages/cloudflare/image/Dockerfile"), "@opencode/cli");
+    const ssh = workerImageInputs(catalog, "ssh");
     const cloudInit = read("infra/hetzner/cloud-init.yaml");
     assert.match(cloudInit, /^\s+npm install -g pnpm@\S+ /mu);
     assert.strictEqual(
       /^\s+npm install -g pnpm@\S+ (.*)$/mu.exec(cloudInit)?.[1],
-      inputs.npmPackages.join(" "),
+      ssh.npmPackages.join(" "),
     );
-    assert.strictEqual(read("infra/worker-image/tag.txt"), `${inputs.tag}\n`);
+    assert.strictEqual(
+      /^\s+launchers="(.*)"$/mu.exec(cloudInit)?.[1],
+      ssh.launcherPackages.join(" "),
+    );
+    assert.match(cloudInit, /^\s+npm install --prefix (\S+) --omit=optional \$launchers$/mu);
+    assert.strictEqual(
+      read("infra/worker-image/tag.txt"),
+      `${workerImageInputs(catalog, "container").tag}\n`,
+    );
   });
 });
