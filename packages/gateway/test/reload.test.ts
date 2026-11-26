@@ -1,4 +1,13 @@
-import { modelProviders } from "@usine/core/agent/provider";
+import {
+  anthropic,
+  ApiKeyCredential,
+  GatewaySlot,
+  GatewayVariable,
+  ModelProvider,
+  ModelProviderCatalog,
+  ModelProviderId,
+  modelProviders,
+} from "@usine/core/agent/provider";
 import { jsonKey } from "@usine/core/json-key";
 // The Node server adapter requires native HTTP server and connection types.
 // @effect-diagnostics-next-line nodeBuiltinImport:off
@@ -26,6 +35,7 @@ import { FetchHttpClient, HttpClient, HttpClientRequest, HttpServerError } from 
 import { HttpApiClient } from "effect/http-api";
 import { AttachRequest, GatewayAdminApi, LlmProviderList } from "../src/admin/api.ts";
 import { AnonymousCredential } from "../src/attachment/attachment.ts";
+import { ApiKey, LlmProvider } from "../src/llm/llm.ts";
 import {
   EgressProxyListenError,
   GatewayAddresses,
@@ -352,7 +362,7 @@ describe("reloading the gateway", () => {
   );
 
   it.live(
-    "the provider report lists every slot with its routes, in a shape that orchestrators from before the catalog read",
+    "the provider report lists every slot with its routes and credential, in a shape that orchestrators from before the catalog read",
     () =>
       withGateway(["registry.npmjs.org"], () =>
         Effect.gen(function* () {
@@ -365,6 +375,37 @@ describe("reloading the gateway", () => {
           const encoded = yield* Schema.encodeEffect(LlmProviderList)(report);
           assert.deepStrictEqual(
             Schema.decodeUnknownOption(ReportBeforeCatalog)(encoded),
+            Option.some({ providers: [{ provider: "anthropic-messages", credential: "api-key" }] }),
+          );
+
+          const plan = ModelProvider.make({
+            ...anthropic,
+            id: ModelProviderId.make("test-plan"),
+            slot: GatewaySlot.make("test-plan"),
+            credentials: [
+              ApiKeyCredential.make({ variable: GatewayVariable.make("TEST_PLAN_API_KEY") }),
+            ],
+            upstreamVariable: Option.none(),
+          });
+          const keyed = LlmProvider.make({
+            upstream: Option.none(),
+            credential: ApiKey.make({ key: Redacted.make(FIRST_KEY) }),
+          });
+          const withPlan = LlmProviderList.fromProviders(
+            ModelProviderCatalog.make({ providers: [...modelProviders.providers, plan] }),
+            { [anthropic.slot]: keyed, [plan.slot]: keyed },
+          );
+          assert.deepStrictEqual(
+            withPlan.slots?.map(({ slot, credential }) => [slot, credential]),
+            [
+              ["anthropic-messages", "api-key"],
+              ["openai-responses", undefined],
+              ["test-plan", "api-key"],
+            ],
+          );
+          const encodedWithPlan = yield* Schema.encodeEffect(LlmProviderList)(withPlan);
+          assert.deepStrictEqual(
+            Schema.decodeUnknownOption(ReportBeforeCatalog)(encodedWithPlan),
             Option.some({ providers: [{ provider: "anthropic-messages", credential: "api-key" }] }),
           );
         }),

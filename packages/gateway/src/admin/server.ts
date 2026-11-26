@@ -132,8 +132,10 @@ const llmHandlers = HttpApiBuilder.group(GatewayAdminApi, "llm", (routes) =>
         const { providers } = yield* (yield* SettingsInForce).current;
         const list = LlmProviderList.fromProviders(catalog, providers);
         yield* Effect.annotateCurrentSpan({
-          providers: list.providers
-            .map(({ provider, credential }) => `${provider}:${credential}`)
+          providers: (list.slots ?? [])
+            .flatMap(({ slot, credential }) =>
+              credential === undefined ? [] : [`${slot}:${credential}`],
+            )
             .join(","),
         });
         return list;

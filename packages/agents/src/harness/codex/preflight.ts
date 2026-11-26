@@ -10,7 +10,7 @@ import { WorkingDirectory } from "../../runtime.ts";
 import { CodexAppServer, codexConfigArgs } from "./app-server.ts";
 import { initializeCodex, verifyCodexAccount } from "./account.ts";
 import { codex } from "./descriptor.ts";
-/** The accepted Codex CLI versions, with the protocol baseline first. */
+/** The accepted Codex CLI versions, with the installed release first and the protocol baseline second. */
 export const supportedCodexVersions = codex.worker.versions;
 
 /** Returns the error for `codex --version` output that names no supported Codex CLI version. */

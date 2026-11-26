@@ -4,9 +4,11 @@ import {
   ProviderConnections,
 } from "../credentials/model.ts";
 import {
+  anthropic,
   GatewaySlot,
   type ModelProviderCatalog,
   modelProviders,
+  openai,
   RoutePattern,
 } from "@usine/core/agent/provider";
 import { RepositoryName } from "@usine/core/repository";
@@ -120,7 +122,7 @@ export class LlmProviderSummary extends Schema.Class<
   credential: GatewayCredentialKind,
 }) {}
 
-/** A provider slot that the gateway serves, with or without a credential, and its routes. */
+/** A provider slot that the gateway serves, with its routes and the kind of its credential, if any. */
 export class ServedSlot extends Schema.Class<
   ServedSlot,
   Brand.Brand<"@usine/gateway/admin/api/ServedSlot">
@@ -128,31 +130,48 @@ export class ServedSlot extends Schema.Class<
   slot: GatewaySlot,
   /** The paths under the slot that the gateway forwards, in the provider's protocol order. */
   routes: Schema.Array(RoutePattern),
+  /** Whether requests use an API key or a subscription credential; absent without a credential. */
+  credential: Schema.optionalKey(GatewayCredentialKind),
 }) {}
 
 /**
- * The LLM providers the gateway forwards to, with each credential kind, and every slot that its
- * provider catalog has. Providers without a credential aren't in `providers`.
+ * The slots that orchestrators from before the provider catalog decode in a report's `providers`;
+ * any other slot there fails their whole read.
+ */
+const SLOTS_BEFORE_CATALOG: ReadonlyArray<GatewaySlot> = [anthropic.slot, openai.slot];
+
+/**
+ * The LLM providers the gateway forwards to, and every slot that its provider catalog has. Each
+ * slot that holds a credential has its kind in `slots`, and also in `providers` when orchestrators
+ * from before the catalog decode the slot.
  */
 export class LlmProviderList extends Schema.Class<
   LlmProviderList,
   Brand.Brand<"@usine/gateway/admin/api/LlmProviderList">
 >("@usine/gateway/LlmProviderList")({
-  /** Configured providers and credential kinds, excluding providers with no credential. */
+  /**
+   * The credential kinds of the slots that orchestrators from before the provider catalog decode,
+   * excluding slots with no credential.
+   */
   providers: Schema.Array(LlmProviderSummary),
   /** Every slot the gateway serves, in catalog order. Gateways from before the provider catalog omit it. */
   slots: Schema.optionalKey(Schema.Array(ServedSlot)),
 }) {
-  /** Lists configured providers in catalog order, exposing only their credential kinds, and every slot of `catalog`. */
+  /** Lists every slot of `catalog` in catalog order, exposing only the credential kinds of `providers`. */
   static fromProviders(catalog: ModelProviderCatalog, providers: LlmProviders): LlmProviderList {
+    const slots = catalog.providers.map(({ slot, routes }) => {
+      const held = providers[slot];
+      return ServedSlot.make(
+        held === undefined ? { slot, routes } : { slot, routes, credential: credentialKind(held) },
+      );
+    });
     return LlmProviderList.make({
-      providers: catalog.providers.flatMap(({ slot }) => {
-        const held = providers[slot];
-        return held === undefined
+      providers: slots.flatMap(({ slot, credential }) =>
+        credential === undefined || !SLOTS_BEFORE_CATALOG.includes(slot)
           ? []
-          : [LlmProviderSummary.make({ provider: slot, credential: credentialKind(held) })];
-      }),
-      slots: catalog.providers.map(({ slot, routes }) => ServedSlot.make({ slot, routes })),
+          : [LlmProviderSummary.make({ provider: slot, credential })],
+      ),
+      slots,
     });
   }
 }

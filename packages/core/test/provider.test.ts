@@ -5,6 +5,8 @@ import {
   ApiKeyCredential,
   GatewaySlot,
   GatewayVariable,
+  HeaderName,
+  KeyHeader,
   ModelProvider,
   ModelProviderCatalog,
   ModelProviderId,
@@ -12,15 +14,35 @@ import {
   openai,
   ProviderProtocol,
   RoutePattern,
-  routeServes,
+  UpstreamBase,
+  WireProtocol,
 } from "../src/agent/provider/catalog.ts";
+
+/** Returns the protocol of the test plan that serves `route` and `others`. */
+const serving = (protocol: string, route: string, ...others: ReadonlyArray<string>) =>
+  ProviderProtocol.make({
+    protocol: WireProtocol.make(protocol),
+    upstream: UpstreamBase.make("https://plan.test"),
+    routes: [RoutePattern.make(route), ...others.map((other) => RoutePattern.make(other))],
+    key: KeyHeader.make({ header: HeaderName.make("x-api-key"), scheme: "none" }),
+  });
+
+/** A provider that only these tests define, which serves `protocols` with one key. */
+const plan = (...protocols: ReadonlyArray<ProviderProtocol>) =>
+  ModelProvider.makeOption({
+    id: ModelProviderId.make("test-plan"),
+    slot: GatewaySlot.make("test-plan"),
+    label: "Test plan",
+    protocols: [protocols[0] ?? serving("plan-messages", "/v1/messages"), ...protocols.slice(1)],
+    credentials: [ApiKeyCredential.make({ variable: GatewayVariable.make("TEST_PLAN_API_KEY") })],
+  });
 
 describe("model providers", () => {
   it("matches a placeholder to one plain segment, and no dot, empty, or encoded segment", () => {
-    const model = RoutePattern.make("/v1/models/{model}");
-    const stream = RoutePattern.make("/v1beta/models/{model}:streamGenerateContent");
-    assert.isTrue(routeServes(model, "/v1/models/claude-haiku-5.5"));
-    assert.isTrue(routeServes(stream, "/v1beta/models/gemini-3:streamGenerateContent"));
+    const model = serving("plan-models", "/v1/models/{model}");
+    const stream = serving("plan-stream", "/v1beta/models/{model}:streamGenerateContent");
+    assert.isTrue(model.serves("/v1/models/claude-haiku-5.5"));
+    assert.isTrue(stream.serves("/v1beta/models/gemini-3:streamGenerateContent"));
     for (const path of [
       "/v1/models/..",
       "/v1/models/.hidden",
@@ -28,11 +50,58 @@ describe("model providers", () => {
       "/v1/models/a%2Fb",
       "/v1/models/a/b",
       "/v1/modelsX/a",
+      "v1/models/a",
     ])
-      assert.isFalse(routeServes(model, path), path);
-    assert.isFalse(routeServes(stream, "/v1beta/models/gemini-3:generateContent"));
+      assert.isFalse(model.serves(path), path);
+    assert.isFalse(stream.serves("/v1beta/models/gemini-3:generateContent"));
     assert(Option.isNone(RoutePattern.makeOption("/v1//messages")));
     assert(Option.isNone(RoutePattern.makeOption("/v1/messages/")));
+  });
+
+  it("refuses a route with a . or .. segment", () => {
+    for (const route of ["/v1/./messages", "/v1/../messages", "/v1/..", "/."])
+      assert(Option.isNone(RoutePattern.makeOption(route)), route);
+    assert(Option.isSome(RoutePattern.makeOption("/v1/.well-known/a..b")));
+  });
+
+  it("refuses two placeholders in one segment without a literal between them", () => {
+    assert(Option.isNone(RoutePattern.makeOption("/v1/{a}{b}x")));
+    assert(Option.isNone(RoutePattern.makeOption("/v1/{a}{b}{c}x")));
+    assert(Option.isSome(RoutePattern.makeOption("/v1/{a}-{b}")));
+    assert(Option.isSome(RoutePattern.makeOption("/v1/{a}/{b}")));
+  });
+
+  it("matches a long path in time linear in its length, even with placeholders a literal can end", () => {
+    const pairs = serving("plan-pairs", "/v1/{a}-{b}-{c}x", "/v1/{a}.{b}");
+    const long = `/v1/${"a-".repeat(8_000)}`;
+    const started = performance.now();
+    assert.isFalse(pairs.serves(long));
+    assert.isTrue(pairs.serves(`${long}ax`));
+    assert.isTrue(pairs.serves("/v1/a.b.c"));
+    assert.isFalse(pairs.serves("/v1/a."));
+    assert.isBelow(performance.now() - started, 2_000);
+  });
+
+  it("refuses a key in a hop-by-hop header or a header that frames the body", () => {
+    for (const header of [
+      "host",
+      "content-type",
+      "content-length",
+      "content-encoding",
+      "connection",
+      "transfer-encoding",
+      "te",
+      "upgrade",
+    ])
+      assert(
+        Option.isNone(KeyHeader.makeOption({ header: HeaderName.make(header), scheme: "none" })),
+        header,
+      );
+    assert(
+      Option.isSome(
+        KeyHeader.makeOption({ header: HeaderName.make("x-goog-api-key"), scheme: "none" }),
+      ),
+    );
   });
 
   it("finds a provider by slot or by ID, and decodes either name to the slot", () => {
@@ -104,19 +173,39 @@ describe("model providers", () => {
     );
   });
 
-  it("refuses a route in two protocols and two credentials of one kind", () => {
-    const [protocol] = anthropic.protocols;
+  it("refuses two protocols of one provider whose routes can match one path", () => {
+    for (const [left, right] of [
+      ["/v1/messages", "/v1/messages"],
+      ["/v1/models/{model}", "/v1/models/gpt-5"],
+      ["/v1/{kind}/list", "/v1/models/{model}"],
+      ["/v1/{name}.json", "/v1/x{suffix}"],
+      ["/v1/{model}:count", "/v1/{a}-{b}:count"],
+    ] as const)
+      assert(
+        Option.isNone(plan(serving("plan-left", left), serving("plan-right", right))),
+        `${left} ${right}`,
+      );
+    for (const [left, right] of [
+      ["/v1/models/{model}", "/v1/models/{model}:streamGenerateContent"],
+      ["/v1/{name}", "/v1/.well-known"],
+      ["/v1/{name}", "/v1/a/b"],
+      ["/v1/{model}:count", "/v1/{model}:generate"],
+    ] as const)
+      assert(
+        Option.isSome(plan(serving("plan-left", left), serving("plan-right", right))),
+        `${left} ${right}`,
+      );
     assert(
-      Option.isNone(
-        ModelProvider.makeOption({
-          ...anthropic,
-          protocols: [
-            protocol,
-            ProviderProtocol.make({ ...protocol, protocol: openai.protocols[0].protocol }),
-          ],
-        }),
+      Option.isSome(
+        plan(
+          serving("plan-left", "/v1/models/{model}", "/v1/models/gpt-5"),
+          serving("plan-right", "/v2"),
+        ),
       ),
     );
+  });
+
+  it("refuses two credentials of one kind", () => {
     assert(
       Option.isNone(
         ModelProvider.makeOption({
@@ -130,5 +219,35 @@ describe("model providers", () => {
     );
     assert.deepStrictEqual(anthropic.kinds, ["api-key", "subscription"]);
     assert.deepStrictEqual(anthropic.hosts, ["api.anthropic.com"]);
+  });
+
+  it("refuses two providers that read one credential or upstream variable", () => {
+    const own = Option.getOrThrow(plan());
+    const reading = (changes: Partial<ModelProvider>) =>
+      ModelProviderCatalog.makeOption({
+        providers: [anthropic, ModelProvider.make({ ...own, ...changes })],
+      });
+    assert(
+      Option.isNone(
+        reading({
+          credentials: [
+            ApiKeyCredential.make({ variable: GatewayVariable.make("ANTHROPIC_API_KEY") }),
+          ],
+        }),
+      ),
+    );
+    assert(
+      Option.isNone(
+        reading({
+          upstreamVariable: Option.some(GatewayVariable.make("USINE_GATEWAY_ANTHROPIC_UPSTREAM")),
+        }),
+      ),
+    );
+    assert(Option.isSome(reading({})));
+    assert(
+      Option.isSome(
+        reading({ upstreamVariable: Option.some(GatewayVariable.make("TEST_PLAN_UPSTREAM")) }),
+      ),
+    );
   });
 });

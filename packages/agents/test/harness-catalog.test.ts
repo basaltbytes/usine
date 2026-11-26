@@ -21,7 +21,7 @@ import {
   WorkerRequirements,
   workerImageInputs,
 } from "../src/harness/catalog.ts";
-import { codex } from "../src/harness/codex/descriptor.ts";
+import { CODEX_CLI_VERSION, codex } from "../src/harness/codex/descriptor.ts";
 import { pi } from "../src/harness/pi/descriptor.ts";
 // Generated image inputs are checked against the source descriptors.
 // @effect-diagnostics-next-line nodeBuiltinImport:off
@@ -141,7 +141,7 @@ describe("harness catalog", () => {
       {
         npmPackages: [...inputs.npmPackages, "new-harness@1.2.3", "its-helper@4.5.6"],
         launcherPackages: [],
-        tag: "claude-2.1.311-codex-0.164.0-new-harness-1.2.3-4.5.6",
+        tag: `${inputs.tag}-new-harness-1.2.3-4.5.6`,
       },
     );
   });
@@ -158,14 +158,14 @@ describe("harness catalog", () => {
     });
     const source = HarnessCatalog.make({ descriptors: [codex, launcher] });
     assert.deepStrictEqual(workerImageInputs(source, "container"), {
-      npmPackages: ["@openai/codex@0.164.0"],
+      npmPackages: [`@openai/codex@${CODEX_CLI_VERSION}`],
       launcherPackages: ["launched@1.0.0"],
-      tag: "codex-0.164.0-launched-1.0.0",
+      tag: `codex-${CODEX_CLI_VERSION}-launched-1.0.0`,
     });
     assert.deepStrictEqual(workerImageInputs(source, "sandbox"), {
-      npmPackages: ["@openai/codex@0.164.0"],
+      npmPackages: [`@openai/codex@${CODEX_CLI_VERSION}`],
       launcherPackages: [],
-      tag: "codex-0.164.0",
+      tag: `codex-${CODEX_CLI_VERSION}`,
     });
   });
 

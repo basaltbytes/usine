@@ -107,6 +107,8 @@ const CodexThreadStart = Schema.Struct({
     dynamicTools: Schema.Array(Schema.Struct({ name: Schema.String, tools: ToolNames })),
   }),
 });
+const CodexInputFrame = Schema.Struct({ data: Schema.Struct({ base64: Schema.String }) });
+const decodeCodexThreadStart = Schema.decodeUnknownOption(Schema.fromJsonString(CodexThreadStart));
 
 /**
  * The tool lists that the recorded traffic shows the session offering to the model: the tools
@@ -138,17 +140,20 @@ export const listedTools = (
       Schema.is(ClaudeInit)(entry.payload)
     )
       return [entry.payload.tools];
-    if (
-      provider === "codex" &&
-      entry.type === "expect_outbound" &&
-      entry.port.endsWith("/stdin") &&
-      Schema.is(CodexThreadStart)(entry.payload)
-    )
-      return [
-        entry.payload.params.dynamicTools.flatMap((namespace) =>
+    if (provider === "codex" && entry.type === "expect_outbound" && entry.port.endsWith("/stdin")) {
+      const starts = Schema.is(CodexInputFrame)(entry.payload)
+        ? entry.payload.data.base64
+            .split("\n")
+            .flatMap((line) => Option.toArray(decodeCodexThreadStart(line)))
+        : Schema.is(CodexThreadStart)(entry.payload)
+          ? [entry.payload]
+          : [];
+      return starts.map(({ params }) =>
+        params.dynamicTools.flatMap((namespace) =>
           namespace.tools.map(({ name }) => `${namespace.name}.${name}`),
         ),
-      ];
+      );
+    }
     return [];
   });
 

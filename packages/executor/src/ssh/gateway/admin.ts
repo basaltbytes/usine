@@ -74,21 +74,31 @@ export interface GatewayAdmin {
 
 /**
  * A Gateway's provider report as any release decodes it: each provider by the name the Gateway
- * gives it, and, from the provider catalog on, the routes of every slot it serves.
+ * gives it, from the provider catalog on, the routes of every slot it serves, and later the
+ * credential kind of each slot that holds one.
  */
 const ProviderReport = Schema.Struct({
   providers: Schema.Array(
     Schema.Struct({ provider: Schema.String, credential: GatewayCredentialKind }),
   ),
   slots: Schema.optionalKey(
-    Schema.Array(Schema.Struct({ slot: Schema.String, routes: Schema.Array(Schema.String) })),
+    Schema.Array(
+      Schema.Struct({
+        slot: Schema.String,
+        routes: Schema.Array(Schema.String),
+        credential: Schema.optionalKey(GatewayCredentialKind),
+      }),
+    ),
   ),
 });
 export type ProviderReport = typeof ProviderReport.Type;
 
 /** The LLM providers a Gateway reports, by slot, the path prefixes it serves, and its slots' routes. */
 export interface ReportedProviders {
-  /** The credential kind of each slot that the Gateway holds a credential for. */
+  /**
+   * The credential kind of each slot that the Gateway holds a credential for, from `providers`
+   * and, when the Gateway reports them, from its slots.
+   */
   readonly credentials: Readonly<Record<string, GatewayCredentialKind>>;
   readonly prefixes: GatewayLlmPrefixes;
   /** The routes of each slot that the Gateway serves, or `None` if it predates the provider catalog. */
@@ -97,7 +107,8 @@ export interface ReportedProviders {
 
 /**
  * Reads `report` with the slots of `providers`: a Gateway from before slots names each provider by
- * its ID, and serves path prefixes by the same names.
+ * its ID, and serves path prefixes by the same names. A Gateway that reports each slot's credential
+ * lists in `providers` only the slots that orchestrators from before the provider catalog decode.
  */
 export const reportedProviders = (
   providers: ModelProviderCatalog,
@@ -111,8 +122,14 @@ export const reportedProviders = (
     }),
     credential,
   }));
+  const slotCredentials = (report.slots ?? []).flatMap(({ slot, credential }) =>
+    credential === undefined ? [] : [[slot, credential] as const],
+  );
   return {
-    credentials: Object.fromEntries(named.map(({ slot, credential }) => [slot, credential])),
+    credentials: Object.fromEntries([
+      ...named.map(({ slot, credential }) => [slot, credential] as const),
+      ...slotCredentials,
+    ]),
     prefixes: named.some(({ reported, slot }) => reported !== slot) ? "provider" : "slot",
     slots: Option.map(Option.fromUndefinedOr(report.slots), (slots) =>
       Object.fromEntries(slots.map(({ slot, routes }) => [slot, routes])),

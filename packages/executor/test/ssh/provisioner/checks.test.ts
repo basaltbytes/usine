@@ -384,7 +384,7 @@ for (const [provider, address, mode] of [
           const downloads = logs.infos.filter((line) => line.includes("downloading it"));
           assert.lengthOf(downloads, 1);
           assert.include(downloads[0], "The attempt image is absent on the Boat machine");
-          assert.include(downloads[0], "claude-2.1.311-codex-0.164.0");
+          assert.include(downloads[0], "claude-2.1.311-codex-0.172.0");
           assert.isEmpty(logs.warnings);
           assert.notInclude(logs.lines.join("\n"), "Rebuild the snapshot");
         } else {
@@ -392,7 +392,7 @@ for (const [provider, address, mode] of [
           assert.lengthOf(downloads, 1);
           assert.include(downloads[0], "snapshot lacks the attempt image");
           assert.include(downloads[0], "Rebuild the snapshot with this image");
-          assert.include(downloads[0], "claude-2.1.311-codex-0.164.0");
+          assert.include(downloads[0], "claude-2.1.311-codex-0.172.0");
         }
         yield* Deferred.succeed(proceed, undefined);
         const grant = yield* Fiber.join(creating);
