@@ -345,6 +345,15 @@ export const runQueries = (database: RunDatabaseClient, record?: RecordChange) =
     return (yield* decodeRunIds(rows)).map(({ runId }) => runId);
   });
 
+  const awaitingCiRuns = Effect.fn("RunStoreQueries.awaitingCiRuns")(function* () {
+    const rows = yield* database
+      .select({ runId: runs.runId })
+      .from(runs)
+      .where(sql`${storedStateTag} = 'AwaitingCi'`)
+      .execute();
+    return rows;
+  });
+
   return {
     snapshot,
     createRun,
@@ -358,5 +367,6 @@ export const runQueries = (database: RunDatabaseClient, record?: RecordChange) =
     approvalExists,
     blockingRun,
     runIdsToDrive,
+    awaitingCiRuns,
   } as const;
 };

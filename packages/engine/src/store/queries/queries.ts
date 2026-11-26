@@ -1,5 +1,7 @@
+import type { ChangeBus } from "@usine/core/changes";
+import type { Effect } from "effect";
 import type { RecordChange } from "../changes.ts";
-import { changeRecorder } from "../changes.ts";
+import { changeRecorder, changeTransaction } from "../changes.ts";
 import type { RunDatabaseClient } from "../../database/database.ts";
 import { cycleQueries } from "../../cycle-budget/queries.ts";
 import type { TranscriptCodec } from "../transcript/codec.ts";
@@ -25,3 +27,14 @@ export const queriesFor = (
   ...eventQueries(database),
   ...queueQueries(database, record),
 });
+
+export type RunQueries = ReturnType<typeof queriesFor>;
+
+/** Runs `operation` in one change transaction, on the Run store queries of that transaction. */
+export const runTransaction =
+  (database: RunDatabaseClient, bus: typeof ChangeBus.Service, codec: TranscriptCodec["Service"]) =>
+  <A, E, R>(operation: (tx: RunQueries) => Effect.Effect<A, E, R>) =>
+    changeTransaction(
+      database,
+      bus,
+    )((transaction, record) => operation(queriesFor(transaction, codec, record)));
