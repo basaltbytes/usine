@@ -351,7 +351,7 @@ export const runQueries = (database: RunDatabaseClient, record?: RecordChange) =
       .from(runs)
       .where(sql`${storedStateTag} = 'AwaitingCi'`)
       .execute();
-    return yield* decodeRunIds(rows);
+    return rows;
   });
 
   return {
