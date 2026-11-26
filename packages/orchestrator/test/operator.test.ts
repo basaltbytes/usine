@@ -148,7 +148,7 @@ import { PoolLimitNeed } from "../src/operator/need.ts";
 import { boardTaskRuns, CallScopeTarget, Operator } from "../src/operator/operator.ts";
 import { jsonBytes, PAGE_BYTES } from "../src/operator/page.ts";
 import type { RunTextPageView, RunTranscriptPageView } from "../src/operator/run-pages.ts";
-import { ReadyOverview } from "../src/operator/overview.ts";
+import { ReadyOverview } from "../src/operator/overview/view.ts";
 import {
   ApprovalView,
   EditAndRetry,

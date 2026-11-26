@@ -1,7 +1,7 @@
 import { assert, it } from "@effect/vitest";
 import { WorkerName } from "@usine/core/worker";
 import { Effect, Option } from "effect";
-import { ReadyOverview } from "../src/operator/overview.ts";
+import { ReadyOverview } from "../src/operator/overview/view.ts";
 import { workerAttentionFor } from "../src/operator/worker-attention.ts";
 import { unchecked } from "../src/worker-status.ts";
 

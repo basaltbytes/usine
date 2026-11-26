@@ -3,10 +3,10 @@ import { AgentName } from "@usine/core/agent";
 import { LoopName } from "@usine/core/loop";
 import { RepositoryName } from "@usine/core/repository";
 import { type Brand, Effect, Schema } from "effect";
-import { LabelPreflightFinding } from "../label-reconciler.ts";
-import { RunSummaryView } from "./run.ts";
-import { BoardItemLink, BoardView, LabelView } from "./board.ts";
-import { NeedView } from "./need.ts";
+import { LabelPreflightFinding } from "../../label-reconciler.ts";
+import { RunSummaryView } from "../run.ts";
+import { BoardItemLink, BoardView, LabelView } from "../board.ts";
+import { NeedView } from "../need.ts";
 
 /** Item identities used by navigation, notifications, and run headings. */
 export class TaskIdentityView extends Schema.Class<

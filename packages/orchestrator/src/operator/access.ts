@@ -17,7 +17,7 @@ import { UsineConfig } from "@usine/config/factory";
 import { Effect, Option, Schema } from "effect";
 import type { ConfigurationEntityKey } from "@usine/config/configuration";
 import { needRepositories } from "./attention.ts";
-import { ReadyOverview } from "./overview.ts";
+import { ReadyOverview } from "./overview/view.ts";
 import type { NeedView } from "./need.ts";
 
 export const loopScope = (loop: string) => {

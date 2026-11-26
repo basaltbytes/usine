@@ -4,7 +4,7 @@ import { DateTime, Effect } from "effect";
 import type { WebhookHealth } from "../webhooks.ts";
 import { partitionNeeds } from "./attention.ts";
 import { WebhookSilenceNeed } from "./need.ts";
-import { ReadyOverview } from "./overview.ts";
+import { ReadyOverview } from "./overview/view.ts";
 
 export const webhookAttentionFor = (
   health: WebhookHealth["Service"],

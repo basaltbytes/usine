@@ -2,7 +2,7 @@ import { ChangeBus, changeBusLayer, type CommittedChanges } from "@usine/core/ch
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { MachineQuotaWait, quotaWaits } from "../src/operator/machines.ts";
 import { workerAttentionFor } from "../src/operator/worker-attention.ts";
-import { ReadyOverview } from "../src/operator/overview.ts";
+import { ReadyOverview } from "../src/operator/overview/view.ts";
 import { assert, describe, it } from "@effect/vitest";
 import { LoadedInstance } from "@usine/config/instance";
 import { CurrentInstance, type WorkerReload } from "../src/current-instance/current-instance.ts";
