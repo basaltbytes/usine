@@ -127,7 +127,7 @@ describe("harness catalog", () => {
         ],
       }),
     });
-    const inputs = workerImageInputs(catalog, "container");
+    const inputs = workerImageInputs(catalog, "orchestrator");
     assert.deepStrictEqual(workerImageInputs(HarnessCatalog.make({ descriptors: [pi] }), "local"), {
       npmPackages: [],
       launcherPackages: [],
