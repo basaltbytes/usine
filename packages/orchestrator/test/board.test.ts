@@ -1,7 +1,7 @@
 import { catalog } from "@usine/agents/harness";
 import { jsonKey } from "@usine/core/json-key";
 import { boardRunSummary } from "../src/operator/operator.ts";
-import { ProjectView } from "../src/operator/overview.ts";
+import { ProjectView } from "../src/operator/overview/view.ts";
 import { groupProjectViews } from "../src/operator/projects.ts";
 import { boardRepositories } from "@usine/config/project";
 import { assert, describe, it } from "@effect/vitest";

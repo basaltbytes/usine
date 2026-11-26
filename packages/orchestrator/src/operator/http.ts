@@ -12,7 +12,7 @@ import {
 export { ChangeNotice, ChangeTarget } from "./changes.ts";
 import { WorkerPreflightView } from "./preflight.ts";
 import { ProjectId } from "@usine/core/project";
-import { ProjectView } from "./overview.ts";
+import { ProjectView } from "./overview/view.ts";
 import {
   LoopDraft,
   LoopCheck,
@@ -91,7 +91,7 @@ import {
   EarlierTranscriptRequest,
   TailTranscriptRequest,
 } from "./transcript.ts";
-import { FactoryOverview } from "./overview.ts";
+import { FactoryOverview } from "./overview/view.ts";
 import { RunDetailView, EditAndRetry, SessionIntervention } from "./run.ts";
 import { RunBriefView, RunTextPageView, RunTextPart, RunTranscriptPageView } from "./run-pages.ts";
 import { RunGitHubChangesView } from "./github-changes.ts";

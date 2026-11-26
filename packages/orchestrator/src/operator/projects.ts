@@ -1,6 +1,6 @@
 import type { UsineConfig } from "@usine/config/factory";
 import { BoardView, ReadOnlyBoardLaneView, WritableBoardLaneView } from "./board.ts";
-import { ProjectView } from "./overview.ts";
+import { ProjectView } from "./overview/view.ts";
 
 export const groupProjectViews = (
   config: UsineConfig,

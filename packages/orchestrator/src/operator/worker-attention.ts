@@ -14,7 +14,7 @@ import {
   WorkerPreflightNeed,
   WorkerQuotaNeed,
 } from "./need.ts";
-import { ReadyOverview } from "./overview.ts";
+import { ReadyOverview } from "./overview/view.ts";
 import type { WorkerStatus } from "../worker-status.ts";
 import type { AttemptSummaryView } from "./attempt.ts";
 import type { RunSummaryView } from "./run.ts";

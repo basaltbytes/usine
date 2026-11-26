@@ -2,7 +2,7 @@ import type { UpgradeDrain } from "@usine/engine/engine";
 import type { AttentionAcknowledgements } from "@usine/engine/attention";
 import { partitionNeeds } from "./attention.ts";
 import { UpgradeDrainNeed } from "./need.ts";
-import { ReadyOverview } from "./overview.ts";
+import { ReadyOverview } from "./overview/view.ts";
 import {
   ReleaseVersion,
   UpgradeChannel,

@@ -155,7 +155,7 @@ import {
   transcriptPageBytes,
 } from "./run-pages.ts";
 import { fillText } from "./page.ts";
-import { LoopView, ProjectView, ReadyOverview } from "./overview.ts";
+import { LoopView, ProjectView, ReadyOverview } from "./overview/view.ts";
 import {
   RunDetailView,
   type RunSummaryView,
@@ -1948,7 +1948,7 @@ export {
   ReadyOverview,
   NeedsSetupOverview,
   FactoryOverview,
-} from "./overview.ts";
+} from "./overview/view.ts";
 export {
   LabelAddedView,
   LabelRemovedView,
@@ -2182,6 +2182,6 @@ export { ConfigurationEditor, type ConfigurationEditorError } from "./configurat
 
 export { SetupState } from "./setup.ts";
 
-export { TaskIdentityView } from "./overview.ts";
+export { TaskIdentityView } from "./overview/view.ts";
 
 export { TaskPullRequestState, TaskAttemptChangesView } from "./task-changes.ts";

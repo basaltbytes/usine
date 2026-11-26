@@ -4,7 +4,7 @@ import type { CapacityWait } from "@usine/engine/engine";
 import { DateTime, Effect } from "effect";
 import { partitionNeeds } from "./attention.ts";
 import { ProviderCapacityNeed } from "./need.ts";
-import { ReadyOverview } from "./overview.ts";
+import { ReadyOverview } from "./overview/view.ts";
 
 /** Returns one attention entry for each capacity group at capacity, in place of a failure per Run. */
 export const capacityNeeds = (

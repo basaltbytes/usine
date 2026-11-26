@@ -6,7 +6,7 @@ import { Effect, Option, Ref, Layer } from "effect";
 import { TestClock } from "effect/testing";
 import { AttentionAcknowledgement } from "@usine/engine/attention";
 import { WebhookHealth } from "../src/webhooks.ts";
-import { ReadyOverview } from "../src/operator/overview.ts";
+import { ReadyOverview } from "../src/operator/overview/view.ts";
 import { webhookAttentionFor } from "../src/operator/webhooks.ts";
 import { attentionKey } from "../src/operator/attention.ts";
 

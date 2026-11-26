@@ -19,7 +19,7 @@ import {
 } from "./board.ts";
 import { NeedView, PoolLimitNeed, POOL_LIMIT_WARNING_PERCENT, RunFailureNeed } from "./need.ts";
 import type { RunSummaryView } from "./run.ts";
-import { ProjectView, ReadyOverview } from "./overview.ts";
+import { ProjectView, ReadyOverview } from "./overview/view.ts";
 
 // The need is already validated; attention keys are derived synchronously.
 // @effect-diagnostics-next-line schemaSync:off
