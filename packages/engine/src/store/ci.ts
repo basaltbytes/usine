@@ -18,7 +18,7 @@ import { jsonExtract } from "../database/dialect.ts";
 import type { RunDatabase } from "../database/database.ts";
 import { runs } from "../database/schema.ts";
 import { persistence } from "./codec.ts";
-import { queriesFor } from "./queries.ts";
+import { queriesFor } from "./queries/queries.ts";
 
 /** Durable CI waits share the run transaction and keep the attempt's session end time. */
 export const ciQueries = (

@@ -4,10 +4,10 @@ import { LoopName } from "@usine/core/loop";
 import { RunId } from "@usine/core/run";
 import { and, desc, eq, inArray, isNotNull } from "drizzle-orm";
 import { Array as EffectArray, Effect, Option, Schema } from "effect";
-import type { RunDatabaseClient } from "../database/database.ts";
-import { loopItems, runs, triggerEvents } from "../database/schema.ts";
-import type { PreviousSighting, Suppression } from "../engine/lifecycle.ts";
-import { LoopSighting } from "../run-reader/model.ts";
+import type { RunDatabaseClient } from "../../database/database.ts";
+import { loopItems, runs, triggerEvents } from "../../database/schema.ts";
+import type { PreviousSighting, Suppression } from "../../engine/lifecycle.ts";
+import { LoopSighting } from "../../run-reader/model.ts";
 
 const LoopItemRow = Schema.Struct({
   observedEventId: Schema.NullOr(EventId),
