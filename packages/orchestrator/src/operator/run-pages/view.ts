@@ -6,10 +6,10 @@ import { RunId } from "@usine/core/run";
 import { WorkerName } from "@usine/core/worker";
 import { TranscriptSequence } from "@usine/engine/transcript";
 import { type Brand, Schema } from "effect";
-import { MachineView } from "./machines.ts";
-import { fillText, jsonBytes, PAGE_BYTES, textStart } from "./page.ts";
-import { RunDurationView, RunSummaryView, UnconfirmedStopView } from "./run.ts";
-import { PoolUsageView } from "./usage.ts";
+import { MachineView } from "../machines.ts";
+import { fillText, jsonBytes, PAGE_BYTES, textStart } from "../page.ts";
+import { RunDurationView, RunSummaryView, UnconfirmedStopView } from "../run.ts";
+import { PoolUsageView } from "../usage.ts";
 
 const Count = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
 
