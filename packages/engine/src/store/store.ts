@@ -1,114 +1,51 @@
 import { TranscriptCodec } from "./transcript/codec.ts";
 import { InstanceScope } from "@usine/core/access";
-import { BillingPools, declaredPool } from "@usine/core/agent/pool";
-import type { PoolRateLimitsUpdated } from "@usine/core/agent/session";
-import { latestPoolRateLimits } from "../run-reader/pool-rate-limits.ts";
+import { BillingPools } from "@usine/core/agent/pool";
 import { ChangeBus } from "@usine/core/changes";
 import { changeTransaction } from "./changes.ts";
-import { AttemptCanceled } from "@usine/core/attempt/outcome";
 import type { CiResolution } from "@usine/core/ci";
 import type { CommitSha } from "@usine/core/repository";
 import { ciQueries } from "./ci.ts";
-import { ActingMember } from "@usine/core/operator";
 import {
   Attempt,
   AttemptId,
-  FailureResolution,
   type AttemptWindows,
   type ContainerOutOfMemoryKills,
 } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
-import { InfraFailure } from "@usine/core/attempt/failure";
 import type { AttemptRecovery, AttemptSalvage } from "@usine/core/attempt/salvage";
-import { StartedByEditAndRetry, StartedByRetry } from "@usine/core/attempt/start";
-import { Event, EventId } from "@usine/core/event";
+import { Event } from "@usine/core/event";
 import { ItemKey } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
-import { CycleGeneration } from "@usine/core/cycle-budget";
 import type { OperatorActor } from "@usine/core/operator";
-import { RunId, Run } from "@usine/core/run";
-import { RunAgain } from "@usine/core/run/again";
+import { RunId } from "@usine/core/run";
 import { ApprovalSource } from "@usine/core/run/approval";
 import { type WorkerKind, WorkerName } from "@usine/core/worker";
 import * as RunState from "@usine/core/run/state";
-import { type Comment, StepResult } from "@usine/core/step/result";
-import {
-  type Brand,
-  Array as EffectArray,
-  Context,
-  Crypto,
-  DateTime,
-  Duration,
-  Effect,
-  FiberMap,
-  Layer,
-  Match,
-  Option,
-  Schema,
-} from "effect";
+import { type Comment } from "@usine/core/step/result";
+import { Context, DateTime, Effect, Layer, Match, Option } from "effect";
 import { ReadSnapshot, RunDatabase } from "../database/database.ts";
-import {
-  Claimed,
-  CycleBlocked,
-  Ignored,
-  Queued,
-  type RevokeScope,
-  reopeningOf,
-  runIdFor,
-  Submission,
-  SubmissionResult,
-  Suppressed,
-} from "../engine/submission.ts";
-import {
-  EnginePersistenceError,
-  RunNotFoundError,
-  RunOperationRejectedError,
-  RunRetryBlockedError,
-  type RunStoreError,
-} from "../engine/error.ts";
+import { type RevokeScope, Submission } from "../engine/submission.ts";
+import { EnginePersistenceError, RunNotFoundError, type RunStoreError } from "../engine/error.ts";
 import { RunSnapshot } from "../run-reader/model.ts";
-import {
-  type RunAgainRequest,
-  type RunAgainResult,
-  runAgainSubmission,
-} from "../engine/run-again.ts";
+import type { RunAgainRequest, RunAgainResult } from "../engine/run-again.ts";
 import type { CapacityWait } from "../engine/capacity/state.ts";
 import type { RetryOutcome, RetryRequest } from "../engine/retry.ts";
-import { StepExecution } from "../step-executor.ts";
 import { TranscriptEntry, TranscriptQuery } from "../transcript.ts";
 import { leftoverQueries } from "./queries/leftovers.ts";
 import { persistence, submissionFromRow } from "./codec.ts";
-import { queriesFor, type RunQueries, runTransaction } from "./queries/queries.ts";
+import { queriesFor, runTransaction } from "./queries/queries.ts";
 import type { PendingQueue, QueuedEvents } from "./queries/queue.ts";
+import type { FinishDecision, AttemptResult } from "../engine/lifecycle.ts";
 import {
-  beginAttempt as decideBeginAttempt,
-  cameBack,
-  cancelRun,
-  claimRun,
-  finishAttempt as decideFinishAttempt,
-  operatorStop,
-  type OperatorStop,
-  resightEvent,
-  retryRun,
-  suppressionDecision,
-  type FinishDecision,
-  type Settlement,
-  type AttemptResult,
-} from "../engine/lifecycle.ts";
-
-const OptionalRunId = Schema.Option(RunId).pipe(
-  Schema.withConstructorDefault(Effect.succeed(Option.none<RunId>())),
-);
-
-/** The result of recording an Event, with the Run it opened and the unstarted Run it superseded. */
-export class Claim extends Schema.Class<Claim, Brand.Brand<"@usine/engine/store/store/Claim">>(
-  "@usine/engine/internal/Claim",
-)({
-  result: SubmissionResult,
-  /** The Run that this claim opened, not yet driven; `None` for a joined Run. */
-  openedRun: OptionalRunId,
-  supersededRun: OptionalRunId,
-}) {}
+  type AttemptRecoveryFailed,
+  type AttemptStarted,
+  attemptOperations,
+  type RunClosed,
+} from "./attempts.ts";
+import { type Claim, claimOperations } from "./claims.ts";
+import { type CancelOutcome, operatorActions } from "./operator-actions.ts";
+import { poolResetNotices } from "./pool-resets.ts";
 
 /** A persisted Attempt that startup reconciliation visits, with its Run and the Run's Loop and Item. */
 export interface SalvageCandidate extends AttemptRecovery {
@@ -117,515 +54,19 @@ export interface SalvageCandidate extends AttemptRecovery {
   readonly itemKey: ItemKey;
 }
 
-export class AttemptStarted extends Schema.TaggedClass<
-  AttemptStarted,
-  Brand.Brand<"@usine/engine/store/store/AttemptStarted">
->("@usine/engine/internal/AttemptStarted")("AttemptStarted", {
-  execution: StepExecution,
-}) {}
-
-/** A Run that failed because failing the interrupted Attempt used its last automatic retry. */
-export class AttemptRecoveryFailed extends Schema.TaggedClass<
-  AttemptRecoveryFailed,
-  Brand.Brand<"@usine/engine/store/store/AttemptRecoveryFailed">
->("@usine/engine/internal/AttemptRecoveryFailed")("AttemptRecoveryFailed", {}) {}
-
-/** A Run that closed (canceled, superseded, or revoked) while waiting for a Worker slot; not an error. */
-export class RunClosed extends Schema.TaggedClass<
-  RunClosed,
-  Brand.Brand<"@usine/engine/store/store/RunClosed">
->("@usine/engine/internal/RunClosed")("RunClosed", {}) {}
-
-/** The result of `RunStore.cancel`, decided in the closing transaction, with the Run's Loop and Item. */
-export type CancelOutcome =
-  | { readonly _tag: "AlreadyClosed" }
-  | {
-      readonly _tag: "Canceled";
-      readonly openAttempt: Option.Option<Pick<Attempt, "id" | "worker">>;
-      readonly loop: LoopName;
-      readonly itemKey: ItemKey;
-    };
-
 const makeRunStore = Effect.gen(function* () {
   const database = yield* RunDatabase;
   const readSnapshot = yield* ReadSnapshot;
   const bus = yield* ChangeBus;
-  const poolResets = yield* FiberMap.make<string>();
   const transact = changeTransaction(database, bus);
-  const crypto = yield* Crypto.Crypto;
   const codec = yield* TranscriptCodec;
   const inTransaction = runTransaction(database, bus, codec);
   const pools = yield* BillingPools;
   const queries = queriesFor(database, codec);
-
-  const schedulePoolResets = Effect.fn("RunStore.schedulePoolResets")(function* (
-    event: PoolRateLimitsUpdated,
-  ) {
-    yield* Effect.annotateCurrentSpan({ pool: event.pool });
-    for (const window of ["primary", "secondary"] as const) {
-      const key = `${event.pool}:${window}`;
-      const limit = event.rateLimits[window];
-      if (Option.isNone(limit) && declaredPool(pools, event.pool).windows === "separately") {
-        yield* Effect.logDebug("Window unreported; keeping its pool reset deadline", {
-          pool: event.pool,
-          window,
-        });
-        continue;
-      }
-      yield* FiberMap.remove(poolResets, key);
-      if (Option.isNone(limit) || Option.isNone(limit.value.resetsAt)) {
-        yield* Effect.logDebug("Pool reset has no deadline", { pool: event.pool, window });
-        continue;
-      }
-      const resetsAt = limit.value.resetsAt.value;
-      const observedAt = yield* DateTime.now;
-      const delay = Duration.toMillis(DateTime.distance(observedAt, resetsAt));
-      if (delay <= 0) {
-        yield* Effect.logDebug("Pool reset deadline has passed", { pool: event.pool, window });
-        continue;
-      }
-      yield* Effect.logDebug("Scheduled pool reset notification", {
-        pool: event.pool,
-        window,
-        resetsAt,
-      });
-      yield* FiberMap.run(
-        poolResets,
-        key,
-        Effect.sleep(delay).pipe(
-          Effect.andThen(
-            Effect.logInfo("Pool reset deadline reached", { pool: event.pool, window }),
-          ),
-          Effect.andThen(
-            bus.publish([
-              { audience: InstanceScope.make(), target: { kind: "attention", id: "instance" } },
-            ]),
-          ),
-        ),
-      );
-    }
-  });
-  for (const event of yield* latestPoolRateLimits(database)) yield* schedulePoolResets(event);
-
-  /** Opens the Submission's Run as `runId` unless the Item's cycle budget is used up. */
-  const admitRun = Effect.fn("RunStore.admitRun")(function* (
-    tx: RunQueries,
-    submission: Submission,
-    runId: RunId,
-  ) {
-    const blocked = yield* tx.cycles.admit(submission);
-    if (Option.isSome(blocked))
-      return CycleBlocked.make({ eventId: submission.event.id, ask: blocked.value });
-    yield* tx.createRun(submission, submission.event.id, runId);
-    yield* tx.cycles.reserve(submission, runId);
-    return Claimed.make({ eventId: submission.event.id, runId });
-  });
-
-  const openRun = Effect.fn("RunStore.openRun")(function* (
-    tx: RunQueries,
-    submission: Submission,
-    runId: RunId,
-    supersededRun: Option.Option<RunId> = Option.none(),
-  ) {
-    const result = yield* admitRun(tx, submission, runId);
-    return Claim.make({
-      result,
-      openedRun: result._tag === "Claimed" ? Option.some(runId) : Option.none(),
-      supersededRun,
-    });
-  });
-
-  const runIdOf = (submission: Submission) =>
-    runIdFor(submission).pipe(Effect.provideService(Crypto.Crypto, crypto));
-
-  /** Returns the Event's Run or ignore reason, or `None` if the Event isn't claimed yet. */
-  const settlementOf = Effect.fn("RunStore.settlementOf")(function* (
-    tx: RunQueries,
-    eventId: EventId,
-  ) {
-    const owner = (yield* tx.runForEvent(eventId))[0];
-    if (owner !== undefined) {
-      const run = (yield* tx.snapshot(owner.runId)).run;
-      return Option.some<Settlement>({ _tag: "Owned", run });
-    }
-    const ignored = (yield* tx.ignoredEvent(eventId))[0];
-    return ignored === undefined
-      ? Option.none<Settlement>()
-      : Option.some<Settlement>({ _tag: "Ignored", reason: ignored.reason });
-  });
-
-  /**
-   * Claims a recorded Event that has no Run and wasn't ignored: keeps it waiting during a
-   * suppression, queues it, or opens its Run as `runId`.
-   */
-  const claimEvent = Effect.fn("RunStore.claimEvent")(function* (
-    tx: RunQueries,
-    recorded: Submission,
-    runId: RunId,
-  ) {
-    if (!(yield* tx.cycles.isCurrentEvent(recorded))) {
-      return Claim.make({
-        result: Ignored.make({ eventId: recorded.event.id, reason: "superseded" }),
-      });
-    }
-    const suppression = yield* tx.loopItems.suppression(recorded.loop, recorded.itemKey);
-    if (Option.isSome(suppression)) {
-      const decision = suppressionDecision(suppression.value, recorded.event.id);
-      const fields = {
-        eventId: recorded.event.id,
-        suppressedBy: suppression.value.runId,
-        loop: recorded.loop,
-        itemKey: recorded.itemKey,
-      };
-      switch (decision._tag) {
-        case "SuppressFrom":
-          yield* tx.loopItems.suppressFrom(recorded.loop, recorded.itemKey, recorded.event.id);
-          yield* Effect.logInfo(
-            "First Item state after the Agent stopped for the operator; it waits for the operator",
-            fields,
-          );
-          return Claim.make({
-            result: Suppressed.make({ eventId: recorded.event.id, runId: suppression.value.runId }),
-          });
-        case "Suppress":
-          yield* Effect.logInfo(
-            "Item unchanged since the Agent stopped for the operator; no Run opens",
-            fields,
-          );
-          return Claim.make({
-            result: Suppressed.make({ eventId: recorded.event.id, runId: suppression.value.runId }),
-          });
-        case "Lift":
-          yield* tx.loopItems.lift(recorded.loop, recorded.itemKey);
-          yield* Effect.logInfo(
-            "Item changed after the Agent stopped for the operator; the Loop acts on its new state",
-            fields,
-          );
-      }
-    }
-    const blocking = yield* tx.blockingRun(recorded.loop, recorded.itemKey);
-    const blockedBy = blocking[0];
-    const decision = claimRun(
-      blockedBy === undefined
-        ? Option.none()
-        : Option.some((yield* tx.snapshot(blockedBy.runId)).run),
-      recorded.event.id,
-      recorded.ciFailureHead,
-    );
-    yield* Effect.logInfo("Event claim decided", {
-      eventId: recorded.event.id,
-      decision: decision._tag,
-    });
-    switch (decision._tag) {
-      case "QueueEvent":
-        return Claim.make({ result: Queued.make({ eventId: recorded.event.id }) });
-      case "SupersedeRun":
-        yield* tx.updateState(decision.runId, decision.state);
-        return yield* openRun(tx, recorded, runId, Option.some(decision.runId));
-      case "OpenRun":
-        return yield* openRun(tx, recorded, runId);
-    }
-  });
-
-  const recordAndClaim = Effect.fn("RunStore.recordAndClaim")(function* (
-    submission: Submission,
-    requestedRunId: RunId,
-  ) {
-    yield* Effect.annotateCurrentSpan({
-      eventId: submission.event.id,
-      runId: requestedRunId,
-      loop: submission.loop,
-      itemKey: submission.itemKey,
-    });
-    return yield* inTransaction((tx) =>
-      Effect.gen(function* () {
-        const recorded = yield* tx.recordTriggerEvent(submission);
-        const previous = yield* tx.loopItems.sighted(
-          recorded.loop,
-          recorded.itemKey,
-          recorded.event.id,
-        );
-        // After a reopening, later sightings of the trigger's Event join the newest reopening.
-        const newestReopening = yield* tx.newestReopening(recorded.event.id);
-        const current = Option.getOrElse(newestReopening, () => ({
-          submission: recorded,
-          reopening: 0,
-        }));
-        const eventId = current.submission.event.id;
-        const settled = yield* settlementOf(tx, eventId);
-        if (Option.isNone(settled)) {
-          return yield* claimEvent(
-            tx,
-            current.submission,
-            current.reopening === 0 ? requestedRunId : yield* runIdOf(current.submission),
-          );
-        }
-        const decision = resightEvent(settled.value, cameBack(previous, recorded.event.id));
-        switch (decision._tag) {
-          case "JoinRun":
-            yield* Effect.logInfo("Event joined its existing Run", {
-              eventId,
-              runId: decision.run.id,
-              state: decision.run.state._tag,
-            });
-            return Claim.make({ result: Claimed.make({ eventId, runId: decision.run.id }) });
-          case "StayIgnored":
-            yield* Effect.logInfo("Event remains ignored", { eventId, reason: decision.reason });
-            return Claim.make({ result: Ignored.make({ eventId, reason: decision.reason }) });
-          case "ReopenEvent": {
-            const reopening = current.reopening + 1;
-            const reopened = yield* tx.recordTriggerEvent(
-              reopeningOf(submission, recorded.event.dedupKey, reopening),
-              Option.some({ eventId: recorded.event.id, reopening }),
-            );
-            yield* Effect.logInfo(
-              "The Item came back to the state of an Event no Attempt worked on; it opens again",
-              {
-                eventId,
-                settled: settled.value._tag,
-                reopenedEventId: reopened.event.id,
-                reopening,
-              },
-            );
-            const admittedRunId = yield* runIdOf(reopened);
-            return yield* claimEvent(tx, reopened, admittedRunId);
-          }
-        }
-      }),
-    );
-  }, persistence("submit event"));
-
-  const parkForApproval = Effect.fn("RunStore.parkForApproval")(function* (runId: RunId) {
-    yield* Effect.annotateCurrentSpan({ runId });
-    return yield* inTransaction((tx) =>
-      Effect.gen(function* () {
-        const current = yield* tx.snapshot(runId);
-        if (current.run.state._tag !== "Pending") return current.run.state;
-        const waiting = RunState.awaitApproval(current.run.state);
-        yield* tx.updateState(runId, waiting);
-        return waiting;
-      }),
-    );
-  }, persistence("park run for approval"));
-
-  // Runs in the caller's transaction, so Attempt, Run, Step, and outbox writes commit or roll
-  // back together.
-  const applyFinish = Effect.fn("RunStore.applyFinish")(function* (
-    tx: RunQueries,
-    runId: RunId,
-    decision: FinishDecision,
-  ) {
-    yield* Effect.annotateCurrentSpan({ runId });
-    if (decision._tag === "Unchanged") {
-      yield* Effect.logInfo("Attempt completion ignored", { runId, reason: decision.reason });
-      return;
-    }
-    const { attempt, outcome } = decision;
-    yield* Effect.annotateCurrentSpan({ attemptId: attempt.id });
-    const fields = {
-      runId,
-      attemptId: attempt.id,
-      number: attempt.number,
-      decision: decision._tag,
-    };
-    yield* Effect.logInfo(
-      "Attempt completion decided",
-      Match.valueTags(outcome, {
-        Failed: ({ failure }) => ({ ...fields, failure: failure._tag }),
-        Succeeded: () => fields,
-        AwaitingCi: () => fields,
-      }),
-    );
-    const endedAt = yield* DateTime.now;
-    yield* tx.closeAttempt(attempt.id, outcome, endedAt);
-    if (decision._tag === "RunSucceeded" || decision._tag === "RunAwaitingCi") {
-      const result = StepResult.make({ ...decision.result, attemptId: Option.some(attempt.id) });
-      yield* tx.recordAttemptResult(attempt.id, result);
-      yield* tx.updateStepResult(runId, attempt.stepName, result);
-    } else if (Option.isSome(decision.harvested)) {
-      yield* tx.recordAttemptResult(
-        attempt.id,
-        StepResult.make({ ...decision.harvested.value, attemptId: Option.some(attempt.id) }),
-      );
-    }
-    if (decision._tag === "RetryAttempt") return;
-    yield* tx.updateState(runId, decision.state, endedAt);
-  });
-
-  // The Event queued during the Attempt is usually the Agent's own question or blocker comment,
-  // so it becomes the suppressed state.
-  const suppressForOperator = Effect.fn("RunStore.suppressForOperator")(function* (
-    tx: RunQueries,
-    current: RunSnapshot,
-    stop: OperatorStop,
-  ) {
-    const runId = current.run.id;
-    const queuedRun = yield* tx.nextQueued(runId);
-    const queued = Option.map(queuedRun, ({ submission }) => submission.event.id);
-    const fields = { runId, loop: current.run.loop, itemKey: current.itemKey, stop };
-    if (
-      yield* tx.loopItems.startSuppression(
-        current.run.loop,
-        current.itemKey,
-        runId,
-        current.event.id,
-        queued,
-      )
-    ) {
-      yield* Effect.logInfo("Agent stopped for the operator; its Loop suppresses the Item", {
-        ...fields,
-        suppressedEventId: Option.getOrElse(queued, () => "none yet"),
-      });
-      return;
-    }
-    yield* Effect.logInfo(
-      "Agent stopped for the operator, but nothing is suppressed; the Loop last saw the Item not matching",
-      fields,
-    );
-  });
-
-  const executionOf = (
-    current: RunSnapshot,
-    {
-      attempt,
-      state,
-      resume,
-      reattach,
-    }: Pick<StepExecution, "attempt" | "resume" | "reattach"> & {
-      readonly state: RunState.Running;
-    },
-  ) =>
-    StepExecution.make({
-      attempt,
-      event: current.event,
-      run: Run.make({
-        id: current.run.id,
-        eventId: current.run.eventId,
-        loop: current.run.loop,
-        state,
-        openedAt: current.run.openedAt,
-      }),
-      step: current.step,
-      repository: current.repository,
-      revision: current.revision,
-      task: current.task,
-      agent: current.agent,
-      permissions: current.permissions,
-      resume,
-      reattach,
-      requiresCi: Option.isSome(current.ciPolicy),
-      outcomeLabels: current.outcomeLabels,
-    });
-
-  const beginAttempt = Effect.fn("RunStore.beginAttempt")(function* (
-    runId: RunId,
-    worker: WorkerName,
-    kind: WorkerKind,
-    live: Option.Option<AttemptId>,
-  ) {
-    yield* Effect.annotateCurrentSpan({ runId, worker, workerKind: kind });
-    return yield* inTransaction((tx) =>
-      Effect.gen(function* () {
-        const current = yield* tx.snapshot(runId);
-        const interruption = InfraFailure.make({
-          message: "The orchestrator stopped during the attempt",
-          cause: new Error("attempt interrupted by orchestrator restart"),
-        });
-        const requested = yield* tx.nextStart(runId);
-        const decision = decideBeginAttempt(current, interruption, live, requested);
-        if (decision._tag === "RunClosed") {
-          yield* Effect.logInfo("Attempt start skipped", { runId, state: decision.state._tag });
-          return RunClosed.make();
-        }
-        if (decision._tag === "RunFailed") {
-          yield* applyFinish(tx, runId, decision);
-          return AttemptRecoveryFailed.make();
-        }
-        if (decision._tag === "ReattachAttempt") {
-          const reattachedAt = yield* DateTime.now;
-          const attempt = Attempt.make({
-            ...decision.attempt,
-            reattachedAt: Option.some(reattachedAt),
-          });
-          yield* tx.recordReattach(attempt.id, reattachedAt);
-          yield* Effect.annotateCurrentSpan({ attemptId: attempt.id });
-          yield* Effect.logInfo("Attempt reattached after an orchestrator restart", {
-            runId,
-            attemptId: attempt.id,
-            number: attempt.number,
-            worker: attempt.worker,
-          });
-          if (attempt.worker !== worker) {
-            // The Run reserves a slot on the Attempt's own Worker (#177), so a lease on another
-            // Worker is a `StepExecutor` defect.
-            yield* Effect.logError(
-              "Reattached Attempt keeps its own Worker, not the reserved one",
-              {
-                runId,
-                attemptId: attempt.id,
-                worker: attempt.worker,
-                reservedWorker: worker,
-              },
-            );
-          }
-          return AttemptStarted.make({
-            execution: executionOf(current, {
-              attempt,
-              state: decision.state,
-              resume: decision.resume,
-              reattach: true,
-            }),
-          });
-        }
-        if (Option.isSome(decision.interrupted)) {
-          yield* applyFinish(tx, runId, decision.interrupted.value);
-        }
-        if (current.run.state._tag !== decision.state._tag) {
-          yield* tx.updateState(runId, decision.state);
-        }
-        const attemptId = AttemptId.make(`${runId}/${current.step.name}/${decision.number}`);
-        const startedAt = yield* DateTime.now;
-        const attempt = Attempt.make({
-          id: attemptId,
-          runId,
-          stepName: current.step.name,
-          worker,
-          workerKind: Option.some(kind),
-          number: decision.number,
-          brain: current.agent.brain,
-          task: current.task,
-          agent: current.agent.name,
-          operatorIntervened: false,
-          parentModel: Option.none(),
-          startedAt,
-          outcome: Option.none(),
-          endedAt: Option.none(),
-          salvage: Option.none(),
-          start: Option.some(decision.start),
-          reattachedAt: Option.none(),
-        });
-        yield* tx.addAttempt(attempt);
-        if (Option.isSome(requested)) yield* tx.setNextStart(runId, Option.none());
-        yield* Effect.logInfo("Attempt started", {
-          runId,
-          attemptId,
-          number: decision.number,
-          worker,
-          workerKind: kind,
-          start: decision.start._tag,
-          resumesFrom: Option.map(decision.resume, ({ ref }) => ref),
-        });
-        return AttemptStarted.make({
-          execution: executionOf(current, {
-            attempt,
-            state: decision.state,
-            resume: decision.resume,
-            reattach: false,
-          }),
-        });
-      }),
-    );
-  }, persistence("begin attempt"));
+  const poolResets = yield* poolResetNotices;
+  const claims = yield* claimOperations;
+  const attempts = yield* attemptOperations;
+  const actions = yield* operatorActions;
 
   const recordSalvage = Effect.fn("RunStore.recordSalvage")(function* (
     attemptId: AttemptId,
@@ -739,406 +180,6 @@ const makeRunStore = Effect.gen(function* () {
     return yield* leftoverQueries(database).openAttempts(worker);
   }, persistence("count open attempts"));
 
-  const finishAttempt = Effect.fn("RunStore.finishAttempt")(function* (
-    attempt: Attempt,
-    result: AttemptResult,
-  ) {
-    yield* Effect.annotateCurrentSpan({ runId: attempt.runId, attemptId: attempt.id });
-    return yield* inTransaction((tx) =>
-      Effect.gen(function* () {
-        const current = yield* tx.snapshot(attempt.runId);
-        const [route] = yield* tx.eventRouteByRun(attempt.runId);
-        if (route === undefined) return yield* Effect.die("A run has no recorded event");
-        const decision = decideFinishAttempt(
-          current,
-          attempt.id,
-          result,
-          current.ciPolicy,
-          route.ciOnGreen,
-        );
-        yield* applyFinish(tx, attempt.runId, decision);
-        const stop = operatorStop(decision, result);
-        if (Option.isSome(stop)) yield* suppressForOperator(tx, current, stop.value);
-        return decision;
-      }),
-    );
-  }, persistence("finish attempt"));
-
-  const resolveFailure = Effect.fn("RunStore.resolveFailure")(function* (
-    runId: RunId,
-    attemptId: AttemptId,
-    operator: Option.Option<OperatorActor>,
-  ) {
-    yield* Effect.annotateCurrentSpan({ runId, attemptId });
-    return yield* inTransaction((tx) =>
-      Effect.gen(function* () {
-        const current = yield* tx.snapshot(runId);
-        const latest = current.attempts.at(-1);
-        if (
-          !RunState.operatorActions(current.run.state).canResolveFailure ||
-          latest?.id !== attemptId
-        ) {
-          yield* Effect.logInfo("Failure resolution rejected; Run or Attempt changed", {
-            runId,
-            attemptId,
-            state: current.run.state._tag,
-            latestAttemptId: latest?.id,
-          });
-          return yield* RunOperationRejectedError.make({
-            runId,
-            operation: "resolveFailure",
-            state: current.run.state._tag,
-          });
-        }
-        if (Option.contains(current.resolvedFailureAttemptId, attemptId)) {
-          yield* Effect.logInfo("Run failure already resolved", { runId, attemptId });
-          return false;
-        }
-
-        const resolution = FailureResolution.make({ resolvedAt: yield* DateTime.now, operator });
-        yield* tx.resolveFailure(runId, attemptId, resolution);
-        const lifted = yield* tx.loopItems.liftRun(runId);
-        yield* Effect.logInfo("Run failure resolved", {
-          runId,
-          attemptId,
-          liftedSuppression: lifted,
-          resolvedAt: DateTime.formatIso(resolution.resolvedAt),
-          operator: Option.getOrNull(operator),
-        });
-        return lifted;
-      }),
-    );
-  }, persistence("resolve run failure"));
-
-  const approve = Effect.fn("RunStore.approve")(function* (
-    runId: RunId,
-    approval: Event,
-    source: ApprovalSource,
-  ) {
-    yield* Effect.annotateCurrentSpan({ runId, eventId: approval.id, channel: source.channel });
-    return yield* inTransaction((tx) =>
-      Effect.gen(function* () {
-        if (yield* tx.approvalExists(runId)) return false;
-        const current = yield* tx.snapshot(runId);
-        if (current.run.state._tag !== "Waiting") {
-          return yield* RunOperationRejectedError.make({
-            runId,
-            operation: "approve",
-            state: current.run.state._tag,
-          });
-        }
-        yield* tx.recordApproval(runId, approval, source);
-        yield* tx.updateState(runId, RunState.approve(current.run.state));
-        return true;
-      }),
-    );
-  }, persistence("approve run"));
-
-  const retry = Effect.fn("RunStore.retry")(function* (
-    runId: RunId,
-    request: RetryRequest,
-    wait: Option.Option<CapacityWait>,
-  ) {
-    const { amendment, requestedBy } = request;
-    yield* Effect.annotateCurrentSpan({ runId });
-    return yield* inTransaction((tx) =>
-      Effect.gen(function* () {
-        const current = yield* tx.snapshot(runId);
-        const decision = retryRun(current, wait);
-        yield* Effect.logInfo("Operator retry decided", {
-          runId,
-          state: current.run.state._tag,
-          decision: decision._tag,
-        });
-        if (decision._tag === "Resume") {
-          // A later Event can have opened another Run of this Loop on the Item; reopening this one
-          // would run both.
-          const blocking = (yield* tx.blockingRun(current.run.loop, current.itemKey))[0];
-          if (blocking !== undefined) {
-            yield* Effect.logInfo("Operator retry rejected; another Run is open on the Item", {
-              runId,
-              openRunId: blocking.runId,
-              loop: current.run.loop,
-              itemKey: current.itemKey,
-            });
-            return yield* RunRetryBlockedError.make({
-              runId,
-              openRunId: blocking.runId,
-              message: `Cannot retry run ${runId}: run ${blocking.runId} of loop "${current.run.loop}" is open on the same item. Cancel run ${blocking.runId}, or try again after it closes.`,
-            });
-          }
-          // Preserve attribution for results stored before producing attempt IDs were recorded.
-          if (
-            Option.isSome(current.step.result) &&
-            Option.isNone(current.step.result.value.attemptId)
-          ) {
-            const producer = EffectArray.findLast(
-              current.attempts,
-              ({ stepName }) => stepName === current.step.name,
-            );
-            if (Option.isSome(producer)) {
-              yield* tx.updateStepResult(
-                runId,
-                current.step.name,
-                StepResult.make({
-                  ...current.step.result.value,
-                  attemptId: Option.some(producer.value.id),
-                }),
-              );
-              yield* Effect.logInfo("Recorded producing attempt for a legacy step result", {
-                runId,
-                attemptId: producer.value.id,
-              });
-            }
-          }
-          if (Option.isSome(amendment)) {
-            yield* tx.amend(runId, amendment.value);
-            yield* Effect.logInfo("Run effective task and Agent amended", {
-              runId,
-              agent: amendment.value.agent.name,
-            });
-          }
-          // A retry lifts the suppression, so Events queue behind the running Run again.
-          if (yield* tx.loopItems.liftRun(runId)) {
-            yield* Effect.logInfo("Operator retry lifts the suppression of the Item", { runId });
-          }
-          yield* tx.setNextStart(
-            runId,
-            Option.some(
-              Option.isSome(amendment)
-                ? StartedByEditAndRetry.make({ operator: requestedBy })
-                : StartedByRetry.make({ operator: requestedBy }),
-            ),
-          );
-          yield* tx.updateState(runId, decision.state);
-          return "Reopened" satisfies RetryOutcome;
-        }
-        if (decision._tag === "RetryNow") {
-          if (Option.isSome(amendment)) {
-            yield* tx.amend(runId, amendment.value);
-            yield* Effect.logInfo("Run effective task and Agent amended", {
-              runId,
-              agent: amendment.value.agent.name,
-            });
-          }
-          yield* tx.setNextStart(
-            runId,
-            Option.some(
-              Option.isSome(amendment)
-                ? StartedByEditAndRetry.make({ operator: requestedBy })
-                : StartedByRetry.make({ operator: requestedBy }),
-            ),
-          );
-          yield* Effect.logInfo(
-            "Operator retry starts the next Attempt of a Run that waits for provider capacity",
-            { runId, state: current.run.state._tag, attempts: current.attempts.length },
-          );
-          return "Forced" satisfies RetryOutcome;
-        }
-        if (decision._tag === "ResumePending" && Option.isNone(amendment))
-          return "Unchanged" satisfies RetryOutcome;
-        return yield* RunOperationRejectedError.make({
-          runId,
-          operation: "retry",
-          state: current.run.state._tag,
-        });
-      }),
-    );
-  }, persistence("retry run"));
-
-  const runAgain = Effect.fn("RunStore.runAgain")(function* (
-    runId: RunId,
-    request: RunAgainRequest,
-  ) {
-    yield* Effect.annotateCurrentSpan({ runId, agent: request.context.agent.name });
-    const receivedAt = yield* DateTime.now;
-    return yield* inTransaction((tx) =>
-      Effect.gen(function* () {
-        const current = yield* tx.snapshot(runId);
-        const { loop } = current.run;
-        const { itemKey } = current;
-        if (!RunState.operatorActions(current.run.state).canRunAgain) {
-          yield* Effect.logInfo("Run again rejected; only a succeeded or canceled Run runs again", {
-            runId,
-            state: current.run.state._tag,
-          });
-          return yield* RunOperationRejectedError.make({
-            runId,
-            operation: "runAgain",
-            state: current.run.state._tag,
-          });
-        }
-        const blocking = (yield* tx.blockingRun(loop, itemKey))[0];
-        if (blocking !== undefined) {
-          yield* Effect.logInfo("Run again rejected; another Run is open on the Item", {
-            runId,
-            openRunId: blocking.runId,
-            loop,
-            itemKey,
-          });
-          return yield* RunRetryBlockedError.make({
-            runId,
-            openRunId: blocking.runId,
-            message: `Run ${runId} cannot run again: run ${blocking.runId} of loop "${loop}" is open on the same item. Cancel run ${blocking.runId}, or try again after it closes.`,
-          });
-        }
-        const reopenedEvent = yield* tx.reopenedEvent(current.event.id);
-        const trigger = Option.getOrElse(reopenedEvent, () => ({
-          eventId: current.event.id,
-          dedupKey: current.event.dedupKey,
-        }));
-        const newestReopening = yield* tx.newestReopening(trigger.eventId);
-        const reopening = Option.match(newestReopening, {
-          onNone: () => 1,
-          onSome: (newest) => newest.reopening + 1,
-        });
-        const cycleBudget = yield* tx.cycles.get(itemKey);
-        const generation = Option.match(cycleBudget, {
-          onNone: () => CycleGeneration.make(0),
-          onSome: (budget) => budget.generation,
-        });
-        const again = runAgainSubmission(current, request, {
-          trigger: trigger.dedupKey,
-          reopening,
-          generation,
-          receivedAt,
-        });
-        // Not recorded as a sighting, so a later poll of the unchanged Item finds the new Run
-        // through the reopening.
-        const recorded = yield* tx.recordTriggerEvent(
-          again,
-          Option.some({ eventId: trigger.eventId, reopening }),
-        );
-        yield* tx.recordRunAgain(
-          recorded.event.id,
-          RunAgain.make({ from: runId, requestedBy: request.requestedBy }),
-        );
-        const admittedRunId = yield* runIdOf(recorded);
-        const result = yield* admitRun(tx, recorded, admittedRunId);
-        yield* Effect.logInfo(
-          "Run again decided",
-          Match.valueTags(result, {
-            Claimed: ({ runId: openedRunId }) => ({
-              runId,
-              eventId: recorded.event.id,
-              reopening,
-              decision: "OpenRun",
-              openedRunId,
-              requestedBy: Option.getOrElse(request.requestedBy, () => "none"),
-            }),
-            CycleBlocked: ({ ask }) => ({
-              runId,
-              eventId: recorded.event.id,
-              reopening,
-              decision: "CycleBlocked",
-              askId: ask.id,
-              requestedBy: Option.getOrElse(request.requestedBy, () => "none"),
-            }),
-          }),
-        );
-        return result;
-      }),
-    );
-  }, persistence("run again"));
-
-  const cancel = Effect.fn("RunStore.cancel")(function* (runId: RunId) {
-    yield* Effect.annotateCurrentSpan({ runId });
-    return yield* inTransaction((tx) =>
-      Effect.gen(function* () {
-        const current = yield* tx.snapshot(runId);
-        const actor = yield* ActingMember;
-        const decision = cancelRun(current, actor);
-        yield* Effect.logInfo("Operator cancellation decided", {
-          runId,
-          state: current.run.state._tag,
-          decision: decision._tag,
-        });
-        if (decision._tag === "AlreadyClosed") return decision;
-        if (decision._tag === "CancelRejected")
-          return yield* RunOperationRejectedError.make({
-            runId,
-            operation: "cancel",
-            state: current.run.state._tag,
-          });
-        const canceledAt = yield* DateTime.now;
-        if (Option.isSome(decision.attempt)) {
-          const { id, outcome } = decision.attempt.value;
-          yield* tx.closeAttempt(id, outcome, canceledAt);
-        }
-        if (current.run.state._tag === "AwaitingCi")
-          yield* tx.settleCiAttempt(runId, AttemptCanceled.make());
-        yield* tx.updateState(runId, decision.state, canceledAt);
-        const canceled: CancelOutcome = {
-          _tag: "Canceled",
-          openAttempt: Option.map(decision.attempt, ({ id, worker }) => ({ id, worker })),
-          loop: current.run.loop,
-          itemKey: current.itemKey,
-        };
-        return canceled;
-      }),
-    );
-  }, persistence("cancel run"));
-
-  const revoke = Effect.fn("RunStore.revoke")(function* (
-    loop: LoopName,
-    itemKey: ItemKey,
-    scope: RevokeScope = "all",
-  ) {
-    yield* Effect.annotateCurrentSpan({ loop, itemKey, scope });
-    return yield* inTransaction((tx) =>
-      Effect.gen(function* () {
-        yield* tx.loopItems.unmatched(loop, itemKey);
-        const storedRuns = yield* tx.revokeUnstarted(loop, itemKey, scope);
-        for (const row of storedRuns) {
-          const current = yield* tx.snapshot(row.runId);
-          if (RunState.isUnstarted(current.run.state)) {
-            yield* tx.updateState(row.runId, RunState.revoke(current.run.state));
-          }
-        }
-        return storedRuns.map((row) => row.runId);
-      }),
-    );
-  }, persistence("revoke run"));
-
-  const revokeQueued = Effect.fn("RunStore.revokeQueued")(function* (queued: QueuedEvents) {
-    const { loop, itemKey, event } = queued.submission;
-    yield* Effect.annotateCurrentSpan({ loop, itemKey, eventId: event.id });
-    // Not recorded as a sighting, because the trigger can still submit this Event from a fetch
-    // made before the closing Run changed the Item.
-    return yield* queries.revokeQueued(loop, itemKey, queued.eventIds);
-  }, persistence("revoke queued events"));
-
-  const claimQueued = Effect.fn("RunStore.claimQueued")(function* (
-    submission: Submission,
-    runId: RunId,
-  ) {
-    return yield* inTransaction((tx) =>
-      Effect.gen(function* () {
-        const existing = yield* tx.runForEvent(submission.event.id);
-        if (existing[0] !== undefined) {
-          yield* Effect.logInfo("Queued Event already opened its Run", {
-            eventId: submission.event.id,
-            runId: existing[0].runId,
-          });
-          return Option.none<RunId>();
-        }
-        if ((yield* tx.ignoredEvent(submission.event.id)).length > 0) {
-          return Option.none<RunId>();
-        }
-        if ((yield* tx.blockingRun(submission.loop, submission.itemKey)).length > 0) {
-          return Option.none<RunId>();
-        }
-        const suppression = yield* tx.loopItems.suppression(submission.loop, submission.itemKey);
-        if (Option.isSome(suppression)) {
-          return Option.none<RunId>();
-        }
-        if (!(yield* tx.cycles.isCurrentEvent(submission))) return Option.none<RunId>();
-        yield* tx.recordSettings(submission);
-        return (yield* openRun(tx, submission, runId)).openedRun;
-      }),
-    );
-  }, persistence("claim queued event"));
-
   const appendTranscript = Effect.fn("RunStore.appendTranscript")(function* (
     direction: AttemptChannel.Direction,
     envelope: AttemptChannel.Envelope,
@@ -1170,7 +211,7 @@ const makeRunStore = Effect.gen(function* () {
       envelope.payload._tag === "SessionEvent" &&
       envelope.payload.event._tag === "PoolRateLimitsUpdated"
     ) {
-      yield* schedulePoolResets(envelope.payload.event);
+      yield* poolResets.schedule(envelope.payload.event);
     }
   }, persistence("append attempt transcript"));
 
@@ -1180,21 +221,17 @@ const makeRunStore = Effect.gen(function* () {
 
   return {
     ...ciQueries(database, bus, codec),
-    approve,
+    ...claims,
+    ...attempts,
+    ...actions,
     appendTranscript,
-    beginAttempt,
-    cancel,
-    claimQueued,
-    finishAttempt,
     nextQueued: (runId: RunId) => queries.nextQueued(runId).pipe(persistence("find queued event")),
     admissibleQueue: (loop: LoopName, itemKey: ItemKey) =>
       queries
         .admissibleQueue(loop, itemKey)
         .pipe(persistence("find admissible queued events on a loop item")),
-    parkForApproval,
     pendingQueues: queries.pendingQueues().pipe(persistence("list pending queues")),
     runIdsToDrive: queries.runIdsToDrive().pipe(persistence("list the runs to drive")),
-    recordAndClaim,
     salvageCandidates: queries.salvageCandidates().pipe(persistence("list salvage candidates")),
     salvageCandidate: (attemptId: AttemptId) =>
       queries.salvageCandidate(attemptId).pipe(persistence("read a salvage candidate")),
@@ -1214,11 +251,6 @@ const makeRunStore = Effect.gen(function* () {
         ),
         persistence("read run submission"),
       ),
-    resolveFailure,
-    retry,
-    revoke,
-    revokeQueued,
-    runAgain,
     snapshot: (runId: RunId) =>
       database
         .transaction((transaction) => queriesFor(transaction, codec).snapshot(runId))
