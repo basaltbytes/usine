@@ -297,7 +297,8 @@ describe("standalone worker owner", () => {
     await eventually(() => stdout(relay.frames) === "running");
     await eventually(() => exited(relay.frames));
     expect(relay.frames.find((frame) => "exitCode" in frame)).toMatchObject({ exitCode: 143 });
-    expect(existsSync(pidFile)).toBe(false);
+    // The owner removes its PID file after it appends the exit frame that the relay forwards.
+    await eventually(() => !existsSync(pidFile));
     expect(JSON.parse(readFileSync(join(root, "exit"), "utf8"))).toMatchObject({ exitCode: 143 });
     expect(await relay.closed, relay.stderr()).toBe(0);
   }, 15_000);
