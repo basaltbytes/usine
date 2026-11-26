@@ -21,7 +21,7 @@ import {
   TranscriptUsageQuery,
   TranscriptWorkerQuery,
 } from "../../../src/transcript.ts";
-import { queriesFor } from "../../../src/store/queries.ts";
+import { queriesFor } from "../../../src/store/queries/queries.ts";
 import { lifecycleSubmission } from "../support.ts";
 import { seedReadFixture } from "./fixture.ts";
 import { undeclaredPools } from "../../support.ts";

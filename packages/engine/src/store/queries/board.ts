@@ -12,10 +12,10 @@ import {
   jsonObject,
   jsonValue,
   elapsedMillis,
-} from "../database/dialect.ts";
-import type { RunDatabaseClient } from "../database/database.ts";
-import { attempts, runs, steps, triggerEvents } from "../database/schema.ts";
-import { ItemRunHistory, RunUsageSource } from "../run-reader/model.ts";
+} from "../../database/dialect.ts";
+import type { RunDatabaseClient } from "../../database/database.ts";
+import { attempts, runs, steps, triggerEvents } from "../../database/schema.ts";
+import { ItemRunHistory, RunUsageSource } from "../../run-reader/model.ts";
 
 export const runPullRequestUrl = sql<
   string | null

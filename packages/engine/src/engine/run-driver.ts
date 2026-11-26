@@ -25,7 +25,7 @@ import { ItemProjectionWriter } from "../item-projection/item-projection.ts";
 import { CompletionCheck } from "../completion-check.ts";
 import { StepExecutor, type WorkerLease } from "../step-executor.ts";
 import { RunStore } from "../store/store.ts";
-import type { PendingQueue, QueuedEvents } from "../store/queries.ts";
+import type { PendingQueue, QueuedEvents } from "../store/queries/queue.ts";
 import { LoopControl } from "../loop-control/loop-control.ts";
 import { TranscriptAllQuery } from "../transcript.ts";
 import { savedSettings, TriggerCondition } from "../trigger-condition.ts";

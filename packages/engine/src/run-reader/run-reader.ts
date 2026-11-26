@@ -34,8 +34,11 @@ import { TranscriptAllQuery, TranscriptEntry, TranscriptQuery } from "../transcr
 import type { RunStoreError } from "../engine/error.ts";
 import { persistence } from "../store/codec.ts";
 import { ciFixDedupKeyPrefix } from "../engine/submission.ts";
-import { leftoverQueries } from "../store/leftovers.ts";
-import { queriesFor } from "../store/queries.ts";
+import { leftoverQueries } from "../store/queries/leftovers.ts";
+import { loopItemQueries } from "../store/queries/loop-items.ts";
+import { runQueries } from "../store/queries/runs.ts";
+import { summaryQueries } from "../store/queries/summaries.ts";
+import { transcriptQueries } from "../store/transcript/queries.ts";
 
 // Each source binds two parameters, so a read stays under 100 bound parameters, the cap that some
 // SQLite hosts set.
@@ -44,11 +47,14 @@ const CI_FIX_SOURCES_PER_READ = 48;
 const makeRunReader = Effect.gen(function* () {
   const database = yield* RunDatabase;
   const codec = yield* TranscriptCodec;
-  const queries = queriesFor(database, codec);
+  const summaryReads = summaryQueries(database);
+  const runReads = runQueries(database);
+  const transcriptReads = transcriptQueries(database, codec);
+  const loopItemReads = loopItemQueries(database);
   const snapshot = yield* ReadSnapshot;
 
   const inspect = Effect.fn("RunReader.inspect")((runId: RunId) =>
-    snapshot.run(database, queries.snapshot(runId)).pipe(persistence("read run")),
+    snapshot.run(database, runReads.snapshot(runId)).pipe(persistence("read run")),
   );
   const runForEvent = Effect.fn("RunReader.runForEvent")(function* (dedupKey: DedupKey) {
     yield* Effect.annotateCurrentSpan({ dedupKey });
@@ -126,9 +132,9 @@ const makeRunReader = Effect.gen(function* () {
       .run(
         database,
         Effect.gen(function* () {
-          const snapshot = yield* queries.snapshot(runId);
+          const snapshot = yield* runReads.snapshot(runId);
           const transcripts = yield* Effect.forEach(snapshot.attempts, ({ id }) =>
-            queries.transcript(TranscriptAllQuery.make({ attemptId: id })),
+            transcriptReads.transcript(TranscriptAllQuery.make({ attemptId: id })),
           );
           return RunEvidence.make({
             snapshot,
@@ -147,7 +153,7 @@ const makeRunReader = Effect.gen(function* () {
   const summary = Effect.fn("RunReader.summary")(function* (runId: RunId) {
     yield* Effect.annotateCurrentSpan({ runId });
     const summary = yield* snapshot
-      .run(database, queries.runSummary(runId))
+      .run(database, summaryReads.runSummary(runId))
       .pipe(persistence("read run summary"));
     yield* Effect.logDebug("Read run summary", { runId, state: summary.run.state._tag });
     return summary;
@@ -155,7 +161,7 @@ const makeRunReader = Effect.gen(function* () {
   const list = Effect.fn("RunReader.list")(function* (options: { readonly closedLimit: number }) {
     yield* Effect.annotateCurrentSpan({ closedLimit: options.closedLimit });
     const summaries = yield* snapshot
-      .run(database, queries.runSummaries(options.closedLimit))
+      .run(database, summaryReads.runSummaries(options.closedLimit))
       .pipe(persistence("list runs"));
     yield* Effect.logDebug("Read run list", {
       closedLimit: options.closedLimit,
@@ -172,7 +178,7 @@ const makeRunReader = Effect.gen(function* () {
       repositories: options.repositories ?? "all",
     });
     const summaries = yield* snapshot
-      .run(database, queries.closedRunSummaries(options.limit, options.repositories))
+      .run(database, summaryReads.closedRunSummaries(options.limit, options.repositories))
       .pipe(persistence("list closed runs"));
     yield* Effect.logDebug("Read closed runs", {
       limit: options.limit,
@@ -186,18 +192,18 @@ const makeRunReader = Effect.gen(function* () {
   ) {
     yield* Effect.annotateCurrentSpan({ since });
     const summaries = yield* snapshot
-      .run(database, queries.closedRunSummariesSince(since))
+      .run(database, summaryReads.closedRunSummariesSince(since))
       .pipe(persistence("list runs closed since a time"));
     yield* Effect.logDebug("Read runs closed since a time", { since, runs: summaries.length });
     return summaries;
   });
   const revision = Effect.suspend(() =>
-    queries.revision().pipe(persistence("read projection revision")),
+    summaryReads.revision().pipe(persistence("read projection revision")),
   ).pipe(Effect.withSpan("RunReader.revision"));
   const forItems = Effect.fn("RunReader.forItems")(function* (itemKeys: ReadonlyArray<ItemKey>) {
     yield* Effect.annotateCurrentSpan({ itemKeys });
     const summaries = yield* snapshot
-      .run(database, queries.itemRunSummaries(itemKeys))
+      .run(database, summaryReads.itemRunSummaries(itemKeys))
       .pipe(persistence("read item run histories"));
     yield* Effect.logDebug("Read item run histories", { itemKeys, runs: summaries.length });
     return summaries;
@@ -208,20 +214,22 @@ const makeRunReader = Effect.gen(function* () {
   ) {
     yield* Effect.annotateCurrentSpan({ itemKeys, attentionRunIds });
     return yield* snapshot
-      .run(database, queries.boardRunSummaries(itemKeys, attentionRunIds))
+      .run(database, summaryReads.boardRunSummaries(itemKeys, attentionRunIds))
       .pipe(persistence("read current board runs and history totals"));
   });
   const events = Effect.fn("RunReader.events")((runIds: ReadonlyArray<RunId>) =>
-    queries.runEvents(runIds).pipe(persistence("read the events of runs")),
+    summaryReads.runEvents(runIds).pipe(persistence("read the events of runs")),
   );
   const transcript = Effect.fn("RunReader.transcript")((query: TranscriptQuery) =>
-    snapshot.run(database, queries.transcript(query)).pipe(persistence("read attempt transcript")),
+    snapshot
+      .run(database, transcriptReads.transcript(query))
+      .pipe(persistence("read attempt transcript")),
   );
   const attemptsByWorker = Effect.suspend(() =>
     leftoverQueries(database).attemptCountsByWorker().pipe(persistence("count attempts by worker")),
   ).pipe(Effect.withSpan("RunReader.attemptsByWorker"));
   const sightings = Effect.fn("RunReader.sightings")((itemKeys: ReadonlyArray<ItemKey>) =>
-    queries.loopItems.sightings(itemKeys).pipe(persistence("read loop sightings")),
+    loopItemReads.sightings(itemKeys).pipe(persistence("read loop sightings")),
   );
 
   return {
