@@ -399,6 +399,7 @@ it.live(
         yield* fs.writeFileString(`${directory}/egress-allowlist`, "registry.npmjs.org\n");
         const upstream = yield* standIn;
         const catalogUpstream = yield* standIn;
+        const anthropicUpstream = yield* standIn;
         const plan = planAt(catalogUpstream.origin);
         const catalog = ModelProviderCatalog.make({
           providers: [...modelProviders.providers, plan],
@@ -411,6 +412,7 @@ it.live(
         ]);
         const start = gatewayServing(catalog, directory, {
           [PLAN_UPSTREAM]: `${upstream.origin}/v1`,
+          USINE_GATEWAY_ANTHROPIC_UPSTREAM: anthropicUpstream.origin,
         }).pipe(Layer.provide(logs));
         const scope = yield* Scope.make();
         const first = yield* Layer.buildWithScope(start, scope);
@@ -486,6 +488,7 @@ it.live(
           ["/v1/chat/completions", `Bearer ${PLAN_KEY}`],
         ]);
         assert.deepStrictEqual(catalogUpstream.seen, []);
+        assert.deepStrictEqual(anthropicUpstream.seen, []);
         assert.isTrue(spans.some(({ name }) => name === "ProviderCredentials.replace"));
         const exposed =
           jsonKey(providers) +
