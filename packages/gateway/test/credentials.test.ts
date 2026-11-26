@@ -503,17 +503,18 @@ it.live(
 );
 
 it.live(
-  "sends the connected built-in static keys and Claude token to the upstreams that the environment sets, through a reload and a restart",
+  "sends each connected built-in static key and the Claude token to the upstream that the environment sets for its slot, through a reload and a restart",
   () =>
     Effect.scoped(
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
         const directory = yield* fs.makeTempDirectoryScoped();
         yield* fs.writeFileString(`${directory}/egress-allowlist`, "registry.npmjs.org\n");
-        const upstream = yield* standIn;
+        const anthropicUpstream = yield* standIn;
+        const openaiUpstream = yield* standIn;
         const start = gatewayServing(modelProviders, directory, {
-          USINE_GATEWAY_ANTHROPIC_UPSTREAM: upstream.origin,
-          USINE_GATEWAY_OPENAI_UPSTREAM: upstream.origin,
+          USINE_GATEWAY_ANTHROPIC_UPSTREAM: anthropicUpstream.origin,
+          USINE_GATEWAY_OPENAI_UPSTREAM: openaiUpstream.origin,
         });
         const messages = `/${anthropic.slot}/v1/messages`;
         const responses = `/${openai.slot}/v1/responses`;
@@ -561,23 +562,16 @@ it.live(
           [...withKeys, ...afterRestart, ...withToken, ...tokenAfterRestart],
           Array.from({ length: 12 }, () => 200),
         );
-        const keys: ReadonlyArray<readonly [string, string]> = [
-          ["/v1/messages", ANTHROPIC_KEY],
-          ["/v1/responses", `Bearer ${openaiKey}`],
-        ];
-        const tokens: ReadonlyArray<readonly [string, string]> = [
-          ["/v1/messages", `Bearer ${claudeToken}`],
-        ];
-        assert.deepStrictEqual(upstream.seen, [
-          ...keys,
-          ...keys,
-          ...keys,
-          ...keys,
-          ...tokens,
-          ...tokens,
-          ...tokens,
-          ...tokens,
+        const anthropicKey = ["/v1/messages", ANTHROPIC_KEY] as const;
+        const tokenSent = ["/v1/messages", `Bearer ${claudeToken}`] as const;
+        assert.deepStrictEqual(anthropicUpstream.seen, [
+          ...Array.from({ length: 4 }, () => anthropicKey),
+          ...Array.from({ length: 4 }, () => tokenSent),
         ]);
+        assert.deepStrictEqual(
+          openaiUpstream.seen,
+          Array.from({ length: 4 }, () => ["/v1/responses", `Bearer ${openaiKey}`] as const),
+        );
       }),
     ).pipe(Effect.provide([NodeServices.layer, FetchHttpClient.layer])),
 );

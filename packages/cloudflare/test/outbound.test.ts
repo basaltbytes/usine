@@ -181,6 +181,31 @@ describe("sandbox outbound handlers", () => {
     ]);
   });
 
+  it("denies a revoked provider host over HTTP when the allowlist lists it", () => {
+    const interceptions = interceptionsFor(
+      modelProviders,
+      credentials,
+      ["test-plan.usine.internal", "registry.npmjs.org"],
+      ["anthropic.usine.internal", "test-plan.usine.internal"],
+    );
+
+    expect(
+      interceptions.map((interception) =>
+        interception._tag === "Denied"
+          ? `Denied:${interception.scheme}:${interception.host}`
+          : `${interception._tag}:${interception.host}`,
+      ),
+    ).toEqual([
+      "GitHub:github.com",
+      "GitHub:api.github.com",
+      "Provider:anthropic.usine.internal",
+      "Denied:http:openai.usine.internal",
+      "Denied:http:test-plan.usine.internal",
+      "Allowed:test-plan.usine.internal",
+      "Allowed:registry.npmjs.org",
+    ]);
+  });
+
   it("replaces the sandbox's credential with the installation token for each GitHub host", () => {
     const token = Redacted.make("ghs_installation-token");
     const git = gitHubRequest(
@@ -220,6 +245,7 @@ describe("sandbox outbound handlers", () => {
             method: "POST",
             headers: { "x-api-key": "usine-placeholder", "anthropic-version": "2023-06-01" },
             body: '{"model":"claude"}',
+            redirect: "follow",
           }),
           anthropic,
           ApiKeyCredential.make({ key: Redacted.make("sk-ant-key") }),
@@ -238,6 +264,7 @@ describe("sandbox outbound handlers", () => {
 
       expect(toAnthropic.url).toBe("https://api.anthropic.com/v1/messages?beta=true");
       expect(toAnthropic.method).toBe("POST");
+      expect([toAnthropic.redirect, toOpenai.redirect]).toEqual(["manual", "manual"]);
       expect(toAnthropic.headers.get("x-api-key")).toBe("sk-ant-key");
       expect(toAnthropic.headers.get("anthropic-version")).toBe("2023-06-01");
       const actual1 = yield* Effect.promise(() => toAnthropic.text());

@@ -82,7 +82,7 @@ export const servedInSandbox = (provider: ModelProvider): boolean =>
  * provider hosts without a credential are denied rather than left out, because a running
  * container keeps its last handler for a host; they're never treated as allowlisted. For the same
  * reason, each host of `registered`, the provider hosts that the container has handlers for, is
- * denied once no provider of `catalog` has it.
+ * denied over HTTP once no provider of `catalog` has it, even when `allowedHosts` lists it.
  */
 export const interceptionsFor = (
   catalog: ModelProviderCatalog,
@@ -100,9 +100,7 @@ export const interceptionsFor = (
       : { _tag: "Provider", host, provider, credential: grant.credential };
   });
   const allowed = Arr.dedupe(allowedHosts).filter((host) => !reserved.has(host));
-  const revoked = Arr.dedupe(registered).filter(
-    (host) => !reserved.has(host) && !allowed.includes(host),
-  );
+  const revoked = Arr.dedupe(registered).filter((host) => !reserved.has(host));
   return [
     ...GITHUB_HOSTS.map((host): Interception =>
       Option.match(credentials.github, {
@@ -189,7 +187,8 @@ export const gitHubRequest = (
  * provider's protocol that serves its path, with the key in that protocol's header in place of the
  * sandbox's credentials. Returns `None` for a path outside the provider's routes, a method that its
  * route doesn't accept, or an upstream without HTTPS, so the rest of the provider's API, such as
- * files or organization administration, can't be reached with the key.
+ * files or organization administration, can't be reached with the key. The request doesn't follow
+ * redirects, so the key never goes to another host.
  * A route's placeholder matches one plain segment, so a percent-encoded separator or a dot segment
  * never matches.
  */
@@ -217,7 +216,7 @@ export const providerRequest = (
         headers.set(protocol.key.header, protocol.key.value(Redacted.value(key))),
     });
     const upstream = new URL(`${protocol.upstream}${incoming.pathname}${incoming.search}`);
-    return new Request(upstream, new Request(request, { headers }));
+    return new Request(upstream, new Request(request, { headers, redirect: "manual" }));
   });
 };
 

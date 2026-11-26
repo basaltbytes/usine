@@ -488,24 +488,26 @@ it.effect("selects a gateway-authenticated provider when no parent model is conf
   }),
 );
 
+/** A Responses provider that only these tests define, named `name`, with a static key only. */
+const responsesCompatible = (name: string) =>
+  ModelProvider.make({
+    id: ModelProviderId.make(name),
+    slot: GatewaySlot.make(name),
+    label: name,
+    protocols: [
+      ProviderProtocol.make({
+        protocol: WireProtocol.make("openai-responses"),
+        upstream: UpstreamBase.make(`https://${name}.example.com`),
+        routes: [RoutePattern.make("/v1/responses")],
+        key: KeyHeader.make({ header: HeaderName.make("authorization"), scheme: "bearer" }),
+      }),
+    ],
+    credentials: [ApiKeyCredential.make({ variable: GatewayVariable.make("TEST_RESPONSES_KEY") })],
+  });
+
 it.live("reaches a later provider of the same protocol when only its slot has a credential", () =>
   Effect.gen(function* () {
-    const compatible = ModelProvider.make({
-      id: ModelProviderId.make("responses-compatible"),
-      slot: GatewaySlot.make("responses-compatible"),
-      label: "Responses-compatible",
-      protocols: [
-        ProviderProtocol.make({
-          protocol: WireProtocol.make("openai-responses"),
-          upstream: UpstreamBase.make("https://responses.example.com"),
-          routes: [RoutePattern.make("/v1/responses")],
-          key: KeyHeader.make({ header: HeaderName.make("authorization"), scheme: "bearer" }),
-        }),
-      ],
-      credentials: [
-        ApiKeyCredential.make({ variable: GatewayVariable.make("RESPONSES_COMPATIBLE_API_KEY") }),
-      ],
-    });
+    const compatible = responsesCompatible("responses-compatible");
     const queried: Array<string> = [];
     const sent: Array<{ slot: string; path: string }> = [];
     const access = yield* gatewayModelAccess(
@@ -539,5 +541,44 @@ it.live("reaches a later provider of the same protocol when only its slot has a 
     assert.deepStrictEqual(sent, [{ slot: "responses-compatible", path: "/v1/responses" }]);
     const unauthenticated = yield* access.credentials.authentication("anthropic");
     assert.isUndefined(unauthenticated);
+  }),
+);
+
+it.live("skips a slot whose provider doesn't accept the credential that the gateway reports", () =>
+  Effect.gen(function* () {
+    const keyOnly = responsesCompatible("responses-key-only");
+    const compatible = responsesCompatible("responses-compatible");
+    const queried: Array<string> = [];
+    const sent: Array<string> = [];
+    const access = yield* gatewayModelAccess(
+      {
+        credential: (slot) =>
+          Effect.sync(() => {
+            queried.push(slot);
+            return Option.some<GatewayCredentialKind>(
+              slot === keyOnly.slot ? "subscription" : "api-key",
+            );
+          }),
+        request: (slot) =>
+          Effect.sync(() => {
+            sent.push(slot);
+            return response("response.done");
+          }),
+      },
+      [anthropic, keyOnly, compatible],
+    );
+    assert.strictEqual(access.credentials.route, "gateway");
+    if (access.credentials.route !== "gateway") return;
+    const authentication = yield* access.credentials.authentication("openai-codex");
+    assert.deepStrictEqual(authentication, { _tag: "ApiKey" });
+    assert.deepStrictEqual(queried, [keyOnly.slot, compatible.slot]);
+    const model = access.models.getModel("openai-codex", "gpt-5.6-sol");
+    assert(model !== undefined);
+    yield* Effect.promise(() =>
+      access.models.completeSimple(model, {
+        messages: [{ role: "user", content: "Hello", timestamp: 1 }],
+      }),
+    );
+    assert.deepStrictEqual(sent, [compatible.slot]);
   }),
 );
