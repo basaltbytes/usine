@@ -213,23 +213,61 @@ export class KeyHeader extends Schema.Class<
   }
 }
 
+/** An HTTP request method that a route accepts. */
+export const RouteMethod = Schema.Literals(["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"]);
+export type RouteMethod = typeof RouteMethod.Type;
+
 /** A wire protocol that a provider serves: its upstream, its routes, and where its key goes. */
 export class ProviderProtocol extends Schema.Class<
   ProviderProtocol,
   Brand.Brand<"@usine/core/agent/provider/ProviderProtocol">
->("Agent/ProviderProtocol")({
-  protocol: WireProtocol,
-  /** The base URL to which the gateway appends a route's path. */
-  upstream: UpstreamBase,
-  /** The paths under the provider's slot that the protocol serves; other paths are refused. */
-  routes: Schema.NonEmptyArray(RoutePattern).check(Schema.isUnique()),
-  key: KeyHeader,
-}) {
+>("Agent/ProviderProtocol")(
+  Schema.Struct({
+    protocol: WireProtocol,
+    /** The base URL to which the gateway appends a route's path. */
+    upstream: UpstreamBase,
+    /** The paths under the provider's slot that the protocol serves; other paths are refused. */
+    routes: Schema.NonEmptyArray(RoutePattern).check(Schema.isUnique()),
+    key: KeyHeader,
+    /**
+     * The methods that each route accepts, by route, or `None` for every method on every route.
+     * The Cloudflare outbound handler refuses another method.
+     */
+    methods: Schema.Option(Schema.Record(RoutePattern, Schema.NonEmptyArray(RouteMethod))).pipe(
+      Schema.withConstructorDefault(Effect.succeedNone),
+    ),
+  }).check(
+    Schema.makeFilter(({ routes, methods }) =>
+      Option.match(methods, {
+        onNone: () => true,
+        onSome: (byRoute) => {
+          const listed = Object.keys(byRoute);
+          return (
+            (listed.length === routes.length && routes.every((route) => listed.includes(route))) ||
+            "Expected the methods of each route and of no other path"
+          );
+        },
+      }),
+    ),
+  ),
+) {
   readonly #segments = this.routes.map(segmentsOf);
 
   /** Returns whether `path`, a path under the slot without its query, is one of the routes. */
   serves(path: string): boolean {
     return this.#segments.some((segments) => routeMatches(segments, path));
+  }
+
+  /** Returns whether `path` is one of the routes, and `method` one that the route accepts. */
+  allows(method: string, path: string): boolean {
+    return this.routes.some(
+      (route, index) =>
+        routeMatches(this.#segments[index] ?? [], path) &&
+        Option.match(this.methods, {
+          onNone: () => true,
+          onSome: (byRoute) => (byRoute[route] ?? []).some((accepted) => accepted === method),
+        }),
+    );
   }
 }
 
@@ -400,14 +438,41 @@ const namesOf = ({ id, slot }: ModelProvider): ReadonlyArray<string> => {
   return Arr.dedupe(names);
 };
 
+/** The names by which an operator selects a provider of a destination. */
+export interface ProviderSelectors {
+  readonly slot: string;
+  readonly id: string;
+  /** The subscription login that the provider accepts, if any. */
+  readonly login: Option.Option<SubscriptionLogin>;
+}
+
+const selectorsOf = ({ slot, id, login }: ProviderSelectors): ReadonlyArray<string> =>
+  Arr.dedupe([slot, id, ...Option.toArray(login)]);
+
+/**
+ * Returns the provider among `providers` that `name` selects by its slot, its ID, or the
+ * subscription login it accepts, with `selectors` giving each provider's names. In a catalog each
+ * name selects at most one provider; a name that selects several selects none.
+ */
+export const selectProvider = <A>(
+  providers: ReadonlyArray<A>,
+  name: string,
+  selectors: (provider: A) => ProviderSelectors,
+): Option.Option<A> => {
+  const [first, ...rest] = providers.filter((provider) =>
+    selectorsOf(selectors(provider)).includes(name),
+  );
+  return first === undefined || rest.length > 0 ? Option.none() : Option.some(first);
+};
+
 /** The gateway variables that `provider` reads: its credentials' and its upstream variable. */
 const variablesOf = ({ credentials, upstreamVariable }: ModelProvider) =>
   Arr.dedupe([...credentials.map(({ variable }) => variable), ...Option.toArray(upstreamVariable)]);
 
 /**
- * Model providers whose IDs and slots are all distinct, so a name finds one provider, and that read
- * no gateway variable in common, so a key goes only to its own provider's upstream. Configuration
- * accepts a provider ID wherever it accepts a slot.
+ * Model providers whose IDs, slots, and subscription logins are all distinct, so a name selects one
+ * provider, and that read no gateway variable in common, so a key goes only to its own provider's
+ * upstream. Configuration accepts a provider ID wherever it accepts a slot.
  */
 export class ModelProviderCatalog extends Schema.Class<
   ModelProviderCatalog,
@@ -415,8 +480,11 @@ export class ModelProviderCatalog extends Schema.Class<
 >("Agent/ModelProviderCatalog")(
   Schema.Struct({ providers: Schema.Array(ModelProvider) }).check(
     Schema.makeFilter(({ providers }) => {
-      const names = providers.flatMap(namesOf);
-      return new Set(names).size === names.length || "Each provider ID and slot names one provider";
+      const names = providers.flatMap(selectorsOf);
+      return (
+        new Set(names).size === names.length ||
+        "Each provider ID, slot, and subscription login names one provider"
+      );
     }),
     Schema.makeFilter(({ providers }) => {
       const variables = providers.flatMap(variablesOf);
@@ -458,7 +526,7 @@ export class ModelProviderCatalog extends Schema.Class<
     return Arr.findFirst(this.providers, (provider) => provider.id === id);
   }
 
-  /** Returns the first provider whose subscription signs in with `login`. */
+  /** Returns the provider whose subscription signs in with `login`. */
   signingIn(login: SubscriptionLogin): Option.Option<ModelProvider> {
     return Arr.findFirst(this.providers, (provider) => Option.contains(provider.login, login));
   }

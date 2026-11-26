@@ -1,8 +1,10 @@
 import {
+  anthropic,
   GatewaySlot,
   type ModelProvider,
   type ModelProviderCatalog,
   ModelProviderId,
+  openai,
   SubscriptionLogin,
 } from "@usine/core/agent/provider";
 import { type Brand, Option, Schema, SchemaTransformation } from "effect";
@@ -126,12 +128,34 @@ export const ProviderConnection = Schema.Struct({ ...connectionFields, ...entryF
 export type ProviderConnection = typeof ProviderConnection.Type;
 
 /**
+ * The slots that orchestrators from before the provider catalog decode in a report's `providers`;
+ * any other slot there fails their whole read.
+ */
+export const SLOTS_BEFORE_CATALOG: ReadonlyArray<GatewaySlot> = [anthropic.slot, openai.slot];
+
+/**
  * The state of the credential in each slot of the gateway's catalog, with the slot's provider.
- * Gateways up to 0.3.0 report only the state.
+ * `catalog` lists every slot. `providers` lists the slots that orchestrators up to 0.6.0 decode,
+ * those of `SLOTS_BEFORE_CATALOG`, so another slot doesn't fail their read. Gateways up to 0.3.0
+ * omit `catalog` and report only the state in `providers`.
  */
 export const ProviderConnections = Schema.Struct({
   providers: Schema.Array(Schema.Union([ProviderConnection, Schema.Struct(connectionFields)])),
+  catalog: Schema.optionalKey(Schema.Array(ProviderConnection)),
 });
+export type ProviderConnections = typeof ProviderConnections.Type;
+
+/** Returns the report of `connections`, every slot of the gateway's catalog in catalog order. */
+export const connectionsReport = (
+  connections: ReadonlyArray<ProviderConnection>,
+): ProviderConnections => ({
+  providers: connections.filter(({ provider }) => SLOTS_BEFORE_CATALOG.includes(provider)),
+  catalog: connections,
+});
+
+/** Returns every slot that `report` lists, from `catalog` when the gateway reports it. */
+export const reportedConnections = (report: ProviderConnections) =>
+  report.catalog ?? report.providers;
 
 /** A provider whose status could not be read on its destination, such as a missing harness. */
 const ProviderUnavailable = Schema.Struct({

@@ -1,4 +1,11 @@
-import { anthropic, GatewaySlot, openai, UpstreamBase } from "@usine/core/agent/provider";
+import {
+  anthropic,
+  GatewaySlot,
+  type ModelProvider,
+  type ModelProviderCatalog,
+  openai,
+  UpstreamBase,
+} from "@usine/core/agent/provider";
 import {
   Context,
   Crypto,
@@ -23,7 +30,7 @@ import {
   LlmProvider,
   type LlmProviders,
 } from "../llm/llm.ts";
-import { GatewaySettings, SettingsInForce } from "../settings.ts";
+import { GatewaySettings, SettingsInForce, type UpstreamOverrides } from "../settings.ts";
 import {
   type LoginSecret,
   ProviderCredentialError,
@@ -54,11 +61,37 @@ const Stored = Schema.Union([
 ]);
 type Stored = typeof Stored.Type;
 
-/** The slot of the provider that accepts each kind of stored credential. */
+/** The slot whose static key each kind of stored credential holds. */
 const SLOT_OF_STORED = {
   AnthropicProvider: anthropic.slot,
   OpenAiProvider: openai.slot,
 } as const satisfies Record<Stored["_tag"], GatewaySlot>;
+
+/** Returns the provider of `catalog` whose slot is `slot`. */
+const providerInSlot = (catalog: ModelProviderCatalog, slot: string) =>
+  Option.filter(catalog.find(slot), (provider) => provider.slot === slot);
+
+/** Returns the provider of `catalog` in `slot` if it accepts a static key. */
+const keyedProvider = (catalog: ModelProviderCatalog, slot: string) =>
+  Option.filter(providerInSlot(catalog, slot), (provider) => provider.accepts("api-key"));
+
+/**
+ * Returns the provider of `catalog` that holds `stored`: for a static key, the provider in the
+ * built-in slot of its kind if it accepts a static key; for a login, the provider that signs in
+ * with it. The writer stores a credential under this provider's slot, and the reader ignores a
+ * credential under another slot.
+ */
+const ownerOf = (catalog: ModelProviderCatalog, stored: Stored): Option.Option<ModelProvider> => {
+  switch (stored.credential._tag) {
+    case "AnthropicApiKey":
+    case "OpenAiApiKey":
+      return keyedProvider(catalog, SLOT_OF_STORED[stored._tag]);
+    case "AnthropicSubscriptionToken":
+      return catalog.signingIn("claude");
+    case "ChatGptLogin":
+      return catalog.signingIn("chatgpt");
+  }
+};
 
 /**
  * Returns the entry of a static key for `slot` in the format of gateways up to 0.3.0, which has one
@@ -100,14 +133,32 @@ interface Snapshot {
   readonly staticKeys: Readonly<Record<GatewaySlot, Redacted.Redacted<string>>>;
 }
 
-const fromStored = ({ upstream, credential }: Stored): LlmProvider =>
-  LlmProvider.make({
-    upstream: Option.some(upstream),
-    credential:
-      credential._tag === "AnthropicApiKey" || credential._tag === "OpenAiApiKey"
-        ? ApiKey.make({ key: credential.key })
-        : credential,
-  });
+/**
+ * Returns the provider credential of `stored`. A ChatGPT login goes to its stored backend; another
+ * credential goes to `override`, the upstream that the environment sets for its slot, or else to
+ * the catalog's upstreams.
+ */
+const fromStored = (
+  { upstream, credential }: Stored,
+  override: Option.Option<UpstreamBase>,
+): LlmProvider => {
+  switch (credential._tag) {
+    case "ChatGptLogin":
+      return LlmProvider.make({ upstream: Option.some(upstream), credential });
+    case "AnthropicSubscriptionToken":
+      return LlmProvider.make({ upstream: override, credential });
+    case "AnthropicApiKey":
+    case "OpenAiApiKey":
+      return LlmProvider.make({
+        upstream: override,
+        credential: ApiKey.make({ key: credential.key }),
+      });
+  }
+};
+
+/** Returns the upstream override of `slot` in `upstreams`, if any. */
+const overrideOf = (upstreams: UpstreamOverrides, slot: string): Option.Option<UpstreamBase> =>
+  Option.fromUndefinedOr(Object.entries(upstreams).find(([name]) => name === slot)?.[1]);
 
 /** Returns `record` without `slot`. */
 const without = <A>(record: Readonly<Record<GatewaySlot, A>>, slot: string) =>
@@ -150,7 +201,14 @@ export class ProviderCredentials extends Context.Service<
     readonly disconnect: (
       provider: string,
     ) => Effect.Effect<void, ProviderCredentialError | UnservedProvider>;
-    readonly apply: (providers: LlmProviders) => Effect.Effect<LlmProviders>;
+    /**
+     * Returns `providers` with the connected credentials in place of the environment's, each sent
+     * to the upstream that `upstreams` sets for its slot, if any.
+     */
+    readonly apply: (
+      providers: LlmProviders,
+      upstreams: UpstreamOverrides,
+    ) => Effect.Effect<LlmProviders>;
   }
 >()("@usine/gateway/credentials/store/ProviderCredentials") {
   static readonly layer = (directory: string) =>
@@ -174,7 +232,8 @@ export class ProviderCredentials extends Context.Service<
             );
           const entries = Object.entries(stored);
           const misplaced = entries.flatMap(([slot, held]) =>
-            Option.isSome(held) && SLOT_OF_STORED[held.value._tag] !== slot
+            Option.isSome(held) &&
+            !Option.exists(ownerOf(catalog, held.value), (owner) => owner.slot === slot)
               ? [{ slot, kind: held.value._tag }]
               : [],
           );
@@ -183,20 +242,29 @@ export class ProviderCredentials extends Context.Service<
               "Ignored a stored provider credential under a slot whose provider doesn't accept it",
               { file, ...fields },
             );
+          const keys = Object.entries(staticKeys);
+          const unkeyed = keys.flatMap(([slot]) =>
+            Option.isNone(keyedProvider(catalog, slot)) ? [slot] : [],
+          );
+          for (const slot of unkeyed)
+            yield* Effect.logWarning(
+              "Ignored a stored static key for a slot whose provider doesn't accept one",
+              { file, slot },
+            );
           snapshot = {
             stored: Object.fromEntries(
               entries.filter(([slot]) => !misplaced.some((ignored) => ignored.slot === slot)),
             ),
-            staticKeys,
+            staticKeys: Object.fromEntries(keys.filter(([slot]) => !unkeyed.includes(slot))),
           };
         }
-        const apply = (providers: LlmProviders) =>
+        const apply = (providers: LlmProviders, upstreams: UpstreamOverrides) =>
           Effect.succeed(
             Object.entries(snapshot.staticKeys).reduce<LlmProviders>(
               (applied, [slot, key]) => ({
                 ...applied,
                 [slot]: LlmProvider.make({
-                  upstream: Option.none(),
+                  upstream: overrideOf(upstreams, slot),
                   credential: ApiKey.make({ key }),
                 }),
               }),
@@ -204,14 +272,20 @@ export class ProviderCredentials extends Context.Service<
                 (applied, [slot, held]) =>
                   Option.match(held, {
                     onNone: () => without(applied, slot),
-                    onSome: (value) => ({ ...applied, [slot]: fromStored(value) }),
+                    onSome: (value) => ({
+                      ...applied,
+                      [slot]: fromStored(value, overrideOf(upstreams, slot)),
+                    }),
                   }),
                 providers,
               ),
             ),
           );
         const initial = yield* settings.current;
-        yield* settings.replace({ ...initial, providers: yield* apply(initial.providers) });
+        yield* settings.replace({
+          ...initial,
+          providers: yield* apply(initial.providers, initial.upstreams),
+        });
         const save = Effect.fn("ProviderCredentials.save")(function* (
           next: Snapshot,
           provider: GatewaySlot,
@@ -233,7 +307,10 @@ export class ProviderCredentials extends Context.Service<
           const previous = Option.flatten(Option.fromUndefinedOr(snapshot.stored[provider]));
           snapshot = next;
           const current = yield* settings.current;
-          yield* settings.replace({ ...current, providers: yield* apply(current.providers) });
+          yield* settings.replace({
+            ...current,
+            providers: yield* apply(current.providers, current.upstreams),
+          });
           if (Option.isSome(previous) && previous.value.credential._tag === "ChatGptLogin") {
             yield* fs
               .remove(previous.value.credential.authFile, { force: true })

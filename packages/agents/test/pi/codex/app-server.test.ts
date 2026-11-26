@@ -502,6 +502,22 @@ describe("Codex app-server transport", () => {
     assert.strictEqual(command.options.forceKillAfter, "6 seconds");
   });
 
+  it("points the sandbox's model provider at the base URL in the environment", () => {
+    const environment = {
+      ...request.environment,
+      USINE_CODEX_BASE_URL: "http://test-plan.usine.internal/v1",
+    };
+    const command = codexAppServerCommand(client(LocalProcess.make(), environment));
+    assert.strictEqual(command._tag, "StandardCommand");
+    if (command._tag !== "StandardCommand") return;
+    assert.deepStrictEqual(command.args.slice(-4), [
+      "-c",
+      'model_providers.usine.base_url="http://test-plan.usine.internal/v1"',
+      "-c",
+      'cli_auth_credentials_store="file"',
+    ]);
+  });
+
   it.effect("skips blank, malformed, and unknown-shaped lines instead of failing", () =>
     Effect.gen(function* () {
       const process = yield* fakeProcess;

@@ -2,15 +2,10 @@ import {
   ProviderCredential,
   ProviderCredentialError,
   ProviderConnections,
+  SLOTS_BEFORE_CATALOG,
   UnservedProvider,
 } from "../credentials/model.ts";
-import {
-  anthropic,
-  GatewaySlot,
-  type ModelProviderCatalog,
-  openai,
-  RoutePattern,
-} from "@usine/core/agent/provider";
+import { GatewaySlot, type ModelProviderCatalog, RoutePattern } from "@usine/core/agent/provider";
 import { RepositoryName } from "@usine/core/repository";
 import { GatewayCredentialKind, WorkerName } from "@usine/core/worker";
 import { type Brand, Schema } from "effect";
@@ -133,12 +128,6 @@ export class ServedSlot extends Schema.Class<
   /** Whether requests use an API key or a subscription credential; absent without a credential. */
   credential: Schema.optionalKey(GatewayCredentialKind),
 }) {}
-
-/**
- * The slots that orchestrators from before the provider catalog decode in a report's `providers`;
- * any other slot there fails their whole read.
- */
-const SLOTS_BEFORE_CATALOG: ReadonlyArray<GatewaySlot> = [anthropic.slot, openai.slot];
 
 /**
  * The LLM providers the gateway forwards to, and every slot that its provider catalog has. Each

@@ -1,6 +1,7 @@
 import {
   anthropic,
   ApiKeyCredential,
+  SubscriptionCredential,
   GatewaySlot,
   GatewayVariable,
   HeaderName,
@@ -70,7 +71,7 @@ import {
 const listener = { host: "127.0.0.1", port: 0 };
 const upstreamsOf = (providers: LlmProviders) => Record.map(providers, ({ upstream }) => upstream);
 const connectedUpstreams = {
-  [anthropic.slot]: Option.some(anthropic.protocols[0].upstream),
+  [anthropic.slot]: Option.none(),
   [openai.slot]: Option.some(CHATGPT_UPSTREAM),
 };
 
@@ -141,11 +142,17 @@ const standIn = Effect.gen(function* () {
   return { origin: `http://127.0.0.1:${address.port}`, seen };
 });
 
-/** A provider that only this test defines, with a static key, at `origin`. */
+/** The gateway variable that replaces the upstream of `planAt`'s provider. */
+const PLAN_UPSTREAM = "TEST_PLAN_UPSTREAM";
+
+/**
+ * A provider that only this test defines, with a static key, at `origin`. Its slot differs from
+ * its ID, so a test sees which one the gateway keys a credential by.
+ */
 const planAt = (origin: string) =>
   ModelProvider.make({
     id: ModelProviderId.make("test-plan"),
-    slot: GatewaySlot.make("test-plan"),
+    slot: GatewaySlot.make("test-plan-chat"),
     label: "Test plan",
     protocols: [
       ProviderProtocol.make({
@@ -156,17 +163,37 @@ const planAt = (origin: string) =>
       }),
     ],
     credentials: [ApiKeyCredential.make({ variable: GatewayVariable.make("TEST_PLAN_API_KEY") })],
+    upstreamVariable: Option.some(GatewayVariable.make(PLAN_UPSTREAM)),
   });
+
+/** A report of `GET /v1/provider-credentials` as orchestrators up to 0.6.0 decode it. */
+const ConnectionsUpTo060 = Schema.fromJsonString(
+  Schema.Struct({
+    providers: Schema.Array(
+      Schema.Struct({
+        provider: Schema.Literals(["anthropic-messages", "openai-responses"]),
+        credential: Schema.NullOr(Schema.Literals(["api-key", "subscription"])),
+        expiresAt: Schema.NullOr(Schema.String),
+        lastRefresh: Schema.NullOr(Schema.String),
+      }),
+    ),
+  }),
+);
 
 /**
  * The gateway as `usine-gateway` composes it, serving `catalog`, with its settings from the
- * environment and its state in `directory`.
+ * environment and `variables`, and its state in `directory`.
  */
-const gatewayServing = (catalog: ModelProviderCatalog, directory: string) =>
+const gatewayServing = (
+  catalog: ModelProviderCatalog,
+  directory: string,
+  variables: Readonly<Record<string, string>> = {},
+) =>
   Layer.unwrap(
     Effect.gen(function* () {
       const base = ConfigProvider.fromEnv({
         env: {
+          ...variables,
           USINE_GATEWAY_DOMAIN: "gw.test",
           USINE_GATEWAY_ADMIN_TOKEN: ADMIN_TOKEN_VALUE,
           USINE_GATEWAY_CALLER_KEY: "caller-key-for-credential-tests-0123456789",
@@ -341,7 +368,10 @@ it.live(
           (yield* credentials.status).map(({ credential }) => credential),
           [null, null],
         );
-        const next = yield* credentials.apply(beforeDisconnect.providers);
+        const next = yield* credentials.apply(
+          beforeDisconnect.providers,
+          beforeDisconnect.upstreams,
+        );
         assert.deepStrictEqual(next, {});
       }),
     ).pipe(Effect.provide([NodeServices.layer, FetchHttpClient.layer])),
@@ -364,7 +394,8 @@ it.live(
         const directory = yield* fs.makeTempDirectoryScoped();
         yield* fs.writeFileString(`${directory}/egress-allowlist`, "registry.npmjs.org\n");
         const upstream = yield* standIn;
-        const plan = planAt(upstream.origin);
+        const catalogUpstream = yield* standIn;
+        const plan = planAt(catalogUpstream.origin);
         const catalog = ModelProviderCatalog.make({
           providers: [...modelProviders.providers, plan],
         });
@@ -374,7 +405,9 @@ it.live(
             lines.push(jsonKey(message));
           }),
         ]);
-        const start = gatewayServing(catalog, directory).pipe(Layer.provide(logs));
+        const start = gatewayServing(catalog, directory, {
+          [PLAN_UPSTREAM]: `${upstream.origin}/v1`,
+        }).pipe(Layer.provide(logs));
         const scope = yield* Scope.make();
         const first = yield* Layer.buildWithScope(start, scope);
         const client = yield* adminOf(first);
@@ -390,7 +423,8 @@ it.live(
           })
           .pipe(Effect.flip);
         assert.strictEqual(unserved._tag, "UnservedProvider");
-        const { providers } = yield* client.llm.connections();
+        const report = yield* client.llm.connections();
+        const providers = report.catalog ?? [];
         assert.deepStrictEqual(providers.at(-1), {
           provider: plan.slot,
           id: plan.id,
@@ -401,32 +435,53 @@ it.live(
           lastRefresh: null,
           refreshable: false,
         });
+        const { admin } = Context.get(first, GatewayAddresses);
+        const legacy = yield* HttpClient.get(
+          `http://${admin.host}:${admin.port}/v1/provider-credentials`,
+          { headers: { authorization: `Bearer ${ADMIN_TOKEN_VALUE}` } },
+        ).pipe(
+          Effect.flatMap((response) => response.text),
+          Effect.flatMap(Schema.decodeUnknownEffect(ConnectionsUpTo060)),
+        );
+        assert.deepStrictEqual(
+          legacy.providers.map(({ provider }): string => provider),
+          [anthropic.slot, openai.slot],
+        );
+        const Saved = Schema.fromJsonString(
+          Schema.Struct({ staticKeys: Schema.Record(Schema.String, Schema.String) }),
+        );
+        const saved = yield* fs
+          .readFileString(`${directory}/provider-credentials.json`)
+          .pipe(Effect.flatMap(Schema.decodeUnknownEffect(Saved)));
+        assert.deepStrictEqual(Object.keys(saved.staticKeys), [plan.slot]);
         const ask = yield* attemptOn(first);
-        const connected = yield* ask("/test-plan/chat/completions");
+        const path = `/${plan.slot}/chat/completions`;
+        const connected = yield* ask(path);
         yield* Effect.flatMap(GatewayReload, ({ reload }) => reload).pipe(
           Effect.provideContext(first),
         );
-        const reloaded = yield* ask("/test-plan/chat/completions");
+        const reloaded = yield* ask(path);
         yield* Scope.close(scope, Exit.void);
 
         const restarted = yield* Layer.build(start);
         const askAgain = yield* attemptOn(restarted);
-        const afterRestart = yield* askAgain("/test-plan/chat/completions");
+        const afterRestart = yield* askAgain(path);
         const again = yield* adminOf(restarted);
         yield* again.llm.disconnect({ params: { provider: plan.id } });
-        const afterDisconnect = yield* askAgain("/test-plan/chat/completions");
+        const afterDisconnect = yield* askAgain(path);
         assert.deepStrictEqual(
           [connected, reloaded, afterRestart, afterDisconnect],
           [200, 200, 200, 503],
         );
         const disconnected = yield* again.llm.connections();
-        assert.strictEqual(disconnected.providers.at(-1)?.credential, null);
+        assert.strictEqual(disconnected.catalog?.at(-1)?.credential, null);
 
         assert.deepStrictEqual(upstream.seen, [
           ["/v1/chat/completions", `Bearer ${PLAN_KEY}`],
           ["/v1/chat/completions", `Bearer ${PLAN_KEY}`],
           ["/v1/chat/completions", `Bearer ${PLAN_KEY}`],
         ]);
+        assert.deepStrictEqual(catalogUpstream.seen, []);
         assert.isTrue(spans.some(({ name }) => name === "ProviderCredentials.replace"));
         const exposed =
           jsonKey(providers) +
@@ -572,12 +627,15 @@ it.live(
             if (logLevel === "Warn") warnings.push(jsonKey(message));
           }),
         ]);
-        const start = () =>
+        const start = (catalog: ModelProviderCatalog = modelProviders) =>
           gatewayLayer(
             { proxy: listener, egress: listener, admin: listener },
             undefined,
             directory,
-          ).pipe(Layer.provide(settingsLayer(NO_PROVIDERS)), Layer.provide(logs));
+          ).pipe(
+            Layer.provide(settingsLayer(NO_PROVIDERS, undefined, undefined, catalog)),
+            Layer.provide(logs),
+          );
         const secret = "sk-ant-api03-misplaced-private-fixture";
         const first = yield* Scope.make();
         const connected = yield* Layer.buildWithScope(start(), first);
@@ -597,10 +655,31 @@ it.live(
           .pipe(Effect.flatMap(Schema.decodeUnknownEffect(StoredFile)));
         const record = stored[anthropic.slot];
         assert(record !== undefined);
-        const misplaced = { [anthropic.slot]: record, [openai.slot]: record, "test-plan": record };
+        // The test's provider now takes only the ChatGPT login, in place of OpenAI, so its saved static key no longer applies.
+        const plan = planAt("https://plan.test");
+        const loginOnly = ModelProvider.make({
+          id: plan.id,
+          slot: plan.slot,
+          label: plan.label,
+          protocols: plan.protocols,
+          credentials: [
+            SubscriptionCredential.make({
+              login: "chatgpt",
+              variable: GatewayVariable.make("TEST_PLAN_AUTH_FILE"),
+            }),
+          ],
+        });
+        const misplaced = {
+          [anthropic.slot]: record,
+          [openai.slot]: record,
+          "test-plan": record,
+          staticKeys: { [plan.slot]: PLAN_KEY },
+        };
         const text = yield* Schema.encodeEffect(StoredFile)(misplaced);
         yield* fs.writeFileString(file, text);
-        const restarted = yield* Layer.build(start());
+        const restarted = yield* Layer.build(
+          start(ModelProviderCatalog.make({ providers: [anthropic, loginOnly] })),
+        );
         const { providers } = yield* SettingsInForce.pipe(
           Effect.provideContext(restarted),
           Effect.flatMap((settings) => settings.current),
@@ -611,7 +690,90 @@ it.live(
         assert.include(ignored[0], `"slot":"${openai.slot}"`);
         assert.include(ignored[0], '"kind":"AnthropicProvider"');
         assert.include(ignored[1], '"slot":"test-plan"');
+        const ignoredKeys = warnings.filter((line) => line.includes("Ignored a stored static key"));
+        assert.strictEqual(ignoredKeys.length, 1);
+        assert.include(ignoredKeys[0], `"slot":"${plan.slot}"`);
+        const store = yield* Effect.serviceOption(ProviderCredentials).pipe(
+          Effect.provideContext(restarted),
+        );
+        if (Option.isNone(store)) return yield* Effect.die("Provider credential service missing");
+        const listed = yield* store.value.status;
+        assert.deepStrictEqual(
+          listed
+            .filter(({ provider }) => provider === plan.slot)
+            .map(({ accepts, credential }) => [accepts.apiKey, credential]),
+          [[false, null]],
+        );
+        const refused = yield* store.value
+          .replace(StaticKey.make({ provider: plan.id, secret: Redacted.make(PLAN_KEY) }))
+          .pipe(Effect.flip);
+        assert.strictEqual(refused._tag, "UnservedProvider");
         assert.notInclude(warnings.join("\n"), secret);
+        assert.notInclude(warnings.join("\n"), PLAN_KEY);
+      }),
+    ).pipe(Effect.provide([NodeServices.layer, FetchHttpClient.layer])),
+);
+
+it.live(
+  "keeps a login across a restart when the catalog's provider that signs in with it has a slot of its own",
+  () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const directory = yield* fs.makeTempDirectoryScoped();
+        const claude = ModelProvider.make({
+          id: anthropic.id,
+          slot: GatewaySlot.make("claude-messages"),
+          label: anthropic.label,
+          protocols: anthropic.protocols,
+          credentials: anthropic.credentials,
+          upstreamVariable: anthropic.upstreamVariable,
+        });
+        const catalog = ModelProviderCatalog.make({ providers: [claude, openai] });
+        const start = () =>
+          gatewayLayer(
+            { proxy: listener, egress: listener, admin: listener },
+            undefined,
+            directory,
+          ).pipe(Layer.provide(settingsLayer(NO_PROVIDERS, undefined, undefined, catalog)));
+        const storeOf = (context: Context.Context<GatewayAddresses>) =>
+          Effect.flatMap(
+            Effect.serviceOption(ProviderCredentials).pipe(Effect.provideContext(context)),
+            Option.match({
+              onNone: () => Effect.die("The gateway has no provider credential store"),
+              onSome: Effect.succeed,
+            }),
+          );
+        const kinds = (context: Context.Context<GatewayAddresses>) =>
+          Effect.flatMap(storeOf(context), ({ status }) =>
+            Effect.map(status, (providers) =>
+              providers.map(({ provider, credential }) => [provider, credential]),
+            ),
+          );
+        const scope = yield* Scope.make();
+        const first = yield* Layer.buildWithScope(start(), scope);
+        yield* Effect.flatMap(storeOf(first), ({ replace }) =>
+          replace(
+            LoginSecret.make({ login: "claude", secret: Redacted.make("sk-ant-oat01-private") }),
+          ),
+        );
+        const connected = yield* kinds(first);
+        yield* Scope.close(scope, Exit.void);
+        const again = yield* Layer.build(start());
+        const restarted = yield* kinds(again);
+        assert.deepStrictEqual(
+          [connected, restarted],
+          [
+            [
+              [claude.slot, "subscription"],
+              [openai.slot, null],
+            ],
+            [
+              [claude.slot, "subscription"],
+              [openai.slot, null],
+            ],
+          ],
+        );
       }),
     ).pipe(Effect.provide([NodeServices.layer, FetchHttpClient.layer])),
 );

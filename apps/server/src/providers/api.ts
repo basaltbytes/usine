@@ -4,7 +4,8 @@ import {
   ProviderStatus,
   type ProviderTarget,
 } from "@usine/gateway/credentials";
-import { Schema } from "effect";
+import type { ProviderSelectors } from "@usine/core/agent/provider";
+import { Option, Schema } from "effect";
 import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/http-api";
 import { AuthenticationError } from "../auth/api.ts";
 import { AuthError } from "../auth/model.ts";
@@ -23,16 +24,19 @@ export const CodeRequest = Schema.Struct({ id: Schema.String, code: secret });
 export const KeyRequest = Schema.Struct({ ...named, key: secret });
 export const DisconnectRequest = Schema.Struct(named);
 
-type ListedProvider = ProviderTarget["providers"][number];
-
-/** Returns the provider that `name` names on a destination: its slot, its ID, or its subscription login. */
-export const providerNamed = (
-  providers: ReadonlyArray<ListedProvider>,
-  name: string,
-): ListedProvider | undefined =>
-  providers.find(
-    ({ provider, id, accepts }) => provider === name || id === name || accepts.login === name,
-  );
+/** Returns the names that select `listed`, a provider of a destination, for `selectProvider`. */
+export const listedSelectors = ({
+  provider,
+  id,
+  accepts,
+}: Pick<
+  ProviderTarget["providers"][number],
+  "provider" | "id" | "accepts"
+>): ProviderSelectors => ({
+  slot: provider,
+  id,
+  login: Option.fromNullOr(accepts.login),
+});
 const error = AuthError.fields.status.literals.map((status) =>
   AuthenticationError.annotate({
     httpApiStatus: status,

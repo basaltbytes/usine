@@ -1,7 +1,7 @@
 // SDK hooks, transactions, and async iterators require Promise callbacks.
 // @effect-diagnostics asyncFunction:off
 import { Files, SandboxFileError } from "@cloudflare/sandbox";
-import { ModelProvider, modelProviders } from "@usine/core/agent/provider";
+import { modelProviders } from "@usine/core/agent/provider";
 import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
 import {
   type Cause,
@@ -10,7 +10,6 @@ import {
   Effect,
   Layer,
   Logger,
-  Match,
   Option,
   Queue,
   Redacted,
@@ -18,15 +17,18 @@ import {
 } from "effect";
 import { HttpRouter } from "effect/http";
 import { type AccessToken, accessGranted } from "./access.ts";
-import { ProcessId, ProviderCredential, SandboxName, SandboxSummary } from "./api/api.ts";
-import { GITHUB_HOSTS } from "./api/harness.ts";
+import { ProcessId, SandboxName, SandboxSummary } from "./api/api.ts";
 import { AttachOffsets } from "./api/stream.ts";
 import { registryRoutes, RegistryStorage, SandboxLookup, SandboxLookupFailed } from "./registry.ts";
 import {
   allowedHostsOf,
   forwardRequest,
+  GitHubProps,
   gitHubRequest,
-  providerRequest,
+  providerOutbound,
+  ProviderProps,
+  type Registration,
+  registrationOf,
 } from "./sandbox/outbound.ts";
 import {
   ContainerFailure,
@@ -72,11 +74,19 @@ const settingsOf = (env: Env): Option.Option<WorkerSettings> =>
     allowedHosts: allowedHostsOf(variables.ALLOWED_HOSTS ?? ""),
   }));
 
-/** The provider and credential of a provider's outbound handler, as its props carry them. */
-const ProviderProps = Schema.Struct({
-  provider: Schema.toCodecJson(ModelProvider),
-  credential: ProviderCredential,
-});
+/** Returns the entrypoint of `exports` for `registration`, with its props. */
+const entrypointOf = (exports: Cloudflare.Exports, registration: Registration) => {
+  switch (registration.handler) {
+    case "GitHubOutbound":
+      return exports.GitHubOutbound({ props: registration.props });
+    case "ProviderOutbound":
+      return exports.ProviderOutbound({ props: registration.props });
+    case "AllowedOutbound":
+      return exports.AllowedOutbound({ props: {} });
+    case "DeniedOutbound":
+      return exports.DeniedOutbound({ props: {} });
+  }
+};
 
 const logger = Logger.layer([Logger.consoleJson]);
 
@@ -203,34 +213,17 @@ const containerOf = (
         container.setInactivityTimeout(Duration.toMillis(inactivity)),
       ),
     intercept: (interception) =>
-      Match.valueTags(interception, {
-        GitHub: ({ host, token }) =>
-          tryContainer("intercept", () =>
-            container.interceptOutboundHttps(
-              host,
-              exports.GitHubOutbound({ props: { host, token: Redacted.value(token) } }),
-            ),
-          ),
-        Provider: ({ host, provider, credential }) =>
-          Schema.encodeEffect(ProviderProps)({ provider, credential }).pipe(
-            Effect.mapError((cause) => containerFailure("intercept")(cause)),
-            Effect.flatMap((props) =>
-              tryContainer("intercept", () =>
-                container.interceptOutboundHttp(host, exports.ProviderOutbound({ props })),
-              ),
-            ),
-          ),
-        Allowed: ({ host }) =>
-          tryContainer("intercept", () =>
-            container.interceptOutboundHttps(host, exports.AllowedOutbound({ props: {} })),
-          ),
-        Denied: ({ host, scheme }) =>
-          tryContainer("intercept", () =>
-            scheme === "https"
-              ? container.interceptOutboundHttps(host, exports.DeniedOutbound({ props: {} }))
-              : container.interceptOutboundHttp(host, exports.DeniedOutbound({ props: {} })),
-          ),
-      }),
+      registrationOf(interception).pipe(
+        Effect.mapError((cause) => containerFailure("intercept")(cause)),
+        Effect.flatMap((registration) =>
+          tryContainer("intercept", () => {
+            const handler = entrypointOf(exports, registration);
+            return registration.scheme === "https"
+              ? container.interceptOutboundHttps(registration.host, handler)
+              : container.interceptOutboundHttp(registration.host, handler);
+          }),
+        ),
+      ),
   };
 };
 
@@ -496,11 +489,6 @@ export class SandboxRegistry extends DurableObject<Env> {
   }
 }
 
-const GitHubProps = Schema.Struct({
-  host: Schema.Literals(GITHUB_HOSTS),
-  token: Schema.NonEmptyString,
-});
-
 /** Adds the Attempt's installation token to the sandbox's requests for GitHub. */
 export class GitHubOutbound extends WorkerEntrypoint<Env, typeof GitHubProps.Encoded> {
   override async fetch(request: Request): Promise<Response> {
@@ -520,26 +508,11 @@ export class GitHubOutbound extends WorkerEntrypoint<Env, typeof GitHubProps.Enc
 /**
  * Sends the sandbox's plain HTTP requests for a provider to the upstream of the protocol that
  * serves the path, with the provider's API key. Refuses a path outside the provider's routes in
- * the catalog with status 404.
+ * the catalog, or a method that its route doesn't accept, with status 404.
  */
 export class ProviderOutbound extends WorkerEntrypoint<Env, typeof ProviderProps.Encoded> {
   override async fetch(request: Request): Promise<Response> {
-    // Cloudflare calls this handler outside the Effect runtime.
-    // @effect-diagnostics-next-line schemaSync:off
-    const props = Schema.decodeSync(ProviderProps)(this.ctx.props);
-    const forwarded = providerRequest(request, props.provider, props.credential);
-    if (Option.isNone(forwarded)) {
-      await run(
-        Effect.logWarning("Refused a sandbox request for a route outside the provider's", {
-          handler: props.provider.id,
-          method: request.method,
-          host: new URL(request.url).host,
-          path: new URL(request.url).pathname,
-        }),
-      );
-      return plain(404, `usine forwards only the ${props.provider.label} routes in its catalog.\n`);
-    }
-    return run(forwardRequest(props.provider.id, request, forwarded.value));
+    return run(providerOutbound(this.ctx.props, request));
   }
 }
 

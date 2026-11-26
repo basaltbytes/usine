@@ -1,3 +1,4 @@
+import { selectProvider } from "@usine/core/agent/provider";
 import { Context, Crypto, Effect, Fiber, Layer, Redacted, Semaphore } from "effect";
 import {
   type LoginProvider,
@@ -6,7 +7,7 @@ import {
   type ProviderStatus,
   StaticKey,
 } from "@usine/gateway/credentials";
-import { providerNamed } from "./api.ts";
+import { listedSelectors } from "./api.ts";
 import { ProviderTargets } from "./targets.ts";
 import { ProviderLoginRunner, type LoginProcess } from "./runner.ts";
 
@@ -60,14 +61,35 @@ export class ProviderLogins extends Context.Service<
             }),
           ),
         );
-      /** Returns the provider of `target` that `name` names, if the destination can read its status. */
+      /** Returns the provider among `providers` of the destination `label` that `name` selects. */
+      const selecting = <A extends Parameters<typeof listedSelectors>[0]>(
+        label: string,
+        providers: ReadonlyArray<A>,
+        name: string,
+      ) =>
+        Effect.fromOption(selectProvider(providers, name, listedSelectors)).pipe(
+          Effect.mapError(() =>
+            ProviderCredentialError.make({
+              message: `${label} has no provider ${name}. Choose ${providers.map(({ id }) => id).join(", ")}.`,
+            }),
+          ),
+        );
+      /**
+       * Returns the provider of `target` that `name` selects, without reading its credential, so a
+       * key or a disconnect can replace a credential that the destination can't read.
+       */
+      const resolved = Effect.fn("ProviderLogins.resolved")(function* (
+        target: string,
+        name: string,
+      ) {
+        yield* Effect.annotateCurrentSpan({ target, provider: name });
+        const { label, providers } = yield* targets.providers(target);
+        return yield* selecting(label, providers, name);
+      });
+      /** Returns the provider of `target` that `name` selects, if the destination can read its status. */
       const listed = Effect.fn("ProviderLogins.listed")(function* (target: string, name: string) {
         const { label, providers } = yield* targets.get(target);
-        const connection = providerNamed(providers, name);
-        if (connection === undefined)
-          return yield* ProviderCredentialError.make({
-            message: `${label} has no provider ${name}. Choose ${providers.map(({ id }) => id).join(", ")}.`,
-          });
+        const connection = yield* selecting(label, providers, name);
         if ("error" in connection)
           return yield* ProviderCredentialError.make({ message: connection.error });
         return connection;
@@ -202,7 +224,7 @@ export class ProviderLogins extends Context.Service<
           (target: string, provider: string, key: Redacted.Redacted<string>) =>
             lock.withPermit(
               Effect.gen(function* () {
-                const connection = yield* listed(target, provider);
+                const connection = yield* resolved(target, provider);
                 if (!connection.accepts.apiKey)
                   return yield* ProviderCredentialError.make({
                     message: `${connection.label} doesn't take an API key on this destination.`,
@@ -218,7 +240,7 @@ export class ProviderLogins extends Context.Service<
         disconnect: Effect.fn("ProviderLogins.disconnect")((target: string, provider: string) =>
           lock.withPermit(
             Effect.gen(function* () {
-              const connection = yield* listed(target, provider);
+              const connection = yield* resolved(target, provider);
               yield* stopLogin(target, connection.accepts.login);
               yield* targets.disconnect(target, connection.provider);
             }),

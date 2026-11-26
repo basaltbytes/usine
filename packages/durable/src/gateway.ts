@@ -16,10 +16,10 @@ import { anthropicMessagesApi } from "@earendil-works/pi-ai/api/anthropic-messag
 import { catalog, type CredentialRoute } from "@usine/agents/harness";
 import { type PiAuthentication } from "@usine/agents/pi/authentication";
 import { Harness } from "@usine/core/agent/brain";
-import type { GatewaySlot } from "@usine/core/agent/provider";
+import type { GatewaySlot, ModelProvider } from "@usine/core/agent/provider";
 import type { GatewayCredentialKind } from "@usine/core/worker";
 import { jsonKey } from "@usine/core/json-key";
-import { Effect, Option, Schema, Stream } from "effect";
+import { Effect, Option, Ref, Schema, Stream } from "effect";
 import { Sse } from "effect/encoding";
 
 /** A provider credential check or model request that failed without exposing credentials. */
@@ -79,17 +79,14 @@ const piProviders = Option.match(catalog.get(Harness.make("pi")), {
   onSome: ({ providers }) => providers,
 });
 
-/**
- * Returns the wire protocol, gateway slot, and model request path of the Pi provider `provider`:
- * the slot of the first of Pi's catalog providers that serves its protocol.
- */
-const gatewayRouteOf = (provider: string) => {
-  const spoken = piProtocolOf(provider);
-  const slot = piProviders.find(({ protocols }) =>
-    protocols.some(({ protocol }) => protocol === spoken?.protocol),
-  )?.slot;
-  return spoken === undefined || slot === undefined ? undefined : { ...spoken, slot };
-};
+/** Returns the providers in `providers` whose slot serves `path` with `protocol`, in their order. */
+const slotsServing = (
+  providers: ReadonlyArray<ModelProvider>,
+  { protocol, path }: { readonly protocol: string; readonly path: string },
+) =>
+  providers.filter((entry) =>
+    Option.exists(entry.protocolFor(path), (served) => served.protocol === protocol),
+  );
 
 const Payload = Schema.Record(Schema.String, Schema.Unknown);
 
@@ -138,31 +135,86 @@ const codexResponse = (response: Response): Response => {
   });
 };
 
-/** Builds Pi providers that only send model requests through the gateway transport. */
+/**
+ * Builds Pi providers that only send model requests through the gateway transport. Each Pi provider
+ * reaches the first slot of `providers`, which default to the Pi harness's catalog providers, that
+ * serves its model request and has a credential it can use. Until a credential check picks a slot,
+ * it reaches the first slot that serves its model request.
+ */
 export const gatewayModelAccess: (
   transport: GatewayModelTransport,
+  providers?: ReadonlyArray<ModelProvider>,
 ) => Effect.Effect<ParentModelAccess> = Effect.fn("GatewayModelAccess.make")(function* (
   transport: GatewayModelTransport,
+  providers: ReadonlyArray<ModelProvider> = piProviders,
 ) {
   const context = yield* Effect.context<never>();
   const run = Effect.runPromiseWith(context);
   const models = createModels();
+  const routes = new Map<
+    string,
+    {
+      readonly protocol: "anthropic-messages" | "openai-responses";
+      readonly path: string;
+      readonly candidates: ReadonlyArray<ModelProvider>;
+      readonly selected: Ref.Ref<GatewaySlot>;
+    }
+  >();
+  for (const provider of [anthropicProvider(), openaiProvider(), openaiCodexProvider()]) {
+    const spoken = piProtocolOf(provider.id);
+    if (spoken === undefined) continue;
+    const candidates = slotsServing(providers, spoken);
+    const first = candidates[0];
+    if (first === undefined) {
+      yield* Effect.logInfo("No gateway slot serves the Pi provider's model request").pipe(
+        Effect.annotateLogs({
+          provider: provider.id,
+          protocol: spoken.protocol,
+          path: spoken.path,
+        }),
+      );
+      continue;
+    }
+    routes.set(provider.id, { ...spoken, candidates, selected: yield* Ref.make(first.slot) });
+  }
   const authentication = Effect.fn("GatewayModelAccess.authentication")(function* (
     provider: string,
   ) {
     yield* Effect.annotateCurrentSpan({ provider });
-    const route = gatewayRouteOf(provider);
+    const route = routes.get(provider);
     if (route === undefined) return undefined;
-    const credential = yield* transport
-      .credential(route.slot)
-      .pipe(Effect.map(Option.getOrUndefined));
-    if (credential === "api-key") return { _tag: "ApiKey" } as const;
-    if (credential === "subscription" && provider === "openai-codex")
-      return { _tag: "OAuth", subscription: true } as const;
+    for (const entry of route.candidates) {
+      const credential = yield* transport
+        .credential(entry.slot)
+        .pipe(Effect.map(Option.getOrUndefined));
+      const authenticated =
+        credential === undefined || !entry.accepts(credential)
+          ? undefined
+          : credential === "api-key"
+            ? ({ _tag: "ApiKey" } as const)
+            : provider === "openai-codex"
+              ? ({ _tag: "OAuth", subscription: true } as const)
+              : undefined;
+      if (authenticated === undefined) {
+        yield* Effect.logInfo("Skipped a gateway slot without a usable credential").pipe(
+          Effect.annotateLogs({ provider, slot: entry.slot, credential: credential ?? "none" }),
+        );
+        continue;
+      }
+      yield* Ref.set(route.selected, entry.slot);
+      yield* Effect.annotateCurrentSpan({ slot: entry.slot });
+      yield* Effect.logInfo("Selected the gateway slot for the Pi provider").pipe(
+        Effect.annotateLogs({ provider, slot: entry.slot, credential }),
+      );
+      return authenticated;
+    }
+    yield* Effect.logInfo("No gateway slot has a usable credential for the Pi provider").pipe(
+      Effect.annotateLogs({ provider, slots: route.candidates.map(({ slot }) => slot).join(",") }),
+    );
     return undefined;
   });
   for (const provider of [anthropicProvider(), openaiProvider(), openaiCodexProvider()]) {
-    const route = gatewayRouteOf(provider.id);
+    const route = routes.get(provider.id);
     if (route === undefined) continue;
     const { protocol } = route;
     const baseUrl = `http://llm.gateway/${protocol}/v1`;
@@ -172,13 +224,16 @@ export const gatewayModelAccess: (
         ...options,
         fetch: async (input, init) => {
           const request = new Request(input, init);
+          const body = await request.text();
           const response = await run(
-            transport.request(
-              route.slot,
-              route.path,
-              await request.text(),
-              Object.fromEntries(request.headers),
-              request.signal,
+            Effect.flatMap(Ref.get(route.selected), (slot) =>
+              transport.request(
+                slot,
+                route.path,
+                body,
+                Object.fromEntries(request.headers),
+                request.signal,
+              ),
             ),
             { signal: request.signal },
           );

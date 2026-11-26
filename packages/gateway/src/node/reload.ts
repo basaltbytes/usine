@@ -17,10 +17,11 @@ import { ChatGptLogins } from "../chatgpt/logins.ts";
 import type { EgressAllowlist } from "../egress/egress.ts";
 import type { ModelProviderCatalog } from "@usine/core/agent/provider";
 import { type LlmProviders, upstreamVariable } from "../llm/llm.ts";
-import { SettingsInForce } from "../settings.ts";
+import { type ReloadableSettings, SettingsInForce } from "../settings.ts";
 import {
   egressAllowlistPath,
   llmProviders,
+  llmUpstreams,
   readEgressAllowlist,
   readSettingsSource,
   type RestartSettings,
@@ -140,12 +141,12 @@ const nextAllowlist = (previous: EgressAllowlist) =>
 
 const keptProviders = (error: string) =>
   Effect.logError("Kept the previous LLM providers", { error }).pipe(
-    Effect.as(Option.none<LlmProviders>()),
+    Effect.as(Option.none<Pick<ReloadableSettings, "providers" | "upstreams">>()),
   );
 
-/** The new LLM providers, or `None` if they're invalid. */
+/** The new LLM providers and upstream overrides, or `None` if they're invalid. */
 const nextProviders = (catalog: ModelProviderCatalog) =>
-  llmProviders(catalog).pipe(
+  Effect.all({ providers: llmProviders(catalog), upstreams: llmUpstreams(catalog) }).pipe(
     Effect.asSome,
     Effect.catchTags({
       ConfigError: ({ message }) => keptProviders(message),
@@ -200,12 +201,14 @@ export const gatewayReloadLayer = (started: StartupSettings, base: ConfigProvide
           const previous = yield* inForce.current;
           const allowlist = yield* nextAllowlist(previous.egress);
           const providers = yield* nextProviders(catalog);
+          const { providers: configured, upstreams } = Option.getOrElse(providers, () => previous);
           const next = {
             egress: Option.getOrElse(allowlist.egress, () => previous.egress),
             providers: yield* Option.match(credentials, {
-              onNone: () => Effect.succeed(Option.getOrElse(providers, () => previous.providers)),
-              onSome: (store) => store.apply(Option.getOrElse(providers, () => previous.providers)),
+              onNone: () => Effect.succeed(configured),
+              onSome: (store) => store.apply(configured, upstreams),
             }),
+            upstreams,
           };
           yield* inForce.replace(next);
           if (Option.isSome(providers)) yield* reloadChatGptLogins(logins, next.providers);

@@ -1,7 +1,6 @@
 import { ListField } from "./list-field";
 import { useQuery } from "@tanstack/react-query";
 import { Worker } from "@usine/config/factory";
-import { modelProviders } from "@usine/core/agent/provider";
 import { CloudflareInstanceType } from "@usine/core/worker";
 import { Checkbox } from "~/components/ui/checkbox";
 import { Label } from "~/components/ui/label";
@@ -14,13 +13,11 @@ import {
   stringValue,
   withField,
 } from "~/features/configuration/lib/forms";
+import { keyedProviders } from "~/features/configuration/lib/providers";
 import { formCopy, workerFormCopy as copy } from "~/features/configuration/strings";
 import { configurationQuery } from "~/lib/configuration/queries";
 import { Fields, FormField } from "./fields";
 import { ProvisionerFields } from "./provisioner";
-
-/** The catalog's providers that take an API key. */
-const keyedProviders = modelProviders.providers.filter((provider) => provider.accepts("api-key"));
 
 const CloudflareKeys = (fields: FormFieldsProps) => {
   const keys = arrayValue(fields.value.llm_providers).map(objectValue);

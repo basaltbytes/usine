@@ -1,5 +1,5 @@
 import { ProviderCredentials } from "../credentials/store.ts";
-import { ProviderCredentialError } from "../credentials/model.ts";
+import { connectionsReport, ProviderCredentialError } from "../credentials/model.ts";
 import { Effect, Layer, Option, Redacted } from "effect";
 import { HttpApiBuilder, HttpApiError } from "effect/http-api";
 import { Attachment, type AttachmentId, newAttachmentId } from "../attachment/attachment.ts";
@@ -119,7 +119,7 @@ const credentials = <A, E>(
 const llmHandlers = HttpApiBuilder.group(GatewayAdminApi, "llm", (routes) =>
   routes
     .handle("connections", () =>
-      credentials((store) => Effect.map(store.status, (providers) => ({ providers }))),
+      credentials((store) => Effect.map(store.status, connectionsReport)),
     )
     .handle("connect", ({ payload }) =>
       credentials((store) => store.replace(payload)).pipe(Effect.as({ ok: true })),

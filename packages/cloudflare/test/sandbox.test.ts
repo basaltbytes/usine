@@ -1,3 +1,4 @@
+import { ModelProviderCatalog, openai } from "@usine/core/agent/provider";
 import { jsonKey } from "@usine/core/json-key";
 import { Deferred, DateTime, Duration, Effect, Option, Redacted, Schema } from "effect";
 import { assert, describe, expect, it } from "@effect/vitest";
@@ -181,6 +182,39 @@ describe("sandbox routes", () => {
         "Allowed:registry.npmjs.org",
       ]);
     }),
+  );
+
+  it.live(
+    "denies a provider host on a running container after the Worker's catalog drops its provider",
+    () =>
+      Effect.gen(function* () {
+        const { state, call } = served();
+        yield* Effect.promise(() => call("PUT", `/v1/sandboxes/${NAME}`, createBody()));
+        // A Worker deployed without the Anthropic provider renews the running sandbox's credentials.
+        state.catalog = ModelProviderCatalog.make({ providers: [openai] });
+        const hosts = (from: number) =>
+          state.interceptions.slice(from).map(({ _tag, host }) => `${_tag}:${host}`);
+        const renewals = [issuedAt(1), issuedAt(2)];
+        const registered: Array<ReadonlyArray<string>> = [];
+        for (const issued of renewals) {
+          const from = state.interceptions.length;
+          const renewed = yield* Effect.promise(() =>
+            call("PUT", `/v1/sandboxes/${NAME}/credentials`, revocation(issued)),
+          );
+          expect(renewed.status).toBe(200);
+          registered.push(hosts(from));
+        }
+
+        expect(registered).toEqual(
+          renewals.map(() => [
+            "Denied:github.com",
+            "Denied:api.github.com",
+            "Denied:openai.usine.internal",
+            "Denied:anthropic.usine.internal",
+            "Allowed:registry.npmjs.org",
+          ]),
+        );
+      }),
   );
 
   it.live.each([

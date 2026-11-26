@@ -26,7 +26,7 @@ import {
   Stopped,
 } from "../api/api.ts";
 import { DRAIN_MARKER } from "../api/harness.ts";
-import { interceptionsFor } from "./outbound.ts";
+import { interceptionsFor, registeredProviderHosts, servedInSandbox } from "./outbound.ts";
 import {
   ContainerFailure,
   type ContainerProcess,
@@ -122,27 +122,33 @@ export const runningSandboxFor = Effect.fn("Sandbox.running")(function* (name: S
   return sandbox;
 });
 
-/** Sends the container's traffic for GitHub, the providers, and the allowlisted hosts to the outbound handlers. */
+/**
+ * Sends the container's traffic for GitHub, the providers, and the allowlisted hosts to the
+ * outbound handlers, over the handlers for the provider hosts of `registered`. Returns the provider
+ * hosts that the container then has handlers for.
+ */
 const intercept = Effect.fn("Sandbox.intercept")(function* (
   name: SandboxName,
   credentials: SandboxCredentials,
+  registered: ReadonlyArray<string>,
 ) {
   const container = yield* SandboxContainer;
   const { allowedHosts, providers } = yield* SandboxSettings;
-  const interceptions = interceptionsFor(providers, credentials, allowedHosts);
-  const unserved = credentials.providers.filter(({ provider }) =>
-    Option.isNone(providers.get(provider)),
+  const interceptions = interceptionsFor(providers, credentials, allowedHosts, registered);
+  const unserved = credentials.providers.filter(
+    ({ provider }) => !Option.exists(providers.get(provider), servedInSandbox),
   );
   if (unserved.length > 0)
-    yield* Effect.logWarning("Left out the keys of providers that the Worker doesn't serve", {
-      sandbox: name,
-      providers: unserved.map(({ provider }) => provider).join(","),
-    });
+    yield* Effect.logWarning(
+      "Left out the keys of providers that the Worker doesn't serve in a sandbox, which takes an API key over HTTPS",
+      { sandbox: name, providers: unserved.map(({ provider }) => provider).join(",") },
+    );
   yield* Effect.forEach(interceptions, container.intercept, { discard: true });
   yield* Effect.logInfo("Registered the sandbox's outbound handlers", {
     sandbox: name,
     hosts: interceptions.map(({ _tag, host }) => `${_tag}:${host}`).join(","),
   });
+  return registeredProviderHosts(registered, interceptions);
 });
 
 /** Fails with `StaleCredentials` if `sandbox` holds credentials issued after `credentials`. */
@@ -236,7 +242,13 @@ const create = Effect.fn("Sandbox.create")(function* (name: SandboxName, request
   if (!wasRunning)
     yield* container.start(image, request.instanceType).pipe(Effect.mapError(unavailable(name)));
   yield* container.keepAlive(INACTIVITY_TIMEOUT).pipe(Effect.mapError(unavailable(name)));
-  yield* intercept(name, request.credentials).pipe(Effect.mapError(unavailable(name)));
+  // A container that just started has no handlers yet.
+  const registered = wasRunning
+    ? Option.match(existing, { onNone: () => [], onSome: ({ providerHosts }) => providerHosts })
+    : [];
+  const providerHosts = yield* intercept(name, request.credentials, registered).pipe(
+    Effect.mapError(unavailable(name)),
+  );
   // Reads the stored sandbox again: a hold may have arrived while the container started.
   const sandbox = yield* storage.modify((current) => {
     const created = StoredSandbox.make({
@@ -250,6 +262,7 @@ const create = Effect.fn("Sandbox.create")(function* (name: SandboxName, request
       // A hold lasts until the sandbox is destroyed, through a reattachment.
       held: Option.exists(current, ({ held }) => held),
       credentials: request.credentials,
+      providerHosts,
     });
     return [created, Option.some(created)] as const;
   });
@@ -280,13 +293,16 @@ const credentials = Effect.fn("Sandbox.credentials")(function* (
   yield* Effect.annotateCurrentSpan({ sandbox: name });
   const sandbox = yield* runningSandboxFor(name);
   yield* refuseStale(sandbox, renewed);
-  yield* intercept(name, renewed).pipe(Effect.mapError(unavailable(name)));
+  const providerHosts = yield* intercept(name, renewed, sandbox.providerHosts).pipe(
+    Effect.mapError(unavailable(name)),
+  );
   const now = yield* DateTime.now;
   const extended = yield* updateStored(name, (current) =>
     StoredSandbox.make({
       ...current,
       leaseUntil: DateTime.addDuration(now, LEASE),
       credentials: renewed,
+      providerHosts,
     }),
   );
   yield* Effect.logInfo("Renewed the sandbox's credentials", {
@@ -483,7 +499,11 @@ export const restore = Effect.fn("Sandbox.restore")(function* () {
     ),
     Effect.ignore,
   );
-  yield* intercept(found.value.name, found.value.credentials).pipe(
+  const providerHosts = yield* intercept(
+    found.value.name,
+    found.value.credentials,
+    found.value.providerHosts,
+  ).pipe(
     Effect.tapError((failure) =>
       Effect.logError("Could not register the sandbox's outbound handlers again", {
         ...fields,
@@ -491,8 +511,17 @@ export const restore = Effect.fn("Sandbox.restore")(function* () {
         message: failure.message,
       }),
     ),
-    Effect.ignore,
+    Effect.option,
   );
+  if (Option.isSome(providerHosts))
+    yield* updateStored(found.value.name, (current) =>
+      StoredSandbox.make({ ...current, providerHosts: providerHosts.value }),
+    ).pipe(
+      Effect.tapError(() =>
+        Effect.logInfo("Kept no outbound handlers: the sandbox was destroyed meanwhile", fields),
+      ),
+      Effect.ignore,
+    );
   yield* Effect.logInfo("Restored the running sandbox after its Durable Object restarted", fields);
 });
 

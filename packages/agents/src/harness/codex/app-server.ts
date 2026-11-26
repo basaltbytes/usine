@@ -21,6 +21,7 @@ import { processError, stopChildProcess } from "../../child-host/process.ts";
 import { pendingRequests } from "../../child-host/requests.ts";
 import { ChildSessionLifecycle, SessionOperationError } from "../../runtime.ts";
 
+import { CODEX_SANDBOX_BASE_URL, CODEX_SANDBOX_PROVIDER } from "./descriptor.ts";
 import {
   CodexAppServer,
   type CodexClient,
@@ -60,11 +61,11 @@ const encoder = new TextEncoder();
 
 const EXIT_REPORT_GRACE = "1 second";
 
-// codexAppServerCommand returns a command synchronously, including its quoted TOML key.
+// codexAppServerCommand returns a command synchronously, including its quoted TOML strings.
 // @effect-diagnostics-next-line schemaSync:off
-const quoteDirectory = Schema.encodeSync(Schema.fromJsonString(Schema.String));
+const quoteTomlString = Schema.encodeSync(Schema.fromJsonString(Schema.String));
 const repositoryTrustOverride = (cwd: string): string =>
-  `projects={${quoteDirectory(cwd)}={trust_level="untrusted"}}`;
+  `projects={${quoteTomlString(cwd)}={trust_level="untrusted"}}`;
 /** Command-line overrides for every Codex invocation: disable nested agents, plugins, apps, startup update checks, and analytics. */
 export const codexConfigArgs: ReadonlyArray<string> = [
   "features.multi_agent=false",
@@ -75,16 +76,25 @@ export const codexConfigArgs: ReadonlyArray<string> = [
   "analytics.enabled=false",
 ].flatMap((override) => ["-c", override]);
 
-const appServerArgs = (cwd: string) => [
+const sandboxBaseUrlOverride = (environment: CodexClient["environment"]) => {
+  const baseUrl = environment[CODEX_SANDBOX_BASE_URL];
+  return baseUrl === undefined
+    ? []
+    : ["-c", `model_providers.${CODEX_SANDBOX_PROVIDER}.base_url=${quoteTomlString(baseUrl)}`];
+};
+
+const appServerArgs = (client: CodexClient) => [
   "app-server",
   "--stdio",
   "-c",
-  repositoryTrustOverride(cwd),
+  repositoryTrustOverride(client.cwd),
   // Every thread sets its own sandbox, so the default only skips the startup check of the Linux
   // sandbox, which warns on each start in a container without user namespaces.
   "-c",
   'sandbox_mode="danger-full-access"',
   ...codexConfigArgs,
+  ...sandboxBaseUrlOverride(client.environment),
+  ...(client.host._tag === "LocalProcess" ? ["-c", 'cli_auth_credentials_store="file"'] : []),
 ];
 
 /**
@@ -102,10 +112,7 @@ export const codexAppServerCommand = (
     {
       cwd: "/",
       command: "codex",
-      args: [
-        ...appServerArgs(client.cwd),
-        ...(client.host._tag === "LocalProcess" ? ["-c", 'cli_auth_credentials_store="file"'] : []),
-      ],
+      args: appServerArgs(client),
     },
     stdin,
   );
@@ -119,6 +126,12 @@ const makeCodexAppServer = Effect.gen(function* () {
         harness: Harness.make("codex"),
         sessionId: Option.getOrUndefined(request.sessionId),
       });
+      const sandboxBaseUrl = request.environment[CODEX_SANDBOX_BASE_URL];
+      if (sandboxBaseUrl !== undefined)
+        yield* Effect.logInfo("Pointing the sandbox's Codex model provider at its base URL", {
+          provider: CODEX_SANDBOX_PROVIDER,
+          baseUrl: sandboxBaseUrl,
+        });
       const lifecycle = yield* ChildSessionLifecycle.current;
       const input = yield* Queue.make<Uint8Array, Cause.Done>();
       const notifications = yield* Queue.make<
@@ -135,12 +148,7 @@ const makeCodexAppServer = Effect.gen(function* () {
         {
           cwd: "/",
           command: "codex",
-          args: [
-            ...appServerArgs(request.cwd),
-            ...(request.host._tag === "LocalProcess"
-              ? ["-c", 'cli_auth_credentials_store="file"']
-              : []),
-          ],
+          args: appServerArgs(request),
         },
         Stream.fromQueue(input),
         { transport: request.transport },

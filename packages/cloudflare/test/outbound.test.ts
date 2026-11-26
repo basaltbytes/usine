@@ -1,7 +1,14 @@
-import { describe, expect, it } from "@effect/vitest";
-import { DateTime, Option, Redacted, Effect } from "effect";
+import { assert, describe, expect, it } from "@effect/vitest";
+import { DateTime, Option, Redacted, Effect, Schema } from "effect";
+// The test reads the image's Codex configuration, which the Dockerfile copies into the image.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
+import { readFileSync } from "node:fs";
 import { FetchHttpClient } from "effect/http";
 import { ApiKeyCredential, ProviderGrant, SandboxCredentials } from "../src/api/api.ts";
+import { LocalProcess } from "@usine/agents/child-host";
+import { codexAppServerCommand } from "@usine/agents/codex";
+import { catalog, HarnessCatalog, HarnessDescriptor } from "@usine/agents/harness";
+import { WorkingDirectory } from "@usine/agents/runtime";
 import { Harness } from "@usine/core/agent/brain";
 import {
   anthropic,
@@ -20,13 +27,15 @@ import {
   UpstreamBase,
   WireProtocol,
 } from "@usine/core/agent/provider";
-import { harnessEnvironment, sandboxHost } from "../src/api/harness.ts";
+import { harnessEnvironment, SANDBOX_HOME, sandboxHost } from "../src/api/harness.ts";
 import {
   allowedHostsOf,
   forwardRequest,
   gitHubRequest,
   interceptionsFor,
+  providerOutbound,
   providerRequest,
+  registrationOf,
 } from "../src/sandbox/outbound.ts";
 
 const issuedAt = DateTime.makeUnsafe("2026-10-26T08:00:00.000Z");
@@ -67,6 +76,62 @@ const plan = ModelProvider.make({
   credentials: [KeyCredential.make({ variable: GatewayVariable.make("TEST_PLAN_API_KEY") })],
   passThrough: Option.some([HeaderName.make("x-plan-session")]),
 });
+
+const codexId = Harness.make("codex");
+
+/** A Responses provider that only this test defines. */
+const responses = ModelProvider.make({
+  id: ModelProviderId.make("test-responses"),
+  slot: GatewaySlot.make("test-responses"),
+  label: "Test Responses",
+  protocols: [
+    ProviderProtocol.make({
+      protocol: WireProtocol.make("openai-responses"),
+      upstream: UpstreamBase.make("https://responses.test"),
+      routes: [RoutePattern.make("/v1/responses"), RoutePattern.make("/v1/models")],
+      key: KeyHeader.make({ header: HeaderName.make("authorization"), scheme: "bearer" }),
+    }),
+  ],
+  credentials: [KeyCredential.make({ variable: GatewayVariable.make("TEST_RESPONSES_KEY") })],
+});
+
+/** The catalog's Codex descriptor, with the test's Responses provider after OpenAI. */
+const twoProviders = HarnessCatalog.make({
+  descriptors: Option.toArray(catalog.get(codexId)).map((codex) =>
+    HarnessDescriptor.make({ ...codex, providers: [openai, responses] }),
+  ),
+});
+
+// effectiveBaseUrl reads a TOML string of the launch command synchronously.
+// @effect-diagnostics-next-line schemaSync:off
+const tomlString = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.String));
+
+const imageConfig = readFileSync(new URL("../image/codex-config.toml", import.meta.url), "utf8");
+
+/**
+ * Returns the base URL of the model provider that the image's Codex configuration selects, after
+ * the `-c` overrides of the app-server command that Codex runs with `environment`.
+ */
+const effectiveBaseUrl = (environment: Record<string, string>) => {
+  const provider = /^model_provider = "(.+)"$/mu.exec(imageConfig)?.[1];
+  const configured = new RegExp(
+    String.raw`^\[model_providers\.${provider}\]\n(?:[^[].*\n)*?base_url = "(.+)"$`,
+    "mu",
+  ).exec(imageConfig)?.[1];
+  const command = codexAppServerCommand({
+    cwd: WorkingDirectory.make(`${SANDBOX_HOME}/workspace`),
+    sessionId: Option.none(),
+    environment,
+    host: LocalProcess.make(),
+  });
+  if (command._tag !== "StandardCommand") return undefined;
+  const key = `model_providers.${provider}.base_url=`;
+  const override = command.args
+    .filter((arg, index) => command.args[index - 1] === "-c" && arg.startsWith(key))
+    .map((arg) => tomlString(arg.slice(key.length)))
+    .at(-1);
+  return override ?? configured;
+};
 
 describe("sandbox outbound handlers", () => {
   it.effect("forwards an allowlisted WebSocket upgrade and preserves its native response", () =>
@@ -211,6 +276,11 @@ describe("sandbox outbound handlers", () => {
       forward(anthropic, "POST", "/\\attacker.example/v1/messages"),
       forward(plan, "POST", "/v1/files"),
       forward(plan, "POST", "/models/..:streamGenerateContent"),
+      forward(openai, "GET", "/v1/responses"),
+      forward(openai, "DELETE", "/v1/models"),
+      forward(anthropic, "GET", "/v1/messages"),
+      forward(anthropic, "POST", "/v1/models"),
+      forward(anthropic, "DELETE", "/v1/models/claude-opus-4-5"),
     ];
     expect(refused.filter(Option.isSome)).toEqual([]);
   });
@@ -282,8 +352,122 @@ describe("sandbox outbound handlers", () => {
           "https://plan.test/google/v1beta/models/plan-model-2.5:streamGenerateContent?alt=sse",
         );
         expect([...generate.headers.entries()]).toEqual([["x-goog-api-key", "plan-key"]]);
+        // Every header passes to this provider, except the key headers of its other protocols.
+        const passingAll = ModelProvider.make({ ...plan, passThrough: Option.none() });
+        const unfiltered = Option.getOrThrow(
+          providerRequest(
+            new Request(`http://${sandboxHost(plan.id)}/chat/completions`, {
+              method: "POST",
+              headers: { "x-goog-api-key": "usine-placeholder", "x-unlisted": "kept" },
+            }),
+            passingAll,
+            key,
+          ),
+        );
+        expect([...unfiltered.headers.entries()]).toEqual([
+          ["authorization", "Bearer plan-key"],
+          ["x-unlisted", "kept"],
+        ]);
       }),
   );
+
+  it.live(
+    "registers a granted provider's handler and serves the sandbox's requests with the props it registers",
+    () =>
+      Effect.gen(function* () {
+        const granted = SandboxCredentials.make({
+          issuedAt,
+          github: Option.none(),
+          providers: [
+            ProviderGrant.make({
+              provider: plan.id,
+              credential: ApiKeyCredential.make({ key: Redacted.make("plan-key") }),
+            }),
+          ],
+        });
+        const catalog = ModelProviderCatalog.make({
+          providers: [...modelProviders.providers, plan],
+        });
+        const registrations = yield* Effect.forEach(
+          interceptionsFor(catalog, granted, ["registry.npmjs.org"]),
+          registrationOf,
+        );
+        expect(
+          registrations.map(({ handler, scheme, host }) => `${handler}:${scheme}:${host}`),
+        ).toEqual([
+          "DeniedOutbound:https:github.com",
+          "DeniedOutbound:https:api.github.com",
+          "DeniedOutbound:http:anthropic.usine.internal",
+          "DeniedOutbound:http:openai.usine.internal",
+          "ProviderOutbound:http:test-plan.usine.internal",
+          "AllowedOutbound:https:registry.npmjs.org",
+        ]);
+        const registered = registrations.find(({ handler }) => handler === "ProviderOutbound");
+        assert(registered?.handler === "ProviderOutbound");
+        const sent: Array<readonly [string, string, string | null]> = [];
+        const serve = (request: Request) =>
+          providerOutbound(registered.props, request).pipe(
+            Effect.provideService(FetchHttpClient.Fetch, (input) => {
+              const upstream = new Request(input);
+              sent.push([upstream.method, upstream.url, upstream.headers.get("authorization")]);
+              return Promise.resolve(new Response("{}"));
+            }),
+          );
+        const host = `http://${sandboxHost(plan.id)}`;
+        const answered = yield* serve(
+          new Request(`${host}/chat/completions`, {
+            method: "POST",
+            headers: { authorization: "Bearer usine-placeholder" },
+            body: "{}",
+          }),
+        );
+        const refused = yield* serve(new Request(`${host}/v1/files`, { method: "POST" }));
+
+        expect([answered.status, refused.status]).toEqual([200, 404]);
+        expect(sent).toEqual([
+          ["POST", "https://plan.test/openai/v1/chat/completions", "Bearer plan-key"],
+        ]);
+      }),
+  );
+
+  it("serves a provider in a sandbox only when each of its upstreams uses HTTPS", () => {
+    const [chat, generate] = plan.protocols;
+    assert(generate !== undefined);
+    const cleartext = ModelProvider.make({
+      ...plan,
+      protocols: [
+        chat,
+        ProviderProtocol.make({
+          ...generate,
+          upstream: UpstreamBase.make("http://plan.test/google"),
+        }),
+      ],
+    });
+    const granted = SandboxCredentials.make({
+      issuedAt,
+      github: Option.none(),
+      providers: [
+        ProviderGrant.make({
+          provider: plan.id,
+          credential: ApiKeyCredential.make({ key: Redacted.make("plan-key") }),
+        }),
+      ],
+    });
+    const catalog = ModelProviderCatalog.make({ providers: [cleartext] });
+
+    expect(
+      interceptionsFor(catalog, granted, []).map(({ _tag, host }) => `${_tag}:${host}`),
+    ).toContain("Denied:test-plan.usine.internal");
+    expect(
+      providerRequest(
+        new Request(`http://${sandboxHost(plan.id)}/models/plan-model:streamGenerateContent`, {
+          method: "POST",
+        }),
+        cleartext,
+        ApiKeyCredential.make({ key: Redacted.make("plan-key") }),
+      ),
+    ).toEqual(Option.none());
+  });
 
   it("points only the configured providers' harnesses at their handlers", () => {
     const claudeOnly = harnessEnvironment(
@@ -299,5 +483,20 @@ describe("sandbox outbound handlers", () => {
         "ANTHROPIC_BASE_URL"
       ],
     ).toBeUndefined();
+  });
+
+  it("points Codex at the handler of the only Responses provider with a key", () => {
+    const environment = harnessEnvironment([responses.id], Option.some(codexId), twoProviders);
+
+    expect(environment["OPENAI_API_KEY"]).toBe("usine-placeholder");
+    expect(effectiveBaseUrl(environment)).toBe("http://test-responses.usine.internal/v1");
+  });
+
+  it("points Codex at the OpenAI handler when OpenAI has a key", () => {
+    const environment = harnessEnvironment([openai.id], Option.some(codexId));
+
+    expect(environment["OPENAI_API_KEY"]).toBe("usine-placeholder");
+    expect(effectiveBaseUrl(environment)).toBe("http://openai.usine.internal/v1");
+    expect(effectiveBaseUrl({})).toBe("http://openai.usine.internal/v1");
   });
 });

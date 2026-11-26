@@ -1,3 +1,4 @@
+import { selectProvider } from "@usine/core/agent/provider";
 import { InstanceDirectory } from "@usine/core/instance";
 import { ProviderLoginView, ProviderStatus, type ProviderTarget } from "@usine/gateway/credentials";
 import { Console, Effect, Option, Redacted, Schema } from "effect";
@@ -7,7 +8,7 @@ import { instanceFiles, readRecord } from "../instance/record.ts";
 import { readAdminToken } from "../auth/local.ts";
 import { authFailure } from "../auth/model.ts";
 import type { ProviderCommand } from "../cli.ts";
-import { providerNamed } from "./api.ts";
+import { listedSelectors } from "./api.ts";
 
 /** Describes each provider by the names it takes and the credentials it accepts. */
 const choices = (providers: ProviderTarget["providers"]) =>
@@ -73,13 +74,16 @@ export const providerCommand = Effect.fn("Cli.providerLogin")(function* (
       400,
     );
   if ("error" in target) return yield* authFailure(`${target.label}: ${target.error}`, 503);
-  const connection = providerNamed(target.providers, command.provider);
-  if (connection === undefined)
+  const selected = selectProvider(target.providers, command.provider, listedSelectors);
+  if (Option.isNone(selected))
     return yield* authFailure(
       `${target.label} has no provider ${command.provider}. Choose ${choices(target.providers)}.`,
       400,
     );
-  if ("error" in connection) return yield* authFailure(`${target.label}: ${connection.error}`, 503);
+  const connection = selected.value;
+  // An unreadable status blocks only a sign-in, so a key or a logout can replace a broken credential.
+  if ("error" in connection && command.action === "login" && command.mode === "subscription")
+    return yield* authFailure(`${target.label}: ${connection.error}`, 503);
   const body = { target: target.target, provider: connection.provider };
   const ok = Schema.Struct({ ok: Schema.Boolean });
   if (command.action === "logout") {

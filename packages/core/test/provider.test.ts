@@ -14,6 +14,7 @@ import {
   openai,
   ProviderProtocol,
   RoutePattern,
+  selectProvider,
   UpstreamBase,
   WireProtocol,
 } from "../src/agent/provider/catalog.ts";
@@ -171,6 +172,56 @@ describe("model providers", () => {
         ModelProviderCatalog.makeOption({ providers: [anthropic, renamed("other", "other")] }),
       ),
     );
+    const keyOnly = (id: string, slot: string) =>
+      ModelProvider.make({
+        id: ModelProviderId.make(id),
+        slot: GatewaySlot.make(slot),
+        label: "Test plan",
+        protocols: [serving("plan-messages", "/v1/messages")],
+        credentials: [
+          ApiKeyCredential.make({ variable: GatewayVariable.make("TEST_PLAN_API_KEY") }),
+        ],
+      });
+    assert(
+      Option.isNone(
+        ModelProviderCatalog.makeOption({
+          providers: [anthropic, keyOnly("claude", "claude-key")],
+        }),
+      ),
+    );
+    assert(
+      Option.isNone(
+        ModelProviderCatalog.makeOption({ providers: [openai, keyOnly("other", "chatgpt")] }),
+      ),
+    );
+  });
+
+  it("selects a provider by its slot, its ID, or its subscription login, and none by a name that selects two", () => {
+    const providers = modelProviders.providers;
+    const selected = (name: string) =>
+      Option.map(
+        selectProvider(providers, name, (provider) => provider),
+        ({ slot }) => slot,
+      );
+    assert.deepStrictEqual(
+      ["anthropic-messages", "anthropic", "claude", "chatgpt", "google"].map(selected),
+      [
+        Option.some(anthropic.slot),
+        Option.some(anthropic.slot),
+        Option.some(anthropic.slot),
+        Option.some(openai.slot),
+        Option.none(),
+      ],
+    );
+    const listed = [
+      { slot: "anthropic-messages", id: "anthropic", login: Option.some("claude" as const) },
+      { slot: "claude-key", id: "claude", login: Option.none() },
+    ];
+    assert(Option.isNone(selectProvider(listed, "claude", (provider) => provider)));
+    assert.deepStrictEqual(
+      selectProvider(listed, "claude-key", (provider) => provider),
+      Option.some(listed[1]),
+    );
   });
 
   it("refuses two protocols of one provider whose routes can match one path", () => {
@@ -201,6 +252,28 @@ describe("model providers", () => {
           serving("plan-left", "/v1/models/{model}", "/v1/models/gpt-5"),
           serving("plan-right", "/v2"),
         ),
+      ),
+    );
+  });
+
+  it("accepts the methods listed for each route, and refuses methods for another path", () => {
+    const [messages] = anthropic.protocols;
+    assert.deepStrictEqual(
+      [
+        messages.allows("POST", "/v1/messages"),
+        messages.allows("GET", "/v1/messages"),
+        messages.allows("GET", "/v1/models/claude-opus-4-5"),
+        messages.allows("DELETE", "/v1/models/claude-opus-4-5"),
+        messages.allows("POST", "/v1/files"),
+      ],
+      [true, false, true, false, false],
+    );
+    assert(
+      Option.isNone(
+        ProviderProtocol.makeOption({
+          ...messages,
+          methods: Option.some({ [RoutePattern.make("/v1/files")]: ["POST"] }),
+        }),
       ),
     );
   });

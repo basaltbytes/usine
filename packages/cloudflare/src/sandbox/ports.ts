@@ -74,6 +74,12 @@ export class SandboxContainer extends Context.Service<
   }
 >()("@usine/cloudflare/sandbox/ports/SandboxContainer") {}
 
+/** The provider hosts that Workers registered before sandboxes stored theirs. */
+const EARLIER_PROVIDER_HOSTS: ReadonlyArray<string> = [
+  "anthropic.usine.internal",
+  "openai.usine.internal",
+];
+
 /** A sandbox as its Durable Object stores it. */
 export class StoredSandbox extends Schema.Class<
   StoredSandbox,
@@ -97,6 +103,14 @@ export class StoredSandbox extends Schema.Class<
   held: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(Effect.succeed(false))),
   /** Kept so the outbound handlers can be registered again after the Durable Object restarts. */
   credentials: SandboxCredentials,
+  /**
+   * The provider hosts that the container has outbound handlers for. A running container keeps
+   * its last handler for a host, so each one that the catalog no longer has is denied. Sandboxes
+   * stored before this field have the handlers that Workers then registered.
+   */
+  providerHosts: Schema.Array(Schema.String).pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed(EARLIER_PROVIDER_HOSTS)),
+  ),
 }) {
   summary(running: boolean, draining: boolean): SandboxSummary {
     return SandboxSummary.make({

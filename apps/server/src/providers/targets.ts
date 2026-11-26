@@ -37,6 +37,7 @@ import {
   providerEntry,
   type ProviderStatus,
   type ProviderTarget,
+  reportedConnections,
 } from "@usine/gateway/credentials";
 
 const quoteCurl = Schema.encodeEffect(Schema.fromJsonString(Schema.String));
@@ -472,6 +473,8 @@ const makeProviderTargets = Effect.fn("ProviderTargets.make")(function* (
       ),
     ),
   );
+  // Settings polls the list, so the slots left out of each destination are logged when they change.
+  const undescribed = new Map<string, string>();
   const get = Effect.fn("ProviderTargets.get")(function* (target: string) {
     yield* Effect.annotateCurrentSpan({ target });
     if (target === "local") {
@@ -484,8 +487,9 @@ const makeProviderTargets = Effect.fn("ProviderTargets.make")(function* (
     const reported = yield* Schema.decodeEffect(Schema.fromJsonString(ProviderConnections))(
       text,
     ).pipe(Effect.mapError(() => failed("Upgrade the gateway to enable provider connections.")));
+    const connections = reportedConnections(reported);
     // A gateway up to 0.3.0 reports only the state; this orchestrator's catalog describes its providers.
-    const providers = reported.providers.flatMap((connection) =>
+    const providers = connections.flatMap((connection) =>
       "id" in connection
         ? [connection]
         : Option.toArray(catalog.providers.find(connection.provider)).map((provider) => ({
@@ -493,25 +497,37 @@ const makeProviderTargets = Effect.fn("ProviderTargets.make")(function* (
             ...providerEntry(provider),
           })),
     );
-    if (providers.length < reported.providers.length)
-      yield* Effect.logDebug(
+    const left = connections
+      .filter((connection) => !providers.some(({ provider }) => provider === connection.provider))
+      .map(({ provider }) => provider)
+      .join(",");
+    if (left === "") undescribed.delete(target);
+    else if (undescribed.get(target) !== left) {
+      undescribed.set(target, left);
+      yield* Effect.logInfo(
         "Left out the slots that the gateway and this orchestrator don't describe",
-        {
-          target,
-          slots: reported.providers
-            .filter(
-              (connection) => !providers.some(({ provider }) => provider === connection.provider),
-            )
-            .map(({ provider }) => provider)
-            .join(","),
-        },
+        { target, slots: left },
       );
+    }
     return { target, label: gateway.destination, providers };
   });
   // Settings polls the list, so each destination's error is logged when it changes.
   const destinationErrors = new Map<string, string>();
   return {
     get,
+    providers: Effect.fn("ProviderTargets.providers")(function* (target: string) {
+      yield* Effect.annotateCurrentSpan({ target });
+      if (target !== "local") return yield* get(target);
+      if ((yield* gateways).size > 0)
+        return yield* failed("Choose the configured gateway for this instance.");
+      return {
+        label: "Local harnesses",
+        providers: localProviders.providers.map((provider) => ({
+          provider: provider.slot,
+          ...providerEntry(provider),
+        })),
+      };
+    }),
     list: Effect.gen(function* () {
       const configured = yield* gateways;
       const targets = configured.size === 0 ? ["local"] : [...configured.keys()];
@@ -605,6 +621,19 @@ export class ProviderTargets extends Context.Service<
   {
     readonly list: Effect.Effect<ProviderStatus["targets"], ProviderCredentialError>;
     readonly get: (target: string) => Effect.Effect<ProviderTarget, ProviderCredentialError>;
+    /**
+     * Returns the providers that `target` lists, without their credentials. Without a gateway, these
+     * are the providers of the local Claude Code and Codex, whose credentials aren't read.
+     */
+    readonly providers: (target: string) => Effect.Effect<
+      {
+        readonly label: string;
+        readonly providers: ReadonlyArray<
+          Pick<ProviderTarget["providers"][number], "provider" | "id" | "label" | "accepts">
+        >;
+      },
+      ProviderCredentialError
+    >;
     readonly replace: (
       target: string,
       credential: ProviderCredential,

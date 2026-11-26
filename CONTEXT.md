@@ -273,7 +273,7 @@ A model provider's credential that stays the same until an operator replaces it,
 _Avoid_: API token, secret
 
 **Subscription login**:
-A subscription's credential from its provider's own sign-in: a Claude setup token (`claude`) or a ChatGPT login (`chatgpt`). usine implements each one's sign-in and refresh, so the logins are a closed set.
+A subscription's credential from its provider's own sign-in: a Claude setup token (`claude`), which lasts a year and is replaced, or a ChatGPT login (`chatgpt`), which usine refreshes. usine implements each one's sign-in, so the logins are a closed set.
 _Avoid_: OAuth token, account login
 
 **Runaway guard**:

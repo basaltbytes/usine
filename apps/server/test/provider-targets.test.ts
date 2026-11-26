@@ -73,10 +73,13 @@ import {
 const credentialOf = (connection: ProviderTarget["providers"][number] | undefined) =>
   connection !== undefined && "credential" in connection ? connection.credential : undefined;
 
-/** A provider that only this test defines, with a static key. */
+/**
+ * A provider that only this test defines, with a static key. Its slot differs from its ID, so a
+ * test sees which one a credential is keyed by.
+ */
 const plan = ModelProvider.make({
   id: ModelProviderId.make("test-plan"),
-  slot: GatewaySlot.make("test-plan"),
+  slot: GatewaySlot.make("test-plan-chat"),
   label: "Test plan",
   protocols: [
     ProviderProtocol.make({
@@ -101,6 +104,7 @@ it.live(
           github: GITHUB_ORIGINS,
           catalog: ModelProviderCatalog.make({ providers: [...modelProviders.providers, plan] }),
           providers: {},
+          upstreams: {},
           adminToken: AdminToken.make(Redacted.make("test-admin-token-private-0123456789")),
           callerKey: CallerKey.make(Redacted.make("test-caller-key-private-0123456789")),
           egress: EgressAllowlist.make({ rules: [] }),
@@ -339,7 +343,7 @@ ${["missing-token", "unreachable", "outdated", "older-gateway"]
           TEST_GATEWAY_ADMIN_TOKEN: Redacted.value(settings.adminToken),
         });
         yield* logins
-          .apiKey("test-gateway", plan.id, Redacted.make(planKey))
+          .apiKey("test-gateway", plan.slot, Redacted.make(planKey))
           .pipe(Effect.provideService(ConfigProvider.ConfigProvider, gatewayToken));
         const planConnected = yield* targets
           .get("test-gateway")
@@ -549,6 +553,18 @@ it.live("manages ChatGPT on a local host without Claude Code", () =>
       assert.notInclude(jsonKey(connected), "fixture-openai-key");
       yield* logins.disconnect("local", "chatgpt");
       assert.equal((yield* providers).credential, null);
+
+      // A key or a disconnect replaces an auth file that the status can't read.
+      const authFile = `${directory}/.codex/auth.json`;
+      yield* fs.makeDirectory(`${directory}/.codex`, { recursive: true });
+      yield* fs.writeFileString(authFile, "{malformed");
+      yield* logins.apiKey("local", "openai", Redacted.make("fixture-repaired-key"));
+      const repaired = yield* fs.readFileString(authFile);
+      assert.include(repaired, "fixture-repaired-key");
+      yield* fs.writeFileString(authFile, "{malformed");
+      yield* logins.disconnect("local", "openai");
+      const left = yield* fs.exists(authFile);
+      assert.isFalse(left);
     }),
   ).pipe(
     Effect.provide(

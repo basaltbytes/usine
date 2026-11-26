@@ -68,6 +68,21 @@ const OWNER = `${INSTANCE}.${WORKER}`;
 const SANDBOX = `${OWNER}.remote-run_execute_1`;
 const WORKTREE = "/home/usine/workspace/attempts/remote-run_execute_1";
 const SHELL = fileURLToPath(new URL("../../src/cloudflare/shell/shell.ts", import.meta.url));
+/**
+ * The Node.js arguments that start the sandbox shell with the compile cache in the system's
+ * temporary directory, which cuts the startup that each command in a sandbox pays to load `effect`.
+ */
+const SHELL_ARGS = [
+  "--no-warnings",
+  "--import",
+  'data:text/javascript,import{enableCompileCache}from"node:module";enableCompileCache()',
+  SHELL,
+];
+/**
+ * The time, in milliseconds, of a test that runs commands in a sandbox. Each command starts the
+ * sandbox shell, and these tests run up to 30 commands in sequence.
+ */
+const SANDBOX_TEST_TIMEOUT = 90_000;
 const ANTHROPIC: CloudflareProviderKey = {
   provider: anthropic.id,
   apiKey: Redacted.make("sk-ant-test-key"),
@@ -135,7 +150,7 @@ const executor = (
       },
     ],
     instance: INSTANCE,
-    shell: { command: process.execPath, args: ["--no-warnings", SHELL] },
+    shell: { command: process.execPath, args: SHELL_ARGS },
     interruptGrace: "2 seconds",
     drainPollInterval: "100 millis",
   }).pipe(
@@ -196,7 +211,7 @@ const echoingParent =
       return yield* completes(context);
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer), Effect.orDie);
 
-describe("cloudflare Worker", () => {
+describe("cloudflare Worker", { timeout: SANDBOX_TEST_TIMEOUT }, () => {
   it.live(
     "runs an Attempt in its own sandbox, with credentials only in the Worker, then destroys it",
     () =>
@@ -674,7 +689,7 @@ describe("sandbox shell", () => {
     Effect.gen(function* () {
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
       const handle = yield* spawner.spawn(
-        ChildProcess.make(process.execPath, ["--no-warnings", SHELL, SANDBOX, "--", line], {
+        ChildProcess.make(process.execPath, [...SHELL_ARGS, SANDBOX, "--", line], {
           stdin: Stream.empty,
           env: {
             [SHELL_ENVIRONMENT.workerUrl]: url.origin,
@@ -790,6 +805,7 @@ it.live(
         assert.isFalse(next.state.requests.some((request) => request.startsWith("DELETE ")));
       }).pipe(Effect.provide(executor(original, mintingProvider())));
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  SANDBOX_TEST_TIMEOUT,
 );
 
 // The reattachment also recovers the kept sandbox, through the same retained client.
@@ -907,4 +923,5 @@ it.live(
         assert.isFalse(replacement.state.requests.some((line) => line.includes(SANDBOX)));
       }).pipe(Effect.provide(runtime(replacement, blocks)));
     }).pipe(Effect.scoped),
+  SANDBOX_TEST_TIMEOUT,
 );

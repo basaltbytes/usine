@@ -32,7 +32,7 @@ import {
   LlmProvider,
   type LlmProviders,
 } from "../llm/llm.ts";
-import { AdminToken, CallerKey, GatewaySettings } from "../settings.ts";
+import { AdminToken, CallerKey, GatewaySettings, type UpstreamOverrides } from "../settings.ts";
 
 /** The allowlist path if `USINE_GATEWAY_EGRESS_ALLOWLIST` isn't set. */
 export const DEFAULT_EGRESS_ALLOWLIST_PATH = "/etc/usine-gateway/egress-allowlist";
@@ -123,6 +123,14 @@ const configuredCredential = Effect.fn("GatewayNode.configuredCredential")(funct
   }
 });
 
+/** Returns the base URL that the upstream variable of `provider` sets, if it's set. */
+const configuredUpstream = Effect.fn("GatewayNode.configuredUpstream")(function* (
+  provider: ModelProvider,
+) {
+  if (Option.isNone(provider.upstreamVariable)) return Option.none<UpstreamBase>();
+  return yield* Config.option(Config.schema(UpstreamBase, provider.upstreamVariable.value));
+});
+
 /**
  * Returns the credential and upstream that the settings set for `provider`, or fails if two of its
  * credential variables are set. A ChatGPT login's auth file is read and parsed, and its directory
@@ -150,9 +158,7 @@ const configuredProvider = Effect.fn("GatewayNode.configuredProvider")(function*
     );
     return Option.some(LlmProvider.make({ upstream: Option.some(upstream), credential }));
   }
-  const upstream = Option.isSome(provider.upstreamVariable)
-    ? yield* Config.option(Config.schema(UpstreamBase, provider.upstreamVariable.value))
-    : Option.none<UpstreamBase>();
+  const upstream = yield* configuredUpstream(provider);
   return Option.some(LlmProvider.make({ upstream, credential }));
 });
 
@@ -169,6 +175,21 @@ export const llmProviders = Effect.fn("GatewayNode.llmProviders")(function* (
     ),
   );
   return Object.fromEntries(held.flatMap(Option.toArray)) satisfies LlmProviders;
+});
+
+/**
+ * The base URLs that the upstream variables of `catalog`'s providers set, by slot, whether or not
+ * the environment sets a credential for the slot.
+ */
+export const llmUpstreams = Effect.fn("GatewayNode.llmUpstreams")(function* (
+  catalog: ModelProviderCatalog,
+) {
+  const set = yield* Effect.forEach(catalog.providers, (provider) =>
+    Effect.map(configuredUpstream(provider), (upstream) =>
+      Option.map(upstream, (value) => [provider.slot, value] as const),
+    ),
+  );
+  return Object.fromEntries(set.flatMap(Option.toArray)) satisfies UpstreamOverrides;
 });
 
 /** Returns each slot's credential kind for a log line, or `none`. */
@@ -254,12 +275,14 @@ const startupSettings = (catalog: ModelProviderCatalog) =>
     const egress = yield* readEgressAllowlist(path);
     yield* Effect.logInfo("Loaded the egress allowlist", { path, rules: egress.rules.length });
     const providers = yield* llmProviders(catalog);
+    const upstreams = yield* llmUpstreams(catalog);
     yield* Effect.logInfo("Configured LLM providers", providerCredentials(catalog, providers));
     const settings = {
       domain,
       github: GITHUB_ORIGINS,
       catalog,
       providers,
+      upstreams,
       egress,
       adminToken,
       callerKey,

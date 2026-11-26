@@ -1,7 +1,7 @@
-import type { ModelProvider, ModelProviderCatalog } from "@usine/core/agent/provider";
-import { Effect, Match, Option, Redacted } from "effect";
+import { ModelProvider, type ModelProviderCatalog } from "@usine/core/agent/provider";
+import { Array as Arr, Effect, Match, Option, Redacted, Schema } from "effect";
 import { FetchHttpClient, HttpClientError, HttpClientRequest } from "effect/http";
-import type { ProviderCredential, SandboxCredentials } from "../api/api.ts";
+import { ProviderCredential, type SandboxCredentials } from "../api/api.ts";
 import { GITHUB_HOSTS, type GitHubHost, sandboxHost } from "../api/harness.ts";
 
 export const forwardRequest = Effect.fn("Sandbox.forwardRequest")(function* (
@@ -68,25 +68,41 @@ export type Interception =
   | DeniedInterception;
 
 /**
+ * Returns whether a sandbox reaches `provider` with an API key: the provider takes one, and each of
+ * its upstreams uses HTTPS, because the key leaves the Worker for them. The sandbox's own hop to
+ * the provider's sandbox host is plain HTTP, with a placeholder.
+ */
+export const servedInSandbox = (provider: ModelProvider): boolean =>
+  provider.accepts("api-key") &&
+  provider.protocols.every(({ upstream }) => upstream.startsWith("https://"));
+
+/**
  * Returns the hosts a sandbox reaches: GitHub and the providers of `catalog` with the Attempt's
  * credentials, and `allowedHosts` unchanged. The container has no other way out. GitHub and
  * provider hosts without a credential are denied rather than left out, because a running
- * container keeps its last handler for a host; they're never treated as allowlisted.
+ * container keeps its last handler for a host; they're never treated as allowlisted. For the same
+ * reason, each host of `registered`, the provider hosts that the container has handlers for, is
+ * denied once no provider of `catalog` has it.
  */
 export const interceptionsFor = (
   catalog: ModelProviderCatalog,
   credentials: SandboxCredentials,
   allowedHosts: ReadonlyArray<string>,
+  registered: ReadonlyArray<string> = [],
 ): ReadonlyArray<Interception> => {
-  const keyed = catalog.providers.filter((provider) => provider.accepts("api-key"));
-  const reserved = new Set<string>([...GITHUB_HOSTS, ...keyed.map(({ id }) => sandboxHost(id))]);
-  const providers = keyed.map((provider): Interception => {
+  const providerHosts = catalog.providers.map(({ id }) => sandboxHost(id));
+  const reserved = new Set<string>([...GITHUB_HOSTS, ...providerHosts]);
+  const providers = catalog.providers.map((provider): Interception => {
     const host = sandboxHost(provider.id);
     const grant = credentials.providers.find((candidate) => candidate.provider === provider.id);
-    return grant === undefined
+    return grant === undefined || !servedInSandbox(provider)
       ? { _tag: "Denied", host, scheme: "http" }
       : { _tag: "Provider", host, provider, credential: grant.credential };
   });
+  const allowed = Arr.dedupe(allowedHosts).filter((host) => !reserved.has(host));
+  const revoked = Arr.dedupe(registered).filter(
+    (host) => !reserved.has(host) && !allowed.includes(host),
+  );
   return [
     ...GITHUB_HOSTS.map((host): Interception =>
       Option.match(credentials.github, {
@@ -95,11 +111,28 @@ export const interceptionsFor = (
       }),
     ),
     ...providers,
-    ...[...new Set(allowedHosts)]
-      .filter((host) => !reserved.has(host))
-      .map((host): Interception => ({ _tag: "Allowed", host })),
+    ...revoked.map((host): Interception => ({ _tag: "Denied", host, scheme: "http" })),
+    ...allowed.map((host): Interception => ({ _tag: "Allowed", host })),
   ];
 };
+
+/**
+ * Returns the provider hosts that a container has handlers for after `interceptions` are
+ * registered over the handlers for `registered`.
+ */
+export const registeredProviderHosts = (
+  registered: ReadonlyArray<string>,
+  interceptions: ReadonlyArray<Interception>,
+): ReadonlyArray<string> =>
+  Arr.dedupe([
+    ...registered,
+    ...interceptions.flatMap((interception) =>
+      interception._tag === "Provider" ||
+      (interception._tag === "Denied" && interception.scheme === "http")
+        ? [interception.host]
+        : [],
+    ),
+  ]);
 
 /** Returns the hosts in a comma-separated `ALLOWED_HOSTS` value, lowercased, without blanks. */
 export const allowedHostsOf = (value: string): ReadonlyArray<string> =>
@@ -154,8 +187,9 @@ export const gitHubRequest = (
 /**
  * Returns `request`, sent over plain HTTP to the provider's sandbox host, for the upstream of the
  * provider's protocol that serves its path, with the key in that protocol's header in place of the
- * sandbox's credentials. Returns `None` for a path outside the provider's routes, so the rest of
- * the provider's API, such as files or organization administration, can't be reached with the key.
+ * sandbox's credentials. Returns `None` for a path outside the provider's routes, a method that its
+ * route doesn't accept, or an upstream without HTTPS, so the rest of the provider's API, such as
+ * files or organization administration, can't be reached with the key.
  * A route's placeholder matches one plain segment, so a percent-encoded separator or a dot segment
  * never matches.
  */
@@ -165,7 +199,13 @@ export const providerRequest = (
   credential: ProviderCredential,
 ): Option.Option<Request> => {
   const incoming = new URL(request.url);
-  return Option.map(provider.protocolFor(incoming.pathname), (protocol) => {
+  const served = Option.filter(
+    provider.protocolFor(incoming.pathname),
+    (protocol) =>
+      protocol.allows(request.method, incoming.pathname) &&
+      protocol.upstream.startsWith("https://"),
+  );
+  return Option.map(served, (protocol) => {
     const keyHeaders = new Set<string>(provider.protocols.map(({ key }) => key.header));
     const headers = new Headers(
       [...withoutCredentials(request)].filter(
@@ -180,3 +220,81 @@ export const providerRequest = (
     return new Request(upstream, new Request(request, { headers }));
   });
 };
+
+/** The props of a GitHub host's outbound handler. */
+export const GitHubProps = Schema.Struct({
+  host: Schema.Literals(GITHUB_HOSTS),
+  token: Schema.NonEmptyString,
+});
+
+/** The provider and credential of a provider's outbound handler, as its props carry them. */
+export const ProviderProps = Schema.Struct({
+  provider: Schema.toCodecJson(ModelProvider),
+  credential: ProviderCredential,
+});
+
+/** The Worker entrypoint that serves an interception's host, with its props and the scheme it intercepts. */
+export type Registration =
+  | {
+      readonly handler: "GitHubOutbound";
+      readonly host: string;
+      readonly scheme: "https";
+      readonly props: typeof GitHubProps.Encoded;
+    }
+  | {
+      readonly handler: "ProviderOutbound";
+      readonly host: string;
+      readonly scheme: "http";
+      readonly props: typeof ProviderProps.Encoded;
+    }
+  | { readonly handler: "AllowedOutbound"; readonly host: string; readonly scheme: "https" }
+  | {
+      readonly handler: "DeniedOutbound";
+      readonly host: string;
+      readonly scheme: "http" | "https";
+    };
+
+/** Returns the Worker entrypoint that the container's requests for `interception`'s host go to. */
+export const registrationOf = (interception: Interception) =>
+  Match.valueTags(interception, {
+    GitHub: ({ host, token }) =>
+      Effect.succeed<Registration>({
+        handler: "GitHubOutbound",
+        host,
+        scheme: "https",
+        props: { host, token: Redacted.value(token) },
+      }),
+    Provider: ({ host, provider, credential }) =>
+      Effect.map(
+        Schema.encodeEffect(ProviderProps)({ provider, credential }),
+        (props): Registration => ({ handler: "ProviderOutbound", host, scheme: "http", props }),
+      ),
+    Allowed: ({ host }) =>
+      Effect.succeed<Registration>({ handler: "AllowedOutbound", host, scheme: "https" }),
+    Denied: ({ host, scheme }) =>
+      Effect.succeed<Registration>({ handler: "DeniedOutbound", host, scheme }),
+  });
+
+const refusal = (status: number, message: string) =>
+  new Response(message, { status, headers: { "content-type": "text/plain; charset=utf-8" } });
+
+/**
+ * Answers a sandbox's request for a provider's host, with `props` as the Worker registered them:
+ * forwards it to the upstream of the protocol that serves the path, with the provider's API key,
+ * or refuses it with status 404.
+ */
+export const providerOutbound = Effect.fn("Sandbox.providerOutbound")(function* (
+  props: typeof ProviderProps.Encoded,
+  request: Request,
+) {
+  const { provider, credential } = yield* Schema.decodeEffect(ProviderProps)(props);
+  const forwarded = providerRequest(request, provider, credential);
+  if (Option.isSome(forwarded)) return yield* forwardRequest(provider.id, request, forwarded.value);
+  yield* Effect.logWarning("Refused a sandbox request for a route outside the provider's", {
+    handler: provider.id,
+    method: request.method,
+    host: new URL(request.url).host,
+    path: new URL(request.url).pathname,
+  });
+  return refusal(404, `usine forwards only the ${provider.label} routes in its catalog.\n`);
+});

@@ -14,6 +14,7 @@ import {
   WireProtocol,
 } from "@usine/core/agent/provider";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { Schema } from "effect";
 import { createRoot } from "react-dom/client";
 import { flushSync } from "react-dom";
 import { expect, it } from "vitest";
@@ -225,10 +226,16 @@ it.each([
   },
 );
 
+const KeyRequest = Schema.Struct({
+  target: Schema.String,
+  provider: Schema.String,
+  key: Schema.String,
+});
+
 it("connects the API key of a provider without a subscription login, with no sign-in", async () => {
   const plan = ModelProvider.make({
     id: ModelProviderId.make("test-plan"),
-    slot: GatewaySlot.make("test-plan"),
+    slot: GatewaySlot.make("test-plan-chat"),
     label: "Test plan",
     protocols: [
       ProviderProtocol.make({
@@ -241,8 +248,8 @@ it("connects the API key of a provider without a subscription login, with no sig
     credentials: [ApiKeyCredential.make({ variable: GatewayVariable.make("TEST_PLAN_API_KEY") })],
   });
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  const sent: unknown[] = [];
-  let credential: "api-key" | null = null;
+  const sent: Array<{ readonly method: string | undefined; readonly body: unknown }> = [];
+  const keyed = new Set<string>();
   const state = (): ProviderStatus => ({
     targets: [
       {
@@ -252,7 +259,7 @@ it("connects the API key of a provider without a subscription login, with no sig
           {
             provider: plan.slot,
             ...providerEntry(plan),
-            credential,
+            credential: keyed.has(plan.slot) ? "api-key" : null,
             expiresAt: null,
             lastRefresh: null,
           },
@@ -263,9 +270,10 @@ it("connects the API key of a provider without a subscription login, with no sig
   });
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (input, init) => {
-    if (String(input).endsWith("/key")) {
-      sent.push(JSON.parse(String(init?.body)));
-      credential = "api-key";
+    if (String(input).endsWith("/api/providers/key")) {
+      const body = Schema.decodeUnknownSync(KeyRequest)(JSON.parse(String(init?.body)));
+      sent.push({ method: init?.method, body });
+      keyed.add(body.provider);
       return Response.json({ ok: true });
     }
     return Response.json(state());
@@ -286,11 +294,18 @@ it("connects the API key of a provider without a subscription login, with no sig
     expect(host.querySelectorAll("details")).toHaveLength(0);
     await page.getByLabelText("API key", { exact: true }).fill("private-plan-key");
     await page.getByRole("button", { name: "Save API key", exact: true }).click();
+    await expect
+      .poll(() => sent)
+      .toEqual([
+        {
+          method: "PUT",
+          body: { target: "gateway", provider: "test-plan-chat", key: "private-plan-key" },
+        },
+      ]);
     await expect.element(page.getByText("Connected · API key", { exact: true })).toBeVisible();
     await expect
       .element(page.getByRole("button", { name: "Disconnect Test plan", exact: true }))
       .toBeVisible();
-    expect(sent).toEqual([{ target: "gateway", provider: "test-plan", key: "private-plan-key" }]);
     expect(host.textContent).not.toContain("private-plan-key");
   } finally {
     root.unmount();

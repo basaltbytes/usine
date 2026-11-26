@@ -7,6 +7,7 @@ export {
   ProviderConnections,
   providerEntry,
   ProviderTarget,
+  reportedConnections,
   StaticKey,
   UnservedProvider,
 } from "./model.ts";
