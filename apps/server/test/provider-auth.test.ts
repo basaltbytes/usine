@@ -1,3 +1,5 @@
+// The CLI case types an API key on a stand-in terminal, which only the unstable Terminal API builds.
+// @effect-diagnostics unstableApiUsage:off
 import { administratorPermissions } from "@usine/core/access";
 import { InstanceDirectory } from "@usine/core/instance";
 import {
@@ -15,10 +17,25 @@ import {
   UpstreamBase,
   WireProtocol,
 } from "@usine/core/agent/provider";
-import { providerEntry, type ProviderLoginView } from "@usine/gateway/credentials";
+import {
+  providerEntry,
+  type ProviderLoginView,
+  type ProviderTarget,
+} from "@usine/gateway/credentials";
 import { NodeHttpServer, NodeServices } from "@effect/platform-node";
 import { assert, it } from "@effect/vitest";
-import { Context, DateTime, Effect, FileSystem, Layer, Option, Redacted } from "effect";
+import {
+  type Cause,
+  Context,
+  DateTime,
+  Effect,
+  FileSystem,
+  Layer,
+  Option,
+  Queue,
+  Redacted,
+  Terminal,
+} from "effect";
 import { FetchHttpClient, HttpRouter, HttpServer } from "effect/http";
 import { Port, ProviderCommand } from "../src/cli.ts";
 import {
@@ -33,6 +50,24 @@ import { ProviderLogins } from "../src/providers/control.ts";
 import { providerRoutes } from "../src/providers/http.ts";
 import { authenticatedRoutes } from "../src/auth/http.ts";
 import { authFixture, alice, localSecret } from "./auth/fixture.ts";
+
+/** A terminal on which the operator types `text`, then presses Enter. */
+const typing = (text: string) =>
+  Terminal.make({
+    columns: Effect.succeed(80),
+    rows: Effect.succeed(24),
+    readInput: Effect.gen(function* () {
+      const input = yield* Queue.make<Terminal.UserInput, Cause.Done>();
+      const key = (name: string) => ({ name, ctrl: false, meta: false, shift: false });
+      yield* Queue.offerAll(input, [
+        ...[...text].map((character) => ({ input: Option.some(character), key: key(character) })),
+        { input: Option.none(), key: key("enter") },
+      ]);
+      return input;
+    }),
+    readLine: Effect.succeed(text),
+    display: () => Effect.void,
+  });
 
 it.live("logs in and out through the authenticated provider API using FetchHttpClient", () =>
   Effect.scoped(
@@ -60,13 +95,14 @@ it.live("logs in and out through the authenticated provider API using FetchHttpC
           ApiKeyCredential.make({ variable: GatewayVariable.make("TEST_PLAN_API_KEY") }),
         ],
       });
-      const providers = [anthropic, openai, plan].map((provider) => ({
+      const connections = [anthropic, openai, plan].map((provider) => ({
         provider: provider.slot,
         ...providerEntry(provider),
         credential: null,
         expiresAt: null,
         lastRefresh: null,
       }));
+      let providers: ReadonlyArray<ProviderTarget["providers"][number]> = connections;
       const calls: string[] = [];
       let logins: readonly ProviderLoginView[] = [];
       const server = yield* Layer.build(
@@ -97,7 +133,10 @@ it.live("logs in and out through the authenticated provider API using FetchHttpC
                   }),
                 submit: () => Effect.die("unexpected code submission"),
                 cancel: () => Effect.die("unexpected cancellation"),
-                apiKey: () => Effect.die("unexpected API key"),
+                apiKey: (target, provider, key) =>
+                  Effect.sync(() => {
+                    calls.push(`key ${target}/${provider} ${Redacted.value(key)}`);
+                  }),
               }),
             ),
           ),
@@ -121,15 +160,14 @@ it.live("logs in and out through the authenticated provider API using FetchHttpC
           }),
         }),
       );
-      const command = (provider: string, action: "login" | "logout") =>
+      const command = (
+        provider: string,
+        action: "login" | "logout",
+        mode: "subscription" | "api-key" = "subscription",
+      ) =>
         providerCommand(
           directory,
-          ProviderCommand.make({
-            provider,
-            action,
-            mode: "subscription",
-            target: Option.none(),
-          }),
+          ProviderCommand.make({ provider, action, mode, target: Option.none() }),
         );
       for (const provider of ["claude", "openai"]) {
         yield* command(provider, "login");
@@ -151,6 +189,31 @@ it.live("logs in and out through the authenticated provider API using FetchHttpC
         keyOnly.message,
         "Test plan takes an API key. Run usine login test-plan --api-key.",
       );
+
+      // The local Codex auth file is unreadable: a key or a logout replaces it, and a sign-in waits.
+      const error = "Could not read the Codex auth file.";
+      providers = connections.map((connection) =>
+        connection.provider === openai.slot
+          ? {
+              provider: connection.provider,
+              id: connection.id,
+              label: connection.label,
+              accepts: connection.accepts,
+              error,
+            }
+          : connection,
+      );
+      calls.length = 0;
+      yield* command("openai", "login", "api-key").pipe(
+        Effect.provideService(Terminal.Terminal, typing("sk-proj-replacement")),
+      );
+      yield* command("openai", "logout");
+      const signIn = yield* command("openai", "login").pipe(Effect.flip);
+      assert.deepStrictEqual(calls, [
+        "key local/openai-responses sk-proj-replacement",
+        "disconnect local/openai-responses",
+      ]);
+      assert.strictEqual(signIn.message, `Local harnesses: ${error}`);
     }),
   ).pipe(Effect.provide([NodeServices.layer, FetchHttpClient.layer])),
 );

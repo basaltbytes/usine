@@ -27,7 +27,7 @@ import {
   gitHubRequest,
   providerOutbound,
   ProviderProps,
-  type Registration,
+  register,
   registrationOf,
 } from "./sandbox/outbound.ts";
 import {
@@ -73,20 +73,6 @@ const settingsOf = (env: Env): Option.Option<WorkerSettings> =>
     },
     allowedHosts: allowedHostsOf(variables.ALLOWED_HOSTS ?? ""),
   }));
-
-/** Returns the entrypoint of `exports` for `registration`, with its props. */
-const entrypointOf = (exports: Cloudflare.Exports, registration: Registration) => {
-  switch (registration.handler) {
-    case "GitHubOutbound":
-      return exports.GitHubOutbound({ props: registration.props });
-    case "ProviderOutbound":
-      return exports.ProviderOutbound({ props: registration.props });
-    case "AllowedOutbound":
-      return exports.AllowedOutbound({ props: {} });
-    case "DeniedOutbound":
-      return exports.DeniedOutbound({ props: {} });
-  }
-};
 
 const logger = Logger.layer([Logger.consoleJson]);
 
@@ -216,12 +202,7 @@ const containerOf = (
       registrationOf(interception).pipe(
         Effect.mapError((cause) => containerFailure("intercept")(cause)),
         Effect.flatMap((registration) =>
-          tryContainer("intercept", () => {
-            const handler = entrypointOf(exports, registration);
-            return registration.scheme === "https"
-              ? container.interceptOutboundHttps(registration.host, handler)
-              : container.interceptOutboundHttp(registration.host, handler);
-          }),
+          tryContainer("intercept", () => register<Fetcher>(container, exports, registration)),
         ),
       ),
   };

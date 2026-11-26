@@ -35,6 +35,10 @@ import {
   interceptionsFor,
   providerOutbound,
   providerRequest,
+  type OutboundEntrypoints,
+  type OutboundInterceptor,
+  type ProviderProps,
+  register,
   registrationOf,
 } from "../src/sandbox/outbound.ts";
 
@@ -377,7 +381,7 @@ describe("sandbox outbound handlers", () => {
       Effect.gen(function* () {
         const granted = SandboxCredentials.make({
           issuedAt,
-          github: Option.none(),
+          github: Option.some(Redacted.make("ghs_installation-token")),
           providers: [
             ProviderGrant.make({
               provider: plan.id,
@@ -388,25 +392,51 @@ describe("sandbox outbound handlers", () => {
         const catalog = ModelProviderCatalog.make({
           providers: [...modelProviders.providers, plan],
         });
-        const registrations = yield* Effect.forEach(
+        // Stands in for `ctx.exports` and the container: each handler names its entrypoint.
+        type Handler = { readonly entrypoint: string; readonly props: unknown };
+        const providerProps: Array<typeof ProviderProps.Encoded> = [];
+        const entrypoints: OutboundEntrypoints<Handler> = {
+          GitHubOutbound: ({ props }) => ({ entrypoint: "GitHubOutbound", props }),
+          ProviderOutbound: ({ props }) => {
+            providerProps.push(props);
+            return { entrypoint: "ProviderOutbound", props };
+          },
+          AllowedOutbound: ({ props }) => ({ entrypoint: "AllowedOutbound", props }),
+          DeniedOutbound: ({ props }) => ({ entrypoint: "DeniedOutbound", props }),
+        };
+        const intercepted: Array<readonly [string, string, Handler]> = [];
+        const container: OutboundInterceptor<Handler> = {
+          interceptOutboundHttp: (host, handler) =>
+            Promise.resolve(void intercepted.push(["http", host, handler])),
+          interceptOutboundHttps: (host, handler) =>
+            Promise.resolve(void intercepted.push(["https", host, handler])),
+        };
+        yield* Effect.forEach(
           interceptionsFor(catalog, granted, ["registry.npmjs.org"]),
-          registrationOf,
+          (interception) =>
+            Effect.flatMap(registrationOf(interception), (registration) =>
+              Effect.promise(() => register(container, entrypoints, registration)),
+            ),
         );
         expect(
-          registrations.map(({ handler, scheme, host }) => `${handler}:${scheme}:${host}`),
+          intercepted.map(([scheme, host, { entrypoint }]) => `${entrypoint}:${scheme}:${host}`),
         ).toEqual([
-          "DeniedOutbound:https:github.com",
-          "DeniedOutbound:https:api.github.com",
+          "GitHubOutbound:https:github.com",
+          "GitHubOutbound:https:api.github.com",
           "DeniedOutbound:http:anthropic.usine.internal",
           "DeniedOutbound:http:openai.usine.internal",
           "ProviderOutbound:http:test-plan.usine.internal",
           "AllowedOutbound:https:registry.npmjs.org",
         ]);
-        const registered = registrations.find(({ handler }) => handler === "ProviderOutbound");
-        assert(registered?.handler === "ProviderOutbound");
+        expect(intercepted[0]?.[2].props).toEqual({
+          host: "github.com",
+          token: "ghs_installation-token",
+        });
+        const [props] = providerProps;
+        assert(props !== undefined);
         const sent: Array<readonly [string, string, string | null]> = [];
         const serve = (request: Request) =>
-          providerOutbound(registered.props, request).pipe(
+          providerOutbound(props, request).pipe(
             Effect.provideService(FetchHttpClient.Fetch, (input) => {
               const upstream = new Request(input);
               sent.push([upstream.method, upstream.url, upstream.headers.get("authorization")]);

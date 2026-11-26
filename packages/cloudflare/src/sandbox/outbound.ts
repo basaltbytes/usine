@@ -275,6 +275,51 @@ export const registrationOf = (interception: Interception) =>
       Effect.succeed<Registration>({ handler: "DeniedOutbound", host, scheme }),
   });
 
+/** The Worker's outbound entrypoints by name, each returning the handler for a host with its props. */
+export interface OutboundEntrypoints<Handler> {
+  readonly GitHubOutbound: (options: { readonly props: typeof GitHubProps.Encoded }) => Handler;
+  readonly ProviderOutbound: (options: { readonly props: typeof ProviderProps.Encoded }) => Handler;
+  readonly AllowedOutbound: (options: { readonly props: Record<string, never> }) => Handler;
+  readonly DeniedOutbound: (options: { readonly props: Record<string, never> }) => Handler;
+}
+
+/** The container's methods that send its requests for a host to a handler. */
+export interface OutboundInterceptor<Handler> {
+  readonly interceptOutboundHttp: (host: string, handler: Handler) => Promise<void>;
+  readonly interceptOutboundHttps: (host: string, handler: Handler) => Promise<void>;
+}
+
+/**
+ * Sends the container's requests for the host of `registration` to the entrypoint of `entrypoints`
+ * that it names, with its props, over its scheme.
+ */
+export const register = <Handler>(
+  container: OutboundInterceptor<Handler>,
+  entrypoints: OutboundEntrypoints<Handler>,
+  registration: Registration,
+): Promise<void> => {
+  const handler = handlerOf(entrypoints, registration);
+  return registration.scheme === "https"
+    ? container.interceptOutboundHttps(registration.host, handler)
+    : container.interceptOutboundHttp(registration.host, handler);
+};
+
+const handlerOf = <Handler>(
+  entrypoints: OutboundEntrypoints<Handler>,
+  registration: Registration,
+): Handler => {
+  switch (registration.handler) {
+    case "GitHubOutbound":
+      return entrypoints.GitHubOutbound({ props: registration.props });
+    case "ProviderOutbound":
+      return entrypoints.ProviderOutbound({ props: registration.props });
+    case "AllowedOutbound":
+      return entrypoints.AllowedOutbound({ props: {} });
+    case "DeniedOutbound":
+      return entrypoints.DeniedOutbound({ props: {} });
+  }
+};
+
 const refusal = (status: number, message: string) =>
   new Response(message, { status, headers: { "content-type": "text/plain; charset=utf-8" } });
 
