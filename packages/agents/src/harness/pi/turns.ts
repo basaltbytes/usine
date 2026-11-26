@@ -81,7 +81,7 @@ export const piTurns = Effect.fn("PiTurns.start")(function* (options: {
           catch: (cause) => options.error("stream", cause),
         }).pipe(
           // Pi's prompt returns when the turn ends.
-          Effect.andThen(conversation.turnEnded),
+          Effect.andThen(conversation.turnEnded()),
           Effect.flatMap(() => {
             const lastAssistant = [...options.sdk.messages]
               .reverse()

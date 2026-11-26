@@ -101,7 +101,7 @@ const started = (sequence: number, callId: string) =>
     ToolStarted.make({ session: parent, callId, tool: "read", input: { path: "src/index.ts" } }),
   );
 const document = (events: ReadonlyArray<TranscriptEventView>) =>
-  readerDocument(projectTranscript(events, []), [], events);
+  readerDocument(projectTranscript(events, [], [], new Set()), [], events);
 const groups = (events: ReadonlyArray<TranscriptEventView>): ReadonlyArray<Burst> =>
   document(events)
     .chapters.flatMap((chapter) => chapter.rows)
@@ -133,7 +133,7 @@ const completed = (
 };
 // Summarizes all calls, delegations included, as a single burst.
 const summary = (events: ReadonlyArray<TranscriptEventView>) => {
-  const [first, ...rest] = projectTranscript(events, [])
+  const [first, ...rest] = projectTranscript(events, [], [], new Set())
     .sessions.flatMap(({ entries }) => entries)
     .filter((entry): entry is TranscriptTool => entry._tag === "Tool")
     .sort((left, right) => left.sequence - right.sequence);
@@ -497,6 +497,7 @@ it("attaches paged input to its child using unpaged session identity without rep
     [receipt],
     [],
     [held, record(8, SessionIdle.make({ session: child }))],
+    new Set(),
   );
   assert.strictEqual(projection.items.length, 1);
   const session = projection.sessions[0];
@@ -508,7 +509,7 @@ it("attaches paged input to its child using unpaged session identity without rep
   assert(entry?._tag === "Notice");
   assert.strictEqual(entry.detail, "Keep this correction\n\nHarness unavailable");
   assert.strictEqual(entry.tone, "failed");
-  const unmatched = projectTranscript([receipt], []).items[0];
+  const unmatched = projectTranscript([receipt], [], [], new Set()).items[0];
   assert(unmatched?._tag === "Notice");
   assert.include(unmatched.label, child.id);
   assert.strictEqual(unmatched.detail, entry.detail);
@@ -579,7 +580,11 @@ it("renders a held child from session state when its activity is outside the loa
       <Outline
         run={run}
         eventPreview="Event"
-        document={readerDocument(projectTranscript(page, [running], sessionState), [running], page)}
+        document={readerDocument(
+          projectTranscript(page, [running], sessionState, new Set()),
+          [running],
+          page,
+        )}
         selection={{ _tag: "Attempt", attemptId: attempt, sessionKey: null }}
         reading={null}
         composerSession={null}
@@ -680,7 +685,7 @@ it("shows the latest parent steer's delivery once without confusing parent and c
   ];
   assert.include(render(initial), "Forwarded to child");
   assert.include(render(initial), "Queued until the current child step ends");
-  const sessions = projectTranscript(initial, []).sessions;
+  const sessions = projectTranscript(initial, [], [], new Set()).sessions;
   assert.isFalse(sessions.find(({ session }) => session.id === parent.id)?.held);
   assert.isTrue(sessions.find(({ session }) => session.id === child.id)?.held);
 
@@ -762,7 +767,7 @@ it("shows a message to a working child queued in the child's section until the c
     applied(3, true),
   ];
   const queuedOf = (events: ReadonlyArray<TranscriptEventView>) => {
-    const session = projectTranscript(events, []).sessions.find(
+    const session = projectTranscript(events, [], [], new Set()).sessions.find(
       (candidate) => candidate.session.id === child.id,
     );
     assert(session !== undefined);

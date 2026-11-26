@@ -484,7 +484,11 @@ describe("provisioned machine", () => {
         <Outline
           run={view}
           eventPreview="Issue #33"
-          document={readerDocument(projectTranscript([], view.attempts), view.attempts, [])}
+          document={readerDocument(
+            projectTranscript([], view.attempts, [], new Set()),
+            view.attempts,
+            [],
+          )}
           selection={{ _tag: "Event" }}
           reading={null}
           composerSession={null}
@@ -559,7 +563,7 @@ describe("Attempt start", () => {
       <Outline
         run={view}
         eventPreview="Issue #33"
-        document={readerDocument(projectTranscript([], attempts), attempts, [])}
+        document={readerDocument(projectTranscript([], attempts, [], new Set()), attempts, [])}
         selection={{ _tag: "Event" }}
         reading={null}
         composerSession={null}
@@ -799,7 +803,11 @@ describe("Run approval", () => {
       <Outline
         run={view}
         eventPreview={eventPreview(view.loop, detail(view).eventPayload)}
-        document={readerDocument(projectTranscript([], view.attempts), view.attempts, [])}
+        document={readerDocument(
+          projectTranscript([], view.attempts, [], new Set()),
+          view.attempts,
+          [],
+        )}
         selection={{ _tag: "Event" }}
         reading={null}
         composerSession={null}

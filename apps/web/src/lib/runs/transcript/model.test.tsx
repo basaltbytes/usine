@@ -154,7 +154,7 @@ const tools = (
   events: ReadonlyArray<TranscriptEventView>,
   attempts = [liveAttempt],
 ): ReadonlyArray<TranscriptTool> =>
-  projectTranscript(events, attempts).sessions.flatMap(({ entries }) =>
+  projectTranscript(events, attempts, [], new Set()).sessions.flatMap(({ entries }) =>
     entries.filter((entry) => entry._tag === "Tool"),
   );
 
@@ -242,7 +242,11 @@ const reader = (
     >
       <MessageScrollerProvider>
         <Transcript
-          document={readerDocument(projectTranscript(events, attempts), attempts, events)}
+          document={readerDocument(
+            projectTranscript(events, attempts, [], new Set()),
+            attempts,
+            events,
+          )}
           runTask="Review the task"
           history={history}
         />
@@ -288,7 +292,11 @@ describe("run transcript", () => {
       LabelView.make({ name: GitHubLabelName.make(name), color, description: null });
     const comment = "https://github.com/basaltbytes/usine/issues/247#issuecomment-6216970836";
     const document = withGitHubChanges(
-      readerDocument(projectTranscript(events, [liveAttempt]), [liveAttempt], events),
+      readerDocument(
+        projectTranscript(events, [liveAttempt], [], new Set()),
+        [liveAttempt],
+        events,
+      ),
       new Map([
         [
           attemptId,
@@ -381,7 +389,7 @@ describe("run transcript", () => {
       }),
     );
     const finished = sessionEvent(2, SessionFinished.make({ session: child }));
-    const projection = projectTranscript([finished], [liveAttempt], [started, finished]);
+    const projection = projectTranscript([finished], [liveAttempt], [started, finished], new Set());
     const session = projection.sessions[0];
     assert(session !== undefined);
     assert.strictEqual(session.status, "Finished");
@@ -391,6 +399,8 @@ describe("run transcript", () => {
     const legacy = projectTranscript(
       [sessionEvent(1, SessionStarted.make({ session: child }))],
       [liveAttempt],
+      [],
+      new Set(),
     );
     const legacySession = legacy.sessions[0];
     assert(legacySession !== undefined);
@@ -467,7 +477,7 @@ describe("run transcript", () => {
       input: { path: "README.md" },
     });
     const events = [sessionEvent(1, start), sessionEvent(2, start, retried.id)];
-    const projection = projectTranscript(events, [failed, retried]);
+    const projection = projectTranscript(events, [failed, retried], [], new Set());
     assert.strictEqual(projection.sessions.length, 2);
     assert.notEqual(projection.sessions[0]?.key, projection.sessions[1]?.key);
     const calls = tools(events, [failed, retried]);
@@ -509,7 +519,7 @@ describe("run transcript", () => {
         ),
         record(2, terminal),
       ];
-      const projection = projectTranscript(events, [liveAttempt]);
+      const projection = projectTranscript(events, [liveAttempt], [], new Set());
       assert.strictEqual(projection.sessions[0]?.status, "Stopped");
       assert.strictEqual(tools(events)[0]?.state._tag, "Stopped");
       assert.isFalse(readerDocument(projection, [liveAttempt], events).chapters[0]?.live);
@@ -527,7 +537,7 @@ describe("run transcript", () => {
       ),
       sessionEvent(2, SessionFinished.make({ session: child })),
     ];
-    const projection = projectTranscript(events, [liveAttempt]);
+    const projection = projectTranscript(events, [liveAttempt], [], new Set());
     assert.strictEqual(projection.sessions[0]?.status, "Finished");
     assert.strictEqual(tools(events)[0]?.state._tag, "Stopped");
     const markup = reader(events);
@@ -541,7 +551,7 @@ describe("run transcript", () => {
       sessionEvent(2, TextOutput.make({ session: child, text: "Child explanation" })),
     ];
     const document = readerDocument(
-      projectTranscript(events, [liveAttempt]),
+      projectTranscript(events, [liveAttempt], [], new Set()),
       [liveAttempt],
       events,
     );
