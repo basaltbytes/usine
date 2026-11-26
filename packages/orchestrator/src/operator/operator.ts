@@ -112,7 +112,7 @@ import {
   textExcerpt,
   transcriptEntries,
   transcriptPageBytes,
-} from "./run-pages.ts";
+} from "./run-pages/view.ts";
 import { fillText } from "./page.ts";
 import { ReadyOverview } from "./overview/view.ts";
 import {
@@ -1405,7 +1405,7 @@ export {
   RunTranscriptPageView,
   TextExcerptView,
   TranscriptTextView,
-} from "./run-pages.ts";
+} from "./run-pages/view.ts";
 export { jsonBytes, PAGE_BYTES, type Page, pageOf, textPrefix } from "./page.ts";
 export {
   TaskItemView,

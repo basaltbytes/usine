@@ -93,7 +93,12 @@ import {
 } from "./transcript.ts";
 import { FactoryOverview } from "./overview/view.ts";
 import { RunDetailView, EditAndRetry, SessionIntervention } from "./run.ts";
-import { RunBriefView, RunTextPageView, RunTextPart, RunTranscriptPageView } from "./run-pages.ts";
+import {
+  RunBriefView,
+  RunTextPageView,
+  RunTextPart,
+  RunTranscriptPageView,
+} from "./run-pages/view.ts";
 import { RunGitHubChangesView } from "./github-changes.ts";
 import { TaskView } from "./task.ts";
 import { ItemView } from "./item.ts";

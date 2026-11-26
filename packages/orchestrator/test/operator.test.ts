@@ -147,7 +147,7 @@ import { FailureView, LocalWorkerAccess, SshWorkerAccess } from "../src/operator
 import { PoolLimitNeed } from "../src/operator/need.ts";
 import { boardTaskRuns, CallScopeTarget, Operator } from "../src/operator/operator.ts";
 import { jsonBytes, PAGE_BYTES } from "../src/operator/page.ts";
-import type { RunTextPageView, RunTranscriptPageView } from "../src/operator/run-pages.ts";
+import type { RunTextPageView, RunTranscriptPageView } from "../src/operator/run-pages/view.ts";
 import { ReadyOverview } from "../src/operator/overview/view.ts";
 import {
   ApprovalView,
