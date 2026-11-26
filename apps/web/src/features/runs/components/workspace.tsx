@@ -76,14 +76,15 @@ export const RunWorkspace = ({ detail, history }: RunWorkspaceProps) => {
   const permitted = useCanOperateRepository(run.repository);
   const outlineId = useId();
   const githubChanges = useQuery(runGitHubChangesQuery(run));
+  const earlierUnloaded = new Set(detail.earlierTranscript.map(({ attemptId }) => attemptId));
   const document = withGitHubChanges(
     readerDocument(
-      projectTranscript(detail.transcript, run.attempts, detail.sessionState),
+      projectTranscript(detail.transcript, run.attempts, detail.sessionState, earlierUnloaded),
       run.attempts,
       detail.transcript,
     ),
     new Map(githubChanges.data?.attempts.map(({ attemptId, changes }) => [attemptId, changes])),
-    new Set(detail.earlierTranscript.map(({ attemptId }) => attemptId)),
+    earlierUnloaded,
   );
   const tally = errorTally(document);
   const through = detail.transcript.reduce<RunDetailView["transcript"][number]["sequence"] | null>(

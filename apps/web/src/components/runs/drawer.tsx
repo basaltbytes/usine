@@ -47,7 +47,12 @@ type LiveSummaryProps = { readonly detail: RunDetailView };
 
 const LiveSummary = ({ detail }: LiveSummaryProps) => {
   const document = readerDocument(
-    projectTranscript(detail.transcript, detail.run.attempts, detail.sessionState),
+    projectTranscript(
+      detail.transcript,
+      detail.run.attempts,
+      detail.sessionState,
+      new Set(detail.earlierTranscript.map(({ attemptId }) => attemptId)),
+    ),
     detail.run.attempts,
     detail.transcript,
   );

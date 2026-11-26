@@ -88,7 +88,7 @@ const meter = (sequence: number) =>
     }),
   );
 const document = (events: ReadonlyArray<TranscriptEventView>) =>
-  readerDocument(projectTranscript(events, []), [], events);
+  readerDocument(projectTranscript(events, [], [], new Set()), [], events);
 const index = (events: ReadonlyArray<TranscriptEventView>) =>
   indexTranscriptUpdates(document(events));
 const through = (events: ReadonlyArray<TranscriptEventView>) => events.at(-1)?.sequence ?? null;

@@ -1,7 +1,7 @@
+import { request, successfulResponses, userMessage } from "./fixture.ts";
 import { CONTINUATION_MESSAGE } from "../../../src/harness/continuation.ts";
 import { jsonKey } from "@usine/core/json-key";
 import { assert, describe, it } from "@effect/vitest";
-import { Harness, BrainSpec, Effort, ModelId } from "@usine/core/agent/brain";
 import {
   AgentSessionId,
   ChildSession,
@@ -11,7 +11,6 @@ import {
   TokenBreakdown,
   sessionPool,
 } from "@usine/core/agent/session";
-import { AgentName } from "@usine/core/agent";
 import {
   Cause,
   Deferred,
@@ -32,9 +31,8 @@ import {
   OperatorMessage,
   Release,
 } from "@usine/core/attempt/channel";
-import { WorkerName } from "@usine/core/worker";
 import { TestClock } from "effect/testing";
-import { type ChildHost, LocalProcess, RemoteShell } from "../../../src/child-host/child-host.ts";
+import { LocalProcess, RemoteShell } from "../../../src/child-host/child-host.ts";
 import {
   AgentResultError,
   ChildRequest,
@@ -47,7 +45,6 @@ import {
   SessionOperationError,
   UnknownModelError,
   UnsupportedEffortError,
-  WorkingDirectory,
 } from "../../../src/runtime.ts";
 import {
   CodexAppServer,
@@ -63,31 +60,6 @@ import { collectLogs } from "../../logs.ts";
 const codexChild = codexChildLayer.pipe(Layer.provideMerge(ChildSessionJournal.layerNoop));
 
 const noDelivery: OnDelivery = () => Effect.void;
-
-const request = (
-  model = "gpt-5.6-terra",
-  effort: Effort = "off",
-  host: ChildHost = LocalProcess.make(),
-) =>
-  ChildRequest.make({
-    worker: WorkerName.make("worker-1"),
-    machine: Option.none(),
-    environment: { HOME: "/home/worker", PATH: "/usr/bin:/bin" },
-    host,
-    session: ChildSession.make({
-      id: AgentSessionId.make("codex-child-1"),
-      parentId: AgentSessionId.make("parent-1"),
-      agent: AgentName.make("developer"),
-      brain: BrainSpec.make({
-        harness: Harness.make("codex"),
-        model: ModelId.make(model),
-        effort,
-      }),
-    }),
-    cwd: WorkingDirectory.make("/workspace/repo"),
-    prompt: "Implement the focused task.",
-    receipts: Option.some([]),
-  });
 
 const connectionLayer = (
   responses: Readonly<Record<string, Schema.Json>>,
@@ -124,37 +96,6 @@ const connectionLayer = (
         } satisfies CodexConnection),
       ),
   });
-
-const successfulResponses = (
-  models: ReadonlyArray<{
-    readonly id: string;
-    readonly model: string;
-    readonly supportedReasoningEfforts?: ReadonlyArray<{ readonly reasoningEffort: string }>;
-  }>,
-) =>
-  ({
-    initialize: {},
-    "account/read": {
-      account: { type: "chatgpt", email: "operator@example.com" },
-      requiresOpenaiAuth: true,
-    },
-    "model/list": { data: models },
-    "thread/start": {
-      modelProvider: "openai",
-      thread: { id: "thread-1" },
-      model: "gpt-5.6-terra",
-    },
-    "turn/start": { turn: { id: "turn-1" } },
-    "turn/steer": {},
-    "turn/interrupt": {},
-  }) satisfies Readonly<Record<string, Schema.Json>>;
-
-/** A Codex `userMessage` item that records `text`. */
-const userMessage = (id: string, text: string) => ({
-  type: "userMessage",
-  id,
-  content: [{ type: "text", text, text_elements: [] }],
-});
 
 /** A request for a child on a remote host, whose lost app-server the backend replaces. */
 const remoteRequest = () =>

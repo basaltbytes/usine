@@ -40,15 +40,24 @@ export interface SessionEvents {
   held: boolean;
   paused: boolean;
   idle: boolean;
+  /**
+   * Whether the loaded page holds every event of the session before `events`: its Attempt has no
+   * earlier page, or the page holds the child's first launch.
+   */
+  earlierLoaded: boolean;
   readonly events: Array<RecordedSessionEvent>;
   readonly interventions: Array<InterventionRecord>;
 }
 
-/** Groups records by session; records outside the loaded page update only the state fields. */
+/**
+ * Groups records by session; records outside the loaded page update only the state fields.
+ * `earlierUnloaded` holds the Attempts whose earlier events aren't loaded.
+ */
 export const indexSessions = (
   events: ReadonlyArray<TranscriptEventView>,
   sessionState: ReadonlyArray<TranscriptEventView>,
   terminalAttempts: ReadonlySet<AttemptId>,
+  earlierUnloaded: ReadonlySet<AttemptId>,
 ) => {
   const loaded = new Set(events.map(({ sequence }) => sequence));
   const records = [
@@ -83,6 +92,7 @@ export const indexSessions = (
         held: false,
         paused: false,
         idle: false,
+        earlierLoaded: !earlierUnloaded.has(record.attemptId),
         events: [],
         interventions: [],
       };
@@ -93,6 +103,8 @@ export const indexSessions = (
     if (event._tag === "SessionStarted") {
       group.harnessSession = event.harnessSession;
       group.prompt = event.prompt;
+      // Only a child's first launch records its prompt; a relaunch after a restart doesn't.
+      if (Option.isSome(event.prompt) && loaded.has(record.sequence)) group.earlierLoaded = true;
     }
     if (event._tag === "SessionFinished") group.status = "Finished";
     if (event._tag === "SessionIdle") group.idle = true;
