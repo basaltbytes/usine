@@ -43,6 +43,7 @@ import {
   gatewayFromEnvironment,
   type Listener,
 } from "../src/node/node.ts";
+import { readSettingsSource, readStartupSettings } from "../src/node/environment.ts";
 import {
   ADMIN_TOKEN_VALUE,
   authFileText,
@@ -469,6 +470,35 @@ describe("reloading the gateway", () => {
           );
           for (const secret of [OPENAI_KEY, CHATGPT_REFRESH, access])
             assert.notInclude(lines.join("\n"), secret);
+        }),
+      ).pipe(Effect.provide(NodeFileSystem.layer)),
+  );
+
+  it.live(
+    "an upstream override over plain HTTP to another host keeps the providers in force on a reload, and fails a startup, naming the variable",
+    () =>
+      withGateway(["registry.npmjs.org"], (files, { anthropic }) =>
+        Effect.gen(function* () {
+          const token = yield* attach;
+          const { proxy, egress, admin } = yield* GatewayAddresses;
+          const ports = { proxy: proxy.port, egress: egress.port, admin: admin.port };
+          const cleartext = "USINE_GATEWAY_ANTHROPIC_UPSTREAM=http://anthropic-override.test";
+          yield* files.write("settings.env", [
+            ...settingsLines(files, ports, "https://api.anthropic.com"),
+            cleartext,
+          ]);
+          yield* (yield* GatewayReload).reload;
+
+          const kept = yield* logged("Kept the previous LLM providers");
+          assert.include(kept, "USINE_GATEWAY_ANTHROPIC_UPSTREAM");
+          assert.include(kept, "http:// to a loopback host");
+          const providerResponse = yield* askAnthropic(token);
+          assert.strictEqual(providerResponse, 200);
+          assert.deepStrictEqual(anthropic, [FIRST_KEY]);
+          const source = yield* readSettingsSource(yield* ConfigProvider.ConfigProvider);
+          const failed = yield* readStartupSettings(source).pipe(Effect.flip);
+          assert.strictEqual(failed._tag, "ConfigError");
+          assert.include(failed.message, "USINE_GATEWAY_ANTHROPIC_UPSTREAM");
         }),
       ).pipe(Effect.provide(NodeFileSystem.layer)),
   );

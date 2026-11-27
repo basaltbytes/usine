@@ -192,7 +192,7 @@ Each provider holds one credential; setting two of a provider's credential varia
 | `openai-responses` | `OPENAI_API_KEY` | An OpenAI-compatible API key | A bearer token |
 | `openai-responses` | `USINE_GATEWAY_CHATGPT_AUTH_FILE` | The absolute path of a Codex `auth.json` with a ChatGPT login | A bearer token with the login's access token, and `ChatGPT-Account-ID`; see [ChatGPT login](#chatgpt-login) |
 
-`USINE_GATEWAY_ANTHROPIC_UPSTREAM` (default `https://api.anthropic.com`) is the Anthropic upstream. `USINE_GATEWAY_OPENAI_UPSTREAM` (default `https://api.openai.com`) is the upstream for an OpenAI API key and can be any OpenAI-compatible provider, and `USINE_GATEWAY_CHATGPT_UPSTREAM` (default `https://chatgpt.com/backend-api/codex`) the one for a ChatGPT login. A provider without a credential is refused with `provider-not-configured`.
+`USINE_GATEWAY_ANTHROPIC_UPSTREAM` (default `https://api.anthropic.com`) is the Anthropic upstream. `USINE_GATEWAY_OPENAI_UPSTREAM` (default `https://api.openai.com`) is the upstream for an OpenAI API key and can be any OpenAI-compatible provider, and `USINE_GATEWAY_CHATGPT_UPSTREAM` (default `https://chatgpt.com/backend-api/codex`) the one for a ChatGPT login. Each upstream variable takes an `https://` URL, or an `http://` URL to a loopback host (`localhost`, `127.0.0.0/8`, or `[::1]`) such as a local stand-in, so a credential never crosses a network in cleartext; another `http://` URL fails the startup, and a reload keeps the provider settings in force, with an error that names the variable. A provider without a credential is refused with `provider-not-configured`.
 
 ### LLM routes
 

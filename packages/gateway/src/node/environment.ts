@@ -123,12 +123,31 @@ const configuredCredential = Effect.fn("GatewayNode.configuredCredential")(funct
   }
 });
 
+/** Returns whether `upstream` reaches the gateway's own host: `localhost`, `127.0.0.0/8`, or `::1`. */
+const isLoopback = (upstream: URL): boolean =>
+  upstream.hostname === "localhost" ||
+  upstream.hostname === "[::1]" ||
+  /^127(?:\.\d{1,3}){3}$/u.test(upstream.hostname);
+
+/**
+ * An upstream that a gateway variable sets, to which the gateway sends a credential: HTTPS, or
+ * plain HTTP to a loopback host only, so the credential never crosses a network in cleartext.
+ */
+const CredentialUpstream = UpstreamBase.check(
+  Schema.makeFilter(
+    (upstream) =>
+      upstream.startsWith("https://") ||
+      isLoopback(new URL(upstream)) ||
+      "Expected an https:// base URL, or http:// to a loopback host, because the gateway sends a credential to it",
+  ),
+);
+
 /** Returns the base URL that the upstream variable of `provider` sets, if it's set. */
 const configuredUpstream = Effect.fn("GatewayNode.configuredUpstream")(function* (
   provider: ModelProvider,
 ) {
   if (Option.isNone(provider.upstreamVariable)) return Option.none<UpstreamBase>();
-  return yield* Config.option(Config.schema(UpstreamBase, provider.upstreamVariable.value));
+  return yield* Config.option(Config.schema(CredentialUpstream, provider.upstreamVariable.value));
 });
 
 /**
@@ -153,7 +172,7 @@ const configuredProvider = Effect.fn("GatewayNode.configuredProvider")(function*
   if (credential._tag === "ChatGptLogin") {
     yield* readAuthFile(credential.authFile);
     yield* checkAuthFileWritable(credential.authFile);
-    const upstream = yield* Config.schema(UpstreamBase, CHATGPT_UPSTREAM_VARIABLE).pipe(
+    const upstream = yield* Config.schema(CredentialUpstream, CHATGPT_UPSTREAM_VARIABLE).pipe(
       Config.withDefault(CHATGPT_UPSTREAM),
     );
     return Option.some(LlmProvider.make({ upstream: Option.some(upstream), credential }));
