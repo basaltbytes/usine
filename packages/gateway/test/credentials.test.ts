@@ -171,6 +171,29 @@ const planAt = (origin: string) =>
     upstreamVariable: Option.some(GatewayVariable.make(PLAN_UPSTREAM)),
   });
 
+/** The gateway variable that replaces the upstream of `trailingAt`'s provider. */
+const TRAILING_UPSTREAM = "TEST_TRAILING_UPSTREAM";
+
+/** A second provider that only this test defines, with a static key, at `origin`. */
+const trailingAt = (origin: string) =>
+  ModelProvider.make({
+    id: ModelProviderId.make("test-trailing"),
+    slot: GatewaySlot.make("test-trailing"),
+    label: "Test trailing",
+    protocols: [
+      ProviderProtocol.make({
+        protocol: WireProtocol.make("openai-chat-completions"),
+        upstream: UpstreamBase.make(`${origin}/v1`),
+        routes: [RoutePattern.make("/chat/completions")],
+        key: KeyHeader.make({ header: HeaderName.make("authorization"), scheme: "bearer" }),
+      }),
+    ],
+    credentials: [
+      ApiKeyCredential.make({ variable: GatewayVariable.make("TEST_TRAILING_API_KEY") }),
+    ],
+    upstreamVariable: Option.some(GatewayVariable.make(TRAILING_UPSTREAM)),
+  });
+
 /** A report of `GET /v1/provider-credentials` as orchestrators up to 0.6.0 decode it. */
 const ConnectionsUpTo060 = Schema.fromJsonString(
   Schema.Struct({
@@ -401,9 +424,12 @@ it.live(
         const upstream = yield* standIn;
         const catalogUpstream = yield* standIn;
         const anthropicUpstream = yield* standIn;
+        const trailingUpstream = yield* standIn;
         const plan = planAt(catalogUpstream.origin);
+        // The provider after the test's has an upstream override too, so the key goes to the
+        // override of its own slot, not to the last one.
         const catalog = ModelProviderCatalog.make({
-          providers: [...modelProviders.providers, plan],
+          providers: [...modelProviders.providers, plan, trailingAt(catalogUpstream.origin)],
         });
         const lines: string[] = [];
         const logs = Logger.layer([
@@ -413,6 +439,7 @@ it.live(
         ]);
         const start = gatewayServing(catalog, directory, {
           [PLAN_UPSTREAM]: `${upstream.origin}/v1`,
+          [TRAILING_UPSTREAM]: `${trailingUpstream.origin}/v1`,
           USINE_GATEWAY_ANTHROPIC_UPSTREAM: anthropicUpstream.origin,
         }).pipe(Layer.provide(logs));
         const scope = yield* Scope.make();
@@ -432,7 +459,7 @@ it.live(
         assert.strictEqual(unserved._tag, "UnservedProvider");
         const report = yield* client.llm.connections();
         const providers = report.catalog ?? [];
-        assert.deepStrictEqual(providers.at(-1), {
+        assert.deepStrictEqual(providers.at(-2), {
           provider: plan.slot,
           id: plan.id,
           label: "Test plan",
@@ -455,12 +482,19 @@ it.live(
           [anthropic.slot, openai.slot],
         );
         const Saved = Schema.fromJsonString(
-          Schema.Struct({ staticKeys: Schema.Record(Schema.String, Schema.String) }),
+          Schema.Struct({
+            staticKeys: Schema.Record(
+              Schema.String,
+              Schema.Struct({ provider: Schema.String, key: Schema.String }),
+            ),
+          }),
         );
         const saved = yield* fs
           .readFileString(`${directory}/provider-credentials.json`)
           .pipe(Effect.flatMap(Schema.decodeUnknownEffect(Saved)));
-        assert.deepStrictEqual(Object.keys(saved.staticKeys), [plan.slot]);
+        assert.deepStrictEqual(Record.map(saved.staticKeys, ({ provider }) => provider), {
+          [plan.slot]: plan.id,
+        });
         const ask = yield* attemptOn(first);
         const path = `/${plan.slot}/chat/completions`;
         const connected = yield* ask(path);
@@ -481,7 +515,7 @@ it.live(
           [200, 200, 200, 503],
         );
         const disconnected = yield* again.llm.connections();
-        assert.strictEqual(disconnected.catalog?.at(-1)?.credential, null);
+        assert.strictEqual(disconnected.catalog?.at(-2)?.credential, null);
 
         assert.deepStrictEqual(upstream.seen, [
           ["/v1/chat/completions", `Bearer ${PLAN_KEY}`],
@@ -490,6 +524,7 @@ it.live(
         ]);
         assert.deepStrictEqual(catalogUpstream.seen, []);
         assert.deepStrictEqual(anthropicUpstream.seen, []);
+        assert.deepStrictEqual(trailingUpstream.seen, []);
         assert.isTrue(spans.some(({ name }) => name === "ProviderCredentials.replace"));
         const exposed =
           jsonKey(providers) +
@@ -695,6 +730,69 @@ it.effect("encodes each built-in credential with the kind that gateways up to 0.
       ["openai-api-key", openai.slot],
     ]);
   }),
+);
+
+it.live(
+  "loads a saved static key without a provider ID, and ignores one connected for another provider than its slot's, with a warning",
+  () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const directory = yield* fs.makeTempDirectoryScoped();
+        const warnings: string[] = [];
+        const logs = Logger.layer([
+          Logger.make(({ logLevel, message }) => {
+            if (logLevel === "Warn") warnings.push(jsonKey(message));
+          }),
+        ]);
+        const plan = planAt("https://plan.test");
+        const trailing = trailingAt("https://trailing.test");
+        const trailingKey = "trailing-key-for-credential-tests-0123456789";
+        // The slot's key was connected for a provider that a later catalog moved out of the slot.
+        yield* fs.writeFileString(
+          `${directory}/provider-credentials.json`,
+          jsonKey({
+            staticKeys: {
+              [plan.slot]: { provider: "earlier-plan", key: PLAN_KEY },
+              [trailing.slot]: trailingKey,
+            },
+          }),
+        );
+        const started = yield* Layer.build(
+          gatewayLayer(
+            { proxy: listener, egress: listener, admin: listener },
+            undefined,
+            directory,
+          ).pipe(
+            Layer.provide(
+              settingsLayer(
+                NO_PROVIDERS,
+                undefined,
+                undefined,
+                ModelProviderCatalog.make({ providers: [anthropic, plan, trailing] }),
+              ),
+            ),
+            Layer.provide(logs),
+          ),
+        );
+        const { providers } = yield* SettingsInForce.pipe(
+          Effect.provideContext(started),
+          Effect.flatMap((settings) => settings.current),
+        );
+        assert.deepStrictEqual(Object.keys(providers), [trailing.slot]);
+        const held = providers[trailing.slot];
+        assert(held !== undefined && held.credential._tag === "ApiKey");
+        assert.strictEqual(Redacted.value(held.credential.key), trailingKey);
+        const ignored = warnings.filter((line) =>
+          line.includes("Ignored a stored static key connected for another provider"),
+        );
+        assert.strictEqual(ignored.length, 1);
+        assert.include(ignored[0], `"slot":"${plan.slot}"`);
+        assert.include(ignored[0], '"provider":"earlier-plan"');
+        assert.include(ignored[0], `"slotProvider":"${plan.id}"`);
+        assert.notInclude(warnings.join("\n"), PLAN_KEY);
+      }),
+    ).pipe(Effect.provide([NodeServices.layer, FetchHttpClient.layer])),
 );
 
 it.live(

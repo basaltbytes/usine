@@ -3,6 +3,7 @@ import {
   GatewaySlot,
   type ModelProvider,
   type ModelProviderCatalog,
+  ModelProviderId,
   openai,
   UpstreamBase,
 } from "@usine/core/agent/provider";
@@ -112,16 +113,24 @@ const storedKey = (slot: GatewaySlot, key: Redacted.Redacted<string>): Option.Op
         })
       : Option.none();
 
+/** A static key in `staticKeys`, with the ID of the provider that it was connected for. */
+const StaticKeyEntry = Schema.Struct({ provider: ModelProviderId, key: Secret });
+type StaticKeyEntry = typeof StaticKeyEntry.Type;
+
 /**
  * `provider-credentials.json`: by slot, a credential that the format of gateways up to 0.3.0
  * stores, or `None` for a slot disconnected from the environment's credential; and in
- * `staticKeys`, the static key of each other slot. `staticKeys` isn't a slot, so those gateways
- * ignore it.
+ * `staticKeys`, the static key of each other slot, with its provider's ID, or alone as the first
+ * gateway with `staticKeys` wrote it. `staticKeys` isn't a slot, so gateways up to 0.3.0 ignore it.
  */
 const SnapshotJson = Schema.fromJsonString(
   Schema.toCodecJson(
     Schema.StructWithRest(
-      Schema.Struct({ staticKeys: Schema.optionalKey(Schema.Record(GatewaySlot, Secret)) }),
+      Schema.Struct({
+        staticKeys: Schema.optionalKey(
+          Schema.Record(GatewaySlot, Schema.Union([StaticKeyEntry, Secret])),
+        ),
+      }),
       [Schema.Record(GatewaySlot, Schema.Option(Stored))],
     ),
   ),
@@ -130,7 +139,7 @@ const SnapshotJson = Schema.fromJsonString(
 /** The connected credentials: `stored` in the format of gateways up to 0.3.0, and the other static keys. */
 interface Snapshot {
   readonly stored: Readonly<Record<GatewaySlot, Option.Option<Stored>>>;
-  readonly staticKeys: Readonly<Record<GatewaySlot, Redacted.Redacted<string>>>;
+  readonly staticKeys: Readonly<Record<GatewaySlot, StaticKeyEntry>>;
 }
 
 /**
@@ -170,14 +179,14 @@ const storing = (snapshot: Snapshot, slot: GatewaySlot, held: Option.Option<Stor
   staticKeys: without(snapshot.staticKeys, slot),
 });
 
-/** Returns `snapshot` with `slot` holding the static key `key`. */
+/** Returns `snapshot` with the slot of `provider` holding its static key `key`. */
 const keying = (
   snapshot: Snapshot,
-  slot: GatewaySlot,
+  provider: ModelProvider,
   key: Redacted.Redacted<string>,
 ): Snapshot => ({
-  stored: without(snapshot.stored, slot),
-  staticKeys: { ...snapshot.staticKeys, [slot]: key },
+  stored: without(snapshot.stored, provider.slot),
+  staticKeys: { ...snapshot.staticKeys, [provider.slot]: { provider: provider.id, key } },
 });
 
 const failed = (cause: { readonly _tag: string }) =>
@@ -242,26 +251,40 @@ export class ProviderCredentials extends Context.Service<
               "Ignored a stored provider credential under a slot whose provider doesn't accept it",
               { file, ...fields },
             );
-          const keys = Object.entries(staticKeys);
-          const unkeyed = keys.flatMap(([slot]) =>
-            Option.isNone(keyedProvider(catalog, slot)) ? [slot] : [],
-          );
-          for (const slot of unkeyed)
-            yield* Effect.logWarning(
-              "Ignored a stored static key for a slot whose provider doesn't accept one",
-              { file, slot },
-            );
+          const keys: Array<readonly [string, StaticKeyEntry]> = [];
+          for (const [slot, held] of Object.entries(staticKeys)) {
+            const owner = keyedProvider(catalog, slot);
+            if (Option.isNone(owner)) {
+              yield* Effect.logWarning(
+                "Ignored a stored static key for a slot whose provider doesn't accept one",
+                { file, slot },
+              );
+              continue;
+            }
+            if (Redacted.isRedacted(held)) {
+              keys.push([slot, { provider: owner.value.id, key: held }]);
+              continue;
+            }
+            if (held.provider !== owner.value.id) {
+              yield* Effect.logWarning(
+                "Ignored a stored static key connected for another provider than its slot's",
+                { file, slot, provider: held.provider, slotProvider: owner.value.id },
+              );
+              continue;
+            }
+            keys.push([slot, held]);
+          }
           snapshot = {
             stored: Object.fromEntries(
               entries.filter(([slot]) => !misplaced.some((ignored) => ignored.slot === slot)),
             ),
-            staticKeys: Object.fromEntries(keys.filter(([slot]) => !unkeyed.includes(slot))),
+            staticKeys: Object.fromEntries(keys),
           };
         }
         const apply = (providers: LlmProviders, upstreams: UpstreamOverrides) =>
           Effect.succeed(
             Object.entries(snapshot.staticKeys).reduce<LlmProviders>(
-              (applied, [slot, key]) => ({
+              (applied, [slot, { key }]) => ({
                 ...applied,
                 [slot]: LlmProvider.make({
                   upstream: overrideOf(upstreams, slot),
@@ -429,7 +452,7 @@ export class ProviderCredentials extends Context.Service<
                     )
                   : Effect.succeed(
                       Option.match(storedKey(provider.slot, credential.secret), {
-                        onNone: () => keying(snapshot, provider.slot, credential.secret),
+                        onNone: () => keying(snapshot, provider, credential.secret),
                         onSome: (stored) => storing(snapshot, provider.slot, Option.some(stored)),
                       }),
                     );
