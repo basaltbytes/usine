@@ -222,7 +222,6 @@ const makeOpenCodeSessions = Effect.gen(function* () {
       retries: 0,
       retrying: false,
       answered: false,
-      workReported: false,
       usage: new Map(),
     });
     const current = Effect.map(Ref.get(state), ({ api: currentApi }) => currentApi);
@@ -498,7 +497,6 @@ const makeOpenCodeSessions = Effect.gen(function* () {
             execution: Execution.Idle(),
             pending: restarted(latest.pending),
             answered: false,
-            workReported: false,
           }));
         }),
       );

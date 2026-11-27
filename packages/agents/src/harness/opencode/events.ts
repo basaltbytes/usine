@@ -199,7 +199,6 @@ export const openCodeEvents = (context: OpenCodeContext, actions: EventActions) 
           lastText: Option.none(),
           retries: 0,
           retrying: false,
-          workReported: false,
         }));
         if (execution._tag === "AwaitingSuccessor")
           yield* Effect.logInfo(

@@ -6,8 +6,9 @@ export type InterruptIntent = "pause" | "stop";
 
 /**
  * The root session's execution, by the events that the runtime handled. Each terminal event of
- * the execution leaves it `Idle`, except an interrupted pause that a late input keeps open, and a
- * success while OpenCode holds input that it hasn't delivered.
+ * the execution leaves it `Idle`, except an interrupted pause that a late input keeps open, a
+ * success while OpenCode holds input that it hasn't delivered, and a success that reports
+ * background work.
  */
 export type Execution = Data.TaggedEnum<{
   Idle: {};
@@ -17,6 +18,11 @@ export type Execution = Data.TaggedEnum<{
    * answers instead, unless every such input fails.
    */
   AwaitingInput: {};
+  /**
+   * The execution succeeded while background work ran, which the runtime reported. The answer
+   * waits for the work, which the runtime checks again as it ends, until an execution starts.
+   */
+  AwaitingWork: {};
   /**
    * The runtime posted an interrupt for `intent`, which OpenCode `answered` or not yet. `late` holds
    * the keys of the inputs posted after the answer of a pause, each of which can start a successor
@@ -53,6 +59,7 @@ export const requestInterrupt = (
       ];
     case "Idle":
     case "AwaitingInput":
+    case "AwaitingWork":
     case "AwaitingSuccessor":
       return [false, execution];
   }
@@ -127,6 +134,17 @@ export const answerDue = (execution: Execution, pending: Pending): readonly [boo
   execution._tag === "AwaitingInput" && unread(pending) === 0
     ? [true, Execution.Idle()]
     : [false, execution];
+
+/**
+ * Returns the execution after the runtime reported the background work of an execution that
+ * succeeded: `AwaitingWork` while the snapshot lists work, and `Idle` once it lists none.
+ */
+export const workReported = (execution: Execution, listed: boolean): Execution =>
+  execution._tag === "Idle" || execution._tag === "AwaitingWork"
+    ? listed
+      ? Execution.AwaitingWork()
+      : Execution.Idle()
+    : execution;
 
 /** An input that the session posted, until OpenCode delivers it or the post fails. */
 interface PostedInput {

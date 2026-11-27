@@ -4,7 +4,7 @@ import type { AgentSessionError, SessionOperationError } from "../../runtime.ts"
 import { query } from "./api.ts";
 import { ActiveSessions, Inbox, type Job, Jobs } from "./codec.ts";
 import type { OpenCodeContext, OpenCodeState } from "./context.ts";
-import { answerDue, Execution, runningWork, unread } from "./state.ts";
+import { answerDue, Execution, runningWork, unread, workReported } from "./state.ts";
 
 /** The check of whether an OpenCode session's answer is due, after its root execution succeeded. */
 export interface DoneCheck {
@@ -45,7 +45,8 @@ export const doneCheck = (context: OpenCodeContext): DoneCheck => {
    */
   const holdForInput = Ref.modify(state, (latest): readonly [number, OpenCodeState] => {
     const count = unread(latest.pending);
-    return count > 0 && latest.execution._tag === "Idle"
+    return count > 0 &&
+      (latest.execution._tag === "Idle" || latest.execution._tag === "AwaitingWork")
       ? [count, { ...latest, execution: Execution.AwaitingInput() }]
       : [count, latest];
   });
@@ -72,9 +73,10 @@ export const doneCheck = (context: OpenCodeContext): DoneCheck => {
 
   /** Reports the background work snapshot `work`. */
   const reportWork = (work: ReadonlyArray<BackgroundWork>) =>
-    Ref.update(state, (latest) => ({ ...latest, workReported: work.length > 0 })).pipe(
-      Effect.andThen(conversation.reportBackground(Option.some(work))),
-    );
+    Ref.update(state, (latest): OpenCodeState => ({
+      ...latest,
+      execution: workReported(latest.execution, work.length > 0),
+    })).pipe(Effect.andThen(conversation.reportBackground(Option.some(work))));
 
   /**
    * Reports the tree's background work after the root execution succeeded, by the events that
@@ -136,8 +138,8 @@ export const doneCheck = (context: OpenCodeContext): DoneCheck => {
   }).pipe(Effect.withSpan("OpenCodeRuntime.executionSucceeded"));
 
   const workEnded = Effect.gen(function* () {
-    const { execution, workReported } = yield* Ref.get(state);
-    if (!workReported || execution._tag !== "Idle" || (yield* channel.isTerminal)) return;
+    const { execution } = yield* Ref.get(state);
+    if (execution._tag !== "AwaitingWork" || (yield* channel.isTerminal)) return;
     yield* Effect.logInfo("Background work that the answer waits for ended; checking the rest", {
       sessionId,
     });

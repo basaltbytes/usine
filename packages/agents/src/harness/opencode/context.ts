@@ -25,8 +25,6 @@ export interface OpenCodeState {
   readonly retrying: boolean;
   /** Whether the model answered since the current bridge started. */
   readonly answered: boolean;
-  /** Whether the latest background snapshot that the runtime reported since an execution lists work. */
-  readonly workReported: boolean;
   /** The cumulative usage of each session in the session's tree, by OpenCode session ID. */
   readonly usage: ReadonlyMap<string, { readonly cost: number; readonly tokens: OpenCodeTokens }>;
 }
