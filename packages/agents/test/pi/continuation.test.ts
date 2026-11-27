@@ -21,7 +21,7 @@ import { catalog } from "../../src/harness/catalog.ts";
 import { claude } from "../../src/harness/claude/descriptor.ts";
 import { CapabilityProfile, Lacking } from "../../src/harness/capability.ts";
 import { HarnessCatalog, HarnessDescriptor } from "../../src/harness/harness.ts";
-import { sessionConversation } from "../../src/harness/conversation.ts";
+import { sessionConversation } from "../../src/harness/conversation/conversation.ts";
 import { sessionChannel } from "../../src/harness/session.ts";
 import {
   ChildRequest,

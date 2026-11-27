@@ -12,7 +12,7 @@ import {
 import { Deferred, Effect, Logger, Option, Queue } from "effect";
 import { ChildSessionJournal, type OnDelivery, RestartState } from "../../../src/runtime.ts";
 import { sessionChannel } from "../../../src/harness/session.ts";
-import { sessionConversation } from "../../../src/harness/conversation.ts";
+import { sessionConversation } from "../../../src/harness/conversation/conversation.ts";
 import { type ReadPoint, Receipt } from "../../../src/harness/receipts.ts";
 import type { ContinuationPolicy } from "../../../src/harness/continuation.ts";
 

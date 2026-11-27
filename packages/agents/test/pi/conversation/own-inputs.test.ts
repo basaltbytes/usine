@@ -3,7 +3,10 @@ import { OperatorMessage, type OperatorMessageId } from "@usine/core/attempt/cha
 import { Deferred, Effect, Fiber, Option } from "effect";
 import { ChildSessionJournal, RestartState } from "../../../src/runtime.ts";
 import { sessionChannel } from "../../../src/harness/session.ts";
-import { type MessageTaken, sessionConversation } from "../../../src/harness/conversation.ts";
+import {
+  type MessageTaken,
+  sessionConversation,
+} from "../../../src/harness/conversation/conversation.ts";
 import { Receipt } from "../../../src/harness/receipts.ts";
 import { child, policyOf, noDelivery } from "./fixture.ts";
 

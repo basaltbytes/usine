@@ -46,7 +46,7 @@ import {
   childContinuation,
   type ContinuationPolicy,
 } from "../continuation.ts";
-import { type MessageTaken, sessionConversation } from "../conversation.ts";
+import { type MessageTaken, sessionConversation } from "../conversation/conversation.ts";
 import { HarnessCatalog } from "../harness.ts";
 import { apiKeys } from "../pool.ts";
 import { type HarnessRuntime, openWithTools } from "../runtime.ts";
