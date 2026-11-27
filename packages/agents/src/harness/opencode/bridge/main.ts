@@ -10,6 +10,7 @@ import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { type OutgoingHttpHeaders, request as httpRequest } from "node:http";
 import { constants } from "node:os";
+import { MCP_RECONNECT_MS, nextReconnectDelay } from "./reconnect.ts";
 
 type Json = null | boolean | number | string | ReadonlyArray<Json> | JsonObject;
 interface JsonObject {
@@ -96,10 +97,6 @@ const HEAD_LENGTH = 256;
  * ID shorter than `MAX_LINE_BYTES`, and equals the bound of `BridgeRequestId` in `lines.ts`.
  */
 const MAX_ID_LENGTH = 128;
-/** Milliseconds before the first reconnection of a client MCP socket that OpenCode closed. */
-const MCP_RECONNECT_MS = 500;
-/** The most milliseconds between reconnections of a client MCP socket, which double up to it. */
-const MCP_RECONNECT_MAX_MS = 10_000;
 /** OpenCode's path for the MCP servers that a client hosts over a WebSocket. */
 const CLIENT_MCP_PATH = "/api/experimental/client-mcp";
 /** The name of a client MCP server, as OpenCode accepts it. */
@@ -423,7 +420,7 @@ const main = () => {
       if (wasOpen) writeLine({ mcp: name, closed: why });
       warn(`OpenCode closed the MCP socket of ${name} (${why}); reconnecting in ${entry.delay} ms`);
       entry.timer = setTimeout(() => openSocket(target, name, entry), entry.delay);
-      entry.delay = Math.min(entry.delay * 2, MCP_RECONNECT_MAX_MS);
+      entry.delay = nextReconnectDelay(entry.delay);
     };
     socket.addEventListener("error", (event) => {
       entry.error = "message" in event && typeof event.message === "string" ? event.message : "";

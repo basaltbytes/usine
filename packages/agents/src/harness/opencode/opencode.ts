@@ -156,7 +156,7 @@ const makeOpenCodeSessions = Effect.gen(function* () {
           model,
           permissions: sessionPermissions(
             spec.admitted.role.nativeTools,
-            Option.isSome(toolServer),
+            Option.isSome(toolServer) ? "served" : "none",
           ).map((rule) => ({ ...rule })),
         }),
       onSome: (saved) =>

@@ -1,5 +1,6 @@
 import type { AgentSessionId } from "@usine/core/agent/session";
 import { Deferred, Effect, FiberMap, Option, Ref, Schema, type Scope, Stream } from "effect";
+import { MAX_PROTOCOL_LINE_BYTES } from "../../child-host/lines.ts";
 import { SessionOperationError } from "../../runtime.ts";
 import {
   callHostTool,
@@ -8,7 +9,7 @@ import {
   type HostToolSet,
   hostToolNames,
 } from "../tools.ts";
-import type { BridgeClient } from "./bridge/client.ts";
+import type { BridgeClient, BridgeLineTooLong } from "./bridge/client.ts";
 import type { BridgeMcpClosed, BridgeMcpMessage, McpMessage } from "./bridge/lines.ts";
 import { TOOL_SERVER } from "./config.ts";
 
@@ -68,7 +69,10 @@ export interface OpenCodeTools {
    * Attaches the tools to OpenCode in `directory` as the client MCP server `TOOL_SERVER`, and
    * serves the calls of OpenCode session `root` until `connection`'s output ends. On a new socket,
    * waits until OpenCode has listed the tools and answered a ping, so the session's next step
-   * lists them. A call from another session, such as a subagent's, returns an error result.
+   * lists them; when OpenCode closes the socket first, waits for the list on the next socket.
+   * Fails with the relay's error when `connection`'s output ends or fails during the wait. A call
+   * from another session, such as a subagent's, returns an error result, and so does a call whose
+   * result is longer than a bridge line.
    */
   readonly attach: (
     connection: McpConnection,
@@ -106,6 +110,8 @@ export const serveOpenCodeTools = Effect.fn("OpenCodeRuntime.serveTools")(functi
       ? Option.getOrElse(names.name(name.slice(prefix.length)), () => name)
       : name;
   const pings = yield* Ref.make(0);
+  /** The wait for one socket: OpenCode's list of the tools on it, and its close. */
+  const socketWait = Effect.all({ listed: Deferred.make<void>(), closed: Deferred.make<void>() });
 
   const attach: OpenCodeTools["attach"] = Effect.fn("OpenCodeRuntime.attachTools")(function* (
     connection: McpConnection,
@@ -113,19 +119,22 @@ export const serveOpenCodeTools = Effect.fn("OpenCodeRuntime.serveTools")(functi
     root: string,
   ) {
     yield* Effect.annotateCurrentSpan({ sessionId, harnessSessionId: root });
-    const listed = yield* Deferred.make<void>();
-    /** The answers that the server waits for, by the ID of its request. */
-    const answers = new Map<RequestId, Deferred.Deferred<void>>();
+    const firstSocket = yield* socketWait;
+    const socket = yield* Ref.make(firstSocket);
+    /** The ping that the attach waits for OpenCode to answer. */
+    const ping = yield* Ref.make(
+      Option.none<{ readonly id: string; readonly answered: Deferred.Deferred<void> }>(),
+    );
+    /** Fails with the relay's error once `connection`'s output ends or fails. */
+    const relayEnded = yield* Deferred.make<never, SessionOperationError>();
     const calls = yield* FiberMap.make<RequestId>();
+    const unanswered = (error: SessionOperationError | BridgeLineTooLong) =>
+      Effect.logWarning("Could not answer OpenCode's MCP request", {
+        sessionId,
+        message: error.message,
+      });
     const reply = (message: McpMessage) =>
-      connection.sendMcp(TOOL_SERVER, message).pipe(
-        Effect.catch((error) =>
-          Effect.logWarning("Could not answer OpenCode's MCP request", {
-            sessionId,
-            message: error.message,
-          }),
-        ),
-      );
+      connection.sendMcp(TOOL_SERVER, message).pipe(Effect.catch(unanswered));
     const answer = (id: RequestId, result: Schema.Json) => reply({ jsonrpc: "2.0", id, result });
     const refuse = (id: RequestId, code: number, message: string) =>
       reply({ jsonrpc: "2.0", id, error: { code, message } });
@@ -155,7 +164,27 @@ export const serveOpenCodeTools = Effect.fn("OpenCodeRuntime.serveTools")(functi
         decodeHostToolInput(params.arguments ?? {}),
         Option.some(String(id)),
       );
-      return yield* answer(id, callResult(result));
+      return yield* connection
+        .sendMcp(TOOL_SERVER, { jsonrpc: "2.0", id, result: callResult(result) })
+        .pipe(
+          Effect.catchTag("BridgeLineTooLong", (error) =>
+            Effect.logWarning(
+              "A usine tool's result is too long for the OpenCode bridge; answering with an error",
+              { sessionId, tool: params.name, bytes: error.bytes },
+            ).pipe(
+              Effect.andThen(
+                answer(
+                  id,
+                  callResult({
+                    isError: true,
+                    text: `The result of the usine tool ${params.name} is longer than the ${MAX_PROTOCOL_LINE_BYTES} bytes that usine relays to OpenCode`,
+                  }),
+                ),
+              ),
+            ),
+          ),
+          Effect.catch(unanswered),
+        );
     });
 
     const request = Effect.fn("OpenCodeRuntime.answerMcpRequest")(function* (
@@ -183,7 +212,8 @@ export const serveOpenCodeTools = Effect.fn("OpenCodeRuntime.serveTools")(functi
             sessionId,
             tools: listing.length,
           });
-          return yield* Deferred.succeed(listed, undefined);
+          const current = yield* Ref.get(socket);
+          return yield* Deferred.succeed(current.listed, undefined);
         case "tools/call": {
           const decoded = Option.flatMap(params, decodeToolCall);
           if (Option.isNone(decoded)) {
@@ -210,9 +240,17 @@ export const serveOpenCodeTools = Effect.fn("OpenCodeRuntime.serveTools")(functi
     ) {
       if (method !== "notifications/cancelled") return;
       const cancelled = Option.flatMap(params, decodeCancelled);
-      if (Option.isNone(cancelled)) return;
+      if (Option.isNone(cancelled))
+        return yield* Effect.logWarning(
+          "Skipping a cancel of a usine tool call that usine can't read; the call keeps running",
+          { sessionId },
+        );
       const { requestId } = cancelled.value;
-      if (!(yield* FiberMap.has(calls, requestId))) return;
+      if (!(yield* FiberMap.has(calls, requestId)))
+        return yield* Effect.logInfo("Skipping a cancel of a usine tool call that isn't running", {
+          sessionId,
+          requestId,
+        });
       yield* Effect.logInfo("Cancelling a usine tool call that OpenCode no longer waits for", {
         sessionId,
         requestId,
@@ -220,12 +258,32 @@ export const serveOpenCodeTools = Effect.fn("OpenCodeRuntime.serveTools")(functi
       yield* FiberMap.remove(calls, requestId);
     });
 
-    const receive = (line: BridgeMcpMessage | BridgeMcpClosed) => {
-      if ("closed" in line)
-        return Effect.logWarning(
+    /** Starts the wait for the next socket and ends the wait for the closed one. */
+    const socketClosed = (reason: string) =>
+      Effect.gen(function* () {
+        yield* Effect.logWarning(
           "OpenCode closed the usine tools' MCP socket; the bridge reconnects it",
-          { sessionId, reason: line.closed },
+          { sessionId, reason },
         );
+        const next = yield* socketWait;
+        const previous = yield* Ref.getAndSet(socket, next);
+        yield* Deferred.succeed(previous.closed, undefined);
+      });
+    /** Answers the ping that the attach waits for, when `id` is its ID. */
+    const response = (id: RequestId) =>
+      Effect.gen(function* () {
+        const pending = yield* Ref.get(ping);
+        const waiting = Option.filter(pending, (current) => current.id === id);
+        if (Option.isSome(waiting))
+          return yield* Deferred.succeed(waiting.value.answered, undefined);
+        yield* Effect.logWarning("Skipping an MCP answer that usine waits for no longer", {
+          sessionId,
+          requestId: id,
+        });
+      });
+
+    const receive = (line: BridgeMcpMessage | BridgeMcpClosed) => {
+      if ("closed" in line) return socketClosed(line.closed);
       if (line.mcp !== TOOL_SERVER)
         return Effect.logWarning("Skipping a message for another MCP server", {
           sessionId,
@@ -246,20 +304,27 @@ export const serveOpenCodeTools = Effect.fn("OpenCodeRuntime.serveTools")(functi
           Option.fromUndefinedOr(asNotification.value.params),
         );
       const asResponse = decodeResponse(message);
-      const waiting = Option.flatMap(asResponse, ({ id }) =>
-        Option.fromUndefinedOr(answers.get(id)),
-      );
-      if (Option.isSome(waiting)) return Deferred.succeed(waiting.value, undefined);
+      if (Option.isSome(asResponse)) return response(asResponse.value.id);
       return Effect.logWarning("Skipping an MCP message that usine can't read", { sessionId });
     };
 
     yield* connection.mcp.pipe(
       Stream.runForEach(receive),
+      Effect.andThen(
+        Effect.fail(
+          SessionOperationError.make({
+            operation: "launch",
+            sessionId: Option.some(sessionId),
+            message: "The usine tools' MCP relay ended with the bridge's output",
+            cause: new Error("relay ended"),
+          }),
+        ),
+      ),
       Effect.catch((error) =>
         Effect.logInfo("The usine tools' MCP relay ended with the bridge's output", {
           sessionId,
           message: error.message,
-        }),
+        }).pipe(Effect.andThen(Deferred.fail(relayEnded, error))),
       ),
       Effect.ensuring(FiberMap.clear(calls)),
       Effect.forkScoped,
@@ -277,17 +342,34 @@ export const serveOpenCodeTools = Effect.fn("OpenCodeRuntime.serveTools")(functi
         message: `OpenCode refused the usine tools' MCP socket (status ${attached.status})`,
         cause: attached,
       });
-    const ping = `usine-ping-${yield* Ref.updateAndGet(pings, (count) => count + 1)}`;
-    const pong = yield* Deferred.make<void>();
-    answers.set(ping, pong);
-    yield* Effect.gen(function* () {
-      yield* Deferred.await(listed);
-      // OpenCode reads its socket in order, so its answer to the ping comes after it registered
-      // the tools that it listed.
-      yield* connection.sendMcp(TOOL_SERVER, { jsonrpc: "2.0", id: ping, method: "ping" });
-      yield* Deferred.await(pong);
-    }).pipe(
-      Effect.ensuring(Effect.sync(() => answers.delete(ping))),
+    /** Waits for the list and the ping's answer on the current socket, or on the next ones. */
+    const listedOnSocket: Effect.Effect<void, SessionOperationError> = Effect.gen(function* () {
+      const current = yield* Ref.get(socket);
+      const pinged = Effect.gen(function* () {
+        yield* Deferred.await(current.listed);
+        const id = `usine-ping-${yield* Ref.updateAndGet(pings, (count) => count + 1)}`;
+        const answered = yield* Deferred.make<void>();
+        yield* Ref.set(ping, Option.some({ id, answered }));
+        // OpenCode reads its socket in order, so its answer to the ping comes after it registered
+        // the tools that it listed.
+        yield* connection
+          .sendMcp(TOOL_SERVER, { jsonrpc: "2.0", id, method: "ping" })
+          // A ping always fits in a line.
+          .pipe(Effect.catchTag("BridgeLineTooLong", (error) => Effect.die(error)));
+        yield* Deferred.await(answered);
+      }).pipe(Effect.ensuring(Ref.set(ping, Option.none())));
+      const reconnected = yield* Effect.raceFirst(
+        pinged.pipe(Effect.as(false)),
+        Deferred.await(current.closed).pipe(Effect.as(true)),
+      );
+      if (!reconnected) return;
+      yield* Effect.logInfo(
+        "OpenCode closed the usine tools' socket before it answered; waiting for the next socket",
+        { sessionId },
+      );
+      return yield* listedOnSocket;
+    });
+    yield* Effect.raceFirst(listedOnSocket, Deferred.await(relayEnded)).pipe(
       Effect.timeoutOrElse({
         duration: LIST_TIMEOUT,
         orElse: () =>

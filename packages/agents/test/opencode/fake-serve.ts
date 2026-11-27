@@ -26,10 +26,14 @@ type Route = (request: IncomingMessage, response: ServerResponse) => void;
  * - `refuse-events-at-end` holds the event subscription and answers it with 401 at end of input.
  * - `helper` starts a detached process that keeps its stdout and stderr open after it exits.
  * - `refuse-mcp` refuses every client MCP socket with 403.
+ * - `refuse-reconnect` opens the first client MCP socket and refuses the next ones with 403.
+ * - `hold-reconnect` opens the first client MCP socket and never answers the opening of the next
+ *   ones.
  *
  * Like OpenCode, the fake sends `initialize` on each client MCP socket that opens, with the
  * server's name, directory, and the number of sockets opened so far. It reports each message that
- * a socket receives as a `fake.mcp` event.
+ * a socket receives as a `fake.mcp` event. When a socket has opened, it reports on stderr the
+ * sockets still open 200 ms after end of input, before it exits.
  */
 const scenario = process.env.FAKE_SERVE_SCENARIO ?? "ready";
 /** The exit code at end of input, from `FAKE_SERVE_EXIT_CODE`. */
@@ -55,6 +59,8 @@ const LARGE_RESPONSE_BYTES = 64 * 1024 ** 2;
 /** The open client MCP sockets, by server name. */
 const mcpSockets = new Map<string, Duplex>();
 let mcpConnections = 0;
+/** Milliseconds between end of input and the report of the open client MCP sockets. */
+const MCP_REPORT_MS = 200;
 /** Returns a WebSocket frame of the server, which is never masked. */
 const frame = (opcode: number, payload: Buffer) => {
   const { length } = payload;
@@ -330,9 +336,14 @@ server.on("upgrade", (request: IncomingMessage, socket: Duplex) => {
     url.pathname !== "/api/experimental/client-mcp" ||
     request.headers.authorization !== `Basic ${btoa(`${userName}:${password}`)}` ||
     key === undefined ||
-    scenario === "refuse-mcp"
+    scenario === "refuse-mcp" ||
+    (scenario === "refuse-reconnect" && mcpConnections > 0)
   )
     return void socket.end("HTTP/1.1 403 Forbidden\r\ncontent-length: 0\r\n\r\n");
+  if (scenario === "hold-reconnect" && mcpConnections > 0) {
+    socket.on("error", () => {});
+    return void process.stderr.write("fake serve: holding the opening of an MCP socket\n");
+  }
   const accept = createHash("sha1")
     .update(`${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`)
     .digest("base64");
@@ -391,6 +402,11 @@ if (scenario === "helper") {
 // Like `serve --stdio`, end of input ends the lease. The default exit code, 7, shows that it arrived.
 process.stdin.on("end", () => {
   process.stderr.write("fake serve: end of input\n");
+  if (mcpConnections > 0)
+    return void setTimeout(() => {
+      process.stderr.write(`fake serve: ${mcpSockets.size} MCP sockets open after end of input\n`);
+      process.exit(exitCode);
+    }, MCP_REPORT_MS);
   if (held.size === 0) process.exit(exitCode);
   for (const response of held) json(response, 401, { _tag: "UnauthorizedError" });
   // Gives the bridge time to read the refusal before serve's exit.

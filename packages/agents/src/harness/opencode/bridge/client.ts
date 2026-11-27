@@ -1,5 +1,15 @@
 import type { AgentSessionId } from "@usine/core/agent/session";
-import { type Cause, Deferred, Effect, Option, Queue, Ref, Schema, Stream } from "effect";
+import {
+  type Brand,
+  type Cause,
+  Deferred,
+  Effect,
+  Option,
+  Queue,
+  Ref,
+  Schema,
+  Stream,
+} from "effect";
 import { boundedLines, MAX_PROTOCOL_LINE_BYTES, previewLine } from "../../../child-host/lines.ts";
 import type { ProcessCommand } from "../../../child-host/process.ts";
 import { pendingRequests } from "../../../child-host/requests.ts";
@@ -38,6 +48,17 @@ export const bridgeCommand = (opencode: ProcessCommand): ProcessCommand => ({
   args: ["-e", OPENCODE_BRIDGE, String(READY_WAIT_MS), opencode.command, ...opencode.args],
   cwd: opencode.cwd,
 });
+
+/** A message of a client MCP server that is longer than the bridge reads in a line. */
+export class BridgeLineTooLong extends Schema.TaggedError<
+  BridgeLineTooLong,
+  Brand.Brand<"@usine/agents/BridgeLineTooLong">
+>("@usine/agents/BridgeLineTooLong")("BridgeLineTooLong", {
+  server: Schema.String,
+  /** The bytes of the line, without its newline. */
+  bytes: Schema.Int,
+  message: Schema.NonEmptyString,
+}) {}
 
 /** A request to the OpenCode server, with `body` sent as JSON. */
 interface OpenCodeRequest {
@@ -109,12 +130,13 @@ export interface BridgeClient {
   /**
    * Sends `message` to OpenCode over the socket of the client's MCP server `server`. The bridge
    * drops it while the socket is closed. Fails when the bridge's input is closed or its output
-   * failed.
+   * failed, and with `BridgeLineTooLong`, without writing it, when its line is longer than
+   * `MAX_PROTOCOL_LINE_BYTES`.
    */
   readonly sendMcp: (
     server: string,
     message: McpMessage,
-  ) => Effect.Effect<void, SessionOperationError>;
+  ) => Effect.Effect<void, SessionOperationError | BridgeLineTooLong>;
   /**
    * Ends the bridge's input. The bridge then ends OpenCode's input and exits with OpenCode's exit
    * code, and requests that wait for an answer fail.
@@ -228,8 +250,8 @@ export const bridgeClient = Effect.fn("OpenCodeBridge.client")(function* (stream
     Effect.forkScoped,
   );
 
-  /** Writes `line` to the bridge's input, unless the client is closing or its output failed. */
-  const write = (operation: SessionOperation, target: string, line: BridgeInput) =>
+  /** Returns the bytes of `line`, unless the client is closing or its output failed. */
+  const encodeLine = (operation: SessionOperation, target: string, line: BridgeInput) =>
     Effect.gen(function* () {
       if (yield* Ref.get(closing))
         return yield* failure(operation, "The OpenCode bridge is closing", new Error("closing"));
@@ -240,13 +262,23 @@ export const bridgeClient = Effect.fn("OpenCodeBridge.client")(function* (stream
           failure(operation, `Invalid OpenCode bridge input for ${target}`, cause),
         ),
       );
-      if (!(yield* Queue.offer(streams.input, encoder.encode(`${encoded}\n`))))
+      return encoder.encode(`${encoded}\n`);
+    });
+  /** Writes the bytes of a line to the bridge's input. */
+  const writeLine = (operation: SessionOperation, bytes: Uint8Array) =>
+    Effect.gen(function* () {
+      if (!(yield* Queue.offer(streams.input, bytes)))
         return yield* failure(
           operation,
           "The OpenCode bridge's input is closed",
           new Error("closed"),
         );
     });
+  /** Writes `line` to the bridge's input, unless the client is closing or its output failed. */
+  const write = (operation: SessionOperation, target: string, line: BridgeInput) =>
+    encodeLine(operation, target, line).pipe(
+      Effect.flatMap((bytes) => writeLine(operation, bytes)),
+    );
 
   /** Writes the input line that `line` returns for a request ID, and waits for its answer. */
   const send = (
@@ -301,7 +333,21 @@ export const bridgeClient = Effect.fn("OpenCodeBridge.client")(function* (stream
   );
 
   const sendMcp: BridgeClient["sendMcp"] = (server, message) =>
-    write("stream", `a message of the MCP server ${server}`, { mcp: server, message });
+    Effect.gen(function* () {
+      const bytes = yield* encodeLine("stream", `a message of the MCP server ${server}`, {
+        mcp: server,
+        message,
+      });
+      // The bridge drops a longer line without an answer, so OpenCode would wait for it forever.
+      const length = bytes.length - 1;
+      if (length > MAX_PROTOCOL_LINE_BYTES)
+        return yield* BridgeLineTooLong.make({
+          server,
+          bytes: length,
+          message: `A message of the MCP server ${server} is longer than the ${MAX_PROTOCOL_LINE_BYTES} bytes of a bridge line`,
+        });
+      yield* writeLine("stream", bytes);
+    });
 
   const close = Effect.gen(function* () {
     yield* Effect.annotateCurrentSpan({ sessionId });
