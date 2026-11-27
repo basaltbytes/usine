@@ -165,6 +165,29 @@ describe("OpenCode answer", () => {
       }).pipe(Effect.scoped),
     );
 
+  for (const enqueued of [false, true])
+    it.live(
+      `answers once OpenCode cancels an inbox item that the done check listed${enqueued ? ", reported after the read" : ""}`,
+      () =>
+        Effect.gen(function* () {
+          const { bridge, running } = yield* launched("Started the tests.");
+          yield* bridge.setInbox([{ id: "msg_notice" }]);
+          for (const line of firstExecutionEnds) yield* bridge.emit(line);
+          yield* Effect.sleep("100 millis");
+          const early = yield* running.result.pipe(Effect.timeoutOption("100 millis"));
+          assert(Option.isNone(early), "the answer waits for the listed inbox item");
+          yield* bridge.setInbox([]);
+          for (const line of [
+            ...(enqueued ? [event("session.inbox.enqueued", { inboxID: "msg_notice" })] : []),
+            event("session.inbox.cancelled", { inboxID: "msg_notice" }),
+          ])
+            yield* bridge.emit(line);
+          const result = yield* running.result.pipe(Effect.timeoutOption("1 second"));
+          assert(Option.isSome(result), "the answer returns once OpenCode cancels the item");
+          assert.strictEqual(result.value.message, "FIRST");
+        }).pipe(Effect.scoped),
+    );
+
   for (const [lookup, name, matches] of [
     ["jobs", "running jobs", (path: string) => path.startsWith("/api/experimental/job")],
     ["inbox", "session inbox", (path: string) => path.endsWith("/inbox")],

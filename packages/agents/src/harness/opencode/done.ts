@@ -77,6 +77,19 @@ export const doneCheck = (context: OpenCodeContext): DoneCheck => {
     });
 
   /**
+   * Records that the answer of execution `checked` waits for the input that OpenCode's inbox
+   * lists, unless OpenCode started a later execution or the session restarted. An end of input,
+   * such as OpenCode's cancellation of a listed item, then checks the answer again.
+   */
+  const awaitListedInput = (checked: Checked) =>
+    Ref.update(state, (latest): OpenCodeState =>
+      stillIn(latest, checked) &&
+      (latest.execution._tag === "Idle" || latest.execution._tag === "AwaitingWork")
+        ? { ...latest, execution: Execution.AwaitingInput() }
+        : latest,
+    );
+
+  /**
    * Logs that a done check stops because OpenCode started an execution after the one it checks,
    * or the session restarted.
    */
@@ -208,6 +221,7 @@ export const doneCheck = (context: OpenCodeContext): DoneCheck => {
       latestApi.read(Inbox, "stream", "GET", `${sessionPath}/inbox`),
     );
     if (inbox.data.length > 0) {
+      yield* awaitListedInput(checked);
       yield* Effect.logInfo("OpenCode has unread input, which starts the next execution", {
         sessionId,
         unread: inbox.data.length,
