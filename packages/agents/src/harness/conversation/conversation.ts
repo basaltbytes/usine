@@ -614,8 +614,9 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
     finish: (message: string) => mutex.withPermits(1)(answer(message)),
     /**
      * Returns `message` as `finish` does, unless `unread` counts input that the harness hasn't
-     * read. `unread` runs under the conversation's lock, so it counts an operator message that was
-     * being sent. That input starts another turn, whose answer the session returns instead.
+     * read or that started a turn since `message`. `unread` runs under the conversation's lock, so
+     * it counts an operator message that was being sent. That input starts another turn, whose
+     * answer the session returns instead.
      */
     finishUnlessUnread: (message: string, unread: Effect.Effect<number>) =>
       mutex.withPermits(1)(
@@ -623,7 +624,7 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
           const count = yield* unread;
           if (count === 0) return yield* answer(message);
           yield* Effect.logInfo(
-            "Session answered with input that its harness hasn't read; waiting for the turn that the input starts",
+            "Session answered with input that starts another turn; waiting for that turn",
             { sessionId: session.id, unread: count },
           );
         }),
