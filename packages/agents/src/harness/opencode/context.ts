@@ -19,6 +19,11 @@ export interface OpenCodeState {
    * OpenCode started an execution after the one that it checks.
    */
   readonly executions: number;
+  /**
+   * How many times the session reopened on a new bridge, which tells a done check whether the
+   * session restarted after the execution that it checks.
+   */
+  readonly restarts: number;
   readonly pending: Pending;
   /** Tool names by call ID, from `session.tool.input.started`. */
   readonly toolNames: ReadonlyMap<string, string>;
