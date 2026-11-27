@@ -478,7 +478,7 @@ describe("reloading the gateway", () => {
   );
 
   it.live(
-    "an upstream override over plain HTTP to another host keeps the providers in force on a reload, and fails a startup, naming the variable",
+    "an upstream override over plain HTTP to another host, or one that isn't a URL, keeps the providers in force on a reload, and fails a startup, naming the variable",
     () =>
       withGateway(["registry.npmjs.org"], (files, { anthropic }) =>
         Effect.gen(function* () {
@@ -498,18 +498,19 @@ describe("reloading the gateway", () => {
             assert.strictEqual(kept.length, keptBefore + 1);
             assert.include(kept.at(-1), "USINE_GATEWAY_ANTHROPIC_UPSTREAM");
             assert.include(kept.at(-1), "http:// to a loopback host");
+
+            const environment = yield* ConfigProvider.ConfigProvider;
+            const source = yield* readSettingsSource(environment);
+            const startup = yield* readStartupSettings(source).pipe(
+              Effect.as("started"),
+              Effect.catchTag("ConfigError", ({ message }) => Effect.succeed(message)),
+              Effect.provide(NodeCrypto.layer),
+            );
+            assert.include(startup, "USINE_GATEWAY_ANTHROPIC_UPSTREAM");
           }
           const providerResponse = yield* askAnthropic(token);
           assert.strictEqual(providerResponse, 200);
           assert.deepStrictEqual(anthropic, [FIRST_KEY]);
-          const environment = yield* ConfigProvider.ConfigProvider;
-          const source = yield* readSettingsSource(environment);
-          const startup = yield* readStartupSettings(source).pipe(
-            Effect.as("started"),
-            Effect.catchTag("ConfigError", ({ message }) => Effect.succeed(message)),
-            Effect.provide(NodeCrypto.layer),
-          );
-          assert.include(startup, "USINE_GATEWAY_ANTHROPIC_UPSTREAM");
         }),
       ).pipe(Effect.provide(NodeFileSystem.layer)),
   );
