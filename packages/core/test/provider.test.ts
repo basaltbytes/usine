@@ -12,6 +12,7 @@ import {
   ModelProviderId,
   modelProviders,
   openai,
+  opencodeGo,
   ProviderProtocol,
   RoutePattern,
   selectProvider,
@@ -322,5 +323,67 @@ describe("model providers", () => {
         reading({ upstreamVariable: Option.some(GatewayVariable.make("TEST_PLAN_UPSTREAM")) }),
       ),
     );
+  });
+
+  it("declares OpenCode Go with a key that each path takes to its protocol's upstream and header", () => {
+    assert(Option.isSome(ModelProvider.makeOption({ ...opencodeGo })));
+    assert(Option.isSome(ModelProviderCatalog.makeOption({ providers: modelProviders.providers })));
+    assert.deepStrictEqual(opencodeGo.kinds, ["api-key"]);
+    assert(Option.isNone(opencodeGo.login));
+    assert(Option.isNone(opencodeGo.sharedUpstream));
+    assert.deepStrictEqual(opencodeGo.hosts, ["opencode.ai"]);
+    const served = (path: string) =>
+      Option.map(opencodeGo.protocolFor(path), ({ upstream, key }) => [
+        `${upstream}${path}`,
+        key.header,
+        key.value("go-key"),
+      ]);
+    assert.deepStrictEqual(
+      [
+        "/chat/completions",
+        "/responses",
+        "/messages",
+        "/models/gemini-4-argon:streamGenerateContent",
+      ].map(served),
+      [
+        Option.some([
+          "https://opencode.ai/inference/go/openai/v1/chat/completions",
+          "authorization",
+          "Bearer go-key",
+        ]),
+        Option.some([
+          "https://opencode.ai/inference/go/openai/v1/responses",
+          "authorization",
+          "Bearer go-key",
+        ]),
+        Option.some([
+          "https://opencode.ai/inference/go/anthropic/v1/messages",
+          "x-api-key",
+          "go-key",
+        ]),
+        Option.some([
+          "https://opencode.ai/inference/go/google/v1beta/models/gemini-4-argon:streamGenerateContent",
+          "x-goog-api-key",
+          "go-key",
+        ]),
+      ],
+    );
+    for (const path of [
+      "/v1/chat/completions",
+      "/models",
+      "/models/gemini-4-argon:generateContent",
+      "/messages/count_tokens",
+    ])
+      assert(Option.isNone(opencodeGo.protocolFor(path)), path);
+    assert.isFalse(opencodeGo.protocols[0].allows("GET", "/chat/completions"));
+    for (const header of [
+      "x-opencode-session-id",
+      "x-session-id",
+      "anthropic-beta",
+      "content-type",
+    ])
+      assert.isTrue(opencodeGo.passes(header), header);
+    for (const header of ["x-forwarded-for", "cookie", "openai-organization"])
+      assert.isFalse(opencodeGo.passes(header), header);
   });
 });

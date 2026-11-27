@@ -80,11 +80,73 @@ export const openai = ModelProvider.make({
   upstreamVariable: Option.some(GatewayVariable.make("USINE_GATEWAY_OPENAI_UPSTREAM")),
 });
 
+/** The `{model}` route of a Google Generative Language API stream. */
+const STREAM_GENERATE_CONTENT = RoutePattern.make("/models/{model}:streamGenerateContent");
+
+/**
+ * The OpenCode Go plan, for OpenCode, whose provider ID it keeps. Its one base URL serves three
+ * protocols, each at its own upstream with the key in its own header. Its key reaches the plan
+ * only through the gateway, so it has no subscription login and no upstream variable.
+ */
+export const opencodeGo = ModelProvider.make({
+  id: ModelProviderId.make("opencode-go"),
+  slot: GatewaySlot.make("opencode-go"),
+  label: "OpenCode Go",
+  protocols: [
+    ProviderProtocol.make({
+      protocol: WireProtocol.make("openai-compatible"),
+      upstream: UpstreamBase.make("https://opencode.ai/inference/go/openai/v1"),
+      routes: Arr.map(["/chat/completions", "/responses"] as const, (route) =>
+        RoutePattern.make(route),
+      ),
+      key: KeyHeader.make({ header: HeaderName.make("authorization"), scheme: "bearer" }),
+      methods: Option.some({
+        [RoutePattern.make("/chat/completions")]: ["POST"],
+        [RoutePattern.make("/responses")]: ["POST"],
+      }),
+    }),
+    ProviderProtocol.make({
+      protocol: WireProtocol.make("anthropic-messages"),
+      upstream: UpstreamBase.make("https://opencode.ai/inference/go/anthropic/v1"),
+      routes: [RoutePattern.make("/messages")],
+      key: KeyHeader.make({ header: HeaderName.make("x-api-key"), scheme: "none" }),
+      methods: Option.some({ [RoutePattern.make("/messages")]: ["POST"] }),
+    }),
+    ProviderProtocol.make({
+      protocol: WireProtocol.make("google-generate-content"),
+      upstream: UpstreamBase.make("https://opencode.ai/inference/go/google/v1beta"),
+      routes: [STREAM_GENERATE_CONTENT],
+      key: KeyHeader.make({ header: HeaderName.make("x-goog-api-key"), scheme: "none" }),
+      methods: Option.some({ [STREAM_GENERATE_CONTENT]: ["POST"] }),
+    }),
+  ],
+  credentials: [ApiKeyCredential.make({ variable: GatewayVariable.make("OPENCODE_GO_API_KEY") })],
+  // OpenCode's session headers keep the plan's cache affinity; the Anthropic protocol needs its
+  // version and beta headers.
+  passThrough: Option.some(
+    Arr.map(
+      [
+        "x-opencode-session-id",
+        "x-opencode-session",
+        "x-session-affinity",
+        "x-session-id",
+        "x-opencode-project",
+        "x-opencode-client",
+        "anthropic-version",
+        "anthropic-beta",
+      ] as const,
+      (header) => HeaderName.make(header),
+    ),
+  ),
+});
+
 /**
  * The model providers that the gateway serves. The harness catalog in `@usine/agents/harness`
  * declares the same entries.
  */
-export const modelProviders = ModelProviderCatalog.make({ providers: [anthropic, openai] });
+export const modelProviders = ModelProviderCatalog.make({
+  providers: [anthropic, openai, opencodeGo],
+});
 
 export {
   AcceptedCredential,

@@ -400,6 +400,7 @@ describe("reloading the gateway", () => {
             [
               ["anthropic-messages", "api-key"],
               ["openai-responses", undefined],
+              ["opencode-go", undefined],
               ["test-plan", "api-key"],
             ],
           );
