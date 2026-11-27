@@ -24,6 +24,7 @@ import {
   openai,
   ProviderProtocol,
   RoutePattern,
+  SubscriptionCredential,
   UpstreamBase,
   WireProtocol,
 } from "@usine/core/agent/provider";
@@ -522,7 +523,7 @@ describe("sandbox outbound handlers", () => {
   );
 
   it.live(
-    "reads a handler's provider from the Worker's current catalog, also for props that an earlier Worker registered with the whole entry, and refuses one that the catalog no longer has",
+    "reads a handler's provider from the Worker's current catalog, also for props that an earlier Worker registered with the whole entry, and refuses one that the catalog no longer serves in a sandbox, and props that it can't decode",
     () =>
       Effect.gen(function* () {
         const credential = ApiKeyCredential.make({ key: Redacted.make("plan-key") });
@@ -536,7 +537,8 @@ describe("sandbox outbound handlers", () => {
         expect(registration.props.provider).toBe(plan.id);
         const [chat, generate] = plan.protocols;
         assert(generate !== undefined);
-        // A later deploy moves the plan's chat upstream; the handler that the container holds stays.
+        // A later deploy moves the plan's chat upstream and passes every header to it; the handler
+        // that the container holds stays.
         const moved = ModelProvider.make({
           ...plan,
           protocols: [
@@ -546,20 +548,38 @@ describe("sandbox outbound handlers", () => {
             }),
             generate,
           ],
+          passThrough: Option.none(),
         });
-        const sent: Array<string> = [];
+        // A later deploy takes only a subscription for the plan, which a sandbox doesn't hold.
+        const subscriptionOnly = ModelProvider.make({
+          ...plan,
+          credentials: [
+            SubscriptionCredential.make({
+              login: "claude",
+              variable: GatewayVariable.make("TEST_PLAN_SUBSCRIPTION_TOKEN"),
+            }),
+          ],
+        });
+        const sent: Array<readonly [string, ReadonlyArray<string>]> = [];
         const serve = (catalog: ModelProviderCatalog, props: typeof ProviderProps.Encoded) =>
           providerOutbound(
             props,
             new Request(`http://${sandboxHost(plan.id)}/chat/completions`, {
               method: "POST",
-              headers: { authorization: "Bearer usine-placeholder" },
+              headers: {
+                authorization: "Bearer usine-placeholder",
+                "x-api-key": "usine-placeholder",
+                "x-goog-api-key": "usine-placeholder",
+                cookie: "session=sandbox",
+                "x-plan-trace": "kept",
+              },
               body: "{}",
             }),
             catalog,
           ).pipe(
             Effect.provideService(FetchHttpClient.Fetch, (input) => {
-              sent.push(new Request(input).url);
+              const upstream = new Request(input);
+              sent.push([upstream.url, [...upstream.headers.keys()]]);
               return Promise.resolve(new Response("{}"));
             }),
           );
@@ -568,21 +588,30 @@ describe("sandbox outbound handlers", () => {
           provider: yield* Schema.encodeEffect(Schema.toCodecJson(ModelProvider))(plan),
           credential: registration.props.credential,
         });
+        const undecodable = {
+          provider: { id: "Not An Id" },
+          credential: registration.props.credential,
+        };
+        const current = ModelProviderCatalog.make({ providers: [anthropic, moved] });
         const answers = yield* Effect.forEach(
           [
-            [ModelProviderCatalog.make({ providers: [anthropic, moved] }), registration.props],
+            [current, registration.props],
             [modelProviders, registration.props],
-            [ModelProviderCatalog.make({ providers: [anthropic, moved] }), earlierProps],
+            [current, earlierProps],
             [modelProviders, earlierProps],
+            [ModelProviderCatalog.make({ providers: [subscriptionOnly] }), registration.props],
+            [current, undecodable],
           ] as const,
           ([catalog, props]) => serve(catalog, props),
         );
 
-        expect(answers.map(({ status }) => status)).toEqual([200, 403, 200, 403]);
-        expect(sent).toEqual([
+        expect(answers.map(({ status }) => status)).toEqual([200, 403, 200, 403, 403, 403]);
+        // Neither a cookie nor any catalog provider's key header reaches the upstream.
+        const forwarded = [
           "https://moved.test/openai/v1/chat/completions",
-          "https://moved.test/openai/v1/chat/completions",
-        ]);
+          ["authorization", "content-type", "x-plan-trace"],
+        ] as const;
+        expect(sent).toEqual([forwarded, forwarded]);
       }),
   );
 
