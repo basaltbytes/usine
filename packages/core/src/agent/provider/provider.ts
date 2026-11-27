@@ -525,6 +525,13 @@ export class ModelProviderCatalog extends Schema.Class<
     return this.providers.map(({ slot }) => slot);
   }
 
+  /** The header name of each protocol's key, once each, which can carry a caller token. */
+  get keyHeaders(): ReadonlyArray<HeaderName> {
+    return Arr.dedupe(
+      this.providers.flatMap(({ protocols }) => protocols.map(({ key }) => key.header)),
+    );
+  }
+
   /** Returns the provider whose slot or ID is `name`. */
   find(name: string): Option.Option<ModelProvider> {
     return Arr.findFirst(this.providers, (provider) => namesOf(provider).includes(name));

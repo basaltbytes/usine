@@ -3,7 +3,6 @@ import {
   type GatewayVariable,
   type KeyHeader,
   type ModelProvider,
-  type ModelProviderCatalog,
   type ProviderProtocol,
   UpstreamBase,
 } from "@usine/core/agent/provider";
@@ -114,11 +113,6 @@ export const passingHeaders = (provider: ModelProvider, headers: Headers.Headers
     headers,
     Object.keys(headers).filter((name) => !provider.passes(name)),
   );
-
-/** Returns the header name of each protocol's key, which can carry a caller token. */
-export const keyHeaders = (catalog: ModelProviderCatalog): ReadonlyArray<string> => [
-  ...new Set(catalog.providers.flatMap(({ protocols }) => protocols.map(({ key }) => key.header))),
-];
 
 /** Returns the gateway variable that sets the upstream of `held`'s credential, if any. */
 export const upstreamVariable = (

@@ -220,13 +220,7 @@ export const providerRequest = (
       protocol.upstream.startsWith("https://"),
   );
   return Option.map(served, (protocol) => {
-    const dropped = new Set<string>([
-      "host",
-      "cookie",
-      ...[provider, ...catalog.providers].flatMap(({ protocols }) =>
-        protocols.map(({ key }) => key.header),
-      ),
-    ]);
+    const dropped = new Set<string>(["host", "cookie", ...catalog.keyHeaders]);
     const headers = new Headers(
       [...withoutCredentials(request)].filter(
         ([name]) => !dropped.has(name) && provider.passes(name),

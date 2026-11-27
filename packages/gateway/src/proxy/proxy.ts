@@ -30,7 +30,6 @@ import { githubDownloadClient } from "../github/download.ts";
 import { type ChatGptLoginUnavailable, ChatGptLogins } from "../chatgpt/logins.ts";
 import {
   type ChatGptLogin,
-  keyHeaders,
   llmUpstream,
   passingHeaders,
   withChatGptAccess,
@@ -156,7 +155,7 @@ export class GatewayProxy extends Context.Service<
       const logins = yield* ChatGptLogins;
       const client = yield* HttpClient.HttpClient;
       const hosts = gatewayHosts(settings.domain);
-      const providerKeyHeaders = keyHeaders(settings.catalog);
+      const providerKeyHeaders = settings.catalog.keyHeaders;
       const slots = settings.catalog.slots.map((slot) => `/${slot}`).join(", ");
 
       const authenticate = Effect.fn("GatewayProxy.authenticate")(function* (
