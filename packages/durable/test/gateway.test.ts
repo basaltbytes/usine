@@ -16,6 +16,7 @@ import {
   openai,
   ProviderProtocol,
   RoutePattern,
+  SubscriptionCredential,
   UpstreamBase,
   WireProtocol,
 } from "@usine/core/agent/provider";
@@ -547,7 +548,16 @@ it.live("reaches a later provider of the same protocol when only its slot has a 
 it.live("skips a slot whose provider doesn't accept the credential that the gateway reports", () =>
   Effect.gen(function* () {
     const keyOnly = responsesCompatible("responses-key-only");
-    const compatible = responsesCompatible("responses-compatible");
+    // The next slot accepts only a subscription, so the check reads each slot's own credentials.
+    const compatible = ModelProvider.make({
+      ...responsesCompatible("responses-compatible"),
+      credentials: [
+        SubscriptionCredential.make({
+          login: "chatgpt",
+          variable: GatewayVariable.make("TEST_RESPONSES_AUTH_FILE"),
+        }),
+      ],
+    });
     const queried: Array<string> = [];
     const sent: Array<string> = [];
     const access = yield* gatewayModelAccess(
@@ -555,9 +565,7 @@ it.live("skips a slot whose provider doesn't accept the credential that the gate
         credential: (slot) =>
           Effect.sync(() => {
             queried.push(slot);
-            return Option.some<GatewayCredentialKind>(
-              slot === keyOnly.slot ? "subscription" : "api-key",
-            );
+            return Option.some<GatewayCredentialKind>("subscription");
           }),
         request: (slot) =>
           Effect.sync(() => {
@@ -570,7 +578,7 @@ it.live("skips a slot whose provider doesn't accept the credential that the gate
     assert.strictEqual(access.credentials.route, "gateway");
     if (access.credentials.route !== "gateway") return;
     const authentication = yield* access.credentials.authentication("openai-codex");
-    assert.deepStrictEqual(authentication, { _tag: "ApiKey" });
+    assert.deepStrictEqual(authentication, { _tag: "OAuth", subscription: true });
     assert.deepStrictEqual(queried, [keyOnly.slot, compatible.slot]);
     const model = access.models.getModel("openai-codex", "gpt-5.6-sol");
     assert(model !== undefined);
