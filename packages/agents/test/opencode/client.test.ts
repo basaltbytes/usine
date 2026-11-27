@@ -43,6 +43,44 @@ const scripted = (generation: Option.Option<number> = Option.none()) =>
   });
 
 describe("OpenCode bridge client", () => {
+  it.effect("connects client MCP servers and relays their messages apart from events", () =>
+    Effect.gen(function* () {
+      const bridge = yield* scripted();
+      yield* bridge.emit({ ready: true });
+      yield* bridge.client.ready;
+      const connect = yield* Effect.forkChild(bridge.client.connectMcp("launch", "usine", "/work"));
+      const connectLine = yield* bridge.sent;
+      assert.deepStrictEqual(connectLine, { id: 1, mcp: "usine", directory: "/work" });
+      for (const line of [
+        { mcp: "usine", message: { jsonrpc: "2.0", id: 0, method: "initialize" } },
+        { event: { type: "between", data: {} } },
+        { id: 1, status: 101, body: null },
+        { mcp: "usine", closed: "code 1011" },
+      ])
+        yield* bridge.emit(line);
+      const connected = yield* Fiber.join(connect);
+      assert.deepStrictEqual(connected, { id: 1, status: 101, body: null });
+      const relayed = yield* bridge.client.mcp.pipe(Stream.take(2), Stream.runCollect);
+      assert.deepStrictEqual(Array.from(relayed), [
+        { mcp: "usine", message: { jsonrpc: "2.0", id: 0, method: "initialize" } },
+        { mcp: "usine", closed: "code 1011" },
+      ]);
+      const events = yield* bridge.client.events.pipe(Stream.take(1), Stream.runCollect);
+      assert.deepStrictEqual(Array.from(events), [{ type: "between", data: {} }]);
+      yield* bridge.client.sendMcp("usine", { jsonrpc: "2.0", id: 0, result: {} });
+      const messageLine = yield* bridge.sent;
+      assert.deepStrictEqual(messageLine, {
+        mcp: "usine",
+        message: { jsonrpc: "2.0", id: 0, result: {} },
+      });
+      yield* bridge.client.close;
+      const refused = yield* bridge.client
+        .sendMcp("usine", { jsonrpc: "2.0", method: "ping" })
+        .pipe(Effect.flip);
+      assert.strictEqual(refused.message, "The OpenCode bridge is closing");
+    }).pipe(Effect.scoped),
+  );
+
   it.effect(
     "relays readiness, answers, and events, and skips lines that aren't bridge output",
     () => {

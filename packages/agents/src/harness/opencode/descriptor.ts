@@ -79,21 +79,21 @@ export const opencode = HarnessDescriptor.make({
       // A gateway that hasn't reported its credential kind yet holds an API key or a login,
       // which the session's route then names; OpenCode runs only on a key.
       credentials: ["gateway", "gateway-api-key", "api-key"],
-      supported: ["resume-session", "steer", "interrupt", "token-usage", "cost-usd", "model-check"],
+      supported: [
+        "resume-session",
+        "steer",
+        "interrupt",
+        "usine-tools",
+        "closed-tools",
+        "token-usage",
+        "cost-usd",
+        "model-check",
+      ],
       lacking: [
         Lacking.make({
           capability: "durable-coordination",
           reason:
-            "OpenCode resumes sessions without a durable journal of usine tool intents and results",
-        }),
-        Lacking.make({
-          capability: "usine-tools",
-          reason: "The OpenCode adapter serves no usine tools",
-        }),
-        Lacking.make({
-          capability: "closed-tools",
-          reason:
-            "The OpenCode adapter serves no usine tools, which a role without OpenCode's own tools needs",
+            "OpenCode resumes sessions without a durable journal of usine tool intents and results, and a retained bridge replays its output from the last delivered checkpoint: a usine tool call that the previous runtime answered after that checkpoint runs again, and one that it read before the checkpoint and never answered stays unanswered",
         }),
         Lacking.make({
           capability: "structured-output",

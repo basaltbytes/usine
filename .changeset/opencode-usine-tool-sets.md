@@ -1,0 +1,5 @@
+---
+"@usine/agents": minor
+---
+
+OpenCode serves usine tool sets. `HarnessRuntime.open` on OpenCode attaches the toolkit as the client MCP server `usine` through OpenCode's client MCP WebSocket, which the OpenCode bridge relays as JSON lines: a connect line `{"id","mcp","directory"}`, and `{"mcp","message"}` lines in both directions. The model sees each tool as `usine_<tool>`, and `ToolStarted` and `ToolFinished` carry the toolkit's names. The session's permissions allow `usine_*` and deny OpenCode's `execute` tool, so Code Mode doesn't hide the tools; with `nativeTools: none`, the model's tool list is exactly the usine tools. The runtime waits until OpenCode has listed the tools before the prompt, serves only the calls of the session that opened them, interrupts a handler when OpenCode cancels its call, and reattaches the tools after a restart; the bridge reconnects a socket that OpenCode closes. The OpenCode descriptor declares `usine-tools` and `closed-tools`, which the `host-tool` and `closed-tools` contract scenarios prove on OpenCode 2.3.2.

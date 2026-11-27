@@ -1,0 +1,1456 @@
+{
+  "protocol": "opencode-bridge",
+  "harnessVersion": "2.3.2",
+  "model": "gpt-5.4-mini",
+  "scenario": "host-tool",
+  "environment": {
+    "HOME": "$HOME",
+    "USINE_OPENCODE_HOME": "$OPENCODE_HOME",
+    "USINE_OPENCODE_BASE_URL": "$MODEL_URL",
+    "OPENAI_API_KEY": "sk-replay",
+    "PATH": "$PATH"
+  },
+  "entries": [
+    {
+      "type": "expect_outbound",
+      "port": "process:1",
+      "payload": {
+        "command": "$NODE",
+        "args": [
+          "-e",
+          "$CHILD_LIFELINE",
+          "$WORKTREE.child-1.pid",
+          "",
+          "node",
+          "-e",
+          "$OPENCODE_BRIDGE",
+          "30000",
+          "opencode"
+        ],
+        "cwd": "$WORKTREE",
+        "env": {
+          "HOME": "$HOME",
+          "USINE_OPENCODE_HOME": "$OPENCODE_HOME",
+          "USINE_OPENCODE_BASE_URL": "$MODEL_URL",
+          "OPENAI_API_KEY": "sk-replay",
+          "PATH": "$PATH",
+          "USINE_OPENCODE_SERVE_XDG_DATA_HOME": "$OPENCODE_HOME/replay-parent_child_1",
+          "USINE_OPENCODE_SERVE_OPENCODE_DB": "$OPENCODE_HOME/replay-parent_child_1/opencode/opencode.db",
+          "USINE_OPENCODE_SERVE_XDG_CONFIG_HOME": "$OPENCODE_HOME/replay-parent_child_1/config",
+          "USINE_OPENCODE_SERVE_OPENCODE_CONFIG_PROJECT_DISABLE": "1",
+          "USINE_OPENCODE_SERVE_OPENCODE_DISABLE_CLAUDE_CODE": "1",
+          "USINE_OPENCODE_SERVE_OPENCODE_DISABLE_MODELS_FETCH": "1",
+          "USINE_OPENCODE_SERVE_OPENCODE_DISABLE_FREE_MODELS": "1",
+          "USINE_OPENCODE_SERVE_OPENCODE_CONFIG_CONTENT": "{\"model\":\"openai/gpt-5.4-mini\",\"providers\":{\"openai\":{\"env\":[],\"settings\":{\"apiKey\":\"{env:OPENAI_API_KEY}\",\"transport\":\"http\",\"baseURL\":\"{env:USINE_OPENCODE_BASE_URL}\"}},\"lmstudio\":{\"settings\":{\"baseURL\":\"\"}},\"ollama\":{\"settings\":{\"baseURL\":\"\"}},\"vllm\":{\"settings\":{\"baseURL\":\"\"}}},\"policies\":[{\"action\":\"provider.use\",\"resource\":\"*\",\"effect\":\"deny\"},{\"action\":\"provider.use\",\"resource\":\"openai\",\"effect\":\"allow\"},{\"action\":\"plugin.use\",\"resource\":\"*\",\"effect\":\"deny\"},{\"action\":\"mcp.use\",\"resource\":\"*\",\"effect\":\"deny\"},{\"action\":\"websearch.use\",\"resource\":\"*\",\"effect\":\"deny\"}],\"permissions\":[{\"action\":\"*\",\"resource\":\"*\",\"effect\":\"allow\"},{\"action\":\"read\",\"resource\":\"*.env\",\"effect\":\"allow\"},{\"action\":\"read\",\"resource\":\"*.env.*\",\"effect\":\"allow\"},{\"action\":\"question\",\"resource\":\"*\",\"effect\":\"deny\"},{\"action\":\"webfetch\",\"resource\":\"*\",\"effect\":\"deny\"},{\"action\":\"websearch\",\"resource\":\"*\",\"effect\":\"deny\"}],\"websearch\":false,\"formatter\":false,\"warming\":false,\"agents\":{\"title\":{\"disabled\":true}},\"instructions\":[\"$WORKTREE/AGENTS.md\"]}"
+        }
+      }
+    },
+    { "type": "emit_inbound", "port": "process:1/stdout", "payload": { "ready": true } },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": { "id": "evt_21bd78483001lMthua9V65a2kn", "type": "server.connected", "data": {} }
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "port": "process:1/stdin",
+      "payload": {
+        "id": 1,
+        "method": "GET",
+        "path": "/api/model?location%5Bdirectory%5D=$ENCODED_WORKTREE"
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_21bd784b5001yfhdP1QYeyVYKf",
+          "created": 1795763438773,
+          "type": "project.updated",
+          "location": { "directory": "$WORKTREE" },
+          "data": {
+            "id": "77dcbb8f468518391e25f8b35014fa1de780ea40",
+            "canonical": "$WORKTREE",
+            "time": { "created": 1795763438769, "updated": 1795763438769, "active": 1795763438773 },
+            "sandboxes": []
+          }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "id": 1,
+        "status": 200,
+        "body": {
+          "location": { "directory": "$WORKTREE" },
+          "data": [
+            {
+              "id": "gpt-5.4-mini",
+              "modelID": "gpt-5.4-mini",
+              "providerID": "openai",
+              "type": "chat",
+              "family": "gpt-mini",
+              "name": "GPT-5.4 mini",
+              "package": "@opencode/ai/providers/openai/responses",
+              "settings": { "apiKey": "sk-replay", "baseURL": "$MODEL_URL" },
+              "capabilities": {
+                "tools": true,
+                "freeform": ["text", "lark", "regex"],
+                "input": ["text", "image"],
+                "output": ["text"],
+                "temperature": true
+              },
+              "variants": [
+                {
+                  "id": "none",
+                  "settings": {
+                    "reasoningEffort": "none",
+                    "reasoningSummary": "auto",
+                    "include": ["reasoning.encrypted_content"]
+                  }
+                },
+                {
+                  "id": "low",
+                  "settings": {
+                    "reasoningEffort": "low",
+                    "reasoningSummary": "auto",
+                    "include": ["reasoning.encrypted_content"]
+                  }
+                },
+                {
+                  "id": "medium",
+                  "settings": {
+                    "reasoningEffort": "medium",
+                    "reasoningSummary": "auto",
+                    "include": ["reasoning.encrypted_content"]
+                  }
+                },
+                {
+                  "id": "high",
+                  "settings": {
+                    "reasoningEffort": "high",
+                    "reasoningSummary": "auto",
+                    "include": ["reasoning.encrypted_content"]
+                  }
+                },
+                {
+                  "id": "xhigh",
+                  "settings": {
+                    "reasoningEffort": "xhigh",
+                    "reasoningSummary": "auto",
+                    "include": ["reasoning.encrypted_content"]
+                  }
+                }
+              ],
+              "time": { "released": 1773705600000 },
+              "cost": [{ "input": 0.75, "output": 4.5, "cache": { "read": 0.075, "write": 0 } }],
+              "status": "active",
+              "enabled": true,
+              "limit": { "context": 400000, "input": 272000, "output": 128000 }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_21bd786ee001Gfa0yMRJ7hTQju",
+          "created": 1795763439342,
+          "type": "integration.updated",
+          "location": { "directory": "$WORKTREE" },
+          "data": {}
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_21bd786f3001xuB9lS4BgpF2jN",
+          "created": 1795763439347,
+          "type": "provider.updated",
+          "location": { "directory": "$WORKTREE" },
+          "data": {}
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_21bd786fc0015iaEGmOdeceE17",
+          "created": 1795763439356,
+          "type": "model.updated",
+          "location": { "directory": "$WORKTREE" },
+          "data": {}
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_21bd786fe0016obac0p7ebP0CH",
+          "created": 1795763439358,
+          "type": "agent.updated",
+          "location": { "directory": "$WORKTREE" },
+          "data": {}
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_21bd786fe002qz9CyANJiZFfuS",
+          "created": 1795763439358,
+          "type": "command.updated",
+          "location": { "directory": "$WORKTREE" },
+          "data": {}
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_21bd786ff001hnsqhiAPMBrgxB",
+          "created": 1795763439359,
+          "type": "skill.updated",
+          "location": { "directory": "$WORKTREE" },
+          "data": {}
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_21bd78717001ENvii3shLHXTkv",
+          "created": 1795763439383,
+          "type": "artifact.updated",
+          "location": { "directory": "$WORKTREE" },
+          "data": {}
+        }
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "port": "process:1/stdin",
+      "payload": {
+        "id": 2,
+        "method": "POST",
+        "path": "/api/session",
+        "body": {
+          "title": "usine replay",
+          "location": { "directory": "$WORKTREE" },
+          "model": { "providerID": "openai", "id": "gpt-5.4-mini", "variant": "low" },
+          "permissions": [
+            { "action": "*", "resource": "*", "effect": "allow" },
+            { "action": "read", "resource": "*.env", "effect": "allow" },
+            { "action": "read", "resource": "*.env.*", "effect": "allow" },
+            { "action": "question", "resource": "*", "effect": "deny" },
+            { "action": "webfetch", "resource": "*", "effect": "deny" },
+            { "action": "websearch", "resource": "*", "effect": "deny" },
+            { "action": "execute", "resource": "*", "effect": "deny" }
+          ]
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_21bd787480013z5BHC5GQrOQWA",
+          "created": 1795763439432,
+          "type": "websearch.updated",
+          "location": { "directory": "$WORKTREE" },
+          "data": {}
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_21bd78749002jxP609AIZSqeEJ",
+          "created": 1795763439433,
+          "type": "reference.updated",
+          "location": { "directory": "$WORKTREE" },
+          "data": {}
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_21bd78749003U7vuHjhezzqNkN",
+          "created": 1795763439433,
+          "type": "plugin.updated",
+          "location": { "directory": "$WORKTREE" },
+          "data": {}
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "id": 2,
+        "status": 200,
+        "body": {
+          "data": {
+            "id": "ses_de4287898ffeRWODggJS7flulS",
+            "projectID": "77dcbb8f468518391e25f8b35014fa1de780ea40",
+            "model": { "id": "gpt-5.4-mini", "providerID": "openai", "variant": "low" },
+            "cost": 0,
+            "tokens": {
+              "input": 0,
+              "output": 0,
+              "reasoning": 0,
+              "cache": { "read": 0, "write": 0 }
+            },
+            "time": { "created": 1795763439465, "updated": 1795763439465 },
+            "title": "usine replay",
+            "permissions": [
+              { "action": "*", "resource": "*", "effect": "allow" },
+              { "action": "read", "resource": "*.env", "effect": "allow" },
+              { "action": "read", "resource": "*.env.*", "effect": "allow" },
+              { "action": "question", "resource": "*", "effect": "deny" },
+              { "action": "webfetch", "resource": "*", "effect": "deny" },
+              { "action": "websearch", "resource": "*", "effect": "deny" },
+              { "action": "execute", "resource": "*", "effect": "deny" }
+            ],
+            "location": { "directory": "$WORKTREE" }
+          }
+        }
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "port": "process:1/stdin",
+      "payload": { "id": 3, "environment": "ses_de4287898ffeRWODggJS7flulS" }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_21bd78768001Vl1NY5UI1xy4nW",
+          "created": 1795763439465,
+          "type": "session.created",
+          "location": { "directory": "$WORKTREE" },
+          "data": {
+            "sessionID": "ses_de4287898ffeRWODggJS7flulS",
+            "slug": "happy-falcon",
+            "version": "2.3.2",
+            "projectID": "77dcbb8f468518391e25f8b35014fa1de780ea40",
+            "location": { "directory": "$WORKTREE" },
+            "subpath": "",
+            "title": "usine replay",
+            "permissions": [
+              { "action": "*", "resource": "*", "effect": "allow" },
+              { "action": "read", "resource": "*.env", "effect": "allow" },
+              { "action": "read", "resource": "*.env.*", "effect": "allow" },
+              { "action": "question", "resource": "*", "effect": "deny" },
+              { "action": "webfetch", "resource": "*", "effect": "deny" },
+              { "action": "websearch", "resource": "*", "effect": "deny" },
+              { "action": "execute", "resource": "*", "effect": "deny" }
+            ],
+            "model": { "id": "gpt-5.4-mini", "providerID": "openai", "variant": "low" }
+          },
+          "durable": { "aggregateID": "ses_de4287898ffeRWODggJS7flulS", "seq": 0, "version": 1 }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": { "id": 3, "status": 204, "body": null }
+    },
+    {
+      "type": "expect_outbound",
+      "port": "process:1/stdin",
+      "payload": { "id": 4, "mcp": "usine", "directory": "$WORKTREE" }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": { "id": 4, "status": 101, "body": null }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "mcp": "usine",
+        "message": {
+          "method": "initialize",
+          "params": {
+            "protocolVersion": "2025-11-25",
+            "capabilities": { "elicitation": { "form": {}, "url": {} }, "roots": {} },
+            "clientInfo": { "name": "opencode", "version": "2.3.2" }
+          },
+          "jsonrpc": "2.0",
+          "id": 0
+        }
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "port": "process:1/stdin",
+      "payload": {
+        "mcp": "usine",
+        "message": {
+          "jsonrpc": "2.0",
+          "id": 0,
+          "result": {
+            "protocolVersion": "2025-11-25",
+            "capabilities": { "tools": {} },
+            "serverInfo": { "name": "usine", "version": "1.0.0" }
+          }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "mcp": "usine",
+        "message": { "jsonrpc": "2.0", "method": "notifications/initialized" }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "mcp": "usine",
+        "message": { "method": "tools/list", "jsonrpc": "2.0", "id": 1 }
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "port": "process:1/stdin",
+      "payload": {
+        "mcp": "usine",
+        "message": {
+          "jsonrpc": "2.0",
+          "id": 1,
+          "result": {
+            "tools": [
+              {
+                "name": "read_note",
+                "description": "Reads the usine note with the given name.",
+                "inputSchema": {
+                  "type": "object",
+                  "properties": { "name": { "type": "string" } },
+                  "required": ["name"],
+                  "additionalProperties": true
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "port": "process:1/stdin",
+      "payload": {
+        "mcp": "usine",
+        "message": { "jsonrpc": "2.0", "id": "usine-ping-1", "method": "ping" }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "mcp": "usine",
+        "message": { "result": {}, "jsonrpc": "2.0", "id": "usine-ping-1" }
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "port": "process:1/stdin",
+      "payload": {
+        "id": 5,
+        "method": "POST",
+        "path": "/api/session/ses_de4287898ffeRWODggJS7flulS/prompt",
+        "body": {
+          "text": "Call the read_note tool with the name \"missing\". That call fails. Then call read_note with the name \"greeting\" and reply with exactly the note that it returns. Call no other tools.",
+          "delivery": "steer"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "id": 5,
+        "status": 200,
+        "body": {
+          "data": {
+            "id": "msg_21bd787a7001KpIzMdkXrENVUE",
+            "sessionID": "ses_de4287898ffeRWODggJS7flulS",
+            "time": { "created": 1795763439529 },
+            "type": "user",
+            "payload": {
+              "text": "Call the read_note tool with the name \"missing\". That call fails. Then call read_note with the name \"greeting\" and reply with exactly the note that it returns. Call no other tools."
+            },
+            "delivery": "steer"
+          }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_21bd787a9001ZFOQSHbKZmkDg2",
+          "created": 1795763439529,
+          "type": "session.inbox.enqueued",
+          "location": { "directory": "$WORKTREE" },
+          "data": {
+            "inboxID": "msg_21bd787a7001KpIzMdkXrENVUE",
+            "sessionID": "ses_de4287898ffeRWODggJS7flulS",
+            "item": {
+              "type": "user",
+              "payload": {
+                "text": "Call the read_note tool with the name \"missing\". That call fails. Then call read_note with the name \"greeting\" and reply with exactly the note that it returns. Call no other tools."
+              },
+              "delivery": "steer"
+            }
+          },
+          "durable": { "aggregateID": "ses_de4287898ffeRWODggJS7flulS", "seq": 1, "version": 1 }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_21bd787ac001PEKtUoud2cfmkd",
+          "created": 1795763439532,
+          "type": "session.execution.started",
+          "data": { "sessionID": "ses_de4287898ffeRWODggJS7flulS" },
+          "durable": { "aggregateID": "ses_de4287898ffeRWODggJS7flulS", "seq": 2, "version": 1 }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_21bd787c00013MZOyYqpc1FCBB",
+          "created": 1795763439553,
+          "metadata": { "instructions": { "initial": true } },
+          "type": "session.instructions.updated",
+          "location": { "directory": "$WORKTREE" },
+          "data": {
+            "sessionID": "ses_de4287898ffeRWODggJS7flulS",
+            "delta": {
+              "core/skill-guidance": "0fcf81582b0bdb08251c185c9c8f477ff4fba0fdecbb4a499f3d6e18ae6a8ed7",
+              "core/date": "aa60042a274d756ab2b6912d1a687df27b15101c31b97dbe569c7396c72e9633",
+              "core/environment": "dac762fda32ea8b99df72d4f0dfc20b46eb6b270f1dcc4797401aca119c4bdba"
+            }
+          },
+          "durable": { "aggregateID": "ses_de4287898ffeRWODggJS7flulS", "seq": 3, "version": 2 }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_21bd787c2001ox9OnCxBItl0J6",
+          "created": 1795763439554,
+          "type": "session.inbox.delivered",
+          "location": { "directory": "$WORKTREE" },
+          "data": {
+            "sessionID": "ses_de4287898ffeRWODggJS7flulS",
+            "inboxID": "msg_21bd787a7001KpIzMdkXrENVUE"
+          },
+          "durable": { "aggregateID": "ses_de4287898ffeRWODggJS7flulS", "seq": 4, "version": 1 }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "model:1/requests",
+      "payload": {
+        "tools": [
+          "browser_back",
+          "browser_check",
+          "browser_click",
+          "browser_console",
+          "browser_cpu_analyze",
+          "browser_cpu_start",
+          "browser_cpu_stop",
+          "browser_dialog",
+          "browser_drag",
+          "browser_evaluate",
+          "browser_files_drop",
+          "browser_files_get",
+          "browser_files_list",
+          "browser_files_upload",
+          "browser_fill",
+          "browser_fill_form",
+          "browser_find",
+          "browser_forward",
+          "browser_frames",
+          "browser_heap_compare",
+          "browser_heap_object",
+          "browser_heap_query",
+          "browser_heap_snapshot",
+          "browser_heap_summary",
+          "browser_hover",
+          "browser_lighthouse",
+          "browser_navigate",
+          "browser_network_get",
+          "browser_network_list",
+          "browser_press",
+          "browser_preview",
+          "browser_reload",
+          "browser_screenshot",
+          "browser_scroll",
+          "browser_select",
+          "browser_snapshot",
+          "browser_stop",
+          "browser_tabs_close",
+          "browser_tabs_focus",
+          "browser_tabs_list",
+          "browser_tabs_open",
+          "browser_trace_analyze",
+          "browser_trace_start",
+          "browser_trace_stop",
+          "browser_wait",
+          "experimental_image_generate",
+          "glob",
+          "grep",
+          "opencode_list_mcp_resources",
+          "opencode_models",
+          "opencode_read_mcp_resource",
+          "opencode_session_move",
+          "opencode_session_rename",
+          "opencode_worktree_create",
+          "opencode_worktree_list",
+          "opencode_worktree_remove",
+          "patch",
+          "read",
+          "shell",
+          "skill",
+          "subagent",
+          "usine_read_note"
+        ]
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_21bd787e60010b39STop4albgd",
+          "created": 1795763439590,
+          "type": "session.step.started",
+          "location": { "directory": "$WORKTREE" },
+          "data": {
+            "sessionID": "ses_de4287898ffeRWODggJS7flulS",
+            "agent": "build",
+            "model": { "id": "gpt-5.4-mini", "providerID": "openai", "variant": "low" },
+            "assistantMessageID": "msg_21bd787cc001TQciGpG1H5i2nQ",
+            "started": 1795763439573
+          },
+          "durable": { "aggregateID": "ses_de4287898ffeRWODggJS7flulS", "seq": 5, "version": 1 }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_21bd787e8001alIMraxHL1so2f",
+          "created": 1795763439592,
+          "type": "session.step.first-token",
+          "location": { "directory": "$WORKTREE" },
+          "data": {
+            "sessionID": "ses_de4287898ffeRWODggJS7flulS",
+            "assistantMessageID": "msg_21bd787cc001TQciGpG1H5i2nQ"
+          },
+          "durable": { "aggregateID": "ses_de4287898ffeRWODggJS7flulS", "seq": 6, "version": 1 }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_21bd787ea001BVUD1S8ZnxWFWw",
+          "created": 1795763439594,
+          "type": "session.tool.input.started",
+          "location": { "directory": "$WORKTREE" },
+          "data": {
+            "sessionID": "ses_de4287898ffeRWODggJS7flulS",
+            "assistantMessageID": "msg_21bd787cc001TQciGpG1H5i2nQ",
+            "id": "call_1",
+            "name": "usine_read_note"
+          },
+          "durable": { "aggregateID": "ses_de4287898ffeRWODggJS7flulS", "seq": 7, "version": 1 }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_21bd787ec001OmGyMdjwK1Sx7Y",
+          "created": 1795763439596,
+          "type": "session.tool.input.ended",
+          "location": { "directory": "$WORKTREE" },
+          "data": {
+            "sessionID": "ses_de4287898ffeRWODggJS7flulS",
+            "assistantMessageID": "msg_21bd787cc001TQciGpG1H5i2nQ",
+            "id": "call_1",
+            "text": "{\"name\":\"missing\"}"
+          },
+          "durable": { "aggregateID": "ses_de4287898ffeRWODggJS7flulS", "seq": 8, "version": 1 }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_21bd787ed0011qkp4if1ckLQlx",
+          "created": 1795763439597,
+          "type": "session.tool.called",
+          "location": { "directory": "$WORKTREE" },
+          "data": {
+            "sessionID": "ses_de4287898ffeRWODggJS7flulS",
+            "assistantMessageID": "msg_21bd787cc001TQciGpG1H5i2nQ",
+            "id": "call_1",
+            "input": { "name": "missing" },
+            "executed": false,
+            "native": { "itemId": "fc_1" }
+          },
+          "durable": { "aggregateID": "ses_de4287898ffeRWODggJS7flulS", "seq": 9, "version": 1 }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "mcp": "usine",
+        "message": {
+          "method": "tools/call",
+          "params": {
+            "name": "read_note",
+            "arguments": { "name": "missing" },
+            "_meta": {
+              "ai.opencode/sessionID": "ses_de4287898ffeRWODggJS7flulS",
+              "progressToken": 2
+            }
+          },
+          "jsonrpc": "2.0",
+          "id": 2
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_21bd787f2001MalnEBFYKxRPyC",
+          "created": 1795763439602,
+          "type": "session.step.streamed",
+          "location": { "directory": "$WORKTREE" },
+          "data": {
+            "sessionID": "ses_de4287898ffeRWODggJS7flulS",
+            "assistantMessageID": "msg_21bd787cc001TQciGpG1H5i2nQ"
+          },
+          "durable": { "aggregateID": "ses_de4287898ffeRWODggJS7flulS", "seq": 10, "version": 1 }
+        }
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "port": "process:1/stdin",
+      "payload": {
+        "mcp": "usine",
+        "message": {
+          "jsonrpc": "2.0",
+          "id": 2,
+          "result": {
+            "content": [
+              { "type": "text", "text": "{\"_tag\":\"NoteMissing\",\"note\":\"missing\"}" }
+            ],
+            "isError": true
+          }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "model:1/requests",
+      "payload": {
+        "tools": [
+          "browser_back",
+          "browser_check",
+          "browser_click",
+          "browser_console",
+          "browser_cpu_analyze",
+          "browser_cpu_start",
+          "browser_cpu_stop",
+          "browser_dialog",
+          "browser_drag",
+          "browser_evaluate",
+          "browser_files_drop",
+          "browser_files_get",
+          "browser_files_list",
+          "browser_files_upload",
+          "browser_fill",
+          "browser_fill_form",
+          "browser_find",
+          "browser_forward",
+          "browser_frames",
+          "browser_heap_compare",
+          "browser_heap_object",
+          "browser_heap_query",
+          "browser_heap_snapshot",
+          "browser_heap_summary",
+          "browser_hover",
+          "browser_lighthouse",
+          "browser_navigate",
+          "browser_network_get",
+          "browser_network_list",
+          "browser_press",
+          "browser_preview",
+          "browser_reload",
+          "browser_screenshot",
+          "browser_scroll",
+          "browser_select",
+          "browser_snapshot",
+          "browser_stop",
+          "browser_tabs_close",
+          "browser_tabs_focus",
+          "browser_tabs_list",
+          "browser_tabs_open",
+          "browser_trace_analyze",
+          "browser_trace_start",
+          "browser_trace_stop",
+          "browser_wait",
+          "experimental_image_generate",
+          "glob",
+          "grep",
+          "opencode_list_mcp_resources",
+          "opencode_models",
+          "opencode_read_mcp_resource",
+          "opencode_session_move",
+          "opencode_session_rename",
+          "opencode_worktree_create",
+          "opencode_worktree_list",
+          "opencode_worktree_remove",
+          "patch",
+          "read",
+          "shell",
+          "skill",
+          "subagent",
+          "usine_read_note"
+        ]
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_21bd787ff001HuZpkGW0hUc6SQ",
+          "created": 1795763439615,
+          "type": "session.tool.failed",
+          "location": { "directory": "$WORKTREE" },
+          "data": {
+            "sessionID": "ses_de4287898ffeRWODggJS7flulS",
+            "assistantMessageID": "msg_21bd787cc001TQciGpG1H5i2nQ",
+            "id": "call_1",
+            "error": {
+              "type": "tool.execution",
+              "message": "{\"_tag\":\"NoteMissing\",\"note\":\"missing\"}"
+            },
+            "executed": false
+          },
+          "durable": { "aggregateID": "ses_de4287898ffeRWODggJS7flulS", "seq": 11, "version": 2 }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_21bd78801001xLvkyAkpjmcrY2",
+          "created": 1795763439617,
+          "type": "session.step.ended",
+          "location": { "directory": "$WORKTREE" },
+          "data": {
+            "sessionID": "ses_de4287898ffeRWODggJS7flulS",
+            "assistantMessageID": "msg_21bd787cc001TQciGpG1H5i2nQ",
+            "finish": "tool-calls",
+            "native": { "responseId": "resp_1" },
+            "tokens": {
+              "input": 1000,
+              "output": 20,
+              "reasoning": 0,
+              "cache": { "read": 200, "write": 0 }
+            },
+            "cost": 0.000855
+          },
+          "durable": { "aggregateID": "ses_de4287898ffeRWODggJS7flulS", "seq": 12, "version": 1 }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_21bd788030017vqdfyTJ2Gwm7P",
+          "created": 1795763439619,
+          "type": "session.usage.updated",
+          "data": {
+            "sessionID": "ses_de4287898ffeRWODggJS7flulS",
+            "cost": 0.000855,
+            "tokens": {
+              "input": 1000,
+              "output": 20,
+              "reasoning": 0,
+              "cache": { "read": 200, "write": 0 }
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_21bd7881e0019D9iYVpeorI4V2",
+          "created": 1795763439646,
+          "type": "session.step.started",
+          "location": { "directory": "$WORKTREE" },
+          "data": {
+            "sessionID": "ses_de4287898ffeRWODggJS7flulS",
+            "agent": "build",
+            "model": { "id": "gpt-5.4-mini", "providerID": "openai", "variant": "low" },
+            "assistantMessageID": "msg_21bd78809001Jp3SWva9bDZUGB",
+            "started": 1795763439630
+          },
+          "durable": { "aggregateID": "ses_de4287898ffeRWODggJS7flulS", "seq": 13, "version": 1 }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_21bd78820001mTVgFzKqznsRPq",
+          "created": 1795763439648,
+          "type": "session.step.first-token",
+          "location": { "directory": "$WORKTREE" },
+          "data": {
+            "sessionID": "ses_de4287898ffeRWODggJS7flulS",
+            "assistantMessageID": "msg_21bd78809001Jp3SWva9bDZUGB"
+          },
+          "durable": { "aggregateID": "ses_de4287898ffeRWODggJS7flulS", "seq": 14, "version": 1 }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_21bd78822001BshLjzGIofXgfD",
+          "created": 1795763439650,
+          "type": "session.tool.input.started",
+          "location": { "directory": "$WORKTREE" },
+          "data": {
+            "sessionID": "ses_de4287898ffeRWODggJS7flulS",
+            "assistantMessageID": "msg_21bd78809001Jp3SWva9bDZUGB",
+            "id": "call_2",
+            "name": "usine_read_note"
+          },
+          "durable": { "aggregateID": "ses_de4287898ffeRWODggJS7flulS", "seq": 15, "version": 1 }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_21bd78823001BSI7WIDhGLiNbm",
+          "created": 1795763439651,
+          "type": "session.tool.input.ended",
+          "location": { "directory": "$WORKTREE" },
+          "data": {
+            "sessionID": "ses_de4287898ffeRWODggJS7flulS",
+            "assistantMessageID": "msg_21bd78809001Jp3SWva9bDZUGB",
+            "id": "call_2",
+            "text": "{\"name\":\"greeting\"}"
+          },
+          "durable": { "aggregateID": "ses_de4287898ffeRWODggJS7flulS", "seq": 16, "version": 1 }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_21bd78824001QUwwJTFWhAzIcC",
+          "created": 1795763439652,
+          "type": "session.tool.called",
+          "location": { "directory": "$WORKTREE" },
+          "data": {
+            "sessionID": "ses_de4287898ffeRWODggJS7flulS",
+            "assistantMessageID": "msg_21bd78809001Jp3SWva9bDZUGB",
+            "id": "call_2",
+            "input": { "name": "greeting" },
+            "executed": false,
+            "native": { "itemId": "fc_2" }
+          },
+          "durable": { "aggregateID": "ses_de4287898ffeRWODggJS7flulS", "seq": 17, "version": 1 }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_21bd78827001VXZs3rHXjIKV4u",
+          "created": 1795763439655,
+          "type": "session.step.streamed",
+          "location": { "directory": "$WORKTREE" },
+          "data": {
+            "sessionID": "ses_de4287898ffeRWODggJS7flulS",
+            "assistantMessageID": "msg_21bd78809001Jp3SWva9bDZUGB"
+          },
+          "durable": { "aggregateID": "ses_de4287898ffeRWODggJS7flulS", "seq": 18, "version": 1 }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "mcp": "usine",
+        "message": {
+          "method": "tools/call",
+          "params": {
+            "name": "read_note",
+            "arguments": { "name": "greeting" },
+            "_meta": {
+              "ai.opencode/sessionID": "ses_de4287898ffeRWODggJS7flulS",
+              "progressToken": 3
+            }
+          },
+          "jsonrpc": "2.0",
+          "id": 3
+        }
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "port": "process:1/stdin",
+      "payload": {
+        "mcp": "usine",
+        "message": {
+          "jsonrpc": "2.0",
+          "id": 3,
+          "result": {
+            "content": [{ "type": "text", "text": "REPLAY_NOTE_7431" }],
+            "isError": false
+          }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "model:1/requests",
+      "payload": {
+        "tools": [
+          "browser_back",
+          "browser_check",
+          "browser_click",
+          "browser_console",
+          "browser_cpu_analyze",
+          "browser_cpu_start",
+          "browser_cpu_stop",
+          "browser_dialog",
+          "browser_drag",
+          "browser_evaluate",
+          "browser_files_drop",
+          "browser_files_get",
+          "browser_files_list",
+          "browser_files_upload",
+          "browser_fill",
+          "browser_fill_form",
+          "browser_find",
+          "browser_forward",
+          "browser_frames",
+          "browser_heap_compare",
+          "browser_heap_object",
+          "browser_heap_query",
+          "browser_heap_snapshot",
+          "browser_heap_summary",
+          "browser_hover",
+          "browser_lighthouse",
+          "browser_navigate",
+          "browser_network_get",
+          "browser_network_list",
+          "browser_press",
+          "browser_preview",
+          "browser_reload",
+          "browser_screenshot",
+          "browser_scroll",
+          "browser_select",
+          "browser_snapshot",
+          "browser_stop",
+          "browser_tabs_close",
+          "browser_tabs_focus",
+          "browser_tabs_list",
+          "browser_tabs_open",
+          "browser_trace_analyze",
+          "browser_trace_start",
+          "browser_trace_stop",
+          "browser_wait",
+          "experimental_image_generate",
+          "glob",
+          "grep",
+          "opencode_list_mcp_resources",
+          "opencode_models",
+          "opencode_read_mcp_resource",
+          "opencode_session_move",
+          "opencode_session_rename",
+          "opencode_worktree_create",
+          "opencode_worktree_list",
+          "opencode_worktree_remove",
+          "patch",
+          "read",
+          "shell",
+          "skill",
+          "subagent",
+          "usine_read_note"
+        ]
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_21bd7883a001MQwwEan2nelb7g",
+          "created": 1795763439674,
+          "type": "session.tool.success",
+          "location": { "directory": "$WORKTREE" },
+          "data": {
+            "sessionID": "ses_de4287898ffeRWODggJS7flulS",
+            "assistantMessageID": "msg_21bd78809001Jp3SWva9bDZUGB",
+            "id": "call_2",
+            "content": [{ "type": "text", "text": "REPLAY_NOTE_7431" }],
+            "metadata": { "truncated": false },
+            "executed": false
+          },
+          "durable": { "aggregateID": "ses_de4287898ffeRWODggJS7flulS", "seq": 19, "version": 2 }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_21bd7883c0016tjtWFRsXl8RIv",
+          "created": 1795763439676,
+          "type": "session.step.ended",
+          "location": { "directory": "$WORKTREE" },
+          "data": {
+            "sessionID": "ses_de4287898ffeRWODggJS7flulS",
+            "assistantMessageID": "msg_21bd78809001Jp3SWva9bDZUGB",
+            "finish": "tool-calls",
+            "native": { "responseId": "resp_2" },
+            "tokens": {
+              "input": 1000,
+              "output": 20,
+              "reasoning": 0,
+              "cache": { "read": 200, "write": 0 }
+            },
+            "cost": 0.000855
+          },
+          "durable": { "aggregateID": "ses_de4287898ffeRWODggJS7flulS", "seq": 20, "version": 1 }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_21bd78846001dkgCfLKaCK8CTx",
+          "created": 1795763439686,
+          "type": "session.usage.updated",
+          "data": {
+            "sessionID": "ses_de4287898ffeRWODggJS7flulS",
+            "cost": 0.00171,
+            "tokens": {
+              "input": 2000,
+              "output": 40,
+              "reasoning": 0,
+              "cache": { "read": 400, "write": 0 }
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_21bd78859001gQh6i9VY0T0R0I",
+          "created": 1795763439705,
+          "type": "session.step.started",
+          "location": { "directory": "$WORKTREE" },
+          "data": {
+            "sessionID": "ses_de4287898ffeRWODggJS7flulS",
+            "agent": "build",
+            "model": { "id": "gpt-5.4-mini", "providerID": "openai", "variant": "low" },
+            "assistantMessageID": "msg_21bd7884c001o04fZzclG7lPpD",
+            "started": 1795763439697
+          },
+          "durable": { "aggregateID": "ses_de4287898ffeRWODggJS7flulS", "seq": 21, "version": 1 }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_21bd7885c001SQUfCmvXlmy3cn",
+          "created": 1795763439708,
+          "type": "session.step.first-token",
+          "location": { "directory": "$WORKTREE" },
+          "data": {
+            "sessionID": "ses_de4287898ffeRWODggJS7flulS",
+            "assistantMessageID": "msg_21bd7884c001o04fZzclG7lPpD"
+          },
+          "durable": { "aggregateID": "ses_de4287898ffeRWODggJS7flulS", "seq": 22, "version": 1 }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_21bd7885e0015EWQueO4IoDrtZ",
+          "created": 1795763439710,
+          "type": "session.text.started",
+          "location": { "directory": "$WORKTREE" },
+          "data": {
+            "sessionID": "ses_de4287898ffeRWODggJS7flulS",
+            "assistantMessageID": "msg_21bd7884c001o04fZzclG7lPpD",
+            "ordinal": 0
+          },
+          "durable": { "aggregateID": "ses_de4287898ffeRWODggJS7flulS", "seq": 23, "version": 1 }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_21bd78860001QZ18aEcNVGFTtm",
+          "created": 1795763439712,
+          "type": "session.text.delta",
+          "location": { "directory": "$WORKTREE" },
+          "data": {
+            "sessionID": "ses_de4287898ffeRWODggJS7flulS",
+            "assistantMessageID": "msg_21bd7884c001o04fZzclG7lPpD",
+            "ordinal": 0,
+            "delta": "REPLAY_NOTE_7431"
+          }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_21bd78860002HnUWRmhRqyhRXF",
+          "created": 1795763439712,
+          "type": "session.text.ended",
+          "location": { "directory": "$WORKTREE" },
+          "data": {
+            "sessionID": "ses_de4287898ffeRWODggJS7flulS",
+            "assistantMessageID": "msg_21bd7884c001o04fZzclG7lPpD",
+            "ordinal": 0,
+            "text": "REPLAY_NOTE_7431",
+            "native": { "itemId": "msg_3" }
+          },
+          "durable": { "aggregateID": "ses_de4287898ffeRWODggJS7flulS", "seq": 24, "version": 1 }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_21bd788610019B3FXmV7oJH5XD",
+          "created": 1795763439713,
+          "type": "session.step.streamed",
+          "location": { "directory": "$WORKTREE" },
+          "data": {
+            "sessionID": "ses_de4287898ffeRWODggJS7flulS",
+            "assistantMessageID": "msg_21bd7884c001o04fZzclG7lPpD"
+          },
+          "durable": { "aggregateID": "ses_de4287898ffeRWODggJS7flulS", "seq": 25, "version": 1 }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_21bd78866001ITayDmZbD2tJ4k",
+          "created": 1795763439718,
+          "type": "session.step.ended",
+          "location": { "directory": "$WORKTREE" },
+          "data": {
+            "sessionID": "ses_de4287898ffeRWODggJS7flulS",
+            "assistantMessageID": "msg_21bd7884c001o04fZzclG7lPpD",
+            "finish": "stop",
+            "native": { "responseId": "resp_3" },
+            "tokens": {
+              "input": 1000,
+              "output": 20,
+              "reasoning": 0,
+              "cache": { "read": 200, "write": 0 }
+            },
+            "cost": 0.000855
+          },
+          "durable": { "aggregateID": "ses_de4287898ffeRWODggJS7flulS", "seq": 26, "version": 1 }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_21bd78867001uU5nP60d93KC6C",
+          "created": 1795763439719,
+          "type": "session.usage.updated",
+          "data": {
+            "sessionID": "ses_de4287898ffeRWODggJS7flulS",
+            "cost": 0.002565,
+            "tokens": {
+              "input": 3000,
+              "output": 60,
+              "reasoning": 0,
+              "cache": { "read": 600, "write": 0 }
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_21bd7886a001Lt38mSSmkRuhMU",
+          "created": 1795763439722,
+          "type": "session.execution.succeeded",
+          "data": { "sessionID": "ses_de4287898ffeRWODggJS7flulS" },
+          "durable": { "aggregateID": "ses_de4287898ffeRWODggJS7flulS", "seq": 27, "version": 1 }
+        }
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "port": "process:1/stdin",
+      "payload": {
+        "id": 6,
+        "method": "GET",
+        "path": "/api/experimental/job?sessionID=ses_de4287898ffeRWODggJS7flulS&descendants=true&status=running"
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": { "id": 6, "status": 200, "body": { "data": [] } }
+    },
+    {
+      "type": "expect_outbound",
+      "port": "process:1/stdin",
+      "payload": {
+        "id": 7,
+        "method": "GET",
+        "path": "/api/session/ses_de4287898ffeRWODggJS7flulS/inbox"
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": { "id": 7, "status": 200, "body": { "data": [] } }
+    },
+    {
+      "type": "expect_outbound",
+      "port": "process:1/stdin",
+      "payload": { "id": 8, "method": "GET", "path": "/api/session/active" }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": { "id": 8, "status": 200, "body": { "data": {} } }
+    },
+    { "type": "expect_outbound", "port": "process:1/stdin", "payload": { "eof": true } },
+    { "type": "runtime_exit", "port": "process:1/stdout", "code": 0, "error": null },
+    { "type": "runtime_exit", "port": "process:1/exit", "code": 0, "error": null }
+  ]
+}

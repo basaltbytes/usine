@@ -12,6 +12,7 @@ import { admitBrain, AdmissionContext } from "../../src/harness/admission.ts";
 import { catalog } from "../../src/harness/catalog.ts";
 import { claudeRuntime } from "../../src/harness/claude/claude.ts";
 import { codexRuntime } from "../../src/harness/codex/codex.ts";
+import { openCodeRuntime } from "../../src/harness/opencode/opencode.ts";
 import { continuationPolicy } from "../../src/harness/continuation.ts";
 import { SessionSpec, StartPrompt } from "../../src/harness/contract.ts";
 import { HarnessCatalog } from "../../src/harness/harness.ts";
@@ -19,12 +20,14 @@ import { piRuntime } from "../../src/harness/pi/pi.ts";
 import { Harnesses } from "../../src/harness/registry.ts";
 import type { HarnessRuntime } from "../../src/harness/runtime.ts";
 import { type NativeTools, RolePlacements, RoleSpec } from "../../src/harness/role.ts";
+import type { CredentialRoute } from "../../src/harness/capability.ts";
 import { RestartState, ChildSessionJournal } from "../../src/runtime.ts";
 import { type FixtureOptions, openFixture, openPiFixture } from "../replay/fixture.ts";
+import { MODEL_REQUESTS, openOpenCodeFixture } from "../replay/opencode.ts";
 import type { Transcript } from "../replay/transcript.ts";
 
 /** The harnesses whose adapters serve a usine tool set. */
-export const toolProviders = ["claude", "pi", "codex"] as const;
+export const toolProviders = ["claude", "pi", "codex", "opencode"] as const;
 export type ToolProvider = (typeof toolProviders)[number];
 
 /** The scenarios that prove `usine-tools` and `closed-tools`. */
@@ -109,12 +112,15 @@ const CodexThreadStart = Schema.Struct({
 });
 const CodexInputFrame = Schema.Struct({ data: Schema.Struct({ base64: Schema.String }) });
 const decodeCodexThreadStart = Schema.decodeUnknownOption(Schema.fromJsonString(CodexThreadStart));
+/** The tool names of a model request that an OpenCode recording took from its model server. */
+const OpenCodeModelRequest = Schema.Struct({ tools: Schema.Array(Schema.String) });
 
 /**
  * The tool lists that the recorded traffic shows the session offering to the model: the tools
- * that Pi declares in each provider request, the tools of Claude Code's `init` messages, or the
- * namespaced tools that Codex's `thread/start` registers. Codex's own tools appear only in its
- * model requests, which the app-server traffic doesn't carry.
+ * that Pi declares in each provider request, the tools of Claude Code's `init` messages, the
+ * namespaced tools that Codex's `thread/start` registers, or the tools of each request that
+ * OpenCode sent to the recording's model server. Codex's own tools appear only in its model
+ * requests, which the app-server traffic doesn't carry.
  */
 export const listedTools = (
   provider: ToolProvider,
@@ -140,6 +146,13 @@ export const listedTools = (
       Schema.is(ClaudeInit)(entry.payload)
     )
       return [entry.payload.tools];
+    if (
+      provider === "opencode" &&
+      entry.type === "emit_inbound" &&
+      entry.port === MODEL_REQUESTS &&
+      Schema.is(OpenCodeModelRequest)(entry.payload)
+    )
+      return [entry.payload.tools];
     if (provider === "codex" && entry.type === "expect_outbound" && entry.port.endsWith("/stdin")) {
       const starts = Schema.is(CodexInputFrame)(entry.payload)
         ? entry.payload.data.base64
@@ -162,10 +175,19 @@ export const listedName = {
   claude: "mcp__usine__read_note",
   pi: "read_note",
   codex: "usine.read_note",
+  opencode: "usine_read_note",
 } satisfies Record<ToolProvider, string>;
 
 /** The harnesses whose recorded tool lists include the harness's own tools. */
-export const listsOwnTools: ReadonlySet<ToolProvider> = new Set(["claude", "pi"]);
+export const listsOwnTools: ReadonlySet<ToolProvider> = new Set(["claude", "pi", "opencode"]);
+
+/** The credential route of each harness's recorded tool traffic. */
+const recordedRoutes = {
+  claude: "gateway-subscription",
+  pi: "host-login",
+  codex: "gateway-subscription",
+  opencode: "api-key",
+} satisfies Record<ToolProvider, CredentialRoute>;
 
 /** Registers `runtime` alone, with `provider`'s descriptor, so the registry admits each session. */
 const registered = <R>(
@@ -194,6 +216,13 @@ export const toolFixture = (
       return {
         ...fixture,
         harnesses: registered("pi", piRuntime).pipe(Layer.provide(fixture.harness)),
+      };
+    }
+    if (provider === "opencode") {
+      const fixture = yield* openOpenCodeFixture(scenario, mode, options);
+      return {
+        ...fixture,
+        harnesses: registered("opencode", openCodeRuntime).pipe(Layer.provide(fixture.harness)),
       };
     }
     const fixture = yield* openFixture(provider, scenario, mode, options);
@@ -234,7 +263,7 @@ export const runToolScenario = (
       session.brain,
       AdmissionContext.make({
         placement: "local",
-        credential: provider === "pi" ? "host-login" : "gateway-subscription",
+        credential: recordedRoutes[provider],
       }),
     );
     assert(Result.isSuccess(admitted), `${provider} admits a role with a usine tool set`);

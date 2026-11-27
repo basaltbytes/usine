@@ -64,7 +64,7 @@ import { openCodeEvents } from "./events.ts";
 import { checkModel, modelChoice } from "./model.ts";
 import { openCodePreflight } from "./preflight.ts";
 import { type RestoredInput, restoredInput } from "./restored.ts";
-import { OpenCodeServer } from "./server.ts";
+import { type OpenCodeConnection, OpenCodeServer } from "./server.ts";
 import {
   answered,
   delivered,
@@ -83,6 +83,7 @@ import {
   restarted,
   trackInput,
 } from "./state.ts";
+import { type OpenCodeTools, serveOpenCodeTools } from "./tools.ts";
 
 export { openCodeServerLive } from "./server.ts";
 
@@ -104,12 +105,20 @@ const makeOpenCodeSessions = Effect.gen(function* () {
       sessionId: spec.session.id,
     });
     const sessionId = spec.session.id;
-    if (hostTools.tools.length > 0)
-      return yield* AgentResultError.make({
-        sessionId: Option.some(sessionId),
-        message: "The OpenCode adapter serves no usine tools",
+    yield* Effect.logInfo("Launching OpenCode child session", {
+      resume: start._tag,
+      hostTools: hostTools.tools.length,
+    });
+    const toolServer: Option.Option<OpenCodeTools> =
+      hostTools.tools.length > 0
+        ? yield* Effect.asSome(serveOpenCodeTools(hostTools, sessionId))
+        : Option.none();
+    /** Attaches the session's usine tools, if it has any, through `client` to session `root`. */
+    const attachTools = (client: OpenCodeConnection, root: string) =>
+      Option.match(toolServer, {
+        onNone: () => Effect.void,
+        onSome: (served) => served.attach(client, spec.cwd, root),
       });
-    yield* Effect.logInfo("Launching OpenCode child session", { resume: start._tag });
     const lifecycle = yield* ChildSessionLifecycle.current;
     const reference = startReference(start);
     const data = Option.match(
@@ -156,9 +165,10 @@ const makeOpenCodeSessions = Effect.gen(function* () {
           title: `usine ${spec.session.agent}`,
           location: { directory: spec.cwd },
           model,
-          permissions: sessionPermissions(spec.admitted.role.nativeTools).map((rule) => ({
-            ...rule,
-          })),
+          permissions: sessionPermissions(
+            spec.admitted.role.nativeTools,
+            Option.isSome(toolServer) ? "served" : "none",
+          ).map((rule) => ({ ...rule })),
         }),
       onSome: (saved) =>
         api.read(SessionInfo, "launch", "GET", `/api/session/${encodeURIComponent(saved.id)}`),
@@ -166,6 +176,7 @@ const makeOpenCodeSessions = Effect.gen(function* () {
     const id = info.data.id;
     const sessionPath = `/api/session/${encodeURIComponent(id)}`;
     yield* api.setToolEnvironment("launch", id);
+    yield* attachTools(connection, id);
     const session: AgentSession = resolvedSession(spec.session, {
       brain,
       // OpenCode bills only API keys; a gateway that hasn't reported its kind holds one too.
@@ -335,6 +346,10 @@ const makeOpenCodeSessions = Effect.gen(function* () {
       channel,
       tasks,
       fail,
+      toolName: Option.match(toolServer, {
+        onNone: () => (name: string) => name,
+        onSome: (served) => served.toolName,
+      }),
     };
     const done = doneCheck(context);
 
@@ -530,6 +545,7 @@ const makeOpenCodeSessions = Effect.gen(function* () {
           const reopenedApi = openCodeApi(reopened, Option.some(sessionId));
           yield* reopenedApi.read(SessionInfo, "launch", "GET", sessionPath);
           yield* reopenedApi.setToolEnvironment("launch", id);
+          yield* attachTools(reopened, id);
           yield* Ref.update(state, (latest): OpenCodeState => ({
             ...latest,
             connection: reopened,

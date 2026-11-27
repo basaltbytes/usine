@@ -72,17 +72,19 @@ export const capabilityProofs = {
  * structured completions replays the completion scenarios in `completion.test.ts`, the harnesses
  * that serve usine tool sets replay their tool scenarios in `host-tools.test.ts`, and the
  * harnesses that admit the supervisor role replay the supervisor scenario in
- * `supervisor.test.ts`. OpenCode replays its scenarios in `opencode.test.ts`.
+ * `supervisor.test.ts`.
+ * OpenCode replays its session scenarios in `opencode.test.ts`.
  */
-export const replayedScenarios = (harness: Harness): ReadonlyArray<Scenario> =>
-  harness === "opencode" ? openCodeScenarios : providerScenarios(harness);
+export const replayedScenarios = (harness: Harness): ReadonlyArray<Scenario> => [
+  ...(harness === "opencode" ? openCodeScenarios : providerScenarios(harness)),
+  ...toolProviders.flatMap((provider) => (provider === harness ? toolScenariosOf(provider) : [])),
+];
 
 const providerScenarios = (harness: Harness): ReadonlyArray<Scenario> => [
   ...(harness === "pi"
     ? piScenarios
     : [...scenarios, "restart" as const, "credential-changed" as const]),
   ...completionScenarios,
-  ...toolProviders.flatMap((provider) => (provider === harness ? toolScenariosOf(provider) : [])),
   ...supervisorProviders.flatMap((provider) =>
     provider === harness ? ["supervisor" as const] : [],
   ),

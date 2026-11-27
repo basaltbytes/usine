@@ -57,6 +57,8 @@ export interface OpenCodeContext {
   readonly tasks: FiberSet.FiberSet<void>;
   /** Closes the bridge and fails the session with `error`, unless the session is stopping. */
   readonly fail: (error: AgentSessionError) => Effect.Effect<void>;
+  /** The name that session events carry for OpenCode's tool `name`: a usine tool's toolkit name. */
+  readonly toolName: (name: string) => string;
 }
 
 /** Applies `f` to the pending input and background work of `state`. */

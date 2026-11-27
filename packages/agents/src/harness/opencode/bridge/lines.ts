@@ -54,8 +54,45 @@ const BridgeEnvironmentRequest = Schema.Struct({
   environment: OpenCodeSessionId,
 });
 
+/** The name of an MCP server that the client hosts, as OpenCode accepts it. */
+const McpServerName = Schema.String.check(
+  Schema.isPattern(/^[A-Za-z0-9_-]+$/u, {
+    message: "Expected an MCP server name of letters, digits, underscores, and hyphens",
+  }),
+);
+
+/** A JSON-RPC message of the MCP protocol: a JSON object. */
+export const McpMessage = Schema.Record(Schema.String, Schema.Json);
+export type McpMessage = typeof McpMessage.Type;
+
+/**
+ * A line on the bridge's standard input that attaches the client's MCP server `mcp` to OpenCode
+ * in `directory`: the bridge opens OpenCode's client MCP socket for them and answers with status
+ * 101 once the socket is open, or with 200 when the bridge already holds the socket of `mcp`. The
+ * bridge reconnects a socket that OpenCode closes, until its input ends.
+ */
+export const BridgeMcpConnect = Schema.Struct({
+  id: BridgeRequestId,
+  mcp: McpServerName,
+  directory: Schema.String,
+});
+export type BridgeMcpConnect = typeof BridgeMcpConnect.Type;
+
+/**
+ * A message of the client's MCP server `mcp`, in either direction: on the bridge's standard input,
+ * the bridge sends `message` to OpenCode over the server's socket; on its standard output, OpenCode
+ * sent `message` over it.
+ */
+export const BridgeMcpMessage = Schema.Struct({ mcp: McpServerName, message: McpMessage });
+export type BridgeMcpMessage = typeof BridgeMcpMessage.Type;
+
 /** A line on the bridge's standard input. */
-export const BridgeInput = Schema.Union([BridgeRequest, BridgeEnvironmentRequest]);
+export const BridgeInput = Schema.Union([
+  BridgeRequest,
+  BridgeEnvironmentRequest,
+  BridgeMcpConnect,
+  BridgeMcpMessage,
+]);
 export type BridgeInput = typeof BridgeInput.Type;
 
 /**
@@ -93,11 +130,20 @@ export type OpenCodeEvent = typeof OpenCodeEvent.Type;
 export const BridgeEvent = Schema.Struct({ event: OpenCodeEvent });
 export type BridgeEvent = typeof BridgeEvent.Type;
 
+/**
+ * The line that reports that OpenCode closed the socket of the client's MCP server `mcp`, with the
+ * reason. The bridge then reconnects it, and OpenCode initializes the server again.
+ */
+export const BridgeMcpClosed = Schema.Struct({ mcp: McpServerName, closed: Schema.String });
+export type BridgeMcpClosed = typeof BridgeMcpClosed.Type;
+
 /** A line on the bridge's standard output. */
 export const BridgeOutput = Schema.Union([
   BridgeReady,
   BridgeAnswer,
   BridgeRequestFailed,
   BridgeEvent,
+  BridgeMcpMessage,
+  BridgeMcpClosed,
 ]);
 export type BridgeOutput = typeof BridgeOutput.Type;

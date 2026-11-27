@@ -4,7 +4,17 @@ import { AgentName } from "@usine/core/agent";
 import { BrainSpec, Harness, ModelId } from "@usine/core/agent/brain";
 import { AgentSessionId, ChildSession } from "@usine/core/agent/session";
 import { WorkerName } from "@usine/core/worker";
-import { Effect, FileSystem, Layer, Option, Path, Predicate, Schema, Stream } from "effect";
+import {
+  Deferred,
+  Effect,
+  FileSystem,
+  Layer,
+  Option,
+  Path,
+  Predicate,
+  Schema,
+  Stream,
+} from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import { env } from "node:process";
 import { fileURLToPath } from "node:url";
@@ -169,26 +179,48 @@ const recordedMessageIds = (inner: ChildProcessSpawner.ChildProcessSpawner["Serv
 };
 
 const ModelServer = Schema.fromJsonString(Schema.Struct({ url: Schema.String }));
+/** The names of the tools of one model request, which the scripted model server prints. */
+const ModelRequest = Schema.Struct({ tools: Schema.Array(Schema.String) });
+const decodeModelRequest = Schema.decodeUnknownEffect(Schema.fromJsonString(ModelRequest));
 
 /**
- * Starts the scripted model server that a recording's OpenCode calls, and returns its base URL.
- * It stops with the scope.
+ * The port whose entries hold the tool names of each model request, which a transcript records
+ * beside the bridge's traffic, because OpenCode calls the model server outside the bridge.
  */
-const modelServer = Effect.gen(function* () {
-  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-  const program = fileURLToPath(new URL("../fixtures/opencode-model.mjs", import.meta.url));
-  const handle = yield* spawner.spawn(ChildProcess.make(process.execPath, [program]));
-  const first = yield* handle.stdout.pipe(
-    Stream.decodeText(),
-    Stream.splitLines,
-    Stream.take(1),
-    Stream.runCollect,
-  );
-  const line = first[0];
-  assert(line !== undefined, "the model server prints its address");
-  const { url } = yield* Schema.decodeEffect(ModelServer)(line);
-  return url;
-});
+export const MODEL_REQUESTS = "model:1/requests";
+
+/**
+ * Starts the scripted model server that a recording's OpenCode calls, records the tool names of
+ * each of its requests on `MODEL_REQUESTS`, and returns its base URL. It stops with the scope.
+ */
+const modelServer = (tape: Tape) =>
+  Effect.gen(function* () {
+    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+    const program = fileURLToPath(new URL("../fixtures/opencode-model.mjs", import.meta.url));
+    const handle = yield* spawner.spawn(ChildProcess.make(process.execPath, [program]));
+    const address = yield* Deferred.make<string>();
+    yield* handle.stdout.pipe(
+      Stream.decodeText(),
+      Stream.splitLines,
+      Stream.runForEach((line) =>
+        Effect.gen(function* () {
+          if (!(yield* Deferred.isDone(address))) {
+            const { url } = yield* Schema.decodeEffect(ModelServer)(line);
+            return yield* Deferred.succeed(address, url);
+          }
+          const request = yield* decodeModelRequest(line);
+          tape.inbound(MODEL_REQUESTS, { tools: [...request.tools] });
+        }),
+      ),
+      Effect.orDie,
+      Effect.forkScoped,
+    );
+    return yield* Deferred.await(address);
+  });
+
+/** Reads the model requests of a replayed transcript, which no process asks for, until the scope closes. */
+const drainModelRequests = (tape: Tape) =>
+  Effect.promise(() => tape.read(MODEL_REQUESTS)).pipe(Effect.forever, Effect.forkScoped);
 
 /**
  * Returns a recording's environment: its own HOME and OpenCode home, the scripted model server's
@@ -209,7 +241,7 @@ const recordingEnvironment = Effect.fn("OpenCodeFixture.recordingEnvironment")(f
     ChildProcess.make("opencode", ["--version"], { env: { HOME: userHome }, extendEnv: true }),
   );
   assert.include(installed, version, "record fixtures with the pinned OpenCode version");
-  const url = yield* modelServer;
+  const url = yield* modelServer(tape);
   tape.bind(userHome, "$HOME");
   tape.bind(home, "$OPENCODE_HOME");
   tape.bind(url, "$MODEL_URL");
@@ -291,14 +323,19 @@ export const openOpenCodeFixture = (
     assert(model !== undefined, "set the integration model to record traffic");
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
     const live = mode === "record" ? trimmedModelLists(spawner, model) : undefined;
+    if (source !== "record") yield* drainModelRequests(tape);
     const transport = Layer.effect(
       ChildProcessSpawner.ChildProcessSpawner,
       Effect.map(ChildProcessSpawner.ChildProcessSpawner, recordedMessageIds),
     ).pipe(Layer.provide(processTransport(tape, live)));
+    /** The OpenCode server on the recorded transport, which a harness runtime needs. */
+    const harness = openCodeServerLive.pipe(
+      Layer.provideMerge(transport),
+      Layer.provideMerge(NodeServices.layer),
+    );
     const backend = openCodeChildLayer.pipe(
       Layer.provideMerge(ChildSessionJournal.layerNoop),
-      Layer.provide(openCodeServerLive),
-      Layer.provide(transport),
+      Layer.provide(harness),
       Layer.provideMerge(NodeServices.layer),
     );
     const request = ChildRequest.make({
@@ -342,6 +379,7 @@ export const openOpenCodeFixture = (
       cwd,
       request,
       backend,
+      harness,
       controls: {
         nativeReceipts: true,
         drop: Effect.void,

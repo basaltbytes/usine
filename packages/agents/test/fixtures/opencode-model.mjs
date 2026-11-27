@@ -1,7 +1,9 @@
 // A scripted OpenAI Responses API on loopback, which OpenCode calls while a replay records. It
-// prints its base URL as `{"url": ...}` and answers each streamed request by the conversation:
-// with a `shell` call of `node wait.cjs` for the waiting task, and otherwise with the reply that
-// the scenario's last instruction names. Every answer reports usage.
+// prints its base URL as `{"url": ...}`, then the names of the tools of each request as
+// `{"tools": [...]}`, and answers each streamed request by the conversation: with a `shell` call
+// of `node wait.cjs` for the waiting task, with the `read_note` calls that the tool scenarios ask
+// for, then the note, and otherwise with the reply that the scenario's last instruction names.
+// Every answer reports usage.
 import { createServer } from "node:http";
 
 const textsOf = (input) =>
@@ -14,14 +16,37 @@ const textsOf = (input) =>
     return content.map((part) => ({ role: item.role, text: part.text ?? "" }));
   });
 
+/**
+ * Returns the `read_note` call or the reply of a tool scenario: a call with the name `missing`
+ * first if the prompt asks for it, then one with `greeting`, then the text of the last result.
+ */
+const noteAnswer = (body, texts, prompt) => {
+  const tool = (body.tools ?? [])
+    .map(({ name }) => name)
+    .find((name) => name.endsWith("read_note"));
+  if (tool === undefined) return { text: "NO_READ_NOTE_TOOL" };
+  const calls = texts.filter(({ role }) => role === "call").length;
+  const names = prompt.includes('"missing"') ? ["missing", "greeting"] : ["greeting"];
+  const name = names[calls];
+  if (name !== undefined) return { call: { name: tool, arguments: { name } } };
+  return { text: texts.filter(({ role }) => role === "tool").at(-1)?.text ?? "" };
+};
+
 const answer = (body) => {
   const texts = textsOf(body.input);
   const users = texts.filter(({ role }) => role === "user").map(({ text }) => text);
   const last = users.at(-1) ?? "";
+  const notePrompt = users.find((text) => text.includes("read_note tool"));
+  if (notePrompt !== undefined) return noteAnswer(body, texts, notePrompt);
   if (last.includes("REPLAY_SECOND")) return { text: "REPLAY_SECOND" };
   if (users.some((text) => text.includes("REPLAY_GUIDED"))) return { text: "REPLAY_GUIDED" };
   if (last.includes("node wait.cjs") && !texts.some(({ role }) => role === "call"))
-    return { call: { command: "node wait.cjs", description: "Wait for the test" } };
+    return {
+      call: {
+        name: "shell",
+        arguments: { command: "node wait.cjs", description: "Wait for the test" },
+      },
+    };
   return { text: "REPLAY_DONE" };
 };
 
@@ -38,6 +63,9 @@ const server = createServer((request, response) => {
       return;
     }
     const body = JSON.parse(raw);
+    process.stdout.write(
+      `${JSON.stringify({ tools: (body.tools ?? []).map(({ name }) => name) })}\n`,
+    );
     const plan = answer(body);
     responses += 1;
     const id = `resp_${responses}`;
@@ -47,12 +75,12 @@ const server = createServer((request, response) => {
     send({ type: "response.created", response: { ...base, status: "in_progress" } });
     let item;
     if (plan.call !== undefined) {
-      const args = JSON.stringify(plan.call);
+      const args = JSON.stringify(plan.call.arguments);
       item = {
         type: "function_call",
         id: `fc_${responses}`,
         call_id: `call_${responses}`,
-        name: "shell",
+        name: plan.call.name,
         arguments: args,
         status: "completed",
       };

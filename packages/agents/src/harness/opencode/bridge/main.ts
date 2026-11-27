@@ -1,5 +1,6 @@
-// This standalone Node entry point relays an OpenCode server over JSON lines on its standard
-// streams, without runtime dependencies, and reports its own failures through stderr.
+// This standalone Node entry point relays an OpenCode server and its client MCP sockets over JSON
+// lines on its standard streams, without runtime dependencies, and reports its own failures
+// through stderr.
 // @effect-diagnostics nodeBuiltinImport:off
 // @effect-diagnostics globalJson:off
 // @effect-diagnostics globalTimers:off
@@ -9,6 +10,7 @@ import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { type OutgoingHttpHeaders, request as httpRequest } from "node:http";
 import { constants } from "node:os";
+import { MCP_RECONNECT_MS, nextReconnectDelay } from "./reconnect.ts";
 
 type Json = null | boolean | number | string | ReadonlyArray<Json> | JsonObject;
 interface JsonObject {
@@ -25,10 +27,39 @@ interface Server {
   readonly host: string;
   readonly port: number;
 }
+/** A line that attaches the client's MCP server `name` to OpenCode in `directory`. */
+interface McpConnect {
+  readonly id: RequestId;
+  readonly name: string;
+  readonly directory: string;
+}
+/** A message that the client's MCP server `name` sends to OpenCode. */
+interface McpSend {
+  readonly name: string;
+  readonly message: JsonObject;
+}
 type InputLine =
   | { readonly request: Request }
+  | { readonly connect: McpConnect }
+  | { readonly send: McpSend }
   | { readonly id: RequestId; readonly invalid: string }
   | { readonly invalid: string };
+/** The socket of a client MCP server, which the bridge reopens until its input ends. */
+interface McpSocket {
+  readonly directory: string;
+  socket: WebSocket | undefined;
+  /** Whether the socket is open. */
+  open: boolean;
+  /** Whether a socket of this server has opened since the client attached it. */
+  attached: boolean;
+  /** The connect lines that wait for the socket to open. */
+  readonly waiting: Array<RequestId>;
+  /** Milliseconds before the next reconnection. */
+  delay: number;
+  timer: ReturnType<typeof setTimeout> | undefined;
+  /** The last socket error, which the close reports. */
+  error: string | undefined;
+}
 
 /** `serve` on a free loopback port, with its warnings on stderr. */
 const SERVE_ARGUMENTS = [
@@ -66,6 +97,17 @@ const HEAD_LENGTH = 256;
  * ID shorter than `MAX_LINE_BYTES`, and equals the bound of `BridgeRequestId` in `lines.ts`.
  */
 const MAX_ID_LENGTH = 128;
+/** OpenCode's path for the MCP servers that a client hosts over a WebSocket. */
+const CLIENT_MCP_PATH = "/api/experimental/client-mcp";
+/** The name of a client MCP server, as OpenCode accepts it. */
+const MCP_NAME = /^[A-Za-z0-9_-]+$/u;
+/** Node's WebSocket client, whose constructor also takes the headers of the opening request. */
+type NodeWebSocket = new (
+  url: URL,
+  init?: string | Array<string> | { readonly headers: Readonly<Record<string, string>> },
+) => WebSocket;
+// SAFETY: Node's global WebSocket is undici's, which reads `headers` from its second argument.
+const NodeWebSocket = WebSocket as NodeWebSocket;
 
 const isObject = (value: Json): value is JsonObject =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -91,16 +133,30 @@ const requestId = (value: Json | undefined): RequestId | undefined =>
 const SESSION_ID = /^ses_[A-Za-z0-9]+$/u;
 
 /**
- * Parses an input line: a request, or an environment line `{"id":...,"environment":"<session>"}`,
- * which becomes `PUT /api/session/<session>/environment` with `tools` as the session's variables.
+ * Parses an input line: a request; an environment line `{"id":...,"environment":"<session>"}`,
+ * which becomes `PUT /api/session/<session>/environment` with `tools` as the session's variables;
+ * an MCP connect line `{"id":...,"mcp":"<server>","directory":"<directory>"}`; or an MCP message
+ * line `{"mcp":"<server>","message":{...}}`.
  */
 const inputLine = (line: string, tools: JsonObject): InputLine => {
   const parsed = parseJson(line);
   if (parsed === undefined) return { invalid: "isn't JSON" };
   if (!isObject(parsed.value)) return { invalid: "isn't a JSON object" };
-  const { method, path, body, environment } = parsed.value;
+  const { method, path, body, environment, mcp, message, directory } = parsed.value;
+  if (mcp !== undefined && message !== undefined) {
+    if (typeof mcp !== "string" || !MCP_NAME.test(mcp)) return { invalid: "names no MCP server" };
+    if (!isObject(message)) return { invalid: "has an MCP message that isn't a JSON object" };
+    return { send: { name: mcp, message } };
+  }
   const id = requestId(parsed.value.id);
   if (id === undefined) return { invalid: "has no request ID" };
+  if (mcp !== undefined) {
+    if (typeof mcp !== "string" || !MCP_NAME.test(mcp))
+      return { id, invalid: "names no MCP server" };
+    if (typeof directory !== "string" || !directory.startsWith("/"))
+      return { id, invalid: "has no absolute MCP directory" };
+    return { connect: { id, name: mcp, directory } };
+  }
   if (environment !== undefined) {
     if (typeof environment !== "string" || !SESSION_ID.test(environment))
       return { id, invalid: "names no OpenCode session" };
@@ -302,6 +358,8 @@ const main = () => {
   let closing = false;
   let failed = false;
   let finished = false;
+  /** Whether serve exited, after which no client MCP socket reopens. */
+  let exited = false;
   let readyWait: ReturnType<typeof setTimeout> | undefined;
   const waiting: Array<string> = [];
   let waitingBytes = 0;
@@ -321,6 +379,119 @@ const main = () => {
     failed = true;
     warn(message);
     serve.stdin.end();
+  };
+
+  const sockets = new Map<string, McpSocket>();
+  /** Opens the client MCP socket of server `name` on `target`, and reopens it when it closes. */
+  const openSocket = (target: Server, name: string, entry: McpSocket) => {
+    entry.timer = undefined;
+    const host = target.host.includes(":") ? `[${target.host}]` : target.host;
+    const url = new URL(`ws://${host}:${target.port}${CLIENT_MCP_PATH}`);
+    url.searchParams.set("location[directory]", entry.directory);
+    url.searchParams.set("name", name);
+    const socket = new NodeWebSocket(url, { headers: { authorization } });
+    entry.socket = socket;
+    entry.error = undefined;
+    socket.addEventListener("open", () => {
+      if (closing) return socket.close(1000);
+      entry.open = true;
+      entry.attached = true;
+      entry.delay = MCP_RECONNECT_MS;
+      for (const id of entry.waiting.splice(0)) writeLine({ id, status: 101, body: null });
+    });
+    let ended = false;
+    // Handles the socket's end once: Node's WebSocket reports a refused opening only as an error.
+    const end = (code: number, reason: string) => {
+      if (ended) return;
+      ended = true;
+      const wasOpen = entry.open;
+      entry.open = false;
+      if (entry.socket === socket) entry.socket = undefined;
+      if (closing || exited) return;
+      const why = [`code ${code}`, reason, entry.error]
+        .filter((part) => part !== undefined && part !== "")
+        .join(": ");
+      if (!entry.attached) {
+        sockets.delete(name);
+        for (const id of entry.waiting.splice(0))
+          writeLine({ id, error: `Can't open OpenCode's MCP socket for ${name} (${why})` });
+        return;
+      }
+      if (wasOpen) writeLine({ mcp: name, closed: why });
+      warn(`OpenCode closed the MCP socket of ${name} (${why}); reconnecting in ${entry.delay} ms`);
+      entry.timer = setTimeout(() => openSocket(target, name, entry), entry.delay);
+      entry.delay = nextReconnectDelay(entry.delay);
+    };
+    socket.addEventListener("error", (event) => {
+      entry.error = "message" in event && typeof event.message === "string" ? event.message : "";
+      end(1006, "");
+    });
+    socket.addEventListener("message", (event) => {
+      if (typeof event.data !== "string")
+        return warn(`skipping a binary message on the MCP socket of ${name}`);
+      const parsed = parseJson(event.data);
+      if (parsed === undefined || !isObject(parsed.value))
+        return warn(
+          `skipping a message of ${Buffer.byteLength(event.data)} bytes on the MCP socket of ${name} that isn't a JSON object`,
+        );
+      const line = outputLine({ mcp: name, message: parsed.value });
+      if (line !== undefined) return void process.stdout.write(line);
+      warn(
+        `skipping a message of ${Buffer.byteLength(event.data)} bytes on the MCP socket of ${name} that is too long for a line of ${MAX_LINE_BYTES} bytes`,
+      );
+      // OpenCode waits for the answer to a request, so the bridge refuses it.
+      const { id, method } = parsed.value;
+      if (requestId(id) !== undefined && typeof method === "string")
+        socket.send(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id,
+            error: {
+              code: -32603,
+              message: `The usine bridge can't relay a ${method} request this long`,
+            },
+          }),
+        );
+    });
+    socket.addEventListener("close", (event) => end(event.code, event.reason));
+  };
+  /** Attaches the client MCP server that `connect` names, or answers that it is attached. */
+  const connectMcp = (target: Server, connect: McpConnect) => {
+    const existing = sockets.get(connect.name);
+    if (existing === undefined) {
+      const entry: McpSocket = {
+        directory: connect.directory,
+        socket: undefined,
+        open: false,
+        attached: false,
+        waiting: [connect.id],
+        delay: MCP_RECONNECT_MS,
+        timer: undefined,
+        error: undefined,
+      };
+      sockets.set(connect.name, entry);
+      return openSocket(target, connect.name, entry);
+    }
+    if (existing.directory !== connect.directory)
+      return writeLine({
+        id: connect.id,
+        error: `The MCP server ${connect.name} is attached in another directory`,
+      });
+    if (existing.open) return writeLine({ id: connect.id, status: 200, body: null });
+    existing.waiting.push(connect.id);
+  };
+  /** Sends `send.message` over the socket of its server, or drops it when the socket is closed. */
+  const sendMcp = (send: McpSend) => {
+    const entry = sockets.get(send.name);
+    if (entry?.socket === undefined || !entry.open)
+      return warn(`dropping a message for the MCP server ${send.name}, whose socket isn't open`);
+    entry.socket.send(JSON.stringify(send.message));
+  };
+  const closeSockets = () => {
+    for (const entry of sockets.values()) {
+      clearTimeout(entry.timer);
+      entry.socket?.close(1000);
+    }
   };
 
   const relay = (target: Server, request: Request) => {
@@ -385,6 +556,17 @@ const main = () => {
   // Relays the request in `line`, or answers it with the reason it is invalid or `refused`.
   const handle = (line: string, refused?: string) => {
     const parsed = inputLine(line, tools);
+    if ("send" in parsed) {
+      if (refused !== undefined)
+        return warn(`dropping a message for the MCP server ${parsed.send.name}: it ${refused}`);
+      return sendMcp(parsed.send);
+    }
+    if ("connect" in parsed) {
+      if (refused !== undefined)
+        return writeLine({ id: parsed.connect.id, error: `The request ${refused}` });
+      if (server !== undefined) connectMcp(server, parsed.connect);
+      return;
+    }
     if ("request" in parsed) {
       if (refused !== undefined)
         return writeLine({ id: parsed.request.id, error: `The request ${refused}` });
@@ -519,6 +701,8 @@ const main = () => {
   });
   serve.on("exit", (code, signal) => {
     clearTimeout(readyWait);
+    exited = true;
+    closeSockets();
     const exitCode = code ?? (signal === null ? 1 : 128 + (constants.signals[signal] ?? 0));
     const done = () => finish(failed && exitCode === 0 ? 1 : exitCode);
     serve.on("close", done);
@@ -531,6 +715,7 @@ const main = () => {
   process.stdin.on("end", () => {
     input.end();
     closing = true;
+    closeSockets();
     serve.stdin.end();
   });
 };

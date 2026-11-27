@@ -5,8 +5,10 @@
 // @effect-diagnostics processEnv:off
 import type { Schema } from "effect";
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
+import type { Duplex } from "node:stream";
 import type { OpenCodeEvent } from "../../src/harness/opencode/bridge/lines.ts";
 
 type Route = (request: IncomingMessage, response: ServerResponse) => void;
@@ -23,6 +25,15 @@ type Route = (request: IncomingMessage, response: ServerResponse) => void;
  * - `refuse-events` answers the event subscription with 401.
  * - `refuse-events-at-end` holds the event subscription and answers it with 401 at end of input.
  * - `helper` starts a detached process that keeps its stdout and stderr open after it exits.
+ * - `refuse-mcp` refuses every client MCP socket with 403.
+ * - `refuse-reconnect` opens the first client MCP socket and refuses the next ones with 403.
+ * - `hold-reconnect` opens the first client MCP socket and never answers the opening of the next
+ *   ones.
+ *
+ * Like OpenCode, the fake sends `initialize` on each client MCP socket that opens, with the
+ * server's name, directory, and the number of sockets opened so far. It reports each message that
+ * a socket receives as a `fake.mcp` event. When a socket has opened, it reports on stderr the
+ * sockets still open 200 ms after end of input, before it exits.
  */
 const scenario = process.env.FAKE_SERVE_SCENARIO ?? "ready";
 /** The exit code at end of input, from `FAKE_SERVE_EXIT_CODE`. */
@@ -44,6 +55,67 @@ const LINE_LIMIT = 4 * 1024 ** 2;
 const LARGE_TEXT = "x".repeat(LINE_LIMIT + 1);
 /** The bytes of `GET /api/large`'s body: far more than the bridge reads of a response. */
 const LARGE_RESPONSE_BYTES = 64 * 1024 ** 2;
+
+/** The open client MCP sockets, by server name. */
+const mcpSockets = new Map<string, Duplex>();
+let mcpConnections = 0;
+/** Milliseconds between end of input and the report of the open client MCP sockets. */
+const MCP_REPORT_MS = 200;
+/** Returns a WebSocket frame of the server, which is never masked. */
+const frame = (opcode: number, payload: Buffer) => {
+  const { length } = payload;
+  const header =
+    length < 126
+      ? Buffer.from([0x80 | opcode, length])
+      : length < 0x10000
+        ? Buffer.from([0x80 | opcode, 126, length >> 8, length & 0xff])
+        : Buffer.concat([Buffer.from([0x80 | opcode, 127]), bigEndian64(length)]);
+  return Buffer.concat([header, payload]);
+};
+const bigEndian64 = (value: number) => {
+  const bytes = Buffer.alloc(8);
+  bytes.writeBigUInt64BE(BigInt(value));
+  return bytes;
+};
+const sendText = (socket: Duplex, text: string) => socket.write(frame(1, Buffer.from(text)));
+/** Returns a reader of the client's frames, which are masked and unfragmented. */
+const frames = (onText: (text: string) => void, onClose: () => void) => {
+  let buffer = Buffer.alloc(0);
+  return (chunk: Buffer) => {
+    buffer = Buffer.concat([buffer, chunk]);
+    for (;;) {
+      if (buffer.length < 2) return;
+      const opcode = (buffer[0] ?? 0) & 0x0f;
+      let length = (buffer[1] ?? 0) & 0x7f;
+      let offset = 2;
+      if (length === 126) {
+        if (buffer.length < 4) return;
+        length = buffer.readUInt16BE(2);
+        offset = 4;
+      } else if (length === 127) {
+        if (buffer.length < 10) return;
+        length = Number(buffer.readBigUInt64BE(2));
+        offset = 10;
+      }
+      if (buffer.length < offset + 4 + length) return;
+      const mask = buffer.subarray(offset, offset + 4);
+      const payload = Buffer.from(buffer.subarray(offset + 4, offset + 4 + length));
+      for (let index = 0; index < payload.length; index++)
+        payload[index] = (payload[index] ?? 0) ^ (mask[index % 4] ?? 0);
+      buffer = buffer.subarray(offset + 4 + length);
+      if (opcode === 1) onText(payload.toString("utf8"));
+      if (opcode === 8) onClose();
+    }
+  };
+};
+/** Closes every client MCP socket with code 1011, as a server that restarts its MCP host does. */
+const closeMcpSockets = () => {
+  const reason = Buffer.from("fake restart");
+  const code = Buffer.alloc(2);
+  code.writeUInt16BE(1011);
+  for (const socket of mcpSockets.values()) socket.end(frame(8, Buffer.concat([code, reason])));
+  mcpSockets.clear();
+};
 
 const subscribers = new Set<ServerResponse>();
 const held = new Set<ServerResponse>();
@@ -212,6 +284,33 @@ const routes = new Map<string, Route>(
       process.stderr.write("fake serve: crashed while answering\n");
       process.exit(4);
     },
+    // A helper holds the client MCP sockets for 100 ms, so the bridge sees the exit before they close.
+    "POST /api/crash-holding-mcp": () => {
+      spawn(process.execPath, ["-e", "setTimeout(() => {}, 100)"], {
+        detached: true,
+        stdio: ["ignore", "ignore", "ignore", ...mcpSockets.values()],
+      }).unref();
+      process.stderr.write("fake serve: crashed with its MCP sockets open\n");
+      process.exit(4);
+    },
+    "POST /api/mcp-close": (_request, response) => {
+      closeMcpSockets();
+      json(response, 200, {});
+    },
+    // Sends a request longer than the bridge's line limit on every client MCP socket.
+    "POST /api/mcp-large": (_request, response) => {
+      for (const socket of mcpSockets.values())
+        sendText(
+          socket,
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: 7,
+            method: "tools/call",
+            params: { text: LARGE_TEXT },
+          }),
+        );
+      json(response, 200, {});
+    },
     "POST /api/garbage": (_request, response) => {
       for (const subscriber of subscribers) {
         subscriber.write("data: {not json\n\n");
@@ -238,6 +337,55 @@ const server = createServer((request, response) => {
   }
   route(request, response);
 });
+server.on("upgrade", (request: IncomingMessage, socket: Duplex) => {
+  const url = new URL(request.url ?? "/", "http://fake");
+  const key = request.headers["sec-websocket-key"];
+  const name = url.searchParams.get("name") ?? "";
+  if (
+    url.pathname !== "/api/experimental/client-mcp" ||
+    request.headers.authorization !== `Basic ${btoa(`${userName}:${password}`)}` ||
+    key === undefined ||
+    scenario === "refuse-mcp" ||
+    (scenario === "refuse-reconnect" && mcpConnections > 0)
+  )
+    return void socket.end("HTTP/1.1 403 Forbidden\r\ncontent-length: 0\r\n\r\n");
+  if (scenario === "hold-reconnect" && mcpConnections > 0) {
+    socket.on("error", () => {});
+    return void process.stderr.write("fake serve: holding the opening of an MCP socket\n");
+  }
+  const accept = createHash("sha1")
+    .update(`${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`)
+    .digest("base64");
+  socket.write(
+    `HTTP/1.1 101 Switching Protocols\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-accept: ${accept}\r\n\r\n`,
+  );
+  mcpConnections += 1;
+  mcpSockets.set(name, socket);
+  socket.on("error", () => {});
+  socket.on(
+    "data",
+    frames(
+      (text) => emit({ type: "fake.mcp", data: { name, message: JSON.parse(text) } }),
+      () => {
+        mcpSockets.delete(name);
+        socket.end();
+      },
+    ),
+  );
+  sendText(
+    socket,
+    JSON.stringify({
+      jsonrpc: "2.0",
+      id: 0,
+      method: "initialize",
+      params: {
+        name,
+        directory: url.searchParams.get("location[directory]"),
+        connection: mcpConnections,
+      },
+    }),
+  );
+});
 server.listen(0, "127.0.0.1", () => {
   // SAFETY: a server listening on a TCP port reports an AddressInfo, never a pipe name or null.
   const { port } = server.address() as AddressInfo;
@@ -263,6 +411,11 @@ if (scenario === "helper") {
 // Like `serve --stdio`, end of input ends the lease. The default exit code, 7, shows that it arrived.
 process.stdin.on("end", () => {
   process.stderr.write("fake serve: end of input\n");
+  if (mcpConnections > 0)
+    return void setTimeout(() => {
+      process.stderr.write(`fake serve: ${mcpSockets.size} MCP sockets open after end of input\n`);
+      process.exit(exitCode);
+    }, MCP_REPORT_MS);
   if (held.size === 0) process.exit(exitCode);
   for (const response of held) json(response, 401, { _tag: "UnauthorizedError" });
   // Gives the bridge time to read the refusal before serve's exit.

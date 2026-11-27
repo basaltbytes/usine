@@ -71,7 +71,8 @@ export interface EventActions {
 
 /** Returns the handler of the OpenCode events of the session that `context` describes. */
 export const openCodeEvents = (context: OpenCodeContext, actions: EventActions) => {
-  const { sessionId, root, session, state, api, conversation, channel, tasks, fail } = context;
+  const { sessionId, root, session, state, api, conversation, channel, tasks, fail, toolName } =
+    context;
   const { done, operatorIds, endInputs, endInterrupted, pause } = actions;
 
   const reportModelOutput = Effect.fn("OpenCodeRuntime.reportModelOutput")(function* () {
@@ -254,7 +255,7 @@ export const openCodeEvents = (context: OpenCodeContext, actions: EventActions) 
         const { id: callId, name } = event.data;
         return yield* Ref.update(state, (latest) => ({
           ...latest,
-          toolNames: new Map(latest.toolNames).set(callId, name),
+          toolNames: new Map(latest.toolNames).set(callId, toolName(name)),
         }));
       }
       case "session.tool.called": {

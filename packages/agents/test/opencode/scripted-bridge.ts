@@ -18,7 +18,12 @@ import {
 } from "effect";
 import { LocalProcess } from "../../src/child-host/child-host.ts";
 import { bridgeClient } from "../../src/harness/opencode/bridge/client.ts";
-import { BridgeInput, type BridgeRequest } from "../../src/harness/opencode/bridge/lines.ts";
+import {
+  BridgeInput,
+  type BridgeMcpConnect,
+  type BridgeMcpMessage,
+  type BridgeRequest,
+} from "../../src/harness/opencode/bridge/lines.ts";
 import { openCodeChildLayer } from "../../src/harness/opencode/opencode.ts";
 import { OpenCodeServer, type OpenCodeTarget } from "../../src/harness/opencode/server.ts";
 import {
@@ -53,11 +58,13 @@ export interface ScriptedBridge {
   readonly target: OpenCodeTarget;
   /** The next other request that the runtime sends, such as a prompt or an interrupt. */
   readonly request: Effect.Effect<BridgeRequest>;
+  /** The next MCP line that the runtime sends: a connect line or a message. */
+  readonly mcp: Effect.Effect<BridgeMcpConnect | BridgeMcpMessage>;
   /** Writes an output line. */
   readonly emit: (line: Schema.Json) => Effect.Effect<void>;
-  /** Answers `request` with `status` and `body`. */
+  /** Answers `request`, a request or an MCP connect line, with `status` and `body`. */
   readonly reply: (
-    request: BridgeRequest,
+    request: { readonly id: BridgeRequest["id"] },
     status: number,
     body: Schema.Json,
   ) => Effect.Effect<void>;
@@ -153,6 +160,7 @@ export const scriptedServerWith = Effect.fn("ScriptedServer.make")(function* (
         const environments = yield* Ref.make<ReadonlyArray<string>>([]);
         const answered = yield* Ref.make<ReadonlyArray<BridgeRequest>>([]);
         const others = yield* Queue.unbounded<BridgeRequest>();
+        const mcp = yield* Queue.unbounded<BridgeMcpConnect | BridgeMcpMessage>();
         const answer = (sent: BridgeRequest, body: Schema.Json) =>
           Ref.update(answered, (all) => [...all, sent]).pipe(
             Effect.andThen(reply(sent, 200, body)),
@@ -167,6 +175,7 @@ export const scriptedServerWith = Effect.fn("ScriptedServer.make")(function* (
               return Ref.update(environments, (all) => [...all, sent.environment]).pipe(
                 Effect.andThen(reply(sent, 204, null)),
               );
+            if ("mcp" in sent) return Queue.offer(mcp, sent).pipe(Effect.asVoid);
             if (sent.path.startsWith("/api/model")) return answer(sent, models);
             if (sent.method === "POST" && sent.path === "/api/session")
               return answer(sent, session);
@@ -202,6 +211,7 @@ export const scriptedServerWith = Effect.fn("ScriptedServer.make")(function* (
         const scripted: ScriptedBridge = {
           target,
           request: Queue.take(others),
+          mcp: Queue.take(mcp),
           emit,
           reply,
           setJobs: (running) => Ref.set(jobs, running),
