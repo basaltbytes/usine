@@ -15,7 +15,7 @@ The server builds one harness runtime registry at startup and shares it between 
 | --- | --- | --- | --- |
 | name | kebab-case string | required | Unique instance-level agent name used by loops. |
 | `harness` | `claude`, `codex`, `opencode`, or `pi` | required | Coding-agent harness used by child sessions. |
-| `model` | non-blank string | required | Model ID understood by the harness, with `provider/model` for Pi. |
+| `model` | non-blank string | required | Model ID understood by the harness, with `provider/model` for Pi, and for an OpenCode model of a provider other than OpenAI. See [OpenCode children](#opencode-children). |
 | `effort` | effort | required | Reasoning effort of child sessions. |
 | `decision` | `model` and `effort` | none | Model and effort that decide a child's report, on the agent's own harness. See [Coordinator](#coordinator). |
 | persona | non-blank Markdown | required | Standing instructions included with the task of every child. |
@@ -62,7 +62,7 @@ Complete one repository task at a time.
 | --- | --- | --- | --- |
 | `claude` | Claude Code with `auth status --json` | Claude subscription login, setup token, or API key | Local, SSH, Cloudflare |
 | `codex` | Codex CLI 0.172.0; preflight also accepts 0.164.0 and 0.159.0 through 0.159.3 | ChatGPT login or API key | Local, SSH, Cloudflare |
-| `opencode` | OpenCode 2.3.2 (`@opencode/cli`), Node.js | OpenAI API key, from the attempt or the gateway | SSH |
+| `opencode` | OpenCode 2.3.2 (`@opencode/cli`), Node.js | OpenAI API key, from the attempt or the gateway, or an OpenCode Go key at the gateway | SSH |
 | `pi` | Bundled Pi runtime | API key for the selected provider or ChatGPT login for `openai-codex` | Local |
 
 For a worker using subscription logins, run these commands as the user running its children:
@@ -102,7 +102,12 @@ Children run without approval prompts. Claude Code ignores project settings, Cod
 
 ### OpenCode children
 
-An OpenCode child runs `opencode serve` behind a small usine bridge on the worker, one per child, under the same process owner as Claude Code and Codex children. Set `model` to an OpenAI model ID from OpenCode's catalog, such as `gpt-5.4-mini`; OpenCode calls the OpenAI Responses API with the attempt's `OPENAI_API_KEY`, or through the gateway's `openai-responses` slot with the caller token. It uses no login of its own, so a worker without an OpenAI key at the attempt or the gateway refuses OpenCode agents. A local worker gives its children only the host's login, so it refuses them too, and Cloudflare sandboxes don't install OpenCode. Sessions record their usage under `apiKeys`, with the cost that OpenCode reports from its catalog prices.
+An OpenCode child runs `opencode serve` behind a small usine bridge on the worker, one per child, under the same process owner as Claude Code and Codex children. OpenCode runs models of two providers, which `model` selects in OpenCode's own `provider/model` notation:
+
+- A model ID without a provider, such as `gpt-5.4-mini`, or one with `openai/`, is an OpenAI model from OpenCode's catalog. OpenCode calls the OpenAI Responses API with the attempt's `OPENAI_API_KEY`, or through the gateway's `openai-responses` slot with the caller token.
+- `opencode-go/<model ID>`, such as `opencode-go/glm-5.3`, is a model of the OpenCode Go plan from OpenCode's catalog. OpenCode calls the gateway's `opencode-go` slot with the caller token, and the gateway adds the plan's key. Connect the key with `usine login opencode-go --api-key`. Each Go model calls the protocol that OpenCode's catalog gives it, and the gateway sends it to that protocol's upstream. Go models need the gateway: preflight refuses one on a worker whose OpenCode attempts get an attempt API key, and a child fails at launch if the worker's gateway doesn't hold the Go key.
+
+Preflight and each launch check the model against OpenCode's list for its provider. A model with another provider, such as `anthropic/claude-sonnet-4-6`, fails preflight with the providers that OpenCode accepts. OpenCode uses no login of its own, so a worker without a key for the model's provider at the attempt or the gateway refuses OpenCode agents. A local worker gives its children only the host's login, so it refuses them too, and Cloudflare sandboxes don't install OpenCode. Sessions record their usage under `apiKeys`, with the cost that OpenCode reports from its catalog prices. OpenCode reads no usage windows of the Go plan.
 
 Each child gets its own OpenCode data directory and database in the attempt's OpenCode home, even on a worker that sets `OPENCODE_DB`. OpenCode reads only the checkout's root `AGENTS.md`: the checkout's `opencode.json`, `.opencode/`, plugins, skills, and `CLAUDE.md` files don't load. OpenCode's web fetch, web search, and question tools are off, as are its plugins and MCP servers, and it reads `.env` files without asking. The data directory and these settings apply to the OpenCode server only: its tool commands, and those of its subagents, run with the worker's environment, including the worker's `XDG_DATA_HOME`, `XDG_CONFIG_HOME`, and `OPENCODE_DB`, so tools such as pnpm keep the worker's store and configuration. The worker needs `rg` on its command path, which the attempt image and the Hetzner worker install; without it, OpenCode downloads ripgrep from GitHub.
 

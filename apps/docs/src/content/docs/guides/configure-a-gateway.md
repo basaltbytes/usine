@@ -63,7 +63,7 @@ Instance admin access, a matching usine checkout, a Hetzner project, the `hcloud
 
    Each gateway reports its connection state separately. A gateway that cannot report its state shows an error beside its destination; healthy gateways keep their connection controls. A gateway without the provider-credentials admin API shows that it is older than the orchestrator and names the `@usine/gateway` version to install. A CLI command with `--target` checks the selected gateway.
 
-   Add `--target usine-gateway` when the instance has several gateways. Add `--api-key` for masked API-key entry. usine transfers completed credentials through the gateway admin API over SSH, saves them with mode `0600`, and updates the workers’ `llm_providers` in a configuration revision. Claude selects `anthropic-messages`; ChatGPT selects `openai-responses`. Routing changes only for providers that the orchestrator's harnesses use. No provider credential requires a manual SSH transfer or service reload. For another provider, run `usine login <provider ID> --api-key`.
+   Add `--target usine-gateway` when the instance has several gateways. Add `--api-key` for masked API-key entry. usine transfers completed credentials through the gateway admin API over SSH, saves them with mode `0600`, and updates the workers’ `llm_providers` in a configuration revision. Claude selects `anthropic-messages`; ChatGPT selects `openai-responses`; `usine login opencode-go --api-key` selects `opencode-go`. Routing changes only for providers that the orchestrator's harnesses use. No provider credential requires a manual SSH transfer or service reload. For another provider, run `usine login <provider ID> --api-key`.
 
    Settings shows each credential kind, reported expiry, and last refresh. **Replace** starts a separate login and keeps the current credential until authorization succeeds. **Disconnect** removes the managed credential and worker routing. `usine logout claude` and `usine logout chatgpt` perform the same actions.
 
@@ -75,7 +75,7 @@ Preflight reaches the admin API and the gateway from the worker. A test attempt 
 
 The executor manages its own admin API forward; omit `LocalForward` from the gateway SSH alias. A private Hetzner worker reaches the gateway only. A Boat worker uses [the Tailscale connection procedure](/guides/connect-boat-to-a-gateway/). A long-lived worker outside the private network uses [worker-level tailnet settings](/guides/add-an-ssh-worker/#home-worker-on-a-mac).
 
-Each model provider that usine knows has one slot at the gateway, which holds its credential. In the SSH worker’s `gateway.llm_providers`, use `anthropic-messages` for the Anthropic API and `openai-responses` for the OpenAI API or a ChatGPT login. See the [worker reference](/reference/configuration/workers/#gateway).
+Each model provider that usine knows has one slot at the gateway, which holds its credential. In the SSH worker’s `gateway.llm_providers`, use `anthropic-messages` for the Anthropic API, `openai-responses` for the OpenAI API or a ChatGPT login, and `opencode-go` for the OpenCode Go plan. See the [worker reference](/reference/configuration/workers/#gateway).
 
 ## Upgrade the gateway
 
@@ -107,6 +107,6 @@ The supervisor runs on the orchestrator host and sends model requests through an
 
 ## Manual credential configuration
 
-The gateway also accepts credentials in `/etc/usine-gateway/secrets.env`: `ANTHROPIC_API_KEY` or `USINE_GATEWAY_ANTHROPIC_SUBSCRIPTION_TOKEN`, and `OPENAI_API_KEY` or `USINE_GATEWAY_CHATGPT_AUTH_FILE`. Obtain a Claude subscription token with `claude setup-token`. For ChatGPT, use an empty `CODEX_HOME` with `codex login --device-auth`, copy its `auth.json` to the gateway with mode `0600` and ownership by the service user, then remove the temporary copy. A refresh token must have one owner.
+The gateway also accepts credentials in `/etc/usine-gateway/secrets.env`: `ANTHROPIC_API_KEY` or `USINE_GATEWAY_ANTHROPIC_SUBSCRIPTION_TOKEN`, `OPENAI_API_KEY` or `USINE_GATEWAY_CHATGPT_AUTH_FILE`, and `OPENCODE_GO_API_KEY`. Obtain a Claude subscription token with `claude setup-token`. For ChatGPT, use an empty `CODEX_HOME` with `codex login --device-auth`, copy its `auth.json` to the gateway with mode `0600` and ownership by the service user, then remove the temporary copy. A refresh token must have one owner.
 
 Set the corresponding `llm_providers` on workers and reload the gateway service after manual changes. Managed connections take precedence over environment credentials, including after disconnect and reload. [Gateway variables](/reference/cli/#usine-gateway) documents the environment settings.
