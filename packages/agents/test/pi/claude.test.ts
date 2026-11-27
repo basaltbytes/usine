@@ -76,7 +76,7 @@ import {
   type ClaudeQuery,
   type ClaudeQueryOptions,
 } from "../../src/harness/claude/claude.ts";
-import { BACKGROUND_TURN_GRACE } from "../../src/harness/conversation.ts";
+import { BACKGROUND_TURN_GRACE } from "../../src/harness/conversation/background.ts";
 
 /** A single login lock for all Workers, since each test launches its children on one Worker. */
 const loginLock = Layer.effect(

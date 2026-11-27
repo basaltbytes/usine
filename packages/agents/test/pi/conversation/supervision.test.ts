@@ -10,7 +10,7 @@ import { Deferred, Effect, Exit, Fiber, Option, Queue, Scope, Schema } from "eff
 import { TestClock } from "effect/testing";
 import { AgentBlockedError, type OnDelivery, RestartState } from "../../../src/runtime.ts";
 import { sessionChannel } from "../../../src/harness/session.ts";
-import { sessionConversation } from "../../../src/harness/conversation.ts";
+import { sessionConversation } from "../../../src/harness/conversation/conversation.ts";
 import {
   child,
   policyOf,

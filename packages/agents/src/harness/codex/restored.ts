@@ -13,7 +13,7 @@ import {
 import type { RestartState } from "../../runtime.ts";
 import { checkContinuation } from "../continuation.ts";
 import type { SessionSpec, Start } from "../contract.ts";
-import type { RestoredItems } from "../conversation.ts";
+import type { RestoredItems } from "../conversation/conversation.ts";
 import { type CodexClient, type CodexConnection, operationError } from "./app-server.ts";
 import {
   AgentMessageKindItem,

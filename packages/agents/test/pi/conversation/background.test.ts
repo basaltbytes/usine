@@ -5,7 +5,8 @@ import { Clock, Deferred, Duration, Effect, Fiber, Option, Predicate } from "eff
 import { TestClock } from "effect/testing";
 import { RestartState } from "../../../src/runtime.ts";
 import { sessionChannel } from "../../../src/harness/session.ts";
-import { BACKGROUND_TURN_GRACE, sessionConversation } from "../../../src/harness/conversation.ts";
+import { BACKGROUND_TURN_GRACE } from "../../../src/harness/conversation/background.ts";
+import { sessionConversation } from "../../../src/harness/conversation/conversation.ts";
 import {
   child,
   policyOf,

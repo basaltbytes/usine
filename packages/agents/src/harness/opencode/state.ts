@@ -6,8 +6,9 @@ export type InterruptIntent = "pause" | "stop";
 
 /**
  * The root session's execution, by the events that the runtime handled. Each terminal event of
- * the execution leaves it `Idle`, except an interrupted pause that a late input keeps open, and a
- * success while OpenCode holds input that it hasn't delivered.
+ * the execution leaves it `Idle`, except an interrupted pause that a late input keeps open, a
+ * success while OpenCode holds input that it hasn't delivered, and a success that reports
+ * background work.
  */
 export type Execution = Data.TaggedEnum<{
   Idle: {};
@@ -17,6 +18,11 @@ export type Execution = Data.TaggedEnum<{
    * answers instead, unless every such input fails.
    */
   AwaitingInput: {};
+  /**
+   * The execution succeeded while background work ran, which the runtime reported. The answer
+   * waits for the work, which the runtime checks again as it ends, until an execution starts.
+   */
+  AwaitingWork: {};
   /**
    * The runtime posted an interrupt for `intent`, which OpenCode `answered` or not yet. `late` holds
    * the keys of the inputs posted after the answer of a pause, each of which can start a successor
@@ -53,6 +59,7 @@ export const requestInterrupt = (
       ];
     case "Idle":
     case "AwaitingInput":
+    case "AwaitingWork":
     case "AwaitingSuccessor":
       return [false, execution];
   }
@@ -128,6 +135,17 @@ export const answerDue = (execution: Execution, pending: Pending): readonly [boo
     ? [true, Execution.Idle()]
     : [false, execution];
 
+/**
+ * Returns the execution after the runtime reported the background work of an execution that
+ * succeeded: `AwaitingWork` while the snapshot lists work, and `Idle` once it lists none.
+ */
+export const workReported = (execution: Execution, listed: boolean): Execution =>
+  execution._tag === "Idle" || execution._tag === "AwaitingWork"
+    ? listed
+      ? Execution.AwaitingWork()
+      : Execution.Idle()
+    : execution;
+
 /** An input that the session posted, until OpenCode delivers it or the post fails. */
 interface PostedInput {
   readonly key: number;
@@ -150,8 +168,8 @@ interface ChildSession {
 export interface Pending {
   readonly inputs: ReadonlyArray<PostedInput>;
   readonly nextKey: number;
-  /** The inbox IDs that OpenCode delivered while an input waited for its ID. */
-  readonly deliveredEarly: ReadonlySet<string>;
+  /** How OpenCode ended each inbox item that it delivered or cancelled while an input waited for its ID. */
+  readonly endedEarly: ReadonlyMap<string, InputEnd>;
   /** The inbox IDs that OpenCode queued on the root session and hasn't delivered or cancelled. */
   readonly queued: ReadonlySet<string>;
   /** The commands of the tree's running shells, by shell ID. */
@@ -160,10 +178,24 @@ export interface Pending {
   readonly children: ReadonlyMap<string, ChildSession>;
 }
 
+/**
+ * How OpenCode ended an inbox item: it delivered it to an execution that can answer it, the
+ * execution that the runtime interrupts read it, or OpenCode cancelled it unread.
+ */
+type InputEnd = "delivered" | "readByInterrupted" | "cancelled";
+
+/** The inputs after some ended, and the keys of those that OpenCode won't deliver. */
+export interface InputsEnded {
+  readonly pending: Pending;
+  readonly dropped: ReadonlyArray<number>;
+  /** How OpenCode ended the answered input before its post's answer, if it did. */
+  readonly early: Option.Option<InputEnd>;
+}
+
 export const emptyPending: Pending = {
   inputs: [],
   nextKey: 0,
-  deliveredEarly: new Set(),
+  endedEarly: new Map(),
   queued: new Set(),
   shells: new Map(),
   children: new Map(),
@@ -172,11 +204,11 @@ export const emptyPending: Pending = {
 const isPending = (pending: Pending, key: number) =>
   pending.inputs.some((input) => input.key === key);
 
-/** Keeps the early deliveries only while an input waits for its ID. */
+/** Keeps the early ends only while an input waits for its ID. */
 const settled = (pending: Pending): Pending =>
   pending.inputs.some((input) => Option.isNone(input.id))
     ? pending
-    : { ...pending, deliveredEarly: new Set() };
+    : { ...pending, endedEarly: new Map() };
 
 /** Returns the key of an input posted with `id`, if known, and the state that tracks it. */
 export const trackInput = (
@@ -191,27 +223,43 @@ export const trackInput = (
   },
 ];
 
-/** Records that OpenCode answered the post of input `key` with inbox ID `id`. */
-export const answered = (pending: Pending, key: number, id: string): Pending => {
-  if (!pending.deliveredEarly.has(id))
-    return settled({
+/**
+ * Records that OpenCode answered the post of input `key` with inbox ID `id`. The input is dropped
+ * if OpenCode cancelled `id` before the answer, or delivered it to the execution that the runtime
+ * interrupted, which starts no successor for it.
+ */
+export const answered = (pending: Pending, key: number, id: string): InputsEnded => {
+  const end = pending.endedEarly.get(id);
+  if (end === undefined)
+    return {
+      pending: settled({
+        ...pending,
+        inputs: pending.inputs.map((input) =>
+          input.key === key ? { ...input, id: Option.some(id) } : input,
+        ),
+      }),
+      dropped: [],
+      early: Option.none(),
+    };
+  const endedEarly = new Map(pending.endedEarly);
+  endedEarly.delete(id);
+  return {
+    pending: settled({
       ...pending,
-      inputs: pending.inputs.map((input) =>
-        input.key === key ? { ...input, id: Option.some(id) } : input,
-      ),
-    });
-  const deliveredEarly = new Set(pending.deliveredEarly);
-  deliveredEarly.delete(id);
-  return settled({
-    ...pending,
-    deliveredEarly,
-    inputs: pending.inputs.filter((input) => input.key !== key),
-  });
+      endedEarly,
+      inputs: pending.inputs.filter((input) => input.key !== key),
+    }),
+    dropped: end === "delivered" ? [] : [key],
+    early: Option.some(end),
+  };
 };
 
 /** Drops input `key`, whose post failed. */
-export const failed = (pending: Pending, key: number): Pending =>
-  settled({ ...pending, inputs: pending.inputs.filter((input) => input.key !== key) });
+export const failed = (pending: Pending, key: number): InputsEnded => ({
+  pending: settled({ ...pending, inputs: pending.inputs.filter((input) => input.key !== key) }),
+  dropped: isPending(pending, key) ? [key] : [],
+  early: Option.none(),
+});
 
 /** Records that OpenCode queued inbox item `id` on the root session. */
 export const enqueued = (pending: Pending, id: string): Pending => ({
@@ -219,8 +267,8 @@ export const enqueued = (pending: Pending, id: string): Pending => ({
   queued: new Set(pending.queued).add(id),
 });
 
-/** Records that OpenCode delivered or cancelled inbox item `id` of the root session. */
-export const removed = (pending: Pending, id: string): Pending => {
+/** Records that OpenCode ended inbox item `id` of the root session with `end`. */
+const ended = (pending: Pending, id: string, end: InputEnd): Pending => {
   const queued = new Set(pending.queued);
   queued.delete(id);
   const inputs = pending.inputs.filter((input) => !Option.contains(input.id, id));
@@ -230,13 +278,23 @@ export const removed = (pending: Pending, id: string): Pending => {
     ...pending,
     queued,
     inputs,
-    deliveredEarly: early ? new Set(pending.deliveredEarly).add(id) : pending.deliveredEarly,
+    endedEarly: early ? new Map(pending.endedEarly).set(id, end) : pending.endedEarly,
   });
 };
 
-/** Returns the keys of the inputs that `before` tracks and `after` doesn't. */
-export const droppedInputs = (before: Pending, after: Pending): ReadonlyArray<number> =>
-  before.inputs.filter((input) => !isPending(after, input.key)).map((input) => input.key);
+/**
+ * Records that OpenCode delivered inbox item `id` of the root session during `execution`. An item
+ * delivered while the runtime interrupts the execution was read by it, so it starts no successor.
+ */
+export const delivered = (pending: Pending, id: string, execution: Execution): Pending =>
+  ended(pending, id, execution._tag === "Interrupting" ? "readByInterrupted" : "delivered");
+
+/** Records that OpenCode cancelled inbox item `id` of the root session, which it won't deliver. */
+export const cancelled = (pending: Pending, id: string): InputsEnded => ({
+  pending: ended(pending, id, "cancelled"),
+  dropped: pending.inputs.filter((input) => Option.contains(input.id, id)).map(({ key }) => key),
+  early: Option.none(),
+});
 
 /** Returns how many inputs and queued items OpenCode hasn't delivered. */
 export const unread = (pending: Pending): number =>
