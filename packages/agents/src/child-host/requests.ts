@@ -1,7 +1,15 @@
-import { Deferred, type Duration, Effect, Option, Ref } from "effect";
+import { type Brand, Deferred, type Duration, Effect, Option, Ref, Schema } from "effect";
 import type { SessionOperation, SessionOperationError } from "../runtime.ts";
 
 const REQUEST_TIMEOUT = "60 seconds" satisfies Duration.Input;
+
+/** A request on a child's line protocol got no answer within `timeout`. */
+export class RequestTimedOut extends Schema.TaggedError<
+  RequestTimedOut,
+  Brand.Brand<"@usine/agents/child-host/RequestTimedOut">
+>("@usine/agents/RequestTimedOut")("RequestTimedOut", {
+  timeout: Schema.String,
+}) {}
 
 /**
  * A request ID on a child's line protocol: a sequence number, or `<generation>:<sequence>` when the
@@ -21,14 +29,14 @@ export interface PendingRequests<A> {
    * Registers a request for `operation` under the next ID, writes it with `write`, and waits 60
    * seconds for its answer. The ID carries `generation`, the process owner's relay generation, so an
    * answer to a request of an earlier connection matches no request of this one. Fails with
-   * `write`'s error, or with `timedOut(timeout)` when no answer arrives in time, and then forgets
-   * the request.
+   * `write`'s error, or with the error that `timedOut` returns for a `RequestTimedOut` when no
+   * answer arrives in time, and then forgets the request.
    */
   readonly send: (request: {
     readonly operation: SessionOperation;
     readonly generation: Option.Option<number>;
     readonly write: (id: RequestId) => Effect.Effect<void, SessionOperationError>;
-    readonly timedOut: (timeout: string) => SessionOperationError;
+    readonly timedOut: (cause: RequestTimedOut) => SessionOperationError;
   }) => Effect.Effect<A, SessionOperationError>;
   /** Removes and returns the request that waits for `id`, or `None` when no request waits for it. */
   readonly take: (id: RequestId) => Effect.Effect<Option.Option<PendingRequest<A>>>;
@@ -74,7 +82,8 @@ export const pendingRequests = <A>(): Effect.Effect<PendingRequests<A>> =>
             Deferred.await(answer).pipe(
               Effect.timeoutOrElse({
                 duration: REQUEST_TIMEOUT,
-                orElse: () => Effect.fail(timedOut(REQUEST_TIMEOUT)),
+                orElse: () =>
+                  Effect.fail(timedOut(RequestTimedOut.make({ timeout: REQUEST_TIMEOUT }))),
               }),
             ),
           ),

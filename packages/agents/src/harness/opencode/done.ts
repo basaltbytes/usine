@@ -2,8 +2,10 @@ import { BackgroundWork } from "@usine/core/agent/session";
 import { retryTransient } from "@usine/core/retry";
 import { Duration, Effect, FiberSet, Option, Ref, Schema } from "effect";
 import { ChildProcessLost } from "../../child-host/process.ts";
+import { RequestTimedOut } from "../../child-host/requests.ts";
 import { type AgentSessionError, SessionOperationError } from "../../runtime.ts";
 import { query } from "./api.ts";
+import { BridgeAnswer } from "./bridge/lines.ts";
 import { ActiveSessions, Inbox, type Job, Jobs } from "./codec.ts";
 import type { OpenCodeContext, OpenCodeState } from "./context.ts";
 import { answerDue, Execution, runningWork, unread, workReported } from "./state.ts";
@@ -35,8 +37,10 @@ const backgroundWork = (job: Job) =>
     description: job.title ?? job.description ?? job.command ?? "",
   });
 
-/** Whether `error` ended a request without the loss of the bridge, which a restart handles. */
-const isTransient = (error: SessionOperationError) => !Schema.is(ChildProcessLost)(error.cause);
+/** Whether `error` is a 5xx answer or a request timeout, which a retry can get past. */
+const isTransient = (error: SessionOperationError) =>
+  Schema.is(RequestTimedOut)(error.cause) ||
+  (Schema.is(BridgeAnswer)(error.cause) && error.cause.status >= 500);
 
 /** Returns the done check of the session that `context` describes. */
 export const doneCheck = (context: OpenCodeContext): DoneCheck => {
@@ -69,8 +73,9 @@ export const doneCheck = (context: OpenCodeContext): DoneCheck => {
   });
 
   /**
-   * Runs `read`, a lookup of OpenCode's `name`, and retries it twice after a failure other than
-   * the bridge's loss. A failure that remains names the lookup.
+   * Runs `read`, a lookup of OpenCode's `name`, and retries it twice after a 5xx answer or a
+   * request timeout. A failure that remains names the lookup, unless it is the bridge's loss,
+   * which a restart handles.
    */
   const lookup = <A>(name: string, read: Effect.Effect<A, SessionOperationError>) =>
     read.pipe(
@@ -84,14 +89,14 @@ export const doneCheck = (context: OpenCodeContext): DoneCheck => {
         }),
       ),
       Effect.mapError((error) =>
-        isTransient(error)
-          ? SessionOperationError.make({
+        Schema.is(ChildProcessLost)(error.cause)
+          ? error
+          : SessionOperationError.make({
               operation: error.operation,
               sessionId: error.sessionId,
               message: `Could not read OpenCode's ${name} after its execution succeeded: ${error.message}`,
               cause: error.cause,
-            })
-          : error,
+            }),
       ),
     );
 
