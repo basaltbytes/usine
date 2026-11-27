@@ -30,15 +30,17 @@ import {
 } from "./context.ts";
 import type { DoneCheck } from "./done.ts";
 import {
+  cancelled,
   childCreated,
   childRunning,
+  delivered,
   enqueued,
   Execution,
   executionInterrupted,
+  type InputsEnded,
   type InterruptIntent,
   inTree,
   type Pending,
-  removed,
   shellEnded,
   shellStarted,
 } from "./state.ts";
@@ -54,10 +56,10 @@ export interface EventActions {
   readonly done: DoneCheck;
   readonly operatorIds: Ref.Ref<OperatorIds>;
   /**
-   * Applies `update`, which records an answered, failed, or cancelled input, and returns the
-   * answer that waited for the inputs that OpenCode won't deliver.
+   * Applies `end`, which records an answered, failed, or cancelled input, and returns the answer
+   * that waited for the inputs that OpenCode won't deliver.
    */
-  readonly dropInputs: (update: (pending: Pending) => Pending) => Effect.Effect<void>;
+  readonly endInputs: (end: (pending: Pending) => InputsEnded) => Effect.Effect<void>;
   /** Ends the turn that `session.execution.interrupted` with `reason` interrupted. */
   readonly endInterrupted: (
     reason: string,
@@ -70,7 +72,7 @@ export interface EventActions {
 /** Returns the handler of the OpenCode events of the session that `context` describes. */
 export const openCodeEvents = (context: OpenCodeContext, actions: EventActions) => {
   const { sessionId, root, session, state, api, conversation, channel, tasks, fail } = context;
-  const { done, operatorIds, dropInputs, endInterrupted, pause } = actions;
+  const { done, operatorIds, endInputs, endInterrupted, pause } = actions;
 
   const reportModelOutput = Effect.fn("OpenCodeRuntime.reportModelOutput")(function* () {
     const latest = yield* Ref.getAndUpdate(state, (value) => ({
@@ -230,10 +232,10 @@ export const openCodeEvents = (context: OpenCodeContext, actions: EventActions) 
           sessionId,
           inboxId: event.data.inboxID,
         });
-        return yield* dropInputs((latest) => removed(latest, event.data.inboxID));
+        return yield* endInputs((latest) => cancelled(latest, event.data.inboxID));
       case "session.inbox.delivered": {
         const operator = (yield* Ref.get(operatorIds)).get(event.data.inboxID);
-        yield* updatePending(state, (latest) => removed(latest, event.data.inboxID));
+        yield* updatePending(state, (latest) => delivered(latest, event.data.inboxID));
         if (operator === undefined) return;
         yield* conversation.observe(operator);
         return;

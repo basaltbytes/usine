@@ -111,6 +111,46 @@ describe("OpenCode turn", () => {
       }).pipe(Effect.scoped),
   );
 
+  for (const end of ["delivered", "cancelled"] as const)
+    it.live(
+      `ends the paused turn once OpenCode ${end} the late steer before its post's answer`,
+      () =>
+        Effect.gen(function* () {
+          const { bridge, running, until } = yield* launched("OLD");
+          yield* interrupted(bridge, running);
+          // A steer without an operator message ID gets its inbox ID only from the post's answer.
+          const steering = yield* Effect.forkScoped(running.steer("Reply STEERED instead."));
+          const posted = yield* bridge.request;
+          for (const line of oldExecutionEnds) yield* bridge.emit(line);
+          yield* bridge.emit(
+            event(end === "delivered" ? "session.inbox.delivered" : "session.inbox.cancelled", {
+              inboxID: "msg_late",
+            }),
+          );
+          // OpenCode answers the post only after it reported the steer's end.
+          yield* Effect.sleep("50 millis");
+          yield* bridge.reply(posted, 200, { data: { id: "msg_late" } });
+          yield* Fiber.join(steering);
+          if (end === "delivered")
+            for (const line of [
+              event("session.execution.started"),
+              event("session.text.ended", { text: "STEERED" }),
+              event("session.step.ended"),
+              event("session.execution.succeeded"),
+            ])
+              yield* bridge.emit(line);
+          const idle = yield* until("SessionIdle");
+          assert(idle._tag === "SessionIdle");
+          assert.deepStrictEqual(
+            idle.message,
+            Option.some(end === "delivered" ? "STEERED" : "OLD"),
+            end === "delivered"
+              ? "the successor that read the steer ends the turn"
+              : "the interrupted execution's answer ends the turn",
+          );
+        }).pipe(Effect.scoped),
+    );
+
   it.live("answers after a steer whose post was interrupted", () =>
     Effect.gen(function* () {
       const { bridge, running } = yield* launched("OLD");

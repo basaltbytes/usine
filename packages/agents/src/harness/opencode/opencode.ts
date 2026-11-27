@@ -73,18 +73,18 @@ import { type RestoredInput, restoredInput } from "./restored.ts";
 import { OpenCodeServer } from "./server.ts";
 import {
   answered,
-  droppedInputs,
+  delivered,
   emptyPending,
   enqueued,
   Execution,
   failed,
   inputPosted,
+  type InputsEnded,
   type InterruptIntent,
   interruptAnswered,
   interruptRefused,
   lateInputsDropped,
   type Pending,
-  removed,
   requestInterrupt,
   restarted,
   trackInput,
@@ -265,11 +265,20 @@ const makeOpenCodeSessions = Effect.gen(function* () {
           })
           .pipe(
             Effect.onExit((exit) =>
-              dropInputs((pending) =>
-                Exit.isSuccess(exit)
-                  ? answered(pending, key, exit.value.data.id)
-                  : failed(pending, key),
-              ),
+              Effect.gen(function* () {
+                if (Exit.hasInterrupts(exit))
+                  yield* Effect.logInfo(
+                    "The post of an input was interrupted; dropping the input",
+                    {
+                      sessionId,
+                    },
+                  );
+                yield* endInputs((pending) =>
+                  Exit.isSuccess(exit)
+                    ? answered(pending, key, exit.value.data.id)
+                    : failed(pending, key),
+                );
+              }),
             ),
           );
         return "queued" as const;
@@ -318,33 +327,31 @@ const makeOpenCodeSessions = Effect.gen(function* () {
     };
     const done = doneCheck(context);
 
+    const superseded = Effect.logInfo("A successor execution superseded OpenCode's execution", {
+      sessionId,
+    });
+    /** Returns the paused execution's answer. */
+    const finishPaused = Effect.flatMap(Ref.get(state), ({ lastText }) =>
+      conversation.finish(Option.getOrElse(lastText, () => "OpenCode session paused")),
+    );
+
     /**
      * Ends the turn that `session.execution.interrupted` with `reason` interrupted. `intent` is the
-     * runtime's interrupt, if it asked for one. `deferred` is true when the pause's late inputs
-     * kept the turn open and OpenCode won't deliver them: the paused execution's answer ends the
-     * turn, even though their steer resumed the conversation.
+     * runtime's interrupt, if it asked for one.
      */
     const endInterrupted: (
       reason: string,
       intent: Option.Option<InterruptIntent>,
-      deferred?: boolean,
     ) => Effect.Effect<void, AgentSessionError> = Effect.fn("OpenCodeRuntime.endInterrupted")(
-      function* (reason: string, intent: Option.Option<InterruptIntent>, deferred = false) {
+      function* (reason: string, intent: Option.Option<InterruptIntent>) {
         yield* Effect.annotateCurrentSpan({
           sessionId,
           reason,
           intent: Option.getOrUndefined(intent),
-          deferred,
         });
-        if (reason === "superseded")
-          return yield* Effect.logInfo("A successor execution superseded OpenCode's execution", {
-            sessionId,
-          });
-        const { lastText } = yield* Ref.get(state);
-        if (!Option.contains(intent, "stop") && (deferred || (yield* conversation.isPaused)))
-          return yield* conversation.finish(
-            Option.getOrElse(lastText, () => "OpenCode session paused"),
-          );
+        if (reason === "superseded") return yield* superseded;
+        if (!Option.contains(intent, "stop") && (yield* conversation.isPaused))
+          return yield* finishPaused;
         if ((yield* lifecycle.isStopping) || (yield* conversation.isClosing))
           return yield* Effect.logInfo("OpenCode's execution stopped with its session", {
             sessionId,
@@ -363,18 +370,26 @@ const makeOpenCodeSessions = Effect.gen(function* () {
     );
 
     /**
-     * Applies `update`, which records an answered, failed, or cancelled input, and returns the
-     * answer that waited for the inputs that OpenCode won't deliver. Ends a paused execution's
-     * turn that no late input keeps open anymore.
+     * Ends the turn of the paused execution that ended with `reason` while its late inputs kept
+     * the turn open, once OpenCode won't deliver them: the paused execution's answer ends the
+     * turn, even though their steer resumed the conversation.
      */
-    const dropInputs = (update: (pending: Pending) => Pending): Effect.Effect<void> =>
+    const endDeferred = Effect.fn("OpenCodeRuntime.endDeferred")(function* (reason: string) {
+      yield* Effect.annotateCurrentSpan({ sessionId, reason });
+      if (reason === "superseded") return yield* superseded;
+      return yield* finishPaused;
+    });
+
+    /**
+     * Applies `end`, which records an answered, failed, or cancelled input, and returns the answer
+     * that waited for the inputs that OpenCode won't deliver. Ends a paused execution's turn that
+     * no late input keeps open anymore.
+     */
+    const endInputs = (end: (pending: Pending) => InputsEnded): Effect.Effect<void> =>
       Effect.gen(function* () {
         const reason = yield* Ref.modify(state, (latest) => {
-          const pending = update(latest.pending);
-          const [ends, execution] = lateInputsDropped(
-            latest.execution,
-            droppedInputs(latest.pending, pending),
-          );
+          const { pending, dropped } = end(latest.pending);
+          const [ends, execution] = lateInputsDropped(latest.execution, dropped);
           return [ends, { ...latest, execution, pending }];
         });
         yield* done.answerIfDue;
@@ -384,10 +399,7 @@ const makeOpenCodeSessions = Effect.gen(function* () {
           { sessionId },
         );
         // A failed post runs under the conversation's lock, which ending the turn takes.
-        yield* FiberSet.run(
-          tasks,
-          endInterrupted(reason.value, Option.some("pause"), true).pipe(Effect.catch(fail)),
-        );
+        yield* FiberSet.run(tasks, endDeferred(reason.value).pipe(Effect.catch(fail)));
       });
 
     /** Asks OpenCode to interrupt the running execution for `intent`. */
@@ -431,7 +443,7 @@ const makeOpenCodeSessions = Effect.gen(function* () {
     const handle = openCodeEvents(context, {
       done,
       operatorIds,
-      dropInputs,
+      endInputs,
       endInterrupted,
       pause: pauseExecution,
     });
@@ -462,7 +474,7 @@ const makeOpenCodeSessions = Effect.gen(function* () {
       if (messageId === undefined) return taken;
       const inputId = openCodeMessageId(sessionId, messageId);
       if (!(yield* (yield* current).messageDelivered(id, inputId))) return taken;
-      yield* updatePending(state, (pending) => removed(pending, inputId));
+      yield* updatePending(state, (pending) => delivered(pending, inputId));
       yield* Effect.logInfo("OpenCode already delivered the resent operator message", {
         sessionId,
         messageId,
