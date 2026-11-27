@@ -1,5 +1,6 @@
 import { MessageSizeMib } from "@usine/core/worker";
 import { ChildProcessLost } from "../../../src/child-host/process.ts";
+import { RequestTimedOut } from "../../../src/child-host/requests.ts";
 import { jsonKey } from "@usine/core/json-key";
 import { assert, describe, it } from "@effect/vitest";
 import {
@@ -741,6 +742,7 @@ describe("Codex app-server transport", () => {
           const matchesError = Schema.is(SessionOperationError)(error);
           assert(matchesError);
           assert.match(error.message, /didn't respond to initialize/u);
+          assert(Schema.is(RequestTimedOut)(error.cause), "the error keeps the timeout cause");
         }),
       ).pipe(Effect.provide(codexAppServerLive.pipe(Layer.provideMerge(spawnerFor(process)))));
     }),

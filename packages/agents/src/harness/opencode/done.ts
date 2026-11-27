@@ -2,8 +2,10 @@ import { BackgroundWork } from "@usine/core/agent/session";
 import { retryTransient } from "@usine/core/retry";
 import { Duration, Effect, FiberSet, Option, Ref, Schema } from "effect";
 import { ChildProcessLost } from "../../child-host/process.ts";
+import { RequestTimedOut } from "../../child-host/requests.ts";
 import { type AgentSessionError, SessionOperationError } from "../../runtime.ts";
 import { query } from "./api.ts";
+import { BridgeAnswer } from "./bridge/lines.ts";
 import { ActiveSessions, Inbox, type Job, Jobs } from "./codec.ts";
 import type { OpenCodeContext, OpenCodeState } from "./context.ts";
 import { answerDue, Execution, runningWork, unread, workReported } from "./state.ts";
@@ -35,8 +37,10 @@ const backgroundWork = (job: Job) =>
     description: job.title ?? job.description ?? job.command ?? "",
   });
 
-/** Whether `error` ended a request without the loss of the bridge, which a restart handles. */
-const isTransient = (error: SessionOperationError) => !Schema.is(ChildProcessLost)(error.cause);
+/** Whether `error` is a 5xx answer or a request timeout, which a retry can get past. */
+const isTransient = (error: SessionOperationError) =>
+  Schema.is(RequestTimedOut)(error.cause) ||
+  (Schema.is(BridgeAnswer)(error.cause) && error.cause.status >= 500);
 
 /** Returns the done check of the session that `context` describes. */
 export const doneCheck = (context: OpenCodeContext): DoneCheck => {
@@ -45,32 +49,42 @@ export const doneCheck = (context: OpenCodeContext): DoneCheck => {
 
   /**
    * Returns how many inputs OpenCode hasn't delivered, of those the session posted and those
-   * OpenCode queued, and records that the answer of the execution that just succeeded waits for
-   * them when there are any.
+   * OpenCode queued, and records that the answer of execution `checked`, which succeeded, waits
+   * for them when there are any. Returns `None` once OpenCode started a later execution.
    */
-  const holdForInput = Ref.modify(state, (latest): readonly [number, OpenCodeState] => {
-    const count = unread(latest.pending);
-    return count > 0 &&
-      (latest.execution._tag === "Idle" || latest.execution._tag === "AwaitingWork")
-      ? [count, { ...latest, execution: Execution.AwaitingInput() }]
-      : [count, latest];
-  });
+  const holdForInput = (checked: number) =>
+    Ref.modify(state, (latest): readonly [Option.Option<number>, OpenCodeState] => {
+      if (latest.executions !== checked) return [Option.none(), latest];
+      const count = unread(latest.pending);
+      return count > 0 &&
+        (latest.execution._tag === "Idle" || latest.execution._tag === "AwaitingWork")
+        ? [Option.some(count), { ...latest, execution: Execution.AwaitingInput() }]
+        : [Option.some(count), latest];
+    });
+
+  /** Logs that a done check stops because OpenCode started an execution after the one it checks. */
+  const superseded = (checked: number) =>
+    Effect.logInfo(
+      "OpenCode started another execution during the done check; that execution's check answers",
+      { sessionId, execution: checked },
+    );
 
   const answerIfDue = Effect.gen(function* () {
     const due = yield* Ref.modify(state, (latest) => {
       const [isDue, execution] = answerDue(latest.execution, latest.pending);
-      return [isDue, { ...latest, execution }];
+      return [isDue ? Option.some(latest.executions) : Option.none(), { ...latest, execution }];
     });
-    if (!due) return;
+    if (Option.isNone(due)) return;
     yield* Effect.logInfo("The input that the answer waited for won't start an execution", {
       sessionId,
     });
-    yield* FiberSet.run(tasks, Effect.suspend(() => executionSucceeded).pipe(Effect.catch(fail)));
+    yield* FiberSet.run(tasks, Effect.suspend(() => check(due.value)).pipe(Effect.catch(fail)));
   });
 
   /**
-   * Runs `read`, a lookup of OpenCode's `name`, and retries it twice after a failure other than
-   * the bridge's loss. A failure that remains names the lookup.
+   * Runs `read`, a lookup of OpenCode's `name`, and retries it twice after a 5xx answer or a
+   * request timeout. A failure that remains names the lookup, unless it is the bridge's loss,
+   * which a restart handles.
    */
   const lookup = <A>(name: string, read: Effect.Effect<A, SessionOperationError>) =>
     read.pipe(
@@ -84,44 +98,67 @@ export const doneCheck = (context: OpenCodeContext): DoneCheck => {
         }),
       ),
       Effect.mapError((error) =>
-        isTransient(error)
-          ? SessionOperationError.make({
+        Schema.is(ChildProcessLost)(error.cause)
+          ? error
+          : SessionOperationError.make({
               operation: error.operation,
               sessionId: error.sessionId,
               message: `Could not read OpenCode's ${name} after its execution succeeded: ${error.message}`,
               cause: error.cause,
-            })
-          : error,
+            }),
       ),
     );
 
-  /** Returns the latest answer unless the session has input that OpenCode hasn't delivered. */
-  const finishAnswer = Effect.flatMap(Ref.get(state), ({ lastText }) =>
-    conversation.finishUnlessUnread(
-      Option.getOrElse(lastText, () => "OpenCode finished without an answer"),
-      holdForInput,
-    ),
-  );
-
-  /** Reports the background work snapshot `work`. */
-  const reportWork = (work: ReadonlyArray<BackgroundWork>) =>
-    Ref.update(state, (latest): OpenCodeState => ({
-      ...latest,
-      execution: workReported(latest.execution, work.length > 0),
-    })).pipe(Effect.andThen(conversation.reportBackground(Option.some(work))));
+  /**
+   * Returns the latest answer as the answer of execution `checked`, unless the session has input
+   * that OpenCode hasn't delivered or OpenCode started a later execution.
+   */
+  const finishAnswer = (checked: number) =>
+    Effect.flatMap(Ref.get(state), ({ lastText }) =>
+      conversation.finishUnlessUnread(
+        Option.getOrElse(lastText, () => "OpenCode finished without an answer"),
+        Effect.flatMap(
+          holdForInput(checked),
+          Option.match({
+            // The later execution read input that starts another turn, which answers instead.
+            onNone: () => Effect.as(superseded(checked), 1),
+            onSome: Effect.succeed,
+          }),
+        ),
+      ),
+    );
 
   /**
-   * Reports the tree's background work after the root execution succeeded, by the events that
-   * the runtime handled and then by OpenCode's own lists. Returns whether the answer is due:
+   * Reports the background work snapshot `work` of execution `checked`, unless OpenCode started a
+   * later execution. Returns whether it reported the snapshot.
+   */
+  const reportWork = Effect.fn("OpenCodeRuntime.reportWork")(function* (
+    checked: number,
+    work: ReadonlyArray<BackgroundWork>,
+  ) {
+    yield* Effect.annotateCurrentSpan({ sessionId, execution: checked });
+    const stillChecked = yield* Ref.modify(state, (latest): readonly [boolean, OpenCodeState] =>
+      latest.executions === checked
+        ? [true, { ...latest, execution: workReported(latest.execution, work.length > 0) }]
+        : [false, latest],
+    );
+    if (!stillChecked) {
+      yield* superseded(checked);
+      return false;
+    }
+    yield* conversation.reportBackground(Option.some(work));
+    return true;
+  });
+
+  /**
+   * Reports the tree's background work after root execution `checked` succeeded, by the events
+   * that the runtime handled and then by OpenCode's own lists. Returns whether the answer is due:
    * false when OpenCode has unread input or runs the session's next execution.
    */
-  const checkWork = Effect.gen(function* () {
-    yield* Effect.annotateCurrentSpan({ sessionId });
+  const checkWork = Effect.fn("OpenCodeRuntime.checkWork")(function* (checked: number) {
+    yield* Effect.annotateCurrentSpan({ sessionId, execution: checked });
     const running = runningWork((yield* Ref.get(state)).pending);
-    if (running.length > 0) {
-      yield* reportWork(running);
-      return true;
-    }
+    if (running.length > 0) return yield* reportWork(checked, running);
     // Work that ended just before the execution may not have queued its notice yet. OpenCode
     // queues the notice before it ends the job, so the job list, then the inbox, then the active
     // executions show the work, its notice, or the execution that the notice started.
@@ -135,10 +172,7 @@ export const doneCheck = (context: OpenCodeContext): DoneCheck => {
         `/api/experimental/job?${query("sessionID", root)}&descendants=true&status=running`,
       ),
     );
-    if (jobs.data.length > 0) {
-      yield* reportWork(jobs.data.map(backgroundWork));
-      return true;
-    }
+    if (jobs.data.length > 0) return yield* reportWork(checked, jobs.data.map(backgroundWork));
     const inbox = yield* lookup(
       "session inbox",
       latestApi.read(Inbox, "stream", "GET", `${sessionPath}/inbox`),
@@ -158,29 +192,32 @@ export const doneCheck = (context: OpenCodeContext): DoneCheck => {
       yield* Effect.logInfo("OpenCode started the session's next execution", { sessionId });
       return false;
     }
-    yield* reportWork([]);
-    return true;
-  }).pipe(Effect.withSpan("OpenCodeRuntime.checkWork"));
+    return yield* reportWork(checked, []);
+  });
 
-  const executionSucceeded = Effect.gen(function* () {
-    yield* Effect.annotateCurrentSpan({ sessionId });
-    const unreadCount = yield* holdForInput;
-    if (unreadCount > 0)
+  /** Returns the answer of root execution `checked` once it is due, as `executionSucceeded` does. */
+  const check = Effect.fn("OpenCodeRuntime.executionSucceeded")(function* (checked: number) {
+    yield* Effect.annotateCurrentSpan({ sessionId, execution: checked });
+    const unreadCount = yield* holdForInput(checked);
+    if (Option.isNone(unreadCount)) return yield* superseded(checked);
+    if (unreadCount.value > 0)
       return yield* Effect.logInfo(
         "OpenCode's execution ended with input that it hasn't delivered, which starts the next execution",
-        { sessionId, unread: unreadCount },
+        { sessionId, unread: unreadCount.value },
       );
-    if (yield* checkWork) yield* finishAnswer;
-  }).pipe(Effect.withSpan("OpenCodeRuntime.executionSucceeded"));
+    if (yield* checkWork(checked)) yield* finishAnswer(checked);
+  });
+
+  const executionSucceeded = Effect.flatMap(Ref.get(state), ({ executions }) => check(executions));
 
   const workEnded = Effect.gen(function* () {
     yield* Effect.annotateCurrentSpan({ sessionId });
-    const { execution } = yield* Ref.get(state);
+    const { execution, executions } = yield* Ref.get(state);
     if (execution._tag !== "AwaitingWork" || (yield* channel.isTerminal)) return;
     yield* Effect.logInfo("Background work that the answer waits for ended; checking the rest", {
       sessionId,
     });
-    yield* checkWork;
+    yield* checkWork(executions);
   }).pipe(Effect.withSpan("OpenCodeRuntime.workEnded"));
 
   return { executionSucceeded, answerIfDue, workEnded };

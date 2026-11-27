@@ -206,9 +206,9 @@ describe("OpenCode turn", () => {
       }).pipe(Effect.scoped),
   );
 
-  it.live("interrupts an execution that starts while a re-run done check reads the jobs", () =>
+  it.live("pauses an execution that starts while a re-run done check reads the jobs", () =>
     Effect.gen(function* () {
-      const { bridge, running } = yield* launched("OLD");
+      const { bridge, running, until } = yield* launched("OLD");
       const steering = yield* Effect.forkScoped(running.steer("Reply STEERED instead."));
       const posted = yield* bridge.request;
       for (const line of firstExecutionEnds) yield* bridge.emit(line);
@@ -240,6 +240,18 @@ describe("OpenCode turn", () => {
       );
       if (Option.isSome(request)) yield* bridge.reply(request.value, 200, { interrupted: true });
       yield* Fiber.await(pause);
+      for (const line of [
+        event("session.tool.failed", {
+          id: "call_2",
+          error: { type: "tool.execution", message: "killed" },
+        }),
+        event("session.execution.interrupted", { reason: "user" }),
+      ])
+        yield* bridge.emit(line);
+      // The check's jobs list ran ahead of the started execution, so its `sh_1` isn't that
+      // execution's work, and the paused answer doesn't wait for it.
+      const idle = yield* until("SessionIdle").pipe(Effect.timeoutOption("3 seconds"));
+      assert(Option.isSome(idle), "the paused execution's answer ends the turn");
     }).pipe(Effect.scoped),
   );
 
