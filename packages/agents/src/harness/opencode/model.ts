@@ -1,48 +1,27 @@
 import { type BrainSpec, Harness } from "@usine/core/agent/brain";
-import type { ModelProvider } from "@usine/core/agent/provider";
-import { Array as Arr, Effect, Option } from "effect";
+import { Effect, Option } from "effect";
 import { UnknownModelError, UnsupportedEffortError } from "../../runtime.ts";
+import type { ModelChoice } from "../harness.ts";
 import { type OpenCodeApi, query } from "./api.ts";
 import { Models } from "./codec.ts";
 import { effortVariant } from "./config.ts";
 import { opencode } from "./descriptor.ts";
 
-/** The provider of a session's model, and the model's ID in that provider's list. */
-export interface ModelChoice {
-  readonly provider: ModelProvider;
-  /** The model ID without the provider, such as `gpt-5.4-mini`. */
-  readonly model: string;
-}
-
 /**
  * Returns the provider and model that `brain` selects in OpenCode's `provider/model` notation, such
- * as `opencode-go/glm-5.3`: the provider whose ID comes before the first `/`, or the descriptor's
- * first provider for an ID without one. Fails for a provider that the descriptor doesn't list, and
- * for an empty model ID after the provider.
+ * as `opencode-go/glm-5.3`, from the descriptor. Fails for a provider that the descriptor doesn't
+ * list, and for an empty model ID after the provider.
  */
 export const modelChoice = Effect.fn("OpenCode.modelChoice")(function* (brain: BrainSpec) {
-  const separator = brain.model.indexOf("/");
-  const prefix =
-    separator === -1 ? Option.none<string>() : Option.some(brain.model.slice(0, separator));
-  const model = brain.model.slice(separator + 1);
-  const provider = Option.match(prefix, {
-    onNone: () => Arr.head(opencode.providers),
-    onSome: (id) => Arr.findFirst(opencode.providers, (listed) => listed.id === id),
-  });
-  if (Option.isSome(provider) && model.trim() !== "")
-    return { provider: provider.value, model } satisfies ModelChoice;
-  const listed = opencode.providers.map(({ id }) => id);
-  yield* Effect.logError("OpenCode can't select a provider for the model", {
-    model: brain.model,
-    providers: listed.join(","),
-  });
-  return yield* UnknownModelError.make({
-    harness: opencode.id,
-    model: brain.model,
-    message: Option.isSome(provider)
-      ? `The model "${brain.model}" names no model after its provider`
-      : `OpenCode has no provider "${Option.getOrElse(prefix, () => "")}" for the model "${brain.model}". Choose one of ${listed.join(", ")} as <provider>/<model>; a model ID without a provider is ${listed[0] ?? "none"}'s.`,
-  });
+  yield* Effect.annotateCurrentSpan({ model: brain.model });
+  return yield* Effect.fromResult(opencode.providerOf(brain.model)).pipe(
+    Effect.tapError(() =>
+      Effect.logError("OpenCode can't select a provider for the model", {
+        model: brain.model,
+        providers: opencode.providers.map(({ id }) => id).join(","),
+      }),
+    ),
+  );
 });
 
 /**

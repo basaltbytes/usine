@@ -64,8 +64,9 @@ export const opencode = HarnessDescriptor.make({
       }),
     ),
   }),
-  // A bare model ID is OpenAI's; `opencode-go/<model>` selects the plan (`modelChoice`).
+  // A bare model ID is OpenAI's; `opencode-go/<model>` selects the plan.
   providers: [openai, opencodeGo],
+  modelNotation: "provider/model",
   // The plan's protocols have different upstreams, so an attempt API key reaches OpenAI only.
   gatewayOnly: [opencodeGo.id],
   capabilities: [

@@ -190,12 +190,16 @@ const makeOpenCodeSessions = Effect.gen(function* () {
     const brain = spec.session.brain;
     const route = spec.admitted.context.credential;
     const choice = yield* modelChoice(brain);
-    const config = yield* serveConfig({
-      choice,
-      route,
-      cwd: spec.cwd,
-      baseUrl: yield* baseUrlVariable(spec.environment, brain, choice, route),
+    const baseUrl = yield* baseUrlVariable(spec.environment, brain, choice, spec.admitted.context);
+    yield* Effect.annotateCurrentSpan({ provider: choice.provider.id, credentialRoute: route });
+    yield* Effect.logInfo("OpenCode chose the model's provider and base URL", {
+      sessionId,
+      provider: choice.provider.id,
+      slot: choice.provider.slot,
+      credentialRoute: route,
+      baseUrlVariable: Option.getOrElse(baseUrl, () => "none"),
     });
+    const config = yield* serveConfig({ choice, route, cwd: spec.cwd, baseUrl });
     const target = {
       host: spec.host,
       cwd: spec.cwd,
@@ -246,6 +250,8 @@ const makeOpenCodeSessions = Effect.gen(function* () {
       cwd: spec.cwd,
       home: data,
       retained: connection.retained,
+      provider: choice.provider.id,
+      model: model.id,
     });
     // A retained bridge may be in an execution, which then continues.
     const active = connection.retained

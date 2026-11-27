@@ -60,6 +60,7 @@ export {
   HarnessCatalog,
   HarnessDescriptor,
   HarnessPresentation,
+  ModelChoice,
   ResumeCommand,
   WorkerRequirements,
 } from "./harness.ts";

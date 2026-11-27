@@ -1,11 +1,23 @@
 import { assert, describe, it } from "@effect/vitest";
 import { BrainSpec, Harness, ModelId } from "@usine/core/agent/brain";
-import { openai as openaiProvider, opencodeGo } from "@usine/core/agent/provider";
 import { ChildSession } from "@usine/core/agent/session";
 import { WorkerName } from "@usine/core/worker";
-import { type Cause, Effect, Exit, Layer, Option, Queue, Ref, Schema, Sink, Stream } from "effect";
+import {
+  type Cause,
+  Effect,
+  Exit,
+  Layer,
+  Option,
+  Queue,
+  Ref,
+  Result,
+  Schema,
+  Sink,
+  Stream,
+} from "effect";
 import { ChildProcessSpawner } from "effect/process";
 import { LocalProcess } from "../../src/child-host/child-host.ts";
+import { AdmissionContext } from "../../src/harness/admission.ts";
 import type { CredentialRoute } from "../../src/harness/capability.ts";
 import { HarnessCatalog } from "../../src/harness/harness.ts";
 import { bridgeClient } from "../../src/harness/opencode/bridge/client.ts";
@@ -201,6 +213,33 @@ const refusedLaunch = (
     return reason.error;
   });
 
+/** Returns `request` with its brain's model set to `model`. */
+const withModel = (request: ChildRequest, model: string) =>
+  ChildRequest.make({
+    ...request,
+    session: ChildSession.make({
+      ...request.session,
+      brain: BrainSpec.make({ ...request.session.brain, model: ModelId.make(model) }),
+    }),
+  });
+
+/**
+ * A child request for `opencode-go/glm-test` on the gateway route, whose gateway holds the plan's
+ * slot.
+ */
+const goRequest = ChildRequest.make({
+  ...withModel(childRequest, "opencode-go/glm-test"),
+  environment: {
+    HOME: "/home/scripted",
+    USINE_GATEWAY_TOKEN: "caller-token",
+    [OPENCODE_GO_BASE_URL]: "http://llm.gw.test/opencode-go",
+  },
+  session: ChildSession.make({
+    ...withModel(childRequest, "opencode-go/glm-test").session,
+    gatewayCredential: Option.some("api-key"),
+  }),
+});
+
 describe("OpenCode model check", () => {
   for (const [credential, token] of [
     ["gateway", "USINE_GATEWAY_TOKEN"],
@@ -262,26 +301,73 @@ describe("OpenCode model check", () => {
     }).pipe(Effect.scoped),
   );
 
-  // The probe on the api-key route starts no bridge, which the helper waits a second for.
+  it.effect("checks a Go model in preflight against the opencode-go provider", () =>
+    Effect.gen(function* () {
+      const { readiness } = yield* preflight("opencode-go/gpt-test", "gateway-api-key");
+      assert(readiness._tag === "HarnessUnavailableError");
+      assert.strictEqual(
+        readiness.message,
+        'OpenCode has no model "gpt-test" for the opencode-go provider',
+      );
+    }).pipe(Effect.scoped),
+  );
+
+  // The refused probe starts no bridge, which the helper waits a second for.
   it.live(
-    "refuses a Go model on the api-key route in preflight, and checks a gateway's against the opencode-go provider",
+    "refuses a provider that OpenCode doesn't list in preflight, with the list, before starting OpenCode",
     () =>
       Effect.gen(function* () {
-        const { readiness: direct, target } = yield* preflight("opencode-go/gpt-test", "api-key");
-        assert(direct._tag === "HarnessUnavailableError");
+        const { readiness, target } = yield* preflight("anthropic/claude-test", "gateway-api-key");
+        assert(readiness._tag === "HarnessUnavailableError");
         assert.strictEqual(
-          direct.message,
-          "OpenCode reaches OpenCode Go models only through a gateway that holds its key, and the api-key route has none",
+          readiness.message,
+          'OpenCode has no provider "anthropic" for the model "anthropic/claude-test". Choose one of openai, opencode-go as <provider>/<model>; a model ID without a provider is openai\'s.',
         );
         assert(Option.isNone(target), "the probe doesn't start OpenCode");
-        const { readiness: gateway } = yield* preflight("opencode-go/gpt-test", "gateway-api-key");
-        assert(gateway._tag === "HarnessUnavailableError");
-        assert.strictEqual(
-          gateway.message,
-          'OpenCode has no model "gpt-test" for the opencode-go provider',
-        );
       }).pipe(Effect.scoped),
   );
+
+  for (const [name, request, message] of [
+    [
+      "a provider that OpenCode doesn't list",
+      withModel(childRequest, "anthropic/claude-test"),
+      'OpenCode has no provider "anthropic" for the model "anthropic/claude-test". Choose one of openai, opencode-go as <provider>/<model>; a model ID without a provider is openai\'s.',
+    ],
+    [
+      "a Go model on a gateway route whose gateway doesn't hold the plan's slot",
+      ChildRequest.make({
+        ...goRequest,
+        environment: {
+          HOME: "/home/scripted",
+          USINE_GATEWAY_TOKEN: "caller-token",
+          [OPENCODE_BASE_URL]: "http://llm.gw.test/openai-responses/v1",
+        },
+      }),
+      'The gateway holds no OpenCode Go credential for the model "opencode-go/glm-test". Connect one for opencode-go at the gateway, and list its slot opencode-go in the worker\'s llm_providers.',
+    ],
+    [
+      "a Go model on the api-key route",
+      withModel(childRequest, "opencode-go/glm-test"),
+      "opencode cannot run as coding-agent at local: lacks credential-route (OpenCode reaches OpenCode Go models only through a gateway that holds the provider's credential, and the api-key route has none)",
+    ],
+  ] as const)
+    it.effect(`refuses ${name} at launch before opening a bridge`, () =>
+      Effect.gen(function* () {
+        const server = yield* listingServer([
+          { ...listed, id: "glm-test", providerID: "opencode-go" },
+        ]);
+        const launch = yield* Effect.gen(function* () {
+          const backend = yield* ChildBackend;
+          return yield* backend.launch(request);
+        }).pipe(Effect.provide(scriptedBackend(server.layer)), Effect.exit);
+        assert(Exit.isFailure(launch), "the launch fails");
+        const reason = launch.cause.reasons[0];
+        assert(reason?._tag === "Fail");
+        assert.strictEqual(reason.error.message, message);
+        const targets = yield* server.targets;
+        assert.deepStrictEqual(targets, [], "no bridge opens");
+      }).pipe(Effect.scoped),
+    );
 
   it.effect("refuses a Go session whose model OpenCode lists only for OpenAI", () =>
     Effect.gen(function* () {
@@ -324,24 +410,6 @@ describe("OpenCode model check", () => {
         );
       }).pipe(Effect.scoped),
   );
-});
-
-/** A child request for `opencode-go/glm-test` on the gateway route, whose gateway holds the plan's slot. */
-const goRequest = ChildRequest.make({
-  ...childRequest,
-  environment: {
-    HOME: "/home/scripted",
-    USINE_GATEWAY_TOKEN: "caller-token",
-    [OPENCODE_GO_BASE_URL]: "http://llm.gw.test/opencode-go",
-  },
-  session: ChildSession.make({
-    ...childRequest.session,
-    brain: BrainSpec.make({
-      ...childRequest.session.brain,
-      model: ModelId.make("opencode-go/glm-test"),
-    }),
-    gatewayCredential: Option.some("api-key"),
-  }),
 });
 
 const GoConfig = Schema.fromJsonString(
@@ -394,6 +462,13 @@ describe("OpenCode provider/model notation", () => {
   );
 });
 
+/** Returns the provider and model that the descriptor selects for `model`. */
+const chosen = (model: string) => Result.getOrThrow(opencode.providerOf(ModelId.make(model)));
+
+/** An admission context on `route` for a session on an SSH worker. */
+const context = (route: CredentialRoute) =>
+  AdmissionContext.make({ placement: "ssh", credential: route });
+
 describe("OpenCode session configuration", () => {
   const decode = Schema.decodeUnknownEffect(
     Schema.fromJsonString(
@@ -414,12 +489,12 @@ describe("OpenCode session configuration", () => {
       Effect.gen(function* () {
         const configs = yield* Effect.forEach(
           [
-            [openaiProvider, "gpt-test", OPENCODE_BASE_URL],
-            [opencodeGo, "glm-5.3", OPENCODE_GO_BASE_URL],
+            ["gpt-test", OPENCODE_BASE_URL],
+            ["opencode-go/glm-5.3", OPENCODE_GO_BASE_URL],
           ] as const,
-          ([provider, model, variable]) =>
+          ([model, variable]) =>
             serveConfig({
-              choice: { provider, model },
+              choice: chosen(model),
               route: "gateway-api-key",
               cwd: "/work/checkout",
               baseUrl: Option.some(variable),
@@ -463,8 +538,8 @@ describe("OpenCode session configuration", () => {
     "reads the base URL of the model's slot on a gateway route, and refuses a provider that the route can't reach",
     () =>
       Effect.gen(function* () {
-        const go = { provider: opencodeGo, model: "glm-5.3" };
-        const openai = { provider: openaiProvider, model: "gpt-test" };
+        const go = chosen("opencode-go/glm-5.3");
+        const openai = chosen("gpt-test");
         const goBrain = goRequest.session.brain;
         const slots = {
           [OPENCODE_BASE_URL]: "http://llm.gw.test/openai-responses/v1",
@@ -477,7 +552,8 @@ describe("OpenCode session configuration", () => {
             [{ [OPENCODE_BASE_URL]: "https://api.openai.com/v1" }, openai, "api-key"],
             [{}, openai, "api-key"],
           ] as const,
-          ([environment, choice, route]) => baseUrlVariable(environment, goBrain, choice, route),
+          ([environment, choice, route]) =>
+            baseUrlVariable(environment, goBrain, choice, context(route)),
         );
         assert.deepStrictEqual(variables, [
           Option.some(OPENCODE_GO_BASE_URL),
@@ -486,14 +562,14 @@ describe("OpenCode session configuration", () => {
           Option.none(),
         ]);
         const unheld = yield* Effect.flip(
-          baseUrlVariable({ [OPENCODE_BASE_URL]: "set" }, goBrain, go, "gateway-api-key"),
+          baseUrlVariable({ [OPENCODE_BASE_URL]: "set" }, goBrain, go, context("gateway-api-key")),
         );
         assert.strictEqual(
           unheld.message,
           'The gateway holds no OpenCode Go credential for the model "opencode-go/glm-test". Connect one for opencode-go at the gateway, and list its slot opencode-go in the worker\'s llm_providers.',
         );
         const direct = yield* Effect.flip(
-          baseUrlVariable({ [OPENCODE_GO_BASE_URL]: "set" }, goBrain, go, "api-key"),
+          baseUrlVariable({ [OPENCODE_GO_BASE_URL]: "set" }, goBrain, go, context("api-key")),
         );
         assert.include(direct.message, "only through a gateway that holds its key");
       }),

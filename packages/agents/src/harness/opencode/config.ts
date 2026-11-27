@@ -2,10 +2,11 @@ import type { BrainSpec } from "@usine/core/agent/brain";
 import type { AgentSessionId } from "@usine/core/agent/session";
 import { Effect, Option, Record, Schema } from "effect";
 import { UnknownModelError } from "../../runtime.ts";
-import type { CredentialRoute } from "../capability.ts";
+import type { AdmissionContext } from "../admission.ts";
+import { type CredentialRoute, isGatewayRoute } from "../capability.ts";
+import type { ModelChoice } from "../harness.ts";
 import type { NativeTools } from "../role.ts";
 import { OPENCODE_BASE_URL, OPENCODE_HOME, opencode } from "./descriptor.ts";
-import type { ModelChoice } from "./model.ts";
 
 /** A rule of OpenCode's permission list; the last rule that matches a tool call applies. */
 interface Permission {
@@ -67,48 +68,31 @@ const tokenVariable = (route: CredentialRoute): string =>
       route === "api-key" ? credential.apiKey.tokenVariable : credential.gateway.tokenVariable,
   });
 
-/** Returns whether `route` reaches the providers through the gateway's slots. */
-const throughGateway = (route: CredentialRoute): boolean =>
-  route === "gateway" || route === "gateway-api-key" || route === "gateway-subscription";
-
-/**
- * Fails for a model whose provider `route` can't reach: a provider that the descriptor reaches
- * only through the gateway, on a route without one.
- */
-export const checkRoute = Effect.fn("OpenCodeConfig.checkRoute")(function* (
-  brain: BrainSpec,
-  choice: ModelChoice,
-  route: CredentialRoute,
-) {
-  if (throughGateway(route) || !opencode.gatewayOnly.includes(choice.provider.id)) return;
-  yield* Effect.logError("OpenCode reaches the model's provider only through a gateway", {
-    model: brain.model,
-    provider: choice.provider.id,
-    route,
-  });
-  return yield* UnknownModelError.make({
-    harness: opencode.id,
-    model: brain.model,
-    message: `OpenCode reaches ${choice.provider.label} models only through a gateway that holds its key, and the ${route} route has none`,
-  });
-});
-
 /**
  * Returns the variable that holds the base URL of the session's provider, if the session's
  * `environment` sets one: on a gateway route, the variable of the provider's slot, which the
- * gateway route sets for each slot that the gateway holds, and on the API-key route
- * `OPENCODE_BASE_URL`. Fails for a provider that `route` can't reach, and on a gateway route for a
- * provider whose slot the gateway doesn't hold.
+ * gateway route sets for each slot that the gateway holds, and otherwise `OPENCODE_BASE_URL`.
+ * Fails for a provider that the session's `context` can't reach, which admission refuses first,
+ * and on a gateway route for a provider whose slot the gateway doesn't hold.
  */
 export const baseUrlVariable = Effect.fn("OpenCodeConfig.baseUrlVariable")(function* (
   environment: Readonly<Record<string, string>>,
   brain: BrainSpec,
   choice: ModelChoice,
-  route: CredentialRoute,
+  context: AdmissionContext,
 ) {
-  yield* checkRoute(brain, choice, route);
+  const { placement, credential: route } = context;
+  const fields = { model: brain.model, provider: choice.provider.id, route };
+  if (!opencode.reaches(choice.provider, placement, route)) {
+    yield* Effect.logError("OpenCode reaches the model's provider only through a gateway", fields);
+    return yield* UnknownModelError.make({
+      harness: opencode.id,
+      model: brain.model,
+      message: `OpenCode reaches ${choice.provider.label} models only through a gateway that holds its key, and the ${route} route has none`,
+    });
+  }
   const isSet = (variable: string) => (environment[variable] ?? "") !== "";
-  if (!throughGateway(route)) return Option.some(OPENCODE_BASE_URL).pipe(Option.filter(isSet));
+  if (!isGatewayRoute(route)) return Option.some(OPENCODE_BASE_URL).pipe(Option.filter(isSet));
   const slot = Option.flatMap(opencode.worker.credential, ({ slots }) =>
     Record.get(slots, choice.provider.id),
   ).pipe(
@@ -116,11 +100,7 @@ export const baseUrlVariable = Effect.fn("OpenCodeConfig.baseUrlVariable")(funct
     Option.filter(isSet),
   );
   if (Option.isSome(slot)) return slot;
-  yield* Effect.logError("The gateway holds no slot of the model's provider", {
-    model: brain.model,
-    provider: choice.provider.id,
-    route,
-  });
+  yield* Effect.logError("The gateway holds no slot of the model's provider", fields);
   return yield* UnknownModelError.make({
     harness: opencode.id,
     model: brain.model,

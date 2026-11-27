@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest";
-import { Harness } from "@usine/core/agent/brain";
+import { BrainSpec, Harness, ModelId } from "@usine/core/agent/brain";
 import { BillingPool, PoolDescriptor } from "@usine/core/agent/pool";
 import {
   anthropic,
@@ -12,12 +12,13 @@ import {
   ModelProviderId,
   modelProviders,
   openai,
+  opencodeGo,
   ProviderProtocol,
   RoutePattern,
   UpstreamBase,
   WireProtocol,
 } from "@usine/core/agent/provider";
-import { Array as Arr, Effect, Option, Schema, SchemaIssue } from "effect";
+import { Array as Arr, Effect, Option, Result, Schema, SchemaIssue } from "effect";
 import {
   apiKeys,
   CapabilityProfile,
@@ -31,6 +32,7 @@ import {
 } from "../src/harness/catalog.ts";
 import { CODEX_CLI_VERSION, codex } from "../src/harness/codex/descriptor.ts";
 import { SlotVariable } from "../src/harness/harness.ts";
+import { opencode } from "../src/harness/opencode/descriptor.ts";
 import { pi } from "../src/harness/pi/descriptor.ts";
 // Generated image inputs are checked against the source descriptors.
 // @effect-diagnostics-next-line nodeBuiltinImport:off
@@ -380,6 +382,47 @@ describe("harness catalog", () => {
       extended.gatewayProvider(both.id, [anthropicSlot]),
       Option.some(anthropic),
     );
+  });
+
+  it("chooses the provider of a brain's model, in the descriptor's notation, and the Gateway's slot of it", () => {
+    const brain = (harness: string, model: string) =>
+      BrainSpec.make({ harness: Harness.make(harness), model: ModelId.make(model), effort: "low" });
+    const held = [openai.slot, opencodeGo.slot];
+    assert.deepStrictEqual(
+      catalog.modelProvider(brain("opencode", "opencode-go/glm-5.3")),
+      Option.some(opencodeGo),
+    );
+    assert.deepStrictEqual(
+      catalog.modelProvider(brain("opencode", "gpt-test")),
+      Option.some(openai),
+    );
+    // An unknown prefix names no provider, and the harness refuses it at launch.
+    assert.isTrue(Option.isNone(catalog.modelProvider(brain("opencode", "anthropic/claude"))));
+    // A harness in the `model` notation reads a slash as part of the model ID.
+    assert.deepStrictEqual(
+      catalog.modelProvider(brain("codex", "vendor/gpt")),
+      Option.some(openai),
+    );
+    // Pi has no credential wiring.
+    assert.isTrue(Option.isNone(catalog.modelProvider(brain("pi", "anthropic/claude"))));
+    assert.deepStrictEqual(
+      catalog.modelGatewayProvider(brain("opencode", "opencode-go/glm-5.3"), held),
+      Option.some(opencodeGo),
+    );
+    assert.deepStrictEqual(
+      catalog.modelGatewayProvider(brain("opencode", "gpt-test"), held),
+      Option.some(openai),
+    );
+    assert.isTrue(
+      Option.isNone(catalog.modelGatewayProvider(brain("opencode", "gpt-test"), [opencodeGo.slot])),
+    );
+    const go = opencode.providerOf(ModelId.make("opencode-go/vendor/model"));
+    assert(Result.isSuccess(go));
+    assert.deepStrictEqual([go.success.provider, go.success.model], [opencodeGo, "vendor/model"]);
+    assert.isTrue(opencode.reaches(opencodeGo, "ssh", "gateway-api-key"));
+    assert.isTrue(opencode.reaches(opencodeGo, "sandbox", "api-key"));
+    assert.isFalse(opencode.reaches(opencodeGo, "ssh", "api-key"));
+    assert.isTrue(opencode.reaches(openai, "ssh", "api-key"));
   });
 
   it("declares the providers that the gateway serves, once each, and refuses two definitions of one", () => {
