@@ -13,7 +13,7 @@ import { Deferred, Effect, Option, Queue } from "effect";
 import { claudeReceipts } from "../../src/harness/claude/codec.ts";
 import { codexReceipts } from "../../src/harness/codex/codec.ts";
 import type { ContinuationPolicy } from "../../src/harness/continuation.ts";
-import { sessionConversation } from "../../src/harness/conversation.ts";
+import { sessionConversation } from "../../src/harness/conversation/conversation.ts";
 import { piReceipts } from "../../src/harness/pi/turns.ts";
 import {
   advanceTurn,

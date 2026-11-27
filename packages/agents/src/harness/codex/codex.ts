@@ -89,7 +89,7 @@ import {
 import { isRemoteHost } from "../../child-host/child-host.ts";
 import { ChildProcessLost } from "../../child-host/process.ts";
 import { sessionChannel } from "../session.ts";
-import { type MessageTaken, sessionConversation } from "../conversation.ts";
+import { type MessageTaken, sessionConversation } from "../conversation/conversation.ts";
 import { codexThreadTokens, codexTokenBreakdown } from "../usage.ts";
 import {
   CodexAppServer,

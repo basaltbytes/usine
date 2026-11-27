@@ -62,7 +62,7 @@ import { isRemoteHost } from "../../child-host/child-host.ts";
 import { ChildProcessLost, stopChildProcess } from "../../child-host/process.ts";
 import { sdkProcessSpawner } from "../../child-host/sdk.ts";
 import { sessionChannel } from "../session.ts";
-import { sessionConversation } from "../conversation.ts";
+import { sessionConversation } from "../conversation/conversation.ts";
 import { claudeSessionMeter, claudeTokenMeter, type RestoredUsage } from "../usage.ts";
 import { structuredCompletion } from "../completion.ts";
 import { claudeCompletion } from "./completion.ts";

@@ -8,7 +8,7 @@ import {
   type RunningSession,
   type InterruptedTool,
 } from "../../runtime.ts";
-import { sessionConversation } from "../conversation.ts";
+import { sessionConversation } from "../conversation/conversation.ts";
 import { failedPiTurn } from "./refusal.ts";
 import type { PiMessage, PiSession } from "./sdk.ts";
 import { Receipt } from "../receipts.ts";
