@@ -351,6 +351,60 @@ describe("OpenCode answer", () => {
     }).pipe(Effect.scoped),
   );
 
+  it.live("doesn't finish a check that waits for the lock while the next execution starts", () =>
+    Effect.gen(function* () {
+      const { bridge, running, seen, until } = yield* launched("OLD");
+      const steering = yield* Effect.forkScoped(running.steer("Reply STEERED instead."));
+      const posted = yield* bridge.request;
+      for (const line of [
+        ...firstExecutionEnds,
+        event("session.usage.updated", { cost: 0.01, tokens: tokens(100, 10) }),
+      ])
+        yield* bridge.emit(line);
+      yield* until("SessionTokensUpdated");
+      yield* until("SessionTokensUpdated");
+      // The failed post makes the answer due, so the done check runs again in a task.
+      yield* bridge.holdNext("active");
+      yield* bridge.reply(posted, 500, { message: "The session can't take input" });
+      yield* Fiber.await(steering);
+      const active = yield* bridge.request;
+      assert.strictEqual(active.path, "/api/session/active");
+      // The operator's message holds the conversation's lock while its post is open.
+      const message = OperatorMessage.make({ message: "Reply SECOND." });
+      const sending = yield* Effect.forkScoped(running.intervene(message, () => Effect.void));
+      const prompt = yield* bridge.request;
+      const id = assertPrompt(prompt, message.message);
+      assert(Option.isSome(id));
+      // The task reports no work and waits for the lock to finish the answer.
+      yield* bridge.reply(active, 200, { data: {} });
+      yield* Effect.sleep("50 millis");
+      // OpenCode starts the next execution and reads the message before the post answers.
+      for (const line of [
+        event("session.inbox.enqueued", { inboxID: id.value }),
+        event("session.execution.started"),
+        event("session.inbox.delivered", { inboxID: id.value }),
+      ])
+        yield* bridge.emit(line);
+      yield* Effect.sleep("50 millis");
+      yield* bridge.reply(prompt, 200, { data: { id: id.value } });
+      yield* Fiber.join(sending);
+      const early = yield* until("SessionIdle").pipe(Effect.timeoutOption("300 millis"));
+      assert(Option.isNone(early), "the task doesn't finish while the next execution runs");
+      for (const line of [
+        event("session.text.ended", { text: "SECOND" }),
+        event("session.step.ended"),
+        event("session.execution.succeeded"),
+      ])
+        yield* bridge.emit(line);
+      const idle = yield* until("SessionIdle");
+      assert(idle._tag === "SessionIdle");
+      assert.deepStrictEqual(idle.message, Option.some("SECOND"));
+      const again = yield* until("SessionIdle").pipe(Effect.timeoutOption("300 millis"));
+      assert(Option.isNone(again), "the session reports idle once");
+      assert.strictEqual(seen.filter((value) => value._tag === "SessionIdle").length, 1);
+    }).pipe(Effect.scoped),
+  );
+
   it.effect("keeps waiting through the execution that background work starts", () =>
     Effect.gen(function* () {
       const request = ChildRequest.make({

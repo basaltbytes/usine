@@ -136,12 +136,13 @@ export const doneCheck = (context: OpenCodeContext): DoneCheck => {
     checked: number,
     work: ReadonlyArray<BackgroundWork>,
   ) {
-    const latest = yield* Ref.modify(state, (latest): readonly [boolean, OpenCodeState] =>
+    yield* Effect.annotateCurrentSpan({ sessionId, execution: checked });
+    const stillChecked = yield* Ref.modify(state, (latest): readonly [boolean, OpenCodeState] =>
       latest.executions === checked
         ? [true, { ...latest, execution: workReported(latest.execution, work.length > 0) }]
         : [false, latest],
     );
-    if (!latest) {
+    if (!stillChecked) {
       yield* superseded(checked);
       return false;
     }
