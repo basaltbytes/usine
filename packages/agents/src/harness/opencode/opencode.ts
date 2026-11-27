@@ -58,12 +58,7 @@ import {
   serveEnvironment,
   sessionPermissions,
 } from "./config.ts";
-import {
-  type OpenCodeContext,
-  type OpenCodeState,
-  type OperatorIds,
-  updatePending,
-} from "./context.ts";
+import { type OpenCodeContext, type OpenCodeState, type OperatorIds } from "./context.ts";
 import { opencode } from "./descriptor.ts";
 import { doneCheck } from "./done.ts";
 import { openCodeEvents } from "./events.ts";
@@ -393,11 +388,19 @@ const makeOpenCodeSessions = Effect.gen(function* () {
      */
     const endInputs = (end: (pending: Pending) => InputsEnded): Effect.Effect<void> =>
       Effect.gen(function* () {
-        const reason = yield* Ref.modify(state, (latest) => {
-          const { pending, dropped } = end(latest.pending);
+        const { reason, early } = yield* Ref.modify(state, (latest) => {
+          const { pending, dropped, early } = end(latest.pending);
           const [ends, execution] = lateInputsDropped(latest.execution, dropped);
-          return [ends, { ...latest, execution, pending }];
+          return [
+            { reason: ends, early },
+            { ...latest, execution, pending },
+          ];
         });
+        if (Option.isSome(early))
+          yield* Effect.logInfo("OpenCode ended the input before it answered the input's post", {
+            sessionId,
+            end: early.value,
+          });
         yield* done.answerIfDue;
         if (Option.isNone(reason)) return;
         yield* Effect.logInfo(
@@ -486,7 +489,10 @@ const makeOpenCodeSessions = Effect.gen(function* () {
         );
         return taken;
       }
-      yield* updatePending(state, (pending) => delivered(pending, inputId));
+      yield* Ref.update(state, (latest): OpenCodeState => ({
+        ...latest,
+        pending: delivered(latest.pending, inputId, latest.execution),
+      }));
       yield* Effect.logInfo("OpenCode already delivered the resent operator message", {
         sessionId,
         messageId,

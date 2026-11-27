@@ -124,9 +124,13 @@ describe("OpenCode turn", () => {
       }).pipe(Effect.scoped),
   );
 
-  for (const end of ["delivered", "cancelled"] as const)
+  for (const { end, order, answer } of [
+    { end: "delivered", order: "after", answer: "STEERED" },
+    { end: "delivered", order: "before", answer: "OLD" },
+    { end: "cancelled", order: "after", answer: "OLD" },
+  ] as const)
     it.live(
-      `ends the paused turn once OpenCode ${end} the late steer before its post's answer`,
+      `ends the paused turn with ${answer} once OpenCode ${end} the late steer ${order} the interrupt, before its post's answer`,
       () =>
         Effect.gen(function* () {
           const { bridge, running, until } = yield* launched("OLD");
@@ -134,17 +138,19 @@ describe("OpenCode turn", () => {
           // A steer without an operator message ID gets its inbox ID only from the post's answer.
           const steering = yield* Effect.forkScoped(running.steer("Reply STEERED instead."));
           const posted = yield* bridge.request;
-          for (const line of oldExecutionEnds) yield* bridge.emit(line);
-          yield* bridge.emit(
-            event(end === "delivered" ? "session.inbox.delivered" : "session.inbox.cancelled", {
-              inboxID: "msg_late",
-            }),
+          const steerEnds = event(
+            end === "delivered" ? "session.inbox.delivered" : "session.inbox.cancelled",
+            { inboxID: "msg_late" },
           );
+          // Delivered before the interrupt, the steer is read by the interrupted execution.
+          const lines =
+            order === "after" ? [...oldExecutionEnds, steerEnds] : [steerEnds, ...oldExecutionEnds];
+          for (const line of lines) yield* bridge.emit(line);
           // OpenCode answers the post only after it reported the steer's end.
           yield* Effect.sleep("50 millis");
           yield* bridge.reply(posted, 200, { data: { id: "msg_late" } });
           yield* Fiber.join(steering);
-          if (end === "delivered")
+          if (answer === "STEERED")
             for (const line of [
               event("session.execution.started"),
               event("session.text.ended", { text: "STEERED" }),
@@ -152,17 +158,90 @@ describe("OpenCode turn", () => {
               event("session.execution.succeeded"),
             ])
               yield* bridge.emit(line);
-          const idle = yield* until("SessionIdle");
-          assert(idle._tag === "SessionIdle");
+          const idle = yield* until("SessionIdle").pipe(Effect.timeoutOption("2 seconds"));
+          assert(Option.isSome(idle), "the turn ended");
+          assert(idle.value._tag === "SessionIdle");
           assert.deepStrictEqual(
-            idle.message,
-            Option.some(end === "delivered" ? "STEERED" : "OLD"),
-            end === "delivered"
+            idle.value.message,
+            Option.some(answer),
+            answer === "STEERED"
               ? "the successor that read the steer ends the turn"
               : "the interrupted execution's answer ends the turn",
           );
         }).pipe(Effect.scoped),
     );
+
+  it.live(
+    "waits for the successor of a late operator steer that OpenCode delivered before its post failed",
+    () =>
+      Effect.gen(function* () {
+        const { bridge, running, until } = yield* launched("OLD");
+        yield* interrupted(bridge, running);
+        const guidance = Steer.make({ message: "Reply STEERED instead." });
+        const steering = yield* Effect.forkScoped(running.intervene(guidance, () => Effect.void));
+        const posted = yield* bridge.request;
+        const id = assertPrompt(posted, guidance.message);
+        assert(Option.isSome(id));
+        for (const line of [
+          event("session.inbox.enqueued", { inboxID: id.value }),
+          ...oldExecutionEnds,
+          event("session.inbox.delivered", { inboxID: id.value }),
+        ])
+          yield* bridge.emit(line);
+        yield* Effect.sleep("50 millis");
+        yield* bridge.reply(posted, 500, { message: "The bridge dropped the answer" });
+        yield* Fiber.await(steering);
+        const early = yield* until("SessionIdle").pipe(Effect.timeoutOption("200 millis"));
+        assert(Option.isNone(early), "the failed post of a delivered steer doesn't end the turn");
+        for (const line of [
+          event("session.execution.started"),
+          event("session.text.ended", { text: "STEERED" }),
+          event("session.step.ended"),
+          event("session.execution.succeeded"),
+        ])
+          yield* bridge.emit(line);
+        const idle = yield* until("SessionIdle");
+        assert(idle._tag === "SessionIdle");
+        assert.deepStrictEqual(idle.message, Option.some("STEERED"));
+      }).pipe(Effect.scoped),
+  );
+
+  it.live("interrupts an execution that starts while a re-run done check reads the jobs", () =>
+    Effect.gen(function* () {
+      const { bridge, running } = yield* launched("OLD");
+      const steering = yield* Effect.forkScoped(running.steer("Reply STEERED instead."));
+      const posted = yield* bridge.request;
+      for (const line of firstExecutionEnds) yield* bridge.emit(line);
+      yield* Effect.sleep("50 millis");
+      // The failed post makes the answer due, so the done check runs again and reads the jobs.
+      yield* bridge.holdNext("jobs");
+      yield* bridge.reply(posted, 500, { message: "The session can't take input" });
+      yield* Fiber.await(steering);
+      const jobs = yield* bridge.request;
+      assert(jobs.path.startsWith("/api/experimental/job"));
+      for (const line of [
+        event("session.execution.started"),
+        event("session.tool.input.started", { id: "call_2", name: "shell" }),
+        event("session.tool.called", { id: "call_2", input: { command: "sleep 60" } }),
+      ])
+        yield* bridge.emit(line);
+      yield* Effect.sleep("50 millis");
+      yield* bridge.reply(jobs, 200, {
+        data: [{ kind: "shell", id: "sh_1", status: "running", title: "test" }],
+      });
+      yield* Effect.sleep("50 millis");
+      const pause = yield* Effect.forkScoped(
+        running.intervene(Interrupt.make(), () => Effect.void),
+      );
+      const request = yield* bridge.request.pipe(Effect.timeoutOption("1 second"));
+      assert(
+        Option.exists(request, ({ path }) => path.endsWith("/interrupt")),
+        "the pause interrupts the execution that started during the done check",
+      );
+      if (Option.isSome(request)) yield* bridge.reply(request.value, 200, { interrupted: true });
+      yield* Fiber.await(pause);
+    }).pipe(Effect.scoped),
+  );
 
   it.live("answers after a steer whose post was interrupted", () =>
     Effect.gen(function* () {

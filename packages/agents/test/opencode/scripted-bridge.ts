@@ -63,8 +63,8 @@ export interface ScriptedBridge {
   ) => Effect.Effect<void>;
   /** Sets the running background work that job queries list from now on. */
   readonly setJobs: (jobs: ReadonlyArray<Schema.Json>) => Effect.Effect<void>;
-  /** Sends the next job query to `request` for the test to answer. */
-  readonly holdNextJobs: Effect.Effect<void>;
+  /** Sends the next query of `lookup` to `request` for the test to answer. */
+  readonly holdNext: (lookup: Lookup) => Effect.Effect<void>;
   /** Sets the items that inbox queries list from now on. */
   readonly setInbox: (items: ReadonlyArray<Schema.Json>) => Effect.Effect<void>;
   /** Sets the sessions that active-session queries list from now on. */
@@ -76,6 +76,9 @@ export interface ScriptedBridge {
   /** Fails the bridge's output with `error`, as a lost process does. */
   readonly lose: (error: SessionOperationError) => Effect.Effect<void>;
 }
+
+/** A query of OpenCode's state that the done check reads. */
+type Lookup = "jobs" | "inbox" | "active";
 
 const models = {
   data: [
@@ -132,7 +135,19 @@ export const scriptedServerWith = Effect.fn("ScriptedServer.make")(function* (
           body: Schema.Json,
         ) => emit({ id: sent.id, status, body });
         const jobs = yield* Ref.make<ReadonlyArray<Schema.Json>>([]);
-        const holdJobs = yield* Ref.make(false);
+        const held = yield* Ref.make<ReadonlySet<Lookup>>(new Set());
+        /** Answers query `sent` of `lookup` with `body`, unless the test holds the next one. */
+        const lookup = (sent: BridgeRequest, name: Lookup, body: Effect.Effect<Schema.Json>) =>
+          Effect.gen(function* () {
+            const holding = yield* Ref.modify(held, (names) => {
+              const rest = new Set(names);
+              rest.delete(name);
+              return [names.has(name), rest];
+            });
+            if (holding) return yield* Queue.offer(others, sent).pipe(Effect.asVoid);
+            const listed = yield* body;
+            return yield* answer(sent, listed);
+          });
         const inbox = yield* Ref.make<ReadonlyArray<Schema.Json>>(options.inbox ?? []);
         const active = yield* Ref.make<ReadonlyArray<string>>(options.active ?? []);
         const environments = yield* Ref.make<ReadonlyArray<string>>([]);
@@ -158,17 +173,25 @@ export const scriptedServerWith = Effect.fn("ScriptedServer.make")(function* (
             if (sent.method === "GET" && sent.path === `/api/session/${SESSION}`)
               return answer(sent, session);
             if (sent.path.endsWith("/inbox"))
-              return Effect.flatMap(Ref.get(inbox), (items) => answer(sent, { data: [...items] }));
+              return lookup(
+                sent,
+                "inbox",
+                Effect.map(Ref.get(inbox), (items) => ({ data: [...items] })),
+              );
             if (sent.path === "/api/session/active")
-              return Effect.flatMap(Ref.get(active), (ids) =>
-                answer(sent, { data: Object.fromEntries(ids.map((id) => [id, {}])) }),
+              return lookup(
+                sent,
+                "active",
+                Effect.map(Ref.get(active), (ids) => ({
+                  data: Object.fromEntries(ids.map((id) => [id, {}])),
+                })),
               );
             if (sent.path.startsWith("/api/experimental/job"))
-              return Effect.gen(function* () {
-                if (yield* Ref.getAndSet(holdJobs, false))
-                  return yield* Queue.offer(others, sent).pipe(Effect.asVoid);
-                return yield* answer(sent, { data: [...(yield* Ref.get(jobs))] });
-              });
+              return lookup(
+                sent,
+                "jobs",
+                Effect.map(Ref.get(jobs), (running) => ({ data: [...running] })),
+              );
             return Queue.offer(others, sent).pipe(Effect.asVoid);
           }),
           Effect.forever,
@@ -182,7 +205,7 @@ export const scriptedServerWith = Effect.fn("ScriptedServer.make")(function* (
           emit,
           reply,
           setJobs: (running) => Ref.set(jobs, running),
-          holdNextJobs: Ref.set(holdJobs, true),
+          holdNext: (name) => Ref.update(held, (names) => new Set(names).add(name)),
           setInbox: (items) => Ref.set(inbox, items),
           setActive: (ids) => Ref.set(active, ids),
           environments: Ref.get(environments),

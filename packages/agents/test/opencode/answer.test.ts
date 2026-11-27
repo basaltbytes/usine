@@ -27,7 +27,7 @@ describe("OpenCode answer", () => {
   it.live("recounts a steer posted while the success handler reads running jobs", () =>
     Effect.gen(function* () {
       const { bridge, running, seen, ended } = yield* launched("OLD");
-      yield* bridge.holdNextJobs;
+      yield* bridge.holdNext("jobs");
       for (const line of firstExecutionEnds) yield* bridge.emit(line);
       const jobs = yield* bridge.request;
       assert(jobs.path.startsWith("/api/experimental/job"));
@@ -165,28 +165,33 @@ describe("OpenCode answer", () => {
       }).pipe(Effect.scoped),
     );
 
-  it.live("retries a lookup that fails after the execution succeeded", () =>
-    Effect.gen(function* () {
-      const { bridge, running } = yield* launched("Started the tests.");
-      yield* bridge.holdNextJobs;
-      for (const line of firstExecutionEnds) yield* bridge.emit(line);
-      const jobs = yield* bridge.request;
-      assert(jobs.path.startsWith("/api/experimental/job"));
-      yield* bridge.reply(jobs, 503, { message: "OpenCode is busy" });
-      const result = yield* running.result;
-      assert.strictEqual(result.message, "FIRST");
-      const answered = yield* bridge.answered;
-      assert(
-        answered.some(({ path }) => path.startsWith("/api/experimental/job")),
-        "the retry read the running jobs",
-      );
-    }).pipe(Effect.scoped),
-  );
+  for (const [lookup, name, matches] of [
+    ["jobs", "running jobs", (path: string) => path.startsWith("/api/experimental/job")],
+    ["inbox", "session inbox", (path: string) => path.endsWith("/inbox")],
+    ["active", "active sessions", (path: string) => path === "/api/session/active"],
+  ] as const)
+    it.live(`retries a read of the ${name} that fails after the execution succeeded`, () =>
+      Effect.gen(function* () {
+        const { bridge, running } = yield* launched("Started the tests.");
+        yield* bridge.holdNext(lookup);
+        for (const line of firstExecutionEnds) yield* bridge.emit(line);
+        const held = yield* bridge.request;
+        assert(matches(held.path), `the held request reads the ${name}`);
+        yield* bridge.reply(held, 503, { message: "OpenCode is busy" });
+        const result = yield* running.result;
+        assert.strictEqual(result.message, "FIRST");
+        const answered = yield* bridge.answered;
+        assert(
+          answered.some(({ path }) => matches(path)),
+          `the retry read the ${name}`,
+        );
+      }).pipe(Effect.scoped),
+    );
 
   it.effect("fails the session with the lookup that keeps failing", () =>
     Effect.gen(function* () {
       const { bridge, running } = yield* launched("Started the tests.");
-      yield* bridge.holdNextJobs;
+      yield* bridge.holdNext("jobs");
       for (const line of firstExecutionEnds) yield* bridge.emit(line);
       // The retries wait on the test clock.
       yield* Effect.forkScoped(
@@ -195,7 +200,7 @@ describe("OpenCode answer", () => {
       for (let attempt = 0; attempt < 3; attempt++) {
         const jobs = yield* bridge.request;
         assert(jobs.path.startsWith("/api/experimental/job"));
-        yield* bridge.holdNextJobs;
+        yield* bridge.holdNext("jobs");
         yield* bridge.reply(jobs, 503, { message: "OpenCode is busy" });
       }
       const failure = yield* running.result.pipe(Effect.flip);
@@ -203,6 +208,37 @@ describe("OpenCode answer", () => {
       assert.include(failure.message, "Could not read OpenCode's running jobs");
       assert.include(failure.message, "OpenCode is busy");
     }).pipe(Effect.scoped),
+  );
+
+  it.live(
+    "answers once an operator message posted while the answer waits for work is cancelled",
+    () =>
+      Effect.gen(function* () {
+        const { bridge, running } = yield* launched("Started the tests.");
+        yield* bridge.holdNext("jobs");
+        for (const line of firstExecutionEnds) yield* bridge.emit(line);
+        const jobs = yield* bridge.request;
+        assert(jobs.path.startsWith("/api/experimental/job"));
+        const guidance = Steer.make({ message: "Reply STEERED instead." });
+        const steering = yield* Effect.forkScoped(running.intervene(guidance, () => Effect.void));
+        const posted = yield* bridge.request;
+        const id = assertPrompt(posted, guidance.message);
+        assert(Option.isSome(id));
+        yield* bridge.reply(posted, 200, { data: { id: id.value } });
+        yield* Fiber.join(steering);
+        yield* bridge.emit(event("session.inbox.enqueued", { inboxID: id.value }));
+        // The answer waits for the listed job, then for the operator message.
+        yield* bridge.reply(jobs, 200, {
+          data: [{ kind: "shell", id: "sh_1", status: "running", title: "test" }],
+        });
+        yield* Effect.sleep("100 millis");
+        const early = yield* running.result.pipe(Effect.timeoutOption("100 millis"));
+        assert(Option.isNone(early), "the answer waits for the operator message");
+        yield* bridge.emit(event("session.inbox.cancelled", { inboxID: id.value }));
+        const result = yield* running.result.pipe(Effect.timeoutOption("2 seconds"));
+        assert(Option.isSome(result), "the answer returns once OpenCode cancels the message");
+        assert.strictEqual(result.value.message, "FIRST");
+      }).pipe(Effect.scoped),
   );
 
   it.live("answers when the steer that the answer waited for fails", () =>

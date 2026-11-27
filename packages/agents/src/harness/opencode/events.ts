@@ -235,7 +235,10 @@ export const openCodeEvents = (context: OpenCodeContext, actions: EventActions) 
         return yield* endInputs((latest) => cancelled(latest, event.data.inboxID));
       case "session.inbox.delivered": {
         const operator = (yield* Ref.get(operatorIds)).get(event.data.inboxID);
-        yield* updatePending(state, (latest) => delivered(latest, event.data.inboxID));
+        yield* Ref.update(state, (latest): OpenCodeState => ({
+          ...latest,
+          pending: delivered(latest.pending, event.data.inboxID, latest.execution),
+        }));
         if (operator === undefined) return;
         yield* conversation.observe(operator);
         return;

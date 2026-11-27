@@ -17,6 +17,7 @@ import {
   childRequest,
   event,
   execution,
+  firstExecutionEnds,
   launched,
   type ScriptedBridge,
   scriptedBackend,
@@ -361,6 +362,47 @@ describe("OpenCode restart", () => {
         "the restart reports the earlier process's background work as unknown",
       );
     }).pipe(Effect.scoped),
+  );
+
+  it.live(
+    "reopens a remote session without a retry when the bridge is lost during a done check",
+    () =>
+      Effect.gen(function* () {
+        const { server, bridge } = yield* launched("OLD", remoteRequest);
+        const first = yield* server.bridges;
+        assert.strictEqual(first, bridge);
+        yield* bridge.holdNext("jobs");
+        for (const line of firstExecutionEnds) yield* bridge.emit(line);
+        const jobs = yield* bridge.request;
+        assert(jobs.path.startsWith("/api/experimental/job"));
+        yield* bridge.lose(lost);
+        // The first retry would wait about a second.
+        const reopened = yield* server.bridges.pipe(Effect.timeoutOption("500 millis"));
+        assert(Option.isSome(reopened), "the session reopens on a new bridge");
+        const continued = yield* reopened.value.request.pipe(Effect.timeoutOption("500 millis"));
+        assert(
+          Option.isSome(continued),
+          "the continuation prompt arrives within the first backoff",
+        );
+        assertPrompt(continued.value, CONTINUATION_MESSAGE);
+      }).pipe(Effect.scoped),
+  );
+
+  it.live(
+    "fails the session with the bridge's loss when a local bridge stops during a done check",
+    () =>
+      Effect.gen(function* () {
+        const { bridge, running } = yield* launched("OLD");
+        yield* bridge.holdNext("jobs");
+        for (const line of firstExecutionEnds) yield* bridge.emit(line);
+        const jobs = yield* bridge.request;
+        assert(jobs.path.startsWith("/api/experimental/job"));
+        yield* bridge.lose(lost);
+        const failure = yield* running.result.pipe(Effect.flip, Effect.timeoutOption("500 millis"));
+        assert(Option.isSome(failure), "the session fails within the first backoff");
+        assert(failure.value._tag === "SessionOperationError");
+        assert.strictEqual(failure.value.message, lost.message);
+      }).pipe(Effect.scoped),
   );
 
   it.live("fails the session when a local bridge stops", () =>
