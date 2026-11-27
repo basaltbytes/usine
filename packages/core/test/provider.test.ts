@@ -17,6 +17,7 @@ import {
   RoutePattern,
   selectProvider,
   UpstreamBase,
+  upstreamSearch,
   WireProtocol,
 } from "../src/agent/provider/catalog.ts";
 
@@ -40,6 +41,21 @@ const plan = (...protocols: ReadonlyArray<ProviderProtocol>) =>
   });
 
 describe("model providers", () => {
+  it("removes the parameters that can carry a key from an upstream query, and keeps the rest as written", () => {
+    assert.deepStrictEqual(
+      [
+        "?alt=sse&key=ugw1.token",
+        "?key=ugw1.token",
+        "?k%65y=ugw1.token&alt=sse",
+        "?key&alt=sse",
+        "?alt=sse&keys=kept&q=a%20b+c",
+        "?bad=%zz",
+        "",
+      ].map(upstreamSearch),
+      ["?alt=sse", "", "?alt=sse", "?alt=sse", "?alt=sse&keys=kept&q=a%20b+c", "?bad=%zz", ""],
+    );
+  });
+
   it("matches a placeholder to one plain segment, and no dot, empty, or encoded segment", () => {
     const model = serving("plan-models", "/v1/models/{model}");
     const stream = serving("plan-stream", "/v1beta/models/{model}:streamGenerateContent");

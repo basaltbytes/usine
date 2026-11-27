@@ -196,7 +196,7 @@ Each provider holds one credential; setting two of a provider's credential varia
 
 ### LLM routes
 
-Each slot serves only the routes in its provider's entry, whatever the credential, so a worker can't use the gateway's credential for the rest of the provider's API, such as files, batches, or organization administration. A route matches whole path segments, so a percent-encoded separator (`%2F`, `%5C`), a doubled or trailing `/`, or a dot segment, which URL parsing resolves first, never reaches the upstream. Other paths are refused with `unsupported-path` before any credential is used or refreshed.
+Each slot serves only the routes in its provider's entry, whatever the credential, so a worker can't use the gateway's credential for the rest of the provider's API, such as files, batches, or organization administration. A route matches whole path segments, so a percent-encoded separator (`%2F`, `%5C`), a doubled or trailing `/`, or a dot segment, which URL parsing resolves first, never reaches the upstream. Other paths, and a method that the entry doesn't list for the route, such as `GET /opencode-go/chat/completions`, are refused with `unsupported-path` before any credential is used or refreshed. The `key` query parameter, where a Google-protocol client can put its caller token, never reaches the upstream; the rest of the query, such as `?alt=sse`, does.
 
 For the built-in providers, these are the routes that their harnesses call:
 

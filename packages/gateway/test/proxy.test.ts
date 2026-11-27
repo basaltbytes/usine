@@ -446,10 +446,14 @@ describe("GatewayProxy", () => {
     () =>
       Effect.gen(function* () {
         const caller = yield* attach(installation);
-        yield* send("http://llm.gw.test/anthropic-messages/v1/messages", {
-          authorization: `Bearer ${caller}`,
-          "anthropic-beta": "fine-grained-tool-streaming-2025-05-14",
-        });
+        yield* send(
+          "http://llm.gw.test/anthropic-messages/v1/messages",
+          {
+            authorization: `Bearer ${caller}`,
+            "anthropic-beta": "fine-grained-tool-streaming-2025-05-14",
+          },
+          { method: "POST", body: "{}" },
+        );
         const [request] = yield* sent;
         assert(request !== undefined);
         assert.deepStrictEqual(
@@ -478,9 +482,11 @@ describe("GatewayProxy", () => {
       Effect.gen(function* () {
         lines.length = 0;
         const caller = yield* attach(installation);
-        yield* send("http://llm.gw.test/openai-responses/v1/responses", {
-          authorization: `Bearer ${caller}`,
-        });
+        yield* send(
+          "http://llm.gw.test/openai-responses/v1/responses",
+          { authorization: `Bearer ${caller}` },
+          { method: "POST", body: "{}" },
+        );
         const [request] = yield* sent;
         assert(request !== undefined);
         assert.strictEqual(request.url, "https://api.openai.com/v1/responses");
@@ -489,15 +495,19 @@ describe("GatewayProxy", () => {
           Headers.get(request.headers, "authorization"),
           Option.some(`Bearer ${OPENAI_KEY}`),
         );
-        yield* send("http://llm.gw.test/openai/v1/responses", {
-          authorization: `Bearer ${caller}`,
-        });
+        yield* send(
+          "http://llm.gw.test/openai/v1/responses",
+          { authorization: `Bearer ${caller}` },
+          { method: "POST", body: "{}" },
+        );
         assert.strictEqual((yield* sent)[1]?.url, "https://api.openai.com/v1/responses");
         assert.isTrue(lines.some((line) => line.includes("Deprecated LLM path prefix")));
         for (const value of [caller, OPENAI_KEY]) assert.notInclude(lines.join("\n"), value);
-        const refused = yield* send("http://llm.gw.test/anthropic-messages/v1/messages", {
-          "x-api-key": caller,
-        });
+        const refused = yield* send(
+          "http://llm.gw.test/anthropic-messages/v1/messages",
+          { "x-api-key": caller },
+          { method: "POST", body: "{}" },
+        );
         assert.deepStrictEqual(
           [refused.status, refused.headers.get(REFUSAL_HEADER)],
           [503, "provider-not-configured"],
@@ -525,16 +535,18 @@ describe("GatewayProxy", () => {
             { authorization: `Bearer ${caller}` },
             { method: "POST", body: "{}" },
           );
-        for (const path of [
-          "/anthropic-messages/v1/messages?beta=true",
-          "/anthropic-messages/v1/messages/count_tokens?beta=true",
-          "/anthropic-messages/v1/models",
-          "/anthropic-messages/v1/models/claude-haiku-5-5",
-          "/openai-responses/v1/responses",
-          "/openai-responses/v1/responses/compact",
-          "/openai-responses/v1/models",
-        ])
-          assert.strictEqual((yield* ask(path)).status, 200, path);
+        const list = (path: string) =>
+          send(`http://llm.gw.test${path}`, { authorization: `Bearer ${caller}` });
+        for (const [path, request] of [
+          ["/anthropic-messages/v1/messages?beta=true", ask],
+          ["/anthropic-messages/v1/messages/count_tokens?beta=true", ask],
+          ["/anthropic-messages/v1/models", list],
+          ["/anthropic-messages/v1/models/claude-haiku-5-5", list],
+          ["/openai-responses/v1/responses", ask],
+          ["/openai-responses/v1/responses/compact", ask],
+          ["/openai-responses/v1/models", list],
+        ] as const)
+          assert.strictEqual((yield* request(path)).status, 200, path);
         assert.deepStrictEqual(
           (yield* sent).map(({ url }) => url),
           [
@@ -1099,6 +1111,49 @@ describe("the OpenCode Go slot", () => {
               );
             }),
           ),
+        ),
+      ),
+  );
+
+  it.effect(
+    "leaves a caller token sent as ?key= out of the upstream URL, and refuses a method that the route doesn't list",
+    () =>
+      Effect.gen(function* () {
+        const caller = yield* attach(installation);
+        const stream = yield* send(
+          `http://llm.gw.test/${opencodeGo.slot}/models/gemini-4-argon:streamGenerateContent?alt=sse&key=${caller}`,
+          { "x-goog-api-key": caller },
+          { method: "POST", body: '{"model":"go-model"}' },
+        );
+        const listing = yield* send(`http://llm.gw.test/${opencodeGo.slot}/chat/completions`, {
+          authorization: `Bearer ${caller}`,
+        });
+
+        assert.deepStrictEqual(
+          [stream.status, listing.status, listing.headers.get(REFUSAL_HEADER)],
+          [200, 404, "unsupported-path"],
+        );
+        const forwarded = yield* sent;
+        assert.deepStrictEqual(
+          forwarded.map(({ url, headers }) => [url, Headers.get(headers, "x-goog-api-key")]),
+          [
+            [
+              "https://opencode.ai/inference/go/google/v1beta/models/gemini-4-argon:streamGenerateContent?alt=sse",
+              Option.some(GO_KEY),
+            ],
+          ],
+        );
+        assert.include(
+          lines.find(
+            (line) =>
+              line.includes("Gateway refused a request") &&
+              line.includes(`"path":"/${opencodeGo.slot}/chat/completions"`),
+          ),
+          '"method":"GET"',
+        );
+      }).pipe(
+        Effect.provide(
+          Layer.unwrap(Effect.map(keyedProviders, (providers) => gateway(providers, ok))),
         ),
       ),
   );

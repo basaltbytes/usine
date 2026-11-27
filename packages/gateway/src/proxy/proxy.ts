@@ -1,3 +1,4 @@
+import { upstreamSearch } from "@usine/core/agent/provider";
 import { canonicalRepositoryName } from "@usine/core/repository";
 import { Context, Effect, Layer, Match, Option, Result, Schema } from "effect";
 import {
@@ -365,6 +366,12 @@ export class GatewayProxy extends Context.Service<
             "unsupported-path",
             `The gateway serves only the routes of ${provider.label} on ${hosts.llm}, such as /${provider.slot}${provider.routes[0] ?? ""}, not ${target.pathname}.`,
           );
+        if (!protocol.value.allows(request.method, rest))
+          return yield* refusedCaller(
+            claims,
+            "unsupported-path",
+            `The gateway serves ${target.pathname} of ${provider.label} only with the methods that its entry lists, not ${request.method}.`,
+          );
         const incoming = passingHeaders(
           provider,
           withoutCallerCredentials(endToEndHeaders(request.headers), providerKeyHeaders),
@@ -377,7 +384,7 @@ export class GatewayProxy extends Context.Service<
                 headers: withStaticCredential(credential, protocol.value.key, incoming),
                 answered: () => Effect.void,
               };
-        const upstream = `${llmUpstream(held, protocol.value, rest)}${target.search}`;
+        const upstream = `${llmUpstream(held, protocol.value, rest)}${upstreamSearch(target.search)}`;
         const response = yield* forwardRequest(client, request, upstream, outgoing.headers);
         yield* outgoing.answered(response.status);
         yield* forwarded("Forwarded an LLM request", request, target, attachment, response, {
