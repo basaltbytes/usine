@@ -4,7 +4,7 @@ import type { AttemptId } from "@usine/core/attempt";
 import { attemptConnectionsFor } from "../attempt-connections.ts";
 import type { RemoteHost } from "@usine/agents/child-host";
 import { Harnesses } from "@usine/agents/harness/node";
-import type { Harness } from "@usine/core/agent/brain";
+import type { BrainSpec } from "@usine/core/agent/brain";
 import type { RepositoryName } from "@usine/core/repository";
 import type { GatewayCredentialKind, WorkerName } from "@usine/core/worker";
 import type { AttemptRuntime } from "@usine/durable/attempt-runtime";
@@ -98,11 +98,11 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
     // or a provisioned machine's Attempts get an API key.
     const harnessProbe = (machine: SshMachine, shell: RemoteHost): HarnessProbe => {
       const own = options.harnessReadiness?.(machine) ?? agentsHarnessProbe(harnesses, shell, {});
-      const keyed = (harness: Harness) =>
-        Option.map(provisionedApiKey(catalog, machine, harness), ({ provider }) => provider);
+      const keyed = (brain: BrainSpec) =>
+        Option.map(provisionedApiKey(catalog, machine, brain), ({ provider }) => provider);
       const external = agentsHarnessProbe(harnesses, shell, {}, "api-key");
       const probe: HarnessProbe = (brain, login) =>
-        Option.isSome(keyed(brain.harness)) ? external(brain, login) : own(brain, login);
+        Option.isSome(keyed(brain)) ? external(brain, login) : own(brain, login);
       return Option.match(machine.gateway, {
         onNone: () => probe,
         onSome: (gateway) =>
@@ -185,7 +185,7 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
 
     const grantFor = (repository: RepositoryName) =>
       Effect.succeed({
-        acquire: (attemptId, worker, permissions, machine, operation, harness) =>
+        acquire: (attemptId, worker, permissions, machine, operation, brain) =>
           Effect.gen(function* () {
             yield* reclaimMachine(machine);
             const access = Option.isNone(machine.gateway)
@@ -205,13 +205,13 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
                   machine,
                   machine.gateway.value,
                   operation,
-                  harness,
+                  brain,
                 );
             const isolation = yield* containers.isolation(machine);
             const sessionMounts = yield* attemptHomes.mounts(
               machine,
               attemptId,
-              harness,
+              Option.map(brain, ({ harness }) => harness),
               isolation,
               operation,
             );
@@ -223,7 +223,7 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
               attemptId,
               access,
               operation,
-              harness,
+              brain,
             );
             return { ...keyed, writableMounts: [...keyed.writableMounts, ...sessionMounts] };
           }),
@@ -345,12 +345,12 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
           onNone: () => `https://github.com/${repository}.git`,
           onSome: ({ settings }) => gatewayRepositoryUrl(settings.domain, repository),
         }),
-      gatewayCredential: (machine, harness) =>
+      gatewayCredential: (machine, brain) =>
         Option.match(machine.gateway, {
           onNone: () => Effect.succeed(Option.none<GatewayCredentialKind>()),
-          onSome: (gateway) => gatewayCredentialFor(catalog, gateway, harness),
+          onSome: (gateway) => gatewayCredentialFor(catalog, gateway, brain),
         }),
-      credentialRoute: (machine, harness) => machineCredentialRoute(catalog, machine, harness),
+      credentialRoute: (machine, brain) => machineCredentialRoute(catalog, machine, brain),
       grantFor,
       readOnlyAccessGap: Option.none(),
       reclaim,

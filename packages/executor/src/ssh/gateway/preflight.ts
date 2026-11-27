@@ -4,7 +4,7 @@ import {
   type HarnessDescriptor,
 } from "@usine/agents/harness";
 import type { RemoteHost } from "@usine/agents/child-host";
-import type { BrainSpec, Harness } from "@usine/core/agent/brain";
+import type { BrainSpec } from "@usine/core/agent/brain";
 import type { ModelProvider, ModelProviderCatalog } from "@usine/core/agent/provider";
 import type { GatewayCredentialKind, WorkerName } from "@usine/core/worker";
 import { Effect, Option, Redacted, Ref } from "effect";
@@ -43,9 +43,21 @@ const listed = (items: ReadonlyArray<string>): string =>
     ? items.join(" and ")
     : `${items.slice(0, -1).join(", ")}, and ${items.at(-1) ?? ""}`;
 
-/** The `llm.<domain>` path prefixes of `providers` on a Gateway that serves `prefixes`, for messages. */
-const llmPaths = (providers: ModelProviderCatalog, prefixes: GatewayLlmPrefixes) =>
-  listed(providers.providers.map((provider) => `/${llmPrefixOf(provider, prefixes)}`));
+/**
+ * The `llm.<domain>` path prefixes of `providers` on a Gateway that serves `prefixes`, for
+ * messages.
+ */
+const llmPaths = (providers: ReadonlyArray<ModelProvider>, prefixes: GatewayLlmPrefixes) =>
+  listed(providers.map((provider) => `/${llmPrefixOf(provider, prefixes)}`));
+
+/**
+ * The providers whose slot isn't their ID, which a Gateway from before slots serves at another
+ * prefix.
+ */
+const renamedProviders = (providers: ModelProviderCatalog): ReadonlyArray<ModelProvider> =>
+  providers.providers.filter(
+    (provider) => llmPrefixOf(provider, "provider") !== llmPrefixOf(provider, "slot"),
+  );
 
 /**
  * Records the path prefixes the Gateway serves, which Attempts that start later use. Logs a
@@ -61,7 +73,7 @@ const recordLlmPrefixes = Effect.fn("SshExecutor.recordLlmPrefixes")(function* (
     worker,
     gateway: gateway.forward.gateway,
     llmPrefixes: prefixes,
-    paths: llmPaths(providers, prefixes),
+    paths: llmPaths(providers.providers, prefixes),
   };
   yield* Effect.annotateCurrentSpan(fields);
   const previous = yield* Ref.getAndSet(gateway.llmPrefixes, prefixes);
@@ -187,16 +199,17 @@ const credentialMode = (kind: GatewayCredentialKind | undefined, listed: boolean
   kind === undefined ? (listed ? "gateway-unreported" : "worker-login") : `gateway-${kind}`;
 
 /**
- * Returns the credential kind the Gateway injects for `harness`, as recorded by the last
- * preflight: the kind of the harness's provider that the Gateway holds. Pi uses its own login.
+ * Returns the credential kind the Gateway injects for a session of `brain`, as recorded by the last
+ * preflight: the kind in the slot of its model's provider, if the Gateway holds it. Pi uses its
+ * own login.
  */
 export const gatewayCredentialFor = (
   catalog: HarnessCatalog,
   gateway: MachineGateway,
-  harness: Harness,
+  brain: BrainSpec,
 ): Effect.Effect<Option.Option<GatewayCredentialKind>> =>
   Effect.map(Ref.get(gateway.credentials), (credentials) =>
-    Option.flatMap(catalog.gatewayProvider(harness, gateway.settings.llmProviders), ({ slot }) =>
+    Option.flatMap(catalog.modelGatewayProvider(brain, gateway.settings.llmProviders), ({ slot }) =>
       Option.fromUndefinedOr(credentials[slot]),
     ),
   );
@@ -217,7 +230,7 @@ const gatewayUpgradeOf = (
   const lags = [
     ...(prefixes === "provider"
       ? [
-          `it serves model requests only at ${llmPaths(providers, "provider")}, which attempts call instead of ${llmPaths(providers, "slot")}`,
+          `it serves model requests only at ${llmPaths(renamedProviders(providers), "provider")}, which attempts call instead of ${llmPaths(renamedProviders(providers), "slot")}`,
         ]
       : []),
     ...(Option.exists(reported, ({ slots }) => Option.isNone(slots))
@@ -417,12 +430,12 @@ const PROXY_REFUSED = "403";
 
 /**
  * Probes a brain on a Worker behind a Gateway (ADR 0027). If the Gateway has the credential of
- * the harness's provider, checks only the harness binary. Otherwise, Claude Code and Codex use
- * the operator's login on the machine, or an API key in the Attempt's environment if `apiKeyed`
- * returns `true` for the harness: `probe` checks the login or the binary, then the machine must
- * connect to the login's hosts, or the provider's API host, through the forward proxy. Pi goes
- * to `probe`, which rejects it on any remote machine. The checks run through `shell`, on the
- * machine or in a container on it.
+ * the provider of the brain's model, checks only the harness binary. Otherwise, Claude Code and
+ * Codex use the operator's login on the machine, or an API key in the Attempt's environment if
+ * `apiKeyed` returns a provider for the brain: `probe` checks the login or the binary, then the
+ * machine must connect to the login's hosts, or the provider's API host, through the forward
+ * proxy. Pi goes to `probe`, which rejects it on any remote machine. The checks run through
+ * `shell`, on the machine or in a container on it.
  */
 export const gatewayHarnessProbe = (
   catalog: HarnessCatalog,
@@ -431,7 +444,7 @@ export const gatewayHarnessProbe = (
   gateway: MachineGateway,
   probe: HarnessProbe,
   shell: RemoteHost,
-  apiKeyed: (harness: Harness) => Option.Option<ModelProvider>,
+  apiKeyed: (brain: BrainSpec) => Option.Option<ModelProvider>,
   external: HarnessProbe,
 ): HarnessProbe => {
   const worker = machine.address.name;
@@ -440,11 +453,12 @@ export const gatewayHarnessProbe = (
   const proxy = forwardProxyUrl(domain);
 
   const loginHostsReachable = Effect.fn("SshExecutor.probeLoginHostsBehindGateway")(function* (
+    brain: BrainSpec,
     descriptor: HarnessDescriptor,
     credential: HarnessCredential,
   ) {
     const { id: harness, label } = descriptor;
-    const keyed = apiKeyed(harness);
+    const keyed = apiKeyed(brain);
     const hosts: ReadonlyArray<string> = Option.match(keyed, {
       onNone: () => credential.hosts,
       onSome: (provider) => provider.hosts,
@@ -505,7 +519,8 @@ export const gatewayHarnessProbe = (
     yield* Effect.annotateCurrentSpan({ worker, host, domain, harness });
     const readiness = yield* probe(brain, login);
     if (readiness._tag === "HarnessUnavailableError") return readiness;
-    if (gateway.settings.egress === "proxy") yield* loginHostsReachable(descriptor, credential);
+    if (gateway.settings.egress === "proxy")
+      yield* loginHostsReachable(brain, descriptor, credential);
     return readiness;
   });
 
@@ -517,7 +532,7 @@ export const gatewayHarnessProbe = (
       {
         onNone: () => probe(brain, login),
         onSome: ({ descriptor, credential }) =>
-          catalog.gatewayHolds(descriptor.id, gateway.settings.llmProviders)
+          Option.isSome(catalog.modelGatewayProvider(brain, gateway.settings.llmProviders))
             ? external(brain, login)
             : loginOnMachine(brain, descriptor, credential, login),
       },

@@ -29,6 +29,10 @@ export const CredentialRoute = Schema.Literals([
 ]);
 export type CredentialRoute = typeof CredentialRoute.Type;
 
+/** Returns whether `route` reaches a provider through the gateway's slot. */
+export const isGatewayRoute = (route: CredentialRoute): boolean =>
+  route === "gateway" || route === "gateway-api-key" || route === "gateway-subscription";
+
 const Requirement = Schema.Union([
   Capability,
   Placement,

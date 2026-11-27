@@ -1,8 +1,8 @@
 import { type HarnessCatalog } from "@usine/agents/harness";
-import type { Harness } from "@usine/core/agent/brain";
+import type { BrainSpec } from "@usine/core/agent/brain";
 import type { ModelProvider } from "@usine/core/agent/provider";
 import type { AttemptId } from "@usine/core/attempt";
-import { Array as Arr, Effect, Option, Redacted } from "effect";
+import { Effect, Option, Redacted } from "effect";
 import type { ExecutorOperation } from "../executor.ts";
 import { type RemoteCommands, sendingShell } from "../remote/commands.ts";
 import type { MachineCredentialRoute, RemoteAccess } from "../remote/machine.ts";
@@ -10,13 +10,18 @@ import type { AttemptHomes } from "./attempt-homes.ts";
 import { writeMachineFiles } from "./gateway/attachments.ts";
 import type { MachineGateway, SshMachine, SshWorkerAddress } from "./model.ts";
 
-/** Returns whether the Gateway holds a credential for one of `harness`'s providers. */
+/**
+ * Returns whether the Gateway holds the slot of the provider of `brain`'s model, and so injects the
+ * credential that each Attempt's session of `brain` uses.
+ */
 export const gatewayHolds = (
   catalog: HarnessCatalog,
-  gateway: Option.Option<MachineGateway>,
-  harness: Harness,
+  gateway: Option.Option<Pick<MachineGateway, "settings">>,
+  brain: BrainSpec,
 ): boolean =>
-  Option.exists(gateway, ({ settings }) => catalog.gatewayHolds(harness, settings.llmProviders));
+  Option.exists(gateway, ({ settings }) =>
+    Option.isSome(catalog.modelGatewayProvider(brain, settings.llmProviders)),
+  );
 
 /** A provider API key that an Attempt gets, and its provider. */
 export interface ProvisionedApiKey {
@@ -25,47 +30,54 @@ export interface ProvisionedApiKey {
 }
 
 /**
- * Returns the API key that each Attempt on a Worker's machine gets for `harness`: the key of its
- * first provider that the provisioner sets one for. `None` if the Worker isn't provisioned, the
- * provisioner sets no key for the harness's providers, or the Gateway holds one of them.
+ * Returns the API key that each Attempt on a Worker's machine gets for `brain`: the provisioner's
+ * key for the provider of its model, if an attempt API key reaches that provider. `None` if the
+ * Worker isn't provisioned, the provisioner sets no such key, the provider is gateway-only, or the
+ * Gateway holds the provider's slot.
  */
 export const provisionedApiKey = (
   catalog: HarnessCatalog,
-  worker: { readonly address: SshWorkerAddress; readonly gateway: Option.Option<MachineGateway> },
-  harness: Harness,
+  worker: {
+    readonly address: SshWorkerAddress;
+    readonly gateway: Option.Option<Pick<MachineGateway, "settings">>;
+  },
+  brain: BrainSpec,
 ): Option.Option<ProvisionedApiKey> => {
   const { machine } = worker.address;
-  if (machine._tag !== "Provisioned" || gatewayHolds(catalog, worker.gateway, harness))
+  if (machine._tag !== "Provisioned" || gatewayHolds(catalog, worker.gateway, brain))
     return Option.none();
   const { apiKeys } = machine.provisioner;
-  return Option.flatMap(
-    Option.filter(catalog.get(harness), ({ worker: requirements }) =>
-      Option.isSome(requirements.credential),
-    ),
-    ({ providers }) =>
-      Arr.findFirst(providers, (provider) =>
-        Option.map(Option.fromUndefinedOr(apiKeys[provider.id]), (key) => ({ provider, key })),
+  return Option.flatMap(catalog.get(brain.harness), ({ apiKeyProviders }) =>
+    Option.flatMap(
+      Option.filter(catalog.modelProvider(brain), ({ id }) =>
+        apiKeyProviders.some((reached) => reached.id === id),
       ),
+      (provider) =>
+        Option.map(Option.fromUndefinedOr(apiKeys[provider.id]), (key) => ({ provider, key })),
+    ),
   );
 };
 
 /**
- * Returns how each Attempt's `harness` authenticates on a Worker's machine: through the Gateway
- * if it holds the provider's credential, with the provisioner's API key if it sets one, or with
- * the SSH user's login otherwise.
+ * Returns how each Attempt's session of `brain` authenticates on a Worker's machine: through the
+ * Gateway if it holds the slot of the model's provider, with the provisioner's API key if it sets
+ * one for that provider, or with the SSH user's login otherwise.
  */
 export const machineCredentialRoute = (
   catalog: HarnessCatalog,
-  worker: { readonly address: SshWorkerAddress; readonly gateway: Option.Option<MachineGateway> },
-  harness: Harness,
+  worker: {
+    readonly address: SshWorkerAddress;
+    readonly gateway: Option.Option<Pick<MachineGateway, "settings">>;
+  },
+  brain: BrainSpec,
 ): MachineCredentialRoute =>
-  gatewayHolds(catalog, worker.gateway, harness)
+  gatewayHolds(catalog, worker.gateway, brain)
     ? "gateway"
-    : Option.isSome(provisionedApiKey(catalog, worker, harness))
+    : Option.isSome(provisionedApiKey(catalog, worker, brain))
       ? "api-key"
       : "host-login";
 
-/** Adds the selected harness's provisioner API key and attempt configuration. */
+/** Adds the provisioner's API key for `brain`'s model, and its attempt configuration. */
 export const withApiKeys = Effect.fn("SshExecutor.withApiKeys")(function* (
   catalog: HarnessCatalog,
   commands: RemoteCommands,
@@ -74,22 +86,21 @@ export const withApiKeys = Effect.fn("SshExecutor.withApiKeys")(function* (
   attemptId: AttemptId,
   access: RemoteAccess,
   operation: ExecutorOperation,
-  harness: Option.Option<Harness>,
+  brain: Option.Option<BrainSpec>,
 ) {
   yield* Effect.annotateCurrentSpan({ attemptId, worker: machine.address.name });
-  const keyed = catalog.descriptors
-    .filter(({ id }) => Option.contains(harness, id))
-    .flatMap((descriptor) =>
-      Option.toArray(provisionedApiKey(catalog, machine, descriptor.id)).flatMap(
-        ({ provider, key }) =>
-          Option.toArray(descriptor.worker.credential).map((credential) => ({
-            descriptor,
-            credential,
-            provider,
-            key,
-          })),
+  const keyed = Option.toArray(brain).flatMap((spec) =>
+    Option.toArray(catalog.get(spec.harness)).flatMap((descriptor) =>
+      Option.toArray(provisionedApiKey(catalog, machine, spec)).flatMap(({ provider, key }) =>
+        Option.toArray(descriptor.worker.credential).map((credential) => ({
+          descriptor,
+          credential,
+          provider,
+          key,
+        })),
       ),
-    );
+    ),
+  );
   if (keyed.length === 0) {
     yield* Effect.logDebug("No attempt API keys to inject", {
       attemptId,

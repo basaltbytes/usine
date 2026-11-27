@@ -293,6 +293,7 @@ describe("sandbox attach stream", () => {
           "Denied:api.github.com",
           "Denied:anthropic.usine.internal",
           "Denied:openai.usine.internal",
+          "Denied:opencode-go.usine.internal",
           "Allowed:registry.npmjs.org",
         ]);
       }).pipe(Effect.provide(sandbox.layer));

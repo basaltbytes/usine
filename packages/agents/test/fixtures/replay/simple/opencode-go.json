@@ -1,0 +1,717 @@
+{
+  "protocol": "opencode-bridge",
+  "harnessVersion": "2.3.2",
+  "model": "opencode-go/gpt-6-luna",
+  "scenario": "simple",
+  "environment": {
+    "HOME": "$HOME",
+    "USINE_OPENCODE_HOME": "$OPENCODE_HOME",
+    "USINE_OPENCODE_GO_BASE_URL": "$MODEL_URL",
+    "USINE_GATEWAY_TOKEN": "usine-replay-caller-token",
+    "PATH": "$PATH"
+  },
+  "entries": [
+    {
+      "type": "expect_outbound",
+      "port": "process:1",
+      "payload": {
+        "command": "$NODE",
+        "args": [
+          "-e",
+          "$CHILD_LIFELINE",
+          "$WORKTREE.child-1.pid",
+          "",
+          "node",
+          "-e",
+          "$OPENCODE_BRIDGE",
+          "30000",
+          "opencode"
+        ],
+        "cwd": "$WORKTREE",
+        "env": {
+          "HOME": "$HOME",
+          "USINE_OPENCODE_HOME": "$OPENCODE_HOME",
+          "USINE_OPENCODE_GO_BASE_URL": "$MODEL_URL",
+          "USINE_GATEWAY_TOKEN": "usine-replay-caller-token",
+          "PATH": "$PATH",
+          "USINE_OPENCODE_SERVE_XDG_DATA_HOME": "$OPENCODE_HOME/replay-parent_child_1",
+          "USINE_OPENCODE_SERVE_OPENCODE_DB": "$OPENCODE_HOME/replay-parent_child_1/opencode/opencode.db",
+          "USINE_OPENCODE_SERVE_XDG_CONFIG_HOME": "$OPENCODE_HOME/replay-parent_child_1/config",
+          "USINE_OPENCODE_SERVE_OPENCODE_CONFIG_PROJECT_DISABLE": "1",
+          "USINE_OPENCODE_SERVE_OPENCODE_DISABLE_CLAUDE_CODE": "1",
+          "USINE_OPENCODE_SERVE_OPENCODE_DISABLE_MODELS_FETCH": "1",
+          "USINE_OPENCODE_SERVE_OPENCODE_DISABLE_FREE_MODELS": "1",
+          "USINE_OPENCODE_SERVE_OPENCODE_CONFIG_CONTENT": "{\"model\":\"opencode-go/gpt-6-luna\",\"providers\":{\"opencode-go\":{\"env\":[],\"settings\":{\"apiKey\":\"{env:USINE_GATEWAY_TOKEN}\",\"transport\":\"http\",\"baseURL\":\"{env:USINE_OPENCODE_GO_BASE_URL}\"}},\"lmstudio\":{\"settings\":{\"baseURL\":\"\"}},\"ollama\":{\"settings\":{\"baseURL\":\"\"}},\"vllm\":{\"settings\":{\"baseURL\":\"\"}}},\"policies\":[{\"action\":\"provider.use\",\"resource\":\"*\",\"effect\":\"deny\"},{\"action\":\"provider.use\",\"resource\":\"opencode-go\",\"effect\":\"allow\"},{\"action\":\"plugin.use\",\"resource\":\"*\",\"effect\":\"deny\"},{\"action\":\"mcp.use\",\"resource\":\"*\",\"effect\":\"deny\"},{\"action\":\"websearch.use\",\"resource\":\"*\",\"effect\":\"deny\"}],\"permissions\":[{\"action\":\"*\",\"resource\":\"*\",\"effect\":\"allow\"},{\"action\":\"read\",\"resource\":\"*.env\",\"effect\":\"allow\"},{\"action\":\"read\",\"resource\":\"*.env.*\",\"effect\":\"allow\"},{\"action\":\"question\",\"resource\":\"*\",\"effect\":\"deny\"},{\"action\":\"webfetch\",\"resource\":\"*\",\"effect\":\"deny\"},{\"action\":\"websearch\",\"resource\":\"*\",\"effect\":\"deny\"}],\"websearch\":false,\"formatter\":false,\"warming\":false,\"agents\":{\"title\":{\"disabled\":true}},\"instructions\":[\"$WORKTREE/AGENTS.md\"]}"
+        }
+      }
+    },
+    { "type": "emit_inbound", "port": "process:1/stdout", "payload": { "ready": true } },
+    {
+      "type": "expect_outbound",
+      "port": "process:1/stdin",
+      "payload": {
+        "id": 1,
+        "method": "GET",
+        "path": "/api/model?location%5Bdirectory%5D=$ENCODED_WORKTREE"
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": { "id": "evt_21b466179001nuIoJ9LZCQocFO", "type": "server.connected", "data": {} }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_21b46618e001qIH7nMlljXo7WY",
+          "created": 1795753927054,
+          "type": "project.updated",
+          "location": { "directory": "$WORKTREE" },
+          "data": {
+            "id": "1d5c7ff8614d511404f8ac6ec2c7dbc056b8a35a",
+            "canonical": "$WORKTREE",
+            "time": { "created": 1795753927051, "updated": 1795753927051, "active": 1795753927053 },
+            "sandboxes": []
+          }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "id": 1,
+        "status": 200,
+        "body": {
+          "location": { "directory": "$WORKTREE" },
+          "data": [
+            {
+              "id": "gpt-6-luna",
+              "modelID": "gpt-6-luna",
+              "providerID": "opencode-go",
+              "type": "chat",
+              "family": "gpt-luna",
+              "name": "GPT-6 Luna",
+              "package": "@opencode/ai/providers/openai/responses",
+              "settings": { "apiKey": "usine-replay-caller-token", "baseURL": "$MODEL_URL" },
+              "capabilities": {
+                "tools": true,
+                "freeform": ["text", "lark", "regex"],
+                "input": ["text", "image", "pdf"],
+                "output": ["text"],
+                "temperature": true
+              },
+              "variants": [
+                {
+                  "id": "none",
+                  "settings": {
+                    "reasoningEffort": "none",
+                    "reasoningSummary": "auto",
+                    "include": ["reasoning.encrypted_content"]
+                  }
+                },
+                {
+                  "id": "low",
+                  "settings": {
+                    "reasoningEffort": "low",
+                    "reasoningSummary": "auto",
+                    "include": ["reasoning.encrypted_content"]
+                  }
+                },
+                {
+                  "id": "medium",
+                  "settings": {
+                    "reasoningEffort": "medium",
+                    "reasoningSummary": "auto",
+                    "include": ["reasoning.encrypted_content"]
+                  }
+                },
+                {
+                  "id": "high",
+                  "settings": {
+                    "reasoningEffort": "high",
+                    "reasoningSummary": "auto",
+                    "include": ["reasoning.encrypted_content"]
+                  }
+                },
+                {
+                  "id": "xhigh",
+                  "settings": {
+                    "reasoningEffort": "xhigh",
+                    "reasoningSummary": "auto",
+                    "include": ["reasoning.encrypted_content"]
+                  }
+                },
+                {
+                  "id": "max",
+                  "settings": {
+                    "reasoningEffort": "max",
+                    "reasoningSummary": "auto",
+                    "include": ["reasoning.encrypted_content"]
+                  }
+                }
+              ],
+              "time": { "released": 1790035200000 },
+              "cost": [
+                { "input": 0.1, "output": 0.5, "cache": { "read": 0.01, "write": 0.125 } },
+                {
+                  "tier": { "type": "context", "size": 272000 },
+                  "input": 0.2,
+                  "output": 0.75,
+                  "cache": { "read": 0.02, "write": 0.25 }
+                }
+              ],
+              "status": "active",
+              "enabled": true,
+              "limit": { "context": 1050000, "input": 922000, "output": 128000 }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_21b46644c001rFwILrj8yG2vRs",
+          "created": 1795753927756,
+          "type": "integration.updated",
+          "location": { "directory": "$WORKTREE" },
+          "data": {}
+        }
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "port": "process:1/stdin",
+      "payload": {
+        "id": 2,
+        "method": "POST",
+        "path": "/api/session",
+        "body": {
+          "title": "usine replay",
+          "location": { "directory": "$WORKTREE" },
+          "model": { "providerID": "opencode-go", "id": "gpt-6-luna", "variant": "low" },
+          "permissions": [
+            { "action": "*", "resource": "*", "effect": "allow" },
+            { "action": "read", "resource": "*.env", "effect": "allow" },
+            { "action": "read", "resource": "*.env.*", "effect": "allow" },
+            { "action": "question", "resource": "*", "effect": "deny" },
+            { "action": "webfetch", "resource": "*", "effect": "deny" },
+            { "action": "websearch", "resource": "*", "effect": "deny" }
+          ]
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_21b466454001jTT8dpKRaoKDO7",
+          "created": 1795753927764,
+          "type": "provider.updated",
+          "location": { "directory": "$WORKTREE" },
+          "data": {}
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_21b466458001QKmNcG61FjF8qs",
+          "created": 1795753927768,
+          "type": "model.updated",
+          "location": { "directory": "$WORKTREE" },
+          "data": {}
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_21b46645a001fsybHdb3Ga30dS",
+          "created": 1795753927770,
+          "type": "agent.updated",
+          "location": { "directory": "$WORKTREE" },
+          "data": {}
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_21b46645a002YI7u2AnhVHhrU7",
+          "created": 1795753927770,
+          "type": "command.updated",
+          "location": { "directory": "$WORKTREE" },
+          "data": {}
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_21b46645b001g7woER1lQKQEPZ",
+          "created": 1795753927771,
+          "type": "skill.updated",
+          "location": { "directory": "$WORKTREE" },
+          "data": {}
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_21b466472001Ulbqw6IoqwI2l9",
+          "created": 1795753927794,
+          "type": "artifact.updated",
+          "location": { "directory": "$WORKTREE" },
+          "data": {}
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_21b466481001hrEpTKF0oBJTp7",
+          "created": 1795753927809,
+          "type": "websearch.updated",
+          "location": { "directory": "$WORKTREE" },
+          "data": {}
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_21b466481003UDafXJyp4HgzVT",
+          "created": 1795753927809,
+          "type": "reference.updated",
+          "location": { "directory": "$WORKTREE" },
+          "data": {}
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_21b466482001y1JDrMEHqsh5Xt",
+          "created": 1795753927810,
+          "type": "plugin.updated",
+          "location": { "directory": "$WORKTREE" },
+          "data": {}
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "id": 2,
+        "status": 200,
+        "body": {
+          "data": {
+            "id": "ses_de4b99b5cffenwfCIrqmiRsYaH",
+            "projectID": "1d5c7ff8614d511404f8ac6ec2c7dbc056b8a35a",
+            "model": { "id": "gpt-6-luna", "providerID": "opencode-go", "variant": "low" },
+            "cost": 0,
+            "tokens": {
+              "input": 0,
+              "output": 0,
+              "reasoning": 0,
+              "cache": { "read": 0, "write": 0 }
+            },
+            "time": { "created": 1795753927848, "updated": 1795753927848 },
+            "title": "usine replay",
+            "permissions": [
+              { "action": "*", "resource": "*", "effect": "allow" },
+              { "action": "read", "resource": "*.env", "effect": "allow" },
+              { "action": "read", "resource": "*.env.*", "effect": "allow" },
+              { "action": "question", "resource": "*", "effect": "deny" },
+              { "action": "webfetch", "resource": "*", "effect": "deny" },
+              { "action": "websearch", "resource": "*", "effect": "deny" }
+            ],
+            "location": { "directory": "$WORKTREE" }
+          }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_21b4664a8001gIV2aUKa6Jxcxy",
+          "created": 1795753927848,
+          "type": "session.created",
+          "location": { "directory": "$WORKTREE" },
+          "data": {
+            "sessionID": "ses_de4b99b5cffenwfCIrqmiRsYaH",
+            "slug": "stellar-engine",
+            "version": "2.3.2",
+            "projectID": "1d5c7ff8614d511404f8ac6ec2c7dbc056b8a35a",
+            "location": { "directory": "$WORKTREE" },
+            "subpath": "",
+            "title": "usine replay",
+            "permissions": [
+              { "action": "*", "resource": "*", "effect": "allow" },
+              { "action": "read", "resource": "*.env", "effect": "allow" },
+              { "action": "read", "resource": "*.env.*", "effect": "allow" },
+              { "action": "question", "resource": "*", "effect": "deny" },
+              { "action": "webfetch", "resource": "*", "effect": "deny" },
+              { "action": "websearch", "resource": "*", "effect": "deny" }
+            ],
+            "model": { "id": "gpt-6-luna", "providerID": "opencode-go", "variant": "low" }
+          },
+          "durable": { "aggregateID": "ses_de4b99b5cffenwfCIrqmiRsYaH", "seq": 0, "version": 1 }
+        }
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "port": "process:1/stdin",
+      "payload": { "id": 3, "environment": "ses_de4b99b5cffenwfCIrqmiRsYaH" }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": { "id": 3, "status": 204, "body": null }
+    },
+    {
+      "type": "expect_outbound",
+      "port": "process:1/stdin",
+      "payload": {
+        "id": 4,
+        "method": "POST",
+        "path": "/api/session/ses_de4b99b5cffenwfCIrqmiRsYaH/prompt",
+        "body": { "text": "Reply with exactly REPLAY_DONE. Do not use tools.", "delivery": "steer" }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "id": 4,
+        "status": 200,
+        "body": {
+          "data": {
+            "id": "msg_21b4664c1001qOvGFBWNyxzYPf",
+            "sessionID": "ses_de4b99b5cffenwfCIrqmiRsYaH",
+            "time": { "created": 1795753927874 },
+            "type": "user",
+            "payload": { "text": "Reply with exactly REPLAY_DONE. Do not use tools." },
+            "delivery": "steer"
+          }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_21b4664c2001Nwlk0EPU60CQHs",
+          "created": 1795753927874,
+          "type": "session.inbox.enqueued",
+          "location": { "directory": "$WORKTREE" },
+          "data": {
+            "inboxID": "msg_21b4664c1001qOvGFBWNyxzYPf",
+            "sessionID": "ses_de4b99b5cffenwfCIrqmiRsYaH",
+            "item": {
+              "type": "user",
+              "payload": { "text": "Reply with exactly REPLAY_DONE. Do not use tools." },
+              "delivery": "steer"
+            }
+          },
+          "durable": { "aggregateID": "ses_de4b99b5cffenwfCIrqmiRsYaH", "seq": 1, "version": 1 }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_21b4664c5001qOHYG0wOYhaaJg",
+          "created": 1795753927877,
+          "type": "session.execution.started",
+          "data": { "sessionID": "ses_de4b99b5cffenwfCIrqmiRsYaH" },
+          "durable": { "aggregateID": "ses_de4b99b5cffenwfCIrqmiRsYaH", "seq": 2, "version": 1 }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_21b4664dd001rJDfEIBmIbKa2x",
+          "created": 1795753927901,
+          "metadata": { "instructions": { "initial": true } },
+          "type": "session.instructions.updated",
+          "location": { "directory": "$WORKTREE" },
+          "data": {
+            "sessionID": "ses_de4b99b5cffenwfCIrqmiRsYaH",
+            "delta": {
+              "core/codemode": "72ca3fdf406e907043554434594d5d88ba02e2a7fbedfb7d9fe9ab80539c75da",
+              "core/skill-guidance": "0fcf81582b0bdb08251c185c9c8f477ff4fba0fdecbb4a499f3d6e18ae6a8ed7",
+              "core/date": "aa60042a274d756ab2b6912d1a687df27b15101c31b97dbe569c7396c72e9633",
+              "core/environment": "5e42fba3a343ec528d883be46bee8d729d79129072089fba6cde3f31e29e3d74"
+            }
+          },
+          "durable": { "aggregateID": "ses_de4b99b5cffenwfCIrqmiRsYaH", "seq": 3, "version": 2 }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_21b4664e0001dpEr4fKb2wv5zi",
+          "created": 1795753927904,
+          "type": "session.inbox.delivered",
+          "location": { "directory": "$WORKTREE" },
+          "data": {
+            "sessionID": "ses_de4b99b5cffenwfCIrqmiRsYaH",
+            "inboxID": "msg_21b4664c1001qOvGFBWNyxzYPf"
+          },
+          "durable": { "aggregateID": "ses_de4b99b5cffenwfCIrqmiRsYaH", "seq": 4, "version": 1 }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_21b46651d001b7cvS8eLMnJ6UV",
+          "created": 1795753927965,
+          "type": "session.step.started",
+          "location": { "directory": "$WORKTREE" },
+          "data": {
+            "sessionID": "ses_de4b99b5cffenwfCIrqmiRsYaH",
+            "agent": "build",
+            "model": { "id": "gpt-6-luna", "providerID": "opencode-go", "variant": "low" },
+            "assistantMessageID": "msg_21b466503001o1cXcXjL60zc1c",
+            "started": 1795753927949
+          },
+          "durable": { "aggregateID": "ses_de4b99b5cffenwfCIrqmiRsYaH", "seq": 5, "version": 1 }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_21b466520001QYelLBfLLfPxsg",
+          "created": 1795753927968,
+          "type": "session.step.first-token",
+          "location": { "directory": "$WORKTREE" },
+          "data": {
+            "sessionID": "ses_de4b99b5cffenwfCIrqmiRsYaH",
+            "assistantMessageID": "msg_21b466503001o1cXcXjL60zc1c"
+          },
+          "durable": { "aggregateID": "ses_de4b99b5cffenwfCIrqmiRsYaH", "seq": 6, "version": 1 }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_21b466523001eiA09SnQ4dg05v",
+          "created": 1795753927971,
+          "type": "session.text.started",
+          "location": { "directory": "$WORKTREE" },
+          "data": {
+            "sessionID": "ses_de4b99b5cffenwfCIrqmiRsYaH",
+            "assistantMessageID": "msg_21b466503001o1cXcXjL60zc1c",
+            "ordinal": 0
+          },
+          "durable": { "aggregateID": "ses_de4b99b5cffenwfCIrqmiRsYaH", "seq": 7, "version": 1 }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_21b466525001HVK2OD8g1vrmz7",
+          "created": 1795753927973,
+          "type": "session.text.delta",
+          "location": { "directory": "$WORKTREE" },
+          "data": {
+            "sessionID": "ses_de4b99b5cffenwfCIrqmiRsYaH",
+            "assistantMessageID": "msg_21b466503001o1cXcXjL60zc1c",
+            "ordinal": 0,
+            "delta": "REPLAY_DONE"
+          }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_21b466526001JHIAS0MnMNYsav",
+          "created": 1795753927974,
+          "type": "session.text.ended",
+          "location": { "directory": "$WORKTREE" },
+          "data": {
+            "sessionID": "ses_de4b99b5cffenwfCIrqmiRsYaH",
+            "assistantMessageID": "msg_21b466503001o1cXcXjL60zc1c",
+            "ordinal": 0,
+            "text": "REPLAY_DONE",
+            "native": { "itemId": "msg_1" }
+          },
+          "durable": { "aggregateID": "ses_de4b99b5cffenwfCIrqmiRsYaH", "seq": 8, "version": 1 }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_21b466531001X1yQ3GHzZCkkO4",
+          "created": 1795753927985,
+          "type": "session.step.streamed",
+          "location": { "directory": "$WORKTREE" },
+          "data": {
+            "sessionID": "ses_de4b99b5cffenwfCIrqmiRsYaH",
+            "assistantMessageID": "msg_21b466503001o1cXcXjL60zc1c"
+          },
+          "durable": { "aggregateID": "ses_de4b99b5cffenwfCIrqmiRsYaH", "seq": 9, "version": 1 }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_21b466534001DM9akjiCIfD3FO",
+          "created": 1795753927988,
+          "type": "session.step.ended",
+          "location": { "directory": "$WORKTREE" },
+          "data": {
+            "sessionID": "ses_de4b99b5cffenwfCIrqmiRsYaH",
+            "assistantMessageID": "msg_21b466503001o1cXcXjL60zc1c",
+            "finish": "stop",
+            "native": { "responseId": "resp_1" },
+            "tokens": {
+              "input": 1000,
+              "output": 20,
+              "reasoning": 0,
+              "cache": { "read": 200, "write": 0 }
+            },
+            "cost": 0.000112
+          },
+          "durable": { "aggregateID": "ses_de4b99b5cffenwfCIrqmiRsYaH", "seq": 10, "version": 1 }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_21b466536001L0bD3QOZRtYi59",
+          "created": 1795753927990,
+          "type": "session.usage.updated",
+          "data": {
+            "sessionID": "ses_de4b99b5cffenwfCIrqmiRsYaH",
+            "cost": 0.000112,
+            "tokens": {
+              "input": 1000,
+              "output": 20,
+              "reasoning": 0,
+              "cache": { "read": 200, "write": 0 }
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "event": {
+          "id": "evt_21b466539001GmQ4xti5Wu45hc",
+          "created": 1795753927993,
+          "type": "session.execution.succeeded",
+          "data": { "sessionID": "ses_de4b99b5cffenwfCIrqmiRsYaH" },
+          "durable": { "aggregateID": "ses_de4b99b5cffenwfCIrqmiRsYaH", "seq": 11, "version": 1 }
+        }
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "port": "process:1/stdin",
+      "payload": {
+        "id": 5,
+        "method": "GET",
+        "path": "/api/experimental/job?sessionID=ses_de4b99b5cffenwfCIrqmiRsYaH&descendants=true&status=running"
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": { "id": 5, "status": 200, "body": { "data": [] } }
+    },
+    {
+      "type": "expect_outbound",
+      "port": "process:1/stdin",
+      "payload": {
+        "id": 6,
+        "method": "GET",
+        "path": "/api/session/ses_de4b99b5cffenwfCIrqmiRsYaH/inbox"
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": { "id": 6, "status": 200, "body": { "data": [] } }
+    },
+    {
+      "type": "expect_outbound",
+      "port": "process:1/stdin",
+      "payload": { "id": 7, "method": "GET", "path": "/api/session/active" }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": { "id": 7, "status": 200, "body": { "data": {} } }
+    },
+    { "type": "expect_outbound", "port": "process:1/stdin", "payload": { "eof": true } },
+    { "type": "runtime_exit", "port": "process:1/stdout", "code": 0, "error": null },
+    { "type": "runtime_exit", "port": "process:1/exit", "code": 0, "error": null }
+  ]
+}

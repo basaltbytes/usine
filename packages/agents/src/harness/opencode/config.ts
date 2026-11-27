@@ -1,12 +1,12 @@
 import type { BrainSpec } from "@usine/core/agent/brain";
 import type { AgentSessionId } from "@usine/core/agent/session";
-import { Effect, Option, Schema } from "effect";
-import type { CredentialRoute } from "../capability.ts";
+import { Effect, Option, Record, Schema } from "effect";
+import { UnknownModelError } from "../../runtime.ts";
+import type { AdmissionContext } from "../admission.ts";
+import { type CredentialRoute, isGatewayRoute } from "../capability.ts";
+import type { ModelChoice } from "../harness.ts";
 import type { NativeTools } from "../role.ts";
 import { OPENCODE_BASE_URL, OPENCODE_HOME, opencode } from "./descriptor.ts";
-
-/** The OpenCode provider that usine configures with the session's credential. */
-export const PROVIDER = "openai";
 
 /** A rule of OpenCode's permission list; the last rule that matches a tool call applies. */
 interface Permission {
@@ -84,30 +84,100 @@ const tokenVariable = (route: CredentialRoute): string =>
   });
 
 /**
+ * The credential of an OpenCode session: the route whose key it reads, and the variable that holds
+ * the base URL of the model's provider, if the session's environment sets one.
+ */
+interface SessionCredential {
+  readonly route: CredentialRoute;
+  readonly baseUrl: Option.Option<string>;
+}
+
+/**
+ * Returns the credential of a session from its `environment` and its `context`'s route.
+ *
+ * - On a gateway route, the session uses the caller token and the variable of the slot of the
+ *   model's provider, which the gateway sets for each slot that it holds.
+ * - On a gateway route whose environment has no slot of the model's provider but sets
+ *   `OPENCODE_BASE_URL`, the session uses the attempt's API key: a worker reports the attempt's
+ *   provisioned key as the gateway's `api-key` kind.
+ * - On any other route, the session uses the API key, and `OPENCODE_BASE_URL` if it is set.
+ *
+ * Fails for a provider that the route can't reach, which admission refuses first, and on a gateway
+ * route for a provider whose slot the gateway doesn't hold.
+ */
+export const sessionCredential = Effect.fn("OpenCodeConfig.sessionCredential")(function* (
+  environment: Readonly<Record<string, string>>,
+  brain: BrainSpec,
+  choice: ModelChoice,
+  context: AdmissionContext,
+) {
+  const { placement, credential: admitted } = context;
+  const isSet = (variable: string) => (environment[variable] ?? "") !== "";
+  const slot = Option.filter(
+    Option.flatMap(opencode.worker.credential, ({ slots }) =>
+      Record.get(slots, choice.provider.id),
+    ),
+    () => isGatewayRoute(admitted),
+  ).pipe(
+    Option.map(({ variable }) => variable),
+    Option.filter(isSet),
+  );
+  if (Option.isSome(slot)) return { route: admitted, baseUrl: slot } satisfies SessionCredential;
+  const route: CredentialRoute =
+    isGatewayRoute(admitted) && isSet(OPENCODE_BASE_URL) ? "api-key" : admitted;
+  const fields = { model: brain.model, provider: choice.provider.id, admitted, route };
+  if (route !== admitted)
+    yield* Effect.logInfo(
+      "OpenCode uses the attempt's API key: the gateway holds no slot of the model's provider",
+      fields,
+    );
+  if (!opencode.reaches(choice.provider, placement, route)) {
+    yield* Effect.logError("OpenCode reaches the model's provider only through a gateway", fields);
+    return yield* UnknownModelError.make({
+      harness: opencode.id,
+      model: brain.model,
+      message: `OpenCode reaches ${choice.provider.label} models only through a gateway that holds its key, and the ${route} route has none`,
+    });
+  }
+  if (!isGatewayRoute(route))
+    return {
+      route,
+      baseUrl: Option.some(OPENCODE_BASE_URL).pipe(Option.filter(isSet)),
+    } satisfies SessionCredential;
+  yield* Effect.logError("The gateway holds no slot of the model's provider", fields);
+  return yield* UnknownModelError.make({
+    harness: opencode.id,
+    model: brain.model,
+    message: `The gateway holds no ${choice.provider.label} credential for the model "${brain.model}". Connect one for ${choice.provider.id} at the gateway, and list its slot ${choice.provider.slot} in the worker's llm_providers.`,
+  });
+});
+
+/**
  * Returns the configuration of a session's `opencode serve`, as `OPENCODE_CONFIG_CONTENT`. It pins
- * the model, points the OpenAI provider at the route's base URL with the route's key, refuses every
- * other provider, plugin, MCP server, and web search, and turns off the requests that OpenCode
- * makes for itself: title generation, prompt-cache warming, and the local model servers it looks
- * for. The checkout's root `AGENTS.md` is its only instruction file.
+ * the model, points the model's provider at the base URL in `baseUrl`, a variable, with the
+ * route's key, refuses every other provider, plugin, MCP server, and web search, and turns off the
+ * requests that OpenCode makes for itself: title generation, prompt-cache warming, and the local
+ * model servers it looks for. The checkout's root `AGENTS.md` is its only instruction file.
  */
 export const serveConfig = Effect.fn("OpenCodeConfig.serve")(function* (options: {
-  readonly brain: BrainSpec;
+  readonly choice: ModelChoice;
   readonly route: CredentialRoute;
   readonly cwd: string;
   readonly baseUrl: Option.Option<string>;
 }) {
+  const provider = options.choice.provider.id;
   return yield* encodeConfig({
-    model: `${PROVIDER}/${options.brain.model}`,
+    model: `${provider}/${options.choice.model}`,
     providers: {
-      [PROVIDER]: {
-        // Without its own variables, a stray OPENAI_API_KEY on the worker can't replace the key.
+      [provider]: {
+        // Without its own variables, a stray key variable on the worker can't replace the key.
         env: [],
         settings: {
           apiKey: `{env:${tokenVariable(options.route)}}`,
           transport: "http",
           ...Option.match(options.baseUrl, {
             onNone: () => ({}),
-            onSome: () => ({ baseURL: `{env:${OPENCODE_BASE_URL}}` }),
+            onSome: (variable) => ({ baseURL: `{env:${variable}}` }),
           }),
         },
       },
@@ -117,7 +187,7 @@ export const serveConfig = Effect.fn("OpenCodeConfig.serve")(function* (options:
     },
     policies: [
       { action: "provider.use", resource: "*", effect: "deny" },
-      { action: "provider.use", resource: PROVIDER, effect: "allow" },
+      { action: "provider.use", resource: provider, effect: "allow" },
       { action: "plugin.use", resource: "*", effect: "deny" },
       { action: "mcp.use", resource: "*", effect: "deny" },
       { action: "websearch.use", resource: "*", effect: "deny" },
@@ -179,7 +249,3 @@ export const serveEnvironment = (
     }).map(([name, value]) => [`${SERVE_ONLY_PREFIX}${name}`, value]),
   ),
 });
-
-/** The base URL that the session's environment sets for the route, if any. */
-export const baseUrl = (environment: Readonly<Record<string, string>>): Option.Option<string> =>
-  Option.fromNullishOr(environment[OPENCODE_BASE_URL]).pipe(Option.filter((url) => url.length > 0));

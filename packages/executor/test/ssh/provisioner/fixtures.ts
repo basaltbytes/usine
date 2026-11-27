@@ -138,6 +138,7 @@ export const gatewayRuntimeOf = (
   gateway: ReturnType<typeof fakeGateway>,
   address: SshWorkerAddress,
   parent: StubParent = completes,
+  harnesses: typeof harnessesLive = harnessesLive,
 ) =>
   Layer.merge(
     sshLayer({
@@ -151,7 +152,7 @@ export const gatewayRuntimeOf = (
       machinePollInterval: "1 millis",
       machineReadyTimeout: "1 second",
     }).pipe(
-      Layer.provide(harnessesLive),
+      Layer.provide(harnesses),
       Layer.provide(machine.layer),
       Layer.provide(mintingProvider().layer),
       Layer.provide(stubAttemptRuntime(new StubStorage(), parent)),

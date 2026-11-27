@@ -21,9 +21,9 @@ import { machineReuseOf, type SshMachine, type SshWorkerAddress } from "../model
 import type { SshWorkerEntry } from "../workers.ts";
 
 /**
- * Returns the error for the first harness in `brains` that can't authenticate on a machine
- * without a stored login: one whose provider credential is neither at
- * the Gateway nor in the provisioner's `api_keys`.
+ * Returns the error for the first brain in `brains` that can't authenticate on a machine without a
+ * stored login: one whose model's provider credential is neither at the Gateway nor in the
+ * provisioner's `api_keys`.
  */
 export const harnessCredentialGap = (
   catalog: HarnessCatalog,
@@ -32,7 +32,12 @@ export const harnessCredentialGap = (
 ): Option.Option<WorkerCapabilityError> => {
   const worker = entry.address.name;
   const noGateway = "A subscription login needs a gateway, which this worker doesn't have.";
-  const missing = ({ label, providers }: HarnessDescriptor) => {
+  const missing = ({ label, providers: listed }: HarnessDescriptor, brain: BrainSpec) => {
+    // The provider of the brain's model, or every provider for a model that names none.
+    const providers = Option.match(catalog.modelProvider(brain), {
+      onNone: () => listed,
+      onSome: (provider) => [provider],
+    });
     const head = `${label} on provisioned worker "${worker}" has no credential, because provisioned machines have no stored login.`;
     const keys = providers.map(({ id }) => `provisioner.api_keys.${id}`).join(" or ");
     return Option.isSome(entry.gateway)
@@ -47,7 +52,7 @@ export const harnessCredentialGap = (
       brain,
       AdmissionContext.make({
         placement: "container",
-        credential: gatewayHolds(catalog, entry.gateway, harness) ? "gateway" : "api-key",
+        credential: gatewayHolds(catalog, entry.gateway, brain) ? "gateway" : "api-key",
       }),
     );
     if (Result.isFailure(admitted))
@@ -60,8 +65,8 @@ export const harnessCredentialGap = (
         }),
       );
     if (
-      gatewayHolds(catalog, entry.gateway, harness) ||
-      Option.isSome(provisionedApiKey(catalog, entry, harness))
+      gatewayHolds(catalog, entry.gateway, brain) ||
+      Option.isSome(provisionedApiKey(catalog, entry, brain))
     )
       continue;
     const message = Option.match(catalog.get(harness), {
@@ -69,7 +74,7 @@ export const harnessCredentialGap = (
       onSome: (descriptor) =>
         Option.isNone(descriptor.worker.credential)
           ? `${descriptor.label} on provisioned worker "${worker}" has no credential route for an API key or gateway.`
-          : missing(descriptor),
+          : missing(descriptor, brain),
     });
     return Option.some(
       WorkerCapabilityError.make({

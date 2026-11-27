@@ -22,6 +22,7 @@ import { LocalProcess } from "../../src/child-host/child-host.ts";
 import { OPENCODE_BRIDGE } from "../../src/harness/opencode/bridge/bundle.js";
 import {
   OPENCODE_BASE_URL,
+  OPENCODE_GO_BASE_URL,
   OPENCODE_HOME,
   opencode,
 } from "../../src/harness/opencode/descriptor.ts";
@@ -44,6 +45,18 @@ export const openCodeScenarios: ReadonlyArray<SessionScenario> = [
   "restart",
 ];
 
+/**
+ * The provider of a fixture's model: OpenAI with an attempt API key, or OpenCode Go through the
+ * gateway route, whose slot the scripted model server stands in for.
+ */
+export type OpenCodeFixtureProvider = "openai" | "opencode-go";
+
+/** The OpenCode Go model that a recording runs, which OpenCode calls at the Responses route. */
+const GO_RECORDING_MODEL = "opencode-go/gpt-6-luna";
+
+/** The caller token that a recording of the gateway route sends to the scripted model server. */
+const RECORDED_CALLER_TOKEN = "usine-replay-caller-token";
+
 const encoder = new TextEncoder();
 /** The OpenCode message IDs that the runtime derives from operator message IDs, which are random. */
 const LIVE_ID = /msg_usine_[A-Za-z0-9]+_[0-9a-f]{32}/gu;
@@ -64,11 +77,20 @@ const decodeModelList = Schema.decodeUnknownOption(ModelList);
 // @effect-diagnostics-next-line schemaSync:off
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Json));
 
+/** Returns OpenCode's provider and model ID of `model`, in OpenCode's `provider/model` notation. */
+const listedAs = (model: string) => {
+  const separator = model.indexOf("/");
+  return separator === -1
+    ? { providerID: "openai", id: model }
+    : { providerID: model.slice(0, separator), id: model.slice(separator + 1) };
+};
+
 /**
  * Returns `line` with the model list that OpenCode answers cut to `model`, the only one that the
  * session reads, so that a transcript doesn't hold OpenCode's whole catalog.
  */
 const trimModelList = (line: string, model: string): string => {
+  const { providerID, id } = listedAs(model);
   const json = decodeJson(line);
   if (Option.isNone(json) || Option.isNone(decodeModelList(json.value))) return line;
   const answer = json.value;
@@ -83,7 +105,7 @@ const trimModelList = (line: string, model: string): string => {
       ...body,
       data: data.filter(
         (entry: Schema.Json) =>
-          isJsonObject(entry) && entry.providerID === "openai" && entry.id === model,
+          isJsonObject(entry) && entry.providerID === providerID && entry.id === id,
       ),
     },
   });
@@ -202,11 +224,13 @@ const drainModelRequests = (tape: Tape) =>
 
 /**
  * Returns a recording's environment: its own HOME and OpenCode home, the scripted model server's
- * base URL, a placeholder key, and this process's PATH, each bound to its placeholder.
+ * base URL for `provider`, a placeholder key or caller token, and this process's PATH, each bound
+ * to its placeholder.
  */
 const recordingEnvironment = Effect.fn("OpenCodeFixture.recordingEnvironment")(function* (
   tape: Tape,
   version: string,
+  provider: OpenCodeFixtureProvider,
 ) {
   const fs = yield* FileSystem.FileSystem;
   // OpenCode writes its logs and caches under HOME, which a recording keeps to itself.
@@ -221,13 +245,12 @@ const recordingEnvironment = Effect.fn("OpenCodeFixture.recordingEnvironment")(f
   tape.bind(userHome, "$HOME");
   tape.bind(home, "$OPENCODE_HOME");
   tape.bind(url, "$MODEL_URL");
-  const recorded = {
-    HOME: userHome,
-    [OPENCODE_HOME]: home,
-    [OPENCODE_BASE_URL]: url,
-    // The scripted model server takes any key.
-    OPENAI_API_KEY: "sk-replay",
-  };
+  // The scripted model server takes any key.
+  const credential =
+    provider === "openai"
+      ? { [OPENCODE_BASE_URL]: url, OPENAI_API_KEY: "sk-replay" }
+      : { [OPENCODE_GO_BASE_URL]: url, USINE_GATEWAY_TOKEN: RECORDED_CALLER_TOKEN };
+  const recorded = { HOME: userHome, [OPENCODE_HOME]: home, ...credential };
   if (env.PATH === undefined) return recorded;
   tape.bind(env.PATH, "$PATH");
   return { ...recorded, PATH: env.PATH };
@@ -250,18 +273,25 @@ const replayedEnvironment = (
 
 /**
  * Opens an OpenCode fixture: a child on the bridge whose process traffic is recorded against the
- * pinned binary, with the scripted model server, or replayed.
+ * pinned binary, with the scripted model server, or replayed. `provider` selects the model's
+ * provider and, for OpenCode Go, the fixture file `opencode-go.json`.
  */
 export const openOpenCodeFixture = (
   scenario: SessionScenario,
   mode: "record" | "replay",
   options: FixtureOptions = {},
+  provider: OpenCodeFixtureProvider = "openai",
 ) =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     const cwd = yield* fs.makeTempDirectoryScoped({ prefix: "usine-replay-" });
-    const file = fixtureFile("opencode", scenario);
+    const file =
+      provider === "openai"
+        ? fixtureFile("opencode", scenario)
+        : fileURLToPath(
+            new URL(`../fixtures/replay/${scenario}/opencode-go.json`, import.meta.url),
+          );
     const source =
       mode === "record"
         ? ("record" as const)
@@ -282,9 +312,14 @@ export const openOpenCodeFixture = (
     assert(version !== undefined);
     const environment =
       source === "record"
-        ? yield* recordingEnvironment(tape, version)
+        ? yield* recordingEnvironment(tape, version, provider)
         : replayedEnvironment(tape, source, scenario, version);
-    const model = source === "record" ? recordingModel("opencode") : source.model;
+    const model =
+      source !== "record"
+        ? source.model
+        : provider === "openai"
+          ? recordingModel("opencode")
+          : GO_RECORDING_MODEL;
     assert(model !== undefined, "set the integration model to record traffic");
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
     const live = mode === "record" ? trimmedModelLists(spawner, model) : undefined;
@@ -318,6 +353,7 @@ export const openOpenCodeFixture = (
           model: ModelId.make(model),
           effort: "low",
         }),
+        gatewayCredential: provider === "openai" ? Option.none() : Option.some("api-key"),
       }),
       prompt: "Reply with exactly REPLAY_DONE. Do not use tools.",
     });

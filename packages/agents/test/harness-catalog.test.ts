@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest";
-import { Harness } from "@usine/core/agent/brain";
+import { BrainSpec, Harness, ModelId } from "@usine/core/agent/brain";
 import { BillingPool, PoolDescriptor } from "@usine/core/agent/pool";
 import {
   anthropic,
@@ -12,12 +12,13 @@ import {
   ModelProviderId,
   modelProviders,
   openai,
+  opencodeGo,
   ProviderProtocol,
   RoutePattern,
   UpstreamBase,
   WireProtocol,
 } from "@usine/core/agent/provider";
-import { Array as Arr, Effect, Option, Schema, SchemaIssue } from "effect";
+import { Array as Arr, Effect, Option, Result, Schema, SchemaIssue } from "effect";
 import {
   apiKeys,
   CapabilityProfile,
@@ -30,6 +31,8 @@ import {
   workerImageInputs,
 } from "../src/harness/catalog.ts";
 import { CODEX_CLI_VERSION, codex } from "../src/harness/codex/descriptor.ts";
+import { SlotVariable } from "../src/harness/harness.ts";
+import { opencode } from "../src/harness/opencode/descriptor.ts";
 import { pi } from "../src/harness/pi/descriptor.ts";
 // Generated image inputs are checked against the source descriptors.
 // @effect-diagnostics-next-line nodeBuiltinImport:off
@@ -255,6 +258,105 @@ describe("harness catalog", () => {
       }),
   );
 
+  it.effect(
+    "reaches a gateway-only provider through the gateway's slot, and an attempt API key only the others'",
+    () =>
+      Effect.gen(function* () {
+        assert(Option.isSome(codex.worker.credential));
+        const credential = codex.worker.credential.value;
+        const split = ModelProvider.make({
+          id: ModelProviderId.make("test-plan"),
+          slot: GatewaySlot.make("test-plan"),
+          label: "Test plan",
+          protocols: [
+            ProviderProtocol.make({
+              protocol: WireProtocol.make("openai-chat-completions"),
+              upstream: UpstreamBase.make("https://plan.test/openai/v1"),
+              routes: [RoutePattern.make("/chat/completions")],
+              key: KeyHeader.make({ header: HeaderName.make("authorization"), scheme: "bearer" }),
+            }),
+            ProviderProtocol.make({
+              protocol: WireProtocol.make("anthropic-messages"),
+              upstream: UpstreamBase.make("https://plan.test/anthropic/v1"),
+              routes: [RoutePattern.make("/messages")],
+              key: KeyHeader.make({ header: HeaderName.make("x-api-key"), scheme: "none" }),
+            }),
+          ],
+          credentials: [
+            ApiKeyCredential.make({ variable: GatewayVariable.make("TEST_PLAN_API_KEY") }),
+          ],
+        });
+        const describing = (
+          gatewayOnly: ReadonlyArray<string>,
+          slots: Readonly<Record<string, string>>,
+        ) =>
+          HarnessDescriptor.makeEffect({
+            ...codex,
+            id: Harness.make("plan-client"),
+            providers: [openai, split],
+            gatewayOnly: gatewayOnly.map((id) => ModelProviderId.make(id)),
+            worker: WorkerRequirements.make({
+              ...codex.worker,
+              credential: Option.some(
+                HarnessCredential.make({
+                  ...credential,
+                  slots: Object.fromEntries(
+                    Object.entries(slots).map(([id, variable]) => [
+                      ModelProviderId.make(id),
+                      SlotVariable.make({ variable, path: id === "openai" ? "/v1" : "" }),
+                    ]),
+                  ),
+                }),
+              ),
+            }),
+          });
+        const described = yield* describing(["test-plan"], {
+          openai: "OPENAI_SLOT_URL",
+          "test-plan": "PLAN_SLOT_URL",
+        });
+        assert.deepStrictEqual(described.apiKeyProviders, [openai]);
+        assert(Option.isSome(described.worker.credential));
+        const slotUrl = (provider: ModelProvider, path: string) =>
+          `http://llm.gw.test/${provider.slot}${path}`;
+        assert.deepStrictEqual(
+          described.worker.credential.value.slotEnvironment([split], slotUrl),
+          {
+            PLAN_SLOT_URL: "http://llm.gw.test/test-plan",
+          },
+        );
+        assert.deepStrictEqual(
+          described.worker.credential.value.slotEnvironment([openai, split], slotUrl),
+          {
+            OPENAI_SLOT_URL: "http://llm.gw.test/openai-responses/v1",
+            PLAN_SLOT_URL: "http://llm.gw.test/test-plan",
+          },
+        );
+        const extended = HarnessCatalog.make({ descriptors: [...catalog.descriptors, described] });
+        assert.deepStrictEqual(
+          extended.environmentFor(codex.id, { PLAN_SLOT_URL: "stale", PATH: "/bin" }),
+          { PATH: "/bin" },
+        );
+        assert.deepStrictEqual(
+          extended.environmentFor(described.id, { PLAN_SLOT_URL: "kept", PATH: "/bin" }),
+          { PLAN_SLOT_URL: "kept", PATH: "/bin" },
+        );
+        const format = SchemaIssue.makeFormatterDefault();
+        const refusals = yield* Effect.forEach(
+          [
+            describing([], {}),
+            describing(["test-plan", "other-plan"], {}),
+            describing(["test-plan"], { "other-plan": "OTHER_URL" }),
+          ],
+          (described) => Effect.map(Effect.flip(described), format),
+        );
+        const unknown =
+          "The provider other-plan that the descriptor names isn't one of the harness's providers";
+        assert.include(refusals[0], "The api-key route outside a sandbox can't reach Test plan");
+        assert.include(refusals[1], unknown);
+        assert.include(refusals[2], unknown);
+      }),
+  );
+
   it("gives a harness the Gateway's credential of the first provider it lists that the Gateway holds", () => {
     const claude = Harness.make("claude");
     const codexId = Harness.make("codex");
@@ -280,6 +382,47 @@ describe("harness catalog", () => {
       extended.gatewayProvider(both.id, [anthropicSlot]),
       Option.some(anthropic),
     );
+  });
+
+  it("chooses the provider of a brain's model, in the descriptor's notation, and the Gateway's slot of it", () => {
+    const brain = (harness: string, model: string) =>
+      BrainSpec.make({ harness: Harness.make(harness), model: ModelId.make(model), effort: "low" });
+    const held = [openai.slot, opencodeGo.slot];
+    assert.deepStrictEqual(
+      catalog.modelProvider(brain("opencode", "opencode-go/glm-5.3")),
+      Option.some(opencodeGo),
+    );
+    assert.deepStrictEqual(
+      catalog.modelProvider(brain("opencode", "gpt-test")),
+      Option.some(openai),
+    );
+    // An unknown prefix names no provider, and the harness refuses it at launch.
+    assert.isTrue(Option.isNone(catalog.modelProvider(brain("opencode", "anthropic/claude"))));
+    // A harness in the `model` notation reads a slash as part of the model ID.
+    assert.deepStrictEqual(
+      catalog.modelProvider(brain("codex", "vendor/gpt")),
+      Option.some(openai),
+    );
+    // Pi has no credential wiring.
+    assert.isTrue(Option.isNone(catalog.modelProvider(brain("pi", "anthropic/claude"))));
+    assert.deepStrictEqual(
+      catalog.modelGatewayProvider(brain("opencode", "opencode-go/glm-5.3"), held),
+      Option.some(opencodeGo),
+    );
+    assert.deepStrictEqual(
+      catalog.modelGatewayProvider(brain("opencode", "gpt-test"), held),
+      Option.some(openai),
+    );
+    assert.isTrue(
+      Option.isNone(catalog.modelGatewayProvider(brain("opencode", "gpt-test"), [opencodeGo.slot])),
+    );
+    const go = opencode.providerOf(ModelId.make("opencode-go/vendor/model"));
+    assert(Result.isSuccess(go));
+    assert.deepStrictEqual([go.success.provider, go.success.model], [opencodeGo, "vendor/model"]);
+    assert.isTrue(opencode.reaches(opencodeGo, "ssh", "gateway-api-key"));
+    assert.isTrue(opencode.reaches(opencodeGo, "sandbox", "api-key"));
+    assert.isFalse(opencode.reaches(opencodeGo, "ssh", "api-key"));
+    assert.isTrue(opencode.reaches(openai, "ssh", "api-key"));
   });
 
   it("declares the providers that the gateway serves, once each, and refuses two definitions of one", () => {

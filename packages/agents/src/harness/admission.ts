@@ -62,8 +62,9 @@ export const routePool = (
  * Checks what `role` requires of `brain` at `context`, without IO or inspecting secret values.
  * `reopens` adds what reopening a saved conversation needs. A refusal lists every missing
  * capability, placement, or credential route with the reason that the role or the harness
- * descriptor gives for it. A harness that can't list only the `read` tools that a role keeps is
- * admitted with all its own tools, and the admission says why in `ownToolsKept`.
+ * descriptor gives for it, including a route that can't reach the provider of the brain's model. A
+ * harness that can't list only the `read` tools that a role keeps is admitted with all its own
+ * tools, and the admission says why in `ownToolsKept`.
  */
 export const admitBrain = (
   catalog: HarnessCatalog,
@@ -112,6 +113,17 @@ export const admitBrain = (
           Lacking.make({ capability: "credential-route", reason: adapter.credentialReason }),
         );
       } else {
+        const unreachable = Option.filter(
+          Result.getSuccess(adapter.providerOf(brain.model)),
+          ({ provider }) => !adapter.reaches(provider, placement, credential),
+        );
+        if (Option.isSome(unreachable))
+          missing.push(
+            Lacking.make({
+              capability: "credential-route",
+              reason: `${adapter.label} reaches ${unreachable.value.provider.label} models only through a gateway that holds the provider's credential, and the ${credential} route has none`,
+            }),
+          );
         const required = requirements(role, options);
         missing.push(
           ...profile.lacking.filter((gap) => required.some((need) => need === gap.capability)),

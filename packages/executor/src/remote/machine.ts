@@ -75,7 +75,8 @@ export interface RemoteGrant<M extends RemoteMachine> {
     permissions: LoopPermissions,
     machine: M,
     operation: ExecutorOperation,
-    harness: Option.Option<Harness>,
+    /** The brain of the Attempt's agent, whose model's provider decides its model credential. */
+    brain: Option.Option<BrainSpec>,
   ) => Effect.Effect<RemoteAccess, ExecutorError, Scope.Scope>;
 }
 
@@ -145,16 +146,20 @@ export interface RemoteWorker<M extends RemoteMachine> {
   readonly runsContainers: boolean;
   /** Returns the URL the cached clone on `machine` fetches `repository` from. */
   readonly repositoryUrl: (machine: M, repository: RepositoryName) => string;
-  /** Returns the credential kind that the Gateway on `machine` injects for `harness`. Returns `None` if the machine has no Gateway or the harness uses its own login. */
+  /**
+   * Returns the credential kind that the Gateway on `machine` injects for a session of `brain`.
+   * Returns `None` if the machine has no Gateway, the Gateway doesn't hold the provider of the
+   * model, or the harness uses its own login.
+   */
   readonly gatewayCredential: (
     machine: M,
-    harness: Harness,
+    brain: BrainSpec,
   ) => Effect.Effect<Option.Option<GatewayCredentialKind>>;
   /**
-   * Returns how each Attempt's `harness` authenticates on `machine`. An Attempt's container
-   * mounts the harness's login files from the machine only for `host-login`.
+   * Returns how each Attempt's session of `brain` authenticates on `machine`. An Attempt's
+   * container mounts the harness's login files from the machine only for `host-login`.
    */
-  readonly credentialRoute: (machine: M, harness: Harness) => MachineCredentialRoute;
+  readonly credentialRoute: (machine: M, brain: BrainSpec) => MachineCredentialRoute;
   /** Returns the access grant for `repository`. Fails if none is configured. */
   readonly grantFor: (
     repository: RepositoryName,

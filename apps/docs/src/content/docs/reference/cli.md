@@ -273,6 +273,7 @@ Environment files listed by `USINE_GATEWAY_ENVIRONMENT_FILES` override process v
 | `ANTHROPIC_API_KEY` | string | none | Anthropic API key that the gateway adds for Claude Code. |
 | `USINE_GATEWAY_ANTHROPIC_SUBSCRIPTION_TOKEN` | string | none | Alternative Anthropic credential: a Claude subscription token from `claude setup-token`, valid for one year. Setting both Anthropic variables is an error. |
 | `OPENAI_API_KEY` | string | none | OpenAI-compatible API key that the gateway adds for Codex. |
+| `OPENCODE_GO_API_KEY` | string | none | OpenCode Go key that the gateway adds for OpenCode, in the header of each request's protocol. |
 | `USINE_GATEWAY_CHATGPT_AUTH_FILE` | string | none | Alternative OpenAI credential: the absolute path of a Codex `auth.json` with a ChatGPT login, which the gateway refreshes and rewrites, so the service needs write access to its directory. Setting both OpenAI variables is an error. If the file isn't a ChatGPT login, the binary exits before it starts listening. |
 | `USINE_GATEWAY_ANTHROPIC_UPSTREAM` | string | `https://api.anthropic.com` | Base URL for Anthropic requests. |
 | `USINE_GATEWAY_OPENAI_UPSTREAM` | string | `https://api.openai.com` | Base URL for OpenAI requests with `OPENAI_API_KEY`. |

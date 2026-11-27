@@ -31,7 +31,7 @@ import {
   HarnessDescriptor,
   Lacking,
 } from "@usine/agents/harness";
-import { supervisorAdmissionProblems } from "../src/instance/admission.ts";
+import { brainAdmissionProblems, supervisorAdmissionProblems } from "../src/instance/admission.ts";
 import { LoadedInstance } from "../src/instance/instance.ts";
 import { Settings, UsineConfig } from "../src/factory.ts";
 import { ConfigParser, makeConfigParser } from "../src/parser.ts";
@@ -158,6 +158,37 @@ const withoutResume = (harness: string) =>
   });
 
 describe("configuration domain without layers", () => {
+  it.effect(
+    "admits an OpenCode Go agent only on a worker whose gateway holds the plan's slot",
+    () =>
+      Effect.gen(function* () {
+        const config = yield* parser.parseUsineYaml(
+          InstancePath.make("usine.yaml"),
+          ["openai-responses", "opencode-go"]
+            .map(
+              (slot) => `  - name: ${slot}-worker
+    kind: ssh
+    destination: ${slot}.example
+    root: /srv/usine
+    gateway:
+      domain: gw.internal
+      destination: usine-gateway
+      admin_token_env: USINE_GATEWAY_ADMIN_TOKEN
+      llm_providers: [${slot}]`,
+            )
+            .reduce((yaml, worker) => `${yaml}\n${worker}`, "version: 1\nrepos: []\nworkers:"),
+        );
+        const agent = yield* parser.parseAgentFile(
+          InstancePath.make("agents/go.md"),
+          "---\nharness: opencode\nmodel: opencode-go/glm-5.3\neffort: low\n---\nWork.\n",
+        );
+        const problems = brainAdmissionProblems(config, [agent]);
+        expect(problems.map(({ message }) => message)).toEqual([
+          'Agent "go" on worker "openai-responses-worker": opencode cannot run as coding-agent at container: lacks credential-route (OpenCode uses an OpenAI API key, from the attempt or held by the gateway, or an OpenCode Go key held by the gateway; it uses no login of its own)',
+        ]);
+      }),
+  );
+
   it.effect("refuses a Pi coding agent on an SSH worker before storing configuration", () =>
     Effect.gen(function* () {
       const instance = yield* fixture;

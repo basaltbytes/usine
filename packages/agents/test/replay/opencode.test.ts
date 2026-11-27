@@ -1,5 +1,5 @@
 import { NodeServices } from "@effect/platform-node";
-import { describe, it } from "@effect/vitest";
+import { assert, describe, it } from "@effect/vitest";
 import { Harness } from "@usine/core/agent/brain";
 import { Effect } from "effect";
 import { assertProvenCapabilities } from "../contract/capabilities.ts";
@@ -24,4 +24,22 @@ describe("recorded OpenCode bridge traffic", () => {
         ).pipe(Effect.provide(NodeServices.layer), Effect.timeout("15 seconds")),
       20_000,
     );
+
+  it.live(
+    "opencode-go: simple, on the gateway route",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const fixture = yield* openOpenCodeFixture("simple", "replay", {}, "opencode-go");
+          assert.strictEqual(fixture.request.session.brain.model, "opencode-go/gpt-6-luna");
+          const events = yield* runScenario("simple", fixture.request, fixture.controls).pipe(
+            Effect.provide(fixture.backend),
+            fixture.tape.guard,
+          );
+          assertProvenCapabilities(Harness.make("opencode"), "simple", events);
+          yield* fixture.save;
+        }),
+      ).pipe(Effect.provide(NodeServices.layer), Effect.timeout("15 seconds")),
+    20_000,
+  );
 });

@@ -1,4 +1,4 @@
-import type { Harness } from "@usine/core/agent/brain";
+import type { BrainSpec } from "@usine/core/agent/brain";
 import type { HarnessCatalog } from "@usine/agents/harness";
 import { Harnesses } from "@usine/agents/harness/node";
 import { reclaimOnceFor } from "../../remote/reclaim.ts";
@@ -155,7 +155,7 @@ export const gatewayAttachmentsFor = Effect.fn("SshExecutor.gatewayAttachmentsFo
     machine: SshMachine,
     gateway: MachineGateway,
     operation: ExecutorOperation,
-    harness: Option.Option<Harness>,
+    brain: Option.Option<BrainSpec>,
   ) {
     const { admin, settings } = gateway;
     const fields = { attemptId, worker, repository, permissions, domain: settings.domain };
@@ -164,20 +164,35 @@ export const gatewayAttachmentsFor = Effect.fn("SshExecutor.gatewayAttachmentsFo
     const llmPrefixes = yield* Ref.get(gateway.llmPrefixes);
     yield* Effect.annotateCurrentSpan({ llmPrefixes });
     const credentials = yield* Ref.get(gateway.credentials);
-    yield* Effect.forEach(Option.toArray(harness), (id) =>
-      Option.match(catalog.gatewayProvider(id, settings.llmProviders), {
+    yield* Effect.forEach(Option.toArray(brain), (spec) =>
+      Option.match(catalog.modelGatewayProvider(spec, settings.llmProviders), {
         onNone: () =>
           Effect.logInfo(
-            "The harness calls no Gateway slot: the Gateway holds none of its providers, or the harness has no Gateway wiring",
-            { ...fields, harness: id },
+            "The harness calls no Gateway slot and gets no caller token: the Gateway doesn't hold the provider of the model, or the harness has no Gateway wiring",
+            {
+              ...fields,
+              harness: spec.harness,
+              model: spec.model,
+              provider: Option.match(catalog.modelProvider(spec), {
+                onNone: () => "none",
+                onSome: ({ id }) => id,
+              }),
+            },
           ),
         onSome: (provider) => {
           const credential = credentials[provider.slot] ?? "unreported";
-          return Effect.annotateCurrentSpan({ harness: id, slot: provider.slot, credential }).pipe(
+          return Effect.annotateCurrentSpan({
+            harness: spec.harness,
+            provider: provider.id,
+            slot: provider.slot,
+            credential,
+          }).pipe(
             Effect.andThen(
-              Effect.logInfo("Wired the harness to a Gateway slot", {
+              Effect.logInfo("Wired the harness to the Gateway slot of the model's provider", {
                 ...fields,
-                harness: id,
+                harness: spec.harness,
+                model: spec.model,
+                provider: provider.id,
                 slot: provider.slot,
                 prefix: llmPrefixOf(provider, llmPrefixes),
                 credential,
@@ -333,7 +348,13 @@ export const gatewayAttachmentsFor = Effect.fn("SshExecutor.gatewayAttachmentsFo
       ),
     ).pipe(Effect.forkScoped);
     const { exported, sent } = gatewayEnvironment({
-      harness,
+      // The caller token goes only to a harness whose model's provider slot the Gateway holds.
+      harness: Option.map(
+        Option.filter(brain, (spec) =>
+          Option.isSome(catalog.modelGatewayProvider(spec, settings.llmProviders)),
+        ),
+        ({ harness }) => harness,
+      ),
       catalog,
       domain: settings.domain,
       egress: settings.egress,

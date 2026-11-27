@@ -22,7 +22,7 @@ export const brainAdmissionProblems = (
       const gateway =
         worker.kind === "ssh" &&
         Option.exists(worker.gateway, ({ llmProviders }) =>
-          catalog.gatewayHolds(brain.harness, llmProviders),
+          Option.isSome(catalog.modelGatewayProvider(brain, llmProviders)),
         );
       const context = AdmissionContext.make({
         placement:
