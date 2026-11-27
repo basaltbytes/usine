@@ -1,21 +1,11 @@
 import { BrainSpec, Harness, ModelId } from "@usine/core/agent/brain";
 import {
   type AgentSession,
-  BackgroundWork,
   HarnessSession,
   HarnessSessionId,
   type OperatorMessageId,
-  ProviderAnswered,
-  ProviderRecovered,
-  ProviderRetries,
-  ProviderRetrying,
   SessionStarted,
-  SessionTokensUpdated,
-  TextOutput,
-  ToolFinished,
-  ToolStarted,
 } from "@usine/core/agent/session";
-import { capacityBackoff } from "@usine/core/attempt";
 import {
   Deferred,
   Effect,
@@ -52,26 +42,14 @@ import { apiKeys } from "../pool.ts";
 import { type HarnessRuntime, openWithTools } from "../runtime.ts";
 import { sessionChannel } from "../session.ts";
 import type { HostToolSet } from "../tools.ts";
-import { type OpenCodeApi, openCodeApi, query } from "./api.ts";
+import { openCodeApi } from "./api.ts";
 import {
   ActiveSessions,
-  addUsage,
-  capacityFailure,
   decodeEvent,
-  distantRetry,
-  type HandledEvent,
-  Inbox,
-  type Job,
-  Jobs,
-  type OpenCodeTokens,
   openCodeMessageId,
   openCodeReceipts,
   PostedInput,
-  type SessionEvent,
   SessionInfo,
-  type ShellEvent,
-  tokenBreakdown,
-  totalTokens,
 } from "./codec.ts";
 import {
   baseUrl,
@@ -80,79 +58,39 @@ import {
   serveEnvironment,
   sessionPermissions,
 } from "./config.ts";
+import {
+  type OpenCodeContext,
+  type OpenCodeState,
+  type OperatorIds,
+  updatePending,
+} from "./context.ts";
 import { opencode } from "./descriptor.ts";
+import { doneCheck } from "./done.ts";
+import { openCodeEvents } from "./events.ts";
 import { checkModel } from "./model.ts";
 import { openCodePreflight } from "./preflight.ts";
 import { type RestoredInput, restoredInput } from "./restored.ts";
-import { type OpenCodeConnection, OpenCodeServer } from "./server.ts";
+import { OpenCodeServer } from "./server.ts";
 import {
-  answerDue,
   answered,
-  childCreated,
-  childRunning,
   droppedInputs,
   emptyPending,
   enqueued,
   Execution,
-  executionInterrupted,
   failed,
   inputPosted,
   type InterruptIntent,
   interruptAnswered,
   interruptRefused,
-  inTree,
   lateInputsDropped,
   type Pending,
   removed,
   requestInterrupt,
   restarted,
-  runningWork,
-  shellEnded,
-  shellStarted,
   trackInput,
-  unread,
 } from "./state.ts";
 
 export { openCodeServerLive } from "./server.ts";
-
-/**
- * A retry that OpenCode schedules further ahead than usine's first wait after a capacity refusal
- * ends the session, so the attempt waits for capacity instead of OpenCode.
- */
-const RETRY_THRESHOLD = capacityBackoff(1);
-
-/** What an OpenCode session tracks about its bridge, executions, input, and background work. */
-interface OpenCodeState {
-  /** The bridge connection; a process restart replaces it. */
-  readonly connection: OpenCodeConnection;
-  readonly api: OpenCodeApi;
-  readonly execution: Execution;
-  readonly pending: Pending;
-  /** Tool names by call ID, from `session.tool.input.started`. */
-  readonly toolNames: ReadonlyMap<string, string>;
-  /** The tool calls that started and haven't finished, by call ID. */
-  readonly toolsInFlight: ReadonlyMap<string, string>;
-  /** The text of the latest execution's last text part. */
-  readonly lastText: Option.Option<string>;
-  readonly retries: number;
-  readonly retrying: boolean;
-  /** Whether the model answered since the current bridge started. */
-  readonly answered: boolean;
-  /** Whether the latest background snapshot that the runtime reported since an execution lists work. */
-  readonly workReported: boolean;
-  /** The cumulative usage of each session in the session's tree, by OpenCode session ID. */
-  readonly usage: ReadonlyMap<string, { readonly cost: number; readonly tokens: OpenCodeTokens }>;
-}
-
-/** Operator message IDs by the OpenCode message IDs that the session posted them with. */
-type OperatorIds = ReadonlyMap<string, OperatorMessageId>;
-
-const backgroundWork = (job: Job) =>
-  BackgroundWork.make({
-    id: job.id,
-    kind: job.kind === "shell" ? "command" : job.kind === "subagent" ? "agent" : "other",
-    description: job.title ?? job.description ?? job.command ?? "",
-  });
 
 const makeOpenCodeSessions = Effect.gen(function* () {
   const server = yield* OpenCodeServer;
@@ -290,37 +228,6 @@ const makeOpenCodeSessions = Effect.gen(function* () {
     const current = Effect.map(Ref.get(state), ({ api: currentApi }) => currentApi);
     /** The work that runs outside the operation or event that started it. */
     const tasks = yield* FiberSet.make<void>();
-    const updatePending = (f: (pending: Pending) => Pending) =>
-      Ref.update(state, (latest): OpenCodeState => ({ ...latest, pending: f(latest.pending) }));
-    /**
-     * Returns how many inputs OpenCode hasn't delivered, of those the session posted and those
-     * OpenCode queued, and records that the answer of the execution that just succeeded waits for
-     * them when there are any.
-     */
-    const holdForInput = Ref.modify(state, (latest): readonly [number, OpenCodeState] => {
-      const count = unread(latest.pending);
-      return count > 0 && latest.execution._tag === "Idle"
-        ? [count, { ...latest, execution: Execution.AwaitingInput() }]
-        : [count, latest];
-    });
-    /**
-     * Returns the answer that waited for input once none of that input remains, such as after its
-     * post failed, outside the operation that dropped it.
-     */
-    const answerIfDue = Effect.gen(function* () {
-      const due = yield* Ref.modify(state, (latest) => {
-        const [isDue, execution] = answerDue(latest.execution, latest.pending);
-        return [isDue, { ...latest, execution }];
-      });
-      if (!due) return;
-      yield* Effect.logInfo("The input that the answer waited for won't start an execution", {
-        sessionId,
-      });
-      yield* FiberSet.run(
-        tasks,
-        Effect.suspend(() => executionSucceeded()).pipe(Effect.catch(fail)),
-      );
-    });
 
     /**
      * Posts `message` to the session. OpenCode reads it at the running execution's next step
@@ -399,6 +306,19 @@ const makeOpenCodeSessions = Effect.gen(function* () {
       yield* channel.fail(error);
     });
 
+    const context: OpenCodeContext = {
+      sessionId,
+      root: id,
+      session,
+      state,
+      api: current,
+      conversation,
+      channel,
+      tasks,
+      fail,
+    };
+    const done = doneCheck(context);
+
     /**
      * Ends the turn that `session.execution.interrupted` with `reason` interrupted. `intent` is the
      * runtime's interrupt, if it asked for one. `deferred` is true when the pause's late inputs
@@ -458,7 +378,7 @@ const makeOpenCodeSessions = Effect.gen(function* () {
           );
           return [ends, { ...latest, execution, pending }];
         });
-        yield* answerIfDue;
+        yield* done.answerIfDue;
         if (Option.isNone(reason)) return;
         yield* Effect.logInfo(
           "OpenCode won't deliver the steer after the interrupt; the interrupted execution ends the turn",
@@ -509,392 +429,12 @@ const makeOpenCodeSessions = Effect.gen(function* () {
     /** Stops the running execution; its `session.execution.interrupted` ends the session. */
     const stopExecution = interruptExecution("stop");
 
-    const reportModelOutput = Effect.fn("OpenCodeRuntime.reportModelOutput")(function* () {
-      const latest = yield* Ref.getAndUpdate(state, (value) => ({
-        ...value,
-        retrying: false,
-        answered: true,
-      }));
-      if (latest.retrying) {
-        yield* Effect.logInfo("OpenCode reached its provider again", {
-          sessionId,
-          retries: latest.retries,
-        });
-        yield* channel.emit(
-          ProviderRecovered.make({ session, retries: ProviderRetries.make(latest.retries) }),
-        );
-      }
-      if (latest.answered) return;
-      yield* Effect.logInfo("OpenCode got its provider's first answer since the bridge started", {
-        sessionId,
-      });
-      yield* channel.emit(ProviderAnswered.make({ session }));
-    });
-
-    /** Returns the latest answer unless the session has input that OpenCode hasn't delivered. */
-    const finishAnswer = Effect.flatMap(Ref.get(state), ({ lastText }) =>
-      conversation.finishUnlessUnread(
-        Option.getOrElse(lastText, () => "OpenCode finished without an answer"),
-        holdForInput,
-      ),
-    );
-
-    /** Reports the background work snapshot `work`. */
-    const reportWork = (work: ReadonlyArray<BackgroundWork>) =>
-      Ref.update(state, (latest) => ({ ...latest, workReported: work.length > 0 })).pipe(
-        Effect.andThen(conversation.reportBackground(Option.some(work))),
-      );
-
-    /**
-     * Reports the tree's background work after the root execution succeeded, by the events that
-     * the runtime handled and then by OpenCode's own lists. Returns whether the answer is due:
-     * false when OpenCode has unread input or runs the session's next execution.
-     */
-    const checkWork = Effect.fn("OpenCodeRuntime.checkWork")(function* () {
-      yield* Effect.annotateCurrentSpan({ sessionId });
-      const running = runningWork((yield* Ref.get(state)).pending);
-      if (running.length > 0) {
-        yield* reportWork(running);
-        return true;
-      }
-      // Work that ended just before the execution may not have queued its notice yet. OpenCode
-      // queues the notice before it ends the job, so the job list, then the inbox, then the active
-      // executions show the work, its notice, or the execution that the notice started.
-      const latestApi = yield* current;
-      const jobs = yield* latestApi.read(
-        Jobs,
-        "stream",
-        "GET",
-        `/api/experimental/job?${query("sessionID", id)}&descendants=true&status=running`,
-      );
-      if (jobs.data.length > 0) {
-        yield* reportWork(jobs.data.map(backgroundWork));
-        return true;
-      }
-      const inbox = yield* latestApi.read(Inbox, "stream", "GET", `${sessionPath}/inbox`);
-      if (inbox.data.length > 0) {
-        yield* Effect.logInfo("OpenCode has unread input, which starts the next execution", {
-          sessionId,
-          unread: inbox.data.length,
-        });
-        return false;
-      }
-      const { data: activeSessions } = yield* latestApi.read(
-        ActiveSessions,
-        "stream",
-        "GET",
-        "/api/session/active",
-      );
-      if (Object.hasOwn(activeSessions, id)) {
-        yield* Effect.logInfo("OpenCode started the session's next execution", { sessionId });
-        return false;
-      }
-      yield* reportWork([]);
-      return true;
-    });
-
-    /**
-     * Returns the session's answer once nothing starts another execution: no input that OpenCode
-     * hasn't delivered and no running background work. Running work is reported, and the
-     * conversation waits for the execution that its end starts.
-     */
-    const executionSucceeded = Effect.fn("OpenCodeRuntime.executionSucceeded")(function* () {
-      yield* Effect.annotateCurrentSpan({ sessionId });
-      const unreadCount = yield* holdForInput;
-      if (unreadCount > 0)
-        return yield* Effect.logInfo(
-          "OpenCode's execution ended with input that it hasn't delivered, which starts the next execution",
-          { sessionId, unread: unreadCount },
-        );
-      if (yield* checkWork()) yield* finishAnswer;
-    });
-
-    /**
-     * Reports the tree's background work again after some of it ended, while the root execution's
-     * answer waits for it, so the conversation returns the answer once none is left.
-     */
-    const workEnded = Effect.fn("OpenCodeRuntime.workEnded")(function* () {
-      const { execution, workReported } = yield* Ref.get(state);
-      if (!workReported || execution._tag !== "Idle" || (yield* channel.isTerminal)) return;
-      yield* Effect.logInfo("Background work that the answer waits for ended; checking the rest", {
-        sessionId,
-      });
-      yield* checkWork();
-    });
-
-    /** Sets the command environment of child session `child`, so its tool commands get the worker's. */
-    const childEnvironment = (child: string) =>
-      Effect.flatMap(current, (latestApi) => latestApi.setToolEnvironment("stream", child)).pipe(
-        Effect.catch((error) =>
-          Effect.logWarning(
-            "Could not set the command environment of an OpenCode child session; its commands get OpenCode's directories",
-            { sessionId, childSessionId: child, message: error.message },
-          ),
-        ),
-      );
-
-    /** Handles an event of a shell, which counts as background work while it runs. */
-    const handleShell = (event: ShellEvent) =>
-      event.type === "shell.created"
-        ? updatePending((pending) =>
-            Option.match(Option.fromUndefinedOr(event.data.info.metadata.sessionID), {
-              onNone: () => pending,
-              onSome: (session) =>
-                shellStarted(pending, id, {
-                  id: event.data.info.id,
-                  command: event.data.info.command,
-                  session,
-                }),
-            }),
-          )
-        : updatePending((pending) => shellEnded(pending, event.data.id)).pipe(
-            Effect.andThen(workEnded()),
-          );
-
-    /** Handles an event of a child session: its creation, executions, and usage. */
-    const handleChild = Effect.fn("OpenCodeRuntime.handleChild")(function* (event: SessionEvent) {
-      const child = event.data.sessionID;
-      switch (event.type) {
-        case "session.created": {
-          const { parentID, title } = event.data;
-          if (parentID === undefined) return;
-          const created = yield* Ref.modify(state, (latest) =>
-            Option.match(
-              childCreated(latest.pending, id, { id: child, parent: parentID, title: title ?? "" }),
-              {
-                onNone: () => [false, latest],
-                onSome: (pending) => [true, { ...latest, pending }],
-              },
-            ),
-          );
-          if (!created) return;
-          yield* Effect.logInfo("OpenCode started a child session", {
-            sessionId,
-            childSessionId: child,
-          });
-          return yield* FiberSet.run(tasks, childEnvironment(child)).pipe(Effect.asVoid);
-        }
-        case "session.execution.started":
-          return yield* updatePending((pending) => childRunning(pending, child, true));
-        case "session.execution.succeeded":
-        case "session.execution.failed":
-        case "session.execution.interrupted":
-          yield* updatePending((pending) => childRunning(pending, child, false));
-          return yield* workEnded();
-        default:
-          return;
-      }
-    });
-
-    /** Records the usage of `owner`, a session of the tree, and reports the tree's total. */
-    const reportUsage = Effect.fn("OpenCodeRuntime.reportUsage")(function* (
-      owner: string,
-      cost: number,
-      tokens: OpenCodeTokens,
-    ) {
-      const { usage } = yield* Ref.updateAndGet(state, (latest) => ({
-        ...latest,
-        usage: new Map(latest.usage).set(owner, { cost, tokens }),
-      }));
-      const total = addUsage([...usage.values()]);
-      yield* channel.emit(
-        SessionTokensUpdated.make({
-          session,
-          totalTokens: totalTokens(total.tokens),
-          costUsd: Option.some(total.cost),
-          breakdown: Option.some(tokenBreakdown(total.tokens)),
-        }),
-      );
-    });
-
-    const handle = Effect.fn("OpenCodeRuntime.handle")(function* (event: HandledEvent) {
-      if (
-        event.type === "shell.created" ||
-        event.type === "shell.exited" ||
-        event.type === "shell.deleted"
-      )
-        return yield* handleShell(event);
-      const { pending } = yield* Ref.get(state);
-      if (!inTree(pending, id, event.data.sessionID) && event.type !== "session.created") return;
-      if (event.type === "session.usage.updated")
-        return yield* reportUsage(event.data.sessionID, event.data.cost, event.data.tokens);
-      if (event.data.sessionID !== id) return yield* handleChild(event);
-      switch (event.type) {
-        case "session.execution.started": {
-          const { execution } = yield* Ref.getAndUpdate(state, (latest): OpenCodeState => ({
-            ...latest,
-            execution: Execution.Running(),
-            lastText: Option.none(),
-            retries: 0,
-            retrying: false,
-            workReported: false,
-          }));
-          if (execution._tag === "AwaitingSuccessor")
-            yield* Effect.logInfo(
-              "A successor execution reads the steer after the interrupt and ends the turn",
-              { sessionId },
-            );
-          yield* conversation.turnStarted;
-          if (!(yield* conversation.isPaused)) return;
-          // The operator paused the session between executions, such as while input was pending.
-          yield* Effect.logInfo("OpenCode started an execution of the paused session; pausing it", {
-            sessionId,
-          });
-          return yield* FiberSet.run(
-            tasks,
-            pauseExecution.pipe(
-              Effect.catch((error) =>
-                Effect.logWarning("Could not pause OpenCode's execution", {
-                  sessionId,
-                  message: error.message,
-                }),
-              ),
-            ),
-          ).pipe(Effect.asVoid);
-        }
-        case "session.inbox.enqueued":
-          return yield* updatePending((latest) => enqueued(latest, event.data.inboxID));
-        case "session.inbox.cancelled":
-          yield* Effect.logInfo("OpenCode cancelled an input that the session hadn't read", {
-            sessionId,
-            inboxId: event.data.inboxID,
-          });
-          return yield* dropInputs((latest) => removed(latest, event.data.inboxID));
-        case "session.inbox.delivered": {
-          const operator = (yield* Ref.get(operatorIds)).get(event.data.inboxID);
-          yield* updatePending((latest) => removed(latest, event.data.inboxID));
-          if (operator === undefined) return;
-          yield* conversation.observe(operator);
-          return;
-        }
-        case "session.text.ended": {
-          const text = event.data.text.trim();
-          if (text.length === 0) return;
-          yield* Ref.update(state, (latest) => ({ ...latest, lastText: Option.some(text) }));
-          return yield* channel.emit(TextOutput.make({ session, text }));
-        }
-        case "session.tool.input.started": {
-          const { id: callId, name } = event.data;
-          return yield* Ref.update(state, (latest) => ({
-            ...latest,
-            toolNames: new Map(latest.toolNames).set(callId, name),
-          }));
-        }
-        case "session.tool.called": {
-          const callId = event.data.id;
-          const tool = (yield* Ref.get(state)).toolNames.get(callId) ?? "unknown";
-          yield* Ref.update(state, (latest) => ({
-            ...latest,
-            toolsInFlight: new Map(latest.toolsInFlight).set(callId, tool),
-          }));
-          return yield* channel.emit(
-            ToolStarted.make({ session, callId, tool, input: event.data.input }),
-          );
-        }
-        case "session.tool.success":
-        case "session.tool.failed": {
-          const callId = event.data.id;
-          const tool = yield* Ref.modify(state, (latest) => {
-            const toolsInFlight = new Map(latest.toolsInFlight);
-            const name = toolsInFlight.get(callId) ?? latest.toolNames.get(callId) ?? "unknown";
-            toolsInFlight.delete(callId);
-            const toolNames = new Map(latest.toolNames);
-            toolNames.delete(callId);
-            return [name, { ...latest, toolsInFlight, toolNames }];
-          });
-          return yield* channel.emit(
-            ToolFinished.make({
-              session,
-              callId,
-              tool,
-              output:
-                event.type === "session.tool.success"
-                  ? event.data.content
-                  : { type: event.data.error.type, message: event.data.error.message },
-              isError: event.type === "session.tool.failed",
-            }),
-          );
-        }
-        case "session.step.ended":
-          return yield* reportModelOutput();
-        case "session.retry.scheduled": {
-          const capacity = distantRetry(sessionId, event.data, RETRY_THRESHOLD);
-          if (Option.isSome(capacity)) {
-            yield* Effect.logWarning(
-              "OpenCode's provider retry is too far ahead; ending the session",
-              {
-                sessionId,
-                retryAfterMs: event.data.error.retryAfterMs,
-                type: event.data.error.type,
-              },
-            );
-            return yield* fail(capacity.value);
-          }
-          const retries = yield* Ref.modify(state, (latest) => [
-            latest.retries + 1,
-            { ...latest, retries: latest.retries + 1, retrying: true },
-          ]);
-          yield* Effect.logWarning("OpenCode can't reach its provider and will retry", {
-            sessionId,
-            retries,
-            attempt: event.data.attempt,
-            retryAfterMs: event.data.error.retryAfterMs,
-            type: event.data.error.type,
-          });
-          return yield* channel.emit(
-            ProviderRetrying.make({
-              session,
-              message: event.data.error.message || event.data.error.type,
-              retries: ProviderRetries.make(retries),
-            }),
-          );
-        }
-        case "session.execution.succeeded":
-          yield* Ref.update(state, (latest): OpenCodeState => ({
-            ...latest,
-            execution: Execution.Idle(),
-          }));
-          return yield* executionSucceeded();
-        case "session.execution.failed": {
-          yield* Ref.update(state, (latest): OpenCodeState => ({
-            ...latest,
-            execution: Execution.Idle(),
-          }));
-          const { error } = event.data;
-          yield* Effect.logWarning("OpenCode's execution failed", {
-            sessionId,
-            type: error.type,
-            message: error.message,
-          });
-          return yield* fail(
-            Option.getOrElse(capacityFailure(sessionId, error), () =>
-              AgentResultError.make({
-                sessionId: Option.some(sessionId),
-                message: `OpenCode's execution failed (${error.type}): ${error.message}`,
-              }),
-            ),
-          );
-        }
-        case "session.execution.interrupted": {
-          const { reason } = event.data;
-          const outcome = yield* Ref.modify(state, (latest) => {
-            const [ended, execution] = executionInterrupted(
-              latest.execution,
-              reason,
-              latest.pending,
-            );
-            return [ended, { ...latest, execution }];
-          });
-          if (outcome._tag === "Deferred")
-            return yield* Effect.logInfo(
-              "A steer posted after the interrupt keeps the turn open for its successor execution",
-              { sessionId, undelivered: outcome.late.length },
-            );
-          return yield* endInterrupted(reason, outcome.intent);
-        }
-        case "session.created":
-          return;
-      }
+    const handle = openCodeEvents(context, {
+      done,
+      operatorIds,
+      dropInputs,
+      endInterrupted,
+      pause: pauseExecution,
     });
 
     const consumeEvents = Stream.unwrap(
@@ -923,7 +463,7 @@ const makeOpenCodeSessions = Effect.gen(function* () {
       if (messageId === undefined) return taken;
       const inputId = openCodeMessageId(sessionId, messageId);
       if (!(yield* (yield* current).messageDelivered(id, inputId))) return taken;
-      yield* updatePending((pending) => removed(pending, inputId));
+      yield* updatePending(state, (pending) => removed(pending, inputId));
       yield* Effect.logInfo("OpenCode already delivered the resent operator message", {
         sessionId,
         messageId,
