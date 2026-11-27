@@ -197,8 +197,14 @@ const makeOpenCodeSessions = Effect.gen(function* () {
     const restoredInputs: RestoredInput = connection.retained
       ? yield* restoredInput(api, id, sessionId, policy.restored.unread)
       : { delivered: [], queued: [], lost: policy.restored.unread };
-    // `recover` sends lost messages to an idle session; a running one gets them at once.
+    // `recover` sends lost messages to an idle session; a running one gets them at once, unless
+    // it is paused: the conversation sends them before the operator's next message.
     const resent = active && !policy.restored.paused ? restoredInputs.lost : [];
+    if (active && policy.restored.paused && restoredInputs.lost.length > 0)
+      yield* Effect.logInfo(
+        "The running session is paused; the operator's next message resends the messages that it never got",
+        { sessionId, lost: restoredInputs.lost.length },
+      );
 
     const operatorIds = yield* Ref.make<OperatorIds>(
       new Map(
@@ -473,7 +479,13 @@ const makeOpenCodeSessions = Effect.gen(function* () {
       const taken = yield* steer(message, messageId);
       if (messageId === undefined) return taken;
       const inputId = openCodeMessageId(sessionId, messageId);
-      if (!(yield* (yield* current).messageDelivered(id, inputId))) return taken;
+      if (!(yield* (yield* current).messageDelivered(id, inputId))) {
+        yield* Effect.logInfo(
+          "OpenCode hasn't saved the resent operator message; it stays pending for its delivery event",
+          { sessionId, messageId },
+        );
+        return taken;
+      }
       yield* updatePending(state, (pending) => delivered(pending, inputId));
       yield* Effect.logInfo("OpenCode already delivered the resent operator message", {
         sessionId,
