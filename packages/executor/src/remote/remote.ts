@@ -851,11 +851,12 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
       const reattached = request.reattach
         ? yield* takeOver(request, machine, worktree, isolation).pipe(Effect.asSome)
         : Option.none();
-      const harness = Option.match(reattached, {
-        onNone: () => request.agent.brain.harness,
-        onSome: (spec) => spec.agent.brain.harness,
+      const brain = Option.match(reattached, {
+        onNone: () => request.agent.brain,
+        onSome: (spec) => spec.agent.brain,
       });
-      const credentialRoute = worker.credentialRoute(machine, harness);
+      const harness = brain.harness;
+      const credentialRoute = worker.credentialRoute(machine, brain);
 
       // A checkout kept after a failed remote stop never closes its scope, so its salvage result
       // is completed here instead of by the checkout finalizer.
@@ -908,7 +909,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
           request.permissions,
           machine,
           "prepare",
-          Option.some(harness),
+          Option.some(brain),
         );
         // Forked before the checkout's release is registered, so the container is removed after
         // the release salvages the checkout in it.
@@ -1006,7 +1007,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
               // Uses the RunSpec's brain, including on reattachment. Each child reads the kind when it
               // starts, so a preflight during the Attempt takes effect.
               const gatewayCredential = worker
-                .gatewayCredential(machine, prepared.spec.agent.brain.harness)
+                .gatewayCredential(machine, prepared.spec.agent.brain)
                 .pipe(
                   Effect.map((kind) =>
                     Option.orElse(kind, () =>

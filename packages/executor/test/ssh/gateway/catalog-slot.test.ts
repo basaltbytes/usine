@@ -1,15 +1,18 @@
 import { assert, describe, it } from "@effect/vitest";
 import { RemoteShell } from "@usine/agents/child-host";
 import {
+  admitBrain,
   apiKeys,
   CapabilityProfile,
   catalog,
+  codingAgent,
   CredentialWiring,
   HarnessCatalog,
   HarnessCredential,
   HarnessDescriptor,
   HarnessPool,
   WorkerRequirements,
+  workerAdmissionContext,
 } from "@usine/agents/harness";
 import { harnessesLiveFrom } from "@usine/agents/harness/node";
 import { Agent } from "@usine/core/agent";
@@ -24,6 +27,7 @@ import {
   ModelProviderCatalog,
   ModelProviderId,
   modelProviders,
+  openai,
   opencodeGo,
   ProviderProtocol,
   RoutePattern,
@@ -33,8 +37,15 @@ import {
 import { jsonKey } from "@usine/core/json-key";
 import type { AttemptRequest } from "@usine/durable/attempt-runtime";
 import { completes, type StubParent } from "@usine/durable/testing";
-import { ApiKey, GatewayProxy, LlmProvider, type LlmProviders } from "@usine/gateway";
-import { Array as Arr, Effect, Layer, Option, Redacted, Schema } from "effect";
+import {
+  ApiKey,
+  ChatGptLogin,
+  GatewayProxy,
+  HostFilePath,
+  LlmProvider,
+  type LlmProviders,
+} from "@usine/gateway";
+import { Array as Arr, Effect, Layer, Option, Redacted, Result, Schema } from "effect";
 import { HttpClient, HttpClientResponse, HttpServerRequest, HttpServerResponse } from "effect/http";
 import { CheckoutRequest, Executor } from "../../../src/executor.ts";
 import {
@@ -504,6 +515,71 @@ describe("the OpenCode Go slot", () => {
             harnesses: goHarnesses,
           }),
           proxy,
+          logs.layer,
+        ]),
+      );
+    },
+  );
+  it.effect(
+    "gives an OpenCode Go attempt the plan's API-key credential when the OpenAI slot holds a ChatGPT login, and logs the plan's slot",
+    () => {
+      const machine = fakeMachine();
+      const gateway = fakeGateway(machine, {
+        [openai.slot]: LlmProvider.make({
+          upstream: Option.some(UpstreamBase.make("https://chatgpt.com/backend-api/codex")),
+          credential: ChatGptLogin.make({
+            authFile: HostFilePath.make("/var/lib/usine-gateway/chatgpt/auth.json"),
+            tokenUrl: UpstreamBase.make("https://auth.openai.com/oauth/token"),
+          }),
+        }),
+        [opencodeGo.slot]: LlmProvider.make({
+          upstream: Option.none(),
+          credential: ApiKey.make({ key: Redacted.make(GO_KEY) }),
+        }),
+      });
+      const logs = capturedLogs();
+      let given: AttemptRequest | undefined;
+      const parent: StubParent = (context) => {
+        given = context.request;
+        return completes(context);
+      };
+      return Effect.gen(function* () {
+        const executor = yield* Executor;
+        yield* executor.preflight(WORKER, [GO_BRAIN], 1);
+        yield* (yield* executor.prepare(
+          CheckoutRequest.make({
+            ...request,
+            agent: Agent.make({ ...TEST_AGENT, brain: GO_BRAIN }),
+          }),
+        )).launch(sink);
+        assert(given !== undefined);
+        const credential = yield* given.gatewayCredential;
+        assert.deepStrictEqual(credential, Option.some("api-key"));
+        assert.strictEqual(
+          given.environment.USINE_OPENCODE_GO_BASE_URL,
+          "http://llm.gw.test/opencode-go",
+        );
+        const context = workerAdmissionContext(catalog, {
+          harness: GO_BRAIN.harness,
+          host: given.host,
+          environment: given.environment,
+          gatewayCredential: credential,
+        });
+        assert.strictEqual(context.credential, "gateway-api-key");
+        assert(Result.isSuccess(admitBrain(catalog, codingAgent, GO_BRAIN, context)));
+        const wired = logs.infos.filter((line) =>
+          line.includes("Wired the harness to the Gateway slot of the model's provider"),
+        );
+        assert.lengthOf(wired, 1);
+        assert.include(wired[0], '"slot":"opencode-go"');
+        assert.include(wired[0], '"credential":"api-key"');
+      }).pipe(
+        Effect.provide([
+          gatewayRuntime(machine, mintingProvider(), gateway, {
+            address: gatewayAddress({ llmProviders: [openai.slot, opencodeGo.slot] }),
+            parent,
+            harnesses: goHarnesses,
+          }),
           logs.layer,
         ]),
       );

@@ -41,25 +41,29 @@ const capabilityError = (
 /** Why an Attempt's container mounts a harness's login files for each credential route, or doesn't. */
 const LOGIN_MOUNT_REASONS = {
   "host-login": "The harness uses the SSH user's login on the machine",
-  gateway: "The Gateway holds the credential of the harness's provider",
-  "api-key": "Each Attempt gets the provisioner's API key for the harness's provider",
+  gateway: "The Gateway holds the credential of the model's provider",
+  "api-key": "Each Attempt gets the provisioner's API key for the model's provider",
 } as const satisfies Record<MachineCredentialRoute, string>;
 
 /**
- * Returns the harnesses whose login files the containers on the machine mount: those that use
- * the SSH user's login. Logs, for each harness, the files that a container mounts if the machine
- * has them, and why.
+ * Returns the harnesses whose login files the containers on the machine mount: those with a brain
+ * in `brains` that uses the SSH user's login. Logs, for each brain, the files that a container
+ * mounts if the machine has them, and why.
  */
 const containerLogins = Effect.fn("SshExecutor.containerLogins")(function* (
   catalog: HarnessCatalog,
   machine: SshMachine,
-  harnesses: ReadonlyArray<Harness>,
+  brains: ReadonlyArray<BrainSpec>,
 ) {
   const worker = machine.address.name;
-  yield* Effect.annotateCurrentSpan({ worker, harnesses: harnesses.join(",") });
+  yield* Effect.annotateCurrentSpan({
+    worker,
+    harnesses: Arr.dedupe(brains.map(({ harness }) => harness)).join(","),
+  });
   const logins: Array<Harness> = [];
-  for (const harness of harnesses) {
-    const credentialRoute = machineCredentialRoute(catalog, machine, harness);
+  for (const brain of brains) {
+    const harness = brain.harness;
+    const credentialRoute = machineCredentialRoute(catalog, machine, brain);
     const files = credentialRoute === "host-login" ? loginFiles(harness) : [];
     yield* Effect.logInfo(
       "Chose the login files that the Worker's containers mount if the machine has them",
@@ -67,13 +71,14 @@ const containerLogins = Effect.fn("SshExecutor.containerLogins")(function* (
         worker,
         host: machine.shell.destination,
         harness,
+        model: brain.model,
         credentialRoute,
         mounted: files.flatMap(({ file, mounted }) => (mounted ? [file] : [])).join(","),
         seeded: files.flatMap(({ file, mounted }) => (mounted ? [] : [file])).join(","),
         reason: LOGIN_MOUNT_REASONS[credentialRoute],
       },
     );
-    if (files.length > 0) logins.push(harness);
+    if (files.length > 0 && !logins.includes(harness)) logins.push(harness);
   }
   return logins;
 });
@@ -234,7 +239,7 @@ export const sshMachinePreflightFor = (
               { worker, host, harnesses: harnesses.join(",") },
             )
           : Effect.scoped(
-              containerLogins(catalog, machine, harnesses).pipe(
+              containerLogins(catalog, machine, brains).pipe(
                 Effect.flatMap((logins) =>
                   containers.preflightShell(
                     machine,
