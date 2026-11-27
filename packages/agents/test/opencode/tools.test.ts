@@ -33,7 +33,7 @@ const WaitForever = Tool.make("wait_forever", {
   success: Schema.String,
 });
 const ReadLarge = Tool.make("read_large", {
-  description: "Returns a text longer than a bridge line.",
+  description: "Returns a text that fits a bridge line in characters but not in UTF-8 bytes.",
   success: Schema.String,
 });
 const tools = Toolkit.make(ReadNote, WaitForever, ReadLarge);
@@ -99,7 +99,7 @@ const served = Effect.gen(function* () {
         Effect.andThen(Effect.never),
         Effect.onInterrupt(() => Deferred.succeed(cancelled, undefined)),
       ),
-    read_large: () => Effect.succeed("x".repeat(MAX_PROTOCOL_LINE_BYTES + 1)),
+    read_large: () => Effect.succeed("é".repeat(MAX_PROTOCOL_LINE_BYTES / 2 + 8)),
   });
   const bound = yield* hostToolSet(tools).pipe(Effect.provide(handlers));
   const server = yield* serveOpenCodeTools(bound, sessionId);
