@@ -115,6 +115,8 @@ const answerTo = (lines: ReadonlyArray<BridgeOutput>, id: number | string) =>
   lines.find((line) => "id" in line && line.id === id);
 const eventTypes = (lines: ReadonlyArray<BridgeOutput>) =>
   lines.flatMap((line) => ("event" in line ? [line.event.type] : []));
+/** The MCP messages and socket reports among `lines`. */
+const mcpLines = (lines: ReadonlyArray<BridgeOutput>) => lines.filter((line) => "mcp" in line);
 
 describe("OpenCode bridge", () => {
   it("reports ready once serve is listening and the event subscription is registered", async () => {
@@ -193,6 +195,121 @@ describe("OpenCode bridge", () => {
       id: 3,
       error: "The request names no OpenCode session",
     });
+  });
+
+  it("relays a client MCP server's socket in both directions", async () => {
+    const bridge = start("ready");
+    await eventually(() => bridge.lines.length >= 2);
+    bridge.send({ id: 1, mcp: "usine", directory: "/work" });
+    await eventually(() => mcpLines(bridge.lines).length >= 1);
+    expect(answerTo(bridge.lines, 1)).toEqual({ id: 1, status: 101, body: null });
+    expect(mcpLines(bridge.lines)).toEqual([
+      {
+        mcp: "usine",
+        message: {
+          jsonrpc: "2.0",
+          id: 0,
+          method: "initialize",
+          params: { name: "usine", directory: "/work", connection: 1 },
+        },
+      },
+    ]);
+    bridge.send({ mcp: "usine", message: { jsonrpc: "2.0", id: 0, result: {} } });
+    await eventually(() => eventTypes(bridge.lines).includes("fake.mcp"));
+    expect(bridge.lines).toContainEqual({
+      event: {
+        type: "fake.mcp",
+        data: { name: "usine", message: { jsonrpc: "2.0", id: 0, result: {} } },
+      },
+    });
+    // The bridge holds the socket, so a second connect line, as after a reattach, opens no other.
+    bridge.send({ id: 2, mcp: "usine", directory: "/work" });
+    bridge.send({ id: 3, mcp: "usine", directory: "/elsewhere" });
+    bridge.send({ id: 4, mcp: "not a name", directory: "/work" });
+    bridge.send({ id: 5, mcp: "other", directory: "work" });
+    await eventually(() => [2, 3, 4, 5].every((id) => answerTo(bridge.lines, id)));
+    expect(answerTo(bridge.lines, 2)).toEqual({ id: 2, status: 200, body: null });
+    expect(answerTo(bridge.lines, 3)).toEqual({
+      id: 3,
+      error: "The MCP server usine is attached in another directory",
+    });
+    expect(answerTo(bridge.lines, 4)).toEqual({ id: 4, error: "The request names no MCP server" });
+    expect(answerTo(bridge.lines, 5)).toEqual({
+      id: 5,
+      error: "The request has no absolute MCP directory",
+    });
+    bridge.send({ mcp: "other", message: { jsonrpc: "2.0", method: "ping" } });
+    await eventually(() => bridge.stderr().includes("dropping a message for the MCP server other"));
+    expect(mcpLines(bridge.lines)).toHaveLength(1);
+  });
+
+  it("reports a client MCP socket that OpenCode closes, and reconnects it", async () => {
+    const bridge = start("ready");
+    await eventually(() => bridge.lines.length >= 2);
+    bridge.send({ id: 1, mcp: "usine", directory: "/work" });
+    await eventually(() => mcpLines(bridge.lines).length >= 1);
+    bridge.send({ id: 2, method: "POST", path: "/api/mcp-close" });
+    await eventually(() => mcpLines(bridge.lines).length >= 3);
+    expect(mcpLines(bridge.lines).slice(1)).toEqual([
+      { mcp: "usine", closed: "code 1011: fake restart" },
+      {
+        mcp: "usine",
+        message: {
+          jsonrpc: "2.0",
+          id: 0,
+          method: "initialize",
+          params: { name: "usine", directory: "/work", connection: 2 },
+        },
+      },
+    ]);
+    expect(bridge.stderr()).toContain(
+      "OpenCode closed the MCP socket of usine (code 1011: fake restart); reconnecting in 500 ms",
+    );
+  });
+
+  it("answers a connect line with an error when OpenCode refuses the socket", async () => {
+    const bridge = start("refuse-mcp");
+    await eventually(() => bridge.lines.length >= 2);
+    bridge.send({ id: 1, mcp: "usine", directory: "/work" });
+    await eventually(() => answerTo(bridge.lines, 1) !== undefined);
+    expect(answerTo(bridge.lines, 1)).toEqual({
+      id: 1,
+      error: expect.stringMatching(/^Can't open OpenCode's MCP socket for usine \(code 1006/u),
+    });
+    // A refused server isn't attached, so the next connect line tries again.
+    bridge.send({ id: 2, mcp: "usine", directory: "/elsewhere" });
+    await eventually(() => answerTo(bridge.lines, 2) !== undefined);
+    expect(answerTo(bridge.lines, 2)).toMatchObject({ id: 2, error: expect.any(String) });
+    expect(JSON.stringify(answerTo(bridge.lines, 2))).not.toContain("another directory");
+  });
+
+  it("refuses an MCP request of OpenCode too long for a line of 4 MiB", async () => {
+    const bridge = start("ready");
+    await eventually(() => bridge.lines.length >= 2);
+    bridge.send({ id: 1, mcp: "usine", directory: "/work" });
+    await eventually(() => mcpLines(bridge.lines).length >= 1);
+    bridge.send({ id: 2, method: "POST", path: "/api/mcp-large" });
+    await eventually(() => eventTypes(bridge.lines).includes("fake.mcp"));
+    expect(bridge.lines).toContainEqual({
+      event: {
+        type: "fake.mcp",
+        data: {
+          name: "usine",
+          message: {
+            jsonrpc: "2.0",
+            id: 7,
+            error: {
+              code: -32603,
+              message: "The usine bridge can't relay a tools/call request this long",
+            },
+          },
+        },
+      },
+    });
+    expect(mcpLines(bridge.lines)).toHaveLength(1);
+    expect(bridge.stderr()).toMatch(
+      /skipping a message of \d+ bytes on the MCP socket of usine that is too long for a line/u,
+    );
   });
 
   it("waits through a slow start and answers requests sent before it was ready", async () => {
