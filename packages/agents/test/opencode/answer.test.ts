@@ -210,6 +210,43 @@ describe("OpenCode answer", () => {
         }).pipe(Effect.scoped),
     );
 
+  it.live(
+    "waits for a listed inbox item that OpenCode keeps when it cancels another during the inbox read of a done check that runs in a task",
+    () =>
+      Effect.gen(function* () {
+        const { bridge, running } = yield* launched("OLD");
+        const inbox = yield* forkedCheck(bridge, running, "inbox");
+        for (const line of [
+          event("session.inbox.enqueued", { inboxID: "msg_other" }),
+          event("session.inbox.cancelled", { inboxID: "msg_other" }),
+        ])
+          yield* bridge.emit(line);
+        yield* Effect.sleep("50 millis");
+        const inboxReads = bridge.answered.pipe(
+          Effect.map((all) => all.filter(({ path }) => path.endsWith("/inbox")).length),
+        );
+        const before = yield* inboxReads;
+        yield* bridge.setInbox([{ id: "msg_notice" }]);
+        yield* bridge.reply(inbox, 200, { data: [{ id: "msg_other" }, { id: "msg_notice" }] });
+        const early = yield* running.result.pipe(Effect.timeoutOption("500 millis"));
+        assert(Option.isNone(early), "the re-read lists the kept item, so the answer waits");
+        assert.strictEqual(
+          (yield* inboxReads) - before,
+          1,
+          "the task reads the inbox again after the cancellation",
+        );
+        yield* bridge.setInbox([]);
+        for (const line of [
+          event("session.inbox.enqueued", { inboxID: "msg_notice" }),
+          ...execution("msg_notice", "SECOND"),
+        ])
+          yield* bridge.emit(line);
+        const result = yield* running.result.pipe(Effect.timeoutOption("1 second"));
+        assert(Option.isSome(result), "the kept item's execution answers");
+        assert.strictEqual(result.value.message, "SECOND");
+      }).pipe(Effect.scoped),
+  );
+
   for (const [lookup, name, matches] of [
     ["jobs", "running jobs", (path: string) => path.startsWith("/api/experimental/job")],
     ["inbox", "session inbox", (path: string) => path.endsWith("/inbox")],
