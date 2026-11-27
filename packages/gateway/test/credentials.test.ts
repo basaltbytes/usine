@@ -492,9 +492,12 @@ it.live(
         const saved = yield* fs
           .readFileString(`${directory}/provider-credentials.json`)
           .pipe(Effect.flatMap(Schema.decodeUnknownEffect(Saved)));
-        assert.deepStrictEqual(Record.map(saved.staticKeys, ({ provider }) => provider), {
-          [plan.slot]: plan.id,
-        });
+        assert.deepStrictEqual(
+          Record.map(saved.staticKeys, ({ provider }) => provider),
+          {
+            [plan.slot]: plan.id,
+          },
+        );
         const ask = yield* attemptOn(first);
         const path = `/${plan.slot}/chat/completions`;
         const connected = yield* ask(path);

@@ -4,7 +4,15 @@ import {
   ModelProviderId,
   upstreamSearch,
 } from "@usine/core/agent/provider";
-import { Array as Arr, Effect, Match, Option, Redacted, Schema } from "effect";
+import {
+  Array as Arr,
+  Effect,
+  Match,
+  Option,
+  Redacted,
+  Schema,
+  SchemaTransformation,
+} from "effect";
 import { FetchHttpClient, HttpClientError, HttpClientRequest } from "effect/http";
 import { ProviderCredential, type SandboxCredentials } from "../api/api.ts";
 import { GITHUB_HOSTS, type GitHubHost, sandboxHost } from "../api/harness.ts";
@@ -242,12 +250,26 @@ export const GitHubProps = Schema.Struct({
 });
 
 /**
+ * The provider of a handler's props: its ID, or the whole entry that earlier Workers registered,
+ * read for its ID. Encodes the ID.
+ */
+const PropsProvider = Schema.Union([
+  ModelProviderId,
+  Schema.Struct({ id: Schema.String }).pipe(
+    Schema.decodeTo(
+      ModelProviderId,
+      SchemaTransformation.transform({ decode: ({ id }) => id, encode: (id) => ({ id }) }),
+    ),
+  ),
+]);
+
+/**
  * The provider ID and credential of a provider's outbound handler, as its props carry them. The
  * handler reads the provider's entry from the Worker's catalog on each request, so a handler that
- * outlives a deploy serves the current entry.
+ * a container keeps across a deployment serves the current entry.
  */
 export const ProviderProps = Schema.Struct({
-  provider: ModelProviderId,
+  provider: PropsProvider,
   credential: ProviderCredential,
 });
 
@@ -342,14 +364,14 @@ const refusal = (status: number, message: string) =>
   new Response(message, { status, headers: { "content-type": "text/plain; charset=utf-8" } });
 
 /**
- * Answers a sandbox's request for a provider's host, with `props` as the Worker registered them:
+ * Answers a sandbox's request for a provider's host, with `props` as a Worker registered them:
  * forwards it to the upstream of the protocol that serves the path, with the provider's API key, or
  * refuses it with status 404. The provider's entry comes from `catalog`, the Worker's current one;
- * a provider that it no longer serves in a sandbox, or props that this Worker can't read, such as
- * those of an earlier deploy, are refused with status 403.
+ * a provider that it no longer serves in a sandbox, or props that it can't decode, are refused with
+ * status 403.
  */
 export const providerOutbound = Effect.fn("Sandbox.providerOutbound")(function* (
-  props: unknown,
+  props: typeof ProviderProps.Encoded,
   request: Request,
   catalog: ModelProviderCatalog,
 ) {
@@ -358,7 +380,7 @@ export const providerOutbound = Effect.fn("Sandbox.providerOutbound")(function* 
     host: new URL(request.url).host,
     path: new URL(request.url).pathname,
   };
-  const decoded = yield* Schema.decodeUnknownEffect(ProviderProps)(props).pipe(Effect.option);
+  const decoded = yield* Schema.decodeEffect(ProviderProps)(props).pipe(Effect.option);
   if (Option.isNone(decoded)) {
     yield* Effect.logWarning("Refused a sandbox request whose handler props are unreadable", route);
     return refusal(403, "usine attached no credential that this Worker reads for this host.\n");

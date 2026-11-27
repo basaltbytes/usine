@@ -16,7 +16,7 @@ import { tmpdir } from "node:os";
 // Synchronous Node path callbacks retain the host platform’s path semantics.
 // @effect-diagnostics-next-line nodeBuiltinImport:off
 import { join, dirname, basename } from "node:path";
-import { NodeServices, NodeFileSystem } from "@effect/platform-node";
+import { NodeCrypto, NodeServices, NodeFileSystem } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import {
   ConfigProvider,
@@ -495,10 +495,14 @@ describe("reloading the gateway", () => {
           const providerResponse = yield* askAnthropic(token);
           assert.strictEqual(providerResponse, 200);
           assert.deepStrictEqual(anthropic, [FIRST_KEY]);
-          const source = yield* readSettingsSource(yield* ConfigProvider.ConfigProvider);
-          const failed = yield* readStartupSettings(source).pipe(Effect.flip);
-          assert.strictEqual(failed._tag, "ConfigError");
-          assert.include(failed.message, "USINE_GATEWAY_ANTHROPIC_UPSTREAM");
+          const environment = yield* ConfigProvider.ConfigProvider;
+          const source = yield* readSettingsSource(environment);
+          const startup = yield* readStartupSettings(source).pipe(
+            Effect.as("started"),
+            Effect.catchTag("ConfigError", ({ message }) => Effect.succeed(message)),
+            Effect.provide(NodeCrypto.layer),
+          );
+          assert.include(startup, "USINE_GATEWAY_ANTHROPIC_UPSTREAM");
         }),
       ).pipe(Effect.provide(NodeFileSystem.layer)),
   );

@@ -37,7 +37,7 @@ import {
   providerRequest,
   type OutboundEntrypoints,
   type OutboundInterceptor,
-  type ProviderProps,
+  ProviderProps,
   register,
   registrationOf,
 } from "../src/sandbox/outbound.ts";
@@ -522,7 +522,7 @@ describe("sandbox outbound handlers", () => {
   );
 
   it.live(
-    "reads a handler's provider from the Worker's current catalog, and refuses one that the catalog no longer has or props from an earlier Worker",
+    "reads a handler's provider from the Worker's current catalog, also for props that an earlier Worker registered with the whole entry, and refuses one that the catalog no longer has",
     () =>
       Effect.gen(function* () {
         const credential = ApiKeyCredential.make({ key: Redacted.make("plan-key") });
@@ -548,7 +548,7 @@ describe("sandbox outbound handlers", () => {
           ],
         });
         const sent: Array<string> = [];
-        const serve = (catalog: ModelProviderCatalog, props: unknown) =>
+        const serve = (catalog: ModelProviderCatalog, props: typeof ProviderProps.Encoded) =>
           providerOutbound(
             props,
             new Request(`http://${sandboxHost(plan.id)}/chat/completions`, {
@@ -563,21 +563,26 @@ describe("sandbox outbound handlers", () => {
               return Promise.resolve(new Response("{}"));
             }),
           );
-        const earlierProps = {
+        // Workers before this one registered the whole entry.
+        const earlierProps = yield* Schema.decodeUnknownEffect(Schema.toEncoded(ProviderProps))({
           provider: yield* Schema.encodeEffect(Schema.toCodecJson(ModelProvider))(plan),
           credential: registration.props.credential,
-        };
+        });
         const answers = yield* Effect.forEach(
           [
             [ModelProviderCatalog.make({ providers: [anthropic, moved] }), registration.props],
             [modelProviders, registration.props],
-            [withPlan, earlierProps],
+            [ModelProviderCatalog.make({ providers: [anthropic, moved] }), earlierProps],
+            [modelProviders, earlierProps],
           ] as const,
           ([catalog, props]) => serve(catalog, props),
         );
 
-        expect(answers.map(({ status }) => status)).toEqual([200, 403, 403]);
-        expect(sent).toEqual(["https://moved.test/openai/v1/chat/completions"]);
+        expect(answers.map(({ status }) => status)).toEqual([200, 403, 200, 403]);
+        expect(sent).toEqual([
+          "https://moved.test/openai/v1/chat/completions",
+          "https://moved.test/openai/v1/chat/completions",
+        ]);
       }),
   );
 
