@@ -177,6 +177,7 @@ describe("sandbox outbound handlers", () => {
       "GitHub:api.github.com",
       "Provider:anthropic.usine.internal",
       "Denied:openai.usine.internal",
+      "Denied:opencode-go.usine.internal",
       "Allowed:registry.npmjs.org",
     ]);
   });
@@ -200,6 +201,7 @@ describe("sandbox outbound handlers", () => {
       "GitHub:api.github.com",
       "Provider:anthropic.usine.internal",
       "Denied:http:openai.usine.internal",
+      "Denied:http:opencode-go.usine.internal",
       "Denied:http:test-plan.usine.internal",
       "Allowed:test-plan.usine.internal",
       "Allowed:registry.npmjs.org",
@@ -340,6 +342,7 @@ describe("sandbox outbound handlers", () => {
           "Denied:api.github.com",
           "Denied:anthropic.usine.internal",
           "Denied:openai.usine.internal",
+          "Denied:opencode-go.usine.internal",
           "Provider:test-plan.usine.internal",
         ]);
         const key = ApiKeyCredential.make({ key: Redacted.make("plan-key") });
@@ -452,6 +455,7 @@ describe("sandbox outbound handlers", () => {
           "GitHubOutbound:https:api.github.com",
           "DeniedOutbound:http:anthropic.usine.internal",
           "DeniedOutbound:http:openai.usine.internal",
+          "DeniedOutbound:http:opencode-go.usine.internal",
           "ProviderOutbound:http:test-plan.usine.internal",
           "AllowedOutbound:https:registry.npmjs.org",
         ]);

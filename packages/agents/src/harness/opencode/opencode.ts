@@ -1,4 +1,3 @@
-import { BrainSpec, Harness, ModelId } from "@usine/core/agent/brain";
 import {
   type AgentSession,
   HarnessSession,
@@ -52,7 +51,7 @@ import {
   SessionInfo,
 } from "./codec.ts";
 import {
-  baseUrl,
+  sessionCredential,
   dataDirectory,
   serveConfig,
   serveEnvironment,
@@ -62,7 +61,7 @@ import { type OpenCodeContext, type OpenCodeState, type OperatorIds } from "./co
 import { opencode } from "./descriptor.ts";
 import { doneCheck } from "./done.ts";
 import { openCodeEvents } from "./events.ts";
-import { checkModel } from "./model.ts";
+import { checkModel, modelChoice } from "./model.ts";
 import { openCodePreflight } from "./preflight.ts";
 import { type RestoredInput, restoredInput } from "./restored.ts";
 import { OpenCodeServer } from "./server.ts";
@@ -121,12 +120,24 @@ const makeOpenCodeSessions = Effect.gen(function* () {
       },
     );
     yield* checkContinuationHome(spec, start, Option.some(data), Option.some(data));
-    const config = yield* serveConfig({
-      brain: spec.session.brain,
-      route: spec.admitted.context.credential,
-      cwd: spec.cwd,
-      baseUrl: baseUrl(spec.environment),
+    const brain = spec.session.brain;
+    const choice = yield* modelChoice(brain);
+    const { route, baseUrl } = yield* sessionCredential(
+      spec.environment,
+      brain,
+      choice,
+      spec.admitted.context,
+    );
+    yield* Effect.annotateCurrentSpan({ provider: choice.provider.id, credentialRoute: route });
+    yield* Effect.logInfo("OpenCode chose the model's provider and base URL", {
+      sessionId,
+      provider: choice.provider.id,
+      slot: choice.provider.slot,
+      credentialRoute: route,
+      admittedRoute: spec.admitted.context.credential,
+      baseUrlVariable: Option.getOrElse(baseUrl, () => "none"),
     });
+    const config = yield* serveConfig({ choice, route, cwd: spec.cwd, baseUrl });
     const target = {
       host: spec.host,
       cwd: spec.cwd,
@@ -138,7 +149,7 @@ const makeOpenCodeSessions = Effect.gen(function* () {
       transport: Option.isSome(reference) ? "resume" : undefined,
     });
     const api = openCodeApi(connection, Option.some(sessionId));
-    const model = yield* checkModel(api, spec.session.brain, Option.some(spec.cwd));
+    const model = yield* checkModel(api, brain, choice, Option.some(spec.cwd));
     const info = yield* Option.match(reference, {
       onNone: () =>
         api.read(SessionInfo, "launch", "POST", "/api/session", {
@@ -156,11 +167,7 @@ const makeOpenCodeSessions = Effect.gen(function* () {
     const sessionPath = `/api/session/${encodeURIComponent(id)}`;
     yield* api.setToolEnvironment("launch", id);
     const session: AgentSession = resolvedSession(spec.session, {
-      brain: BrainSpec.make({
-        harness: Harness.make("opencode"),
-        model: ModelId.make(model.id),
-        effort: spec.session.brain.effort,
-      }),
+      brain,
       // OpenCode bills only API keys; a gateway that hasn't reported its kind holds one too.
       pool: Option.some(Option.getOrElse(spec.admitted.pool, () => apiKeys.id)),
       endpoint: Option.none(),
@@ -181,6 +188,8 @@ const makeOpenCodeSessions = Effect.gen(function* () {
       cwd: spec.cwd,
       home: data,
       retained: connection.retained,
+      provider: choice.provider.id,
+      model: model.id,
     });
     // A retained bridge may be in an execution, which then continues.
     const active = connection.retained

@@ -152,6 +152,38 @@ describe("brain admission", () => {
     }
   });
 
+  it("admits an OpenCode Go model only on a gateway route, with the provider in the refusal", () => {
+    const go = BrainSpec.make({
+      harness: Harness.make("opencode"),
+      model: ModelId.make("opencode-go/glm-5.3"),
+      effort: "low",
+    });
+    const admits = (placement: Placement, credential: CredentialRoute) =>
+      admitBrain(catalog, codingAgent, go, AdmissionContext.make({ placement, credential }));
+    for (const credential of ["gateway", "gateway-api-key"] as const)
+      assert(Result.isSuccess(admits("ssh", credential)));
+    const refused = admits("ssh", "api-key");
+    assert(Result.isFailure(refused));
+    assert.deepStrictEqual(refused.failure.missing, [
+      Lacking.make({
+        capability: "credential-route",
+        reason:
+          "OpenCode reaches OpenCode Go models only through a gateway that holds the provider's credential, and the api-key route has none",
+      }),
+    ]);
+    // A bare model is OpenAI's, which an attempt API key reaches.
+    assert(
+      Result.isSuccess(
+        admitBrain(
+          catalog,
+          codingAgent,
+          brain("opencode"),
+          AdmissionContext.make({ placement: "ssh", credential: "api-key" }),
+        ),
+      ),
+    );
+  });
+
   it("refuses unregistered harnesses and unsupported credentials", () => {
     const unknown = admitBrain(catalog, codingAgent, brain("unknown"), local);
     assert(Result.isFailure(unknown));

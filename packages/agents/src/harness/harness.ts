@@ -1,9 +1,20 @@
-import { Harness } from "@usine/core/agent/brain";
+import { type BrainSpec, Harness, ModelId } from "@usine/core/agent/brain";
 import type { PoolDescriptor } from "@usine/core/agent/pool";
-import { type GatewaySlot, ModelProvider, ModelProviderCatalog } from "@usine/core/agent/provider";
+import {
+  type GatewaySlot,
+  ModelProvider,
+  ModelProviderCatalog,
+  ModelProviderId,
+} from "@usine/core/agent/provider";
 import { type TokenBreakdown, UsdAmount } from "@usine/core/agent/session";
-import { Array as Arr, type Brand, Effect, Equal, Option, Record, Schema } from "effect";
-import { CapabilityProfile } from "./capability.ts";
+import { Array as Arr, type Brand, Effect, Equal, Option, Record, Result, Schema } from "effect";
+import { UnknownModelError } from "../runtime.ts";
+import {
+  CapabilityProfile,
+  type CredentialRoute,
+  isGatewayRoute,
+  type Placement,
+} from "./capability.ts";
 import { HarnessPool } from "./pool.ts";
 
 /** The terminal command for a saved harness session. */
@@ -67,6 +78,22 @@ export class CredentialWiring extends Schema.Class<
   }
 }
 
+/** A base URL's path under a provider's slot or upstream, such as `/v1`, or empty. */
+const SlotPath = Schema.String.check(
+  Schema.isPattern(/^(?:\/[A-Za-z0-9][A-Za-z0-9._~-]*)*$/u, {
+    message: "Expected an empty path or one such as /v1",
+  }),
+);
+
+/** The variable that holds the URL of a provider's gateway slot, and the URL's path under the slot. */
+export class SlotVariable extends Schema.Class<
+  SlotVariable,
+  Brand.Brand<"@usine/agents/harness/SlotVariable">
+>("@usine/agents/SlotVariable")({
+  variable: Schema.NonEmptyString,
+  path: SlotPath,
+}) {}
+
 /**
  * How a harness on a worker reaches its providers: through a gateway slot, with an API key, or
  * with a Cloudflare Worker's key, and the hosts of its own login.
@@ -76,11 +103,16 @@ export class HarnessCredential extends Schema.Class<
   Brand.Brand<"@usine/agents/harness/HarnessCredential">
 >("@usine/agents/HarnessCredential")(
   Schema.Struct({
-    /** The base URL's path under the provider's slot or upstream, such as `/v1`, or empty. */
-    slotPath: Schema.String.check(
-      Schema.isPattern(/^(?:\/[A-Za-z0-9][A-Za-z0-9._~-]*)*$/u, {
-        message: "Expected an empty path or one such as /v1",
-      }),
+    /** The path of `{{baseUrl}}` under the provider's slot or upstream, such as `/v1`, or empty. */
+    slotPath: SlotPath,
+    /**
+     * The variables that a gateway route sets to the URL of each provider's slot, by provider ID,
+     * for each provider that the gateway holds. A harness that runs models of several providers
+     * reads the variable of the model's provider, where `{{baseUrl}}` has only the first one.
+     */
+    slots: Schema.Record(ModelProviderId, SlotVariable).pipe(
+      Schema.withConstructorDefault(Effect.succeed({})),
+      Schema.withDecodingDefaultKey(Effect.succeed({})),
     ),
     /** None when credential wiring needs no attempt home. */
     home: Schema.Option(Schema.NonEmptyString),
@@ -101,10 +133,27 @@ export class HarnessCredential extends Schema.Class<
   /**
    * Returns the base URL that the API-key wiring gets for `provider`: the upstream that its
    * protocols share, and `slotPath`. A descriptor that offers the `api-key` route outside a sandbox
-   * lists only providers whose protocols share an upstream.
+   * reaches only providers whose protocols share an upstream with it.
    */
   apiKeyBaseUrl(provider: ModelProvider): string {
     return `${provider.protocols[0].upstream}${this.slotPath}`;
+  }
+
+  /**
+   * Returns the slot variables of `held`, the providers whose credential the gateway holds: each
+   * variable that `slots` names for one of them, set to `slotUrl` of the provider and the path.
+   */
+  slotEnvironment(
+    held: ReadonlyArray<ModelProvider>,
+    slotUrl: (provider: ModelProvider, path: string) => string,
+  ): Readonly<Record<string, string>> {
+    return Object.fromEntries(
+      held.flatMap((provider) =>
+        Option.toArray(Record.get(this.slots, provider.id)).map(
+          ({ variable, path }) => [variable, slotUrl(provider, path)] as const,
+        ),
+      ),
+    );
   }
 }
 
@@ -165,6 +214,19 @@ const TokenRates = Schema.Struct({
   output: Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0)),
 });
 
+/**
+ * The provider of a session's model, and the model's ID in that provider's list. Construct it with
+ * `HarnessDescriptor.providerOf`.
+ */
+export class ModelChoice extends Schema.Class<
+  ModelChoice,
+  Brand.Brand<"@usine/agents/harness/ModelChoice">
+>("@usine/agents/ModelChoice")({
+  provider: ModelProvider,
+  /** The model ID without a provider prefix, such as `gpt-5.4-mini`. */
+  model: ModelId,
+}) {}
+
 /** The credential kind that determines each gateway credential route. */
 const GATEWAY_ROUTES = {
   "gateway-api-key": "api-key",
@@ -184,6 +246,24 @@ export class HarnessDescriptor extends Schema.Class<
     worker: WorkerRequirements,
     /** The model providers whose gateway slots the harness can use, in the order it prefers them. */
     providers: Schema.Array(ModelProvider),
+    /**
+     * How a model ID names its provider: in `model`, every model is the first provider's; in
+     * `provider/model`, an ID such as `opencode-go/glm-5.3` names the provider before its first
+     * `/`, and an ID without one is the first provider's.
+     */
+    modelNotation: Schema.Literals(["model", "provider/model"]).pipe(
+      Schema.withConstructorDefault(Effect.succeed("model" as const)),
+      Schema.withDecodingDefaultKey(Effect.succeed("model" as const)),
+    ),
+    /**
+     * The IDs of the providers that the harness reaches only through a gateway slot or a sandbox,
+     * never with an attempt API key outside a sandbox: a provider whose protocols have different
+     * upstreams, which one base URL can't reach.
+     */
+    gatewayOnly: Schema.Array(ModelProviderId).pipe(
+      Schema.withConstructorDefault(Effect.succeed([])),
+      Schema.withDecodingDefaultKey(Effect.succeed([])),
+    ),
     capabilities: Schema.NonEmptyArray(CapabilityProfile).check(
       Schema.makeFilter(
         (profiles) => {
@@ -224,17 +304,30 @@ export class HarnessDescriptor extends Schema.Class<
         new Set(providers.map(({ id }) => id)).size === providers.length ||
         "A harness lists each provider once",
     ),
-    Schema.makeFilter(({ capabilities, providers }) => {
+    Schema.makeFilter(({ providers, gatewayOnly, worker }) => {
+      const listed = [
+        ...gatewayOnly,
+        ...Option.toArray(worker.credential).flatMap(({ slots }) => Object.keys(slots)),
+      ];
+      const unknown = listed.find((id) => !providers.some((provider) => provider.id === id));
+      return (
+        unknown === undefined ||
+        `The provider ${unknown} that the descriptor names isn't one of the harness's providers`
+      );
+    }),
+    Schema.makeFilter(({ capabilities, providers, gatewayOnly }) => {
       const direct = capabilities.some(
         ({ placements, credentials }) =>
           credentials.includes("api-key") &&
           placements.some((placement) => placement !== "sandbox"),
       );
-      const split = providers.find(({ sharedUpstream }) => Option.isNone(sharedUpstream));
+      const split = providers.find(
+        ({ id, sharedUpstream }) => Option.isNone(sharedUpstream) && !gatewayOnly.includes(id),
+      );
       return (
         !direct ||
         split === undefined ||
-        `The api-key route outside a sandbox can't reach ${split.label}: with an attempt API key, the harness calls one upstream, and ${split.label}'s protocols have different upstreams. Reach it through the gateway, or in a sandbox, whose handler sends each path to its protocol's upstream.`
+        `The api-key route outside a sandbox can't reach ${split.label}: with an attempt API key, the harness calls one upstream, and ${split.label}'s protocols have different upstreams. List it as gateway-only, reach it through the gateway, or in a sandbox, whose handler sends each path to its protocol's upstream.`
       );
     }),
     Schema.makeFilter(({ pools, providers }) => {
@@ -257,6 +350,53 @@ export class HarnessDescriptor extends Schema.Class<
       this.capabilities
         .flatMap(({ lacking }) => lacking)
         .find(({ capability }) => capability === "closed-tools")?.reason,
+    );
+  }
+
+  /** The providers that an attempt API key outside a sandbox reaches, in the order the harness prefers them. */
+  get apiKeyProviders(): ReadonlyArray<ModelProvider> {
+    return this.providers.filter(({ id }) => !this.gatewayOnly.includes(id));
+  }
+
+  /**
+   * Returns the provider and model that `model` selects in the descriptor's `modelNotation`. Fails
+   * for a prefix that names none of the harness's providers, for an empty model ID after the
+   * prefix, and for a harness without providers.
+   */
+  providerOf(model: ModelId): Result.Result<ModelChoice, UnknownModelError> {
+    const separator = this.modelNotation === "provider/model" ? model.indexOf("/") : -1;
+    const prefix =
+      separator === -1 ? Option.none<string>() : Option.some(model.slice(0, separator));
+    const provider = Option.match(prefix, {
+      onNone: () => Arr.head(this.providers),
+      onSome: (id) => Arr.findFirst(this.providers, (listed) => listed.id === id),
+    });
+    const refuse = (message: string) =>
+      Result.fail(UnknownModelError.make({ harness: this.id, model, message }));
+    if (Option.isNone(provider)) {
+      const listed = this.providers.map(({ id }) => id);
+      return Option.match(prefix, {
+        onNone: () => refuse(`${this.label} uses no model provider`),
+        onSome: (id) =>
+          refuse(
+            `${this.label} has no provider "${id}" for the model "${model}". Choose one of ${listed.join(", ")} as <provider>/<model>; a model ID without a provider is ${listed[0] ?? "none"}'s.`,
+          ),
+      });
+    }
+    return Option.match(Schema.decodeOption(ModelId)(model.slice(separator + 1)), {
+      onNone: () => refuse(`The model "${model}" names no model after its provider`),
+      onSome: (id) => Result.succeed(ModelChoice.make({ provider: provider.value, model: id })),
+    });
+  }
+
+  /**
+   * Returns whether a session at `placement` on `route` reaches the models of `provider`: through a
+   * gateway slot, in a sandbox, whose handler sends each path to its protocol's upstream, or
+   * otherwise for a provider that isn't gateway-only.
+   */
+  reaches(provider: ModelProvider, placement: Placement, route: CredentialRoute): boolean {
+    return (
+      isGatewayRoute(route) || placement === "sandbox" || !this.gatewayOnly.includes(provider.id)
     );
   }
 
@@ -354,8 +494,9 @@ export class HarnessCatalog extends Schema.Class<
     const variables = (descriptor: HarnessDescriptor) => [
       ...descriptor.worker.login.environment,
       ...Option.toArray(descriptor.worker.credential).flatMap(
-        ({ home, gateway, apiKey, cloudflare }) => [
+        ({ home, gateway, apiKey, cloudflare, slots }) => [
           ...Option.toArray(home),
+          ...Object.values(slots).map(({ variable }) => variable),
           ...[gateway, apiKey, cloudflare].flatMap((wiring) => [
             wiring.tokenVariable,
             ...Object.keys(wiring.environment),
@@ -389,8 +530,38 @@ export class HarnessCatalog extends Schema.Class<
     );
   }
 
-  /** Returns whether a Gateway that holds the slots `llmProviders` holds the credential that harness `id` uses. */
+  /**
+   * Returns whether a Gateway that holds the slots `llmProviders` holds the credential of one of
+   * harness `id`'s providers, so that the Workers behind it get the harness's Gateway wiring.
+   */
   gatewayHolds(id: Harness, llmProviders: ReadonlyArray<GatewaySlot>): boolean {
     return Option.isSome(this.gatewayProvider(id, llmProviders));
+  }
+
+  /**
+   * Returns the provider whose slot or API key a session of `brain` uses: the provider that its
+   * model names. `None` for a harness without credential wiring, such as Pi, an unknown harness,
+   * or a model that names none of the harness's providers, which the harness refuses at launch.
+   */
+  modelProvider(brain: Pick<BrainSpec, "harness" | "model">): Option.Option<ModelProvider> {
+    return Option.flatMap(
+      Option.filter(this.get(brain.harness), ({ worker }) => Option.isSome(worker.credential)),
+      (descriptor) =>
+        Option.map(
+          Result.getSuccess(descriptor.providerOf(brain.model)),
+          ({ provider }) => provider,
+        ),
+    );
+  }
+
+  /**
+   * Returns the provider of `brain`'s model if a Gateway that holds the slots `llmProviders` holds
+   * its slot, and so injects the credential that a session of `brain` uses.
+   */
+  modelGatewayProvider(
+    brain: Pick<BrainSpec, "harness" | "model">,
+    llmProviders: ReadonlyArray<GatewaySlot>,
+  ): Option.Option<ModelProvider> {
+    return Option.filter(this.modelProvider(brain), ({ slot }) => llmProviders.includes(slot));
   }
 }

@@ -51,6 +51,7 @@ import {
   ModelProviderId,
   modelProviders,
   openai,
+  opencodeGo,
   ProviderProtocol,
   RoutePattern,
   UpstreamBase,
@@ -955,5 +956,150 @@ describe("a provider slot that the catalog declares", () => {
       const forwarded = yield* sent;
       assert.deepStrictEqual(forwarded, []);
     }).pipe(Effect.provide(gateway(NO_PROVIDERS, ok, withPlan))),
+  );
+});
+
+describe("the OpenCode Go slot", () => {
+  const GO_KEY = "go-key-for-tests-0123456789";
+  const OVERRIDE = "https://openai-override.test";
+  /**
+   * The gateway's credentials as it reads them from an environment with a key for OpenCode Go, and
+   * an OpenAI key whose upstream variable is set.
+   */
+  const keyedProviders = llmProviders(modelProviders).pipe(
+    Effect.provideService(
+      ConfigProvider.ConfigProvider,
+      ConfigProvider.fromUnknown({
+        OPENCODE_GO_API_KEY: GO_KEY,
+        OPENAI_API_KEY: OPENAI_KEY,
+        USINE_GATEWAY_OPENAI_UPSTREAM: OVERRIDE,
+      }),
+    ),
+    Effect.provide([NodeFileSystem.layer, NodeCrypto.layer]),
+    Effect.orDie,
+  );
+  /** The body of the plan's usage limit, which OpenCode reads by its code. */
+  const LIMIT = '{"type":"error","error":{"type":"GoUsageLimitError","message":"limit"}}';
+
+  it.effect(
+    "sends the key to each protocol's upstream in its header, passes OpenCode's headers, and returns a limit's body unchanged",
+    () =>
+      Effect.gen(function* () {
+        const caller = yield* attach(installation);
+        const session = {
+          "x-opencode-session-id": "ses_1",
+          "x-opencode-session": "ses_1",
+          "x-session-affinity": "ses_1",
+          "x-session-id": "ses_1",
+          "x-opencode-project": "a1b2c3",
+          "x-opencode-client": "cli",
+          "x-repository-hash": "d4e5f6",
+          "content-type": "application/json",
+        };
+        const answers = yield* Effect.forEach(
+          [
+            ["/chat/completions", { authorization: `Bearer ${caller}` }],
+            ["/responses", { authorization: `Bearer ${caller}` }],
+            [
+              "/messages",
+              {
+                "x-api-key": caller,
+                "anthropic-version": "2023-06-01",
+                "anthropic-beta": "interleaved-thinking-2025-05-14",
+              },
+            ],
+            ["/models/gemini-4-argon:streamGenerateContent?alt=sse", { "x-goog-api-key": caller }],
+          ] as const,
+          ([path, key]) =>
+            send(
+              `http://llm.gw.test/${opencodeGo.slot}${path}`,
+              { ...session, ...key },
+              { method: "POST", body: '{"model":"go-model"}' },
+            ),
+        );
+        assert.deepStrictEqual(
+          answers.map(({ status, body }) => [status, body]),
+          [
+            [200, "upstream body"],
+            [200, "upstream body"],
+            [429, LIMIT],
+            [200, "upstream body"],
+          ],
+        );
+        const forwarded = yield* sent;
+        assert.deepStrictEqual(
+          forwarded.map(({ url, headers }) => [
+            url,
+            Headers.get(headers, "authorization"),
+            Headers.get(headers, "x-api-key"),
+            Headers.get(headers, "x-goog-api-key"),
+          ]),
+          [
+            [
+              "https://opencode.ai/inference/go/openai/v1/chat/completions",
+              Option.some(`Bearer ${GO_KEY}`),
+              Option.none(),
+              Option.none(),
+            ],
+            [
+              "https://opencode.ai/inference/go/openai/v1/responses",
+              Option.some(`Bearer ${GO_KEY}`),
+              Option.none(),
+              Option.none(),
+            ],
+            [
+              "https://opencode.ai/inference/go/anthropic/v1/messages",
+              Option.none(),
+              Option.some(GO_KEY),
+              Option.none(),
+            ],
+            [
+              "https://opencode.ai/inference/go/google/v1beta/models/gemini-4-argon:streamGenerateContent?alt=sse",
+              Option.none(),
+              Option.none(),
+              Option.some(GO_KEY),
+            ],
+          ],
+        );
+        for (const { headers } of forwarded) {
+          for (const [name, value] of Object.entries(session))
+            assert.deepStrictEqual(
+              Headers.get(headers, name),
+              name === "x-repository-hash" ? Option.none() : Option.some(value),
+              name,
+            );
+        }
+        const messages = forwarded[2];
+        assert(messages !== undefined);
+        assert.deepStrictEqual(
+          [
+            Headers.get(messages.headers, "anthropic-version"),
+            Headers.get(messages.headers, "anthropic-beta"),
+          ],
+          [Option.some("2023-06-01"), Option.some("interleaved-thinking-2025-05-14")],
+        );
+        assert.isFalse(forwarded.some(({ url }) => url.startsWith(OVERRIDE)));
+        assert.notInclude(lines.join("\n"), GO_KEY);
+      }).pipe(
+        Effect.provide(
+          Layer.unwrap(
+            Effect.map(keyedProviders, (providers) => {
+              assert.deepStrictEqual(
+                Object.keys(providers).sort(),
+                [openai.slot, opencodeGo.slot].sort(),
+                "the gateway holds both keys",
+              );
+              return gateway(providers, (url) =>
+                url.pathname.endsWith("/messages")
+                  ? new Response(LIMIT, {
+                      status: 429,
+                      headers: { "content-type": "application/json" },
+                    })
+                  : ok(url),
+              );
+            }),
+          ),
+        ),
+      ),
   );
 });

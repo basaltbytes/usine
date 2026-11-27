@@ -34,6 +34,21 @@ export const recordContracts = (harness: RecordedHarness): void => {
           ).pipe(Effect.provide(NodeServices.layer)),
         240_000,
       );
+    it.live.skipIf(recordingModel(harness) === undefined)(
+      `records ${harness}: simple on OpenCode Go`,
+      () =>
+        Effect.scoped(
+          Effect.gen(function* () {
+            const fixture = yield* openOpenCodeFixture("simple", "record", {}, "opencode-go");
+            yield* runScenario("simple", fixture.request, fixture.controls).pipe(
+              Effect.provide(fixture.backend),
+              fixture.tape.guard,
+            );
+            yield* fixture.save;
+          }),
+        ).pipe(Effect.provide(NodeServices.layer)),
+      240_000,
+    );
     return;
   }
   recordProvider(harness);

@@ -11,6 +11,7 @@ import {
   ModelProviderId,
   modelProviders,
   openai,
+  opencodeGo,
   ProviderProtocol,
   RoutePattern,
   UpstreamBase,
@@ -355,11 +356,11 @@ it.live(
         const credentials = found.value;
         assert.deepEqual(
           (yield* credentials.status).map(({ credential }) => credential),
-          ["subscription", "subscription"],
+          ["subscription", "subscription", null],
         );
         assert.deepEqual(
           (yield* credentials.status).map(({ refreshable }) => refreshable),
-          [false, true],
+          [false, true, false],
         );
         const beforeDisconnect = yield* SettingsInForce.pipe(
           Effect.provideContext(restarted),
@@ -370,7 +371,7 @@ it.live(
         yield* credentials.disconnect("openai");
         assert.deepEqual(
           (yield* credentials.status).map(({ credential }) => credential),
-          [null, null],
+          [null, null, null],
         );
         const next = yield* credentials.apply(
           beforeDisconnect.providers,
@@ -634,6 +635,7 @@ it.live(
         assert.deepStrictEqual(loaded, [
           [anthropic.slot, "api-key"],
           [openai.slot, null],
+          [opencodeGo.slot, null],
           [plan.slot, null],
         ]);
         const store = yield* storeOf(first);
@@ -661,6 +663,7 @@ it.live(
         assert.deepStrictEqual(reread, [
           [anthropic.slot, "api-key"],
           [openai.slot, "api-key"],
+          [opencodeGo.slot, null],
           [plan.slot, "api-key"],
         ]);
       }),

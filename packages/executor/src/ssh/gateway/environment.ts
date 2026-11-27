@@ -116,13 +116,21 @@ export const gatewayExportedEnvironment = (
  * - A harness whose provider the Gateway holds calls `llm.<domain>/<slot>` and its slot path
  *   with the caller token, wired as its descriptor says: Claude Code calls
  *   `llm.<domain>/anthropic-messages`, and Codex reads `CODEX_HOME` and calls
- *   `llm.<domain>/openai-responses/v1`.
+ *   `llm.<domain>/openai-responses/v1`. A harness that runs models of several providers gets the
+ *   URL of each slot that the Gateway holds in that provider's variable: OpenCode reads
+ *   `llm.<domain>/opencode-go` for a model of OpenCode Go.
  * - A Gateway from before slots gets the provider IDs instead, such as `/anthropic`.
  * - A harness whose providers the Gateway has no credential for uses its own login through the
  *   forward proxy, whose allowlist must include the login's hosts.
  */
 export const gatewayEnvironment = (
-  options: GatewayEnvironmentOptions & { readonly harness: Option.Option<Harness> },
+  options: GatewayEnvironmentOptions & {
+    /**
+     * The harness that calls the Gateway's slots with the caller token, or `None`. An Attempt
+     * passes its harness only if the Gateway holds the slot of its model's provider.
+     */
+    readonly harness: Option.Option<Harness>;
+  },
 ): GatewayEnvironment => {
   const { domain, callerToken } = options;
   const gitBase = `http://git.${domain}/`;
@@ -174,14 +182,24 @@ const gatewayWirings = (
     "catalog" | "domain" | "llmProviders" | "llmPrefixes" | "homes"
   >,
 ) =>
-  options.catalog.descriptors.flatMap(({ id, worker }) =>
-    Option.toArray(worker.credential).flatMap(({ gateway, slotPath }) =>
-      Option.toArray(options.catalog.gatewayProvider(id, options.llmProviders)).map((provider) => ({
-        harness: id,
-        ...gateway.render(
-          `http://llm.${options.domain}/${llmPrefixOf(provider, options.llmPrefixes)}${slotPath}`,
+  options.catalog.descriptors.flatMap(({ id, worker, providers }) =>
+    Option.toArray(worker.credential).flatMap((credential) =>
+      Option.toArray(options.catalog.gatewayProvider(id, options.llmProviders)).map((first) => {
+        const slotUrl = (provider: ModelProvider, path: string) =>
+          `http://llm.${options.domain}/${llmPrefixOf(provider, options.llmPrefixes)}${path}`;
+        const rendered = credential.gateway.render(
+          slotUrl(first, credential.slotPath),
           options.homes[id] ?? "",
-        ),
-      })),
+        );
+        const held = providers.filter(({ slot }) => options.llmProviders.includes(slot));
+        return {
+          harness: id,
+          ...rendered,
+          environment: {
+            ...rendered.environment,
+            ...credential.slotEnvironment(held, slotUrl),
+          },
+        };
+      }),
     ),
   );

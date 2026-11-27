@@ -123,6 +123,7 @@ describe("sandbox routes", () => {
         "GitHub:api.github.com",
         "Provider:anthropic.usine.internal",
         "Denied:openai.usine.internal",
+        "Denied:opencode-go.usine.internal",
         "Allowed:registry.npmjs.org",
       ]);
       expect(state.recorded.map(({ name }) => name)).toEqual([NAME]);
@@ -212,11 +213,12 @@ describe("sandbox routes", () => {
       expect(Option.isNone(state.stored.value.credentials.github)).toBe(true);
       expect(state.stored.value.credentials.providers).toEqual([]);
       expect(DateTime.isGreaterThan(state.stored.value.leaseUntil, firstLease)).toBe(true);
-      expect(state.interceptions.slice(-5).map(({ _tag, host }) => `${_tag}:${host}`)).toEqual([
+      expect(state.interceptions.slice(-6).map(({ _tag, host }) => `${_tag}:${host}`)).toEqual([
         "Denied:github.com",
         "Denied:api.github.com",
         "Denied:anthropic.usine.internal",
         "Denied:openai.usine.internal",
+        "Denied:opencode-go.usine.internal",
         "Allowed:registry.npmjs.org",
       ]);
     }),
@@ -269,10 +271,12 @@ describe("sandbox routes", () => {
             "Denied:openai.usine.internal",
             "Denied:test-plan.usine.internal",
             "Denied:anthropic.usine.internal",
+            "Denied:opencode-go.usine.internal",
           ],
           [
             "Denied:openai.usine.internal",
             "Denied:anthropic.usine.internal",
+            "Denied:opencode-go.usine.internal",
             "Denied:test-plan.usine.internal",
           ],
         ]);
@@ -280,6 +284,7 @@ describe("sandbox routes", () => {
         expect(state.stored.value.providerHosts).toEqual([
           "anthropic.usine.internal",
           "openai.usine.internal",
+          "opencode-go.usine.internal",
           "test-plan.usine.internal",
         ]);
       }),
