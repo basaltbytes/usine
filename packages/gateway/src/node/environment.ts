@@ -137,7 +137,7 @@ const CredentialUpstream = UpstreamBase.check(
   Schema.makeFilter(
     (upstream) =>
       upstream.startsWith("https://") ||
-      isLoopback(new URL(upstream)) ||
+      (URL.canParse(upstream) && isLoopback(new URL(upstream))) ||
       "Expected an https:// base URL, or http:// to a loopback host, because the gateway sends a credential to it",
   ),
 );
