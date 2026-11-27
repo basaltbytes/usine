@@ -39,17 +39,31 @@ const BASE_PERMISSIONS: ReadonlyArray<Permission> = [
 const READ_TOOLS = ["read", "glob", "grep"];
 
 /**
- * Returns the session permissions for a role that keeps `nativeTools` of OpenCode's own tools. A
- * tool whose last matching rule denies every resource leaves the model's list, and denying `*`
- * also denies reads outside the session's directory.
+ * The client MCP server that serves a session's usine tools. OpenCode names each of its tools
+ * `usine_<tool>`.
  */
-export const sessionPermissions = (nativeTools: NativeTools): ReadonlyArray<Permission> =>
-  nativeTools === "all"
-    ? BASE_PERMISSIONS
-    : [
-        rule("*", "deny"),
-        ...(nativeTools === "read" ? READ_TOOLS.map((tool) => rule(tool, "allow")) : []),
-      ];
+export const TOOL_SERVER = "usine";
+
+/**
+ * Returns the session permissions for a role that keeps `nativeTools` of OpenCode's own tools,
+ * and serves usine tools when `hostTools` is set. A tool whose last matching rule denies every
+ * resource leaves the model's list, and denying `*` also denies reads outside the session's
+ * directory. Usine tools need `execute` denied: while the model can call it, OpenCode's Code Mode
+ * lists MCP tools only in `execute`'s catalog.
+ */
+export const sessionPermissions = (
+  nativeTools: NativeTools,
+  hostTools: boolean,
+): ReadonlyArray<Permission> => {
+  const tools = hostTools ? [rule(`${TOOL_SERVER}_*`, "allow")] : [];
+  if (nativeTools === "all")
+    return hostTools ? [...BASE_PERMISSIONS, rule("execute", "deny")] : BASE_PERMISSIONS;
+  return [
+    rule("*", "deny"),
+    ...(nativeTools === "read" ? READ_TOOLS.map((tool) => rule(tool, "allow")) : []),
+    ...tools,
+  ];
+};
 
 /** Returns the OpenCode reasoning variant for `effort`. */
 export const effortVariant = (effort: BrainSpec["effort"]): string =>
