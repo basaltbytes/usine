@@ -172,6 +172,46 @@ describe("OpenCode answer", () => {
       }).pipe(Effect.scoped),
     );
 
+  it.live("retries a lookup that fails after the execution succeeded", () =>
+    Effect.gen(function* () {
+      const { bridge, running } = yield* launched("Started the tests.");
+      yield* bridge.holdNextJobs;
+      for (const line of firstExecutionEnds) yield* bridge.emit(line);
+      const jobs = yield* bridge.request;
+      assert(jobs.path.startsWith("/api/experimental/job"));
+      yield* bridge.reply(jobs, 503, { message: "OpenCode is busy" });
+      const result = yield* running.result;
+      assert.strictEqual(result.message, "FIRST");
+      const answered = yield* bridge.answered;
+      assert(
+        answered.some(({ path }) => path.startsWith("/api/experimental/job")),
+        "the retry read the running jobs",
+      );
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("fails the session with the lookup that keeps failing", () =>
+    Effect.gen(function* () {
+      const { bridge, running } = yield* launched("Started the tests.");
+      yield* bridge.holdNextJobs;
+      for (const line of firstExecutionEnds) yield* bridge.emit(line);
+      // The retries wait on the test clock.
+      yield* Effect.forkScoped(
+        Effect.forever(TestClock.adjust("1 second").pipe(Effect.andThen(Effect.yieldNow))),
+      );
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const jobs = yield* bridge.request;
+        assert(jobs.path.startsWith("/api/experimental/job"));
+        yield* bridge.holdNextJobs;
+        yield* bridge.reply(jobs, 503, { message: "OpenCode is busy" });
+      }
+      const failure = yield* running.result.pipe(Effect.flip);
+      assert(failure._tag === "SessionOperationError");
+      assert.include(failure.message, "Could not read OpenCode's running jobs");
+      assert.include(failure.message, "OpenCode is busy");
+    }).pipe(Effect.scoped),
+  );
+
   it.live("answers when the steer that the answer waited for fails", () =>
     Effect.gen(function* () {
       const { bridge, running } = yield* launched("OLD");

@@ -1,6 +1,8 @@
 import { BackgroundWork } from "@usine/core/agent/session";
-import { Effect, FiberSet, Option, Ref } from "effect";
-import type { AgentSessionError, SessionOperationError } from "../../runtime.ts";
+import { retryTransient } from "@usine/core/retry";
+import { Duration, Effect, FiberSet, Option, Ref, Schema } from "effect";
+import { ChildProcessLost } from "../../child-host/process.ts";
+import { type AgentSessionError, SessionOperationError } from "../../runtime.ts";
 import { query } from "./api.ts";
 import { ActiveSessions, Inbox, type Job, Jobs } from "./codec.ts";
 import type { OpenCodeContext, OpenCodeState } from "./context.ts";
@@ -33,6 +35,9 @@ const backgroundWork = (job: Job) =>
     description: job.title ?? job.description ?? job.command ?? "",
   });
 
+/** Whether `error` ended a request without the loss of the bridge, which a restart handles. */
+const isTransient = (error: SessionOperationError) => !Schema.is(ChildProcessLost)(error.cause);
+
 /** Returns the done check of the session that `context` describes. */
 export const doneCheck = (context: OpenCodeContext): DoneCheck => {
   const { sessionId, root, state, api, conversation, channel, tasks, fail } = context;
@@ -62,6 +67,33 @@ export const doneCheck = (context: OpenCodeContext): DoneCheck => {
     });
     yield* FiberSet.run(tasks, Effect.suspend(() => executionSucceeded).pipe(Effect.catch(fail)));
   });
+
+  /**
+   * Runs `read`, a lookup of OpenCode's `name`, and retries it twice after a failure other than
+   * the bridge's loss. A failure that remains names the lookup.
+   */
+  const lookup = <A>(name: string, read: Effect.Effect<A, SessionOperationError>) =>
+    read.pipe(
+      retryTransient(isTransient, ({ error, retry, delay }) =>
+        Effect.logWarning("Could not read OpenCode's state for the done check; retrying", {
+          sessionId,
+          lookup: name,
+          retry,
+          delayMs: Duration.toMillis(delay),
+          message: error.message,
+        }),
+      ),
+      Effect.mapError((error) =>
+        isTransient(error)
+          ? SessionOperationError.make({
+              operation: error.operation,
+              sessionId: error.sessionId,
+              message: `Could not read OpenCode's ${name} after its execution succeeded: ${error.message}`,
+              cause: error.cause,
+            })
+          : error,
+      ),
+    );
 
   /** Returns the latest answer unless the session has input that OpenCode hasn't delivered. */
   const finishAnswer = Effect.flatMap(Ref.get(state), ({ lastText }) =>
@@ -94,17 +126,23 @@ export const doneCheck = (context: OpenCodeContext): DoneCheck => {
     // queues the notice before it ends the job, so the job list, then the inbox, then the active
     // executions show the work, its notice, or the execution that the notice started.
     const latestApi = yield* api;
-    const jobs = yield* latestApi.read(
-      Jobs,
-      "stream",
-      "GET",
-      `/api/experimental/job?${query("sessionID", root)}&descendants=true&status=running`,
+    const jobs = yield* lookup(
+      "running jobs",
+      latestApi.read(
+        Jobs,
+        "stream",
+        "GET",
+        `/api/experimental/job?${query("sessionID", root)}&descendants=true&status=running`,
+      ),
     );
     if (jobs.data.length > 0) {
       yield* reportWork(jobs.data.map(backgroundWork));
       return true;
     }
-    const inbox = yield* latestApi.read(Inbox, "stream", "GET", `${sessionPath}/inbox`);
+    const inbox = yield* lookup(
+      "session inbox",
+      latestApi.read(Inbox, "stream", "GET", `${sessionPath}/inbox`),
+    );
     if (inbox.data.length > 0) {
       yield* Effect.logInfo("OpenCode has unread input, which starts the next execution", {
         sessionId,
@@ -112,11 +150,9 @@ export const doneCheck = (context: OpenCodeContext): DoneCheck => {
       });
       return false;
     }
-    const { data: activeSessions } = yield* latestApi.read(
-      ActiveSessions,
-      "stream",
-      "GET",
-      "/api/session/active",
+    const { data: activeSessions } = yield* lookup(
+      "active sessions",
+      latestApi.read(ActiveSessions, "stream", "GET", "/api/session/active"),
     );
     if (Object.hasOwn(activeSessions, root)) {
       yield* Effect.logInfo("OpenCode started the session's next execution", { sessionId });
@@ -138,6 +174,7 @@ export const doneCheck = (context: OpenCodeContext): DoneCheck => {
   }).pipe(Effect.withSpan("OpenCodeRuntime.executionSucceeded"));
 
   const workEnded = Effect.gen(function* () {
+    yield* Effect.annotateCurrentSpan({ sessionId });
     const { execution } = yield* Ref.get(state);
     if (execution._tag !== "AwaitingWork" || (yield* channel.isTerminal)) return;
     yield* Effect.logInfo("Background work that the answer waits for ended; checking the rest", {
