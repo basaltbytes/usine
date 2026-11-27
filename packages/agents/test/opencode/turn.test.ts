@@ -2,66 +2,79 @@ import { assert, describe, it } from "@effect/vitest";
 import { Interrupt, Steer } from "@usine/core/attempt/channel";
 import { Effect, Fiber, Option } from "effect";
 import { TestClock } from "effect/testing";
-import { ChildRequest } from "../../src/runtime.ts";
 import {
   assertPrompt,
-  childRequest,
   event,
+  firstExecutionEnds,
   interrupted,
   launched,
   oldExecutionEnds,
   SESSION,
-  tokens,
+  shell,
 } from "./scripted-bridge.ts";
 
-/** The lines that end the first execution of `launched` with the answer `FIRST`. */
-const firstExecutionEnds = [
-  event("session.tool.success", { id: "call_1", content: [{ type: "text", text: "done" }] }),
-  event("session.text.ended", { text: "FIRST" }),
-  event("session.step.ended"),
-  event("session.usage.updated", { cost: 0.01, tokens: tokens(100, 10) }),
-  event("session.execution.succeeded"),
-];
-
-/** The info of shell `id` that `session` started. */
-const shell = (id: string, session: string) => ({
-  id,
-  status: "running",
-  command: "pnpm test",
-  cwd: "/work/checkout",
-  shell: "/usr/bin/bash",
-  file: `/tmp/${id}.out`,
-  metadata: { sessionID: session },
-  time: { started: 0 },
-});
+const CHILD = "ses_child";
 
 describe("OpenCode turn", () => {
-  for (const limit of [Option.none<number>(), Option.some(10)])
-    it.effect(
-      `returns the answer after background work ends without waking the root, limit ${Option.getOrElse(limit, () => 0)}`,
-      () =>
-        Effect.gen(function* () {
-          const { bridge, running, until } = yield* launched(
-            "Started the tests.",
-            ChildRequest.make({ ...childRequest, maxBackgroundWaitMinutes: limit }),
-          );
-          for (const line of [
-            { event: { type: "shell.created", data: { info: shell("sh_1", SESSION) } } },
-            ...firstExecutionEnds,
-          ])
-            yield* bridge.emit(line);
-          yield* until("BackgroundWorkUpdated");
-          yield* bridge.emit({
-            event: { type: "shell.exited", data: { id: "sh_1", exit: 0, status: "exited" } },
-          });
-          const result = yield* Effect.forkScoped(running.result);
-          for (let i = 0; i < 200; i++) yield* Effect.yieldNow;
-          yield* TestClock.adjust("30 minutes");
-          for (let i = 0; i < 200; i++) yield* Effect.yieldNow;
-          const polled = yield* Effect.sync(() => result.pollUnsafe());
-          assert(polled !== undefined, "the session returned after the work ended");
-        }).pipe(Effect.scoped),
+  for (const work of ["a shell", "a child execution"] as const)
+    it.effect(`returns the answer after ${work} ends without waking the root`, () =>
+      Effect.gen(function* () {
+        const { bridge, running, until } = yield* launched("Started the tests.");
+        for (const line of [
+          ...(work === "a shell"
+            ? [{ event: { type: "shell.created", data: { info: shell("sh_1", SESSION) } } }]
+            : [
+                event("session.created", { sessionID: CHILD, parentID: SESSION, title: "review" }),
+                event("session.execution.started", { sessionID: CHILD }),
+              ]),
+          ...firstExecutionEnds,
+        ])
+          yield* bridge.emit(line);
+        yield* until("BackgroundWorkUpdated");
+        yield* bridge.emit(
+          work === "a shell"
+            ? { event: { type: "shell.exited", data: { id: "sh_1", exit: 0, status: "exited" } } }
+            : event("session.execution.succeeded", { sessionID: CHILD }),
+        );
+        const result = yield* Effect.forkScoped(running.result);
+        for (let i = 0; i < 200; i++) yield* Effect.yieldNow;
+        yield* TestClock.adjust("30 minutes");
+        for (let i = 0; i < 200; i++) yield* Effect.yieldNow;
+        const polled = yield* Effect.sync(() => result.pollUnsafe());
+        assert(polled !== undefined, "the session returned after the work ended");
+      }).pipe(Effect.scoped),
     );
+
+  it.live("checks no background work that ends while a root execution runs", () =>
+    Effect.gen(function* () {
+      const { bridge, running, until } = yield* launched("Started the tests.");
+      for (const line of [
+        { event: { type: "shell.created", data: { info: shell("sh_1", SESSION) } } },
+        ...firstExecutionEnds,
+      ])
+        yield* bridge.emit(line);
+      yield* until("BackgroundWorkUpdated");
+      for (const line of [
+        event("session.execution.started"),
+        { event: { type: "shell.exited", data: { id: "sh_1", exit: 0, status: "exited" } } },
+      ])
+        yield* bridge.emit(line);
+      yield* Effect.sleep("200 millis");
+      const answered = yield* bridge.answered;
+      assert(
+        !answered.some(({ path }) => path.startsWith("/api/experimental/job")),
+        "the running execution's own end checks the work",
+      );
+      for (const line of [
+        event("session.text.ended", { text: "SECOND" }),
+        event("session.step.ended"),
+        event("session.execution.succeeded"),
+      ])
+        yield* bridge.emit(line);
+      const result = yield* running.result;
+      assert.strictEqual(result.message, "SECOND");
+    }).pipe(Effect.scoped),
+  );
 
   it.live("ends the turn when OpenCode cancels the late steer after the interrupt", () =>
     Effect.gen(function* () {

@@ -8,21 +8,14 @@ import {
   childRequest,
   event,
   execution,
+  firstExecutionEnds,
   launched,
   SESSION,
+  shell,
   tokens,
 } from "./scripted-bridge.ts";
 
 const CHILD = "ses_child";
-
-/** The lines that end the first execution of `launched` with the answer `FIRST`. */
-const firstExecutionEnds = [
-  event("session.tool.success", { id: "call_1", content: [{ type: "text", text: "done" }] }),
-  event("session.text.ended", { text: "FIRST" }),
-  event("session.step.ended"),
-  event("session.usage.updated", { cost: 0.01, tokens: tokens(100, 10) }),
-  event("session.execution.succeeded"),
-];
 
 /** The lines of the execution that a notice `notice` of background work wakes, answering `WOKEN`. */
 const woken = (notice: string) => [
@@ -265,17 +258,3 @@ describe("OpenCode answer", () => {
     }).pipe(Effect.scoped),
   );
 });
-
-/** Returns the `info` of a running shell that session `session` started. */
-function shell(id: string, session: string) {
-  return {
-    id,
-    status: "running",
-    command: "pnpm test",
-    cwd: "/work/checkout",
-    shell: "/usr/bin/bash",
-    file: `/tmp/${id}.out`,
-    metadata: { sessionID: session },
-    time: { started: 0 },
-  };
-}

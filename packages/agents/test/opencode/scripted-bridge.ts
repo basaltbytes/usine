@@ -312,6 +312,27 @@ export const oldExecutionEnds = [
   event("session.execution.interrupted", { reason: "user" }),
 ];
 
+/** The lines that end the first execution of `launched` with the answer `FIRST`. */
+export const firstExecutionEnds = [
+  event("session.tool.success", { id: "call_1", content: [{ type: "text", text: "done" }] }),
+  event("session.text.ended", { text: "FIRST" }),
+  event("session.step.ended"),
+  event("session.usage.updated", { cost: 0.01, tokens: tokens(100, 10) }),
+  event("session.execution.succeeded"),
+];
+
+/** Returns the `info` of a running shell `id` that session `session` started. */
+export const shell = (id: string, session: string) => ({
+  id,
+  status: "running",
+  command: "pnpm test",
+  cwd: "/work/checkout",
+  shell: "/usr/bin/bash",
+  file: `/tmp/${id}.out`,
+  metadata: { sessionID: session },
+  time: { started: 0 },
+});
+
 /** The lines of an execution that delivers inbox item `id` and answers `text`. */
 export const execution = (id: string, text: string) => [
   event("session.execution.started"),

@@ -267,6 +267,68 @@ describe("OpenCode restart", () => {
       }).pipe(Effect.scoped),
     );
 
+  it.live(
+    "resends a lost steer before the operator's next message to a paused running bridge",
+    () =>
+      Effect.gen(function* () {
+        const guidance = Steer.make({ message: "Reply STEERED instead." });
+        const inputId = openCodeMessageId(childRequest.session.id, guidance.id);
+        const server = yield* scriptedServerWith({ retained: true, active: [SESSION] });
+        const launching = yield* Effect.gen(function* () {
+          const backend = yield* ChildBackend;
+          return yield* backend.launch(ChildRequest.make({ ...resumed(guidance), paused: true }));
+        }).pipe(Effect.provide(scriptedBackend(server.layer)), Effect.forkScoped);
+        const bridge = yield* server.bridge;
+        const looked = yield* restoredLookup(bridge, 404);
+        assert.strictEqual(looked, inputId);
+        const running = yield* Fiber.join(launching);
+        const early = yield* bridge.request.pipe(Effect.timeoutOption("200 millis"));
+        assert(Option.isNone(early), "the paused session doesn't resend the steer at once");
+        const next = Steer.make({ message: "Then reply NEXT." });
+        const steering = yield* Effect.forkScoped(running.intervene(next, () => Effect.void));
+        const resent = yield* bridge.request;
+        assert.deepStrictEqual(assertPrompt(resent, guidance.message), Option.some(inputId));
+        yield* bridge.reply(resent, 200, { data: { id: inputId } });
+        const posted = yield* bridge.request;
+        const nextId = assertPrompt(posted, next.message);
+        assert(Option.isSome(nextId));
+        yield* bridge.reply(posted, 200, { data: { id: nextId.value } });
+        yield* Fiber.join(steering);
+      }).pipe(Effect.scoped),
+  );
+
+  it.live("checks no background work after a restart until an execution succeeds", () =>
+    Effect.gen(function* () {
+      const { server, bridge, running, until } = yield* launched("OLD", remoteRequest);
+      for (const line of answeredWithBackground) yield* bridge.emit(line);
+      yield* until("BackgroundWorkUpdated");
+      const first = yield* server.bridges;
+      assert.strictEqual(first, bridge);
+      yield* bridge.lose(lost);
+      const reopened = yield* server.bridges;
+      const continued = yield* reopened.request;
+      assertPrompt(continued, CONTINUATION_MESSAGE);
+      yield* reopened.reply(continued, 200, { data: { id: "msg_continue" } });
+      // The earlier process's shell stopped with it, so the answer no longer waits for it.
+      yield* reopened.emit({
+        event: { type: "shell.exited", data: { id: "sh_1", exit: 0, status: "exited" } },
+      });
+      yield* Effect.sleep("200 millis");
+      const answered = yield* reopened.answered;
+      assert(
+        !answered.some(({ path }) => path.startsWith("/api/experimental/job")),
+        "the end of the earlier process's work checks nothing",
+      );
+      for (const line of [
+        event("session.inbox.enqueued", { inboxID: "msg_continue" }),
+        ...execution("msg_continue", "AFTER"),
+      ])
+        yield* reopened.emit(line);
+      const result = yield* running.result;
+      assert.strictEqual(result.message, "AFTER");
+    }).pipe(Effect.scoped),
+  );
+
   it.live("reopens the saved session on a new remote bridge and continues it", () =>
     Effect.gen(function* () {
       const { server, bridge, running, until, seen } = yield* launched("OLD", remoteRequest);
