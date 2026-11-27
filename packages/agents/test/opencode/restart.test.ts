@@ -11,18 +11,14 @@ import { ChildProcessLost } from "../../src/child-host/process.ts";
 import { CONTINUATION_MESSAGE } from "../../src/harness/continuation.ts";
 import { openCodeMessageId } from "../../src/harness/opencode/codec.ts";
 import type { OpenCodeServer } from "../../src/harness/opencode/server.ts";
-import {
-  ChildBackend,
-  ChildRequest,
-  type RunningSession,
-  SessionOperationError,
-} from "../../src/runtime.ts";
+import { ChildBackend, ChildRequest, SessionOperationError } from "../../src/runtime.ts";
 import {
   assertPrompt,
   childRequest,
   event,
   execution,
   firstExecutionEnds,
+  forkedCheck,
   launched,
   type ScriptedBridge,
   scriptedBackend,
@@ -109,24 +105,6 @@ const assertReadOnce = (seen: ReadonlyArray<AgentSessionEvent>, guidance: Steer)
       .length,
     1,
   );
-
-/**
- * Ends the first execution of `launched` while a steer's post is open, then fails the post, which
- * runs the done check in a task. Returns the task's held jobs read.
- */
-const forkedCheck = (bridge: ScriptedBridge, running: RunningSession) =>
-  Effect.gen(function* () {
-    const steering = yield* Effect.forkScoped(running.steer("Reply STEERED instead."));
-    const posted = yield* bridge.request;
-    for (const line of firstExecutionEnds) yield* bridge.emit(line);
-    yield* Effect.sleep("50 millis");
-    yield* bridge.holdNext("jobs");
-    yield* bridge.reply(posted, 500, { message: "The session can't take input" });
-    yield* Fiber.await(steering);
-    const jobs = yield* bridge.request;
-    assert(jobs.path.startsWith("/api/experimental/job"));
-    return jobs;
-  });
 
 describe("OpenCode restart", () => {
   for (const delivery of ["delivered", "pending", "lookup failed"] as const)
@@ -435,7 +413,7 @@ describe("OpenCode restart", () => {
         const { server, bridge, running } = yield* launched("OLD", remoteRequest);
         const first = yield* server.bridges;
         assert.strictEqual(first, bridge);
-        yield* forkedCheck(bridge, running);
+        yield* forkedCheck(bridge, running, "jobs");
         yield* bridge.lose(lost);
         const reopened = yield* server.bridges.pipe(Effect.timeoutOption("500 millis"));
         assert(Option.isSome(reopened), "the session reopens on a new bridge");
@@ -457,7 +435,7 @@ describe("OpenCode restart", () => {
       const { server, bridge, running } = yield* launched("OLD", remoteRequest);
       const first = yield* server.bridges;
       assert.strictEqual(first, bridge);
-      const jobs = yield* forkedCheck(bridge, running);
+      const jobs = yield* forkedCheck(bridge, running, "jobs");
       // The task's jobs read fails once; its retry waits about a second.
       yield* bridge.reply(jobs, 503, { message: "OpenCode is busy" });
       yield* Effect.sleep("50 millis");
@@ -493,7 +471,7 @@ describe("OpenCode restart", () => {
     () =>
       Effect.gen(function* () {
         const { bridge, running } = yield* launched("OLD");
-        yield* forkedCheck(bridge, running);
+        yield* forkedCheck(bridge, running, "jobs");
         yield* bridge.lose(lost);
         const failure = yield* running.result.pipe(Effect.flip, Effect.timeoutOption("500 millis"));
         assert(Option.isSome(failure), "the session fails");

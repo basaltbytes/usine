@@ -146,6 +146,15 @@ export const workReported = (execution: Execution, listed: boolean): Execution =
       : Execution.Idle()
     : execution;
 
+/**
+ * Returns the execution after the runtime found input that OpenCode hasn't delivered once an
+ * execution succeeded: `AwaitingInput`, so the input's end checks the answer again.
+ */
+export const inputAwaited = (execution: Execution): Execution =>
+  execution._tag === "Idle" || execution._tag === "AwaitingWork"
+    ? Execution.AwaitingInput()
+    : execution;
+
 /** An input that the session posted, until OpenCode delivers it or the post fails. */
 interface PostedInput {
   readonly key: number;

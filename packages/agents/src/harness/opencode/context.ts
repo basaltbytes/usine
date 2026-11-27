@@ -20,10 +20,10 @@ export interface OpenCodeState {
    */
   readonly executions: number;
   /**
-   * How many times the session reopened on a new bridge, which tells a done check whether the
-   * session restarted after the execution that it checks.
+   * How many inbox items of the root session OpenCode cancelled since the session opened, which
+   * tells a done check whether OpenCode cancelled an item during its inbox read.
    */
-  readonly restarts: number;
+  readonly cancellations: number;
   readonly pending: Pending;
   /** Tool names by call ID, from `session.tool.input.started`. */
   readonly toolNames: ReadonlyMap<string, string>;

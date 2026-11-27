@@ -233,6 +233,10 @@ export const openCodeEvents = (context: OpenCodeContext, actions: EventActions) 
           sessionId,
           inboxId: event.data.inboxID,
         });
+        yield* Ref.update(state, (latest): OpenCodeState => ({
+          ...latest,
+          cancellations: latest.cancellations + 1,
+        }));
         return yield* endInputs((latest) => cancelled(latest, event.data.inboxID));
       case "session.inbox.delivered": {
         const operator = (yield* Ref.get(operatorIds)).get(event.data.inboxID);
