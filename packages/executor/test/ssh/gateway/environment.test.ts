@@ -88,7 +88,7 @@ describe("An Attempt's environment behind a Gateway", () => {
     const options = {
       catalog,
       domain: GatewayDomain.make("gw.internal"),
-      llmProviders: slots("anthropic-messages", "openai-responses"),
+      llmProviders: slots("anthropic-messages", "openai-responses", "opencode-go"),
       llmPrefixes: "slot" as const,
       ...DIRECTORIES,
       homes: { ...DIRECTORIES.homes, opencode: "/attempt/opencode" },
@@ -106,6 +106,7 @@ describe("An Attempt's environment behind a Gateway", () => {
       );
       assert.strictEqual("USINE_OPENCODE_HOME" in environment, harness === "opencode");
       assert.strictEqual("USINE_OPENCODE_BASE_URL" in environment, harness === "opencode");
+      assert.strictEqual("USINE_OPENCODE_GO_BASE_URL" in environment, harness === "opencode");
       assert.strictEqual(exported.GH_HOST, "git.gw.internal");
     }
     const opencode = gatewayEnvironment({
@@ -116,6 +117,10 @@ describe("An Attempt's environment behind a Gateway", () => {
     assert.strictEqual(
       opencode.exported.USINE_OPENCODE_BASE_URL,
       "http://llm.gw.internal/openai-responses/v1",
+    );
+    assert.strictEqual(
+      opencode.exported.USINE_OPENCODE_GO_BASE_URL,
+      "http://llm.gw.internal/opencode-go",
     );
     assert.deepStrictEqual(
       gatewayEnvironment({ ...options, harness: Option.none() }).exported,

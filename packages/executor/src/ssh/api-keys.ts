@@ -26,8 +26,9 @@ export interface ProvisionedApiKey {
 
 /**
  * Returns the API key that each Attempt on a Worker's machine gets for `harness`: the key of its
- * first provider that the provisioner sets one for. `None` if the Worker isn't provisioned, the
- * provisioner sets no key for the harness's providers, or the Gateway holds one of them.
+ * first provider that an attempt API key reaches and that the provisioner sets one for. `None` if
+ * the Worker isn't provisioned, the provisioner sets no such key, or the Gateway holds one of the
+ * harness's providers.
  */
 export const provisionedApiKey = (
   catalog: HarnessCatalog,
@@ -42,8 +43,8 @@ export const provisionedApiKey = (
     Option.filter(catalog.get(harness), ({ worker: requirements }) =>
       Option.isSome(requirements.credential),
     ),
-    ({ providers }) =>
-      Arr.findFirst(providers, (provider) =>
+    ({ apiKeyProviders }) =>
+      Arr.findFirst(apiKeyProviders, (provider) =>
         Option.map(Option.fromUndefinedOr(apiKeys[provider.id]), (key) => ({ provider, key })),
       ),
   );

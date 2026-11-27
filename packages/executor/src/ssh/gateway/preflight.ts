@@ -43,9 +43,20 @@ const listed = (items: ReadonlyArray<string>): string =>
     ? items.join(" and ")
     : `${items.slice(0, -1).join(", ")}, and ${items.at(-1) ?? ""}`;
 
-/** The `llm.<domain>` path prefixes of `providers` on a Gateway that serves `prefixes`, for messages. */
-const llmPaths = (providers: ModelProviderCatalog, prefixes: GatewayLlmPrefixes) =>
-  listed(providers.providers.map((provider) => `/${llmPrefixOf(provider, prefixes)}`));
+/**
+ * The `llm.<domain>` path prefixes of `providers` on a Gateway that serves `prefixes`, for
+ * messages. With `renamed`, only those of the providers whose slot isn't their ID, which a Gateway
+ * from before slots serves at another prefix.
+ */
+const llmPaths = (providers: ModelProviderCatalog, prefixes: GatewayLlmPrefixes, renamed = false) =>
+  listed(
+    providers.providers
+      .filter(
+        (provider) =>
+          !renamed || llmPrefixOf(provider, "provider") !== llmPrefixOf(provider, "slot"),
+      )
+      .map((provider) => `/${llmPrefixOf(provider, prefixes)}`),
+  );
 
 /**
  * Records the path prefixes the Gateway serves, which Attempts that start later use. Logs a
@@ -217,7 +228,7 @@ const gatewayUpgradeOf = (
   const lags = [
     ...(prefixes === "provider"
       ? [
-          `it serves model requests only at ${llmPaths(providers, "provider")}, which attempts call instead of ${llmPaths(providers, "slot")}`,
+          `it serves model requests only at ${llmPaths(providers, "provider", true)}, which attempts call instead of ${llmPaths(providers, "slot", true)}`,
         ]
       : []),
     ...(Option.exists(reported, ({ slots }) => Option.isNone(slots))

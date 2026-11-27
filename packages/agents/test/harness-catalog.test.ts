@@ -30,6 +30,7 @@ import {
   workerImageInputs,
 } from "../src/harness/catalog.ts";
 import { CODEX_CLI_VERSION, codex } from "../src/harness/codex/descriptor.ts";
+import { SlotVariable } from "../src/harness/harness.ts";
 import { pi } from "../src/harness/pi/descriptor.ts";
 // Generated image inputs are checked against the source descriptors.
 // @effect-diagnostics-next-line nodeBuiltinImport:off
@@ -252,6 +253,105 @@ describe("harness catalog", () => {
         );
         const inSandbox = yield* offering(split, ["sandbox"]);
         assert.deepStrictEqual(inSandbox.providers, [split]);
+      }),
+  );
+
+  it.effect(
+    "reaches a gateway-only provider through the gateway's slot, and an attempt API key only the others'",
+    () =>
+      Effect.gen(function* () {
+        assert(Option.isSome(codex.worker.credential));
+        const credential = codex.worker.credential.value;
+        const split = ModelProvider.make({
+          id: ModelProviderId.make("test-plan"),
+          slot: GatewaySlot.make("test-plan"),
+          label: "Test plan",
+          protocols: [
+            ProviderProtocol.make({
+              protocol: WireProtocol.make("openai-chat-completions"),
+              upstream: UpstreamBase.make("https://plan.test/openai/v1"),
+              routes: [RoutePattern.make("/chat/completions")],
+              key: KeyHeader.make({ header: HeaderName.make("authorization"), scheme: "bearer" }),
+            }),
+            ProviderProtocol.make({
+              protocol: WireProtocol.make("anthropic-messages"),
+              upstream: UpstreamBase.make("https://plan.test/anthropic/v1"),
+              routes: [RoutePattern.make("/messages")],
+              key: KeyHeader.make({ header: HeaderName.make("x-api-key"), scheme: "none" }),
+            }),
+          ],
+          credentials: [
+            ApiKeyCredential.make({ variable: GatewayVariable.make("TEST_PLAN_API_KEY") }),
+          ],
+        });
+        const describing = (
+          gatewayOnly: ReadonlyArray<string>,
+          slots: Readonly<Record<string, string>>,
+        ) =>
+          HarnessDescriptor.makeEffect({
+            ...codex,
+            id: Harness.make("plan-client"),
+            providers: [openai, split],
+            gatewayOnly: gatewayOnly.map((id) => ModelProviderId.make(id)),
+            worker: WorkerRequirements.make({
+              ...codex.worker,
+              credential: Option.some(
+                HarnessCredential.make({
+                  ...credential,
+                  slots: Object.fromEntries(
+                    Object.entries(slots).map(([id, variable]) => [
+                      ModelProviderId.make(id),
+                      SlotVariable.make({ variable, path: id === "openai" ? "/v1" : "" }),
+                    ]),
+                  ),
+                }),
+              ),
+            }),
+          });
+        const described = yield* describing(["test-plan"], {
+          openai: "OPENAI_SLOT_URL",
+          "test-plan": "PLAN_SLOT_URL",
+        });
+        assert.deepStrictEqual(described.apiKeyProviders, [openai]);
+        assert(Option.isSome(described.worker.credential));
+        const slotUrl = (provider: ModelProvider, path: string) =>
+          `http://llm.gw.test/${provider.slot}${path}`;
+        assert.deepStrictEqual(
+          described.worker.credential.value.slotEnvironment([split], slotUrl),
+          {
+            PLAN_SLOT_URL: "http://llm.gw.test/test-plan",
+          },
+        );
+        assert.deepStrictEqual(
+          described.worker.credential.value.slotEnvironment([openai, split], slotUrl),
+          {
+            OPENAI_SLOT_URL: "http://llm.gw.test/openai-responses/v1",
+            PLAN_SLOT_URL: "http://llm.gw.test/test-plan",
+          },
+        );
+        const extended = HarnessCatalog.make({ descriptors: [...catalog.descriptors, described] });
+        assert.deepStrictEqual(
+          extended.environmentFor(codex.id, { PLAN_SLOT_URL: "stale", PATH: "/bin" }),
+          { PATH: "/bin" },
+        );
+        assert.deepStrictEqual(
+          extended.environmentFor(described.id, { PLAN_SLOT_URL: "kept", PATH: "/bin" }),
+          { PLAN_SLOT_URL: "kept", PATH: "/bin" },
+        );
+        const format = SchemaIssue.makeFormatterDefault();
+        const refusals = yield* Effect.forEach(
+          [
+            describing([], {}),
+            describing(["test-plan", "other-plan"], {}),
+            describing(["test-plan"], { "other-plan": "OTHER_URL" }),
+          ],
+          (described) => Effect.map(Effect.flip(described), format),
+        );
+        const unknown =
+          "The provider other-plan that the descriptor names isn't one of the harness's providers";
+        assert.include(refusals[0], "The api-key route outside a sandbox can't reach Test plan");
+        assert.include(refusals[1], unknown);
+        assert.include(refusals[2], unknown);
       }),
   );
 
