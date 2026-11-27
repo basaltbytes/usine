@@ -81,6 +81,9 @@ const plan = ModelProvider.make({
   passThrough: Option.some([HeaderName.make("x-plan-session")]),
 });
 
+/** The Worker's catalog with the test's plan after its built-in providers. */
+const withPlan = ModelProviderCatalog.make({ providers: [...modelProviders.providers, plan] });
+
 const codexId = Harness.make("codex");
 
 /** A Responses provider that only this test defines. */
@@ -251,6 +254,7 @@ describe("sandbox outbound handlers", () => {
           }),
           anthropic,
           ApiKeyCredential.make({ key: Redacted.make("sk-ant-key") }),
+          withPlan,
         ),
       );
       const toOpenai = Option.getOrThrow(
@@ -261,6 +265,7 @@ describe("sandbox outbound handlers", () => {
           }),
           openai,
           ApiKeyCredential.make({ key: Redacted.make("sk-openai-key") }),
+          withPlan,
         ),
       );
 
@@ -284,6 +289,7 @@ describe("sandbox outbound handlers", () => {
           new Request(`http://${sandboxHost(provider.id)}${path}`, { method }),
           provider,
           key,
+          withPlan,
         ),
         (forwarded) => `${forwarded.method} ${forwarded.url}`,
       );
@@ -361,16 +367,18 @@ describe("sandbox outbound handlers", () => {
             }),
             plan,
             key,
+            withPlan,
           ),
         );
         const generate = Option.getOrThrow(
           providerRequest(
             new Request(
-              `http://${sandboxHost(plan.id)}/models/plan-model-2.5:streamGenerateContent?alt=sse`,
+              `http://${sandboxHost(plan.id)}/models/plan-model-2.5:streamGenerateContent?alt=sse&key=usine-placeholder`,
               { method: "POST", headers: { "x-goog-api-key": "usine-placeholder" } },
             ),
             plan,
             key,
+            withPlan,
           ),
         );
 
@@ -396,11 +404,33 @@ describe("sandbox outbound handlers", () => {
             }),
             passingAll,
             key,
+            withPlan,
           ),
         );
         expect([...unfiltered.headers.entries()]).toEqual([
           ["authorization", "Bearer plan-key"],
           ["x-unlisted", "kept"],
+        ]);
+        // A provider that passes every header gets neither a cookie nor another provider's key header.
+        const toAnthropic = Option.getOrThrow(
+          providerRequest(
+            new Request(`http://${sandboxHost(anthropic.id)}/v1/messages`, {
+              method: "POST",
+              headers: {
+                "x-api-key": "usine-placeholder",
+                "x-goog-api-key": "usine-placeholder",
+                cookie: "session=sandbox",
+                "anthropic-version": "2023-06-01",
+              },
+            }),
+            anthropic,
+            ApiKeyCredential.make({ key: Redacted.make("sk-ant-key") }),
+            withPlan,
+          ),
+        );
+        expect([...toAnthropic.headers.entries()]).toEqual([
+          ["anthropic-version", "2023-06-01"],
+          ["x-api-key", "sk-ant-key"],
         ]);
       }),
   );
@@ -467,7 +497,7 @@ describe("sandbox outbound handlers", () => {
         assert(props !== undefined);
         const sent: Array<readonly [string, string, string | null]> = [];
         const serve = (request: Request) =>
-          providerOutbound(props, request).pipe(
+          providerOutbound(props, request, catalog).pipe(
             Effect.provideService(FetchHttpClient.Fetch, (input) => {
               const upstream = new Request(input);
               sent.push([upstream.method, upstream.url, upstream.headers.get("authorization")]);
@@ -488,6 +518,66 @@ describe("sandbox outbound handlers", () => {
         expect(sent).toEqual([
           ["POST", "https://plan.test/openai/v1/chat/completions", "Bearer plan-key"],
         ]);
+      }),
+  );
+
+  it.live(
+    "reads a handler's provider from the Worker's current catalog, and refuses one that the catalog no longer has or props from an earlier Worker",
+    () =>
+      Effect.gen(function* () {
+        const credential = ApiKeyCredential.make({ key: Redacted.make("plan-key") });
+        const registration = yield* registrationOf({
+          _tag: "Provider",
+          host: sandboxHost(plan.id),
+          provider: plan,
+          credential,
+        });
+        assert(registration.handler === "ProviderOutbound");
+        expect(registration.props.provider).toBe(plan.id);
+        const [chat, generate] = plan.protocols;
+        assert(generate !== undefined);
+        // A later deploy moves the plan's chat upstream; the handler that the container holds stays.
+        const moved = ModelProvider.make({
+          ...plan,
+          protocols: [
+            ProviderProtocol.make({
+              ...chat,
+              upstream: UpstreamBase.make("https://moved.test/openai/v1"),
+            }),
+            generate,
+          ],
+        });
+        const sent: Array<string> = [];
+        const serve = (catalog: ModelProviderCatalog, props: unknown) =>
+          providerOutbound(
+            props,
+            new Request(`http://${sandboxHost(plan.id)}/chat/completions`, {
+              method: "POST",
+              headers: { authorization: "Bearer usine-placeholder" },
+              body: "{}",
+            }),
+            catalog,
+          ).pipe(
+            Effect.provideService(FetchHttpClient.Fetch, (input) => {
+              sent.push(new Request(input).url);
+              return Promise.resolve(new Response("{}"));
+            }),
+          );
+        const earlierProps = {
+          provider: yield* Schema.encodeEffect(Schema.toCodecJson(ModelProvider))(plan),
+          credential: registration.props.credential,
+        };
+        const answers = yield* Effect.forEach(
+          [
+            [ModelProviderCatalog.make({ providers: [anthropic, moved] }), registration.props],
+            [modelProviders, registration.props],
+            [withPlan, earlierProps],
+          ] as const,
+          ([catalog, props]) => serve(catalog, props),
+        );
+
+        expect(answers.map(({ status }) => status)).toEqual([200, 403, 403]);
+        expect(sent).toEqual(["https://moved.test/openai/v1/chat/completions"]);
       }),
   );
 
@@ -526,6 +616,7 @@ describe("sandbox outbound handlers", () => {
         }),
         cleartext,
         ApiKeyCredential.make({ key: Redacted.make("plan-key") }),
+        catalog,
       ),
     ).toEqual(Option.none());
   });

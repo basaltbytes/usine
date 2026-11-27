@@ -21,7 +21,7 @@ import { HttpRouter } from "effect/http";
 import { TestClock } from "effect/testing";
 import { ProcessStatus, SandboxSummary } from "../src/api/api.ts";
 import { processFiles, stopCommand } from "../src/sandbox/process.ts";
-import { DRAIN_MARKER } from "../src/api/harness.ts";
+import { DRAIN_MARKER, sandboxHost } from "../src/api/harness.ts";
 import type { Interception } from "../src/sandbox/outbound.ts";
 import { StoredSandbox } from "../src/sandbox/ports.ts";
 import { keepAlive, LEASE, restore, sandboxRoutes } from "../src/sandbox/sandbox.ts";
@@ -245,11 +245,18 @@ describe("sandbox routes", () => {
     ["a restart of the Durable Object", ({ layer }) => restore().pipe(Effect.provide(layer))],
   ];
 
-  it.live.each(reregistrations)(
+  /** The test's plan host, which the allowlist lists in the second run of each re-registration. */
+  const planHost = sandboxHost(plan.id);
+  it.live.each(
+    reregistrations.flatMap(([name, reregister]) => [
+      [name, reregister, false] as const,
+      [`${name}, with the host allowlisted`, reregister, true] as const,
+    ]),
+  )(
     "denies a provider host on %s after the Worker's catalog drops its provider, each time",
-    ([, reregister]) =>
+    ([, reregister, allowlisted]) =>
       Effect.gen(function* () {
-        const sandbox = served();
+        const sandbox = served(allowlisted ? ["registry.npmjs.org", planHost] : undefined);
         const { state, call } = sandbox;
         yield* Effect.promise(() => call("PUT", `/v1/sandboxes/${NAME}`, createBody()));
         // A Worker deployed without Anthropic but with another provider registers the handlers
@@ -278,6 +285,7 @@ describe("sandbox routes", () => {
             "Denied:anthropic.usine.internal",
             "Denied:opencode-go.usine.internal",
             "Denied:test-plan.usine.internal",
+            ...(allowlisted ? ["Allowed:test-plan.usine.internal"] : []),
           ],
         ]);
         assert(Option.isSome(state.stored));

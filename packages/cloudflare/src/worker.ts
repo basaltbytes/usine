@@ -489,11 +489,12 @@ export class GitHubOutbound extends WorkerEntrypoint<Env, typeof GitHubProps.Enc
 /**
  * Sends the sandbox's plain HTTP requests for a provider to the upstream of the protocol that
  * serves the path, with the provider's API key. Refuses a path outside the provider's routes in
- * the catalog, or a method that its route doesn't accept, with status 404.
+ * the catalog, or a method that its route doesn't accept, with status 404, and a provider that the
+ * Worker's catalog no longer serves in a sandbox with status 403.
  */
 export class ProviderOutbound extends WorkerEntrypoint<Env, typeof ProviderProps.Encoded> {
   override async fetch(request: Request): Promise<Response> {
-    return run(providerOutbound(this.ctx.props, request));
+    return run(providerOutbound(this.ctx.props, request, modelProviders));
   }
 }
 
