@@ -72,7 +72,10 @@ export const supervisorMessages = [
     "Call no tools.",
 ] as const;
 
-/** The harnesses whose descriptors admit the supervisor role: every harness that serves usine tool sets. */
+/**
+ * The harnesses whose descriptors admit the supervisor role. OpenCode serves usine tool sets too,
+ * but doesn't run at the orchestrator.
+ */
 export const supervisorProviders = [
   "claude",
   "pi",

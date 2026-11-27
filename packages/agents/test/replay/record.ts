@@ -34,9 +34,26 @@ export const recordContracts = (harness: RecordedHarness): void => {
           ).pipe(Effect.provide(NodeServices.layer)),
         240_000,
       );
+    recordTools(harness);
     return;
   }
   recordProvider(harness);
+};
+
+/** Records the tool scenarios of `harness`, if its adapter serves usine tool sets. */
+const recordTools = (harness: RecordedHarness): void => {
+  for (const tools of toolProviders)
+    if (tools === harness)
+      for (const scenario of toolScenariosOf(tools))
+        it.live.skipIf(recordingModel(harness) === undefined)(
+          `records ${harness}: ${scenario}`,
+          () =>
+            runToolScenario(tools, scenario, "record").pipe(
+              Effect.scoped,
+              Effect.provide(NodeServices.layer),
+            ),
+          240_000,
+        );
 };
 
 const recordProvider = (provider: Provider): void => {
@@ -59,18 +76,7 @@ const recordProvider = (provider: Provider): void => {
         ).pipe(Effect.provide(NodeServices.layer)),
       240_000,
     );
-  for (const tools of toolProviders)
-    if (tools === provider)
-      for (const scenario of toolScenariosOf(tools))
-        it.live.skipIf(recordingModel(provider) === undefined)(
-          `records ${provider}: ${scenario}`,
-          () =>
-            runToolScenario(tools, scenario, "record").pipe(
-              Effect.scoped,
-              Effect.provide(NodeServices.layer),
-            ),
-          240_000,
-        );
+  recordTools(provider);
   for (const supervised of supervisorProviders)
     if (supervised === provider)
       it.live.skipIf(recordingModel(provider) === undefined)(
