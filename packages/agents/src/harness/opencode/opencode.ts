@@ -1,4 +1,3 @@
-import { BrainSpec, Harness, ModelId } from "@usine/core/agent/brain";
 import {
   type AgentSession,
   BackgroundWork,
@@ -74,14 +73,14 @@ import {
   totalTokens,
 } from "./codec.ts";
 import {
-  baseUrl,
+  baseUrlVariable,
   dataDirectory,
   serveConfig,
   serveEnvironment,
   sessionPermissions,
 } from "./config.ts";
 import { opencode } from "./descriptor.ts";
-import { checkModel } from "./model.ts";
+import { checkModel, modelChoice } from "./model.ts";
 import { openCodePreflight } from "./preflight.ts";
 import { type RestoredInput, restoredInput } from "./restored.ts";
 import { type OpenCodeConnection, OpenCodeServer } from "./server.ts";
@@ -188,11 +187,14 @@ const makeOpenCodeSessions = Effect.gen(function* () {
       },
     );
     yield* checkContinuationHome(spec, start, Option.some(data), Option.some(data));
+    const brain = spec.session.brain;
+    const route = spec.admitted.context.credential;
+    const choice = yield* modelChoice(brain);
     const config = yield* serveConfig({
-      brain: spec.session.brain,
-      route: spec.admitted.context.credential,
+      choice,
+      route,
       cwd: spec.cwd,
-      baseUrl: baseUrl(spec.environment),
+      baseUrl: yield* baseUrlVariable(spec.environment, brain, choice, route),
     });
     const target = {
       host: spec.host,
@@ -205,7 +207,7 @@ const makeOpenCodeSessions = Effect.gen(function* () {
       transport: Option.isSome(reference) ? "resume" : undefined,
     });
     const api = openCodeApi(connection, Option.some(sessionId));
-    const model = yield* checkModel(api, spec.session.brain, Option.some(spec.cwd));
+    const model = yield* checkModel(api, brain, choice, Option.some(spec.cwd));
     const info = yield* Option.match(reference, {
       onNone: () =>
         api.read(SessionInfo, "launch", "POST", "/api/session", {
@@ -223,11 +225,7 @@ const makeOpenCodeSessions = Effect.gen(function* () {
     const sessionPath = `/api/session/${encodeURIComponent(id)}`;
     yield* api.setToolEnvironment("launch", id);
     const session: AgentSession = resolvedSession(spec.session, {
-      brain: BrainSpec.make({
-        harness: Harness.make("opencode"),
-        model: ModelId.make(model.id),
-        effort: spec.session.brain.effort,
-      }),
+      brain,
       // OpenCode bills only API keys; a gateway that hasn't reported its kind holds one too.
       pool: Option.some(Option.getOrElse(spec.admitted.pool, () => apiKeys.id)),
       endpoint: Option.none(),

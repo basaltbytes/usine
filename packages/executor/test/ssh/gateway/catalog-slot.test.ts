@@ -13,7 +13,7 @@ import {
 } from "@usine/agents/harness";
 import { harnessesLiveFrom } from "@usine/agents/harness/node";
 import { Agent } from "@usine/core/agent";
-import { BrainSpec, Harness } from "@usine/core/agent/brain";
+import { BrainSpec, Harness, ModelId } from "@usine/core/agent/brain";
 import {
   ApiKeyCredential,
   GatewaySlot,
@@ -24,6 +24,7 @@ import {
   ModelProviderCatalog,
   ModelProviderId,
   modelProviders,
+  opencodeGo,
   ProviderProtocol,
   RoutePattern,
   UpstreamBase,
@@ -375,6 +376,136 @@ describe("a provider slot that only the test's catalog declares", () => {
             harnesses: planHarnesses,
           }),
         ),
+      );
+    },
+  );
+});
+
+const GO_KEY = "go-key-for-executor-tests-0123456789";
+
+/** OpenCode on its own descriptor, whose preflight runs Claude's runtime on the fake machine. */
+const goHarnesses = harnessesLiveFrom(catalog, (runtimes) => {
+  const runtime = runtimes.find(({ id }) => id === "claude");
+  assert(runtime !== undefined);
+  return runtimes.map((each) => (each.id === "opencode" ? { ...runtime, id: each.id } : each));
+}).pipe(Layer.orDie);
+
+const GO_BRAIN = BrainSpec.make({
+  harness: Harness.make("opencode"),
+  model: ModelId.make("opencode-go/glm-5.3"),
+  effort: "low",
+});
+
+describe("the OpenCode Go slot", () => {
+  it.effect(
+    "gives an OpenCode attempt the slot's URL and only a caller token, which the gateway swaps for the plan's key",
+    () => {
+      const machine = fakeMachine();
+      const gateway = fakeGateway(machine, {
+        [opencodeGo.slot]: LlmProvider.make({
+          upstream: Option.none(),
+          credential: ApiKey.make({ key: Redacted.make(GO_KEY) }),
+        }),
+      });
+      const upstream: Array<Upstream> = [];
+      const proxy = GatewayProxy.layer.pipe(
+        Layer.provide(
+          Layer.succeed(HttpClient.HttpClient)(
+            HttpClient.make((sent) => {
+              upstream.push({ url: sent.url, headers: sent.headers });
+              return Effect.succeed(HttpClientResponse.fromWeb(sent, new Response("answer")));
+            }),
+          ),
+        ),
+        Layer.provide(gateway.layer),
+      );
+      const logs = capturedLogs();
+      let given: AttemptRequest | undefined;
+      let handler: GatewayProxy["Service"] | undefined;
+      const statuses: Array<number> = [];
+      const parent: StubParent = (context) =>
+        Effect.gen(function* () {
+          given = context.request;
+          assert(Schema.is(RemoteShell)(given.host));
+          const token = stdinValue(given.host, "USINE_GATEWAY_TOKEN");
+          const base = new URL(given.environment.USINE_OPENCODE_GO_BASE_URL ?? "").pathname;
+          const proxied = handler;
+          assert(proxied !== undefined);
+          const response = yield* proxied.handle.pipe(
+            Effect.provideService(
+              HttpServerRequest.HttpServerRequest,
+              HttpServerRequest.fromWeb(
+                new Request(`http://llm.gw.test${base}/chat/completions`, {
+                  method: "POST",
+                  headers: {
+                    authorization: `Bearer ${token}`,
+                    "x-opencode-session-id": "ses_1",
+                    host: "llm.gw.test",
+                  },
+                  body: '{"model":"glm-5.3"}',
+                }),
+              ),
+            ),
+          );
+          statuses.push(HttpServerResponse.toWeb(response).status);
+          return yield* completes(context);
+        });
+      return Effect.gen(function* () {
+        handler = yield* GatewayProxy;
+        const executor = yield* Executor;
+        yield* executor.preflight(WORKER, [GO_BRAIN], 1);
+        yield* (yield* executor.prepare(
+          CheckoutRequest.make({
+            ...request,
+            agent: Agent.make({ ...TEST_AGENT, brain: GO_BRAIN }),
+          }),
+        )).launch(sink);
+        assert(given !== undefined && Schema.is(RemoteShell)(given.host));
+        const token = stdinValue(given.host, "USINE_GATEWAY_TOKEN");
+        assert.strictEqual(
+          given.environment.USINE_OPENCODE_GO_BASE_URL,
+          "http://llm.gw.test/opencode-go",
+        );
+        // The gateway holds no OpenAI key, so OpenCode gets no OpenAI slot.
+        assert.notProperty(given.environment, "USINE_OPENCODE_BASE_URL");
+        assert.notProperty(given.environment, "OPENAI_API_KEY");
+        assert.notProperty(given.host.stdinEnvironment ?? {}, "OPENAI_API_KEY");
+        assert.notProperty(given.host.sshEnvironment, "USINE_GATEWAY_TOKEN");
+        assert.notInclude(jsonKey(given.environment), token);
+        const credential = yield* given.gatewayCredential;
+        assert.deepStrictEqual(credential, Option.some("api-key"));
+        assert.deepStrictEqual(statuses, [200]);
+        assert.deepStrictEqual(
+          upstream.map(({ url, headers }) => [
+            url,
+            headers.authorization,
+            headers["x-opencode-session-id"],
+          ]),
+          [
+            [
+              "https://opencode.ai/inference/go/openai/v1/chat/completions",
+              `Bearer ${GO_KEY}`,
+              "ses_1",
+            ],
+          ],
+        );
+        for (const text of [
+          jsonKey(given.environment),
+          given.host.ssh.args.join(" "),
+          logs.lines.join("\n"),
+          [...machine.state.files.values()].join("\n"),
+        ])
+          assert.notInclude(text, GO_KEY);
+      }).pipe(
+        Effect.provide([
+          gatewayRuntime(machine, mintingProvider(), gateway, {
+            address: gatewayAddress({ llmProviders: ["opencode-go"] }),
+            parent,
+            harnesses: goHarnesses,
+          }),
+          proxy,
+          logs.layer,
+        ]),
       );
     },
   );

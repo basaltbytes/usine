@@ -6,9 +6,9 @@ import { isRemoteHost } from "../../child-host/child-host.ts";
 import { probeBinary } from "../../preflight/command.ts";
 import { checkedPreflight, loginUnavailable, type ProbeTarget } from "../runtime.ts";
 import { openCodeApi } from "./api.ts";
-import { serveConfig } from "./config.ts";
+import { checkRoute, serveConfig } from "./config.ts";
 import { OPENCODE_VERSION, opencode } from "./descriptor.ts";
-import { checkModel } from "./model.ts";
+import { checkModel, modelChoice } from "./model.ts";
 import { OpenCodeServer } from "./server.ts";
 
 /**
@@ -52,8 +52,12 @@ const check = Effect.fn("OpenCodeRuntime.check")(function* (brain: BrainSpec, ta
   const unsupported = unsupportedOpenCodeVersion(version);
   if (Option.isSome(unsupported)) return yield* unsupported.value;
   const server = yield* OpenCodeServer;
+  const choice = yield* modelChoice(brain).pipe(
+    Effect.tap((chosen) => checkRoute(brain, chosen, target.credential)),
+    Effect.catchTag("UnknownModelError", (error) => loginUnavailable(brain, error.message)),
+  );
   const config = yield* serveConfig({
-    brain,
+    choice,
     route: target.credential,
     cwd: "/",
     baseUrl: Option.none(),
@@ -68,7 +72,7 @@ const check = Effect.fn("OpenCodeRuntime.check")(function* (brain: BrainSpec, ta
         sessionId: Option.none(),
         command: { command: "sh", args: ["-c", PROBE_SCRIPT, "sh", config] },
       });
-      yield* checkModel(openCodeApi(connection, Option.none()), brain, Option.none());
+      yield* checkModel(openCodeApi(connection, Option.none()), brain, choice, Option.none());
     }),
   ).pipe(
     Effect.catchTags({

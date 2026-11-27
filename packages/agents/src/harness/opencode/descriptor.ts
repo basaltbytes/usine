@@ -1,11 +1,12 @@
 import { Harness } from "@usine/core/agent/brain";
-import { openai } from "@usine/core/agent/provider";
+import { openai, opencodeGo } from "@usine/core/agent/provider";
 import { Option } from "effect";
 import { CapabilityProfile, Lacking } from "../capability.ts";
 import {
   CredentialWiring,
   HarnessCredential,
   HarnessDescriptor,
+  SlotVariable,
   WorkerRequirements,
 } from "../harness.ts";
 import { apiKeys, HarnessPool } from "../pool.ts";
@@ -22,12 +23,8 @@ export const OPENCODE_HOME = "USINE_OPENCODE_HOME";
 /** The variable with the base URL of the OpenAI Responses API that the session calls. */
 export const OPENCODE_BASE_URL = "USINE_OPENCODE_BASE_URL";
 
-const wiring = (tokenVariable: string) =>
-  CredentialWiring.make({
-    tokenVariable,
-    environment: { [OPENCODE_BASE_URL]: "{{baseUrl}}", [OPENCODE_HOME]: "{{home}}" },
-    files: {},
-  });
+/** The variable with the base URL of the gateway's OpenCode Go slot. */
+export const OPENCODE_GO_BASE_URL = "USINE_OPENCODE_GO_BASE_URL";
 
 export const opencode = HarnessDescriptor.make({
   id: Harness.make("opencode"),
@@ -41,8 +38,22 @@ export const opencode = HarnessDescriptor.make({
       HarnessCredential.make({
         slotPath: "/v1",
         home: Option.some(OPENCODE_HOME),
-        gateway: wiring("USINE_GATEWAY_TOKEN"),
-        apiKey: wiring("OPENAI_API_KEY"),
+        // A gateway route sets the URL of each slot that the gateway holds, in `slots`.
+        gateway: CredentialWiring.make({
+          tokenVariable: "USINE_GATEWAY_TOKEN",
+          environment: { [OPENCODE_HOME]: "{{home}}" },
+          files: {},
+        }),
+        apiKey: CredentialWiring.make({
+          tokenVariable: "OPENAI_API_KEY",
+          environment: { [OPENCODE_BASE_URL]: "{{baseUrl}}", [OPENCODE_HOME]: "{{home}}" },
+          files: {},
+        }),
+        slots: {
+          [openai.id]: SlotVariable.make({ variable: OPENCODE_BASE_URL, path: "/v1" }),
+          // OpenCode appends each protocol's path to the plan's one base URL.
+          [opencodeGo.id]: SlotVariable.make({ variable: OPENCODE_GO_BASE_URL, path: "" }),
+        },
         // OpenCode has no sandbox placement, so the Cloudflare image doesn't install it.
         cloudflare: CredentialWiring.make({
           tokenVariable: "OPENAI_API_KEY",
@@ -53,7 +64,10 @@ export const opencode = HarnessDescriptor.make({
       }),
     ),
   }),
-  providers: [openai],
+  // A bare model ID is OpenAI's; `opencode-go/<model>` selects the plan (`modelChoice`).
+  providers: [openai, opencodeGo],
+  // The plan's protocols have different upstreams, so an attempt API key reaches OpenAI only.
+  gatewayOnly: [opencodeGo.id],
   capabilities: [
     CapabilityProfile.make({
       placements: ["local", "ssh", "container"],
@@ -94,8 +108,9 @@ export const opencode = HarnessDescriptor.make({
   placementReason:
     "OpenCode runs on a worker behind its bridge, which the sandbox image doesn't install",
   credentialReason:
-    "OpenCode uses an OpenAI API key, from the attempt or held by the gateway; it uses no login of its own",
+    "OpenCode uses an OpenAI API key, from the attempt or held by the gateway, or an OpenCode Go key held by the gateway; it uses no login of its own",
   pools: [HarnessPool.make({ pool: apiKeys, routes: ["gateway-api-key", "api-key"] })],
+  // OpenCode reports each step's cost from its own catalog, so usine keeps no price table.
   prices: Option.none(),
   handoff: null,
 });

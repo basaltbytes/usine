@@ -1,5 +1,7 @@
 import { assert, describe, it } from "@effect/vitest";
 import { BrainSpec, Harness, ModelId } from "@usine/core/agent/brain";
+import { openai as openaiProvider, opencodeGo } from "@usine/core/agent/provider";
+import { ChildSession } from "@usine/core/agent/session";
 import { WorkerName } from "@usine/core/worker";
 import { type Cause, Effect, Exit, Layer, Option, Queue, Ref, Schema, Sink, Stream } from "effect";
 import { ChildProcessSpawner } from "effect/process";
@@ -8,9 +10,15 @@ import type { CredentialRoute } from "../../src/harness/capability.ts";
 import { HarnessCatalog } from "../../src/harness/harness.ts";
 import { bridgeClient } from "../../src/harness/opencode/bridge/client.ts";
 import { BridgeRequest } from "../../src/harness/opencode/bridge/lines.ts";
-import { opencode } from "../../src/harness/opencode/descriptor.ts";
+import { baseUrlVariable, serveConfig } from "../../src/harness/opencode/config.ts";
+import {
+  OPENCODE_BASE_URL,
+  OPENCODE_GO_BASE_URL,
+  opencode,
+} from "../../src/harness/opencode/descriptor.ts";
+import { modelChoice } from "../../src/harness/opencode/model.ts";
 import { openCodeRuntime } from "../../src/harness/opencode/opencode.ts";
-import { OpenCodeServer } from "../../src/harness/opencode/server.ts";
+import { type OpenCodeTarget, OpenCodeServer } from "../../src/harness/opencode/server.ts";
 import { Harnesses } from "../../src/harness/registry.ts";
 import { ProbeTarget } from "../../src/harness/runtime.ts";
 import { ChildBackend, ChildRequest, type SessionOperationError } from "../../src/runtime.ts";
@@ -107,10 +115,13 @@ const listed = {
 const listingServer = (models: ReadonlyArray<Schema.Json>) =>
   Effect.gen(function* () {
     const requests = yield* Ref.make<ReadonlyArray<string>>([]);
+    const bodies = yield* Ref.make<ReadonlyArray<BridgeRequest["body"]>>([]);
+    const targets = yield* Ref.make<ReadonlyArray<OpenCodeTarget>>([]);
     const layer = Layer.succeed(OpenCodeServer)({
       stop: () => Effect.void,
       open: (target) =>
         Effect.gen(function* () {
+          yield* Ref.update(targets, (all) => [...all, target]);
           const input = yield* Queue.make<Uint8Array, Cause.Done>();
           const output = yield* Queue.make<Uint8Array, SessionOperationError | Cause.Done>();
           const client = yield* bridgeClient({
@@ -129,7 +140,9 @@ const listingServer = (models: ReadonlyArray<Schema.Json>) =>
             Effect.flatMap(decodeRequest),
             Effect.orDie,
             Effect.tap((sent) =>
-              Ref.update(requests, (all) => [...all, `${sent.method} ${sent.path}`]),
+              Ref.update(requests, (all) => [...all, `${sent.method} ${sent.path}`]).pipe(
+                Effect.andThen(Ref.update(bodies, (all) => [...all, sent.body])),
+              ),
             ),
             Effect.flatMap((sent) =>
               sent.path.startsWith("/api/model")
@@ -145,7 +158,12 @@ const listingServer = (models: ReadonlyArray<Schema.Json>) =>
           return { ...client, retained: false };
         }),
     });
-    return { layer, requests: Ref.get(requests) };
+    return {
+      layer,
+      requests: Ref.get(requests),
+      bodies: Ref.get(bodies),
+      targets: Ref.get(targets),
+    };
   });
 
 /**
@@ -155,6 +173,7 @@ const listingServer = (models: ReadonlyArray<Schema.Json>) =>
 const refusedLaunch = (
   models: ReadonlyArray<Schema.Json>,
   brain: Partial<Pick<BrainSpec, "model" | "effort">>,
+  request: ChildRequest = childRequest,
 ) =>
   Effect.gen(function* () {
     const server = yield* listingServer(models);
@@ -162,10 +181,10 @@ const refusedLaunch = (
       const backend = yield* ChildBackend;
       return yield* backend.launch(
         ChildRequest.make({
-          ...childRequest,
+          ...request,
           session: {
-            ...childRequest.session,
-            brain: BrainSpec.make({ ...childRequest.session.brain, ...brain }),
+            ...request.session,
+            brain: BrainSpec.make({ ...request.session.brain, ...brain }),
           },
         }),
       );
@@ -241,5 +260,242 @@ describe("OpenCode model check", () => {
       assert(error._tag === "UnknownModelError");
       assert.strictEqual(error.message, 'OpenCode has no model "gpt-test" for the openai provider');
     }).pipe(Effect.scoped),
+  );
+
+  // The probe on the api-key route starts no bridge, which the helper waits a second for.
+  it.live(
+    "refuses a Go model on the api-key route in preflight, and checks a gateway's against the opencode-go provider",
+    () =>
+      Effect.gen(function* () {
+        const { readiness: direct, target } = yield* preflight("opencode-go/gpt-test", "api-key");
+        assert(direct._tag === "HarnessUnavailableError");
+        assert.strictEqual(
+          direct.message,
+          "OpenCode reaches OpenCode Go models only through a gateway that holds its key, and the api-key route has none",
+        );
+        assert(Option.isNone(target), "the probe doesn't start OpenCode");
+        const { readiness: gateway } = yield* preflight("opencode-go/gpt-test", "gateway-api-key");
+        assert(gateway._tag === "HarnessUnavailableError");
+        assert.strictEqual(
+          gateway.message,
+          'OpenCode has no model "gpt-test" for the opencode-go provider',
+        );
+      }).pipe(Effect.scoped),
+  );
+
+  it.effect("refuses a Go session whose model OpenCode lists only for OpenAI", () =>
+    Effect.gen(function* () {
+      const error = yield* refusedLaunch([{ ...listed, id: "glm-test" }], {}, goRequest);
+      assert(error._tag === "UnknownModelError");
+      assert.strictEqual(
+        error.message,
+        'OpenCode has no model "glm-test" for the opencode-go provider',
+      );
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect(
+    "starts a Go session on the gateway's slot with the caller token, and creates it with the plan's model",
+    () =>
+      Effect.gen(function* () {
+        const server = yield* listingServer([
+          { ...listed, id: "glm-test" },
+          { ...listed, id: "glm-test", providerID: "opencode-go" },
+        ]);
+        yield* Effect.gen(function* () {
+          const backend = yield* ChildBackend;
+          return yield* backend.launch(goRequest);
+        }).pipe(Effect.provide(scriptedBackend(server.layer)), Effect.exit);
+        const [target] = yield* server.targets;
+        assert(target !== undefined);
+        const config = yield* Schema.decodeUnknownEffect(GoConfig)(
+          target.environment.USINE_OPENCODE_SERVE_OPENCODE_CONFIG_CONTENT,
+        );
+        assert.deepStrictEqual(config.providers["opencode-go"].settings, {
+          apiKey: "{env:USINE_GATEWAY_TOKEN}",
+          transport: "http",
+          baseURL: "{env:USINE_OPENCODE_GO_BASE_URL}",
+        });
+        const requests = yield* server.requests;
+        const created = (yield* server.bodies)[requests.indexOf("POST /api/session")];
+        assert.deepStrictEqual(
+          Schema.decodeUnknownOption(CreatedModel)(created),
+          Option.some({ model: { providerID: "opencode-go", id: "glm-test", variant: "low" } }),
+        );
+      }).pipe(Effect.scoped),
+  );
+});
+
+/** A child request for `opencode-go/glm-test` on the gateway route, whose gateway holds the plan's slot. */
+const goRequest = ChildRequest.make({
+  ...childRequest,
+  environment: {
+    HOME: "/home/scripted",
+    USINE_GATEWAY_TOKEN: "caller-token",
+    [OPENCODE_GO_BASE_URL]: "http://llm.gw.test/opencode-go",
+  },
+  session: ChildSession.make({
+    ...childRequest.session,
+    brain: BrainSpec.make({
+      ...childRequest.session.brain,
+      model: ModelId.make("opencode-go/glm-test"),
+    }),
+    gatewayCredential: Option.some("api-key"),
+  }),
+});
+
+const GoConfig = Schema.fromJsonString(
+  Schema.Struct({
+    providers: Schema.Struct({
+      "opencode-go": Schema.Struct({ settings: Schema.Record(Schema.String, Schema.String) }),
+    }),
+  }),
+);
+
+const CreatedModel = Schema.Struct({
+  model: Schema.Struct({ providerID: Schema.String, id: Schema.String, variant: Schema.String }),
+});
+
+describe("OpenCode provider/model notation", () => {
+  const brain = (model: string) =>
+    BrainSpec.make({ harness: opencode.id, model: ModelId.make(model), effort: "low" });
+
+  it.effect("selects OpenAI for a bare model ID, and the provider that a prefix names", () =>
+    Effect.gen(function* () {
+      const chosen = yield* Effect.forEach(
+        ["gpt-test", "openai/gpt-test", "opencode-go/glm-5.3", "opencode-go/vendor/model"],
+        (model) =>
+          Effect.map(modelChoice(brain(model)), ({ provider, model: id }) => [provider.id, id]),
+      );
+      assert.deepStrictEqual(chosen, [
+        ["openai", "gpt-test"],
+        ["openai", "gpt-test"],
+        ["opencode-go", "glm-5.3"],
+        ["opencode-go", "vendor/model"],
+      ]);
+    }),
+  );
+
+  it.effect(
+    "refuses a provider that the harness doesn't list, with the list, and an empty model",
+    () =>
+      Effect.gen(function* () {
+        const refused = yield* Effect.forEach(
+          ["anthropic/claude-test", "/gpt-test", "opencode-go/", "opencode-go/ "],
+          (model) => Effect.map(Effect.flip(modelChoice(brain(model))), (error) => error.message),
+        );
+        assert.deepStrictEqual(refused, [
+          'OpenCode has no provider "anthropic" for the model "anthropic/claude-test". Choose one of openai, opencode-go as <provider>/<model>; a model ID without a provider is openai\'s.',
+          'OpenCode has no provider "" for the model "/gpt-test". Choose one of openai, opencode-go as <provider>/<model>; a model ID without a provider is openai\'s.',
+          'The model "opencode-go/" names no model after its provider',
+          'The model "opencode-go/ " names no model after its provider',
+        ]);
+      }),
+  );
+});
+
+describe("OpenCode session configuration", () => {
+  const decode = Schema.decodeUnknownEffect(
+    Schema.fromJsonString(
+      Schema.StructWithRest(
+        Schema.Struct({
+          model: Schema.optionalKey(Schema.String),
+          providers: Schema.optionalKey(Schema.Record(Schema.String, Schema.Json)),
+          policies: Schema.optionalKey(Schema.Json),
+        }),
+        [Schema.Record(Schema.String, Schema.Json)],
+      ),
+    ),
+  );
+
+  it.effect(
+    "configures OpenCode Go with the caller token at its slot's variable, and keeps every other setting of the OpenAI configuration",
+    () =>
+      Effect.gen(function* () {
+        const configs = yield* Effect.forEach(
+          [
+            [openaiProvider, "gpt-test", OPENCODE_BASE_URL],
+            [opencodeGo, "glm-5.3", OPENCODE_GO_BASE_URL],
+          ] as const,
+          ([provider, model, variable]) =>
+            serveConfig({
+              choice: { provider, model },
+              route: "gateway-api-key",
+              cwd: "/work/checkout",
+              baseUrl: Option.some(variable),
+            }).pipe(Effect.flatMap(decode)),
+        );
+        const [openai, go] = configs;
+        assert(openai !== undefined && go !== undefined);
+        const { model, providers, policies, ...rest } = go;
+        const { model: _model, providers: _providers, policies: _policies, ...kept } = openai;
+        assert.deepStrictEqual(rest, kept);
+        assert.deepStrictEqual(
+          { model, policies, go: providers?.["opencode-go"], openai: providers?.openai },
+          {
+            model: "opencode-go/glm-5.3",
+            policies: [
+              { action: "provider.use", resource: "*", effect: "deny" },
+              { action: "provider.use", resource: "opencode-go", effect: "allow" },
+              { action: "plugin.use", resource: "*", effect: "deny" },
+              { action: "mcp.use", resource: "*", effect: "deny" },
+              { action: "websearch.use", resource: "*", effect: "deny" },
+            ],
+            go: {
+              env: [],
+              settings: {
+                apiKey: "{env:USINE_GATEWAY_TOKEN}",
+                transport: "http",
+                baseURL: "{env:USINE_OPENCODE_GO_BASE_URL}",
+              },
+            },
+            openai: undefined,
+          },
+        );
+        assert.deepStrictEqual(
+          Object.keys(providers ?? {}),
+          Object.keys(openai.providers ?? {}).map((id) => (id === "openai" ? "opencode-go" : id)),
+        );
+      }),
+  );
+
+  it.effect(
+    "reads the base URL of the model's slot on a gateway route, and refuses a provider that the route can't reach",
+    () =>
+      Effect.gen(function* () {
+        const go = { provider: opencodeGo, model: "glm-5.3" };
+        const openai = { provider: openaiProvider, model: "gpt-test" };
+        const goBrain = goRequest.session.brain;
+        const slots = {
+          [OPENCODE_BASE_URL]: "http://llm.gw.test/openai-responses/v1",
+          [OPENCODE_GO_BASE_URL]: "http://llm.gw.test/opencode-go",
+        };
+        const variables = yield* Effect.forEach(
+          [
+            [slots, go, "gateway-api-key"],
+            [slots, openai, "gateway"],
+            [{ [OPENCODE_BASE_URL]: "https://api.openai.com/v1" }, openai, "api-key"],
+            [{}, openai, "api-key"],
+          ] as const,
+          ([environment, choice, route]) => baseUrlVariable(environment, goBrain, choice, route),
+        );
+        assert.deepStrictEqual(variables, [
+          Option.some(OPENCODE_GO_BASE_URL),
+          Option.some(OPENCODE_BASE_URL),
+          Option.some(OPENCODE_BASE_URL),
+          Option.none(),
+        ]);
+        const unheld = yield* Effect.flip(
+          baseUrlVariable({ [OPENCODE_BASE_URL]: "set" }, goBrain, go, "gateway-api-key"),
+        );
+        assert.strictEqual(
+          unheld.message,
+          'The gateway holds no OpenCode Go credential for the model "opencode-go/glm-test". Connect one for opencode-go at the gateway, and list its slot opencode-go in the worker\'s llm_providers.',
+        );
+        const direct = yield* Effect.flip(
+          baseUrlVariable({ [OPENCODE_GO_BASE_URL]: "set" }, goBrain, go, "api-key"),
+        );
+        assert.include(direct.message, "only through a gateway that holds its key");
+      }),
   );
 });
