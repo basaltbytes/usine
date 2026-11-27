@@ -325,6 +325,22 @@ describe("OpenCode bridge", () => {
     expect(mcpLines(bridge.lines)).toHaveLength(1);
   });
 
+  it("doesn't report or reopen a client MCP socket when serve exits", async () => {
+    // The helper keeps serve's output open, so the bridge runs for its grace after serve's exit and
+    // would report a reconnection within it.
+    const bridge = start("helper");
+    await eventually(() => bridge.stderr().includes("fake serve: helper"));
+    helpers.push(Number(/fake serve: helper (\d+)/u.exec(bridge.stderr())?.[1]));
+    await eventually(() => bridge.lines.length >= 2);
+    bridge.send({ id: 1, mcp: "usine", directory: "/work" });
+    await eventually(() => mcpLines(bridge.lines).length >= 1);
+    bridge.send({ id: 2, method: "POST", path: "/api/crash-holding-mcp" });
+    expect(await bridge.exit).toBe(4);
+    expect(bridge.stderr()).toContain("fake serve: crashed with its MCP sockets open");
+    expect(bridge.stderr()).not.toContain("reconnecting");
+    expect(mcpLines(bridge.lines)).toHaveLength(1);
+  });
+
   it("answers a connect line with an error when OpenCode refuses the socket", async () => {
     const bridge = start("refuse-mcp");
     await eventually(() => bridge.lines.length >= 2);

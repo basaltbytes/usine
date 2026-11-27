@@ -28,15 +28,15 @@ const sessionId = AgentSessionId.make("parent:tools:child:1");
 const messages = (records: ReturnType<typeof collectLogs>["records"]) =>
   records.map(({ message }) => (Array.isArray(message) ? message[0] : message));
 
-const WaitForever = Tool.make("wait_forever", {
-  description: "Waits until the call is cancelled.",
+const WaitForRelease = Tool.make("wait_for_release", {
+  description: "Waits until the test releases it, and then answers `released`.",
   success: Schema.String,
 });
 const ReadLarge = Tool.make("read_large", {
   description: "Returns a text that fits a bridge line in characters but not in UTF-8 bytes.",
   success: Schema.String,
 });
-const tools = Toolkit.make(ReadNote, WaitForever, ReadLarge);
+const tools = Toolkit.make(ReadNote, WaitForRelease, ReadLarge);
 
 /**
  * A bridge that answers the connect line with `status`, and records the messages that the usine
@@ -87,44 +87,55 @@ const lost = SessionOperationError.make({
   cause: new Error("killed"),
 });
 
-/** Serves `tools` with handlers that record when `wait_forever` starts and is cancelled. */
+/** Serves `tools` with handlers that record when `wait_for_release` starts and is cancelled. */
 const served = Effect.gen(function* () {
   const started = yield* Deferred.make<void>();
   const cancelled = yield* Deferred.make<void>();
+  const released = yield* Deferred.make<void>();
   const handlers = tools.toLayer({
     read_note: ({ name }) =>
       name === "greeting" ? Effect.succeed(NOTE) : Effect.die(new Error("unexpected note")),
-    wait_forever: () =>
+    wait_for_release: () =>
       Deferred.succeed(started, undefined).pipe(
-        Effect.andThen(Effect.never),
+        Effect.andThen(Deferred.await(released)),
+        Effect.as("released"),
         Effect.onInterrupt(() => Deferred.succeed(cancelled, undefined)),
       ),
     read_large: () => Effect.succeed("é".repeat(MAX_PROTOCOL_LINE_BYTES / 2 + 8)),
   });
   const bound = yield* hostToolSet(tools).pipe(Effect.provide(handlers));
   const server = yield* serveOpenCodeTools(bound, sessionId);
-  return { server, started: Deferred.await(started), cancelled: Deferred.await(cancelled) };
+  return {
+    server,
+    started: Deferred.await(started),
+    cancelled: Deferred.await(cancelled),
+    wasCancelled: Deferred.isDone(cancelled),
+    release: Deferred.succeed(released, undefined),
+  };
 });
 
-/** Runs OpenCode's start of a new socket on `bridge`, and returns the ping that it waits for. */
-const listOn = (bridge: Effect.Success<ReturnType<typeof connection>>) =>
+/** Runs OpenCode's start of a new socket on `bridge`: `initialize` and `tools/list`. */
+const startOn = (bridge: Effect.Success<ReturnType<typeof connection>>) =>
   Effect.gen(function* () {
     yield* bridge.receive({ jsonrpc: "2.0", id: 0, method: "initialize" });
     yield* bridge.sent;
     yield* bridge.receive({ jsonrpc: "2.0", id: 1, method: "tools/list" });
     yield* bridge.sent;
-    return yield* bridge.sent;
   });
+
+/** Runs OpenCode's start of a new socket on `bridge`, and returns the ping that it waits for. */
+const listOn = (bridge: Effect.Success<ReturnType<typeof connection>>) =>
+  startOn(bridge).pipe(Effect.andThen(bridge.sent));
 
 /** Attaches the tools on a new socket and runs OpenCode's side of the start up to the ping's answer. */
 const attached = Effect.gen(function* () {
-  const { server, started, cancelled } = yield* served;
+  const { server, ...handlers } = yield* served;
   const bridge = yield* connection(101);
   const attach = yield* Effect.forkChild(server.attach(bridge.fake, "/work", ROOT));
   const ping = yield* listOn(bridge);
   yield* bridge.receive({ jsonrpc: "2.0", id: ping.id ?? null, result: {} });
   yield* Fiber.join(attach);
-  return { bridge, started, cancelled };
+  return { bridge, ...handlers };
 });
 
 const call = (id: number, name: string, caller: string, args: Schema.Json = {}) => ({
@@ -163,7 +174,7 @@ describe("OpenCode usine tools", () => {
       const listed = yield* bridge.sent.pipe(Effect.flatMap(decodeListed));
       assert.deepStrictEqual(
         listed.result.tools.map(({ name }) => name),
-        ["read_note", "wait_forever", "read_large"],
+        ["read_note", "wait_for_release", "read_large"],
       );
       const ping = yield* bridge.sent;
       assert.deepStrictEqual(ping, { jsonrpc: "2.0", id: "usine-ping-1", method: "ping" });
@@ -260,7 +271,7 @@ describe("OpenCode usine tools", () => {
     const logs = collectLogs(["Info", "Warn"]);
     return Effect.gen(function* () {
       const { bridge, started, cancelled } = yield* attached;
-      yield* bridge.receive(call(7, "wait_forever", ROOT));
+      yield* bridge.receive(call(7, "wait_for_release", ROOT));
       yield* started;
       yield* bridge.receive({
         jsonrpc: "2.0",
@@ -295,10 +306,54 @@ describe("OpenCode usine tools", () => {
   it.effect("interrupts the running calls when the relay ends", () =>
     Effect.gen(function* () {
       const { bridge, started, cancelled } = yield* attached;
-      yield* bridge.receive(call(7, "wait_forever", ROOT));
+      yield* bridge.receive(call(7, "wait_for_release", ROOT));
       yield* started;
       yield* bridge.fail(lost);
       yield* cancelled;
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("interrupts the calls of a socket that OpenCode closes", () => {
+    const logs = collectLogs(["Info"]);
+    return Effect.gen(function* () {
+      const { bridge, started, wasCancelled } = yield* attached;
+      yield* bridge.receive(call(2, "wait_for_release", ROOT));
+      yield* started;
+      yield* bridge.close;
+      // OpenCode numbers the requests of each socket from 0, so the next socket reuses ID 2.
+      yield* startOn(bridge);
+      const endedByClose = yield* wasCancelled;
+      assert.isTrue(endedByClose, "the close, not the next call, ends the call");
+      const interrupted = logs.records.flatMap(({ message }) =>
+        Array.isArray(message) &&
+        message[0] ===
+          "Interrupting the usine tool calls of the closed MCP socket, whose answers OpenCode no longer waits for"
+          ? [message[1]]
+          : [],
+      );
+      assert.deepStrictEqual(interrupted, [{ sessionId, requestIds: [2] }]);
+      yield* bridge.receive(call(2, "read_note", ROOT, { name: "greeting" }));
+      const answer = yield* bridge.sent;
+      assert.deepStrictEqual(answer, {
+        jsonrpc: "2.0",
+        id: 2,
+        result: { content: [{ type: "text", text: NOTE }], isError: false },
+      });
+    }).pipe(Effect.scoped, Effect.provide(logs.layer));
+  });
+
+  it.effect("sends no answer for a call of a socket that OpenCode closed", () =>
+    Effect.gen(function* () {
+      const { bridge, started, release } = yield* attached;
+      yield* bridge.receive(call(2, "wait_for_release", ROOT));
+      yield* started;
+      yield* bridge.close;
+      yield* startOn(bridge);
+      yield* release;
+      yield* Effect.yieldNow;
+      yield* bridge.receive({ jsonrpc: "2.0", id: 2, method: "ping" });
+      const answer = yield* bridge.sent;
+      assert.deepStrictEqual(answer, { jsonrpc: "2.0", id: 2, result: {} });
     }).pipe(Effect.scoped),
   );
 

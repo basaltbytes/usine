@@ -93,7 +93,7 @@ export const opencode = HarnessDescriptor.make({
         Lacking.make({
           capability: "durable-coordination",
           reason:
-            "OpenCode resumes sessions without a durable journal of usine tool intents and results",
+            "OpenCode resumes sessions without a durable journal of usine tool intents and results, and a retained bridge replays its output from the last delivered checkpoint: a usine tool call that the previous runtime answered after that checkpoint runs again, and one that it read before the checkpoint and never answered stays unanswered",
         }),
         Lacking.make({
           capability: "structured-output",

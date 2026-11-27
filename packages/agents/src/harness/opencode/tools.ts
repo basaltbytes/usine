@@ -72,7 +72,8 @@ export interface OpenCodeTools {
    * lists them; when OpenCode closes the socket first, waits for the list on the next socket.
    * Fails with the relay's error when `connection`'s output ends or fails during the wait. A call
    * from another session, such as a subagent's, returns an error result, and so does a call whose
-   * result is longer than a bridge line.
+   * result is longer than a bridge line. A socket's close interrupts its running calls, and their
+   * answers are never sent.
    */
   readonly attach: (
     connection: McpConnection,
@@ -258,13 +259,24 @@ export const serveOpenCodeTools = Effect.fn("OpenCodeRuntime.serveTools")(functi
       yield* FiberMap.remove(calls, requestId);
     });
 
-    /** Starts the wait for the next socket and ends the wait for the closed one. */
+    /**
+     * Interrupts the calls of the closed socket, starts the wait for the next socket, and ends the
+     * wait for the closed one.
+     */
     const socketClosed = (reason: string) =>
       Effect.gen(function* () {
         yield* Effect.logWarning(
           "OpenCode closed the usine tools' MCP socket; the bridge reconnects it",
           { sessionId, reason },
         );
+        const running = Array.from(calls, ([id]) => id);
+        if (running.length > 0) {
+          yield* Effect.logInfo(
+            "Interrupting the usine tool calls of the closed MCP socket, whose answers OpenCode no longer waits for",
+            { sessionId, requestIds: running },
+          );
+          yield* FiberMap.clear(calls);
+        }
         const next = yield* socketWait;
         const previous = yield* Ref.getAndSet(socket, next);
         yield* Deferred.succeed(previous.closed, undefined);

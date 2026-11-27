@@ -284,6 +284,15 @@ const routes = new Map<string, Route>(
       process.stderr.write("fake serve: crashed while answering\n");
       process.exit(4);
     },
+    // A helper holds the client MCP sockets for 100 ms, so the bridge sees the exit before they close.
+    "POST /api/crash-holding-mcp": () => {
+      spawn(process.execPath, ["-e", "setTimeout(() => {}, 100)"], {
+        detached: true,
+        stdio: ["ignore", "ignore", "ignore", ...mcpSockets.values()],
+      }).unref();
+      process.stderr.write("fake serve: crashed with its MCP sockets open\n");
+      process.exit(4);
+    },
     "POST /api/mcp-close": (_request, response) => {
       closeMcpSockets();
       json(response, 200, {});
