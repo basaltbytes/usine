@@ -13,7 +13,7 @@ An agent is standing instructions plus a brain spec: harness, model, and effort.
 
 ## Status
 
-Built: runtimes and descriptors, a role-neutral session spec (#1203), roles as declarations (#1204), usine tool sets, a structured `complete`, and the supervisor role on Pi, Claude Code, and Codex (#1205, #1206, #1208, #1267, #1280). Codex lacks `closed-tools`, so it keeps all its tools for a read-only role, such as the supervisor, whose container limits them. OpenCode runs the coding agent only, until it serves usine tools (#1386). Pi runs children on local workers only. Every new attempt runs on the event-driven coordinator (#1157, #1166); the Pi parent runs only the attempts that earlier versions started with it.
+Built: runtimes and descriptors, a role-neutral session spec (#1203), roles as declarations (#1204), usine tool sets, a structured `complete`, and the supervisor role on Pi, Claude Code, and Codex (#1205, #1206, #1208, #1267, #1280). Codex lacks `closed-tools`, so it keeps all its tools for a read-only role, such as the supervisor, whose container limits them. OpenCode serves usine tool sets (#1386) but runs only on workers, so not the supervisor. Pi runs children on local workers only. Every new attempt runs on the event-driven coordinator (#1157, #1166); the Pi parent runs only the attempts that earlier versions started with it.
 
 ## Considered options
 
