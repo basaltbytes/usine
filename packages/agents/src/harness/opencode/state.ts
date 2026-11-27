@@ -254,7 +254,13 @@ export const answered = (pending: Pending, key: number, id: string): InputsEnded
   };
 };
 
-/** Drops input `key`, whose post failed. */
+/**
+ * Drops input `key`, whose post failed, as an input that OpenCode won't deliver. An input posted
+ * without an ID that OpenCode delivered before the post failed is dropped too, because no inbox ID
+ * matches it to the delivery: a paused turn that the input kept open then ends with the
+ * interrupted execution's answer, and the answer of the execution that read the input follows.
+ * After a pause, only `RunningSession.steer` posts an input without an ID.
+ */
 export const failed = (pending: Pending, key: number): InputsEnded => ({
   pending: settled({ ...pending, inputs: pending.inputs.filter((input) => input.key !== key) }),
   dropped: isPending(pending, key) ? [key] : [],

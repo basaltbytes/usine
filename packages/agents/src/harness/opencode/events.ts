@@ -199,6 +199,7 @@ export const openCodeEvents = (context: OpenCodeContext, actions: EventActions) 
         const { execution } = yield* Ref.getAndUpdate(state, (latest): OpenCodeState => ({
           ...latest,
           execution: Execution.Running(),
+          executions: latest.executions + 1,
           lastText: Option.none(),
           retries: 0,
           retrying: false,

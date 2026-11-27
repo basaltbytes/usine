@@ -463,12 +463,12 @@ const makeCodexAppServer = Effect.gen(function* () {
             operation,
             generation: yield* handle.generation,
             write: (id) => write({ id, method, params }, operation),
-            timedOut: (timeout) =>
+            timedOut: (cause) =>
               operationError(
                 operation,
                 request,
-                `Codex app-server didn't respond to ${method} within ${timeout}`,
-                new Error("request timed out"),
+                `Codex app-server didn't respond to ${method} within ${cause.timeout}`,
+                cause,
               ),
           });
         });

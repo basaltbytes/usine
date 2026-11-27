@@ -291,12 +291,8 @@ export const bridgeClient = Effect.fn("OpenCodeBridge.client")(function* (stream
       operation,
       generation: streams.generation,
       write: (id: BridgeRequestId) => write(operation, target, line(id)),
-      timedOut: (timeout) =>
-        failure(
-          operation,
-          `OpenCode didn't answer ${target} within ${timeout}`,
-          new Error("request timed out"),
-        ),
+      timedOut: (cause) =>
+        failure(operation, `OpenCode didn't answer ${target} within ${cause.timeout}`, cause),
     });
 
   const request: BridgeClient["request"] = Effect.fn("OpenCodeBridge.request")(

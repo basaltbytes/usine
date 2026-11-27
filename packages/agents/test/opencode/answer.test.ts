@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest";
-import { Steer } from "@usine/core/attempt/channel";
+import { OperatorMessage, Steer } from "@usine/core/attempt/channel";
 import { Effect, Fiber, Option } from "effect";
 import { TestClock } from "effect/testing";
 import { ChildRequest } from "../../src/runtime.ts";
@@ -210,6 +210,53 @@ describe("OpenCode answer", () => {
     }).pipe(Effect.scoped),
   );
 
+  it.effect("retries a lookup that OpenCode doesn't answer in time", () =>
+    Effect.gen(function* () {
+      const { bridge, running } = yield* launched("Started the tests.");
+      yield* bridge.holdNext("jobs");
+      for (const line of firstExecutionEnds) yield* bridge.emit(line);
+      const jobs = yield* bridge.request;
+      assert(jobs.path.startsWith("/api/experimental/job"));
+      // The request timeout and the retry wait on the test clock.
+      yield* Effect.forkScoped(
+        Effect.forever(TestClock.adjust("1 second").pipe(Effect.andThen(Effect.yieldNow))),
+      );
+      const result = yield* running.result;
+      assert.strictEqual(result.message, "FIRST");
+      const answered = yield* bridge.answered;
+      assert(
+        answered.some(({ path }) => path.startsWith("/api/experimental/job")),
+        "the retry read the running jobs",
+      );
+    }).pipe(Effect.scoped),
+  );
+
+  for (const [problem, status, body, reason] of [
+    ["a 4xx answer", 404, { message: "No such session" }, "No such session"],
+    ["a body that doesn't decode", 200, { data: "busy" }, "unexpected body"],
+  ] as const)
+    it.live(`fails the session without a retry after ${problem} to a lookup`, () =>
+      Effect.gen(function* () {
+        const { bridge, running } = yield* launched("Started the tests.");
+        yield* bridge.holdNext("jobs");
+        for (const line of firstExecutionEnds) yield* bridge.emit(line);
+        const jobs = yield* bridge.request;
+        assert(jobs.path.startsWith("/api/experimental/job"));
+        yield* bridge.reply(jobs, status, body);
+        // A retry would wait about a second.
+        const failure = yield* running.result.pipe(Effect.flip, Effect.timeoutOption("500 millis"));
+        assert(Option.isSome(failure), "the session fails within the first backoff");
+        assert(failure.value._tag === "SessionOperationError");
+        assert.include(failure.value.message, "Could not read OpenCode's running jobs");
+        assert.include(failure.value.message, reason);
+        const answered = yield* bridge.answered;
+        assert(
+          !answered.some(({ path }) => path.startsWith("/api/experimental/job")),
+          "the runtime doesn't read the running jobs again",
+        );
+      }).pipe(Effect.scoped),
+    );
+
   it.live(
     "answers once an operator message posted while the answer waits for work is cancelled",
     () =>
@@ -253,6 +300,108 @@ describe("OpenCode answer", () => {
       yield* Fiber.join(steering).pipe(Effect.flip);
       const result = yield* running.result;
       assert.strictEqual(result.message, "FIRST");
+    }).pipe(Effect.scoped),
+  );
+
+  it.live("reports idle once when a retried done check outlasts the next execution", () =>
+    Effect.gen(function* () {
+      const { bridge, running, seen, until } = yield* launched("OLD");
+      const steering = yield* Effect.forkScoped(running.steer("Reply STEERED instead."));
+      const posted = yield* bridge.request;
+      for (const line of [
+        ...firstExecutionEnds,
+        event("session.usage.updated", { cost: 0.01, tokens: tokens(100, 10) }),
+      ])
+        yield* bridge.emit(line);
+      // The second usage report follows the handled success.
+      yield* until("SessionTokensUpdated");
+      yield* until("SessionTokensUpdated");
+      // The failed post makes the answer due, so the done check runs again in a task.
+      yield* bridge.holdNext("jobs");
+      yield* bridge.reply(posted, 500, { message: "The session can't take input" });
+      yield* Fiber.await(steering);
+      const jobs = yield* bridge.request;
+      assert(jobs.path.startsWith("/api/experimental/job"));
+      // The operator's message holds the session and starts the next execution.
+      const message = OperatorMessage.make({ message: "Reply SECOND." });
+      const sending = yield* Effect.forkScoped(running.intervene(message, () => Effect.void));
+      const prompt = yield* bridge.request;
+      const id = assertPrompt(prompt, message.message);
+      assert(Option.isSome(id));
+      yield* bridge.reply(prompt, 200, { data: { id: id.value } });
+      yield* Fiber.join(sending);
+      // The task's jobs read fails once; its retry waits about a second.
+      yield* bridge.reply(jobs, 503, { message: "OpenCode is busy" });
+      for (const line of [
+        event("session.inbox.enqueued", { inboxID: id.value }),
+        ...execution(id.value, "SECOND"),
+      ])
+        yield* bridge.emit(line);
+      const idle = yield* until("SessionIdle");
+      assert(idle._tag === "SessionIdle");
+      assert.deepStrictEqual(idle.message, Option.some("SECOND"));
+      // The task's retry reads the active sessions last, after the next execution's check.
+      yield* bridge.holdNext("active");
+      const active = yield* bridge.request;
+      assert.strictEqual(active.path, "/api/session/active");
+      yield* bridge.reply(active, 200, { data: {} });
+      const again = yield* until("SessionIdle").pipe(Effect.timeoutOption("200 millis"));
+      assert(Option.isNone(again), "the retried check doesn't report the next execution idle");
+      assert.strictEqual(seen.filter((value) => value._tag === "SessionIdle").length, 1);
+    }).pipe(Effect.scoped),
+  );
+
+  it.live("doesn't finish a check that waits for the lock while the next execution starts", () =>
+    Effect.gen(function* () {
+      const { bridge, running, seen, until } = yield* launched("OLD");
+      const steering = yield* Effect.forkScoped(running.steer("Reply STEERED instead."));
+      const posted = yield* bridge.request;
+      for (const line of [
+        ...firstExecutionEnds,
+        event("session.usage.updated", { cost: 0.01, tokens: tokens(100, 10) }),
+      ])
+        yield* bridge.emit(line);
+      yield* until("SessionTokensUpdated");
+      yield* until("SessionTokensUpdated");
+      // The failed post makes the answer due, so the done check runs again in a task.
+      yield* bridge.holdNext("active");
+      yield* bridge.reply(posted, 500, { message: "The session can't take input" });
+      yield* Fiber.await(steering);
+      const active = yield* bridge.request;
+      assert.strictEqual(active.path, "/api/session/active");
+      // The operator's message holds the conversation's lock while its post is open.
+      const message = OperatorMessage.make({ message: "Reply SECOND." });
+      const sending = yield* Effect.forkScoped(running.intervene(message, () => Effect.void));
+      const prompt = yield* bridge.request;
+      const id = assertPrompt(prompt, message.message);
+      assert(Option.isSome(id));
+      // The task reports no work and waits for the lock to finish the answer.
+      yield* bridge.reply(active, 200, { data: {} });
+      yield* Effect.sleep("50 millis");
+      // OpenCode starts the next execution and reads the message before the post answers.
+      for (const line of [
+        event("session.inbox.enqueued", { inboxID: id.value }),
+        event("session.execution.started"),
+        event("session.inbox.delivered", { inboxID: id.value }),
+      ])
+        yield* bridge.emit(line);
+      yield* Effect.sleep("50 millis");
+      yield* bridge.reply(prompt, 200, { data: { id: id.value } });
+      yield* Fiber.join(sending);
+      const early = yield* until("SessionIdle").pipe(Effect.timeoutOption("300 millis"));
+      assert(Option.isNone(early), "the task doesn't finish while the next execution runs");
+      for (const line of [
+        event("session.text.ended", { text: "SECOND" }),
+        event("session.step.ended"),
+        event("session.execution.succeeded"),
+      ])
+        yield* bridge.emit(line);
+      const idle = yield* until("SessionIdle");
+      assert(idle._tag === "SessionIdle");
+      assert.deepStrictEqual(idle.message, Option.some("SECOND"));
+      const again = yield* until("SessionIdle").pipe(Effect.timeoutOption("300 millis"));
+      assert(Option.isNone(again), "the session reports idle once");
+      assert.strictEqual(seen.filter((value) => value._tag === "SessionIdle").length, 1);
     }).pipe(Effect.scoped),
   );
 

@@ -14,6 +14,11 @@ export interface OpenCodeState {
   readonly connection: OpenCodeConnection;
   readonly api: OpenCodeApi;
   readonly execution: Execution;
+  /**
+   * How many root executions started since the session opened, which tells a done check whether
+   * OpenCode started an execution after the one that it checks.
+   */
+  readonly executions: number;
   readonly pending: Pending;
   /** Tool names by call ID, from `session.tool.input.started`. */
   readonly toolNames: ReadonlyMap<string, string>;
