@@ -105,7 +105,9 @@ describe("An Attempt's environment behind a Gateway", () => {
         harness === "codex" || harness === "opencode",
       );
       assert.strictEqual("USINE_OPENCODE_HOME" in environment, harness === "opencode");
-      assert.strictEqual("USINE_OPENCODE_BASE_URL" in environment, harness === "opencode");
+      assert.strictEqual("USINE_OPENCODE_OPENAI_BASE_URL" in environment, harness === "opencode");
+      // The attempt's own API key sets `USINE_OPENCODE_BASE_URL`; the gateway never does.
+      assert.notProperty(environment, "USINE_OPENCODE_BASE_URL");
       assert.strictEqual("USINE_OPENCODE_GO_BASE_URL" in environment, harness === "opencode");
       assert.strictEqual(exported.GH_HOST, "git.gw.internal");
     }
@@ -115,7 +117,7 @@ describe("An Attempt's environment behind a Gateway", () => {
     });
     assert.strictEqual(opencode.exported.USINE_OPENCODE_HOME, "/attempt/opencode");
     assert.strictEqual(
-      opencode.exported.USINE_OPENCODE_BASE_URL,
+      opencode.exported.USINE_OPENCODE_OPENAI_BASE_URL,
       "http://llm.gw.internal/openai-responses/v1",
     );
     assert.strictEqual(

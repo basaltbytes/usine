@@ -124,7 +124,13 @@ export const gatewayExportedEnvironment = (
  *   forward proxy, whose allowlist must include the login's hosts.
  */
 export const gatewayEnvironment = (
-  options: GatewayEnvironmentOptions & { readonly harness: Option.Option<Harness> },
+  options: GatewayEnvironmentOptions & {
+    /**
+     * The harness that calls the Gateway's slots with the caller token, or `None`. An Attempt
+     * passes its harness only if the Gateway holds the slot of its model's provider.
+     */
+    readonly harness: Option.Option<Harness>;
+  },
 ): GatewayEnvironment => {
   const { domain, callerToken } = options;
   const gitBase = `http://git.${domain}/`;

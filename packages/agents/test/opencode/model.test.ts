@@ -22,10 +22,11 @@ import type { CredentialRoute } from "../../src/harness/capability.ts";
 import { HarnessCatalog } from "../../src/harness/harness.ts";
 import { bridgeClient } from "../../src/harness/opencode/bridge/client.ts";
 import { BridgeRequest } from "../../src/harness/opencode/bridge/lines.ts";
-import { baseUrlVariable, serveConfig } from "../../src/harness/opencode/config.ts";
+import { serveConfig, sessionCredential } from "../../src/harness/opencode/config.ts";
 import {
   OPENCODE_BASE_URL,
   OPENCODE_GO_BASE_URL,
+  OPENCODE_OPENAI_BASE_URL,
   opencode,
 } from "../../src/harness/opencode/descriptor.ts";
 import { modelChoice } from "../../src/harness/opencode/model.ts";
@@ -340,7 +341,7 @@ describe("OpenCode model check", () => {
         environment: {
           HOME: "/home/scripted",
           USINE_GATEWAY_TOKEN: "caller-token",
-          [OPENCODE_BASE_URL]: "http://llm.gw.test/openai-responses/v1",
+          [OPENCODE_OPENAI_BASE_URL]: "http://llm.gw.test/openai-responses/v1",
         },
       }),
       'The gateway holds no OpenCode Go credential for the model "opencode-go/glm-test". Connect one for opencode-go at the gateway, and list its slot opencode-go in the worker\'s llm_providers.',
@@ -410,7 +411,49 @@ describe("OpenCode model check", () => {
         );
       }).pipe(Effect.scoped),
   );
+
+  it.effect(
+    "starts an OpenAI session on the attempt's API key when its worker reports the key as the gateway's api-key kind",
+    () =>
+      Effect.gen(function* () {
+        const server = yield* listingServer([listed]);
+        yield* Effect.gen(function* () {
+          const backend = yield* ChildBackend;
+          return yield* backend.launch(
+            ChildRequest.make({
+              ...childRequest,
+              environment: {
+                HOME: "/home/scripted",
+                [OPENCODE_BASE_URL]: "https://api.openai.com/v1",
+              },
+              session: ChildSession.make({
+                ...childRequest.session,
+                gatewayCredential: Option.some("api-key"),
+              }),
+            }),
+          );
+        }).pipe(Effect.provide(scriptedBackend(server.layer)), Effect.exit);
+        const [target] = yield* server.targets;
+        assert(target !== undefined);
+        const config = yield* Schema.decodeUnknownEffect(OpenAiConfig)(
+          target.environment.USINE_OPENCODE_SERVE_OPENCODE_CONFIG_CONTENT,
+        );
+        assert.deepStrictEqual(config.providers.openai.settings, {
+          apiKey: "{env:OPENAI_API_KEY}",
+          transport: "http",
+          baseURL: "{env:USINE_OPENCODE_BASE_URL}",
+        });
+      }).pipe(Effect.scoped),
+  );
 });
+
+const OpenAiConfig = Schema.fromJsonString(
+  Schema.Struct({
+    providers: Schema.Struct({
+      openai: Schema.Struct({ settings: Schema.Record(Schema.String, Schema.String) }),
+    }),
+  }),
+);
 
 const GoConfig = Schema.fromJsonString(
   Schema.Struct({
@@ -542,10 +585,10 @@ describe("OpenCode session configuration", () => {
         const openai = chosen("gpt-test");
         const goBrain = goRequest.session.brain;
         const slots = {
-          [OPENCODE_BASE_URL]: "http://llm.gw.test/openai-responses/v1",
+          [OPENCODE_OPENAI_BASE_URL]: "http://llm.gw.test/openai-responses/v1",
           [OPENCODE_GO_BASE_URL]: "http://llm.gw.test/opencode-go",
         };
-        const variables = yield* Effect.forEach(
+        const credentials = yield* Effect.forEach(
           [
             [slots, go, "gateway-api-key"],
             [slots, openai, "gateway"],
@@ -553,25 +596,61 @@ describe("OpenCode session configuration", () => {
             [{}, openai, "api-key"],
           ] as const,
           ([environment, choice, route]) =>
-            baseUrlVariable(environment, goBrain, choice, context(route)),
+            sessionCredential(environment, goBrain, choice, context(route)),
         );
-        assert.deepStrictEqual(variables, [
-          Option.some(OPENCODE_GO_BASE_URL),
-          Option.some(OPENCODE_BASE_URL),
-          Option.some(OPENCODE_BASE_URL),
-          Option.none(),
+        assert.deepStrictEqual(credentials, [
+          { route: "gateway-api-key", baseUrl: Option.some(OPENCODE_GO_BASE_URL) },
+          { route: "gateway", baseUrl: Option.some(OPENCODE_OPENAI_BASE_URL) },
+          { route: "api-key", baseUrl: Option.some(OPENCODE_BASE_URL) },
+          { route: "api-key", baseUrl: Option.none() },
         ]);
         const unheld = yield* Effect.flip(
-          baseUrlVariable({ [OPENCODE_BASE_URL]: "set" }, goBrain, go, context("gateway-api-key")),
+          sessionCredential(
+            { [OPENCODE_OPENAI_BASE_URL]: "set" },
+            goBrain,
+            go,
+            context("gateway-api-key"),
+          ),
         );
         assert.strictEqual(
           unheld.message,
           'The gateway holds no OpenCode Go credential for the model "opencode-go/glm-test". Connect one for opencode-go at the gateway, and list its slot opencode-go in the worker\'s llm_providers.',
         );
         const direct = yield* Effect.flip(
-          baseUrlVariable({ [OPENCODE_GO_BASE_URL]: "set" }, goBrain, go, context("api-key")),
+          sessionCredential({ [OPENCODE_GO_BASE_URL]: "set" }, goBrain, go, context("api-key")),
         );
         assert.include(direct.message, "only through a gateway that holds its key");
+      }),
+  );
+
+  it.effect(
+    "uses the attempt's API key on a gateway route whose gateway holds no slot of the model's provider",
+    () =>
+      Effect.gen(function* () {
+        const provisioned = { [OPENCODE_BASE_URL]: "https://api.openai.com/v1" };
+        const goBrain = goRequest.session.brain;
+        const credential = yield* sessionCredential(
+          provisioned,
+          goBrain,
+          chosen("gpt-test"),
+          context("gateway-api-key"),
+        );
+        assert.deepStrictEqual(credential, {
+          route: "api-key",
+          baseUrl: Option.some(OPENCODE_BASE_URL),
+        });
+        const go = yield* Effect.flip(
+          sessionCredential(
+            provisioned,
+            goBrain,
+            chosen("opencode-go/glm-5.3"),
+            context("gateway-api-key"),
+          ),
+        );
+        assert.strictEqual(
+          go.message,
+          "OpenCode reaches OpenCode Go models only through a gateway that holds its key, and the api-key route has none",
+        );
       }),
   );
 });

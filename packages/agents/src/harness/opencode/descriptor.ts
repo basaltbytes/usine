@@ -20,8 +20,11 @@ export const OPENCODE_VERSION = "2.3.2";
  */
 export const OPENCODE_HOME = "USINE_OPENCODE_HOME";
 
-/** The variable with the base URL of the OpenAI Responses API that the session calls. */
+/** The variable with the base URL of the OpenAI Responses API that the attempt's API key calls. */
 export const OPENCODE_BASE_URL = "USINE_OPENCODE_BASE_URL";
+
+/** The variable with the base URL of the gateway's OpenAI slot. */
+export const OPENCODE_OPENAI_BASE_URL = "USINE_OPENCODE_OPENAI_BASE_URL";
 
 /** The variable with the base URL of the gateway's OpenCode Go slot. */
 export const OPENCODE_GO_BASE_URL = "USINE_OPENCODE_GO_BASE_URL";
@@ -38,7 +41,8 @@ export const opencode = HarnessDescriptor.make({
       HarnessCredential.make({
         slotPath: "/v1",
         home: Option.some(OPENCODE_HOME),
-        // A gateway route sets the URL of each slot that the gateway holds, in `slots`.
+        // A gateway route sets the URL of each slot that the gateway holds, in `slots`, and the
+        // API-key route sets `OPENCODE_BASE_URL`, so the environment tells the two apart.
         gateway: CredentialWiring.make({
           tokenVariable: "USINE_GATEWAY_TOKEN",
           environment: { [OPENCODE_HOME]: "{{home}}" },
@@ -50,7 +54,7 @@ export const opencode = HarnessDescriptor.make({
           files: {},
         }),
         slots: {
-          [openai.id]: SlotVariable.make({ variable: OPENCODE_BASE_URL, path: "/v1" }),
+          [openai.id]: SlotVariable.make({ variable: OPENCODE_OPENAI_BASE_URL, path: "/v1" }),
           // OpenCode appends each protocol's path to the plan's one base URL.
           [opencodeGo.id]: SlotVariable.make({ variable: OPENCODE_GO_BASE_URL, path: "" }),
         },

@@ -478,6 +478,7 @@ describe("the OpenCode Go slot", () => {
           "http://llm.gw.test/opencode-go",
         );
         // The gateway holds no OpenAI key, so OpenCode gets no OpenAI slot.
+        assert.notProperty(given.environment, "USINE_OPENCODE_OPENAI_BASE_URL");
         assert.notProperty(given.environment, "USINE_OPENCODE_BASE_URL");
         assert.notProperty(given.environment, "OPENAI_API_KEY");
         assert.notProperty(given.host.stdinEnvironment ?? {}, "OPENAI_API_KEY");

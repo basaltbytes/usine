@@ -69,20 +69,53 @@ const tokenVariable = (route: CredentialRoute): string =>
   });
 
 /**
- * Returns the variable that holds the base URL of the session's provider, if the session's
- * `environment` sets one: on a gateway route, the variable of the provider's slot, which the
- * gateway route sets for each slot that the gateway holds, and otherwise `OPENCODE_BASE_URL`.
- * Fails for a provider that the session's `context` can't reach, which admission refuses first,
- * and on a gateway route for a provider whose slot the gateway doesn't hold.
+ * The credential of an OpenCode session: the route whose key it reads, and the variable that holds
+ * the base URL of the model's provider, if the session's environment sets one.
  */
-export const baseUrlVariable = Effect.fn("OpenCodeConfig.baseUrlVariable")(function* (
+interface SessionCredential {
+  readonly route: CredentialRoute;
+  readonly baseUrl: Option.Option<string>;
+}
+
+/**
+ * Returns the credential of a session from its `environment` and its `context`'s route.
+ *
+ * - On a gateway route, the session uses the caller token and the variable of the slot of the
+ *   model's provider, which the gateway sets for each slot that it holds.
+ * - On a gateway route whose environment has no slot of the model's provider but sets
+ *   `OPENCODE_BASE_URL`, the session uses the attempt's API key: a worker reports the attempt's
+ *   provisioned key as the gateway's `api-key` kind.
+ * - On any other route, the session uses the API key, and `OPENCODE_BASE_URL` if it is set.
+ *
+ * Fails for a provider that the route can't reach, which admission refuses first, and on a gateway
+ * route for a provider whose slot the gateway doesn't hold.
+ */
+export const sessionCredential = Effect.fn("OpenCodeConfig.sessionCredential")(function* (
   environment: Readonly<Record<string, string>>,
   brain: BrainSpec,
   choice: ModelChoice,
   context: AdmissionContext,
 ) {
-  const { placement, credential: route } = context;
-  const fields = { model: brain.model, provider: choice.provider.id, route };
+  const { placement, credential: admitted } = context;
+  const isSet = (variable: string) => (environment[variable] ?? "") !== "";
+  const slot = Option.filter(
+    Option.flatMap(opencode.worker.credential, ({ slots }) =>
+      Record.get(slots, choice.provider.id),
+    ),
+    () => isGatewayRoute(admitted),
+  ).pipe(
+    Option.map(({ variable }) => variable),
+    Option.filter(isSet),
+  );
+  if (Option.isSome(slot)) return { route: admitted, baseUrl: slot } satisfies SessionCredential;
+  const route: CredentialRoute =
+    isGatewayRoute(admitted) && isSet(OPENCODE_BASE_URL) ? "api-key" : admitted;
+  const fields = { model: brain.model, provider: choice.provider.id, admitted, route };
+  if (route !== admitted)
+    yield* Effect.logInfo(
+      "OpenCode uses the attempt's API key: the gateway holds no slot of the model's provider",
+      fields,
+    );
   if (!opencode.reaches(choice.provider, placement, route)) {
     yield* Effect.logError("OpenCode reaches the model's provider only through a gateway", fields);
     return yield* UnknownModelError.make({
@@ -91,15 +124,11 @@ export const baseUrlVariable = Effect.fn("OpenCodeConfig.baseUrlVariable")(funct
       message: `OpenCode reaches ${choice.provider.label} models only through a gateway that holds its key, and the ${route} route has none`,
     });
   }
-  const isSet = (variable: string) => (environment[variable] ?? "") !== "";
-  if (!isGatewayRoute(route)) return Option.some(OPENCODE_BASE_URL).pipe(Option.filter(isSet));
-  const slot = Option.flatMap(opencode.worker.credential, ({ slots }) =>
-    Record.get(slots, choice.provider.id),
-  ).pipe(
-    Option.map(({ variable }) => variable),
-    Option.filter(isSet),
-  );
-  if (Option.isSome(slot)) return slot;
+  if (!isGatewayRoute(route))
+    return {
+      route,
+      baseUrl: Option.some(OPENCODE_BASE_URL).pipe(Option.filter(isSet)),
+    } satisfies SessionCredential;
   yield* Effect.logError("The gateway holds no slot of the model's provider", fields);
   return yield* UnknownModelError.make({
     harness: opencode.id,

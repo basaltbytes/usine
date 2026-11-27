@@ -168,7 +168,7 @@ export const gatewayAttachmentsFor = Effect.fn("SshExecutor.gatewayAttachmentsFo
       Option.match(catalog.modelGatewayProvider(spec, settings.llmProviders), {
         onNone: () =>
           Effect.logInfo(
-            "The harness calls no Gateway slot: the Gateway doesn't hold the provider of the model, or the harness has no Gateway wiring",
+            "The harness calls no Gateway slot and gets no caller token: the Gateway doesn't hold the provider of the model, or the harness has no Gateway wiring",
             {
               ...fields,
               harness: spec.harness,
@@ -348,7 +348,13 @@ export const gatewayAttachmentsFor = Effect.fn("SshExecutor.gatewayAttachmentsFo
       ),
     ).pipe(Effect.forkScoped);
     const { exported, sent } = gatewayEnvironment({
-      harness: Option.map(brain, ({ harness }) => harness),
+      // The caller token goes only to a harness whose model's provider slot the Gateway holds.
+      harness: Option.map(
+        Option.filter(brain, (spec) =>
+          Option.isSome(catalog.modelGatewayProvider(spec, settings.llmProviders)),
+        ),
+        ({ harness }) => harness,
+      ),
       catalog,
       domain: settings.domain,
       egress: settings.egress,

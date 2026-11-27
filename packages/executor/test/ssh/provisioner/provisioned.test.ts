@@ -1,4 +1,6 @@
-import { anthropic, openai } from "@usine/core/agent/provider";
+import { anthropic, openai, opencodeGo } from "@usine/core/agent/provider";
+import { catalog } from "@usine/agents/harness";
+import { harnessesLiveFrom } from "@usine/agents/harness/node";
 import { assert, describe, it } from "@effect/vitest";
 import { RemoteShell } from "@usine/agents/child-host";
 import { Agent, AgentName, AgentPersona } from "@usine/core/agent";
@@ -18,6 +20,7 @@ import {
 import type { AttemptRequest } from "@usine/durable/attempt-runtime";
 import { completes, type StubParent, StubStorage } from "@usine/durable/testing";
 import {
+  ApiKey,
   LlmProvider,
   AnthropicSubscriptionToken,
   ChatGptLogin,
@@ -80,6 +83,32 @@ const codexAgent = Agent.make({
 });
 
 const codexRequest = CheckoutRequest.make({ ...request, agent: codexAgent });
+
+const openCodeAgent = Agent.make({
+  ...codexAgent,
+  brain: BrainSpec.make({
+    harness: Harness.make("opencode"),
+    model: ModelId.make("gpt-test"),
+    effort: "low",
+  }),
+});
+
+const openCodeRequest = CheckoutRequest.make({ ...request, agent: openCodeAgent });
+
+/** A Gateway that holds only the OpenCode Go plan's key. */
+const GO_PROVIDERS = {
+  [opencodeGo.slot]: LlmProvider.make({
+    upstream: Option.none(),
+    credential: ApiKey.make({ key: Redacted.make("sk-go-for-provisioned-tests") }),
+  }),
+};
+
+/** The harnesses, with OpenCode's probe answered by Claude Code's runtime on the fake machine. */
+const openCodeHarnesses = harnessesLiveFrom(catalog, (runtimes) => {
+  const runtime = runtimes.find(({ id }) => id === "claude");
+  assert(runtime !== undefined);
+  return runtimes.map((each) => (each.id === "opencode" ? { ...runtime, id: each.id } : each));
+}).pipe(Layer.orDie);
 
 const OPENAI_KEY = "sk-proj-openai-for-provisioned-tests";
 
@@ -303,6 +332,87 @@ describe("Provisioned SSH Worker behind a Gateway", () => {
       });
     },
   );
+  it.live(
+    "runs a bare OpenCode model on the provisioner's OpenAI key behind a Gateway that holds only the OpenCode Go slot, without the caller token",
+    () => {
+      const machine = fakeMachine();
+      const providers = fakeProviders();
+      const gateway = fakeGateway(machine, GO_PROVIDERS);
+      let given: AttemptRequest | undefined;
+      const parent: StubParent = (context) => {
+        given = context.request;
+        return completes(context);
+      };
+      return Effect.gen(function* () {
+        const executor = yield* Executor;
+        const machines = yield* WorkerMachines;
+        yield* executor.preflight(WORKER, [openCodeAgent.brain], 1);
+        const grant = yield* machines.create(WORKER, MACHINE_RUN, request.attemptId, [
+          openCodeAgent.brain,
+        ]);
+        yield* (yield* executor.prepare(openCodeRequest)).launch(sink);
+        assert(given !== undefined && Schema.is(RemoteShell)(given.host));
+        assert.strictEqual(stdinValue(given.host, "OPENAI_API_KEY"), OPENAI_KEY);
+        // The Gateway holds no slot of OpenAI, so the Attempt gets no caller token for its model.
+        assert.notProperty(given.host.stdinEnvironment ?? {}, "USINE_GATEWAY_TOKEN");
+        assert.notProperty(given.host.sshEnvironment, "USINE_GATEWAY_TOKEN");
+        assert.strictEqual(given.environment.USINE_OPENCODE_BASE_URL, "https://api.openai.com/v1");
+        assert.notProperty(given.environment, "USINE_OPENCODE_OPENAI_BASE_URL");
+        assert.notProperty(given.environment, "USINE_OPENCODE_GO_BASE_URL");
+        const credential = yield* given.gatewayCredential;
+        assert.deepStrictEqual(credential, Option.some("api-key"));
+        yield* machines.release(grant.hold);
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(
+          gatewayRuntimeOf(
+            machine,
+            providers,
+            gateway,
+            gatewayHetznerAddress([opencodeGo.slot], { openai: OPENAI_KEY }),
+            parent,
+            openCodeHarnesses,
+          ),
+        ),
+      );
+    },
+  );
+
+  it.live(
+    "checks the OpenAI API host for a bare OpenCode model behind a Gateway that holds only the OpenCode Go slot",
+    () => {
+      const machine = fakeMachine();
+      const providers = fakeProviders();
+      const gateway = fakeGateway(machine, GO_PROVIDERS);
+      machine.state.refusedHosts.add("api.openai.com");
+      return Effect.gen(function* () {
+        const executor = yield* Executor;
+        const machines = yield* WorkerMachines;
+        yield* executor.preflight(WORKER, [openCodeAgent.brain], 1);
+        const blocked = yield* machines
+          .create(WORKER, MACHINE_RUN, request.attemptId, [openCodeAgent.brain])
+          .pipe(Effect.flip);
+        assert.include(
+          blocked.message,
+          "OpenCode uses an API key on SSH worker \"eu-one\", and the gateway's forward proxy blocks api.openai.com. Add api.openai.com to the gateway's egress allowlist, or add openai-responses to the worker's llm_providers with the key on the gateway.",
+        );
+        assert.strictEqual(providers.hetzner.servers.size, 0, "the unusable machine was deleted");
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(
+          gatewayRuntimeOf(
+            machine,
+            providers,
+            gateway,
+            gatewayHetznerAddress([opencodeGo.slot], { openai: OPENAI_KEY }),
+            completes,
+            openCodeHarnesses,
+          ),
+        ),
+      );
+    },
+  );
+
   it.live(
     "reports a Gateway from before protocol slots in the Worker's preflight and in the first machine check",
     () => {
