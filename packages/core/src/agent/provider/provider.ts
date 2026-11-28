@@ -1,4 +1,4 @@
-import { Array as Arr, type Brand, Effect, Option, Schema, SchemaGetter } from "effect";
+import { Array as Arr, type Brand, Effect, Option, Result, Schema, SchemaGetter } from "effect";
 import type { GatewayCredentialKind } from "../../worker.ts";
 
 const KEBAB = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u;
@@ -231,7 +231,7 @@ export class ProviderProtocol extends Schema.Class<
     key: KeyHeader,
     /**
      * The methods that each route accepts, by route, or `None` for every method on every route.
-     * The Cloudflare outbound handler refuses another method.
+     * The gateway and the Cloudflare outbound handler refuse another method.
      */
     methods: Schema.Option(Schema.Record(RoutePattern, Schema.NonEmptyArray(RouteMethod))).pipe(
       Schema.withConstructorDefault(Effect.succeedNone),
@@ -270,6 +270,31 @@ export class ProviderProtocol extends Schema.Class<
     );
   }
 }
+
+/** The query parameters that can carry a key, such as Google's `?key=`, which never reach an upstream. */
+const KEY_PARAMETERS: ReadonlyArray<string> = ["key"];
+
+/** Returns the name of `pair`, one `name=value` of a query, decoded, or as written if it can't be. */
+const parameterName = (pair: string): string => {
+  const [name = ""] = pair.split("=", 1);
+  return Option.getOrElse(
+    Result.getSuccess(Result.try(() => decodeURIComponent(name.replaceAll("+", " ")))),
+    () => name,
+  );
+};
+
+/**
+ * Returns `search`, a query with its `?` or empty, without the parameters that can carry a key, so
+ * a caller token sent as `?key=` never reaches an upstream. The other parameters keep their order
+ * and encoding.
+ */
+export const upstreamSearch = (search: string): string => {
+  const kept = search
+    .replace(/^\?/u, "")
+    .split("&")
+    .filter((pair) => pair !== "" && !KEY_PARAMETERS.includes(parameterName(pair)));
+  return kept.length === 0 ? "" : `?${kept.join("&")}`;
+};
 
 /** The subscription logins whose sign-in and refresh the gateway implements. */
 export const SubscriptionLogin = Schema.Literals(["claude", "chatgpt"]);
@@ -498,6 +523,13 @@ export class ModelProviderCatalog extends Schema.Class<
   /** Every slot, in catalog order. */
   get slots(): ReadonlyArray<GatewaySlot> {
     return this.providers.map(({ slot }) => slot);
+  }
+
+  /** The header name of each protocol's key, once each, which can carry a caller token. */
+  get keyHeaders(): ReadonlyArray<HeaderName> {
+    return Arr.dedupe(
+      this.providers.flatMap(({ protocols }) => protocols.map(({ key }) => key.header)),
+    );
   }
 
   /** Returns the provider whose slot or ID is `name`. */

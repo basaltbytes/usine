@@ -168,5 +168,6 @@ export {
   SubscriptionCredential,
   SubscriptionLogin,
   UpstreamBase,
+  upstreamSearch,
   WireProtocol,
 } from "./provider.ts";

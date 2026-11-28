@@ -3,7 +3,9 @@ import {
   GatewaySlot,
   type ModelProvider,
   type ModelProviderCatalog,
+  ModelProviderId,
   openai,
+  type SubscriptionLogin,
   UpstreamBase,
 } from "@usine/core/agent/provider";
 import {
@@ -61,11 +63,11 @@ const Stored = Schema.Union([
 ]);
 type Stored = typeof Stored.Type;
 
-/** The slot whose static key each kind of stored credential holds. */
-const SLOT_OF_STORED = {
-  AnthropicProvider: anthropic.slot,
-  OpenAiProvider: openai.slot,
-} as const satisfies Record<Stored["_tag"], GatewaySlot>;
+/** The built-in provider whose static key each kind of stored credential holds. */
+const PROVIDER_OF_STORED = {
+  AnthropicProvider: anthropic,
+  OpenAiProvider: openai,
+} as const satisfies Record<Stored["_tag"], ModelProvider>;
 
 /** Returns the provider of `catalog` whose slot is `slot`. */
 const providerInSlot = (catalog: ModelProviderCatalog, slot: string) =>
@@ -75,36 +77,60 @@ const providerInSlot = (catalog: ModelProviderCatalog, slot: string) =>
 const keyedProvider = (catalog: ModelProviderCatalog, slot: string) =>
   Option.filter(providerInSlot(catalog, slot), (provider) => provider.accepts("api-key"));
 
+/** Returns whether `provider` is the built-in provider `builtIn` in its built-in slot. */
+const isBuiltIn = (provider: ModelProvider, builtIn: ModelProvider) =>
+  provider.id === builtIn.id && provider.slot === builtIn.slot;
+
 /**
- * Returns the provider of `catalog` that holds `stored`: for a static key, the provider in the
- * built-in slot of its kind if it accepts a static key; for a login, the provider that signs in
- * with it. The writer stores a credential under this provider's slot, and the reader ignores a
- * credential under another slot.
+ * Returns the provider of `catalog` that signs in with `login`. A Claude token goes to its
+ * provider's upstream, so only the built-in Anthropic provider holds one; a ChatGPT login goes to
+ * the backend stored with it, whichever provider signs in with it.
+ */
+const signingIn = (
+  catalog: ModelProviderCatalog,
+  login: SubscriptionLogin,
+): Option.Option<ModelProvider> =>
+  login === "claude"
+    ? Option.filter(catalog.signingIn(login), (provider) => provider.id === anthropic.id)
+    : catalog.signingIn(login);
+
+/**
+ * Returns the provider of `catalog` that holds `stored`: for a static key, the built-in provider
+ * of its kind if it's in its built-in slot and accepts a static key; for a login, the provider that
+ * signs in with it. The writer stores a credential under this provider's slot, and the reader
+ * ignores a credential under another slot or without this provider.
  */
 const ownerOf = (catalog: ModelProviderCatalog, stored: Stored): Option.Option<ModelProvider> => {
   switch (stored.credential._tag) {
     case "AnthropicApiKey":
-    case "OpenAiApiKey":
-      return keyedProvider(catalog, SLOT_OF_STORED[stored._tag]);
+    case "OpenAiApiKey": {
+      const builtIn = PROVIDER_OF_STORED[stored._tag];
+      return Option.filter(keyedProvider(catalog, builtIn.slot), (provider) =>
+        isBuiltIn(provider, builtIn),
+      );
+    }
     case "AnthropicSubscriptionToken":
-      return catalog.signingIn("claude");
+      return signingIn(catalog, "claude");
     case "ChatGptLogin":
-      return catalog.signingIn("chatgpt");
+      return signingIn(catalog, "chatgpt");
   }
 };
 
 /**
- * Returns the entry of a static key for `slot` in the format of gateways up to 0.3.0, which has one
- * for the built-in providers' slots only.
+ * Returns the entry of `provider`'s static key in the format of gateways up to 0.3.0, which has one
+ * for the built-in providers in their built-in slots only.
  */
-const storedKey = (slot: GatewaySlot, key: Redacted.Redacted<string>): Option.Option<Stored> =>
-  slot === anthropic.slot
+const storedKey = (
+  provider: ModelProvider,
+  key: Redacted.Redacted<string>,
+): Option.Option<Stored> =>
+  isBuiltIn(provider, anthropic)
     ? Option.some({
         _tag: "AnthropicProvider",
         upstream: anthropic.protocols[0].upstream,
         credential: { _tag: "AnthropicApiKey", key },
       })
-    : slot === openai.slot
+    : isBuiltIn(provider, openai)
       ? Option.some({
           _tag: "OpenAiProvider",
           upstream: openai.protocols[0].upstream,
@@ -112,16 +138,24 @@ const storedKey = (slot: GatewaySlot, key: Redacted.Redacted<string>): Option.Op
         })
       : Option.none();
 
+/** A static key in `staticKeys`, with the ID of the provider that it was connected for. */
+const StaticKeyEntry = Schema.Struct({ provider: ModelProviderId, key: Secret });
+type StaticKeyEntry = typeof StaticKeyEntry.Type;
+
 /**
  * `provider-credentials.json`: by slot, a credential that the format of gateways up to 0.3.0
  * stores, or `None` for a slot disconnected from the environment's credential; and in
- * `staticKeys`, the static key of each other slot. `staticKeys` isn't a slot, so those gateways
- * ignore it.
+ * `staticKeys`, the static key of each other slot, with its provider's ID, or alone as the first
+ * gateway with `staticKeys` wrote it. `staticKeys` isn't a slot, so gateways up to 0.3.0 ignore it.
  */
 const SnapshotJson = Schema.fromJsonString(
   Schema.toCodecJson(
     Schema.StructWithRest(
-      Schema.Struct({ staticKeys: Schema.optionalKey(Schema.Record(GatewaySlot, Secret)) }),
+      Schema.Struct({
+        staticKeys: Schema.optionalKey(
+          Schema.Record(GatewaySlot, Schema.Union([StaticKeyEntry, Secret])),
+        ),
+      }),
       [Schema.Record(GatewaySlot, Schema.Option(Stored))],
     ),
   ),
@@ -130,7 +164,7 @@ const SnapshotJson = Schema.fromJsonString(
 /** The connected credentials: `stored` in the format of gateways up to 0.3.0, and the other static keys. */
 interface Snapshot {
   readonly stored: Readonly<Record<GatewaySlot, Option.Option<Stored>>>;
-  readonly staticKeys: Readonly<Record<GatewaySlot, Redacted.Redacted<string>>>;
+  readonly staticKeys: Readonly<Record<GatewaySlot, StaticKeyEntry>>;
 }
 
 /**
@@ -170,14 +204,14 @@ const storing = (snapshot: Snapshot, slot: GatewaySlot, held: Option.Option<Stor
   staticKeys: without(snapshot.staticKeys, slot),
 });
 
-/** Returns `snapshot` with `slot` holding the static key `key`. */
+/** Returns `snapshot` with the slot of `provider` holding its static key `key`. */
 const keying = (
   snapshot: Snapshot,
-  slot: GatewaySlot,
+  provider: ModelProvider,
   key: Redacted.Redacted<string>,
 ): Snapshot => ({
-  stored: without(snapshot.stored, slot),
-  staticKeys: { ...snapshot.staticKeys, [slot]: key },
+  stored: without(snapshot.stored, provider.slot),
+  staticKeys: { ...snapshot.staticKeys, [provider.slot]: { provider: provider.id, key } },
 });
 
 const failed = (cause: { readonly _tag: string }) =>
@@ -242,26 +276,40 @@ export class ProviderCredentials extends Context.Service<
               "Ignored a stored provider credential under a slot whose provider doesn't accept it",
               { file, ...fields },
             );
-          const keys = Object.entries(staticKeys);
-          const unkeyed = keys.flatMap(([slot]) =>
-            Option.isNone(keyedProvider(catalog, slot)) ? [slot] : [],
-          );
-          for (const slot of unkeyed)
-            yield* Effect.logWarning(
-              "Ignored a stored static key for a slot whose provider doesn't accept one",
-              { file, slot },
-            );
+          const keys: Array<readonly [string, StaticKeyEntry]> = [];
+          for (const [slot, held] of Object.entries(staticKeys)) {
+            const owner = keyedProvider(catalog, slot);
+            if (Option.isNone(owner)) {
+              yield* Effect.logWarning(
+                "Ignored a stored static key for a slot whose provider doesn't accept one",
+                { file, slot },
+              );
+              continue;
+            }
+            if (Redacted.isRedacted(held)) {
+              keys.push([slot, { provider: owner.value.id, key: held }]);
+              continue;
+            }
+            if (held.provider !== owner.value.id) {
+              yield* Effect.logWarning(
+                "Ignored a stored static key connected for another provider than its slot's",
+                { file, slot, provider: held.provider, slotProvider: owner.value.id },
+              );
+              continue;
+            }
+            keys.push([slot, held]);
+          }
           snapshot = {
             stored: Object.fromEntries(
               entries.filter(([slot]) => !misplaced.some((ignored) => ignored.slot === slot)),
             ),
-            staticKeys: Object.fromEntries(keys.filter(([slot]) => !unkeyed.includes(slot))),
+            staticKeys: Object.fromEntries(keys),
           };
         }
         const apply = (providers: LlmProviders, upstreams: UpstreamOverrides) =>
           Effect.succeed(
             Object.entries(snapshot.staticKeys).reduce<LlmProviders>(
-              (applied, [slot, key]) => ({
+              (applied, [slot, { key }]) => ({
                 ...applied,
                 [slot]: LlmProvider.make({
                   upstream: overrideOf(upstreams, slot),
@@ -412,24 +460,29 @@ export class ProviderCredentials extends Context.Service<
                 const named =
                   credential._tag === "StaticKey" ? credential.provider : credential.login;
                 yield* Effect.annotateCurrentSpan({ credential: credential._tag, named });
-                const provider = yield* Option.match(credential.providerIn(catalog), {
-                  onNone: () =>
-                    unserved(
-                      named,
-                      credential._tag === "StaticKey"
-                        ? `The gateway serves no provider ${named} that accepts a static key.`
-                        : `The gateway serves no provider that signs in with ${named}.`,
-                    ),
-                  onSome: Effect.succeed,
-                });
+                const provider = yield* Option.match(
+                  credential._tag === "StaticKey"
+                    ? credential.providerIn(catalog)
+                    : signingIn(catalog, credential.login),
+                  {
+                    onNone: () =>
+                      unserved(
+                        named,
+                        credential._tag === "StaticKey"
+                          ? `The gateway serves no provider ${named} that accepts a static key.`
+                          : `The gateway serves no provider that signs in with ${named}.`,
+                      ),
+                    onSome: Effect.succeed,
+                  },
+                );
                 yield* Effect.annotateCurrentSpan({ provider: provider.slot });
                 const next = yield* credential._tag === "LoginSecret"
                   ? Effect.map(heldLogin(credential), (held) =>
                       storing(snapshot, provider.slot, Option.some(held)),
                     )
                   : Effect.succeed(
-                      Option.match(storedKey(provider.slot, credential.secret), {
-                        onNone: () => keying(snapshot, provider.slot, credential.secret),
+                      Option.match(storedKey(provider, credential.secret), {
+                        onNone: () => keying(snapshot, provider, credential.secret),
                         onSome: (stored) => storing(snapshot, provider.slot, Option.some(stored)),
                       }),
                     );

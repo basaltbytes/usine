@@ -1,5 +1,18 @@
-import { ModelProvider, type ModelProviderCatalog } from "@usine/core/agent/provider";
-import { Array as Arr, Effect, Match, Option, Redacted, Schema } from "effect";
+import {
+  type ModelProvider,
+  type ModelProviderCatalog,
+  ModelProviderId,
+  upstreamSearch,
+} from "@usine/core/agent/provider";
+import {
+  Array as Arr,
+  Effect,
+  Match,
+  Option,
+  Redacted,
+  Schema,
+  SchemaTransformation,
+} from "effect";
 import { FetchHttpClient, HttpClientError, HttpClientRequest } from "effect/http";
 import { ProviderCredential, type SandboxCredentials } from "../api/api.ts";
 import { GITHUB_HOSTS, type GitHubHost, sandboxHost } from "../api/harness.ts";
@@ -185,10 +198,11 @@ export const gitHubRequest = (
 /**
  * Returns `request`, sent over plain HTTP to the provider's sandbox host, for the upstream of the
  * provider's protocol that serves its path, with the key in that protocol's header in place of the
- * sandbox's credentials. Returns `None` for a path outside the provider's routes, a method that its
- * route doesn't accept, or an upstream without HTTPS, so the rest of the provider's API, such as
- * files or organization administration, can't be reached with the key. The request doesn't follow
- * redirects, so the key never goes to another host.
+ * sandbox's credentials. `cookie`, the key header of each provider of `catalog`, and the `key`
+ * query parameter are left out. Returns `None` for a path outside the provider's routes, a method
+ * that its route doesn't accept, or an upstream without HTTPS, so the rest of the provider's API,
+ * such as files or organization administration, can't be reached with the key. The request doesn't
+ * follow redirects, so the key never goes to another host.
  * A route's placeholder matches one plain segment, so a percent-encoded separator or a dot segment
  * never matches.
  */
@@ -196,6 +210,7 @@ export const providerRequest = (
   request: Request,
   provider: ModelProvider,
   credential: ProviderCredential,
+  catalog: ModelProviderCatalog,
 ): Option.Option<Request> => {
   const incoming = new URL(request.url);
   const served = Option.filter(
@@ -205,17 +220,19 @@ export const providerRequest = (
       protocol.upstream.startsWith("https://"),
   );
   return Option.map(served, (protocol) => {
-    const keyHeaders = new Set<string>(provider.protocols.map(({ key }) => key.header));
+    const dropped = new Set<string>(["host", "cookie", ...catalog.keyHeaders]);
     const headers = new Headers(
       [...withoutCredentials(request)].filter(
-        ([name]) => name !== "host" && !keyHeaders.has(name) && provider.passes(name),
+        ([name]) => !dropped.has(name) && provider.passes(name),
       ),
     );
     Match.valueTags(credential, {
       ApiKey: ({ key }) =>
         headers.set(protocol.key.header, protocol.key.value(Redacted.value(key))),
     });
-    const upstream = new URL(`${protocol.upstream}${incoming.pathname}${incoming.search}`);
+    const upstream = new URL(
+      `${protocol.upstream}${incoming.pathname}${upstreamSearch(incoming.search)}`,
+    );
     return new Request(upstream, new Request(request, { headers, redirect: "manual" }));
   });
 };
@@ -226,9 +243,27 @@ export const GitHubProps = Schema.Struct({
   token: Schema.NonEmptyString,
 });
 
-/** The provider and credential of a provider's outbound handler, as its props carry them. */
+/**
+ * The provider of a handler's props: its ID, or the whole entry that earlier Workers registered,
+ * read for its ID. Encodes the ID.
+ */
+const PropsProvider = Schema.Union([
+  ModelProviderId,
+  Schema.Struct({ id: Schema.String }).pipe(
+    Schema.decodeTo(
+      ModelProviderId,
+      SchemaTransformation.transform({ decode: ({ id }) => id, encode: (id) => ({ id }) }),
+    ),
+  ),
+]);
+
+/**
+ * The provider ID and credential of a provider's outbound handler, as its props carry them. The
+ * handler reads the provider's entry from the Worker's catalog on each request, so a handler that
+ * a container keeps across a deployment serves the current entry.
+ */
 export const ProviderProps = Schema.Struct({
-  provider: Schema.toCodecJson(ModelProvider),
+  provider: PropsProvider,
   credential: ProviderCredential,
 });
 
@@ -265,7 +300,7 @@ export const registrationOf = (interception: Interception) =>
       }),
     Provider: ({ host, provider, credential }) =>
       Effect.map(
-        Schema.encodeEffect(ProviderProps)({ provider, credential }),
+        Schema.encodeEffect(ProviderProps)({ provider: provider.id, credential }),
         (props): Registration => ({ handler: "ProviderOutbound", host, scheme: "http", props }),
       ),
     Allowed: ({ host }) =>
@@ -323,22 +358,41 @@ const refusal = (status: number, message: string) =>
   new Response(message, { status, headers: { "content-type": "text/plain; charset=utf-8" } });
 
 /**
- * Answers a sandbox's request for a provider's host, with `props` as the Worker registered them:
- * forwards it to the upstream of the protocol that serves the path, with the provider's API key,
- * or refuses it with status 404.
+ * Answers a sandbox's request for a provider's host, with `props` as a Worker registered them:
+ * forwards it to the upstream of the protocol that serves the path, with the provider's API key, or
+ * refuses it with status 404. The provider's entry comes from `catalog`, the Worker's current one;
+ * a provider that it no longer serves in a sandbox, or props that it can't decode, are refused with
+ * status 403.
  */
 export const providerOutbound = Effect.fn("Sandbox.providerOutbound")(function* (
   props: typeof ProviderProps.Encoded,
   request: Request,
+  catalog: ModelProviderCatalog,
 ) {
-  const { provider, credential } = yield* Schema.decodeEffect(ProviderProps)(props);
-  const forwarded = providerRequest(request, provider, credential);
-  if (Option.isSome(forwarded)) return yield* forwardRequest(provider.id, request, forwarded.value);
-  yield* Effect.logWarning("Refused a sandbox request for a route outside the provider's", {
-    handler: provider.id,
+  const route = {
     method: request.method,
     host: new URL(request.url).host,
     path: new URL(request.url).pathname,
+  };
+  const decoded = yield* Schema.decodeEffect(ProviderProps)(props).pipe(Effect.option);
+  if (Option.isNone(decoded)) {
+    yield* Effect.logWarning("Refused a sandbox request whose handler props are unreadable", route);
+    return refusal(403, "usine attached no credential that this Worker reads for this host.\n");
+  }
+  const { provider: id, credential } = decoded.value;
+  const provider = Option.filter(catalog.get(id), servedInSandbox);
+  if (Option.isNone(provider)) {
+    yield* Effect.logWarning(
+      "Refused a sandbox request for a provider that the Worker's catalog no longer serves",
+      { ...route, handler: id },
+    );
+    return refusal(403, `usine no longer serves the provider ${id} in a sandbox.\n`);
+  }
+  const forwarded = providerRequest(request, provider.value, credential, catalog);
+  if (Option.isSome(forwarded)) return yield* forwardRequest(id, request, forwarded.value);
+  yield* Effect.logWarning("Refused a sandbox request for a route outside the provider's", {
+    ...route,
+    handler: id,
   });
-  return refusal(404, `usine forwards only the ${provider.label} routes in its catalog.\n`);
+  return refusal(404, `usine forwards only the ${provider.value.label} routes in its catalog.\n`);
 });

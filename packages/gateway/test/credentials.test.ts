@@ -171,6 +171,29 @@ const planAt = (origin: string) =>
     upstreamVariable: Option.some(GatewayVariable.make(PLAN_UPSTREAM)),
   });
 
+/** The gateway variable that replaces the upstream of `trailingAt`'s provider. */
+const TRAILING_UPSTREAM = "TEST_TRAILING_UPSTREAM";
+
+/** A second provider that only this test defines, with a static key, at `origin`. */
+const trailingAt = (origin: string) =>
+  ModelProvider.make({
+    id: ModelProviderId.make("test-trailing"),
+    slot: GatewaySlot.make("test-trailing"),
+    label: "Test trailing",
+    protocols: [
+      ProviderProtocol.make({
+        protocol: WireProtocol.make("openai-chat-completions"),
+        upstream: UpstreamBase.make(`${origin}/v1`),
+        routes: [RoutePattern.make("/chat/completions")],
+        key: KeyHeader.make({ header: HeaderName.make("authorization"), scheme: "bearer" }),
+      }),
+    ],
+    credentials: [
+      ApiKeyCredential.make({ variable: GatewayVariable.make("TEST_TRAILING_API_KEY") }),
+    ],
+    upstreamVariable: Option.some(GatewayVariable.make(TRAILING_UPSTREAM)),
+  });
+
 /** A report of `GET /v1/provider-credentials` as orchestrators up to 0.6.0 decode it. */
 const ConnectionsUpTo060 = Schema.fromJsonString(
   Schema.Struct({
@@ -401,9 +424,12 @@ it.live(
         const upstream = yield* standIn;
         const catalogUpstream = yield* standIn;
         const anthropicUpstream = yield* standIn;
+        const trailingUpstream = yield* standIn;
         const plan = planAt(catalogUpstream.origin);
+        // The provider after the test's has an upstream override too, so the key goes to the
+        // override of its own slot, not to the last one.
         const catalog = ModelProviderCatalog.make({
-          providers: [...modelProviders.providers, plan],
+          providers: [...modelProviders.providers, plan, trailingAt(catalogUpstream.origin)],
         });
         const lines: string[] = [];
         const logs = Logger.layer([
@@ -413,6 +439,7 @@ it.live(
         ]);
         const start = gatewayServing(catalog, directory, {
           [PLAN_UPSTREAM]: `${upstream.origin}/v1`,
+          [TRAILING_UPSTREAM]: `${trailingUpstream.origin}/v1`,
           USINE_GATEWAY_ANTHROPIC_UPSTREAM: anthropicUpstream.origin,
         }).pipe(Layer.provide(logs));
         const scope = yield* Scope.make();
@@ -432,7 +459,7 @@ it.live(
         assert.strictEqual(unserved._tag, "UnservedProvider");
         const report = yield* client.llm.connections();
         const providers = report.catalog ?? [];
-        assert.deepStrictEqual(providers.at(-1), {
+        assert.deepStrictEqual(providers.at(-2), {
           provider: plan.slot,
           id: plan.id,
           label: "Test plan",
@@ -455,12 +482,22 @@ it.live(
           [anthropic.slot, openai.slot],
         );
         const Saved = Schema.fromJsonString(
-          Schema.Struct({ staticKeys: Schema.Record(Schema.String, Schema.String) }),
+          Schema.Struct({
+            staticKeys: Schema.Record(
+              Schema.String,
+              Schema.Struct({ provider: Schema.String, key: Schema.String }),
+            ),
+          }),
         );
         const saved = yield* fs
           .readFileString(`${directory}/provider-credentials.json`)
           .pipe(Effect.flatMap(Schema.decodeUnknownEffect(Saved)));
-        assert.deepStrictEqual(Object.keys(saved.staticKeys), [plan.slot]);
+        assert.deepStrictEqual(
+          Record.map(saved.staticKeys, ({ provider }) => provider),
+          {
+            [plan.slot]: plan.id,
+          },
+        );
         const ask = yield* attemptOn(first);
         const path = `/${plan.slot}/chat/completions`;
         const connected = yield* ask(path);
@@ -481,7 +518,7 @@ it.live(
           [200, 200, 200, 503],
         );
         const disconnected = yield* again.llm.connections();
-        assert.strictEqual(disconnected.catalog?.at(-1)?.credential, null);
+        assert.strictEqual(disconnected.catalog?.at(-2)?.credential, null);
 
         assert.deepStrictEqual(upstream.seen, [
           ["/v1/chat/completions", `Bearer ${PLAN_KEY}`],
@@ -490,6 +527,7 @@ it.live(
         ]);
         assert.deepStrictEqual(catalogUpstream.seen, []);
         assert.deepStrictEqual(anthropicUpstream.seen, []);
+        assert.deepStrictEqual(trailingUpstream.seen, []);
         assert.isTrue(spans.some(({ name }) => name === "ProviderCredentials.replace"));
         const exposed =
           jsonKey(providers) +
@@ -698,6 +736,69 @@ it.effect("encodes each built-in credential with the kind that gateways up to 0.
 );
 
 it.live(
+  "loads a saved static key without a provider ID, and ignores one connected for another provider than its slot's, with a warning",
+  () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const directory = yield* fs.makeTempDirectoryScoped();
+        const warnings: string[] = [];
+        const logs = Logger.layer([
+          Logger.make(({ logLevel, message }) => {
+            if (logLevel === "Warn") warnings.push(jsonKey(message));
+          }),
+        ]);
+        const plan = planAt("https://plan.test");
+        const trailing = trailingAt("https://trailing.test");
+        const trailingKey = "trailing-key-for-credential-tests-0123456789";
+        // The slot's key was connected for a provider that a later catalog moved out of the slot.
+        yield* fs.writeFileString(
+          `${directory}/provider-credentials.json`,
+          jsonKey({
+            staticKeys: {
+              [plan.slot]: { provider: "earlier-plan", key: PLAN_KEY },
+              [trailing.slot]: trailingKey,
+            },
+          }),
+        );
+        const started = yield* Layer.build(
+          gatewayLayer(
+            { proxy: listener, egress: listener, admin: listener },
+            undefined,
+            directory,
+          ).pipe(
+            Layer.provide(
+              settingsLayer(
+                NO_PROVIDERS,
+                undefined,
+                undefined,
+                ModelProviderCatalog.make({ providers: [anthropic, plan, trailing] }),
+              ),
+            ),
+            Layer.provide(logs),
+          ),
+        );
+        const { providers } = yield* SettingsInForce.pipe(
+          Effect.provideContext(started),
+          Effect.flatMap((settings) => settings.current),
+        );
+        assert.deepStrictEqual(Object.keys(providers), [trailing.slot]);
+        const held = providers[trailing.slot];
+        assert(held !== undefined && held.credential._tag === "ApiKey");
+        assert.strictEqual(Redacted.value(held.credential.key), trailingKey);
+        const ignored = warnings.filter((line) =>
+          line.includes("Ignored a stored static key connected for another provider"),
+        );
+        assert.strictEqual(ignored.length, 1);
+        assert.include(ignored[0], `"slot":"${plan.slot}"`);
+        assert.include(ignored[0], '"provider":"earlier-plan"');
+        assert.include(ignored[0], `"slotProvider":"${plan.id}"`);
+        assert.notInclude(warnings.join("\n"), PLAN_KEY);
+      }),
+    ).pipe(Effect.provide([NodeServices.layer, FetchHttpClient.layer])),
+);
+
+it.live(
   "ignores a stored credential under a slot whose provider doesn't accept it, and logs it without its value",
   () =>
     Effect.scoped(
@@ -886,6 +987,176 @@ it.live(
             ],
           ],
         );
+      }),
+    ).pipe(Effect.provide([NodeServices.layer, FetchHttpClient.layer])),
+);
+
+/** Builds the gateway over `catalog`, with its provider credentials in `directory`. */
+const gatewayOver = (
+  directory: string,
+  catalog: ModelProviderCatalog,
+  logs: Layer.Layer<never> = Layer.empty,
+) =>
+  gatewayLayer({ proxy: listener, egress: listener, admin: listener }, undefined, directory).pipe(
+    Layer.provide(settingsLayer(NO_PROVIDERS, undefined, undefined, catalog)),
+    Layer.provide(logs),
+  );
+
+/** Returns the provider credential store of a built gateway. */
+const credentialStoreOf = (context: Context.Context<GatewayAddresses>) =>
+  Effect.flatMap(
+    Effect.serviceOption(ProviderCredentials).pipe(Effect.provideContext(context)),
+    Option.match({
+      onNone: () => Effect.die("The gateway has no provider credential store"),
+      onSome: Effect.succeed,
+    }),
+  );
+
+/** Returns each slot of a built gateway's settings in force, with its credential's kind. */
+const slotsOf = (context: Context.Context<SettingsInForce>) =>
+  SettingsInForce.pipe(
+    Effect.provideContext(context),
+    Effect.flatMap((settings) => settings.current),
+    Effect.map(({ providers }) =>
+      Object.entries(providers).map(([slot, { credential }]) => [slot, credential._tag]),
+    ),
+  );
+
+/** Returns a logger layer that collects the message of each warning in `warnings`. */
+const warningsInto = (warnings: string[]) =>
+  Logger.layer([
+    Logger.make(({ logLevel, message }) => {
+      if (logLevel === "Warn") warnings.push(jsonKey(message));
+    }),
+  ]);
+
+/** Returns a provider with the ID `impostor` that takes a static key in `slot`. */
+const impostorIn = (slot: GatewaySlot) =>
+  ModelProvider.make({
+    ...planAt("https://impostor.test"),
+    id: ModelProviderId.make("impostor"),
+    slot,
+  });
+
+const BUILT_IN_KEYS = [
+  { builtIn: anthropic, key: ANTHROPIC_KEY, kind: "AnthropicProvider" },
+  { builtIn: openai, key: "sk-proj-built-in-slot-private-fixture", kind: "OpenAiProvider" },
+];
+
+it.live.each(BUILT_IN_KEYS)(
+  "ignores $builtIn.id's stored key once another provider holds its slot",
+  ({ builtIn, key, kind }) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const directory = yield* fs.makeTempDirectoryScoped();
+        const warnings: string[] = [];
+        const first = yield* Scope.make();
+        const connected = yield* Layer.buildWithScope(
+          gatewayOver(directory, modelProviders),
+          first,
+        );
+        yield* Effect.flatMap(credentialStoreOf(connected), ({ replace }) =>
+          replace(StaticKey.make({ provider: builtIn.id, secret: Redacted.make(key) })),
+        );
+        yield* Scope.close(first, Exit.void);
+        const impostors = ModelProviderCatalog.make({ providers: [impostorIn(builtIn.slot)] });
+        const restarted = yield* Layer.build(
+          gatewayOver(directory, impostors, warningsInto(warnings)),
+        );
+        const slots = yield* slotsOf(restarted);
+
+        assert.deepStrictEqual(slots, []);
+        const ignored = warnings.filter((line) => line.includes("Ignored a stored"));
+        assert.strictEqual(ignored.length, 1);
+        assert.include(ignored[0], `"kind":"${kind}"`);
+        assert.notInclude(warnings.join("\n"), key);
+      }),
+    ).pipe(Effect.provide([NodeServices.layer, FetchHttpClient.layer])),
+);
+
+it.live.each(BUILT_IN_KEYS)(
+  "keeps another provider's key in $builtIn.id's slot for that provider only",
+  ({ builtIn }) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const directory = yield* fs.makeTempDirectoryScoped();
+        const warnings: string[] = [];
+        const impostor = impostorIn(builtIn.slot);
+        const impostors = ModelProviderCatalog.make({ providers: [impostor] });
+        const taken = yield* Scope.make();
+        const takenOver = yield* Layer.buildWithScope(gatewayOver(directory, impostors), taken);
+        yield* Effect.flatMap(credentialStoreOf(takenOver), ({ replace }) =>
+          replace(StaticKey.make({ provider: impostor.id, secret: Redacted.make(PLAN_KEY) })),
+        );
+        yield* Scope.close(taken, Exit.void);
+        const file = yield* fs.readFileString(`${directory}/provider-credentials.json`);
+
+        const impostorAgain = yield* Layer.build(gatewayOver(directory, impostors)).pipe(
+          Effect.flatMap(slotsOf),
+        );
+        const builtInAgain = yield* Layer.build(
+          gatewayOver(directory, modelProviders, warningsInto(warnings)),
+        ).pipe(Effect.flatMap(slotsOf));
+        assert.deepStrictEqual([impostorAgain, builtInAgain], [[[builtIn.slot, "ApiKey"]], []]);
+        assert.include(file, '"staticKeys"');
+        assert.include(file, '"provider":"impostor"');
+        assert.notInclude(file, '"AnthropicProvider"');
+        assert.notInclude(file, '"OpenAiProvider"');
+        const ignored = warnings.filter((line) => line.includes("Ignored a stored"));
+        assert.strictEqual(ignored.length, 1);
+        assert.include(ignored[0], '"provider":"impostor"');
+        assert.include(ignored[0], `"slotProvider":"${builtIn.id}"`);
+        assert.notInclude(warnings.join("\n"), PLAN_KEY);
+      }),
+    ).pipe(Effect.provide([NodeServices.layer, FetchHttpClient.layer])),
+);
+
+it.live(
+  "keeps a Claude login for the anthropic provider once another provider signs in with it",
+  () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const directory = yield* fs.makeTempDirectoryScoped();
+        const warnings: string[] = [];
+        const impostor = ModelProvider.make({
+          ...impostorIn(anthropic.slot),
+          credentials: [
+            ApiKeyCredential.make({ variable: GatewayVariable.make("TEST_PLAN_API_KEY") }),
+            SubscriptionCredential.make({
+              login: "claude",
+              variable: GatewayVariable.make("TEST_PLAN_SUBSCRIPTION_TOKEN"),
+            }),
+          ],
+        });
+        const impostors = ModelProviderCatalog.make({ providers: [impostor] });
+        const claudeToken = "sk-ant-oat01-impostor-private-fixture";
+        const builtIn = yield* Scope.make();
+        const connected = yield* Layer.buildWithScope(
+          gatewayOver(directory, modelProviders),
+          builtIn,
+        );
+        yield* Effect.flatMap(credentialStoreOf(connected), ({ replace }) =>
+          replace(LoginSecret.make({ login: "claude", secret: Redacted.make(claudeToken) })),
+        );
+        yield* Scope.close(builtIn, Exit.void);
+
+        // The impostor signs in with the Claude login in Anthropic's slot, so the token stays unused.
+        const takenOver = yield* Layer.build(
+          gatewayOver(directory, impostors, warningsInto(warnings)),
+        );
+        const atTakeover = yield* slotsOf(takenOver);
+        const refused = yield* Effect.flatMap(credentialStoreOf(takenOver), ({ replace }) =>
+          replace(LoginSecret.make({ login: "claude", secret: Redacted.make(claudeToken) })),
+        ).pipe(Effect.flip);
+
+        assert.deepStrictEqual([atTakeover, refused._tag], [[], "UnservedProvider"]);
+        const ignored = warnings.filter((line) => line.includes("Ignored a stored"));
+        assert.strictEqual(ignored.length, 1);
+        assert.include(ignored[0], '"kind":"AnthropicProvider"');
+        assert.notInclude(warnings.join("\n"), claudeToken);
       }),
     ).pipe(Effect.provide([NodeServices.layer, FetchHttpClient.layer])),
 );

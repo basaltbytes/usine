@@ -259,9 +259,9 @@ Keep `.env` private, set mode `0600`, and exclude it from git. Changes take effe
 
 ## usine-gateway
 
-The `@usine/gateway` package provides a separate `usine-gateway` binary with no arguments. It logs one JSON object per line. Refused proxy requests include `x-usine-gateway-refusal` and a logged reason.
+The `@usine/gateway` package provides a separate `usine-gateway` binary with no arguments. It logs one JSON object per line. Refused proxy requests include `x-usine-gateway-refusal` and a logged reason. A provider slot serves each route of its catalog entry only with the methods that the entry lists, and refuses another method with `unsupported-path`. The `key` query parameter never reaches a provider's upstream; the rest of the query does.
 
-Environment files listed by `USINE_GATEWAY_ENVIRONMENT_FILES` override process values, with later files taking precedence. This differs from the instance `.env`. Missing required values, invalid settings, or an unreadable allowlist stop startup.
+Environment files listed by `USINE_GATEWAY_ENVIRONMENT_FILES` override process values, with later files taking precedence. This differs from the instance `.env`. Missing required values, invalid settings, or an unreadable allowlist stop startup. An upstream variable must be an `https://` URL, or an `http://` URL whose host is `localhost`, `127.0.0.0/8`, or `[::1]`, because the gateway sends a credential to it; another `http://` URL stops startup, and a reload with one keeps the provider settings in force, with an error that names the variable.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |

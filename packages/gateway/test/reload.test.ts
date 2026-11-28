@@ -16,7 +16,7 @@ import { tmpdir } from "node:os";
 // Synchronous Node path callbacks retain the host platform’s path semantics.
 // @effect-diagnostics-next-line nodeBuiltinImport:off
 import { join, dirname, basename } from "node:path";
-import { NodeServices, NodeFileSystem } from "@effect/platform-node";
+import { NodeCrypto, NodeServices, NodeFileSystem } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import {
   ConfigProvider,
@@ -43,6 +43,7 @@ import {
   gatewayFromEnvironment,
   type Listener,
 } from "../src/node/node.ts";
+import { readSettingsSource, readStartupSettings } from "../src/node/environment.ts";
 import {
   ADMIN_TOKEN_VALUE,
   authFileText,
@@ -133,6 +134,9 @@ const secretsLines = (anthropicKey: string) => [
 
 /** The Gateway's log lines with their levels, for the running test. */
 const lines: Array<string> = [];
+
+/** The log message of a reload that keeps the providers in force. */
+const KEPT_PROVIDERS = "Kept the previous LLM providers";
 const recordLogs = Logger.layer([
   Logger.make(({ logLevel, message }) => {
     lines.push(jsonKey({ level: logLevel, message }));
@@ -469,6 +473,44 @@ describe("reloading the gateway", () => {
           );
           for (const secret of [OPENAI_KEY, CHATGPT_REFRESH, access])
             assert.notInclude(lines.join("\n"), secret);
+        }),
+      ).pipe(Effect.provide(NodeFileSystem.layer)),
+  );
+
+  it.live(
+    "an upstream override over plain HTTP to another host, or one that isn't a URL, keeps the providers in force on a reload, and fails a startup, naming the variable",
+    () =>
+      withGateway(["registry.npmjs.org"], (files, { anthropic }) =>
+        Effect.gen(function* () {
+          const token = yield* attach;
+          const { proxy, egress, admin } = yield* GatewayAddresses;
+          const ports = { proxy: proxy.port, egress: egress.port, admin: admin.port };
+          // The second value parses with the upstream pattern, but not as a URL.
+          for (const upstream of ["http://anthropic-override.test", "http://localhost:99999"]) {
+            yield* files.write("settings.env", [
+              ...settingsLines(files, ports, "https://api.anthropic.com"),
+              `USINE_GATEWAY_ANTHROPIC_UPSTREAM=${upstream}`,
+            ]);
+            const keptBefore = lines.filter((line) => line.includes(KEPT_PROVIDERS)).length;
+            yield* (yield* GatewayReload).reload;
+
+            const kept = lines.filter((line) => line.includes(KEPT_PROVIDERS));
+            assert.strictEqual(kept.length, keptBefore + 1);
+            assert.include(kept.at(-1), "USINE_GATEWAY_ANTHROPIC_UPSTREAM");
+            assert.include(kept.at(-1), "http:// to a loopback host");
+
+            const environment = yield* ConfigProvider.ConfigProvider;
+            const source = yield* readSettingsSource(environment);
+            const startup = yield* readStartupSettings(source).pipe(
+              Effect.as("started"),
+              Effect.catchTag("ConfigError", ({ message }) => Effect.succeed(message)),
+              Effect.provide(NodeCrypto.layer),
+            );
+            assert.include(startup, "USINE_GATEWAY_ANTHROPIC_UPSTREAM");
+          }
+          const providerResponse = yield* askAnthropic(token);
+          assert.strictEqual(providerResponse, 200);
+          assert.deepStrictEqual(anthropic, [FIRST_KEY]);
         }),
       ).pipe(Effect.provide(NodeFileSystem.layer)),
   );

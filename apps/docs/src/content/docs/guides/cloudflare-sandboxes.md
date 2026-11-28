@@ -43,7 +43,7 @@ A sandbox can reach GitHub, configured providers, and the allowed package hosts.
 
 The command shell returns exit code 255 if its command stream fails, including during startup. Unexpected failures produce a generic error message that excludes Access credentials.
 
-Requests to allowlisted hosts preserve their headers and redirect policy. WebSocket upgrades use the Cloudflare platform connection.
+A provider host forwards each route of the provider's catalog entry with the methods that the entry lists, to the provider that the Worker's current catalog has under that ID. It refuses a provider that the current catalog lacks. It never forwards `cookie`, the key header of any catalog provider, or the `key` query parameter. Requests to allowlisted hosts preserve their headers and redirect policy. WebSocket upgrades use the Cloudflare platform connection.
 
 A retained sandbox stays billable while held for recovery. Startup reattaches live attempts or salvages retained work. A stopped container loses its disk, so recovery depends on pushed salvage. If a sandbox remains after an attempt, inspect the orchestrator and Worker logs before deleting it. [Cloudflare settings](/reference/configuration/workers/#cloudflare-connection) lists fields and defaults.
 
