@@ -1,6 +1,6 @@
 {
   "name": "@usine/gateway",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "The usine gateway: a credential-injecting proxy for GitHub and LLM providers, and an egress allowlist, in front of Worker VMs.",
   "license": "AGPL-3.0-only",
   "repository": {

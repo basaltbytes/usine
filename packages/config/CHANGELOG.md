@@ -1,5 +1,211 @@
 # @usine/config
 
+## 0.7.0
+
+### Minor Changes
+
+- f8f311c: boxd workers connect to any boxd cluster. `provisioner.endpoint` sets the cluster's account endpoint, such as `https://boxd.example.com:9443`, and defaults to the hosted service at `https://boxd.sh:9443`. The driver sends account calls and `ListRegions` there, and derives the token exchange URL from it as the boxd SDK does: `https://app.<host>/api/v1/auth/token`, without the port, or the endpoint itself for a `localhost`, IP address, or `app.` host.
+  
+  `provisioner.region` is optional and no longer defaults to `fra`. Without it, every call goes to the endpoint, and machines start where the endpoint runs them: Frankfurt on the hosted service, or the only location of a self-hosted cluster. A region that the endpoint serves itself needs no API endpoint in the region listing. Preflight compares the snapshot's region with the region that boxd serves, and fails with advice to remove `provisioner.region` when a cluster that runs in one place lists no regions.
+  
+  Over TLS or to a loopback address, the driver sends the API key as the bearer. It falls back to the token exchange when boxd refuses the key as a bearer, and keeps renewing the session and retrying a call once on `UNAUTHENTICATED`. `Exec` calls carry the session too once boxd refuses the key, so a cluster behind a load balancer that terminates TLS runs commands. `provisioner.endpoint` accepts `http://` only for `localhost`, `127.0.0.0/8`, or `[::1]`, and a port only from 1 to 65535. The driver refuses to connect to a region that boxd lists at an `http://` API endpoint on another host. When boxd doesn't answer or rate-limits, the error names the URL that usine called. The operator view and the worker form show the endpoint, and the view reports a missing region as null.
+- 2b3ac6b: boxd workers accept `provisioner.egress`, the complete egress allowlist of each machine: host names, `*.` wildcards, public IPv4 addresses or CIDR ranges of at most `/8`, or `none`. Like boxd, the configuration refuses an address with host bits set or one in a private, CGNAT, loopback, link-local, multicast, or reserved range. The driver sends it in the machine spec of the restore request, so each machine is created with it, and waits one second before it connects to the machine: processes that the snapshot resumes can reach hosts outside the list for up to about a second. If boxd reports the new machine unrestricted, the driver deletes the machine and retries creation. A reused machine gets the list again. Without `egress`, machines keep unrestricted egress.
+  
+  Behind a gateway, the configuration is refused when the list omits `*.tailscale.com`, or admits `github.com`, `api.github.com`, or the API and login hosts of a provider in `gateway.llm_providers`. Address entries aren't checked against the gateway; preflight logs a warning that names them. The operator view and the worker form show the list. `infra/boxd/egress.mjs` prints the gateway's `egress-allowlist` as `provisioner.egress`, so both enforcement points use one list.
+- b580789: `@usine/config` and `@usine/executor/ssh` no longer export the deprecated `BoatTailnet` alias. Use `ProvisionerTailnet`.
+  
+  A boxd `Exec` call takes its exit code from the last response only: one without data, or one with a non-zero exit code. A call whose last response is output fails as unreachable, even after an earlier empty response, and a last response that carries output and an exit code keeps both. Error messages stay readable when the boxd credential is empty. A dead `Exec` connection fails within 50 seconds by default.
+  
+  `infra/boxd/build-snapshot.mjs --no-isolated` builds a snapshot without isolation. A machine restored from an isolated snapshot is always isolated, so a worker's `isolated: false` takes effect only with such a snapshot.
+  
+  The worker page shows a boxd worker's region, snapshot, size, and isolation, with the default that applies when a setting is empty.
+- 55c75fe: boxd workers run commands over boxd's gRPC `Exec` stream instead of SSH. A boxd worker needs only its API key: neither the boxd account nor the snapshot needs an SSH key, and a boxd worker that still sets `identity_file`, as earlier releases required, loads and ignores it, with a preflight warning that names the file. The executor runs boxd commands in its own process through a new `ExecShell` child host, with one HTTP/2 connection per worker that raises the receive windows, sends stdin in small chunks, and sends keepalive pings. A lost command is a typed `HostUnreachable` error instead of exit code 255. The executor reports an SSH client's exit code 255 as the same error, so a machine that SSH loses during a preflight or preparation check fails with a message that names the host and the SSH client's reason, and the executor no longer pins a proxy host key or refreshes a proxy port for boxd machines.
+- 095438d: boxd `provisioner.region` accepts any lowercase region id, with `fra` as the default. The boxd driver finds the region's API endpoint with `ListRegions` on `boxd.sh`, so a worker can run on a boxd deployment in your own cloud account and region. Preflight fails with a `provider` capability error that names the listed region ids when boxd lists no region with the configured id. The worker form suggests `fra` and `nyc`.
+  
+  If boxd doesn't answer or rate-limits while the driver connects to the region, attempt launch waits and tries again instead of failing the Worker's check, and preflight names the hosts to reach: `app.boxd.sh`, `boxd.sh:9443`, and the region's API endpoint.
+- 6aa5e72: boxd workers follow how boxd restores machines. `provisioner.size` is optional and takes any `<vcpu>x<GiB>` size, such as `1x32` on a self-hosted cluster, instead of the hosted sizes only. A restore keeps its snapshot's size, so the setting only asserts it: when it is set, preflight compares the snapshot's vCPU count and memory with it and names the snapshot's size on a mismatch. Without it, preflight accepts the snapshot's size. Preflight logs the snapshot's size in `boxd provisioner verified`. `BoxdSize` is a branded `<vcpu>x<GiB>` string, and the operator view reports a missing size as null. `infra/boxd/build-snapshot.mjs --size` takes the same pattern and puts it in the temporary machine's spec.
+  
+  Each boxd machine is created with SSH off, since usine runs every command through `Exec`. A boxd worker ignores `provisioner.reuse`: boxd restores a machine in under a second, so every attempt gets a new machine. A stored worker that sets it still loads, and preflight warns that it has no effect and names the worker. The executor's `BoxdProvisioner` has no reuse policy and reports the ignored setting as `ignoredReuse`, `MachineDriver.assign` is optional and absent from the boxd driver, and the boxd client no longer updates labels.
+- 539349e: Add boxd as an SSH provisioner with snapshot size and region checks, machine reuse, and gateway tailnet support. Add worker configuration fields and a snapshot setup guide.
+- beaf1bf: A provider with a static key is added with its catalog entry and the descriptors that use it. The operator connects its key in Settings or with `usine login <provider> --api-key`, and a harness reaches it through the gateway or in a Cloudflare sandbox. The two subscription logins, `claude` and `chatgpt`, stay a closed set, because usine implements each one's sign-in.
+  
+  - `@usine/gateway`: the admin API connects and disconnects a static key for any provider of the gateway's catalog that accepts one. `PUT /v1/provider-credentials` takes the kind `<provider ID>-api-key`, which gateways up to 0.3.0 accept for the built-in providers, and returns 422 with `UnservedProvider` for a provider that the catalog doesn't have or that doesn't take the credential; `DELETE /v1/provider-credentials/:provider` takes a slot or a provider ID. `GET /v1/provider-credentials` lists every slot of the catalog in `catalog`, with its provider's `id`, `label`, and `accepts`, and the built-in slots in `providers`, which orchestrators up to 0.6.0 read. A connected static key or Claude setup token goes to the upstream that the provider's upstream variable sets. A login is stored under the slot of the catalog's provider that signs in with it, and a saved static key whose provider no longer takes one is ignored with a warning. `provider-credentials.json` keeps the format of gateways up to 0.3.0 for the built-in providers' credentials, so those gateways still read it, and holds other providers' keys under `staticKeys`, which they ignore. `ProviderCredential` decodes to a `StaticKey` or a `LoginSecret`; `credentialProvider` and `loginLlmProvider` are removed, and `providerEntry` and `AcceptedCredentials` are added.
+  - `@usine/server`: Provider connections and `usine login` list each provider that a destination serves, with the credentials it takes. Settings shows a provider without a subscription login with only its API key field. `usine login <provider>` takes a provider ID, a slot, or a login name, and lists the destination's providers when the name matches none. A key or a disconnect replaces a local credential whose status can't be read, such as a malformed Codex `auth.json`. The operator API's `PUT /api/providers/key` and `POST /api/providers/disconnect` take a provider by its slot or ID, or by its subscription login as before. Worker routing changes only for providers that the orchestrator's harnesses use. The Cloudflare worker and provisioner forms list the catalog's providers.
+  - `@usine/cloudflare`: the Worker serves `<provider ID>.usine.internal` for each provider of its catalog that takes an API key, and sends each request to the upstream of the protocol that serves its path, with the key in that protocol's header. It forwards each route of the catalog with the methods that the route's entry lists, and serves only a provider whose upstreams use HTTPS. A sandbox stores the provider hosts that it registered, and denies each one that the Worker's catalog no longer has. Codex uses the base URL of the provider that the sandbox has a key for. `PROVIDER_HOSTS` is replaced by `sandboxHost`, `interceptionsFor` takes the catalog, `providerRequest` takes a `ModelProvider`, `SandboxSettings` has `providers`, and `ProviderGrant.provider` is a `ModelProviderId`.
+  - `@usine/core`: `CloudflareLlmProvider` is removed. `ModelProvider` adds `login`, `passes`, and `sharedUpstream`; `ProviderProtocol` adds `methods` and `allows`; `ModelProviderCatalog` adds `signingIn` and refuses a subscription login that is also a provider ID or slot; and `selectProvider` resolves a provider name.
+  - `@usine/config`: a Cloudflare worker's `llm_providers` names any catalog provider that takes an API key.
+  - `@usine/executor`: `CloudflareProviderKey.provider` is a `ModelProviderId`.
+  - `@usine/agents`: a descriptor that offers the `api-key` route outside a sandbox refuses a provider whose protocols have different upstreams, and `HarnessCredential.apiKeyBaseUrl` gives the upstream they share.
+  - `@usine/durable`: Pi's gateway route takes the slot of the first of the Pi harness's catalog providers that serves the model request and has a credential, for both authentication and requests.
+- f898c14: A loop can declare the labels to change when CI passes, in `ci.on_green`. Each entry has an integer CEL `item` expression and `add` and `remove` label lists. The expression reads the trigger's `item` and `repo` and `pullRequest.number`, the pull request whose CI passed, so one loop can label the pull request and its issue:
+  
+  ```yaml
+  ci:
+    fix_loop: widgets/act-on-findings
+    timeout_seconds: 1800
+    on_green:
+      - item: pullRequest.number
+        add: [ready-for-review]
+      - item: item.number
+        remove: [agent-in-progress]
+  ```
+  
+  usine applies these changes whether or not the agent ended with the `[usine:awaiting-ci]` handoff. When the handoff also names `on_green` changes, usine applies the handoff's first and then the loop's, and applies a change that repeats an earlier one only once. A CI fix inherits both. usine reads `on_green` from the loop's current configuration when CI settles. Loops stored without `on_green` load without it. When the loop declares labels, the generated CI handoff instructions tell the agent that the handoff's `on_green` can be empty.
+  
+  When CI passes on an open pull request, neither the handoff nor the loop names a label change, and the loop doesn't set `on_green`, the run no longer closes as succeeded. The attempt and run fail with `AgentFailure` in **Needs attention**, with a message that names the pull request, which has no completion labels. The same happens when an `on_green` item expression fails. The log line `CI passed; completion actions applied` states how many changes usine applied.
+  
+  A loop with a CI policy that applies no completion labels when CI passes must now add `on_green: []` to its `ci` settings. Without it, every green run of the loop on an open pull request whose handoff names no labels fails in **Needs attention**. With `on_green: []`, the run succeeds and usine applies only the handoff's label changes, if any.
+  
+  Breaking API changes:
+  
+  - `LoopFile.ci` is a `LoopCiPolicy`, which adds `onGreen` to the `CiPolicy` fields: `None` without the key, and `Some` with the declared changes. `loopCiPolicy(loop)` returns the `CiPolicy` that a trigger event records.
+  - `CiResolution` has a `CiPassedWithoutLabels` variant.
+  - `CiMonitor.applyLabelsAfterGreen` takes the loaded instance as its first argument and can fail with `CiLabelExpressionError`, which `POST /api/runs/{runId}/apply-ci-labels` returns with status 422.
+- e828b51: The new instance setting `settings.max_background_wait_minutes` limits how long a child that answers while its background tasks still run waits for that work to start a turn. The default is no limit: such a child waits for its background work and the turn it starts, however long they take. **Configuration > Settings** shows and edits the setting.
+  
+  Claude Code children apply the limit. When it passes and the child is still idle, the child returns its last answer as its report, and a warning names the limit and the background task IDs. Closing the child ends the Claude Code process, which stops its background tasks, and their results never reach the Attempt. The child's `SessionFinished` event sets `backgroundWaitLimitPassed`, and when the Attempt ends, even as a success, cleanup salvages its checkout as after a failure, so work that the child hasn't pushed is kept. Cleanup applies the limit that the Attempt started with. If that salvage doesn't push all the work, the checkout stays, and startup recovery salvages it again instead of removing it. A turn that starts within the limit runs to its own answer. If the operator holds or pauses the child when the limit passes, the child stays open without reporting idle. A Release of a held child then returns the answer, unless a turn started first. If the Claude process resumes in the meantime, the child reports the kept answer as idle, and a Release returns it. The limit runs in memory, so a child that was already waiting when usine restarted waits without one.
+- dead029: A Claude Code child stops at its first request on usage credits. When a Claude subscription reaches its plan's usage limit and the account has usage credits turned on, Claude Code keeps working and bills the credits. A Claude Code child now stops at the first rate-limit report that says a request ran on usage credits, and the attempt ends with a capacity refusal: the run waits in its capacity group until the plan window resets, and **Needs attention** shows the reason. The report arrives after its request, so that request is already billed; other requests that Claude Code sent before usine closed the child can be billed too.
+  
+  The new instance setting `settings.allow_usage_credits`, `false` by default, lets Claude Code children keep working on usage credits instead. An attempt applies the value that it started with, and the supervisor keeps working on usage credits. **Configuration > Settings** shows and edits the setting.
+- d7e00bc: Configuration selects what coordinates an attempt. The `coordinator` setting in `usine.yaml` takes `session`, the default, where a Pi parent session coordinates the attempt, or `events`, where the event-driven coordinator applies rules to the attempt's lifecycle events with no parent session. An agent file's `coordinator` overrides the instance setting, and the scheduler resolves it when each attempt launches. Startup, reloads, and saved edits check the parent brain only of agents that resolve to `session`, so an instance whose agents all resolve to `events` starts without a Pi credential and quarantines no agent. Imports, reloads, and saved edits refuse `parent_model` or `parent_effort` in the same agent file or `settings` block as `coordinator: events`, with the field path in the problem. An agent file also accepts an optional `decision` with a `model` and an `effort` for its decision sessions, which run on the agent's own harness; no behavior reads it yet.
+  
+  `ParentKind` (`pi` or `none`) is now `CoordinatorKind` (`session` or `events`), and `RunSpec.parent` is now `RunSpec.coordinator`, which decodes as `session` for attempts stored without it. A fourth attempt journal migration rewrites a stored `RunSpec.parent` of `pi` or `none` as `session` or `events`. `Agent` adds the optional `coordinator` and `decision` (`DecisionBrain`), and `resolveCoordinator` returns the agent's kind, else the instance setting. `CheckoutRequest.coordinator` carries the resolved kind into the `RunSpec`. In the operator API, `SettingsView.coordinator`, `AgentFileView.coordinator`, and `AgentFileView.resolvedCoordinator` report the setting. The web configuration pages show the coordinator of the instance and of each agent and edit it in the settings and agent forms; an agent on `events` shows no parent model or effort.
+- 5c1ff0a: An `exe.dev` worker is refused with a message that names it and says that this version of usine doesn't run the kind. The configuration store refuses a commit that leaves an `exe.dev` worker in the configuration, and `usine up` refuses a stored one when it starts running attempts. Setup mode, which runs no attempts, still starts. Before, an instance whose workers were all `exe.dev` was told that the worker differed from the other workers. `@usine/config/factory` exports `exeDevWorkerRefusal`, the shared message. `@usine/config/configuration` exports `replay`, which applies stored revisions without this refusal. Replaying stored revisions, for a revert or when the running server applies a new revision, still accepts `exe.dev` workers.
+- 07b1f29: OpenCode agents can run models of the OpenCode Go plan through the gateway. Connect the plan's key with `usine login opencode-go --api-key`, or `OPENCODE_GO_API_KEY` on the gateway, and set `model` to `opencode-go/<model ID>`, such as `opencode-go/glm-5.3`. A model ID without a provider stays an OpenAI model. The gateway holds the key, and the worker gets only the caller token and the URL of the gateway's `opencode-go` slot.
+  
+  - `@usine/core`: the provider catalog adds `opencodeGo`, whose slot `opencode-go` serves `/chat/completions` and `/responses` at the plan's OpenAI upstream, `/messages` at its Anthropic upstream, and `/models/{model}:streamGenerateContent` at its Google upstream, each with the key in that protocol's header. It passes OpenCode's session headers and the Anthropic version and beta headers, and accepts only an API key.
+  - `@usine/gateway`: the gateway serves the `opencode-go` slot and returns the plan's error bodies unchanged, so OpenCode recognizes its limits.
+  - `@usine/agents`: a `HarnessDescriptor` lists the providers that an attempt API key outside a sandbox doesn't reach in `gatewayOnly`, and returns the others as `apiKeyProviders`. A `HarnessCredential` names the variable of each provider's slot URL in `slots`, which `slotEnvironment` renders for the providers that a gateway holds. A descriptor's `modelNotation` and `providerOf` read the provider of a model, as a branded `ModelChoice`, and `reaches` tells whether a route reaches it; `admitBrain` refuses a gateway-only provider's model outside the gateway route. `catalog.modelProvider` and `catalog.modelGatewayProvider` return a brain's provider, and whether a gateway holds its slot. OpenCode lists `openai` and `opencode-go`, reads the gateway's OpenAI slot from `USINE_OPENCODE_OPENAI_BASE_URL` and the attempt's API key's base URL from `USINE_OPENCODE_BASE_URL`, uses the attempt's API key on a gateway route without a slot of the model's provider, reads the provider of the model in OpenCode's `provider/model` notation, and refuses a provider that it doesn't list with the list in the message. Its session allows only the model's provider, and preflight and launch check the model against that provider.
+  - `@usine/cloudflare`: the Worker serves `opencode-go.usine.internal` for a sandbox with the plan's key, and denies it otherwise, as for every catalog provider.
+  - `@usine/executor`: a gateway route sets the URL of each slot of a harness that the gateway holds in the variable that the descriptor names, and the attempt's gateway credential kind, credential route, provisioner API key, caller token, and logged slot follow the provider of its model, not the harness's first provider. An attempt whose model's provider slot the gateway doesn't hold gets no caller token, so an OpenCode attempt on the provisioner's `openai` key sends only that key to OpenAI. A provisioner's `api_keys` give an attempt only a key that the harness reaches with one. The gateway upgrade notice lists only the paths that changed with slots.
+  - `@usine/config`: configuration admits an agent on a gateway route only when the worker's gateway holds the slot of its model's provider, so it refuses an OpenCode Go agent on a worker whose gateway doesn't list `opencode-go`.
+  - `@usine/server`: the agent and worker references document the OpenCode Go provider.
+- 360d371: `outcome_labels` entries use the GitHub label name rules and messages: a trimmed name of at most 50 characters. A loop file whose outcome labels differ only in letter case is rejected, because GitHub compares labels without case. A schedule loop that sets `outcome_labels` fails schema validation, because its runs have no item to label. An outcome label that `usine.yaml` doesn't declare under `labels` adds an `UndeclaredOutcomeLabelWarning` to `LoadedInstance.warnings` and logs `Loop outcome label is not a declared GitHub label` when the instance folder loads and each time `CurrentInstance` installs a configuration. The loop still loads. `logConfigWarnings` in `@usine/config/instance` logs these warnings.
+  
+  The SQLite configuration store rewrites stored loops that earlier versions accepted and these rules reject, so the stored configuration keeps loading. When it opens, it removes a schedule loop's outcome labels and each label that repeats an earlier one in a different letter case, records the change as one revision without an actor, and logs each loop. If the upgraded configuration is still invalid, the store leaves the stored loops unchanged and logs a warning with the problems. **Configuration > History** shows a stored agent or loop value that the current rules reject as YAML of its stored fields, through `formatRevisionEntity` in `@usine/config/folder-codec`, instead of failing to load the revision.
+  
+  `GitHubLabelName` and `canonicalLabelName` are exported from `@usine/core/label`; import them from there instead of `@usine/config/label`. `OutcomeLabels` in `@usine/core/loop`, and the `outcomeLabels` field of `Submission` in `@usine/engine`, now contain `GitHubLabelName` values.
+  
+  The loop detail page in **Configuration > Loops** lists a loop's outcome labels and warns about undeclared ones. `LoopFileView` in the operator API adds `outcomeLabels` and `undeclaredOutcomeLabels`. The loop form writes `outcome_labels` only when the loop sets at least one label.
+- 331a899: Workers accept `paused`. A paused worker takes no new attempts, and its running attempts finish; a run that reattaches an attempt already on the worker still takes a free slot there. The scheduler sends other runs to the next unpaused worker, so pausing the workers listed before a new worker sends attempts to it. Pausing or resuming applies on reload without a restart or a preflight. The worker page, the worker list, and the **Workers** line on **Overview** show a paused worker, and **Needs attention** lists it until it resumes. The worker form has a **Paused** option, and exports omit `paused: false`.
+- 2d9ee2e: A model provider is one catalog entry, and the gateway serves one slot for each. An entry gives the provider's ID, its slot at the gateway, its label, each wire protocol's upstream, routes, and key header, the credentials it accepts, the request headers that pass to the upstream, and the variable that replaces its upstreams. One key can serve several protocols: each path under the slot goes to the upstream of the protocol that serves it, with the key in that protocol's header. A provider with a static key needs only its entry. The Anthropic and OpenAI providers are entries with the slots `anthropic-messages` and `openai-responses`, and behave as before, subscription logins included.
+  
+  - `@usine/core/agent/provider`: `ModelProvider`, `ProviderProtocol`, `KeyHeader`, `ApiKeyCredential`, `SubscriptionCredential`, `ModelProviderCatalog`, the `ModelProviderId`, `GatewaySlot`, `WireProtocol`, `RoutePattern`, `HeaderName`, `GatewayVariable`, and `UpstreamBase` schemas, and `modelProviders`, the catalog of the `anthropic` and `openai` entries. `/worker` no longer exports `GatewayLlmProvider`, `GatewayLlmProtocol`, `GATEWAY_LEGACY_PROVIDERS`, `gatewayLlmProtocolOf`, or `GatewayLlmProtocolFromName`; `ModelProviderCatalog.find` and `slotFromName` read a slot or a provider ID.
+  - `@usine/agents/harness`: `HarnessDescriptor.providers` lists the providers a harness can use, in the order it prefers them; `HarnessCredential` drops `provider`, `protocol`, `label`, `apiHost`, and `apiKeyBaseUrl`, and its `gatewayPath` becomes `slotPath`, the path under the slot. `HarnessCatalog.providers` lists each declared provider once, `gatewayProvider` returns the provider whose gateway credential a harness uses, and the catalog refuses a provider ID that two harnesses define differently. A pool route `gateway-api-key` or `gateway-subscription` needs a provider of the harness that accepts that kind of credential.
+  - `@usine/gateway`: `GatewaySettings.catalog` holds the providers it serves, and `LlmProviders` holds an `LlmProvider` (an `ApiKey`, `AnthropicSubscriptionToken`, or `ChatGptLogin`, and an optional upstream) by slot; `AnthropicApiKey`, `OpenAiApiKey`, `AnthropicProvider`, and `OpenAiProvider` are removed. The gateway reads each provider's credential from the variables of its entry, reads a caller token from each protocol's key header, and refuses paths outside the entry's routes. `GET /v1/providers` also lists every slot it serves, with its routes, as `slots`. `provider-credentials.json` keeps its format.
+  - `@usine/config`: `gateway.llm_providers` accepts the slots of the harness catalog's providers, and their IDs as before slots. `ProviderApiKeys` maps a catalog provider ID to a variable, so a provisioner's `api_keys` accepts any catalog provider and refuses an unknown one; stored `anthropic` and `openai` keys read as before.
+  - `@usine/executor`: the gateway preflight refuses a gateway that doesn't serve a listed slot, or a route under it that the catalog declares, and asks to upgrade the gateway to the orchestrator's release; it reports a gateway that doesn't list its slots in `gatewayUpgrade`. `ProviderApiKeys` is a record by provider ID, and `provisionedApiKey` returns the key with its provider. `GatewayModelRoute.request` takes a slot and a path, and replaces `countTokens`. The supervisor relay forwards a model request to any route of a catalog provider.
+  - `@usine/durable`: `GatewayModelTransport` takes a slot and, for requests, a path.
+  - `@usine/orchestrator`: provisioner views replace `anthropicKeyEnv` and `openaiKeyEnv` with `apiKeys`, the variable of each provider's key by provider ID.
+  - `@usine/server`: the operator API's provisioner views have `apiKeys`, and the worker page lists each provider's API key variable.
+- cfd02df: The `coordinator`, `parent_model`, and `parent_effort` keys are removed from agent files and from `settings` in `usine.yaml`. Every new attempt runs on the event-driven coordinator. An attempt that an earlier version started with a Pi parent session keeps that parent when an orchestrator restart reattaches it, and its transcript still shows its parent model.
+  
+  usine ignores the three keys when an imported agent file or `usine.yaml` still has them, and logs a warning that names them. When usine opens the configuration store, it removes them from the stored settings and agents in one revision with the message `Removed coordinator, parent_model, and parent_effort, which usine ignores`, so no agent is quarantined because of them. Reverting a revision reads the values of earlier revisions without these keys.
+  
+  Configuration saves, reloads, and startup no longer check a parent model, effort, or credential, so the `coordinator-brains` step and `ValidationTimeoutError` are removed. The configuration pages, the agent and settings forms, and the operator API's `AgentFileView` and `SettingsView` no longer show a coordinator, parent model, or parent effort.
+  
+  `Agent` drops `parentModel`, `parentEffort`, and `coordinator`, and `resolveParentModel`, `resolveParentEffort`, `resolveCoordinator`, and `DEFAULT_COORDINATOR` are removed. `AttemptContext`, `Submission`, `StepExecution`, and the run snapshot drop `parentModel`, and `CheckoutRequest` drops `parentModel`, `parentEffort`, and `coordinator`. `@usine/orchestrator` removes the `/parent-admission` and `/parent-models` subpaths, `checkCoordinatorBrains`, `coordinatorBrainTimeout`, `registerParentAdmission`, and `ValidationTimeoutRefusal`.
+- 8fa25bb: Sign-in rate limits count each client address separately. Each sign-in operation allows 60 requests per minute from one client address and 600 per minute for the whole instance. The client address is the address of the connection. When that address is in the new `auth.trusted_proxies` setting, such as `[127.0.0.1/32, ::1/128]` for a reverse proxy on the same machine, the server reads the client address from `X-Forwarded-For`. Without the setting, the server ignores the header.
+  
+  On an instance behind a reverse proxy, the per-client limits take effect only after you list the proxy in `auth.trusted_proxies`. Until then, every client behind the proxy counts as the proxy's address and shares one allowance, so one client can still lock every member out of sign-in.
+- c7bd772: SSH workers keep their disks from filling up with worker images. After each image pull, usine removes the other images of the attempt image's repository. It keeps the current image, the most recently built other image, and every image that a container uses. After a rollback, the retained image can be newer than the current image. Cleanup recognizes Docker Hub name aliases and tracks images replaced by mutable tags such as `latest`.
+  
+  Preflight and each new attempt, before its checkout starts, check the free disk space on the filesystem of the worker's `root` and on the container runtime's image storage. Below the threshold, the check fails with a `disk` capability error that states the free space and the threshold. **Needs attention** shows the error, and attempts wait until a preflight passes. The threshold defaults to 10 GiB; set `min_free_disk_gib` on the worker to change it, or to `0` to turn the check off. An attempt whose check fails before its checkout fails with an infrastructure failure, which usine retries.
+  
+  When one of usine's own commands on a worker, such as an image pull or a checkout, reports `ENOSPC` or `No space left on device` during preflight or preparation, usine reports the same `disk` error instead of the command's failure. A report from the attempt's agent keeps the outcome that the agent gave it.
+- 4aebd77: The supervisor is a role of the harness contract. `@usine/agents/harness` exports `supervisor`, a role that runs on the orchestrator on a gateway credential route, lists only its usine tool set, keeps its conversation between turns, and takes interventions, and `admitSupervisor`, which requires `usine-tools`, `closed-tools`, `resume-session`, `steer`, `interrupt`, and `token-usage`. `@usine/agents/supervisor` exports `runSupervisorTurn`, which opens a supervisor session through `Harnesses` with a toolkit, or reopens the saved session for the conversation's next turn, and returns the answer, the saved session, and the session's cumulative usage across turns. A failed turn returns `SupervisorTurnError` with the usage that the session had spent. When a Claude Code process resumes a session, the first result's `modelUsage` minus its `model_usage_since_last_result` is the usage that Claude restored. usine counts that usage once and logs it at Info. This applies to a replacement process, to a process that the adapter resumes after its remote process stops, and to either one when the orchestrator reattaches it before its first result. `SessionTokensUpdated.processUsage` records `awaitsFirstResult` until then.
+  
+  `settings.supervisor: { harness, model, effort }` selects the supervisor's brain. Saving the configuration refuses a harness that can't serve the role and names what it lacks; Codex is refused, because it lists its own tools in every thread. An instance without the setting starts, and `SettingsView.supervisor` is null, which **Configuration > Settings** shows as not configured. The settings form edits the brain.
+  
+  The server builds the supervisor's operator toolkit from the operator tools that the MCP endpoint serves, filtered by the member's grants and operation ceiling, and answers each call through the operator API with the member's credential.
+
+### Patch Changes
+
+- eb58cad: Configuration checks, worker preflight, and coordinator startup admit brains through role declarations. A refusal names the missing capability, placement, or credential route with the harness's reason. For example, a Pi child placed on an SSH or container worker is refused with "Pi runs its tools in the orchestrator process and supports only local children".
+- 33bab87: Require container seats for supervisor sessions and enforce configurable CPU, memory, process, temporary storage and persistent conversation limits. Conversation storage on Docker and Podman requires Linux FUSE and a preallocated ext4 filesystem. Make relay request and supervisor Codex frame limits configurable, bound Pi file reads, restrict model forwarding, and remove labeled containers at turn end, shutdown and startup before reopening a conversation.
+- Updated dependencies [c99ca54]
+- Updated dependencies [4289b0b]
+- Updated dependencies [2cc7a34]
+- Updated dependencies [f8f311c]
+- Updated dependencies [2b3ac6b]
+- Updated dependencies [55c75fe]
+- Updated dependencies [095438d]
+- Updated dependencies [6aa5e72]
+- Updated dependencies [539349e]
+- Updated dependencies [fe7ceaa]
+- Updated dependencies [beaf1bf]
+- Updated dependencies [7626bb7]
+- Updated dependencies [b6fd6b2]
+- Updated dependencies [4ff30ae]
+- Updated dependencies [039daa4]
+- Updated dependencies [322d45e]
+- Updated dependencies [f898c14]
+- Updated dependencies [bfa02ef]
+- Updated dependencies [c8ea557]
+- Updated dependencies [589ad7b]
+- Updated dependencies [71ecb9e]
+- Updated dependencies [e828b51]
+- Updated dependencies [322d45e]
+- Updated dependencies [dead029]
+- Updated dependencies [b71cabb]
+- Updated dependencies [f889e77]
+- Updated dependencies [650d14a]
+- Updated dependencies [3fef8e2]
+- Updated dependencies [4eec609]
+- Updated dependencies [d6fb554]
+- Updated dependencies [34f71e5]
+- Updated dependencies [dd2a806]
+- Updated dependencies [d7e00bc]
+- Updated dependencies [64afcbb]
+- Updated dependencies [fd52df7]
+- Updated dependencies [e8003db]
+- Updated dependencies [650d14a]
+- Updated dependencies [eb83984]
+- Updated dependencies [fa97db3]
+- Updated dependencies [c8241d7]
+- Updated dependencies [3eccfe4]
+- Updated dependencies [edf94cf]
+- Updated dependencies [07b1f29]
+- Updated dependencies [053494a]
+- Updated dependencies [9a85543]
+- Updated dependencies [3eccfe4]
+- Updated dependencies [d185132]
+- Updated dependencies [08de94f]
+- Updated dependencies [eb83984]
+- Updated dependencies [2a76a52]
+- Updated dependencies [360d371]
+- Updated dependencies [b74919c]
+- Updated dependencies [2882f71]
+- Updated dependencies [b74919c]
+- Updated dependencies [fa97db3]
+- Updated dependencies [eb83984]
+- Updated dependencies [1634d92]
+- Updated dependencies [2d9ee2e]
+- Updated dependencies [e740eff]
+- Updated dependencies [360d371]
+- Updated dependencies [cfd02df]
+- Updated dependencies [eb83984]
+- Updated dependencies [fa97db3]
+- Updated dependencies [eb58cad]
+- Updated dependencies [b74919c]
+- Updated dependencies [c7bd772]
+- Updated dependencies [c7f39bc]
+- Updated dependencies [324bfed]
+- Updated dependencies [738c15c]
+- Updated dependencies [5ae7631]
+- Updated dependencies [6a42cb3]
+- Updated dependencies [1eddd3d]
+- Updated dependencies [1b04776]
+- Updated dependencies [7bc55d5]
+- Updated dependencies [4aebd77]
+- Updated dependencies [33bab87]
+- Updated dependencies [c5be05b]
+- Updated dependencies [ce404bf]
+- Updated dependencies [039daa4]
+- Updated dependencies [b1b75bd]
+  - @usine/agents@0.8.0
+  - @usine/core@0.8.0
+
 ## 0.6.0
 
 ### Minor Changes

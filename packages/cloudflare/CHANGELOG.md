@@ -1,5 +1,124 @@
 # @usine/cloudflare
 
+## 0.3.0
+
+### Minor Changes
+
+- beaf1bf: A provider with a static key is added with its catalog entry and the descriptors that use it. The operator connects its key in Settings or with `usine login <provider> --api-key`, and a harness reaches it through the gateway or in a Cloudflare sandbox. The two subscription logins, `claude` and `chatgpt`, stay a closed set, because usine implements each one's sign-in.
+  
+  - `@usine/gateway`: the admin API connects and disconnects a static key for any provider of the gateway's catalog that accepts one. `PUT /v1/provider-credentials` takes the kind `<provider ID>-api-key`, which gateways up to 0.3.0 accept for the built-in providers, and returns 422 with `UnservedProvider` for a provider that the catalog doesn't have or that doesn't take the credential; `DELETE /v1/provider-credentials/:provider` takes a slot or a provider ID. `GET /v1/provider-credentials` lists every slot of the catalog in `catalog`, with its provider's `id`, `label`, and `accepts`, and the built-in slots in `providers`, which orchestrators up to 0.6.0 read. A connected static key or Claude setup token goes to the upstream that the provider's upstream variable sets. A login is stored under the slot of the catalog's provider that signs in with it, and a saved static key whose provider no longer takes one is ignored with a warning. `provider-credentials.json` keeps the format of gateways up to 0.3.0 for the built-in providers' credentials, so those gateways still read it, and holds other providers' keys under `staticKeys`, which they ignore. `ProviderCredential` decodes to a `StaticKey` or a `LoginSecret`; `credentialProvider` and `loginLlmProvider` are removed, and `providerEntry` and `AcceptedCredentials` are added.
+  - `@usine/server`: Provider connections and `usine login` list each provider that a destination serves, with the credentials it takes. Settings shows a provider without a subscription login with only its API key field. `usine login <provider>` takes a provider ID, a slot, or a login name, and lists the destination's providers when the name matches none. A key or a disconnect replaces a local credential whose status can't be read, such as a malformed Codex `auth.json`. The operator API's `PUT /api/providers/key` and `POST /api/providers/disconnect` take a provider by its slot or ID, or by its subscription login as before. Worker routing changes only for providers that the orchestrator's harnesses use. The Cloudflare worker and provisioner forms list the catalog's providers.
+  - `@usine/cloudflare`: the Worker serves `<provider ID>.usine.internal` for each provider of its catalog that takes an API key, and sends each request to the upstream of the protocol that serves its path, with the key in that protocol's header. It forwards each route of the catalog with the methods that the route's entry lists, and serves only a provider whose upstreams use HTTPS. A sandbox stores the provider hosts that it registered, and denies each one that the Worker's catalog no longer has. Codex uses the base URL of the provider that the sandbox has a key for. `PROVIDER_HOSTS` is replaced by `sandboxHost`, `interceptionsFor` takes the catalog, `providerRequest` takes a `ModelProvider`, `SandboxSettings` has `providers`, and `ProviderGrant.provider` is a `ModelProviderId`.
+  - `@usine/core`: `CloudflareLlmProvider` is removed. `ModelProvider` adds `login`, `passes`, and `sharedUpstream`; `ProviderProtocol` adds `methods` and `allows`; `ModelProviderCatalog` adds `signingIn` and refuses a subscription login that is also a provider ID or slot; and `selectProvider` resolves a provider name.
+  - `@usine/config`: a Cloudflare worker's `llm_providers` names any catalog provider that takes an API key.
+  - `@usine/executor`: `CloudflareProviderKey.provider` is a `ModelProviderId`.
+  - `@usine/agents`: a descriptor that offers the `api-key` route outside a sandbox refuses a provider whose protocols have different upstreams, and `HarnessCredential.apiKeyBaseUrl` gives the upstream they share.
+  - `@usine/durable`: Pi's gateway route takes the slot of the first of the Pi harness's catalog providers that serves the model request and has a credential, for both authentication and requests.
+- 07b1f29: OpenCode agents can run models of the OpenCode Go plan through the gateway. Connect the plan's key with `usine login opencode-go --api-key`, or `OPENCODE_GO_API_KEY` on the gateway, and set `model` to `opencode-go/<model ID>`, such as `opencode-go/glm-5.3`. A model ID without a provider stays an OpenAI model. The gateway holds the key, and the worker gets only the caller token and the URL of the gateway's `opencode-go` slot.
+  
+  - `@usine/core`: the provider catalog adds `opencodeGo`, whose slot `opencode-go` serves `/chat/completions` and `/responses` at the plan's OpenAI upstream, `/messages` at its Anthropic upstream, and `/models/{model}:streamGenerateContent` at its Google upstream, each with the key in that protocol's header. It passes OpenCode's session headers and the Anthropic version and beta headers, and accepts only an API key.
+  - `@usine/gateway`: the gateway serves the `opencode-go` slot and returns the plan's error bodies unchanged, so OpenCode recognizes its limits.
+  - `@usine/agents`: a `HarnessDescriptor` lists the providers that an attempt API key outside a sandbox doesn't reach in `gatewayOnly`, and returns the others as `apiKeyProviders`. A `HarnessCredential` names the variable of each provider's slot URL in `slots`, which `slotEnvironment` renders for the providers that a gateway holds. A descriptor's `modelNotation` and `providerOf` read the provider of a model, as a branded `ModelChoice`, and `reaches` tells whether a route reaches it; `admitBrain` refuses a gateway-only provider's model outside the gateway route. `catalog.modelProvider` and `catalog.modelGatewayProvider` return a brain's provider, and whether a gateway holds its slot. OpenCode lists `openai` and `opencode-go`, reads the gateway's OpenAI slot from `USINE_OPENCODE_OPENAI_BASE_URL` and the attempt's API key's base URL from `USINE_OPENCODE_BASE_URL`, uses the attempt's API key on a gateway route without a slot of the model's provider, reads the provider of the model in OpenCode's `provider/model` notation, and refuses a provider that it doesn't list with the list in the message. Its session allows only the model's provider, and preflight and launch check the model against that provider.
+  - `@usine/cloudflare`: the Worker serves `opencode-go.usine.internal` for a sandbox with the plan's key, and denies it otherwise, as for every catalog provider.
+  - `@usine/executor`: a gateway route sets the URL of each slot of a harness that the gateway holds in the variable that the descriptor names, and the attempt's gateway credential kind, credential route, provisioner API key, caller token, and logged slot follow the provider of its model, not the harness's first provider. An attempt whose model's provider slot the gateway doesn't hold gets no caller token, so an OpenCode attempt on the provisioner's `openai` key sends only that key to OpenAI. A provisioner's `api_keys` give an attempt only a key that the harness reaches with one. The gateway upgrade notice lists only the paths that changed with slots.
+  - `@usine/config`: configuration admits an agent on a gateway route only when the worker's gateway holds the slot of its model's provider, so it refuses an OpenCode Go agent on a worker whose gateway doesn't list `opencode-go`.
+  - `@usine/server`: the agent and worker references document the OpenCode Go provider.
+- e740eff: The gateway and the Cloudflare outbound handlers close the ways that a later change or a careless setting could send a provider key or a caller token to the wrong host.
+  
+  - `@usine/gateway`: an upstream variable, such as `USINE_GATEWAY_OPENAI_UPSTREAM` or `USINE_GATEWAY_CHATGPT_UPSTREAM`, takes an `https://` URL, or an `http://` URL to a loopback host only. Another `http://` URL fails the startup, and a reload with one keeps the provider settings in force, with an error that names the variable. A provider slot refuses a method that the route's entry doesn't list with `unsupported-path`, as the Cloudflare handler does. The `key` query parameter no longer reaches a provider's upstream. `provider-credentials.json` records the provider ID of each key under `staticKeys`, and the gateway ignores, with a warning, a key saved for another provider than its slot's; a key saved without an ID still loads. A saved Anthropic or OpenAI key, and a saved Claude setup token, load only for the built-in `anthropic` or `openai` provider, and a Claude login connects only to `anthropic`, so a catalog that gives a built-in slot or the `claude` login to another provider never sends it those credentials.
+  - `@usine/cloudflare`: `ProviderProps` carries the provider's ID instead of its entry, and reads the props that earlier Workers registered for the entry's ID. `providerOutbound` takes the Worker's catalog and reads the entry from it on each request, so a handler that a container keeps across a deployment serves the current entry. It refuses a provider that the catalog no longer serves in a sandbox, or props that it can't decode, with status 403. `providerRequest` takes the catalog and leaves out `cookie`, the key header of every catalog provider, and the `key` query parameter.
+  - `@usine/core/agent/provider`: `upstreamSearch` returns a query without the parameters that can carry a key, and `ModelProviderCatalog.keyHeaders` lists the header that each protocol takes its key in.
+
+### Patch Changes
+
+- b71cabb: Workers install Codex CLI 0.172.0, which offers `gpt-6.2-astra` and `gpt-6.2-sol`. The app-server protocol baseline stays at 0.164.0, the latest release with a published `@pwrdrvr/codex-app-server-protocol` package. `CODEX_CLI_VERSION` is now the installed release and no longer equals `CODEX_PROTOCOL.version`. Preflight accepts 0.172.0, 0.164.0, and 0.159.0 through 0.159.3, so workers built from older images pass until they are rebuilt. The worker image tag, the Hetzner cloud-init, and the Cloudflare sandbox image install 0.172.0.
+  
+  When Codex's `model/list` lacks the requested model, the `UnknownModelError` message and the `Codex rejected an unknown model` log entry list the model IDs that Codex offers and the Codex CLI version that the app server reports. `initializeCodex` returns that version, read from the `initialize` user agent, and `checkCodexModel` takes it.
+  
+  The OpenAI price table adds `gpt-6.2-astra`, `gpt-6.2-sol`, and `gpt-6.1-terra`.
+- Updated dependencies [c99ca54]
+- Updated dependencies [4289b0b]
+- Updated dependencies [2cc7a34]
+- Updated dependencies [f8f311c]
+- Updated dependencies [2b3ac6b]
+- Updated dependencies [55c75fe]
+- Updated dependencies [095438d]
+- Updated dependencies [6aa5e72]
+- Updated dependencies [539349e]
+- Updated dependencies [fe7ceaa]
+- Updated dependencies [beaf1bf]
+- Updated dependencies [7626bb7]
+- Updated dependencies [b6fd6b2]
+- Updated dependencies [4ff30ae]
+- Updated dependencies [039daa4]
+- Updated dependencies [322d45e]
+- Updated dependencies [f898c14]
+- Updated dependencies [bfa02ef]
+- Updated dependencies [c8ea557]
+- Updated dependencies [589ad7b]
+- Updated dependencies [71ecb9e]
+- Updated dependencies [e828b51]
+- Updated dependencies [322d45e]
+- Updated dependencies [dead029]
+- Updated dependencies [b71cabb]
+- Updated dependencies [f889e77]
+- Updated dependencies [650d14a]
+- Updated dependencies [3fef8e2]
+- Updated dependencies [4eec609]
+- Updated dependencies [d6fb554]
+- Updated dependencies [34f71e5]
+- Updated dependencies [dd2a806]
+- Updated dependencies [d7e00bc]
+- Updated dependencies [64afcbb]
+- Updated dependencies [fd52df7]
+- Updated dependencies [e8003db]
+- Updated dependencies [650d14a]
+- Updated dependencies [eb83984]
+- Updated dependencies [fa97db3]
+- Updated dependencies [c8241d7]
+- Updated dependencies [3eccfe4]
+- Updated dependencies [edf94cf]
+- Updated dependencies [07b1f29]
+- Updated dependencies [053494a]
+- Updated dependencies [9a85543]
+- Updated dependencies [3eccfe4]
+- Updated dependencies [d185132]
+- Updated dependencies [08de94f]
+- Updated dependencies [eb83984]
+- Updated dependencies [2a76a52]
+- Updated dependencies [360d371]
+- Updated dependencies [b74919c]
+- Updated dependencies [2882f71]
+- Updated dependencies [b74919c]
+- Updated dependencies [fa97db3]
+- Updated dependencies [eb83984]
+- Updated dependencies [1634d92]
+- Updated dependencies [2d9ee2e]
+- Updated dependencies [e740eff]
+- Updated dependencies [360d371]
+- Updated dependencies [cfd02df]
+- Updated dependencies [eb83984]
+- Updated dependencies [fa97db3]
+- Updated dependencies [eb58cad]
+- Updated dependencies [b74919c]
+- Updated dependencies [c7bd772]
+- Updated dependencies [c7f39bc]
+- Updated dependencies [324bfed]
+- Updated dependencies [738c15c]
+- Updated dependencies [5ae7631]
+- Updated dependencies [6a42cb3]
+- Updated dependencies [1eddd3d]
+- Updated dependencies [1b04776]
+- Updated dependencies [7bc55d5]
+- Updated dependencies [4aebd77]
+- Updated dependencies [33bab87]
+- Updated dependencies [c5be05b]
+- Updated dependencies [ce404bf]
+- Updated dependencies [039daa4]
+- Updated dependencies [b1b75bd]
+  - @usine/agents@0.8.0
+  - @usine/core@0.8.0
+
 ## 0.2.0
 
 ### Minor Changes
