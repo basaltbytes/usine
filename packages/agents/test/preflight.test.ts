@@ -95,8 +95,13 @@ const encoder = new TextEncoder();
 const codexVersionCommand =
   "codex -c features.multi_agent=false -c features.plugins=false -c features.remote_plugin=false -c features.apps=false -c check_for_update_on_startup=false -c analytics.enabled=false --version";
 
+/** The stderr of every stubbed command whose response sets none. */
+const DIAGNOSTIC = "a diagnostic on stderr";
+
 const commands = (
-  responses: Readonly<Record<string, { readonly stdout: string; readonly exitCode: number }>>,
+  responses: Readonly<
+    Record<string, { readonly stdout: string; readonly exitCode: number; readonly stderr?: string }>
+  >,
 ) =>
   Layer.succeed(ChildProcessSpawner.ChildProcessSpawner)(
     ChildProcessSpawner.make((command) =>
@@ -118,7 +123,7 @@ const commands = (
           kill: () => Effect.void,
           stdin: Sink.drain,
           stdout: Stream.make(encoder.encode(response.stdout)),
-          stderr: Stream.make(encoder.encode("a diagnostic on stderr")),
+          stderr: Stream.make(encoder.encode(response.stderr ?? DIAGNOSTIC)),
           all: Stream.empty,
           getInputFd: () => Sink.drain,
           getOutputFd: () => Stream.empty,
@@ -250,7 +255,7 @@ describe("worker harness readiness", () => {
           assert(matchesError);
           assert.strictEqual(error.capability, result.capability);
           assert.strictEqual(server.opened(), 0);
-          assert(!jsonKey(error).includes("credential-shaped"));
+          assert(!jsonKey(error).includes(DIAGNOSTIC), "stderr stays out of the error");
         }).pipe(
           Effect.provide(
             commands({ [codexVersionCommand]: result }).pipe(
@@ -484,40 +489,45 @@ describe("worker harness readiness", () => {
     ),
   );
 
-  for (const [credential, sandbox] of [
-    ["host-login", false],
-    ["api-key", true],
+  for (const [credential, sandbox, exitCode] of [
+    ["host-login", false, 127],
+    ["api-key", true, 126],
   ] as const) {
     const route = sandbox ? "sandbox api-key" : credential;
-    it.effect(`reports the Claude Code installation for the ${route} route`, () =>
-      Effect.gen(function* () {
-        const error = yield* verifyHarness(
-          brain(Harness.make("claude")),
-          local,
-          workerEnvironment,
-          credential,
-          sandbox ? "sandbox" : "local",
-        ).pipe(Effect.flip);
-        assert.strictEqual(error._tag, "HarnessUnavailableError");
-        assert.strictEqual(
-          error.message,
-          sandbox
-            ? "claude --version failed in the sandbox image. Check the Claude Code installation in the sandbox image."
-            : `claude --version failed. Check the Claude Code installation${credential === "host-login" ? " and login" : ""} on the worker.`,
-        );
-      }).pipe(
-        Effect.provide(
-          commands({ "claude --version": { stdout: "", exitCode: 127 } }).pipe(
-            Layer.provideMerge(unusedAccount),
-            Layer.provideMerge(unusedPi),
+    it.effect(
+      `reports the Claude Code installation for the ${route} route (exit ${exitCode})`,
+      () =>
+        Effect.gen(function* () {
+          const error = yield* verifyHarness(
+            brain(Harness.make("claude")),
+            local,
+            workerEnvironment,
+            credential,
+            sandbox ? "sandbox" : "local",
+          ).pipe(Effect.flip);
+          assert.strictEqual(error._tag, "HarnessUnavailableError");
+          assert.strictEqual(
+            error.message,
+            sandbox
+              ? "claude --version failed in the sandbox image. Check the Claude Code installation in the sandbox image."
+              : `claude --version failed. Check the Claude Code installation${credential === "host-login" ? " and login" : ""} on the worker.`,
+          );
+        }).pipe(
+          Effect.provide(
+            commands({ "claude --version": { stdout: "", exitCode } }).pipe(
+              Layer.provideMerge(unusedAccount),
+              Layer.provideMerge(unusedPi),
+            ),
           ),
         ),
-      ),
     );
   }
 
   it.effect("reports the exit code of a version check that ran, and logs its error output", () => {
     const logs = collectLogs(["Warn"]);
+    // Longer than the logged 1000 characters, with a tail that its head doesn't repeat.
+    const tail = `${"t".repeat(990)}last words`;
+    const stderr = `${"h".repeat(500)}${tail}`;
     return Effect.gen(function* () {
       const error = yield* verifyHarness(
         brain(Harness.make("claude")),
@@ -538,11 +548,12 @@ describe("worker harness readiness", () => {
       assert.deepInclude(failure.message[1], {
         command: "claude",
         exitCode: 1,
-        stderr: "a diagnostic on stderr",
+        stderr: tail,
       });
+      assert(!jsonKey(error).includes("last words"), "stderr stays out of the error");
     }).pipe(
       Effect.provide(
-        commands({ "claude --version": { stdout: "", exitCode: 1 } }).pipe(
+        commands({ "claude --version": { stdout: "", exitCode: 1, stderr } }).pipe(
           Layer.provideMerge(unusedAccount),
           Layer.provideMerge(unusedPi),
           Layer.provideMerge(logs.layer),

@@ -1,13 +1,9 @@
-// @effect-diagnostics nodeBuiltinImport:off
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import { BrainSpec, Harness, ModelId } from "@usine/core/agent/brain";
 import { WorkerName } from "@usine/core/worker";
-import { Effect, Layer, Option, Ref, Sink, Stream } from "effect";
+import { Effect, FileSystem, Layer, Option, Ref, Sink, Stream } from "effect";
 import { ChildProcessSpawner } from "effect/process";
-import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { LocalProcess } from "../../src/child-host/child-host.ts";
 import { hostOutput } from "../../src/child-host/command.ts";
 import { HarnessCatalog } from "../../src/harness/harness.ts";
@@ -17,6 +13,7 @@ import { OpenCodeServer } from "../../src/harness/opencode/server.ts";
 import { Harnesses } from "../../src/harness/registry.ts";
 import { ProbeTarget } from "../../src/harness/runtime.ts";
 import { SessionOperationError } from "../../src/runtime.ts";
+import { collectLogs } from "../logs.ts";
 
 const encoder = new TextEncoder();
 
@@ -89,15 +86,57 @@ const preflight = (output: string) =>
 
 /**
  * A stand-in for `opencode` that creates folders in OpenCode's XDG directories on every start, as
- * OpenCode 2.3.2 does, and fails when it can't.
+ * OpenCode 2.3.2 does, and fails when it can't. `serve` also creates OpenCode's database.
  */
 const STUB_OPENCODE = [
   "#!/bin/sh",
   'mkdir -p "${XDG_DATA_HOME:-$HOME/.local/share}/opencode/log" "${XDG_CONFIG_HOME:-$HOME/.config}/opencode" \\',
   '  "${XDG_STATE_HOME:-$HOME/.local/state}/opencode" "${XDG_CACHE_HOME:-$HOME/.cache}/opencode" || exit 1',
-  `[ "$1" != --version ] || echo "opencode v${OPENCODE_VERSION}"`,
+  `[ "$1" != --version ] || { echo "opencode v${OPENCODE_VERSION}"; exit 0; }`,
+  "db=${OPENCODE_DB:-${XDG_DATA_HOME:-$HOME/.local/share}/opencode/opencode.db}",
+  'mkdir -p "$(dirname "$db")" && : > "$db"',
   "",
 ].join("\n");
+
+/** A stand-in for an `opencode` that runs and fails. */
+const FAILING_OPENCODE = ["#!/bin/sh", "echo 'opencode broke' >&2", "exit 1", ""].join("\n");
+
+/** The commands that the probe scripts and `STUB_OPENCODE` run. */
+const TOOLS = ["sh", "mktemp", "rm", "mkdir", "dirname"];
+
+/**
+ * Creates a scoped local worker whose command path has only `TOOLS` and, when given, `opencode` as
+ * the script `opencode`. Its home is a file, so that no folder can be created in it, not even by
+ * root. Its `TMPDIR` is an empty directory, and it exports `OPENCODE_DB`.
+ */
+const stubWorker = Effect.fn(function* (opencode: Option.Option<string>) {
+  const fs = yield* FileSystem.FileSystem;
+  const root = yield* fs.makeTempDirectoryScoped({ prefix: "usine-opencode-probe-" });
+  const bin = `${root}/bin`;
+  const tmp = `${root}/tmp`;
+  yield* fs.makeDirectory(bin);
+  yield* fs.makeDirectory(tmp);
+  for (const tool of TOOLS) {
+    const found = yield* Effect.findFirst(["/bin", "/usr/bin"], (dir) =>
+      fs.exists(`${dir}/${tool}`),
+    );
+    assert(Option.isSome(found), `the test machine has ${tool}`);
+    yield* fs.symlink(`${found.value}/${tool}`, `${bin}/${tool}`);
+  }
+  if (Option.isSome(opencode)) {
+    yield* fs.writeFileString(`${bin}/opencode`, opencode.value);
+    yield* fs.chmod(`${bin}/opencode`, 0o755);
+  }
+  yield* fs.writeFileString(`${root}/home`, "");
+  const database = `${root}/worker/opencode.db`;
+  return {
+    environment: { PATH: bin, HOME: `${root}/home`, TMPDIR: tmp, OPENCODE_DB: database },
+    /** The entries that the probes left in `TMPDIR`. */
+    leftovers: fs.readDirectory(tmp),
+    /** Whether a probe created the worker's `OPENCODE_DB`. */
+    usedWorkerDatabase: fs.exists(database),
+  };
+});
 
 describe("OpenCode preflight", () => {
   it.effect("reports another OpenCode release as unavailable without starting it", () =>
@@ -126,13 +165,7 @@ describe("OpenCode preflight", () => {
 
   it.effect("runs both probes with OpenCode's directories outside the home directory", () =>
     Effect.gen(function* () {
-      const root = mkdtempSync(join(tmpdir(), "usine-opencode-probe-"));
-      writeFileSync(join(root, "opencode"), STUB_OPENCODE);
-      chmodSync(join(root, "opencode"), 0o755);
-      // A home that is a file, so that no folder can be created in it, not even by root.
-      const home = join(root, "home");
-      writeFileSync(home, "");
-      const environment = { PATH: `${root}:/usr/bin:/bin`, HOME: home };
+      const worker = yield* stubWorker(Option.some(STUB_OPENCODE));
       const serve = yield* Ref.make(Option.none<{ exitCode: number; stderr: string }>());
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
       // Runs the serve probe's command, then fails as if OpenCode never got ready.
@@ -141,7 +174,7 @@ describe("OpenCode preflight", () => {
           Effect.gen(function* () {
             assert(target.command !== undefined, "the probe starts OpenCode with its own script");
             const result = yield* hostOutput(target.host, {
-              environment,
+              environment: worker.environment,
               command: target.command.command,
               args: [...target.command.args, "serve"],
             }).pipe(
@@ -161,10 +194,56 @@ describe("OpenCode preflight", () => {
           }),
         stop: () => Effect.void,
       });
-      const readiness = yield* runPreflight(environment).pipe(Effect.provide(server), Effect.flip);
+      const readiness = yield* runPreflight(worker.environment).pipe(
+        Effect.provide(server),
+        Effect.flip,
+      );
       assert.strictEqual(readiness.message, "The test serves no OpenCode");
       const served = yield* Ref.get(serve);
       assert.deepStrictEqual(served, Option.some({ exitCode: 0, stderr: "" }));
-    }).pipe(Effect.provide(NodeServices.layer)),
+      const leftovers = yield* worker.leftovers;
+      assert.deepStrictEqual(leftovers, [], "the probes remove their directories");
+      const usedWorkerDatabase = yield* worker.usedWorkerDatabase;
+      assert.isFalse(usedWorkerDatabase, "serve uses the probe's database");
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("reports the exit code of an OpenCode that fails, and logs its error output", () => {
+    const logs = collectLogs(["Warn"]);
+    return Effect.gen(function* () {
+      const worker = yield* stubWorker(Option.some(FAILING_OPENCODE));
+      const readiness = yield* runPreflight(worker.environment).pipe(Effect.provide(unusedServer));
+      assert(readiness._tag === "HarnessUnavailableError");
+      assert.strictEqual(
+        readiness.message,
+        'opencode --version exited with code 1 on the worker. The log entry "Harness prerequisite check failed" has its error output.',
+      );
+      const failure = logs.records.find(
+        ({ message }) =>
+          Array.isArray(message) && message[0] === "Harness prerequisite check failed",
+      );
+      assert(failure !== undefined && Array.isArray(failure.message), "the failure is logged");
+      assert.deepInclude(failure.message[1], {
+        command: "opencode",
+        exitCode: 1,
+        stderr: "opencode broke",
+      });
+      const leftovers = yield* worker.leftovers;
+      assert.deepStrictEqual(leftovers, [], "the probe removes its directory");
+    }).pipe(Effect.scoped, Effect.provide(Layer.merge(NodeServices.layer, logs.layer)));
+  });
+
+  it.effect("reports the OpenCode installation when the worker has no opencode", () =>
+    Effect.gen(function* () {
+      const worker = yield* stubWorker(Option.none());
+      const readiness = yield* runPreflight(worker.environment).pipe(Effect.provide(unusedServer));
+      assert(readiness._tag === "HarnessUnavailableError");
+      assert.strictEqual(
+        readiness.message,
+        "opencode --version failed. Check the OpenCode installation on the worker.",
+      );
+      const leftovers = yield* worker.leftovers;
+      assert.deepStrictEqual(leftovers, [], "the probe removes its directory");
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 });

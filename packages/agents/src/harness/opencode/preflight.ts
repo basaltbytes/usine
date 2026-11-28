@@ -6,25 +6,25 @@ import { isRemoteHost } from "../../child-host/child-host.ts";
 import { probeBinary } from "../../preflight/command.ts";
 import { checkedPreflight, loginUnavailable, type ProbeTarget } from "../runtime.ts";
 import { openCodeApi } from "./api.ts";
-import { openCodeDirectories, serveConfig } from "./config.ts";
+import { openCodeDirectories, serveConfig, serveVariables } from "./config.ts";
 import { OPENCODE_VERSION, opencode } from "./descriptor.ts";
 import { checkModel, modelChoice } from "./model.ts";
 import { OpenCodeServer } from "./server.ts";
 
 /**
- * Returns a script that runs `opencode` with the script's arguments and the `variables` assignments
- * in a temporary directory, which also holds OpenCode's XDG directories and which the script removes
- * when OpenCode exits. The probes use no folder of the home directory, which a container's volume
- * mounts can leave owned by root.
+ * Returns a script that runs `opencode` with the script's arguments in a temporary directory, which
+ * it removes when OpenCode exits, and with the assignments that `variables` returns for `$dir`, the
+ * directory's path. The shell expands each value. The probes use no folder of the home directory,
+ * which a container's volume mounts can leave owned by root.
  */
-const temporaryOpenCode = (variables: string) => {
-  const directories = Object.entries(openCodeDirectories("$dir"))
+const temporaryOpenCode = (variables: (dir: string) => Readonly<Record<string, string>>) => {
+  const assignments = Object.entries(variables("$dir"))
     .map(([name, value]) => `${name}="${value}"`)
     .join(" ");
   return String.raw`
 dir=$(mktemp -d) || exit 1
 cd "$dir" || exit 1
-${directories} ${variables}opencode "$@"
+${assignments} opencode "$@"
 status=$?
 rm -rf "$dir"
 exit "$status"
@@ -32,14 +32,13 @@ exit "$status"
 };
 
 /** Runs `opencode` with the script's arguments, such as `--version`. */
-const VERSION_SCRIPT = temporaryOpenCode("");
+const VERSION_SCRIPT = temporaryOpenCode(openCodeDirectories);
 
 /** Starts `opencode serve` with `$1` as its configuration. The remaining arguments are `serve`'s. */
 const PROBE_SCRIPT = String.raw`
 config=$1
 shift
-${temporaryOpenCode(String.raw`OPENCODE_CONFIG_PROJECT_DISABLE=1 OPENCODE_DISABLE_CLAUDE_CODE=1 \
-  OPENCODE_DISABLE_MODELS_FETCH=1 OPENCODE_DISABLE_FREE_MODELS=1 OPENCODE_CONFIG_CONTENT="$config" `)}
+${temporaryOpenCode((dir) => serveVariables(dir, "$config"))}
 `.trim();
 
 /** Returns the error for `opencode --version` output that names another release than the pin. */
