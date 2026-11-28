@@ -41,7 +41,8 @@ const decodeRunDuration = Schema.decodeUnknownEffect(
   ),
 );
 
-const SHARED_CACHES = [
+/** The volumes that every container of a machine shares, and where each container mounts them. */
+export const SHARED_CACHES = [
   { volume: PNPM_STORE_VOLUME, path: PNPM_STORE_PATH },
   {
     volume: "usine-turbo-cache",

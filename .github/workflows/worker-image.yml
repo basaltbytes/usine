@@ -4,10 +4,11 @@ name: Worker image
 # an SSH worker with Docker, for linux/amd64 and linux/arm64, each on a runner
 # of that architecture, and prints the version of each tool in it. On main, each
 # build pushes its image by digest, and the publish job tags both digests as one
-# multi-platform image. The tag names the Claude Code and Codex versions that
-# the harness descriptors specify, which is the tag of the SSH executor's default image
-# (ATTEMPT_IMAGE in packages/executor/src/ssh/container.ts). A pull request only
-# builds and checks both images.
+# multi-platform image. The tag names the harness versions that the harness
+# descriptors specify and the digest of the image's files, and is the tag of the
+# SSH executor's default image (ATTEMPT_IMAGE in
+# packages/executor/src/ssh/container.ts). A pull request only builds and checks
+# both images.
 
 on:
   push:
@@ -94,6 +95,20 @@ jobs:
             version=$(corepack pnpm --version)
             echo "corepack pnpm: $version"
             [ "pnpm@$version" = "${PACKAGE_MANAGER%%+*}" ]'
+      # Attempt containers mount these volumes, and the runtime creates the
+      # missing parents of each mount point as root.
+      - name: Run OpenCode with the shared cache volumes mounted
+        run: |
+          docker run --rm \
+            --volume usine-pnpm-store:/home/usine/.local/share/pnpm/store:nocopy \
+            --volume usine-turbo-cache:/home/usine/.cache/turbo:nocopy \
+            usine-worker:smoke bash -euc '
+            for dir in ~/.cache ~/.config ~/.local ~/.local/share ~/.local/share/pnpm ~/.local/state; do
+              owner=$(stat -c %U "$dir")
+              [ "$owner" = usine ] || { echo "$dir belongs to $owner" >&2; exit 1; }
+            done
+            printf "opencode: "
+            opencode --version'
       # Rebuilds from the build cache of the Build step.
       - name: Push by digest
         id: push
