@@ -234,6 +234,7 @@ const makeOpenCodeSessions = Effect.gen(function* () {
       api,
       execution: active ? Execution.Running() : Execution.Idle(),
       executions: 0,
+      cancellations: 0,
       pending: restoredInputs.queued.reduce(
         (pending, messageId) => enqueued(pending, openCodeMessageId(sessionId, messageId)),
         emptyPending,

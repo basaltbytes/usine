@@ -8,7 +8,7 @@ import { query } from "./api.ts";
 import { BridgeAnswer } from "./bridge/lines.ts";
 import { ActiveSessions, Inbox, type Job, Jobs } from "./codec.ts";
 import type { OpenCodeContext, OpenCodeState } from "./context.ts";
-import { answerDue, Execution, runningWork, unread, workReported } from "./state.ts";
+import { answerDue, inputAwaited, runningWork, unread, workReported } from "./state.ts";
 
 /** The check of whether an OpenCode session's answer is due, after its root execution succeeded. */
 export interface DoneCheck {
@@ -42,6 +42,12 @@ const isTransient = (error: SessionOperationError) =>
   Schema.is(RequestTimedOut)(error.cause) ||
   (Schema.is(BridgeAnswer)(error.cause) && error.cause.status >= 500);
 
+/**
+ * How a done check that read OpenCode's inbox records the input that it lists: the answer waits
+ * for it, OpenCode started a later execution, or OpenCode cancelled an inbox item during the read.
+ */
+type ListedInput = "awaited" | "superseded" | "cancelled";
+
 /** Returns the done check of the session that `context` describes. */
 export const doneCheck = (context: OpenCodeContext): DoneCheck => {
   const { sessionId, root, state, api, conversation, channel, tasks, fail } = context;
@@ -56,11 +62,25 @@ export const doneCheck = (context: OpenCodeContext): DoneCheck => {
     Ref.modify(state, (latest): readonly [Option.Option<number>, OpenCodeState] => {
       if (latest.executions !== checked) return [Option.none(), latest];
       const count = unread(latest.pending);
-      return count > 0 &&
-        (latest.execution._tag === "Idle" || latest.execution._tag === "AwaitingWork")
-        ? [Option.some(count), { ...latest, execution: Execution.AwaitingInput() }]
+      return count > 0
+        ? [Option.some(count), { ...latest, execution: inputAwaited(latest.execution) }]
         : [Option.some(count), latest];
     });
+
+  /**
+   * Records that the answer of execution `checked` waits for the input that OpenCode's inbox
+   * lists, unless OpenCode started a later execution, or cancelled an inbox item after the
+   * session's count of cancellations was `cancellations`. An end of input, such as OpenCode's
+   * cancellation of a listed item, then checks the answer again.
+   */
+  const awaitListedInput = (checked: number, cancellations: number) =>
+    Ref.modify(state, (latest): readonly [ListedInput, OpenCodeState] =>
+      latest.executions !== checked
+        ? ["superseded", latest]
+        : latest.cancellations !== cancellations
+          ? ["cancelled", latest]
+          : ["awaited", { ...latest, execution: inputAwaited(latest.execution) }],
+    );
 
   /** Logs that a done check stops because OpenCode started an execution after the one it checks. */
   const superseded = (checked: number) =>
@@ -68,6 +88,19 @@ export const doneCheck = (context: OpenCodeContext): DoneCheck => {
       "OpenCode started another execution during the done check; that execution's check answers",
       { sessionId, execution: checked },
     );
+
+  /**
+   * Fails the session with `error` from a done check that runs in a task, unless the bridge was
+   * lost: the event stream fails with that loss too, and its consumer reopens a remote session or
+   * fails a local one.
+   */
+  const failTask = (error: AgentSessionError) =>
+    error._tag === "SessionOperationError" && Schema.is(ChildProcessLost)(error.cause)
+      ? Effect.logWarning(
+          "The OpenCode bridge was lost during the done check; stopping the check",
+          { sessionId, message: error.message },
+        )
+      : fail(error);
 
   const answerIfDue = Effect.gen(function* () {
     const due = yield* Ref.modify(state, (latest) => {
@@ -78,7 +111,7 @@ export const doneCheck = (context: OpenCodeContext): DoneCheck => {
     yield* Effect.logInfo("The input that the answer waited for won't start an execution", {
       sessionId,
     });
-    yield* FiberSet.run(tasks, Effect.suspend(() => check(due.value)).pipe(Effect.catch(fail)));
+    yield* FiberSet.run(tasks, Effect.suspend(() => check(due.value)).pipe(Effect.catch(failTask)));
   });
 
   /**
@@ -153,9 +186,13 @@ export const doneCheck = (context: OpenCodeContext): DoneCheck => {
   /**
    * Reports the tree's background work after root execution `checked` succeeded, by the events
    * that the runtime handled and then by OpenCode's own lists. Returns whether the answer is due:
-   * false when OpenCode has unread input or runs the session's next execution.
+   * false when OpenCode has unread input or runs the session's next execution. Reads OpenCode's
+   * lists again when OpenCode cancelled an inbox item during the inbox read, which the read may
+   * list.
    */
-  const checkWork = Effect.fn("OpenCodeRuntime.checkWork")(function* (checked: number) {
+  const checkWork: (checked: number) => Effect.Effect<boolean, SessionOperationError> = Effect.fn(
+    "OpenCodeRuntime.checkWork",
+  )(function* (checked: number) {
     yield* Effect.annotateCurrentSpan({ sessionId, execution: checked });
     const running = runningWork((yield* Ref.get(state)).pending);
     if (running.length > 0) return yield* reportWork(checked, running);
@@ -173,16 +210,29 @@ export const doneCheck = (context: OpenCodeContext): DoneCheck => {
       ),
     );
     if (jobs.data.length > 0) return yield* reportWork(checked, jobs.data.map(backgroundWork));
+    const { cancellations } = yield* Ref.get(state);
     const inbox = yield* lookup(
       "session inbox",
       latestApi.read(Inbox, "stream", "GET", `${sessionPath}/inbox`),
     );
     if (inbox.data.length > 0) {
-      yield* Effect.logInfo("OpenCode has unread input, which starts the next execution", {
-        sessionId,
-        unread: inbox.data.length,
-      });
-      return false;
+      switch (yield* awaitListedInput(checked, cancellations)) {
+        case "superseded":
+          yield* superseded(checked);
+          return false;
+        case "cancelled":
+          yield* Effect.logInfo(
+            "OpenCode cancelled an inbox item during the done check's inbox read; reading its state again",
+            { sessionId, listed: inbox.data.length },
+          );
+          return yield* checkWork(checked);
+        case "awaited":
+          yield* Effect.logInfo("OpenCode has unread input, which starts the next execution", {
+            sessionId,
+            unread: inbox.data.length,
+          });
+          return false;
+      }
     }
     const { data: activeSessions } = yield* lookup(
       "active sessions",

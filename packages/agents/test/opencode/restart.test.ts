@@ -18,6 +18,7 @@ import {
   event,
   execution,
   firstExecutionEnds,
+  forkedCheck,
   launched,
   type ScriptedBridge,
   scriptedBackend,
@@ -400,6 +401,80 @@ describe("OpenCode restart", () => {
         yield* bridge.lose(lost);
         const failure = yield* running.result.pipe(Effect.flip, Effect.timeoutOption("500 millis"));
         assert(Option.isSome(failure), "the session fails within the first backoff");
+        assert(failure.value._tag === "SessionOperationError");
+        assert.strictEqual(failure.value.message, lost.message);
+      }).pipe(Effect.scoped),
+  );
+
+  it.live(
+    "reopens a remote session when the bridge is lost during a done check that runs in a task",
+    () =>
+      Effect.gen(function* () {
+        const { server, bridge, running } = yield* launched("OLD", remoteRequest);
+        const first = yield* server.bridges;
+        assert.strictEqual(first, bridge);
+        yield* forkedCheck(bridge, running, "jobs");
+        yield* bridge.lose(lost);
+        const reopened = yield* server.bridges.pipe(Effect.timeoutOption("500 millis"));
+        assert(Option.isSome(reopened), "the session reopens on a new bridge");
+        const continued = yield* reopened.value.request;
+        assertPrompt(continued, CONTINUATION_MESSAGE);
+        yield* reopened.value.reply(continued, 200, { data: { id: "msg_continue" } });
+        for (const line of [
+          event("session.inbox.enqueued", { inboxID: "msg_continue" }),
+          ...execution("msg_continue", "AFTER"),
+        ])
+          yield* reopened.value.emit(line);
+        const result = yield* running.result;
+        assert.strictEqual(result.message, "AFTER");
+      }).pipe(Effect.scoped),
+  );
+
+  it.live("doesn't run a done check from before a restart on the reopened session", () =>
+    Effect.gen(function* () {
+      const { server, bridge, running } = yield* launched("OLD", remoteRequest);
+      const first = yield* server.bridges;
+      assert.strictEqual(first, bridge);
+      const jobs = yield* forkedCheck(bridge, running, "jobs");
+      // The task's jobs read fails once; its retry waits about a second.
+      yield* bridge.reply(jobs, 503, { message: "OpenCode is busy" });
+      yield* Effect.sleep("50 millis");
+      yield* bridge.lose(lost);
+      const reopened = yield* server.bridges.pipe(Effect.timeoutOption("500 millis"));
+      assert(Option.isSome(reopened), "the session reopens on a new bridge");
+      const continued = yield* reopened.value.request;
+      assertPrompt(continued, CONTINUATION_MESSAGE);
+      yield* reopened.value.reply(continued, 200, { data: { id: "msg_continue" } });
+      // The task's retry runs about a second after the 503.
+      const early = yield* running.result.pipe(Effect.exit, Effect.timeoutOption("2 seconds"));
+      assert(
+        Option.isNone(early),
+        "the task's retry neither fails nor answers the reopened session",
+      );
+      const reads = yield* reopened.value.answered;
+      assert(
+        !reads.some(({ path }) => path.startsWith("/api/experimental/job")),
+        "the task doesn't read the reopened bridge",
+      );
+      for (const line of [
+        event("session.inbox.enqueued", { inboxID: "msg_continue" }),
+        ...execution("msg_continue", "AFTER"),
+      ])
+        yield* reopened.value.emit(line);
+      const result = yield* running.result;
+      assert.strictEqual(result.message, "AFTER");
+    }).pipe(Effect.scoped),
+  );
+
+  it.live(
+    "fails the session with the bridge's loss when a local bridge stops during a done check that runs in a task",
+    () =>
+      Effect.gen(function* () {
+        const { bridge, running } = yield* launched("OLD");
+        yield* forkedCheck(bridge, running, "jobs");
+        yield* bridge.lose(lost);
+        const failure = yield* running.result.pipe(Effect.flip, Effect.timeoutOption("500 millis"));
+        assert(Option.isSome(failure), "the session fails");
         assert(failure.value._tag === "SessionOperationError");
         assert.strictEqual(failure.value.message, lost.message);
       }).pipe(Effect.scoped),

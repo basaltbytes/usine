@@ -19,6 +19,11 @@ export interface OpenCodeState {
    * OpenCode started an execution after the one that it checks.
    */
   readonly executions: number;
+  /**
+   * How many inbox items of the root session OpenCode cancelled since the session opened, which
+   * tells a done check whether OpenCode cancelled an item during its inbox read.
+   */
+  readonly cancellations: number;
   readonly pending: Pending;
   /** Tool names by call ID, from `session.tool.input.started`. */
   readonly toolNames: ReadonlyMap<string, string>;

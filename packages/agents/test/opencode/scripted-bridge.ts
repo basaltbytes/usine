@@ -374,3 +374,29 @@ export const execution = (id: string, text: string) => [
   event("session.step.ended"),
   event("session.execution.succeeded"),
 ];
+
+/** Whether `path` is the path of a query of `lookup`. */
+const readsLookup = (lookup: Lookup, path: string) =>
+  lookup === "jobs"
+    ? path.startsWith("/api/experimental/job")
+    : lookup === "inbox"
+      ? path.endsWith("/inbox")
+      : path === "/api/session/active";
+
+/**
+ * Ends the first execution of `launched` while a steer's post is open, then fails the post, which
+ * runs the done check in a task. Returns the task's held query of `lookup`.
+ */
+export const forkedCheck = (bridge: ScriptedBridge, running: RunningSession, lookup: Lookup) =>
+  Effect.gen(function* () {
+    const steering = yield* Effect.forkScoped(running.steer("Reply STEERED instead."));
+    const posted = yield* bridge.request;
+    for (const line of firstExecutionEnds) yield* bridge.emit(line);
+    yield* Effect.sleep("50 millis");
+    yield* bridge.holdNext(lookup);
+    yield* bridge.reply(posted, 500, { message: "The session can't take input" });
+    yield* Fiber.await(steering);
+    const held = yield* bridge.request;
+    assert(readsLookup(lookup, held.path), `the task's held request reads the ${lookup}`);
+    return held;
+  });
