@@ -81,11 +81,12 @@ export const hostSpawn = (
 /** The trimmed standard output and the exit code of a command on a host. */
 interface HostOutput {
   readonly stdout: string;
+  readonly stderr: string;
   readonly exitCode: number;
 }
 
 /**
- * Runs `invocation` on `host` and returns its trimmed stdout and exit code; stderr is discarded.
+ * Runs `invocation` on `host` and returns its trimmed stdout and stderr, and its exit code.
  * Fails with `HostUnreachable` if a remote host can't run the command or loses it: an SSH client
  * that exits with `SSH_FAILURE`, or an `ExecShell` transport failure.
  */
@@ -118,7 +119,7 @@ export const hostOutput = Effect.fn("ChildHost.output")(function* (
           destination: host.destination,
           message: stderr.trim() || `${host.ssh.command} exited with code ${SSH_FAILURE}`,
         });
-      return { stdout: stdout.trim(), exitCode } satisfies HostOutput;
+      return { stdout: stdout.trim(), stderr: stderr.trim(), exitCode } satisfies HostOutput;
     }),
   );
 });

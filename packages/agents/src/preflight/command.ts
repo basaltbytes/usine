@@ -22,7 +22,7 @@ export const probeFailed = (
 
 /**
  * Runs a readiness command on `host` with a 30-second timeout and returns its trimmed stdout and
- * exit code; stderr is discarded. If the remote host is unreachable or the command times out, fails
+ * stderr, and its exit code. If the remote host is unreachable or the command times out, fails
  * with `SessionOperationError`. Dies if `host` is a remote shell and `environment` is not empty.
  */
 export const probeOutput = Effect.fn("HarnessPreflight.command")(function* (
@@ -61,30 +61,60 @@ export const probeOutput = Effect.fn("HarnessPreflight.command")(function* (
   );
 });
 
-/** Checks a runtime prerequisite using the target's installation guidance. */
+/** The exit codes of a shell that can't find or execute a command. */
+const NOT_INSTALLED = new Set([126, 127]);
+
+/**
+ * Checks a runtime prerequisite with `command --version`, or the `run` command line that runs it,
+ * and returns its stdout. Fails with the target's installation guidance if the command can't run,
+ * and with its exit code if it ran and failed; the log entry of that failure has the end of its
+ * stderr, which the error message leaves out.
+ */
 export const probeBinary = Effect.fn("HarnessPreflight.binary")(function* (
   descriptor: HarnessDescriptor,
   target: ProbeTarget,
   command: string,
   args: ReadonlyArray<string>,
+  run: { readonly command: string; readonly args: ReadonlyArray<string> } = { command, args },
 ) {
   const { host, environment, placement, credential } = target;
   yield* Effect.annotateCurrentSpan({ harness: descriptor.id, worker: target.worker, credential });
+  const where = placement === "sandbox" ? "in the sandbox image" : "on the worker";
   const failed = () =>
     HarnessUnavailableError.make({
       harness: descriptor.id,
       capability: "binary",
       message:
         placement === "sandbox"
-          ? `${command} --version failed in the sandbox image. Check the ${descriptor.label} installation in the sandbox image.`
+          ? `${command} --version failed ${where}. Check the ${descriptor.label} installation in the sandbox image.`
           : command === "node" && credential !== "host-login"
             ? `Remote ${descriptor.label} children require Node.js on the worker's command path.`
             : `${command} --version failed. Check the ${descriptor.label} installation${credential === "host-login" ? " and login" : ""} on the worker.`,
     });
-  const result = yield* probeOutput(host, environment, descriptor.id, "binary", command, args).pipe(
-    Effect.catchTag("HarnessUnavailableError", () => failed()),
-  );
-  if (result.exitCode !== 0) return yield* failed();
+  const result = yield* probeOutput(
+    host,
+    environment,
+    descriptor.id,
+    "binary",
+    run.command,
+    run.args,
+  ).pipe(Effect.catchTag("HarnessUnavailableError", () => failed()));
+  if (result.exitCode !== 0) {
+    yield* Effect.logWarning("Harness prerequisite check failed", {
+      harness: descriptor.id,
+      worker: target.worker,
+      credential,
+      command,
+      exitCode: result.exitCode,
+      stderr: result.stderr.slice(-1000),
+    });
+    if (NOT_INSTALLED.has(result.exitCode)) return yield* failed();
+    return yield* HarnessUnavailableError.make({
+      harness: descriptor.id,
+      capability: "binary",
+      message: `${command} --version exited with code ${result.exitCode} ${where}. The log entry "Harness prerequisite check failed" has its error output.`,
+    });
+  }
   yield* Effect.logInfo("Harness prerequisite verified", {
     harness: descriptor.id,
     worker: target.worker,

@@ -20,6 +20,7 @@ import { Deferred, Effect, Fiber, Layer, Option, Redacted, References, Schema } 
 // @effect-diagnostics-next-line nodeBuiltinImport:off
 import { readFileSync } from "node:fs";
 import { CheckoutRequest, Executor } from "../../src/executor.ts";
+import { SHARED_CACHES } from "../../src/remote/container.ts";
 import { ATTEMPT_IMAGE, type SshWorkerAddress, SshWorkers } from "../../src/ssh/ssh.ts";
 import { fakeGateway, gatewayAddress, gatewayRuntime } from "./gateway/support.ts";
 import {
@@ -180,6 +181,33 @@ describe("SSH Worker with Docker", () => {
       "utf8",
     ).trim();
     assert.strictEqual(ATTEMPT_IMAGE, `ghcr.io/basaltbytes/usine-worker:${tag}`);
+  });
+
+  it("gives the usine user the parents of the shared cache mounts and the XDG directories", () => {
+    const dockerfile = readFileSync(
+      new URL("../../../../infra/worker-image/Dockerfile", import.meta.url),
+      "utf8",
+    );
+    const install = /^ && install -d -o usine -g usine -m 0700 \\\n((?:.*\\\n)*.*)$/mu.exec(
+      dockerfile,
+    );
+    assert(install?.[1] !== undefined, "the image creates the usine user's directories");
+    const created = new Set(install[1].split(/\s+/u).filter((word) => word.startsWith("/")));
+    const home = "/home/usine";
+    const folders = [
+      ...SHARED_CACHES.map(({ path }) => path),
+      `${home}/.config`,
+      `${home}/.local/share`,
+      `${home}/.local/state`,
+    ];
+    // The runtime creates each missing parent of a mount point as root.
+    const expected = folders.flatMap((folder) =>
+      folder
+        .slice(home.length + 1)
+        .split("/")
+        .map((_, index, names) => `${home}/${names.slice(0, index + 1).join("/")}`),
+    );
+    for (const folder of expected) assert(created.has(folder), `the image creates ${folder}`);
   });
 
   it.effect("reports an absent image and that preflight downloaded it", () => {

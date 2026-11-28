@@ -79,7 +79,7 @@ describe("exec shell", () => {
         command: "sh",
         args: ["-c", 'printf "%s|%s" "$USINE_SECRET" "$(pwd)"'],
       });
-      assert.deepStrictEqual(output, { stdout: `${secret}|/`, exitCode: 0 });
+      assert.deepStrictEqual(output, { stdout: `${secret}|/`, stderr: "", exitCode: 0 });
       assert.lengthOf(lines, 1);
       assert.notInclude(lines[0] ?? "", secret);
       const failed = yield* hostOutput(host, { environment: {}, command: "false", args: [] });

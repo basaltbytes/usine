@@ -58,10 +58,14 @@ RUN npm install -g "pnpm@${PNPM_VERSION}" ${HARNESS_PACKAGES} \
  && npm cache clean --force
 
 # The harnesses write sessions and settings under their directories; the
-# executor mounts only the login files inside them.
+# executor mounts only the login files inside them. The runtime creates the
+# missing parents of a volume's mount point as root, so the home directory
+# holds every parent of the shared cache mounts, and the XDG directories.
 RUN useradd --uid "${USINE_UID}" --create-home --shell /bin/bash usine \
  && install -d -o usine -g usine -m 0700 \
-      /home/usine/.claude /home/usine/.codex /home/usine/.cache /home/usine/.config
+      /home/usine/.claude /home/usine/.codex /home/usine/.cache /home/usine/.cache/turbo \
+      /home/usine/.config /home/usine/.local /home/usine/.local/share \
+      /home/usine/.local/share/pnpm /home/usine/.local/share/pnpm/store /home/usine/.local/state
 
 COPY --chmod=0755 container-init.sh /usr/local/bin/usine-container-init
 

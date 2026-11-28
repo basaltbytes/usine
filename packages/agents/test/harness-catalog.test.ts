@@ -493,9 +493,10 @@ describe("harness catalog", () => {
       ssh.launcherPackages.join(" "),
     );
     assert.match(cloudInit, /^\s+npm install --prefix (\S+) --omit=optional \$launchers$/mu);
-    assert.strictEqual(
-      read("infra/worker-image/tag.txt"),
-      `${workerImageInputs(catalog, "container").tag}\n`,
-    );
+    // The generator appends the digest of the image's files to the harness versions.
+    const { tag } = workerImageInputs(catalog, "container");
+    const generated = read("infra/worker-image/tag.txt");
+    assert.strictEqual(generated.slice(0, tag.length), tag);
+    assert.match(generated.slice(tag.length), /^-[0-9a-f]{12}\n$/u);
   });
 });

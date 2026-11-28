@@ -217,17 +217,44 @@ export const dataDirectory = (
 };
 
 /**
+ * Returns OpenCode's XDG base directories in `root`: its data in `root`, and its configuration,
+ * state, and cache in subdirectories. OpenCode creates folders in each of them on every start,
+ * `--version` included, so a home directory that it can't write to doesn't stop it.
+ */
+export const openCodeDirectories = (root: string) => ({
+  XDG_DATA_HOME: root,
+  XDG_CONFIG_HOME: `${root}/config`,
+  XDG_STATE_HOME: `${root}/state`,
+  XDG_CACHE_HOME: `${root}/cache`,
+});
+
+/**
  * The prefix of the variables that the bridge sets on `serve` only, without the prefix. It equals
  * `SERVE_ONLY_PREFIX` in `bridge/main.ts`.
  */
 const SERVE_ONLY_PREFIX = "USINE_OPENCODE_SERVE_";
 
 /**
+ * Returns the variables of `opencode serve`: OpenCode's directories and database in `data`, the
+ * checkout's own configuration turned off, no catalog download, no free models, and `config` as its
+ * configuration.
+ */
+export const serveVariables = (data: string, config: string) => ({
+  ...openCodeDirectories(data),
+  // OpenCode's default path under `XDG_DATA_HOME`, which a worker's `OPENCODE_DB` would move.
+  OPENCODE_DB: `${data}/opencode/opencode.db`,
+  OPENCODE_CONFIG_PROJECT_DISABLE: "1",
+  OPENCODE_DISABLE_CLAUDE_CODE: "1",
+  OPENCODE_DISABLE_MODELS_FETCH: "1",
+  OPENCODE_DISABLE_FREE_MODELS: "1",
+  OPENCODE_CONFIG_CONTENT: config,
+});
+
+/**
  * Returns the environment of a session's bridge: the session's environment, and for `serve` only
- * OpenCode's data, database, and configuration in `data`, the checkout's own configuration turned off, no
- * catalog download, no free models, and `config` as its configuration. Tool commands get the
- * session's environment, which keeps the worker's data and configuration directories, once the
- * runtime sets each OpenCode session's command environment from the bridge.
+ * the `serveVariables` of `data` and `config`. Tool commands get the session's environment, which
+ * keeps the worker's XDG directories, once the runtime sets each OpenCode session's command
+ * environment from the bridge.
  */
 export const serveEnvironment = (
   environment: Readonly<Record<string, string>>,
@@ -236,16 +263,9 @@ export const serveEnvironment = (
 ) => ({
   ...environment,
   ...Object.fromEntries(
-    Object.entries({
-      XDG_DATA_HOME: data,
-      // OpenCode's default path under `XDG_DATA_HOME`, which a worker's `OPENCODE_DB` would move.
-      OPENCODE_DB: `${data}/opencode/opencode.db`,
-      XDG_CONFIG_HOME: `${data}/config`,
-      OPENCODE_CONFIG_PROJECT_DISABLE: "1",
-      OPENCODE_DISABLE_CLAUDE_CODE: "1",
-      OPENCODE_DISABLE_MODELS_FETCH: "1",
-      OPENCODE_DISABLE_FREE_MODELS: "1",
-      OPENCODE_CONFIG_CONTENT: config,
-    }).map(([name, value]) => [`${SERVE_ONLY_PREFIX}${name}`, value]),
+    Object.entries(serveVariables(data, config)).map(([name, value]) => [
+      `${SERVE_ONLY_PREFIX}${name}`,
+      value,
+    ]),
   ),
 });

@@ -1,4 +1,5 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { catalog, workerImageInputs } from "../../packages/agents/dist/harness/catalog.js";
 
 const root = new URL("../../", import.meta.url);
@@ -68,7 +69,48 @@ source = replaceLine(
   { missing: "fail" },
 );
 outputs.push([cloudInit, source]);
-outputs.push(["infra/worker-image/tag.txt", `${workerImageInputs(catalog, "container").tag}\n`]);
+
+/**
+ * Returns the first 12 hexadecimal digits of the SHA-256 digest of the attempt image's build files,
+ * with the generated content of those in `outputs`. The tests and the tag aren't build files.
+ */
+const imageContent = () => {
+  const directory = "infra/worker-image/";
+  const generated = new Map(outputs);
+  const hash = createHash("sha256");
+  for (const name of readdirSync(new URL(directory, root), { recursive: true }).sort()) {
+    const file = `${directory}${name}`;
+    if (
+      name === "tag.txt" ||
+      name.split("/")[0] === "test" ||
+      !statSync(new URL(file, root)).isFile()
+    )
+      continue;
+    hash
+      .update(`${name}\0`)
+      .update(generated.get(file) ?? readFileSync(new URL(file, root)))
+      .update("\0");
+  }
+  return hash.digest("hex").slice(0, 12);
+};
+
+// A change to the image changes its tag, so that a worker that has the earlier image pulls it.
+const content = imageContent();
+const executorImage = "packages/executor/src/ssh/container.ts";
+outputs.push([
+  executorImage,
+  replaceLine(
+    executorImage,
+    readFileSync(new URL(executorImage, root), "utf8"),
+    /^const ATTEMPT_IMAGE_CONTENT = ".*";$/mu,
+    `const ATTEMPT_IMAGE_CONTENT = "${content}";`,
+    { missing: "fail" },
+  ),
+]);
+outputs.push([
+  "infra/worker-image/tag.txt",
+  `${workerImageInputs(catalog, "container").tag}-${content}\n`,
+]);
 
 for (const [file, expected] of outputs) {
   const path = new URL(file, root);
