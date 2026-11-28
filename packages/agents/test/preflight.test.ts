@@ -26,6 +26,7 @@ import { CodexAppServer, type CodexConnection } from "../src/harness/codex/app-s
 import { OpenCodeServer } from "../src/harness/opencode/server.ts";
 import { PiSdk, type PiStartOptions, type PiStartResult } from "../src/harness/pi/sdk.ts";
 import { probeOutput } from "../src/preflight/command.ts";
+import { collectLogs } from "./logs.ts";
 import { CODEX_CLI_VERSION } from "../src/preflight/preflight.ts";
 
 /** Fails a Pi completion that the test doesn't expect. */
@@ -117,7 +118,7 @@ const commands = (
           kill: () => Effect.void,
           stdin: Sink.drain,
           stdout: Stream.make(encoder.encode(response.stdout)),
-          stderr: Stream.make(encoder.encode("credential-shaped diagnostic must not escape")),
+          stderr: Stream.make(encoder.encode("a diagnostic on stderr")),
           all: Stream.empty,
           getInputFd: () => Sink.drain,
           getOutputFd: () => Stream.empty,
@@ -514,6 +515,41 @@ describe("worker harness readiness", () => {
       ),
     );
   }
+
+  it.effect("reports the exit code of a version check that ran, and logs its error output", () => {
+    const logs = collectLogs(["Warn"]);
+    return Effect.gen(function* () {
+      const error = yield* verifyHarness(
+        brain(Harness.make("claude")),
+        local,
+        workerEnvironment,
+        "api-key",
+      ).pipe(Effect.flip);
+      assert.strictEqual(error._tag, "HarnessUnavailableError");
+      assert.strictEqual(
+        error.message,
+        'claude --version exited with code 1 on the worker. The log entry "Harness prerequisite check failed" has its error output.',
+      );
+      const failure = logs.records.find(
+        ({ message }) =>
+          Array.isArray(message) && message[0] === "Harness prerequisite check failed",
+      );
+      assert(failure !== undefined && Array.isArray(failure.message), "the failure is logged");
+      assert.deepInclude(failure.message[1], {
+        command: "claude",
+        exitCode: 1,
+        stderr: "a diagnostic on stderr",
+      });
+    }).pipe(
+      Effect.provide(
+        commands({ "claude --version": { stdout: "", exitCode: 1 } }).pipe(
+          Layer.provideMerge(unusedAccount),
+          Layer.provideMerge(unusedPi),
+          Layer.provideMerge(logs.layer),
+        ),
+      ),
+    );
+  });
 
   for (const sandbox of [false, true]) {
     const route = sandbox ? "sandbox api-key" : "api-key";

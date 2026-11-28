@@ -47,7 +47,8 @@ const versionCommand = Layer.succeed(ChildProcessSpawner.ChildProcessSpawner)(
   ChildProcessSpawner.make((command) =>
     Effect.sync(() => {
       assert(command._tag === "StandardCommand");
-      assert.deepStrictEqual([command.command, ...command.args], ["opencode", "--version"]);
+      assert.strictEqual(command.command, "sh");
+      assert.strictEqual(command.args.at(-1), "--version");
       return ChildProcessSpawner.makeHandle({
         pid: ChildProcessSpawner.ProcessId(1),
         exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(0)),
