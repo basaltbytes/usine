@@ -45,14 +45,14 @@
     "@usine/core": "workspace:*"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "5.20261027.1",
+    "@cloudflare/workers-types": "5.20261123.1",
     "@effect/vitest": "catalog:",
     "@types/node": "catalog:",
     "@usine/tsconfig": "workspace:*",
     "effect": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:",
-    "wrangler": "4.153.0"
+    "wrangler": "4.166.0"
   },
   "peerDependencies": {
     "effect": "catalog:"
